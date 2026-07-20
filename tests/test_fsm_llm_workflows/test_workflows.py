@@ -345,6 +345,82 @@ class TestWorkflowDSL:
 # ----------------------------------------------------------------
 
 
+class TestStepDataInternalKeyFilter:
+    """The step-result filter must use the canonical prefix predicate AND keep
+    the `_STEP_INTERNAL_WHITELIST` override layered on top of it.
+
+    Pins step 3 of plan-2026-07-20T040150-876e7164 (F-13). Asserts BOTH
+    directions, because a fix that only tightened the predicate would break the
+    waiting/timer detection, and a fix that only kept the whitelist would leave
+    the `system_`/`internal_`/`__` leak open.
+    """
+
+    async def test_whitelist_passes_while_internal_prefixes_are_stripped(self):
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.engine import WorkflowEngine
+        from fsm_llm_workflows.models import WorkflowStatus, WorkflowStepResult
+        from fsm_llm_workflows.steps import WorkflowStep
+
+        class _MixedKeyStep(WorkflowStep):
+            """Emits the whitelist key alongside every internal-prefix shape."""
+
+            async def execute(self, context):
+                return WorkflowStepResult(
+                    success=True,
+                    next_state=None,
+                    data={
+                        # Whitelisted: must survive, or the engine can no longer
+                        # detect that this step is waiting for an event.
+                        "_waiting_info": {
+                            "waiting_for_event": True,
+                            "event_type": "resume",
+                        },
+                        # Plain public key: must survive.
+                        "order_id": "A-1",
+                        # Every internal shape: must ALL be stripped.
+                        "_private": "no",
+                        "system_password": "hunter2",
+                        "internal_token": "tok",
+                        "Internal_Token": "tok-case-variant",
+                        "SYSTEM_secret": "shh",
+                        "__dunder": "no",
+                    },
+                )
+
+        engine = WorkflowEngine()
+        step = _MixedKeyStep(step_id="mixed", name="Mixed")
+        definition = WorkflowDefinition(
+            workflow_id="wf-filter",
+            name="Filter",
+            steps={"mixed": step},
+            initial_step_id="mixed",
+        )
+        engine.register_workflow(definition)
+        instance_id = await engine.start_workflow("wf-filter")
+
+        instance = engine.get_workflow_instance(instance_id)
+        context = instance.context
+
+        # Direction 1 — the whitelist override still works. `_waiting_info`
+        # reached the context, so the engine parked the instance in WAITING.
+        assert "_waiting_info" in context
+        assert instance.status == WorkflowStatus.WAITING
+
+        # Public keys are untouched.
+        assert context["order_id"] == "A-1"
+
+        # Direction 2 — every internal prefix is stripped, case-insensitively.
+        for leaked in (
+            "_private",
+            "system_password",
+            "internal_token",
+            "Internal_Token",
+            "SYSTEM_secret",
+            "__dunder",
+        ):
+            assert leaked not in context, f"internal key leaked into context: {leaked}"
+
+
 class TestPackageImports:
     """Test that the package exports are correct."""
 

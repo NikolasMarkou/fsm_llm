@@ -15,6 +15,7 @@ from typing import Any, cast
 from pydantic import BaseModel
 
 from fsm_llm import API
+from fsm_llm.constants import has_internal_prefix
 from fsm_llm.context import ContextCompactor
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
@@ -449,10 +450,21 @@ class BaseAgent(ABC):
     # Context filtering
     # ------------------------------------------------------------------
 
+    # DECISION plan-2026-07-20T040150-876e7164/D-003
+    # This filter's output feeds `AgentResult.final_context`, which is returned
+    # straight to the agent's caller. Do NOT re-inline `k.startswith("_")` here:
+    # that check is case-SENSITIVE and only sees the literal `_` prefix, so
+    # `system_password`, `internal_token` and `__dunder` all leaked through it
+    # (F-13, measured). `has_internal_prefix` is the single canonical predicate
+    # over INTERNAL_KEY_PREFIXES and case-folds. See decisions.md D-003.
     @staticmethod
     def _filter_context(context: dict[str, Any]) -> dict[str, Any]:
-        """Remove internal (``_``-prefixed) keys from context."""
-        return {k: v for k, v in context.items() if not k.startswith("_")}
+        """Remove internal-prefixed keys from context.
+
+        Top-level only: nested dict values are not recursed into (that is a
+        separate contract, see `fsm_llm.context.clean_context_keys`).
+        """
+        return {k: v for k, v in context.items() if not has_internal_prefix(k)}
 
     # ------------------------------------------------------------------
     # API factory helper

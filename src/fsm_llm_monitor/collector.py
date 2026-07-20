@@ -12,6 +12,7 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
+from fsm_llm.constants import has_internal_prefix
 from fsm_llm.logging import logger
 
 from .constants import (
@@ -380,11 +381,17 @@ class EventCollector:
     ) -> dict[str, str]:
         """Extract display-worthy key-value pairs from an FSM context dict.
 
-        Filters out internal (``_``-prefixed) keys, noise keys, and empty values.
+        Filters out internal-prefixed keys, noise keys, and empty values.
         """
         out: dict[str, str] = {}
         for k, v in ctx.items():
-            if k.startswith("_") or k in EventCollector._CONTEXT_NOISE_KEYS:
+            # DECISION plan-2026-07-20T040150-876e7164/D-003
+            # TWO layers: `has_internal_prefix` is the canonical security
+            # predicate (do NOT re-inline `k.startswith("_")` -- case-sensitive
+            # and blind to `system_`/`internal_`/`__`), and _CONTEXT_NOISE_KEYS
+            # is a separate display-only suppression list that must be kept
+            # alongside it, not folded into it. See decisions.md D-003.
+            if has_internal_prefix(k) or k in EventCollector._CONTEXT_NOISE_KEYS:
                 continue
             s = str(v) if v is not None else ""
             if s in EventCollector._CONTEXT_EMPTY_VALUES:

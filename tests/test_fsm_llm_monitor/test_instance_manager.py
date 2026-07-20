@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Tests for fsm_llm_monitor.instance_manager."""
 
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 from fsm_llm_monitor.constants import EVENT_INSTANCE_LAUNCHED
@@ -12,6 +13,7 @@ from fsm_llm_monitor.instance_manager import (
     ManagedFSM,
     ManagedWorkflow,
     register_monitor_handlers,
+    snapshot_from_api,
 )
 
 
@@ -211,6 +213,74 @@ class TestRegisterMonitorHandlers:
         collector = EventCollector()
         register_monitor_handlers(api, collector)
         assert api.register_handler.call_count == 8
+
+
+class TestSnapshotInternalKeyHiding:
+    """`show_internal_keys=False` must actually hide the whole internal class.
+
+    Pins step 3 of plan-2026-07-20T040150-876e7164 (F-13). This was the
+    CONFIRMED leak: the dashboard's "hide internal keys" knob used a
+    case-sensitive `k.startswith("_")` check, so `system_`/`internal_`/`__`
+    keys were rendered in `ConversationSnapshot.context_data` regardless.
+    """
+
+    @staticmethod
+    def _api_with_context(context_data):
+        api = MagicMock()
+        api.fsm_manager.get_complete_conversation.return_value = {
+            "current_state": {"id": "collect", "description": "Collecting"},
+            "collected_data": context_data,
+            "conversation_history": [],
+            "last_extraction_response": None,
+            "last_transition_decision": None,
+            "last_response_generation": None,
+        }
+        api.get_stack_depth.return_value = 0
+        return api
+
+    _MIXED_CONTEXT: ClassVar[dict[str, str]] = {
+        "order_id": "A-1",
+        "_private": "no",
+        "system_password": "hunter2",
+        "internal_token": "tok",
+        "__dunder": "no",
+        "System_Password": "hunter2",
+        "Internal_token": "tok",
+        "SYSTEM_secret": "shh",
+    }
+
+    def test_hidden_when_show_internal_keys_false(self):
+        snap = snapshot_from_api(
+            self._api_with_context(dict(self._MIXED_CONTEXT)),
+            "conv-1",
+            show_internal_keys=False,
+        )
+
+        assert snap is not None
+        assert snap.context_data == {"order_id": "A-1"}
+        for leaked in (
+            "_private",
+            "system_password",
+            "internal_token",
+            "__dunder",
+            "System_Password",
+            "Internal_token",
+            "SYSTEM_secret",
+        ):
+            assert leaked not in snap.context_data, (
+                f"internal key rendered despite show_internal_keys=False: {leaked}"
+            )
+
+    def test_shown_when_show_internal_keys_true(self):
+        """The other direction: the knob is a knob, not an unconditional strip."""
+        snap = snapshot_from_api(
+            self._api_with_context(dict(self._MIXED_CONTEXT)),
+            "conv-1",
+            show_internal_keys=True,
+        )
+
+        assert snap is not None
+        assert snap.context_data == self._MIXED_CONTEXT
 
 
 class TestConversationCaching:

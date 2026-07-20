@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from fsm_llm.constants import has_internal_prefix
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.logging import logger
 
@@ -299,13 +300,21 @@ class WorkflowEngine:
                 result = await current_step.execute(instance.context)
 
             # Update context and history (filter internal keys to prevent overwrites).
-            # Whitelist: _waiting_info and _timer_info must pass through so that
-            # _handle_step_without_transition can detect waiting/timer steps.
+            # DECISION plan-2026-07-20T040150-876e7164/D-003
+            # TWO layers, and both are load-bearing:
+            #   1. `has_internal_prefix` is the canonical predicate. Do NOT
+            #      re-inline `k.startswith("_")` -- it is case-sensitive and
+            #      blind to `system_`/`internal_`/`__`, which is the F-13 leak.
+            #   2. `_STEP_INTERNAL_WHITELIST` is a DELIBERATE override on top of
+            #      layer 1. Do NOT drop it while "simplifying" the predicate:
+            #      _waiting_info and _timer_info must reach the context or
+            #      _handle_step_without_transition can no longer detect
+            #      waiting/timer steps (invariant I-10). See decisions.md D-003.
             if result.data:
                 filtered_data = {
                     k: v
                     for k, v in result.data.items()
-                    if not k.startswith("_") or k in _STEP_INTERNAL_WHITELIST
+                    if not has_internal_prefix(k) or k in _STEP_INTERNAL_WHITELIST
                 }
                 instance.context.update(filtered_data)
 

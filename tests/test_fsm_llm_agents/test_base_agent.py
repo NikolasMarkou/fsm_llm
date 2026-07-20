@@ -144,6 +144,56 @@ class TestBaseAgentContextFiltering:
         assert "_internal" not in filtered
         assert "_max" not in filtered
 
+    def test_filter_removes_every_internal_prefix_case_insensitively(self):
+        """`_filter_context` must strip the FULL internal-prefix class.
+
+        Pins step 3 of plan-2026-07-20T040150-876e7164 (F-13). The previous
+        `k.startswith("_")` check was case-sensitive and saw only the literal
+        `_` prefix, so `system_password`, `internal_token` and `__dunder` all
+        passed straight through into caller-visible output.
+        """
+        ctx = {
+            # Must survive.
+            "answer": "yes",
+            "data": 42,
+            # `_`-prefixed (already caught by the old check).
+            "_internal": "secret",
+            # The prefixes the old check MISSED entirely.
+            "system_password": "hunter2",
+            "internal_token": "tok",
+            "__dunder": "no",
+            # Case variants of the same prefixes.
+            "System_Password": "hunter2",
+            "SYSTEM_secret": "shh",
+            "Internal_token": "tok",
+            "INTERNAL_state": "x",
+        }
+        filtered = BaseAgent._filter_context(ctx)
+
+        assert filtered == {"answer": "yes", "data": 42}
+
+    def test_final_context_does_not_leak_system_prefixed_keys(self):
+        """The filter's output is what reaches `AgentResult.final_context`.
+
+        End-to-end assertion of the same defect at the surface a caller
+        actually sees, not just at the static helper.
+        """
+        result = AgentResult(
+            answer="done",
+            success=True,
+            final_context=BaseAgent._filter_context(
+                {
+                    "order_id": "A-1",
+                    "system_password": "hunter2",
+                    "Internal_token": "tok",
+                }
+            ),
+        )
+
+        assert result.final_context == {"order_id": "A-1"}
+        assert "system_password" not in result.final_context
+        assert "Internal_token" not in result.final_context
+
 
 class TestBaseAgentCreateApi:
     """Tests for API factory helper."""

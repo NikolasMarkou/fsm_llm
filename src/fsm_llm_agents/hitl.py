@@ -11,6 +11,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from fsm_llm.constants import has_internal_prefix
 from fsm_llm.logging import logger
 
 from .constants import ContextKeys, Defaults, LogMessages
@@ -100,10 +101,14 @@ class HumanInTheLoop:
             tool_name=tool_call.tool_name,
             parameters=tool_call.parameters,
             reasoning=tool_call.reasoning,
+            # DECISION plan-2026-07-20T040150-876e7164/D-003
+            # This summary is handed to the approval callback (a human-facing
+            # surface). Do NOT re-inline `k.startswith("_")`: it misses
+            # `system_`/`internal_`/`__` and is case-sensitive. See D-003.
             context_summary={
                 k: v
                 for k, v in context.items()
-                if not k.startswith("_") and k != "observations"
+                if not has_internal_prefix(k) and k != "observations"
             },
         )
 

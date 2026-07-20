@@ -18,7 +18,7 @@ from typing import Any, TypeVar
 _T = TypeVar("_T")
 
 from fsm_llm import API, HandlerTiming, create_handler
-from fsm_llm.constants import DEFAULT_LLM_MODEL
+from fsm_llm.constants import DEFAULT_LLM_MODEL, has_internal_prefix
 from fsm_llm.logging import logger
 
 from .collector import EventCollector
@@ -411,8 +411,15 @@ def snapshot_from_api(
         current_state = complete.get("current_state", {})
         context_data = complete.get("collected_data", {})
         if not show_internal_keys:
+            # DECISION plan-2026-07-20T040150-876e7164/D-003
+            # This is the CONFIRMED leak: `show_internal_keys=False` is the
+            # dashboard's "hide it" knob, and the old `k.startswith("_")` here
+            # hid only literal `_`-prefixed keys -- `system_password`,
+            # `internal_token` and every case variant were rendered anyway in
+            # `ConversationSnapshot.context_data` (F-13, measured end-to-end).
+            # Do NOT re-inline the startswith check. See decisions.md D-003.
             context_data = {
-                k: v for k, v in context_data.items() if not k.startswith("_")
+                k: v for k, v in context_data.items() if not has_internal_prefix(k)
             }
         return ConversationSnapshot(
             conversation_id=conversation_id,
