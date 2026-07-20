@@ -653,3 +653,202 @@ class TestGetConversationDataFiltering:
 
         assert data["user_name"] == "Alice"
         assert data["preference"] == "dark mode"
+
+
+class TestFsmHandlerContractTwins:
+    """A ``critical=True`` handler's raise must not vanish inside ``fsm.py``.
+
+    Two sites, one contract (D-009 of plan-2026-07-20T040150-876e7164):
+
+    * ``_process_message_locked``'s ERROR-timing pass — the handler failure is
+      promoted, chained from the failure it was reporting on.
+    * ``update_conversation_context``'s CONTEXT_UPDATE pass — the keys the call
+      committed are rolled back before the failure propagates.
+    """
+
+    def _manager(self, fsm_definition, llm_interface):
+        return FSMManager(
+            fsm_loader=lambda fid: fsm_definition,
+            llm_interface=llm_interface,
+            transition_evaluator=TransitionEvaluator(fsm_definition),
+        )
+
+    @staticmethod
+    def _raising_handler(name, timing, exc):
+        from fsm_llm.handlers import HandlerBuilder
+
+        def _boom(context):
+            raise exc
+
+        return HandlerBuilder(name).at(timing).critical().do(_boom)
+
+    # -- SC-12: ERROR-timing handler ------------------------------------
+
+    def test_critical_error_handler_failure_reaches_caller_with_cause_and_log(
+        self, sample_fsm_definition_v2, mock_llm2_interface
+    ):
+        """All three clauses at once.
+
+        Surfacing the handler error ALONE would be strictly worse than the old
+        swallow: it would destroy the diagnosis of the failure being reported,
+        which is exactly what the original deferral feared. ``raise X from Y``
+        plus an explicit ``log.error`` keeps both, so all three are asserted
+        together and none of them may be dropped.
+        """
+        from fsm_llm.handlers import HandlerExecutionError, HandlerTiming
+        from fsm_llm.logging import logger
+
+        manager = self._manager(sample_fsm_definition_v2, mock_llm2_interface)
+        conv_id, _ = manager.start_conversation("test-fsm")
+
+        original = RuntimeError("pipeline exploded")
+
+        def _explode(*args, **kwargs):
+            raise original
+
+        manager._pipeline.process = _explode
+        manager.register_handler(
+            self._raising_handler(
+                "BoomOnError",
+                HandlerTiming.ERROR,
+                ValueError("error handler exploded"),
+            )
+        )
+
+        records: list[str] = []
+        sink_id = logger.add(
+            lambda m: records.append(m.record["message"]), level="ERROR"
+        )
+        logger.enable("fsm_llm")
+        try:
+            with pytest.raises(HandlerExecutionError) as exc_info:
+                manager.process_message(conv_id, "hello")
+        finally:
+            logger.remove(sink_id)
+            # Restore the library default (logging.py disables on import).
+            logger.disable("fsm_llm")
+
+        # (1) the critical handler's failure reaches the caller -- it is NOT
+        #     relabelled as the generic FSMError("Failed to process message").
+        assert "error handler exploded" in str(exc_info.value)
+
+        # (2) the failure being unwound survives as __cause__.
+        assert exc_info.value.__cause__ is original
+
+        # (3) a single log.error line names BOTH failures, because a traceback
+        #     is not guaranteed to reach the operator.
+        both = [
+            line
+            for line in records
+            if "error handler exploded" in line and "pipeline exploded" in line
+        ]
+        assert both, (
+            "no single ERROR log line named both the handler failure and the "
+            f"original failure; captured: {records}"
+        )
+
+    # -- SC-13: CONTEXT_UPDATE-timing handler ---------------------------
+
+    def test_context_update_is_rolled_back_when_critical_handler_raises(
+        self, sample_fsm_definition_v2, mock_llm2_interface
+    ):
+        """The keys this call committed are restored before the raise escapes."""
+        from fsm_llm.handlers import HandlerExecutionError, HandlerTiming
+
+        manager = self._manager(sample_fsm_definition_v2, mock_llm2_interface)
+        conv_id, _ = manager.start_conversation("test-fsm")
+        manager.instances[conv_id].context.data["existing_key"] = "pre_call_value"
+
+        manager.register_handler(
+            self._raising_handler(
+                "BoomOnContextUpdate",
+                HandlerTiming.CONTEXT_UPDATE,
+                ValueError("context handler exploded"),
+            )
+        )
+
+        with pytest.raises(HandlerExecutionError):
+            manager.update_conversation_context(
+                conv_id, {"existing_key": "post_call_value", "brand_new_key": "added"}
+            )
+
+        data = manager.get_conversation_data(conv_id)
+        # Overwritten key restored to its pre-call value...
+        assert data["existing_key"] == "pre_call_value"
+        # ...and a key the call introduced is removed entirely.
+        assert "brand_new_key" not in data
+
+    def test_unrelated_keys_are_untouched_by_the_rollback(
+        self, sample_fsm_definition_v2, mock_llm2_interface
+    ):
+        """The snapshot is SCOPED: only the written keys are restored.
+
+        A full-context deepcopy would also discard deltas that other, already
+        successful handlers wrote -- which is why shape (c) was chosen.
+        """
+        from fsm_llm.handlers import HandlerExecutionError, HandlerTiming
+
+        manager = self._manager(sample_fsm_definition_v2, mock_llm2_interface)
+        conv_id, _ = manager.start_conversation("test-fsm")
+        manager.instances[conv_id].context.data["untouched"] = "still here"
+
+        manager.register_handler(
+            self._raising_handler(
+                "BoomOnContextUpdate",
+                HandlerTiming.CONTEXT_UPDATE,
+                ValueError("context handler exploded"),
+            )
+        )
+
+        with pytest.raises(HandlerExecutionError):
+            manager.update_conversation_context(conv_id, {"written": "value"})
+
+        data = manager.get_conversation_data(conv_id)
+        assert data["untouched"] == "still here"
+        assert "written" not in data
+
+    def test_shallow_snapshot_boundary_in_place_mutation_is_not_restored(
+        self, sample_fsm_definition_v2, mock_llm2_interface
+    ):
+        """Pins the KNOWN, DELIBERATE limit of the scoped rollback.
+
+        ``pre_commit`` holds the same objects as ``context.data``, so a handler
+        that mutates a pre-existing dict/list value IN PLACE before failing is
+        NOT restored. This test documents that boundary rather than leaving it
+        latent -- it is not a bug report. Do not "fix" it with a deep copy;
+        D-005/D-020 rejected that deliberately (handlers are contractually
+        supposed to return a delta, not reach into ``context.data``).
+        """
+        from fsm_llm.handlers import (
+            HandlerBuilder,
+            HandlerExecutionError,
+            HandlerTiming,
+        )
+
+        manager = self._manager(sample_fsm_definition_v2, mock_llm2_interface)
+        conv_id, _ = manager.start_conversation("test-fsm")
+
+        shared = {"kept": "yes"}
+        manager.instances[conv_id].context.data["profile"] = shared
+
+        def _mutate_then_raise(context):
+            manager.instances[conv_id].context.data["profile"]["injected"] = "leaked"
+            raise ValueError("context handler exploded")
+
+        manager.register_handler(
+            HandlerBuilder("MutateThenBoom")
+            .at(HandlerTiming.CONTEXT_UPDATE)
+            .critical()
+            .do(_mutate_then_raise)
+        )
+
+        with pytest.raises(HandlerExecutionError):
+            manager.update_conversation_context(
+                conv_id, {"profile": shared, "brand_new_key": "added"}
+            )
+
+        data = manager.get_conversation_data(conv_id)
+        # Key-level rollback still works for the key the call introduced.
+        assert "brand_new_key" not in data
+        # But the in-place mutation of the pre-existing value survives.
+        assert data["profile"]["injected"] == "leaked"

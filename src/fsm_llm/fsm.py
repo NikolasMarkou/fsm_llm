@@ -432,9 +432,32 @@ class FSMManager:
                     },
                 )
             except Exception as handler_err:
-                log.warning(
-                    f"Error handler raised an exception, preserving original error: {handler_err}"
+                # DECISION plan-2026-07-20T040150-876e7164/D-009
+                # The HANDLER exception wins; the failure being unwound becomes
+                # its `__cause__`. This is the same shape (and the same rule) as
+                # `_cleanup_after_failed_start` 150 lines above, which chains
+                # `raise cleanup_err from original` for a structurally identical
+                # unwind-time handler pass.
+                # Do NOT restore the `log.warning(...)`-and-continue swallow that
+                # used to be here. Its stated justification was that promoting the
+                # reporter's own failure destroys the diagnosis of the failure
+                # being reported — that is FALSE for `raise X from Y`, which keeps
+                # BOTH: `handler_err` reaches the caller (a `critical=True`
+                # handler always raising is a package-wide contract) and `e`
+                # survives as `handler_err.__cause__`, printed in any default
+                # traceback. The `log.error` below states both failures explicitly
+                # as well, because a traceback is not guaranteed to reach the
+                # operator.
+                # Do NOT narrow this to `getattr(handler, "critical", False)`:
+                # whatever escapes `execute_handlers` has ALREADY passed through
+                # the handler system's swallow decision (a non-critical handler
+                # under "continue" never reaches here).
+                log.error(
+                    "ERROR-timing handler failed while unwinding a failed "
+                    f"process_message: {handler_err} "
+                    f"(original failure being unwound: {e!s})"
                 )
+                raise handler_err from e
 
             raise FSMError(f"Failed to process message: {e!s}") from e
 
@@ -530,13 +553,54 @@ class FSMManager:
         try:
             if context_update:
                 log.info(f"Updating context with keys: {list(context_update.keys())}")
+
+                # DECISION plan-2026-07-20T040150-876e7164/D-009
+                # Scoped rollback — shape (c) of `pipeline.py`'s three different
+                # partial-commit contracts (D-005 of
+                # plan-2026-07-19T191147-4b664252). Snapshot EXACTLY the keys this
+                # call is about to write, commit, and restore only those keys if
+                # the CONTEXT_UPDATE pass raises. Without it a caller that catches
+                # the handler failure and reports "update rejected" was simply
+                # wrong: the update had already landed permanently.
+                # Do NOT "align" this with a full `context.data` deepcopy: that
+                # would also discard the deltas of CONTEXT_UPDATE handlers that
+                # already SUCCEEDED, which D-006 guarantees survive at this timing
+                # point. Precedence note: if a handler delta touched one of
+                # `context_update`'s own keys, the rollback wins.
+                # BOUNDARY (known, deliberate): the snapshot is SHALLOW. Key
+                # coverage is exact — `FSMContext.update` writes precisely
+                # `new_data`'s keys and derives nothing — but `pre_commit` holds
+                # the SAME objects as `context.data[key]`. A handler that mutates
+                # a pre-existing dict/list value IN PLACE before failing is
+                # therefore NOT restored. Do not "fix" this with a deep copy:
+                # D-005/D-020 rejected exactly that, because handlers are
+                # contractually supposed to return a delta rather than reach into
+                # `context.data`, and the copy cost would be paid on every call.
+                pre_commit = {
+                    key: instance.context.data[key]
+                    for key in context_update
+                    if key in instance.context.data
+                }
                 instance.context.update(context_update)
 
-                self._execute_handlers(
-                    HandlerTiming.CONTEXT_UPDATE,
-                    conversation_id,
-                    updated_keys=set(context_update.keys()),
-                )
+                try:
+                    self._execute_handlers(
+                        HandlerTiming.CONTEXT_UPDATE,
+                        conversation_id,
+                        updated_keys=set(context_update.keys()),
+                    )
+                except Exception as handler_err:
+                    log.error(
+                        f"CONTEXT_UPDATE handler failed "
+                        f"({type(handler_err).__name__}: {handler_err}), rolling "
+                        f"back keys {sorted(context_update)}"
+                    )
+                    for key in context_update:
+                        if key in pre_commit:
+                            instance.context.data[key] = pre_commit[key]
+                        else:
+                            instance.context.data.pop(key, None)
+                    raise
         finally:
             if conv_lock is not None:
                 try:
