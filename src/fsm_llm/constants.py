@@ -199,17 +199,56 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
 # `password_reset_token` -- which this allowlist would otherwise keep via
 # `reset` -- is still stripped.
 # See decisions.md D-016.
+#
+# DECISION plan-2026-07-19T191147-4b664252/D-026 (CORRECTS D-016's SHAPE, keeps
+# its fail-CLOSED direction)
+# D-016 got the DIRECTION right and the SHAPE wrong. Its lookahead tested only
+# the token IMMEDIATELY following `password` and let the rest of the key run on
+# unchecked, so the allowlist tokens behaved as unanchored PREFIXES with
+# unbounded trailing content. One infix token defeated the whole control:
+#   password_plaintext      -> STRIPPED   but password_last_plaintext -> KEPT
+#   password_hash           -> STRIPPED   but password_reset_hash     -> KEPT
+# Six such keys (`password_reset_code`, `password_reset_otp`,
+# `password_reset_hash`, `password_last_plaintext`, `password_retrieval`,
+# `password_policy_key`) were measured reaching the LLM prompt. D-016 found
+# exactly ONE member of this class (`password_reset_token`) and closed it with a
+# point fix in the auth-token pattern -- which is the same error as step 8:
+# fixing a named key instead of the class.
+# The lookahead below now matches the WHOLE remainder: a key is KEPT only when
+# everything after `password` decomposes into allowlisted policy tokens, right
+# up to `$`. Any unrecognized TRAILING token strips the key, no matter what
+# preceded it. So `password_reset_flow_enabled` is KEPT (reset + flow + enabled
+# are all policy tokens) while `password_reset_hash` is STRIPPED (`hash` is not).
+# Two rules for editing this list, both load-bearing:
+#  1. Tokens are COMPLETE WORDS, not prefixes. D-016 used `retr` and `polic` as
+#     prefixes; `retr` then silently kept `password_retrieval` -- a secret --
+#     because `retr` prefixes `retrieval` as happily as `retry`. Spell out
+#     `retry|retries` and `policy|policies` instead. A prefix token re-opens the
+#     bypass for every longer word it happens to prefix.
+#  2. `[-_.]?` separators are OPTIONAL between tokens so `passwordless_login`
+#     works, but the `+$` anchor is NOT optional -- dropping it restores the
+#     unbounded-tail bypass exactly.
+# See decisions.md D-026.
 _PASSWORD_POLICY_SUFFIXES = (
-    "less|reset|polic|strength|expir|require|rule|supported|enabled|disabled"
-    "|changed|updated|last|attempt|retr|length|min|max|complexity|valid"
-    "|mismatch|manager|strateg|age|status|count|error|help|instruction"
-    "|setup|setting"
+    "less|reset|policy|policies|strength|expiry|expires|expiration|expired"
+    "|require|required|requirement|requirements|rule|rules|support|supported"
+    "|enable|enabled|disable|disabled|change|changed|update|updated|last"
+    "|attempt|attempts|retry|retries|length|min|max|minimum|maximum"
+    "|complexity|valid|validation|mismatch|manager|strategy|age|status|count"
+    "|error|errors|help|instruction|instructions|setup|setting|settings"
+    "|flow|login|day|days|meter|screen|page|banner|notice|reminder"
+    # Notification-status tokens (`password_reset_email_sent`). `email` here
+    # means an email ADDRESS or a sent-notification flag, never a credential.
+    # `link` is deliberately NOT in this group: a `password_reset_link` embeds
+    # the reset token, so it is a credential-bearing value and must strip.
+    "|email|mail|sent|notification|notified|warning|enforced"
 )
 
 FORBIDDEN_CONTEXT_PATTERNS = [
     # Password keys. Strips password/passwords/password123/user_password AND
-    # every `password_<suffix>` whose suffix is not a policy/status token.
-    rf"(?:^|.*[\W_])passwords?(?![-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))",
+    # every `password_<suffix>` whose suffix does not decompose ENTIRELY into
+    # policy/status tokens. See the D-026 block above before editing.
+    rf"(?:^|.*[\W_])passwords?(?!(?:[-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))+$)",
     r"(?:^|.*[\W_])secret(?:s)?(?:[\W_].*|$)",  # Secret-related keys (not "secretary")
     r"(?:^|.*[\W_])(?:api[-_.]?token|auth[-_.]?token|access[-_.]?token|refresh[-_.]?token|bearer[-_.]?token|reset[-_.]?token)(?:s)?(?:[\W_].*|$)",  # Auth token keys (not "tokenizer")
     r".*(?:api[-_.]?key|key[-_.]?api).*",  # API key patterns (both orderings, with dash/underscore/dot)

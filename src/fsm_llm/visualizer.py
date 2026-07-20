@@ -111,6 +111,42 @@ def _states_box_row(vertical: str, content: str) -> str:
     return "│ " + vertical + content[:width].ljust(width) + vertical + " │"
 
 
+# Width, in characters, of the content area between the outer "│ " and " │" of any
+# top-level section box (METADATA, PERSONA, STATES, TRANSITIONS). The box border is
+# "┌" + 60 * "─" + "┐" = 62 columns, so a content row is 1 + 1 + 58 + 1 + 1 = 62.
+_SECTION_BOX_INNER_WIDTH = 58
+
+
+def _section_box_row(content: str) -> str:
+    """Render one content row of a top-level section box.
+
+    Args:
+        content: the row's text WITHOUT either border glyph and without padding —
+            this function owns both. Callers pass the full logical line
+            (``f"Initial State: {state_id}"``), not a pre-``ljust``-ed fragment.
+
+    Returns:
+        A row of exactly ``_SECTION_BOX_INNER_WIDTH + 4`` == 62 characters, matching
+        the section's own border, for ANY input including one longer than the box.
+    """
+    # DECISION plan-2026-07-19T191147-4b664252/D-028
+    # SC-18 says "a 100-char state id does not break box alignment" — unscoped. Step 14
+    # fixed only `create_states_section` (via `_states_box_row`) and the pinning test
+    # measured only that section, so the suite stayed green while METADATA rendered a
+    # 119-char row, TRANSITIONS a 127-char row and PERSONA a stray 58-char row against
+    # the same 62-char border. That is a scope-narrowed test standing in for a broader
+    # claim. The cause was uniform: every row was built as `"│ " + text.ljust(N)` with a
+    # HAND-COUNTED N per row, and `ljust` never shortens. Hand-counted widths also drifted
+    # on their own — several METADATA rows were 63-69 chars with no long id involved.
+    # Do NOT go back to per-row `.ljust(N)` literals in any section builder: route every
+    # bordered row through this helper so a new row cannot be added at the wrong width,
+    # and so truncation is automatic rather than per-call. The `[:width]` slice is
+    # load-bearing for the same reason it is in `_states_box_row`.
+    # See decisions.md D-028.
+    width = _SECTION_BOX_INNER_WIDTH
+    return "│ " + content[:width].ljust(width) + " │"
+
+
 def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:
     """Reject an FSM whose ``initial_state`` is not a key of ``states``.
 
@@ -200,11 +236,17 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
     elif style == "compact" and persona:
         # In compact mode, just show a simplified persona section
         lines.append("╭" + "─" * 60 + "╮")
+        # D-028: this row was `"│ " + ljust(10) + ljust(50) + " │"` == 64 against a
+        # 62-char border — ragged on every compact render carrying a persona,
+        # independent of state-id length.
+        _compact_label = "PERSONA:  "
         lines.append(
-            "│ "
-            + "PERSONA: ".ljust(10)
-            + textwrap.shorten(persona, width=48).ljust(50)
-            + " │"
+            _section_box_row(
+                _compact_label
+                + textwrap.shorten(
+                    persona, width=_SECTION_BOX_INNER_WIDTH - len(_compact_label)
+                )
+            )
         )
         lines.append("╰" + "─" * 60 + "╯")
         lines.append("")
@@ -284,34 +326,37 @@ def create_metadata_section(
     # / wrap("   ") both return [], so `wrapped_desc[0]` raised out of this
     # public, non-pydantic-validated function. Same guard at :364 and :470.
     description = fsm_data.get("description") or "No description"
-    wrapped_desc = textwrap.wrap(description, width=56) or [""]
+    # Wrap to the space left AFTER the "Description: " label, so a normal
+    # description never reaches `_section_box_row`'s truncation.
+    _desc_label = "Description: "
+    wrapped_desc = textwrap.wrap(
+        description, width=_SECTION_BOX_INNER_WIDTH - len(_desc_label)
+    ) or [""]
 
-    lines.append("│ Description: " + wrapped_desc[0].ljust(46) + " │")
+    lines.append(_section_box_row(_desc_label + wrapped_desc[0]))
     for line in wrapped_desc[1:]:
-        lines.append("│ " + " " * 12 + line.ljust(48) + " │")
+        lines.append(_section_box_row(" " * len(_desc_label) + line))
 
-    lines.append("│ Version: " + str(fsm_data.get("version", "N/A")).ljust(51) + " │")
-    lines.append("│ Initial State: " + initial_state.ljust(45) + " │")
-    lines.append(
-        "│ Total States: " + str(len(fsm_data.get("states", {}))).ljust(47) + " │"
-    )
+    lines.append(_section_box_row(f"Version: {fsm_data.get('version', 'N/A')}"))
+    lines.append(_section_box_row(f"Initial State: {initial_state}"))
+    lines.append(_section_box_row(f"Total States: {len(fsm_data.get('states', {}))}"))
 
     # Add some statistics
     terminal_count = sum(
         1 for m in state_metrics.values() if m.get("is_terminal", False)
     )
-    lines.append("│ Terminal States: " + str(terminal_count).ljust(43) + " │")
+    lines.append(_section_box_row(f"Terminal States: {terminal_count}"))
 
     input_states = sum(1 for m in state_metrics.values() if m.get("required_keys"))
-    lines.append("│ States With User Input: " + str(input_states).ljust(38) + " │")
+    lines.append(_section_box_row(f"States With User Input: {input_states}"))
 
     branching_states = sum(
         1 for m in state_metrics.values() if m.get("outbound", 0) > 1
     )
-    lines.append("│ Branching States: " + str(branching_states).ljust(43) + " │")
+    lines.append(_section_box_row(f"Branching States: {branching_states}"))
 
     max_path = find_longest_path(state_metrics)
-    lines.append("│ Maximum Path Length: " + str(max_path).ljust(40) + " │")
+    lines.append(_section_box_row(f"Maximum Path Length: {max_path}"))
 
     lines.append("└" + "─" * 60 + "┘")
     lines.append("")
@@ -340,12 +385,15 @@ def create_persona_section(persona: str) -> list[str]:
     else:
         lines.append("│" + " Conversation Personality ".center(60) + "│")
 
-    lines.append("│                                                        │")
+    # NOTE: this spacer used to be a hand-typed literal of 56 spaces between two
+    # glyphs — a 58-char row inside a 62-char box, ragged on EVERY render with a
+    # persona, with or without a long state id. Routed through the helper (D-028).
+    lines.append(_section_box_row(""))
 
     # Format persona with word wrapping
-    wrapped_persona = textwrap.wrap(persona, width=56)
+    wrapped_persona = textwrap.wrap(persona, width=_SECTION_BOX_INNER_WIDTH)
     for line in wrapped_persona:
-        lines.append("│ " + line.ljust(58) + " │")
+        lines.append(_section_box_row(line))
 
     lines.append("└" + "─" * 60 + "┘")
     lines.append("")
@@ -483,16 +531,16 @@ def create_transitions_section(
         if len(targets) > 1:
             # Branching state
             branches = f" ({len(targets)} branches)"
-            lines.append("│ " + f"From: {state_id}{branches}".ljust(58) + " │")
+            lines.append(_section_box_row(f"From: {state_id}{branches}"))
         elif len(incoming_transitions[state_id]) > 1:
             # Merge state
             merges = f" (merges {len(incoming_transitions[state_id])} paths)"
-            lines.append("│ " + f"From: {state_id}{merges}".ljust(58) + " │")
+            lines.append(_section_box_row(f"From: {state_id}{merges}"))
         else:
-            lines.append("│ " + f"From: {state_id}".ljust(58) + " │")
+            lines.append(_section_box_row(f"From: {state_id}"))
 
         if not targets:
-            lines.append("│ " + "  └─ (No outgoing transitions)".ljust(58) + " │")
+            lines.append(_section_box_row("  └─ (No outgoing transitions)"))
             continue
 
         for i, (target, desc, required_keys) in enumerate(targets):
@@ -507,39 +555,40 @@ def create_transitions_section(
             if target == state_id:
                 # Self-loop
                 lines.append(
-                    "│ "
-                    + f"{prefix} To: {target} {ARROW_STYLES['self']} (Self loop)".ljust(
-                        58
+                    _section_box_row(
+                        f"{prefix} To: {target} {ARROW_STYLES['self']} (Self loop)"
                     )
-                    + " │"
                 )
             else:
                 # Normal transition
-                lines.append("│ " + f"{prefix} To: {target}".ljust(58) + " │")
+                lines.append(_section_box_row(f"{prefix} To: {target}"))
 
-            # Add transition description
+            # Add transition description. Wrap to the width left after the
+            # continuation indent and the "└─ Why: " lead-in, so ordinary text
+            # never reaches `_section_box_row`'s truncation.
             if desc:
+                _why_lead = f"{continuation}└─ Why: "
                 # `if desc:` admits whitespace-only, which wraps to [] (D-009)
-                wrapped_desc = textwrap.wrap(desc, width=46) or [""]
-                lines.append(
-                    "│ " + f"{continuation}└─ Why: {wrapped_desc[0]}".ljust(58) + " │"
-                )
+                wrapped_desc = textwrap.wrap(
+                    desc, width=_SECTION_BOX_INNER_WIDTH - len(_why_lead)
+                ) or [""]
+                lines.append(_section_box_row(_why_lead + wrapped_desc[0]))
                 for line in wrapped_desc[1:]:
-                    lines.append("│ " + f"{continuation}   {line}".ljust(58) + " │")
+                    lines.append(_section_box_row(f"{continuation}   {line}"))
 
             # Add required keys with key icon
             if required_keys:
                 key_str = ", ".join(required_keys)
-                wrapped_keys = textwrap.wrap(f"Requires: {key_str}", width=46)
+                _key_lead = f"{continuation}└─ {ICONS['key']} "
+                wrapped_keys = textwrap.wrap(
+                    f"Requires: {key_str}",
+                    width=_SECTION_BOX_INNER_WIDTH - len(_key_lead),
+                )
                 for j, line in enumerate(wrapped_keys):
                     if j == 0:
-                        lines.append(
-                            "│ "
-                            + f"{continuation}└─ {ICONS['key']} {line}".ljust(58)
-                            + " │"
-                        )
+                        lines.append(_section_box_row(_key_lead + line))
                     else:
-                        lines.append("│ " + f"{continuation}   {line}".ljust(58) + " │")
+                        lines.append(_section_box_row(f"{continuation}   {line}"))
 
     lines.append("└" + "─" * 60 + "┘")
     lines.append("")

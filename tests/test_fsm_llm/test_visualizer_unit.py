@@ -527,6 +527,60 @@ def _states_section_lines(output):
     return lines[start : end + 1]
 
 
+# Glyphs that OPEN and CLOSE a box at the start of a line. Nested per-state boxes
+# inside the STATES section start with the section's own "│", so they are never
+# mistaken for a top-level box here.
+_BOX_OPENERS = ("┌", "╭", "┏", "╔")
+_BOX_CLOSERS = ("└", "╰", "┗", "╚")
+# Horizontal run glyphs that may appear BETWEEN a border line's two corners.
+_BOX_HORIZONTALS = set("─═━")
+# Width of every top-level SECTION box: "┌" + 60 * "─" + "┐".
+_SECTION_WIDTH = 62
+
+
+def _is_border_line(line, corners):
+    """True if `line` is a pure box border: a corner, a horizontal run, a corner.
+
+    The flow diagram draws arrows with the SAME glyphs that open boxes
+    (`╔═══> state`, `┗━━━> tail`), so "starts with ╔" is not sufficient — a
+    border line must contain nothing but box-drawing characters.
+    """
+    return (
+        len(line) >= 2
+        and line.startswith(corners)
+        and set(line[1:-1]) <= _BOX_HORIZONTALS
+        and not line[-1].isalnum()
+    )
+
+
+def _bordered_boxes(output):
+    """Split a render into every complete top-level box it contains.
+
+    Unlike `_states_section_lines`, this does NOT privilege one section — it
+    returns every box in the document so an alignment claim can be checked
+    against the whole render rather than against the one box a fix touched.
+
+    Args:
+        output: a full render at any style.
+
+    Returns:
+        List of boxes, each a list of lines from its opening border through its
+        closing border inclusive.
+    """
+    boxes = []
+    current = None
+    for line in output.split("\n"):
+        if current is None:
+            if _is_border_line(line, _BOX_OPENERS):
+                current = [line]
+        else:
+            current.append(line)
+            if _is_border_line(line, _BOX_CLOSERS):
+                boxes.append(current)
+                current = None
+    return boxes
+
+
 def _long_id_fsm_data():
     """FSM whose ids, purpose and required keys all overflow the box."""
     long_id = "overflowing_state_identifier_" + "x" * 71  # exactly 100 chars
@@ -602,6 +656,80 @@ class TestStatesSectionBoxIntegrity:
         assert widths == {62}, (
             f"a {len(long_id)}-char id made the box ragged, widths={sorted(widths)}:\n"
             + "\n".join(f"{len(line):>3} {line}" for line in section)
+        )
+
+
+class TestWholeRenderBoxAlignment:
+    """SC-18 says "a 100-char state id does not break box alignment" — about the
+    RENDER, not about one section. The original pinning test measured only the
+    STATES section (the box step 14 touched) via `_states_section_lines`, so the
+    suite stayed green while `create_metadata_section` emitted a 119-char row,
+    `create_transitions_section` a 127-char row, and `create_persona_section` a
+    stray 58-char spacer, all against the same 62-char border. These tests
+    measure EVERY bordered row of the WHOLE document instead, so a fix applied to
+    one section builder and not its twins cannot pass.
+    """
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_every_box_in_the_render_is_internally_uniform(self, style):
+        _, data = _long_id_fsm_data()
+        output = visualize_fsm_ascii(data, style=style)
+
+        for box in _bordered_boxes(output):
+            widths = {len(line) for line in box}
+            assert len(widths) == 1, (
+                f"ragged box in style={style!r}, widths={sorted(widths)}:\n"
+                + "\n".join(f"{len(line):>4} {line}" for line in box)
+            )
+
+    @pytest.mark.parametrize("style", ["full", "compact"])
+    def test_every_section_box_is_exactly_the_border_width(self, style):
+        """Per-state mini boxes are sized to their own content, so uniformity
+        alone would be satisfied by a section box that is uniformly WRONG. Pin
+        the top-level section boxes to the 62-char border specifically."""
+        _, data = _long_id_fsm_data()
+        output = visualize_fsm_ascii(data, style=style)
+
+        section_boxes = [
+            box for box in _bordered_boxes(output) if len(box[0]) == _SECTION_WIDTH
+        ]
+        assert section_boxes, f"no section box found in style={style!r}"
+
+        for box in section_boxes:
+            for line in box:
+                assert len(line) == _SECTION_WIDTH, (
+                    f"row is {len(line)} chars against a {_SECTION_WIDTH}-char "
+                    f"border in style={style!r}:\n{line!r}\nfull box:\n"
+                    + "\n".join(f"{len(x):>4} {x}" for x in box)
+                )
+
+    def test_the_probe_actually_sees_the_sections_that_were_broken(self):
+        """Vacuity guard. The two tests above are trivially satisfied if
+        `_bordered_boxes` returns nothing, or returns only the STATES box that
+        was already correct. Pin that METADATA, PERSONA and TRANSITIONS — the
+        three sections that were ragged — are genuinely among the boxes measured.
+        """
+        _, data = _long_id_fsm_data()
+        data["persona"] = "A persona, whose section carried the 58-char spacer."
+        output = visualize_fsm_ascii(data, style="full")
+
+        boxes = _bordered_boxes(output)
+        measured = "\n".join("\n".join(box) for box in boxes)
+
+        for title in (" METADATA ", " PERSONA ", " STATES ", " TRANSITIONS "):
+            assert title in measured, (
+                f"{title!r} is not inside any box returned by `_bordered_boxes`, "
+                "so the whole-render assertions never look at it"
+            )
+
+    def test_a_long_id_is_truncated_rather_than_dropped(self):
+        """Over-correction guard: padding every row to 62 by emitting an empty
+        row would pass the alignment tests. The id must still be legible."""
+        long_id, data = _long_id_fsm_data()
+        output = visualize_fsm_ascii(data, style="full")
+
+        assert long_id[:40] in output, (
+            "the long state id vanished from the render entirely"
         )
 
     def test_an_overflowing_required_keys_list_does_not_break_alignment(self):

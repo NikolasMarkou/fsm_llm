@@ -435,6 +435,19 @@ FORBIDDEN_POSITIVES = [
     "password_hash2",
     # kept by the policy allowlist via `reset`, stripped by the token pattern
     "password_reset_token",
+    # The six keys measured reaching the LLM PROMPT under D-016's prefix-shaped
+    # lookahead. D-016 found one member of this class (`password_reset_token`)
+    # and closed it by naming it in the auth-token pattern; these are the rest.
+    # See D-026 -- the allowlist now matches the WHOLE remaining suffix.
+    "password_reset_code",
+    "password_reset_otp",
+    "password_reset_hash",
+    "password_last_plaintext",
+    "password_retrieval",
+    "password_policy_key",
+    # the excluded-token half of D-016, previously unpinned
+    "password_confirmation",
+    "password_hint",
     "auth_token",
     "api_key",
     "api_secret",
@@ -580,6 +593,44 @@ _PW_SECRET_SUFFIXES = [
     "_pbkdf2",
     "_hash2",
     "_wibble",
+    # --- COMPOUND `_<policy-token>_<secret>` suffixes (D-026) --------------
+    # The list above is entirely SINGLE-token, which is why it could not see the
+    # infix bypass: D-016's lookahead only inspected the token immediately after
+    # `password`, so ANY allowlisted token inserted in front of a secret one
+    # defeated the whole control (`password_plaintext` stripped but
+    # `password_last_plaintext` was KEPT). These pin the SHAPE of the suffix, not
+    # just its vocabulary — a fix that re-anchors only the tokens it was written
+    # from will fail here.
+    "_reset_hash",
+    "_reset_code",
+    "_reset_otp",
+    "_reset_secret",
+    "_last_plaintext",
+    "_manager_dump",
+    "_policy_key",
+    "_retrieval",
+    "_expiry_hash",
+    "_login_plaintext",
+    "_flow_token",
+    "_status_raw",
+    "_attempt_hash",
+    "_setup_secret",
+    "_help_plaintext",
+    "_strategy_pepper",
+    # depth 3: two policy tokens then a secret one
+    "_reset_flow_hash",
+    "_last_manager_salt",
+    # --- tokens D-016 says it DELIBERATELY excluded from the allowlist -----
+    # These are the load-bearing half of that decision and were unpinned: the
+    # reviewer re-added them to the allowlist and 5 credential keys flipped
+    # STRIP -> KEEP with ZERO test failures. `password_confirmation` is the
+    # re-typed password itself.
+    "_confirmation",
+    "_confirm",
+    "_hint",
+    "_field",
+    "_input",
+    "_form",
 ]
 
 # Suffixes naming a policy/status PROPERTY. These MUST be kept (SC-9).

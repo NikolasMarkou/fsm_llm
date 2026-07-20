@@ -423,12 +423,50 @@ class WorkingMemory:
     # independent objects would serialize against each other. Do NOT add
     # `_lock` back into the returned state.
     # See decisions.md D-018.
+    #
+    # DECISION plan-2026-07-19T191147-4b664252/D-027 (CORRECTS D-018)
+    # D-018's first version held the lock but returned LIVE references:
+    #     with self._lock:
+    #         return {"_buffers": self._buffers, ...}
+    # Holding the lock there buys NOTHING. `__getstate__` returns before the
+    # copier walks the dict, so the lock is already released by the time
+    # `deepcopy`/`pickle` iterates -- and a concurrent `set()` then raises
+    # `RuntimeError: dictionary changed size during iteration`. That is SC-7's
+    # exact failure class, reintroduced inside the fix for a different concern
+    # (measured: 48/1200 deepcopies raised, and 1200/1200 under the reviewer's
+    # heavier writer). The copy must therefore be taken INSIDE the lock, not
+    # merely started inside it.
+    # Second defect, same cause: because `_buffers` was a live reference,
+    # `copy.copy` produced an object SHARING the buffers while `__setstate__`
+    # gave it a DIFFERENT lock -- two objects mutating one dict under two locks,
+    # i.e. no mutual exclusion at all, which falsified D-018's own "shallow-copy
+    # semantics are unchanged" claim.
+    # RESOLUTION -- `copy.copy` is defined as a SNAPSHOT, and the docstrings say
+    # so. The buffer MAPPINGS are rebuilt (so no writer can mutate a copy's
+    # structure, and no copy can mutate the original's); the buffered VALUES are
+    # still shared by reference, which is what makes this a shallow copy rather
+    # than a deep one. `deepcopy` layers its own value-copying on top of this
+    # snapshot and is therefore safe by construction.
+    # The alternative -- sharing the lock alongside the buffers so `copy.copy`
+    # stays a true alias -- was rejected: `__getstate__` also serves `pickle`,
+    # where a shared lock is impossible, so that route would need two divergent
+    # code paths and would still leave `deepcopy` racing.
+    # Do NOT "optimise" the dict rebuild below back into a bare reference.
+    # See decisions.md D-027.
     def __getstate__(self) -> dict[str, Any]:
-        """Return picklable state: everything except the unpicklable lock."""
+        """Return a picklable SNAPSHOT: everything except the unpicklable lock.
+
+        The snapshot is materialised while the lock is held, so a concurrent
+        writer can neither corrupt the copier's iteration nor be observed
+        half-applied. Buffered values are shared by reference; only the
+        mappings are rebuilt.
+        """
         with self._lock:
             return {
-                "_buffers": self._buffers,
-                "_hidden_buffers": self._hidden_buffers,
+                "_buffers": {
+                    name: dict(contents) for name, contents in self._buffers.items()
+                },
+                "_hidden_buffers": set(self._hidden_buffers),
             }
 
     def __setstate__(self, state: dict[str, Any]) -> None:

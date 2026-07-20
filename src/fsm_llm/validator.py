@@ -250,6 +250,23 @@ class FSMValidator:
             # `string_too_short`/`string_too_long`/`string_pattern_mismatch` are
             # DISTINCT type names and are deliberately NOT promoted here (see
             # decisions.md D-013 twin sweep).
+            #
+            # KNOWN OPEN DEFECT -- disclosed, not fixed (D-029).
+            # Leaving `string_pattern_mismatch` unpromoted keeps a LIVE false
+            # green of exactly the class the maintainer directive quoted above
+            # was issued to eliminate. Reproduced, not theorised:
+            #     {"states": {"b": {"id": "café", "description": ..., "purpose": ...}}}
+            #     fsm-llm-validate -> is_valid: True, errors: []
+            #     FSMDefinition(**d) -> ['string_pattern_mismatch']
+            # The non-ASCII id is reported only as a WARNING, so the CLI exits 0
+            # on a file `API.from_file` hard-refuses. Promoting these three type
+            # names is the likely correct fix -- they are framework-authored
+            # schema rules (`ASCII_IDENTIFIER_PATTERN`), not type coercion, so the
+            # rationale above supports promoting them exactly as it supported
+            # `missing`/`too_short`/`too_long`. It was NOT done here because
+            # changing this ALLOW-list is a HARD-invariant decision that was
+            # outside the authorised scope of the step that found it.
+            # See decisions.md D-029.
             for error in e.errors():
                 loc = " → ".join(str(x) for x in error["loc"])
                 if error["type"] in (

@@ -544,3 +544,141 @@ class TestWorkingMemoryCopySemantics:
         context.working_memory.set(BUFFER_CORE, "a", 1)
         clone = copy.deepcopy(context)
         assert clone.working_memory.get(BUFFER_CORE, "a") == 1
+
+
+class TestWorkingMemoryCopyUnderConcurrency:
+    """D-027: D-018's first `__getstate__` held the lock but returned a LIVE
+    `_buffers` reference, so the copier walked the dict AFTER the lock was
+    released. That reintroduced SC-7's exact failure class
+    (``RuntimeError: dictionary changed size during iteration``) on the code path
+    D-018 had just created, and it also made `copy.copy` share `_buffers` while
+    holding a DIFFERENT lock -- two objects mutating one dict under two locks.
+    The five tests in `TestWorkingMemoryCopySemantics` all passed throughout:
+    none of them exercised concurrency, and none exercised `copy.copy` at all.
+    """
+
+    def test_concurrent_set_during_deepcopy_produces_no_raises(self):
+        """Mirrors SC-7's shape and scale: a large seeded buffer widens the
+        iteration window so the race is reliable, not incidental. Against the
+        live-reference `__getstate__` this measured 48/1200 raises here and
+        1200/1200 under the reviewer's heavier writer; either way, non-zero."""
+        import copy
+
+        memory = WorkingMemory()
+        # A small buffer makes the copy window too short to race into, which
+        # would let this test pass against the un-fixed code.
+        for i in range(2000):
+            memory.set(BUFFER_CORE, f"seed_{i}", f"value_{i}")
+
+        stop = threading.Event()
+        writes = 0
+        raises: list[str] = []
+
+        def writer():
+            # set-then-delete keeps the buffer SIZE stable. An append-only
+            # writer would grow it without bound, and since each copy walks the
+            # whole buffer the run time would go quadratic.
+            nonlocal writes
+            while not stop.is_set():
+                memory.set(BUFFER_CORE, f"k_{writes}", writes)
+                memory.delete(BUFFER_CORE, f"k_{writes}")
+                writes += 1
+
+        def copier():
+            for _ in range(200):
+                try:
+                    copy.deepcopy(memory)
+                except Exception as e:  # the defect under test
+                    raises.append(f"{type(e).__name__}: {e}")
+
+        writer_thread = threading.Thread(target=writer, daemon=True)
+        copier_thread = threading.Thread(target=copier)
+        writer_thread.start()
+        copier_thread.start()
+        copier_thread.join(timeout=120)
+        stop.set()
+        writer_thread.join(timeout=10)
+
+        assert not copier_thread.is_alive(), "copier thread deadlocked"
+        # Vacuity guard: a writer that never ran makes 0-raises meaningless.
+        assert writes > 0, "writer never mutated the buffer; probe was vacuous"
+        assert raises == [], f"{len(raises)}/200 deepcopies raised; first: {raises[0]}"
+
+    def test_concurrent_set_during_pickle_produces_no_raises(self):
+        """`pickle` goes through the same `__getstate__`, and it is the path
+        session persistence uses -- so it needs its own pin, not an inference."""
+        import pickle
+
+        memory = WorkingMemory()
+        for i in range(2000):
+            memory.set(BUFFER_CORE, f"seed_{i}", f"value_{i}")
+
+        stop = threading.Event()
+        writes = 0
+        raises: list[str] = []
+
+        def writer():
+            # set-then-delete: see the deepcopy test above.
+            nonlocal writes
+            while not stop.is_set():
+                memory.set(BUFFER_CORE, f"k_{writes}", writes)
+                memory.delete(BUFFER_CORE, f"k_{writes}")
+                writes += 1
+
+        def dumper():
+            for _ in range(200):
+                try:
+                    pickle.dumps(memory)
+                except Exception as e:
+                    raises.append(f"{type(e).__name__}: {e}")
+
+        writer_thread = threading.Thread(target=writer, daemon=True)
+        dumper_thread = threading.Thread(target=dumper)
+        writer_thread.start()
+        dumper_thread.start()
+        dumper_thread.join(timeout=120)
+        stop.set()
+        writer_thread.join(timeout=10)
+
+        assert not dumper_thread.is_alive(), "dumper thread deadlocked"
+        assert writes > 0, "writer never mutated the buffer; probe was vacuous"
+        assert raises == [], f"{len(raises)}/200 pickles raised; first: {raises[0]}"
+
+    def test_shallow_copy_is_a_snapshot_not_a_shared_alias(self):
+        """D-027 defines `copy.copy` as a SNAPSHOT. This is the assertion that
+        makes the docstring and the behaviour agree -- D-018 claimed
+        "shallow-copy semantics are unchanged" while shipping a shared-buffer,
+        separate-lock object, and no test contradicted it because no test
+        touched `copy.copy`."""
+        import copy
+
+        memory = WorkingMemory()
+        memory.set(BUFFER_CORE, "a", 1)
+        clone = copy.copy(memory)
+
+        # The mappings must be distinct objects...
+        assert clone._buffers is not memory._buffers
+        assert clone._buffers[BUFFER_CORE] is not memory._buffers[BUFFER_CORE]
+        assert clone._hidden_buffers is not memory._hidden_buffers
+        # ...and the lock must be distinct too. Shared STATE plus separate LOCKS
+        # is the combination that removes mutual exclusion outright.
+        assert clone._lock is not memory._lock
+
+        # Structural writes on one side must not be visible on the other.
+        clone.set(BUFFER_CORE, "b", 2)
+        assert memory.get(BUFFER_CORE, "b") is None
+        memory.set(BUFFER_CORE, "c", 3)
+        assert clone.get(BUFFER_CORE, "c") is None
+
+    def test_shallow_copy_still_shares_values_by_reference(self):
+        """The other half of "shallow": the snapshot rebuilds the MAPPINGS but
+        must not deep-copy the VALUES, or `copy.copy` would silently become
+        `copy.deepcopy` and cost O(payload) on every call."""
+        import copy
+
+        payload = {"n": 1}
+        memory = WorkingMemory()
+        memory.set(BUFFER_CORE, "nested", payload)
+        clone = copy.copy(memory)
+
+        assert clone.get(BUFFER_CORE, "nested") is payload
