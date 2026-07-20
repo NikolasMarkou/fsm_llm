@@ -1284,6 +1284,26 @@ CARVE_OUT_CREDENTIAL_ENTRIES: tuple[tuple[str, str, object], ...] = (
         "-----END PRIVATE KEY-----\n",
     ),
     ("vendor_prefix/credential", "billing_key", "sk_live_9mK3aX7yB1nV5rD4jH2kM7"),
+    # SHAPE-COVERAGE GAP CLOSED BY PLAN STEP 8. The entry above is 30
+    # characters, so it clears the 24-character floor and the GENERIC shape arm
+    # catches it unaided -- the enumerated `_CREDENTIAL_VALUE_PREFIXES` denylist
+    # contributes nothing to its verdict. That left the corpus with ZERO
+    # instances of the ONE region where the prefix arm is genuinely
+    # load-bearing: a published vendor credential SHORTER than the floor, where
+    # the prefix arm fires before the length test and is the only thing standing
+    # between the value and the prompt.
+    #
+    # Its absence is why `test_the_generic_arm_carries_the_control` measured the
+    # generic arm's share at a suspiciously clean 100%: the corpus held no
+    # credential the prefix arm could uniquely claim. With this entry the figure
+    # is 148/149, and the 1 is this row. That is the honest number, and the drop
+    # is the POINT of adding it -- a 100% that came from a missing shape is the
+    # same defect class this whole plan exists to close (`LESSONS [I:5]`).
+    #
+    # DO NOT delete `_CREDENTIAL_VALUE_PREFIXES` on the strength of the generic
+    # arm's share. This row is the counter-example: 20 characters, `AKIA`
+    # prefix, synthesized (not copied from vendor documentation).
+    ("vendor_prefix_short/credential", "kiosk_key", "AKIA7QM2VP9RTLC4YB8K"),
     # `<label>:<pure hex>`. D-021 KEEPS this shape by design so that
     # `cache_key: "sha256:..."` survives; a credential deliberately stored as
     # `v1:<hex>` rides that carve-out out of the filter. Disclosed, not hidden.

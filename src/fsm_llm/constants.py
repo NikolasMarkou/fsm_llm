@@ -1225,6 +1225,7 @@ def _is_path_shaped(stripped: str) -> bool:
     if "/" not in stripped:
         return False
     segments = stripped.split("/")
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-005 -- ReDoS ordering.
     # Segment count first, THEN the regex: `or` short-circuits, and
     # `_PATH_VALUE_RE`'s two adjacent `[^\s]*` runs have a measured backtracking
     # cliff on slash-and-dot-heavy input (~490us at the `_VALUE_SCAN_LIMIT`
@@ -1324,7 +1325,8 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     # limit on the claim, and what NOT to do: see the D-003 block above
     # `_UUID_VALUE_RE`.
     if _UUID_VALUE_RE.match(stripped) or _ULID_VALUE_RE.match(stripped):
-        # D-006: the `if name else ()` short-circuit deleted here read
+        # DECISION plan-2026-07-20T103203-b8a6b855/D-006 -- site C, deleted.
+        # The `if name else ()` short-circuit that stood here read
         # `bool(name)` -- the subclass's `__len__`/`__bool__`, a latent raise
         # site reachable ONLY under a UUID/ULID value, which is why it survived
         # step 4. Deleting it is verdict-identical (`str.lower("")` splits to
@@ -1455,7 +1457,8 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     if value is None:
         return False
 
-    # D-006: unbound `str.lower`, not `key.lower()`. The polarity here is NOT the
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-006 -- site B, the key-arm read.
+    # Unbound `str.lower`, not `key.lower()`. The polarity here is NOT the
     # value arm's: failing closed on every `str` subclass KEY would strip
     # unrelated names wholesale, so this site reads the underlying buffer, as the
     # layer-1 regexes above already do. `lowered_key` is then an exact `str`, so

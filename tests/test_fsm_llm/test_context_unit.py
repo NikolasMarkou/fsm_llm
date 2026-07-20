@@ -24,6 +24,12 @@ from tests.test_fsm_llm.fixtures.context_key_corpus import (
     TOKEN_SECRET_SHORT_VALUE_ENTRIES,
     TOKEN_SECRET_VALUES,
 )
+from tests.test_fsm_llm.fixtures.holdout_key_corpus import (
+    HOLDOUT,
+    HOLDOUT_KNOWN_FAIL_OPEN,
+    HOLDOUT_KNOWN_OVER_STRIPPED,
+    arm_of,
+)
 
 
 class TestCleanContextKeys:
@@ -2248,20 +2254,31 @@ class TestValueShapeLayer:
         credential value in the shipped corpus. The question is what fraction of
         the detections the generic arm still makes on its own.
 
-        MEASURED AT THIS COMMIT: **100% (148/148)**. Every single credential the
-        filter detects, it detects on shape alone. The prefix arm contributes
-        ZERO unique detections on this corpus. That is stronger than the 73%/27%
-        the retracted citation claimed from a scratchpad.
+        MEASURED AT PLAN STEP 8: **99.4% (153/154)**. Every credential the
+        filter detects bar one, it detects on shape alone. That is stronger than
+        the 73%/27% the retracted citation claimed from a scratchpad.
 
-        AND THE HONEST CAVEAT, asserted below rather than left in prose: 100% is
-        partly an artifact of WHICH vendor credentials this corpus holds. The
-        prefix arm IS load-bearing, in exactly one place -- a published vendor
-        credential SHORTER than the 24-character length floor. `AKIA...` (20
-        chars) and `xoxb-...` are detected by the prefix arm ONLY. The corpus's
-        `vendor_prefix/credential` instance is 30 characters, so it never
-        exercises that region. So: do NOT read this test as licence to delete
-        `_CREDENTIAL_VALUE_PREFIXES`. It buys the short tail, and the second half
-        of this test pins that it does.
+        TWO CORRECTIONS TO WHAT THIS DOCSTRING SAID AT STEP 7, both found by
+        step 8's audit and both recorded rather than quietly overwritten:
+
+        1. Step 7 wrote "100% (148/148)". The share was right; the COUNT was
+           wrong -- re-measured on step 7's own commit (`aee9753`) the corpus
+           yields 153 head detections, not 148. A hand-transcribed denominator
+           in a security anchor is exactly the class of claim
+           `LESSONS [I:5]` says to grep before trusting.
+        2. Step 7 wrote that 100% was "partly an artifact of WHICH vendor
+           credentials this corpus holds", that the prefix arm is load-bearing
+           only for a published vendor credential SHORTER than the 24-character
+           floor, and that the corpus contained no such instance. All three were
+           true. Step 8 CLOSED that gap rather than leaving it disclosed: the
+           corpus now carries `vendor_prefix_short/credential`
+           (`kiosk_key`, `AKIA...`, 20 chars). It is the single entry in
+           `prefix_only` below, and it is why the share is no longer a clean
+           100%. The number got worse because the instrument got better.
+
+        So: do NOT read this test as licence to delete
+        `_CREDENTIAL_VALUE_PREFIXES`. It buys the short tail, the corpus now
+        contains that tail, and the second half of this test pins it besides.
 
         The floor is 0.50 -- a genuine majority claim, deliberately NOT a
         restatement of the measured 1.00. If it ever drops below half, the class
@@ -2317,9 +2334,10 @@ class TestValueShapeLayer:
 
         # The other side: the prefix arm is not dead weight. A published vendor
         # credential under the 24-char length floor is detected by it ALONE.
-        # These two are absent from the corpus on purpose (they are published
-        # constants, and `test_the_corpus_does_not_paste_the_pattern_it_tests`
-        # governs what may be pasted into a fixture) and are probed inline.
+        # The corpus now carries one such instance itself
+        # (`vendor_prefix_short/credential`); these two remain probed inline
+        # because they are the PUBLISHED literals, and what a fixture may paste
+        # is governed by `test_the_corpus_does_not_paste_the_pattern_it_tests`.
         for name, short_vendor_value in (
             ("aws_key", "AKIAIOSFODNN7EXAMPLE"),
             ("slack_token", "xoxb-1234"),
@@ -2969,3 +2987,231 @@ class TestHostileStrSubclasses:
         )
         assert "order_key" not in cleaned and "harvest_token" not in cleaned
         assert cleaned.get("keep_me") == "ok"
+
+
+class TestBurnedHoldoutCorpus:
+    """The independence corpus, after it was spent.
+
+    `holdout_key_corpus.py` was authored in full BEFORE `constants.py` and
+    `context_key_corpus.py` were opened in its authoring context, then measured
+    against the shipped filter across steps 2-8 of
+    `plan-2026-07-20T103203-b8a6b855`. That measurement BURNED it: it is a
+    regression artifact now and its figures may never be re-quoted as an
+    independence statistic (H-7, H-8; `plans/LESSONS.md` [I:5]).
+
+    What ships here is therefore not an independence claim. It is (a) the
+    mechanical guarantee that the two corpus artifacts stay separate, (b) the
+    two-sided disclosure of every wrong verdict the corpus found, and (c) the
+    bounds it was scored against, so that a future edit moving any of them has
+    to say so.
+    """
+
+    @staticmethod
+    def _stripped(key, value):
+        return key not in clean_context_keys(
+            {key: value}, "test-conv", strip_forbidden_keys=True
+        )
+
+    # -- SC-7: the two artifacts stay separate ----------------------------
+    def test_the_burned_holdout_is_disjoint_from_the_regression_corpus(self):
+        """SC-7. Collapsing a regression-probe set into an independence
+        statistic is the metric category error that invalidated a prior plan's
+        headline figure. The two files exist precisely so that cannot happen by
+        accident, and this test is what stops it happening on purpose.
+
+        NAME overlap must be EMPTY. VALUE overlap must be EXACTLY the one known,
+        structurally-not-re-derivable scalar -- the literal ``True``. Arbitrary
+        value overlap is NOT silently permitted: a second collision fails here
+        and must be re-derived, not added to the exception.
+
+        Values are compared by ``repr`` for non-``str`` so that ``True`` and
+        ``1`` (equal and hash-equal in Python) do not silently merge, which
+        would let a real integer collision hide behind the disclosed bool one.
+        """
+        from tests.test_fsm_llm.fixtures import context_key_corpus
+
+        shipped_names: set[str] = set()
+        shipped_values: set[str] = set()
+        for attribute in dir(context_key_corpus):
+            if attribute.startswith("__"):
+                continue
+            obj = getattr(context_key_corpus, attribute)
+            if isinstance(obj, (tuple, list, frozenset, set)):
+                for item in obj:
+                    if isinstance(item, str):
+                        shipped_names.add(item)
+                    elif isinstance(item, tuple):
+                        for sub in item:
+                            if isinstance(sub, str):
+                                shipped_names.add(sub)
+                                shipped_values.add(sub)
+            elif isinstance(obj, dict):
+                for key, value in obj.items():
+                    if isinstance(key, str):
+                        shipped_names.add(key)
+                    shipped_values.add(value if isinstance(value, str) else repr(value))
+
+        holdout_names = {name for name, _value, _truth in HOLDOUT}
+        holdout_values = {
+            value if isinstance(value, str) else repr(value)
+            for _name, value, _truth in HOLDOUT
+        }
+
+        assert len(holdout_names) == len(HOLDOUT), (
+            "the holdout contains duplicate names, so its denominators are wrong"
+        )
+        assert (holdout_names & shipped_names) == set(), (
+            "the holdout shares names with the regression-probe corpus, so it is "
+            "no longer a record of what an UNSIGHTED corpus found: "
+            f"{sorted(holdout_names & shipped_names)}"
+        )
+
+        # The single disclosed exception, named explicitly rather than tolerated
+        # as "a small overlap". `bool` has two inhabitants, so re-deriving this
+        # value is impossible -- only the NAME could be (and was) re-derived.
+        assert (holdout_values & shipped_values) == {"True"}, (
+            "the value intersection is no longer exactly the one disclosed, "
+            "not-re-derivable scalar `True`. Re-derive the new collision(s); do "
+            "NOT widen this assertion: "
+            f"{sorted(holdout_values & shipped_values)}"
+        )
+
+    def test_both_corpus_artifacts_declare_which_kind_of_artifact_they_are(self):
+        """SC-7. A banner that drifts off a file is the same defect as never
+        having written it. Both are asserted mechanically."""
+        import pathlib
+
+        from tests.test_fsm_llm.fixtures import context_key_corpus, holdout_key_corpus
+
+        regression = pathlib.Path(context_key_corpus.__file__).read_text()
+        assert "REGRESSION-PROBE + SHAPE-COVERAGE" in regression
+        assert "NOT** AN INDEPENDENCE STATISTIC" in regression
+
+        burned = pathlib.Path(holdout_key_corpus.__file__).read_text()
+        assert "**BURNED**" in burned
+        assert "MUST **NOT** BE USED AS AN INDEPENDENCE STATISTIC AGAIN" in burned
+        assert "MUST derive a FRESH corpus" in burned
+
+    # -- the disclosed residuals, two-sided -------------------------------
+    def test_the_burned_holdout_fail_open_set_is_pinned_exactly(self):
+        """Two-sided pin, same idiom as `TOKEN_KNOWN_OVER_STRIPPED`.
+
+        A name LEAVING this set is a FIX and must be recorded in the banner. A
+        name JOINING it is an undisclosed regression on a corpus that was
+        authored without sight of the filter -- which is the only kind of
+        regression evidence this seam has ever had.
+        """
+        actual = {
+            name
+            for name, value, truth in HOLDOUT
+            if truth == "credential" and not self._stripped(name, value)
+        }
+        assert actual == HOLDOUT_KNOWN_FAIL_OPEN, (
+            "the holdout's disclosed fail-open set moved.\n"
+            "NEWLY LEAKING (undisclosed regression): "
+            f"{sorted(actual - HOLDOUT_KNOWN_FAIL_OPEN)}\n"
+            "NO LONGER LEAKING (a fix -- update the banner and the pin): "
+            f"{sorted(HOLDOUT_KNOWN_FAIL_OPEN - actual)}"
+        )
+
+    def test_the_burned_holdout_over_strip_set_is_pinned_exactly(self):
+        """The other axis, pinned with the same discipline. `LESSONS [I:4]`:
+        fixing a filter's over-match silently creates an under-match in the same
+        edit, so BOTH directions are pinned or neither measurement means
+        anything."""
+        actual = {
+            name
+            for name, value, truth in HOLDOUT
+            if truth == "safe" and self._stripped(name, value)
+        }
+        assert actual == HOLDOUT_KNOWN_OVER_STRIPPED, (
+            "the holdout's disclosed over-strip set moved.\n"
+            "NEWLY OVER-STRIPPED: "
+            f"{sorted(actual - HOLDOUT_KNOWN_OVER_STRIPPED)}\n"
+            "NO LONGER OVER-STRIPPED: "
+            f"{sorted(HOLDOUT_KNOWN_OVER_STRIPPED - actual)}"
+        )
+
+    # -- SC-3 / SC-4: the bounds, per-arm AND slice-total ------------------
+    def test_the_burned_holdout_scores_inside_both_bounds_on_both_arms(self):
+        """SC-3 and SC-4, mechanised in one test because they are one claim.
+
+        Pre-Mortem 2 of the plan: *a one-axis improvement gets mistaken for a
+        fix*. Every prior design on this seam moved error from one axis to the
+        other with every gate green, because a stop trigger existed for one axis
+        and not the other. So both axes are computed here, per arm AND
+        slice-total -- six cells, all asserted, one failure message.
+
+        The scoring is per-arm as well as total on purpose: at step 2 this
+        corpus's token arm was at 12.5% fail-open while its key arm was at 2.4%,
+        and a 7.4% slice-total would have masked exactly that.
+        """
+        bounds = {"over-strip": 15.0, "fail-open": 5.0}
+        counts = {
+            (axis, arm): [0, 0] for axis in bounds for arm in ("key", "token", "total")
+        }
+
+        for name, value, truth in HOLDOUT:
+            axis = "fail-open" if truth == "credential" else "over-strip"
+            stripped = self._stripped(name, value)
+            wrong = (not stripped) if truth == "credential" else stripped
+            for arm in (arm_of(name), "total"):
+                counts[(axis, arm)][0] += 1
+                counts[(axis, arm)][1] += int(wrong)
+
+        vacuous = [key for key, (total, _) in counts.items() if total == 0]
+        assert vacuous == [], f"empty cells make this test vacuous: {vacuous}"
+
+        failures = []
+        for (axis, arm), (total, wrong) in sorted(counts.items()):
+            pct = 100.0 * wrong / total
+            if pct > bounds[axis]:
+                failures.append(
+                    f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) "
+                    f"> {bounds[axis]:.0f}% bound"
+                )
+        assert failures == [], (
+            "the BURNED holdout no longer scores inside its bounds:\n  "
+            + "\n  ".join(failures)
+            + "\n\nThis corpus is a regression artifact, so a cell moving out of "
+            "bounds is a REGRESSION in the filter, not a new independence "
+            "measurement. Do not re-tune a threshold to the specific entries "
+            "named above (`plans/LESSONS.md` [I:4]); find what changed."
+        )
+
+    def test_the_burned_holdout_still_reaches_the_value_layer(self):
+        """ANTI-VACUITY GUARD, and the reason the numbers above mean anything.
+
+        A corpus whose credential half is struck at layer 1 on the NAME measures
+        the NAME layer and says NOTHING about the value layer this plan changed.
+        Step 2 measured this corpus at 58.0% value-attributable overall. The
+        floor asserted here is a bare majority -- deliberately not a restatement
+        of the measured figure -- because below half, the fail-open number above
+        stops being a statement about layer 2 at all.
+
+        For contrast, the shipped corpus's key arm is ~9% value-attributable and
+        would fail this guard outright. That is correct for a regression-probe
+        set built from credential-looking vendor names, and it is exactly why
+        the two artifacts are not interchangeable.
+        """
+        inert = "v"
+        value_attributable = 0
+        credentials = 0
+        for name, value, truth in HOLDOUT:
+            if truth != "credential":
+                continue
+            credentials += 1
+            if self._stripped(name, value) and not self._stripped(name, inert):
+                value_attributable += 1
+
+        assert credentials > 50, (
+            f"vacuity: only {credentials} credential entries to apportion"
+        )
+        share = value_attributable / credentials
+        assert share > 0.50, (
+            f"only {value_attributable}/{credentials} ({share:.1%}) of the "
+            "holdout's credentials are decided on their VALUE; the rest are "
+            "struck on their NAME at layer 1. Below half, this corpus's "
+            "fail-open figure is a statement about the name layer and must not "
+            "be quoted as evidence about the value layer."
+        )
