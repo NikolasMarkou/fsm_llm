@@ -3670,3 +3670,294 @@ class TestShippedCorpusBounds:
             f"vacuity: {credentials} credential / {safes} safe entries is too "
             "few for these rates to mean anything"
         )
+
+
+class TestCensusCorpusAdequacy:
+    """SC-1. Guards on the census corpus ITSELF, not on the filter.
+
+    Every assertion in this class holds regardless of what
+    `is_forbidden_context_entry` does. That is deliberate: these guards must
+    keep failing loudly across the `constants.py` change in plan step 5, so a
+    corpus weakened to flatter a rate is caught by the corpus's own tests
+    rather than by whoever reads the rate months later.
+    """
+
+    @staticmethod
+    def _corpus_names(module) -> set:
+        """Every context-key NAME a corpus module exposes, whatever holds it.
+
+        The three corpora do not agree on container shape -- `context_key_corpus`
+        keeps names in bare tuples, dict keys and frozensets; the holdout and the
+        census keep `(name, value, ground_truth)` tuples. Harvesting per-shape
+        rather than per-file is what makes the disjointness guard total instead of
+        accidentally scoped to whichever container the author happened to use.
+        """
+        names = set()
+        for attribute in dir(module):
+            if attribute.startswith("__"):
+                continue
+            obj = getattr(module, attribute)
+            if isinstance(obj, dict):
+                names.update(key for key in obj if isinstance(key, str))
+            elif isinstance(obj, (list, tuple, set, frozenset)):
+                for entry in obj:
+                    if isinstance(entry, str):
+                        names.add(entry)
+                    elif (
+                        isinstance(entry, tuple) and entry and isinstance(entry[0], str)
+                    ):
+                        names.add(entry[0])
+        return names
+
+    def test_the_census_corpus_never_imports_the_thing_it_measures(self):
+        """SC-1, and the whole point of the artifact.
+
+        A corpus that can see `constants.py` is not evidence about
+        `constants.py`. Asserted on the file's SOURCE rather than on its
+        namespace, because an indirect import would still contaminate the
+        authoring even if no symbol were bound.
+        """
+        import pathlib
+
+        from tests.test_fsm_llm.fixtures import census_key_corpus
+
+        source = pathlib.Path(census_key_corpus.__file__).read_text()
+        offenders = [
+            line
+            for line in source.splitlines()
+            if line.lstrip().startswith(("import ", "from "))
+            and "fsm_llm.constants" in line
+        ]
+        assert not offenders, (
+            "the census corpus imports the filter it exists to measure "
+            f"independently: {offenders}"
+        )
+
+    def test_the_census_corpus_declares_which_kind_of_artifact_it_is(self):
+        """SC-1. Same idiom as the sibling banner test above: a banner that
+        drifts off the file is the same defect as never having written it."""
+        import pathlib
+
+        from tests.test_fsm_llm.fixtures import census_key_corpus
+
+        source = pathlib.Path(census_key_corpus.__file__).read_text()
+        assert "ROLE: **INDEPENDENCE**" in source
+        assert "REGRESSION-PROBE + SHAPE-COVERAGE" in source
+        assert "role: BURNED" in source
+        assert "shape-census-blind.md" in source
+        assert "a SAMPLING GUIDE, not ground truth" in source
+        assert "NOT frequency-calibrated" in source
+        assert "Entries dropped under STOP-4" in source
+
+    def test_every_census_ground_truth_is_one_of_the_two_legal_strings(self):
+        """A third label -- `"ambiguous"`, `""`, `None` -- would be silently
+        counted as neither a credential nor a safe row by every scorer, moving
+        a denominator without moving a visible number."""
+        from tests.test_fsm_llm.fixtures.census_key_corpus import (
+            CENSUS,
+            GROUND_TRUTH_VALUES,
+        )
+
+        illegal = {truth for _name, _value, truth in CENSUS} - GROUND_TRUTH_VALUES
+        assert not illegal, f"illegal ground_truth labels in the census: {illegal}"
+        assert GROUND_TRUTH_VALUES == frozenset({"credential", "safe"})
+
+    def test_every_census_cell_is_large_enough_to_mean_something(self):
+        """SC-1: >=240 entries, n >= 60 in EVERY (arm x ground_truth) cell.
+
+        A vacuous cell is the failure mode this seam has hit repeatedly: a rate
+        computed over four rows reads exactly like a rate computed over four
+        hundred, and only the n tells them apart. Per A-6 the bound is a
+        point-estimate bound by construction -- at n = 60, 0 failures still
+        leaves a Wilson upper bound near 6%, so this guard buys resolution, not
+        the ability to exclude a 5% rate.
+        """
+        from tests.test_fsm_llm.fixtures.census_key_corpus import (
+            CENSUS,
+            KEY_ARM_CREDENTIAL,
+            KEY_ARM_SAFE,
+            TOKEN_ARM_CREDENTIAL,
+            TOKEN_ARM_SAFE,
+            arm_of,
+        )
+
+        cells = {
+            ("key", "credential"): KEY_ARM_CREDENTIAL,
+            ("key", "safe"): KEY_ARM_SAFE,
+            ("token", "credential"): TOKEN_ARM_CREDENTIAL,
+            ("token", "safe"): TOKEN_ARM_SAFE,
+        }
+        undersized = {
+            cell: len(entries) for cell, entries in cells.items() if len(entries) < 60
+        }
+        assert not undersized, f"census cells below n = 60: {undersized}"
+        assert len(CENSUS) >= 240, f"census has only {len(CENSUS)} entries"
+        assert len(CENSUS) == sum(len(entries) for entries in cells.values()), (
+            "CENSUS is not the exact concatenation of the four arm lists -- a "
+            "denominator has drifted"
+        )
+
+        # Each list must actually live in the arm and the ground truth it claims.
+        for (arm, truth), entries in cells.items():
+            for name, _value, actual_truth in entries:
+                assert arm_of(name) == arm, f"{name!r} is filed under the {arm} arm"
+                assert actual_truth == truth, f"{name!r} is filed under {truth}"
+
+        names = [name for name, _value, _truth in CENSUS]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        assert not duplicates, f"duplicate census names: {duplicates}"
+
+    def test_the_census_corpus_shares_no_name_with_either_sibling_corpus(self):
+        """SC-1. The census is only an INDEPENDENCE artifact to the extent it is
+        a different corpus. A shared name is a shared row, and a shared row is
+        the shipped corpus's verdict laundered through a new filename.
+
+        If this fails, rename in `census_key_corpus.py`. Do not relax the guard,
+        and do not delete the census row -- both are the move this seam's
+        discipline forbids.
+        """
+        from tests.test_fsm_llm.fixtures import (
+            census_key_corpus,
+            context_key_corpus,
+            holdout_key_corpus,
+        )
+
+        mine = {name for name, _value, _truth in census_key_corpus.CENSUS}
+        shipped = self._corpus_names(context_key_corpus)
+        burned = self._corpus_names(holdout_key_corpus)
+
+        assert not (mine & shipped), (
+            "census names collide with the REGRESSION-PROBE corpus: "
+            f"{sorted(mine & shipped)}"
+        )
+        assert not (mine & burned), (
+            f"census names collide with the BURNED holdout: {sorted(mine & burned)}"
+        )
+
+    def test_the_census_contains_every_population_it_was_built_for(self):
+        """SC-1's fifth clause. Each of these populations is the reason a
+        specific finding exists; a corpus missing one leaves that finding's risk
+        unmeasured BY CONSTRUCTION, which is worse than measuring it badly
+        because the resulting table looks complete.
+        """
+        from tests.test_fsm_llm.fixtures.census_key_corpus import CENSUS
+
+        values = {name: value for name, value, _truth in CENSUS}
+        credentials = {name for name, _v, t in CENSUS if t == "credential"}
+        safes = {name for name, _v, t in CENSUS if t == "safe"}
+
+        def _count(predicate) -> int:
+            return sum(1 for value in values.values() if predicate(value))
+
+        # Scheme-word class, listed-style heads and unlisted heads (the class the
+        # whole plan exists to fix). Heads are named here, not imported.
+        listed_heads = ("Bearer ", "Basic ", "token ", "apikey ", "digest ")
+        unlisted_heads = (
+            "OAuth2 ",
+            "AWS4-HMAC-SHA256 ",
+            "SharedKey ",
+            "ntrip ",
+            "secret ",
+            "Sigv4Custom ",
+            "GSSAPI ",
+            "Kerberos5 ",
+            "X-Api-Key ",
+            "SASL ",
+            "PLAIN ",
+            "OCPP16 ",
+        )
+        assert _count(lambda v: v.startswith(listed_heads)) >= 10
+        assert _count(lambda v: v.startswith(unlisted_heads)) >= 24
+
+        # F-05's over-strip casualties: two-field metadata under *_key / *_token
+        # names, ground-truthed safe. Without these the over-strip cost of the
+        # shape test is unmeasured by construction.
+        casualties = (
+            "scope readonly",
+            "grant_type refresh",
+            "realm production",
+            "token_type Bearer",
+            "Zone eu-central-1",
+            "Region us-east-1",
+            "Type Standard",
+            "Tier Gold",
+            "Order 12345",
+        )
+        for casualty in casualties:
+            holders = {name for name, value in values.items() if value == casualty}
+            assert holders, f"F-05 casualty {casualty!r} is not in the census"
+            assert holders <= safes, f"{casualty!r} must be ground-truthed safe"
+
+        # Identifier-noun class, BOTH directions -- UUID/ULID under an
+        # identifier-ish name (safe) and under a secret-ish name (credential).
+        uuid_ish = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+        bare_identifier_shaped = {
+            name
+            for name, value in values.items()
+            if value in {uuid_ish, ulid, uuid_ish.upper()}
+        }
+        assert bare_identifier_shaped & safes, "no identifier-ish UUID rows"
+        assert bare_identifier_shaped & credentials, "no secret-ish UUID rows"
+
+        # F-09: the `Bearer <uuid>` interaction, tested nowhere else in the suite.
+        wrapped_uuid = {
+            name
+            for name, value in values.items()
+            if " " in value and value.split(" ", 1)[1] in {uuid_ish, ulid}
+        }
+        assert len(wrapped_uuid) >= 8, f"F-09 population is thin: {wrapped_uuid}"
+        assert wrapped_uuid & credentials, "no credential-side wrapped UUID"
+        assert wrapped_uuid & safes, "no safe-side wrapped UUID"
+
+        # The broad S01-S50 spread, including the census's named hard
+        # false-positive class: PEM PUBLIC (safe) against PEM PRIVATE (credential).
+        assert {n for n, v in values.items() if "BEGIN PUBLIC KEY" in v} <= safes
+        assert {n for n, v in values.items() if "BEGIN PRIVATE KEY" in v} <= credentials
+        for probe in (
+            "eyJ",  # JWT
+            "sha256:",  # algorithm-prefixed content hash
+            "${",  # unresolved template
+            "%C3%A9",  # percent-encoded
+            "10.0.0.12:8080",  # host:port colon composite
+            "svcuser:",  # user:pass colon composite
+            "https://svc:",  # URL with embedded userinfo
+            "app.settings.theme",  # dotted config path
+            "1.4.2",  # semver
+            "/etc/app/certs",  # filesystem path
+            "xk_live_",  # invented (NOT real) vendor prefix
+        ):
+            assert _count(lambda v, p=probe: p in v), (
+                f"no census row exercises {probe!r}"
+            )
+        assert "" in values.values(), "no empty-string row"
+        assert " " in values.values(), "no whitespace-only row"
+
+    def test_the_census_carries_no_real_vendor_secret_prefix(self):
+        """F-15. The repo is currently blocked by GitHub push protection on
+        exactly this class of literal. A new fixture that re-blocks the push
+        would cost the plan its final step.
+
+        This is a cheap belt, not GitHub's scanner -- only a push attempt gets
+        the authoritative answer. It exists so an obvious mistake fails in 50ms
+        rather than at step 10.
+        """
+        from tests.test_fsm_llm.fixtures.census_key_corpus import CENSUS
+
+        # Split so this file does not itself carry a scannable literal.
+        forbidden = (
+            "sk" + "_live_",
+            "sk" + "-ant-",
+            "gh" + "p_",
+            "gh" + "o_",
+            "AKIA",
+            "xox" + "b-",
+            "CFP" + "AT-",
+            "AIza",
+        )
+        offenders = sorted(
+            name
+            for name, value, _truth in CENSUS
+            if any(prefix in value for prefix in forbidden)
+        )
+        assert not offenders, f"vendor-real secret prefixes in the census: {offenders}"
