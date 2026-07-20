@@ -494,6 +494,50 @@ class TestWorkingMemoryConcurrency:
 class TestWorkingMemoryCopySemantics:
     """D-018: the D-007 lock made WorkingMemory un-deepcopy-able/un-picklable."""
 
+    @pytest.mark.parametrize("how", ["copy", "deepcopy", "pickle"])
+    def test_hidden_buffers_stays_a_frozenset_across_every_copy_path(self, how):
+        """D-032. `_hidden_buffers` is declared `frozenset[str]` because it gates
+        what reaches an LLM prompt, so its immutability is a control rather than
+        an incidental choice. D-027 rebuilt it as a mutable `set` inside
+        `__getstate__` while fixing a different defect, and every copy path then
+        silently downgraded the type -- a 138-line test addition specifically
+        about copy semantics could not see it, because nothing asserted the TYPE.
+        mypy cannot see it either: `__setstate__` reads from a `dict[str, Any]`.
+        """
+        import copy as copy_mod
+        import pickle
+
+        memory = WorkingMemory()
+        memory.set(BUFFER_CORE, "k", "v")
+        assert memory._hidden_buffers, (
+            "vacuity guard: an empty hidden set makes the mutation assertion "
+            "below meaningless"
+        )
+
+        clone = {
+            "copy": lambda: copy_mod.copy(memory),
+            "deepcopy": lambda: copy_mod.deepcopy(memory),
+            "pickle": lambda: pickle.loads(pickle.dumps(memory)),
+        }[how]()
+
+        assert type(clone._hidden_buffers) is frozenset, (
+            f"{how} downgraded _hidden_buffers to "
+            f"{type(clone._hidden_buffers).__name__}; the declared type is "
+            "frozenset[str] and it gates prompt visibility"
+        )
+        with pytest.raises(AttributeError):
+            clone._hidden_buffers.add("injected")
+
+    def test_a_legacy_pickle_carrying_a_mutable_set_is_normalised(self):
+        """Over-correction guard AND a real compatibility case: pickles written
+        by the D-027 build carry a plain `set`. `__setstate__` must re-wrap
+        rather than trust `__getstate__`, or those restore as mutable."""
+        memory = WorkingMemory()
+        memory.__setstate__({"_buffers": {}, "_hidden_buffers": {"metadata"}})
+
+        assert type(memory._hidden_buffers) is frozenset
+        assert memory._hidden_buffers == frozenset({"metadata"})
+
     def test_deepcopy_succeeds_and_is_independent(self):
         import copy
 
@@ -656,10 +700,23 @@ class TestWorkingMemoryCopyUnderConcurrency:
         memory.set(BUFFER_CORE, "a", 1)
         clone = copy.copy(memory)
 
-        # The mappings must be distinct objects...
+        # The MUTABLE mappings must be distinct objects...
         assert clone._buffers is not memory._buffers
         assert clone._buffers[BUFFER_CORE] is not memory._buffers[BUFFER_CORE]
-        assert clone._hidden_buffers is not memory._hidden_buffers
+        # ...but `_hidden_buffers` is deliberately NOT asserted to be a distinct
+        # object (D-032). It is a `frozenset`, so `frozenset(x)` returns `x`
+        # itself and sharing it is safe by construction -- there is no writer.
+        # The original form of this line demanded non-identity, which is only
+        # meaningful for a MUTABLE container; satisfying it literally is what
+        # pushed D-027 into rebuilding the frozenset as a `set` and silently
+        # downgrading a declared-immutable prompt-visibility control on every
+        # copy. The invariant that actually matters -- the copy's hidden set
+        # cannot be mutated at all, so it can never diverge from or corrupt the
+        # original's -- is stronger, and is pinned by
+        # `test_hidden_buffers_stays_a_frozenset_across_every_copy_path`.
+        assert clone._hidden_buffers == memory._hidden_buffers
+        with pytest.raises(AttributeError):
+            clone._hidden_buffers.add("injected")
         # ...and the lock must be distinct too. Shared STATE plus separate LOCKS
         # is the combination that removes mutual exclusion outright.
         assert clone._lock is not memory._lock

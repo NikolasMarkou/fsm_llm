@@ -724,12 +724,21 @@ class TestWholeRenderBoxAlignment:
 
     def test_a_long_id_is_truncated_rather_than_dropped(self):
         """Over-correction guard: padding every row to 62 by emitting an empty
-        row would pass the alignment tests. The id must still be legible."""
+        row would pass the alignment tests. The id must still be legible.
+
+        D-033 strengthened this from `long_id[:40] in output`, which the
+        free-standing state diagram satisfied on its own and which said nothing
+        about the section boxes. Both ENDS must survive now.
+        """
         long_id, data = _long_id_fsm_data()
         output = visualize_fsm_ascii(data, style="full")
 
-        assert long_id[:40] in output, (
-            "the long state id vanished from the render entirely"
+        assert long_id[:20] in output, (
+            "the head of the long state id vanished from the render entirely"
+        )
+        assert long_id[-20:] in output, (
+            "the TAIL of the long state id appears nowhere in the render -- a "
+            "head-only truncation put the information beyond recovery"
         )
 
     def test_an_overflowing_required_keys_list_does_not_break_alignment(self):
@@ -814,3 +823,109 @@ class TestMissingInitialStateIsDiagnosable:
         for style in ("full", "compact", "minimal"):
             output = visualize_fsm_ascii(_multi_state_fsm_data(), style=style)
             assert "init" in output
+
+
+class TestTruncationIsVisibleAndUnambiguous:
+    """D-033. D-028 bought alignment with a silent head-only slice, and for rows
+    carrying a state id that is worse than a ragged box: two DISTINCT states
+    sharing a long prefix rendered byte-identically in the TRANSITIONS graph,
+    with no marker that anything had been cut. Reading which state goes where is
+    the entire purpose of that section.
+    """
+
+    _A = "checkout_payment_authorization_pending_manual_review_ALPHA"
+    _B = "checkout_payment_authorization_pending_manual_review_BRAVO"
+
+    def _same_prefix_fsm(self):
+        return {
+            "name": "AmbiguityFSM",
+            "initial_state": "start",
+            "states": {
+                "start": {
+                    "id": "start",
+                    "description": "d",
+                    "purpose": "p",
+                    "transitions": [
+                        {"target_state": self._A, "description": "to alpha"},
+                        {"target_state": self._B, "description": "to bravo"},
+                    ],
+                },
+                self._A: {
+                    "id": self._A,
+                    "description": "d",
+                    "purpose": "p",
+                    "transitions": [],
+                },
+                self._B: {
+                    "id": self._B,
+                    "description": "d",
+                    "purpose": "p",
+                    "transitions": [],
+                },
+            },
+        }
+
+    @pytest.mark.parametrize("style", ["full", "compact", "detailed"])
+    def test_two_same_prefix_states_do_not_render_identically(self, style):
+        """The defect, stated directly. Under a head-only slice both ids became
+        `...pending_manual_review` and the diagram showed one node where the FSM
+        has two."""
+        output = visualize_fsm_ascii(self._same_prefix_fsm(), style=style)
+
+        rows = [
+            line
+            for line in output.splitlines()
+            if line.startswith("│ ") and "review" in line
+        ]
+        duplicates = {row for row in rows if rows.count(row) > 1}
+        assert not duplicates, (
+            f"style={style!r}: distinct states render as identical rows, so the "
+            f"diagram is ambiguous:\n" + "\n".join(sorted(duplicates))
+        )
+
+    @pytest.mark.parametrize("style", ["full", "compact", "detailed"])
+    def test_both_distinguishing_suffixes_survive(self, style):
+        """Stronger than 'the rows differ': the part that actually tells the two
+        states apart must be present, not merely some incidental difference."""
+        output = visualize_fsm_ascii(self._same_prefix_fsm(), style=style)
+
+        for marker in ("ALPHA", "BRAVO"):
+            assert marker in output, (
+                f"style={style!r}: {marker} appears nowhere, so the reader "
+                "cannot tell the two states apart at all"
+            )
+
+    def test_shortening_leaves_a_visible_marker(self):
+        """A truncation the reader cannot see is a truncation the reader will
+        mistake for the whole id."""
+        output = visualize_fsm_ascii(self._same_prefix_fsm(), style="full")
+        assert "…" in output, "content was shortened with no ellipsis marker"
+
+    def test_the_marker_costs_exactly_one_character_of_width(self):
+        """Vacuity/regression guard: the ellipsis must not reintroduce the
+        raggedness D-028 fixed. It is one character in `len()` terms."""
+        output = visualize_fsm_ascii(self._same_prefix_fsm(), style="full")
+
+        for box in _bordered_boxes(output):
+            widths = {len(line) for line in box}
+            assert len(widths) == 1, (
+                f"the ellipsis made a box ragged, widths={sorted(widths)}:\n"
+                + "\n".join(f"{len(x):>4} {x}" for x in box)
+            )
+
+    def test_fit_is_exact_and_keeps_both_ends(self):
+        """Unit-level pin on the helper, including the degenerate widths."""
+        from fsm_llm.visualizer import _fit
+
+        assert _fit("short", 10) == "short"
+        assert _fit("exactfit!!", 10) == "exactfit!!"
+        assert len(_fit("a" * 100, 10)) == 10
+        # width 5 -> 4 content chars + the marker: 2 from the head, 2 from the tail
+        assert _fit("abcdefghij", 5) == "ab…ij"
+        assert _fit("abcdefghij", 1) == "a"
+        assert _fit("abcdefghij", 0) == ""
+
+        fitted = _fit("HEAD" + "x" * 60 + "TAIL", 20)
+        assert fitted.startswith("HEAD")
+        assert fitted.endswith("TAIL")
+        assert "…" in fitted

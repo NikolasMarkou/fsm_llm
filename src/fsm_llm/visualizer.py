@@ -87,6 +87,46 @@ ICONS = {
 # truncated) to exactly this, or the box's right border stops lining up.
 _STATES_BOX_INNER_WIDTH = 56
 
+# The marker left behind when a row is shortened. Exactly ONE character wide, so
+# every `len()`-based alignment guarantee in this module is unaffected.
+_ELLIPSIS = "…"
+
+
+def _fit(content: str, width: int) -> str:
+    """Shorten ``content`` to ``width``, VISIBLY and without losing the tail.
+
+    Args:
+        content: the row's logical text.
+        width: the exact number of characters available.
+
+    Returns:
+        ``content`` unchanged when it fits, otherwise ``head + "…" + tail`` of
+        exactly ``width`` characters.
+    """
+    # DECISION plan-2026-07-19T191147-4b664252/D-033
+    # D-028 fixed the ALIGNMENT by slicing every over-long row to the box width. That
+    # was correct and is not being undone — but a plain head slice is SILENT and
+    # LOSSY-AT-THE-TAIL, and for rows that carry a state id those two properties
+    # combine into something worse than a ragged box: two DISTINCT states sharing a
+    # long prefix render byte-identically. Measured on the TRANSITIONS graph,
+    # `checkout_payment_authorization_pending_manual_review_ALPHA` and `..._BRAVO`
+    # both rendered as `│ From: checkout_payment_authorization_pending_manual_review │`
+    # with no marker of any kind, and a 100-char id survived nowhere in the `full` or
+    # `detailed` render. A diagram whose whole purpose is showing which state goes
+    # where must not silently draw two different states as the same node.
+    # MIDDLE elision fixes both halves at once: the `…` makes the loss visible, and
+    # keeping the TAIL is what keeps same-prefix ids distinguishable — a head-only
+    # truncation plus an ellipsis would still render ALPHA and BRAVO identically.
+    # Do NOT "simplify" this back to `content[:width]`, and do NOT drop the tail half.
+    # See decisions.md D-033.
+    if len(content) <= width:
+        return content
+    if width <= 1:
+        return content[:width]
+    keep = width - 1
+    head = (keep + 1) // 2
+    return content[:head] + _ELLIPSIS + content[len(content) - (keep - head) :]
+
 
 def _states_box_row(vertical: str, content: str) -> str:
     """Render one content row of a STATES-section mini box.
@@ -107,8 +147,10 @@ def _states_box_row(vertical: str, content: str) -> str:
     # the box. This mirrors `create_state_boxes`' `[: box_width - 1].ljust(box_width - 1)`
     # (see the `[REUSE]` note in findings/cli-exports-coherence.md). Do NOT drop the
     # slice, and do NOT let callers pre-pad `content`. See decisions.md D-022.
+    # D-033: `_fit` replaces the bare `[:width]` slice so an over-long id is
+    # shortened VISIBLY and keeps its tail. The padding contract is unchanged.
     width = _STATES_BOX_INNER_WIDTH
-    return "│ " + vertical + content[:width].ljust(width) + vertical + " │"
+    return "│ " + vertical + _fit(content, width).ljust(width) + vertical + " │"
 
 
 # Width, in characters, of the content area between the outer "│ " and " │" of any
@@ -143,8 +185,10 @@ def _section_box_row(content: str) -> str:
     # and so truncation is automatic rather than per-call. The `[:width]` slice is
     # load-bearing for the same reason it is in `_states_box_row`.
     # See decisions.md D-028.
+    # D-033: `_fit` replaces the bare `[:width]` slice — see `_fit` for why a
+    # silent head-only truncation made the TRANSITIONS graph ambiguous.
     width = _SECTION_BOX_INNER_WIDTH
-    return "│ " + content[:width].ljust(width) + " │"
+    return "│ " + _fit(content, width).ljust(width) + " │"
 
 
 def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:

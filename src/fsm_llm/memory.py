@@ -466,13 +466,26 @@ class WorkingMemory:
                 "_buffers": {
                     name: dict(contents) for name, contents in self._buffers.items()
                 },
-                "_hidden_buffers": set(self._hidden_buffers),
+                "_hidden_buffers": frozenset(self._hidden_buffers),
             }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         """Restore state and give the copy its OWN fresh lock."""
         self._buffers = state["_buffers"]
-        self._hidden_buffers = state["_hidden_buffers"]
+        # DECISION plan-2026-07-19T191147-4b664252/D-032
+        # `frozenset(...)`, NOT a bare assignment, and NOT `set(...)`.
+        # `_hidden_buffers` is declared `frozenset[str]` (see the attribute above)
+        # because it gates `get_all_data`/`to_scoped_view`/`search` -- i.e. what
+        # reaches an LLM prompt -- so its immutability is a deliberate control,
+        # not an incidental choice. D-027 rebuilt it as a mutable `set` while
+        # fixing the live-reference race, and EVERY copy/deepcopy/pickle then
+        # silently downgraded the type: a copy's prompt-visibility set became
+        # mutable in place. mypy cannot see this, because `state` is `dict[str,
+        # Any]`; only an explicit type assertion in the copy-semantics tests can.
+        # The re-wrap here (rather than trusting `__getstate__` alone) also
+        # normalises pickles written by the D-027 build, which carry a `set`.
+        # See decisions.md D-032.
+        self._hidden_buffers = frozenset(state["_hidden_buffers"])
         self._lock = threading.Lock()
 
     def __len__(self) -> int:

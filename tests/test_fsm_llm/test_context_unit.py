@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from fsm_llm.context import ContextCompactor, clean_context_keys
+from tests.test_fsm_llm.fixtures.context_key_corpus import (
+    KNOWN_OVER_STRIPPED,
+    SAFE_KEYS,
+    SECRET_KEYS,
+)
 
 
 class TestCleanContextKeys:
@@ -998,3 +1003,89 @@ class TestNestedContextCleaning:
         # Behaviour is unchanged (still kept) -- but it is now announced.
         assert b"password" in result
         assert any("skipped the security name checks" in r["message"] for r in records)
+
+
+class TestIndependentVocabularyKeyCorpus:
+    """D-030. Every previous corpus in this plan was ENUMERATED FROM the token
+    list it was testing, so it could not contain a key the list omits, and for
+    three consecutive rounds the residual defect hid in exactly that blind spot
+    (round 1 an under-match, round 2 an over-match of the same class).
+
+    This corpus is hand-authored in
+    `tests/test_fsm_llm/fixtures/context_key_corpus.py` from real-world
+    application vocabulary and never imports `fsm_llm.constants`. On its first
+    run it caught two credential keys -- `signing_key` and `encryption_key` --
+    that every generated corpus had missed, because `private[-_.]?key` covered
+    exactly one qualifier (D-031).
+    """
+
+    @staticmethod
+    def _kept(key):
+        return key in clean_context_keys(
+            {key: "v"}, "test-conv", strip_forbidden_keys=True
+        )
+
+    def test_the_corpus_is_independent_of_the_module_under_test(self):
+        """The construction rule IS the control here, so pin it mechanically:
+        a future edit that "helpfully" generates the corpus from the constants
+        re-creates the exact blind spot this file exists to remove."""
+        import pathlib
+
+        from tests.test_fsm_llm.fixtures import context_key_corpus
+
+        source = pathlib.Path(context_key_corpus.__file__).read_text()
+        offending = [
+            line
+            for line in source.splitlines()
+            if "import" in line and "fsm_llm" in line
+        ]
+        assert offending == [], (
+            "the independent corpus imports the module it is testing, which "
+            f"destroys its independence: {offending}"
+        )
+
+    def test_the_corpus_is_not_trivial(self):
+        """Vacuity guard: an empty or single-class corpus proves nothing, and
+        every 'safe' key must be genuinely reachable rather than all pinned as
+        known-over-stripped."""
+        assert len(SECRET_KEYS) >= 60, "secret class too small to be a class"
+        assert len(SAFE_KEYS) >= 60, "safe class too small to discriminate"
+        assert not (set(SECRET_KEYS) & set(SAFE_KEYS)), "a key claims both classes"
+        assert KNOWN_OVER_STRIPPED <= set(SAFE_KEYS), (
+            "KNOWN_OVER_STRIPPED names a key that is not in SAFE_KEYS"
+        )
+        assert len(KNOWN_OVER_STRIPPED) < len(SAFE_KEYS) // 2, (
+            "most of the safe class is pinned as over-stripped, so the "
+            "'is kept' assertion below has almost nothing left to check"
+        )
+
+    def test_no_credential_key_reaches_the_prompt(self):
+        """The security assertion. Fail-CLOSED is not a defence here: every one
+        of these names a credential VALUE outright."""
+        leaked = [k for k in SECRET_KEYS if self._kept(k)]
+        assert leaked == [], (
+            f"{len(leaked)} credential keys reached the prompt: {leaked}"
+        )
+
+    def test_legitimate_metadata_keys_still_reach_the_prompt(self):
+        """The usability assertion. Over-stripping is not dangerous but it
+        silently degrades the model's context, so it is pinned, not ignored."""
+        destroyed = [
+            k for k in SAFE_KEYS if k not in KNOWN_OVER_STRIPPED and not self._kept(k)
+        ]
+        assert destroyed == [], (
+            f"{len(destroyed)} legitimate keys were stripped: {destroyed}"
+        )
+
+    def test_the_known_over_strip_set_is_pinned_exactly(self):
+        """Pinned in BOTH directions on purpose. A key leaving the set is an
+        improvement that must be recorded rather than absorbed silently; a key
+        joining it is a new usability regression of the class that went
+        undisclosed for a whole round. Either way the cost stays visible."""
+        actual = frozenset(k for k in SAFE_KEYS if not self._kept(k))
+        assert actual == KNOWN_OVER_STRIPPED, (
+            "the over-strict class drifted.\n"
+            f"  newly stripped (regression): {sorted(actual - KNOWN_OVER_STRIPPED)}\n"
+            f"  newly kept (fixed, update the pin): "
+            f"{sorted(KNOWN_OVER_STRIPPED - actual)}"
+        )

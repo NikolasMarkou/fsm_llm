@@ -229,6 +229,31 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
 #     works, but the `+$` anchor is NOT optional -- dropping it restores the
 #     unbounded-tail bypass exactly.
 # See decisions.md D-026.
+#
+# DECISION plan-2026-07-19T191147-4b664252/D-030 (bounds D-026's OVER-strictness;
+# does NOT change its shape)
+# D-026 closed the under-match and opened an over-match of the same class: the
+# `+$` anchor requires EVERY trailing token to be allowlisted, so one ordinary
+# English word strips the key. Measured against an independent-vocabulary corpus:
+# 155 keys / 31 suffixes that BOTH `b00fade` and D-016 KEPT were newly stripped --
+# `password_updated_at`, `password_changed_at`, `password_expires_at`,
+# `password_policy_url`, `password_help_text`. These are timestamps and UI copy,
+# not credentials. Fail-CLOSED, so a usability cost, not a leak.
+# THE FIX IS DELIBERATELY PARTIAL, and the reason is the load-bearing part:
+# because a key is KEPT when its WHOLE suffix decomposes into tokens, EVERY token
+# added here is ALSO independently keepable as the ENTIRE suffix. Measured, one
+# token at a time (probe `r3_token_safety.py`): adding `code` keeps
+# `password_code` AND `password_reset_code` -- one of the six credential keys
+# D-026 closed; `url` keeps `password_reset_url`, which embeds the reset token and
+# so is credential-bearing by the SAME argument that excluded `link`; `text`,
+# `value` and `string` keep `password_text`/`password_value`/`password_string`,
+# i.e. the password itself. So `url`, `text`, `code`, `message`, `template`,
+# `list`, `label`, `placeholder`, `value` and `string` are REFUSED, and keys
+# ending in them stay stripped. That residual over-strip is DISCLOSED rather than
+# fixed -- do not "complete" this group without re-running the probe.
+# Only the temporal/ordinal/numeric group below is added, because those words
+# cannot name a credential VALUE even standing alone as the whole suffix.
+# See decisions.md D-030.
 _PASSWORD_POLICY_SUFFIXES = (
     "less|reset|policy|policies|strength|expiry|expires|expiration|expired"
     "|require|required|requirement|requirements|rule|rules|support|supported"
@@ -242,6 +267,38 @@ _PASSWORD_POLICY_SUFFIXES = (
     # `link` is deliberately NOT in this group: a `password_reset_link` embeds
     # the reset token, so it is a credential-bearing value and must strip.
     "|email|mail|sent|notification|notified|warning|enforced"
+    # D-030 temporal/ordinal/numeric METADATA group. Every word here is safe as a
+    # WHOLE suffix on its own (`password_at`, `password_score` cannot name a
+    # credential), which is the test each candidate had to pass. This group is what
+    # keeps `password_updated_at`, `password_expires_at`, `password_last_rotated`,
+    # `password_strength_score` and `password_policy_version` reaching the prompt.
+    "|at|on|in|date|time|today|after|since|until|rotated|rotation"
+    "|score|version|len"
+    # D-030 status group, added by the SAME rule that already admits
+    # `enabled`/`disabled`/`status`/`changed`: these words denote an outcome or a
+    # lifecycle event, never a value. `recovery` was probed and REFUSED --
+    # `password_recovery` plausibly names a recovery code or security answer.
+    "|fail|failed|failure|failures|complete|completed|create|created"
+)
+
+# DECISION plan-2026-07-19T191147-4b664252/D-031
+# `private[-_.]?key` covered exactly ONE qualifier, so `signing_key` and
+# `encryption_key` -- both naming raw key material -- reached the LLM prompt.
+# This was NOT found by any password corpus in this plan; it was found the first
+# time a corpus was written from real-world vocabulary INSTEAD of from
+# `constants.py` (see tests/test_fsm_llm/fixtures/context_key_corpus.py, D-030).
+# Do NOT "simplify" this to a blanket `.*key.*`: `primary_key`, `foreign_key`,
+# `cache_key`, `sort_key`, `partition_key` and `idempotency_key` are ordinary
+# non-secret database and API vocabulary, and destroying them is the over-match
+# failure D-009 was written to prevent. The qualifier list is therefore an
+# ALLOWLIST of words that mean "cryptographic key material", and it must stay one.
+# `public` is deliberately absent: a public key is not a secret.
+# The trailing `(?:[\W_].*|$)` boundary is what keeps `private_keystone` and
+# `sharedkeyboard` safe -- do not replace it with `.*`.
+# See decisions.md D-031.
+_CRYPTO_KEY_QUALIFIERS = (
+    "private|signing|sign|encryption|decryption|encrypt|decrypt"
+    "|master|symmetric|shared|session|hmac|jwt|cipher|crypto"
 )
 
 FORBIDDEN_CONTEXT_PATTERNS = [
@@ -253,7 +310,8 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     r"(?:^|.*[\W_])(?:api[-_.]?token|auth[-_.]?token|access[-_.]?token|refresh[-_.]?token|bearer[-_.]?token|reset[-_.]?token)(?:s)?(?:[\W_].*|$)",  # Auth token keys (not "tokenizer")
     r".*(?:api[-_.]?key|key[-_.]?api).*",  # API key patterns (both orderings, with dash/underscore/dot)
     r"(?:^|.*[\W_])credential(?:s)?(?:[\W_].*|$)",  # Credential-related keys
-    r"(?:^|.*[\W_])private[-_.]?key(?:s)?(?:[\W_].*|$)",  # Private key patterns
+    # Cryptographic key material. See the _CRYPTO_KEY_QUALIFIERS block above.
+    rf"(?:^|.*[\W_])(?:{_CRYPTO_KEY_QUALIFIERS})[-_.]?keys?(?:[\W_].*|$)",
     r"(?:^|.*[\W_])oauth[-_.]?token(?:s)?(?:[\W_].*|$)",  # OAuth token patterns
 ]
 
