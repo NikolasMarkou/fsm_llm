@@ -1,6 +1,43 @@
 """Hand-authored context-key corpus for the forbidden-pattern security control.
 
-THE CONSTRUCTION RULE IS THE POINT OF THIS FILE, so it is stated first:
+======================================================================
+WHAT THIS ARTIFACT IS -- AND WHAT IT IS NOT
+======================================================================
+
+    THIS IS A **REGRESSION-PROBE + SHAPE-COVERAGE** ARTIFACT.
+    IT IS **NOT** AN INDEPENDENCE STATISTIC.
+
+This corpus DELIBERATELY RESTATES prior bypass vocabulary. Every name and
+value a previous round measured as leaking, or as over-stripped, is kept
+here on purpose so that a closed bypass cannot silently reopen. That
+property is exactly what makes it USELESS as an independence measurement:
+a set assembled to regress known failures is, by construction, correlated
+with the failures it was assembled from.
+
+    Computing a "vocabulary-independence" figure from this file is a
+    METRIC CATEGORY ERROR. Do not do it, and do not quote a number
+    derived from it as evidence that the filter generalises.
+
+The independence corpus is a SEPARATE artifact: `holdout_key_corpus.py`
+(ships at plan step 8, banner-marked BURNED once it has been measured).
+Keep the two files, and the two claims they support, apart -- collapsing
+them is the error that invalidated a prior plan's headline figure
+(`plans/LESSONS.md` [I:5]; H-7).
+
+The second purpose of this file is SHAPE COVERAGE. The value layer of the
+control carves out ~13 value SHAPES (canonical UUID, ULID, PEM armour,
+published vendor prefix, colon composites, sub-length, whitespace,
+percent-encoding, paths, slash runs, single character class, low entropy)
+plus the token arm's numeric/non-str split. A corpus containing zero
+instances of a shape its own carve-outs exist to handle cannot measure
+those carve-outs at all -- which is precisely how all five of the defects
+this plan closes stayed invisible. So every shape below carries at least
+one CREDENTIAL instance and at least one SAFE instance, mechanically
+enforced by the shape-coverage guard in `test_context_unit.py`.
+
+======================================================================
+
+THE CONSTRUCTION RULE IS THE POINT OF THIS FILE, so it is stated next:
 
     Every name below is written by hand from REAL-WORLD application vocabulary.
     Nothing here may be generated, derived or copied from `fsm_llm.constants` --
@@ -892,3 +929,519 @@ TOKEN_SAFE_VALUES: dict[str, object] = {
     name: _TOKEN_SAFE_NON_COUNT_VALUES.get(name, 1200 + index)
     for index, name in enumerate(TOKEN_SAFE_KEYS)
 }
+
+
+# ==========================================================================
+# VALUES FOR THE CRYPTO-KEY CORPUS -- defect 5, this plan's step 1.
+#
+# UNTIL NOW THE `key` ARM HAD NO VALUE CORPUS AT ALL. Its two corpus tests
+# called `_kept(name)` with the inert default `"v"` -- three characters, one
+# character class, zero entropy -- so they measured LAYER 1 (the name) and
+# nothing else. The shipped control decides `stripe_key` vs `order_key`
+# ENTIRELY on the value (LESSONS [I:5]), so a green result there was a
+# statement about NAMES wearing the costume of a statement about the control.
+#
+# Same split as the token arm above, for the same reason: the NAMES were
+# sourced from real application vocabulary before the pattern existed; the
+# VALUES are authored here, because value SHAPE is a structural property and
+# can be written without the tautology risk that authoring NAMES carries.
+#
+# Every name in `CRYPTO_KEY_SECRET_KEYS` and `CRYPTO_KEY_SAFE_KEYS` has an
+# entry here. The consuming tests assert total coverage, so a name added to
+# either tuple without a value fails loudly instead of quietly reverting to a
+# placeholder -- which is the exact regression this section exists to end.
+#
+# A few values deliberately begin with a PUBLISHED vendor prefix
+# (`sk_live_`, `ghp_`, `xoxb-`, `AKIA`). The prefix IS the shape under test,
+# so it has to appear; every tail is synthesized keyboard noise. Nothing here
+# is, or ever was, a live credential.
+# ==========================================================================
+CRYPTO_KEY_SECRET_VALUES: dict[str, object] = {
+    # the bare article -- layer 1 cannot resolve these, so the value is the
+    # whole control for them
+    "key": "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI",
+    "keys": "aK3mQ9xZ7pL4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6",
+    # OpenSSH / git forge deploy keys
+    "ssh_key": (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2\n"
+        "-----END OPENSSH PRIVATE KEY-----\n"
+    ),
+    "ssh_keys": ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH7mQ2xZ9pL4vN8bR2tY6wJ1hG5sF0"),
+    "sshkey": "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMw",
+    "ssh-key": "AAAAB3NzaC1yc2EAAAADAQABAAABgQDh7mQ2xZ9pL4vN8bR2tY6wJ1hG5sF",
+    "ssh.key": "AAAAC3NzaC1lZDI1NTE5AAAAIL4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ",
+    "ssh_host_key": "AAAAB3NzaC1yc2EAAAADAQABAAABgQC9pL4vN8bR2tY6wJ1hG5sF0dC",
+    "ssh_private_key": (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2\n"
+        "-----END OPENSSH PRIVATE KEY-----\n"
+    ),
+    "deploy_key": "ghp_7mQ2xZ9pL4vN8bR2tY6wJ1hG5sF0dC4eT8uI",
+    "deployment_key": "glpat-9pL4vN8bR2tY6wJ1hG5s",
+    "authorized_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDh7mQ2xZ9pL4 ci@runner",
+    "authorized_keys": (
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDh7mQ2xZ9pL4 ci@runner\n"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH7mQ2xZ9pL4 ops@bastion\n"
+    ),
+    "host_key": "AAAAB3NzaC1yc2EAAAADAQABAAABgQDh7mQ2xZ9pL4vN8bR2tY6wJ1hG5sF",
+    "private_key": (
+        "-----BEGIN PRIVATE KEY-----\n"
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC9pL4vN8bR2tY6\n"
+        "-----END PRIVATE KEY-----\n"
+    ),
+    "privatekey": "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC9pL4",
+    "private-key": "MIIEowIBAAKCAQEAvaS+LzfG0drWOsCdYRuWRfHRdCPhOgi9jOgs",
+    "privkey": "L4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB1nV5rD",
+    "priv_key": "8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB1nV5rD4jH",
+    "id_rsa": (
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIEowIBAAKCAQEAvaS+LzfG0drWOsCdYRuWRfHRdCPhOgi9jOgsC1nV5rD4jH2k\n"
+        "-----END RSA PRIVATE KEY-----\n"
+    ),
+    "id_ed25519": (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2\n"
+        "-----END OPENSSH PRIVATE KEY-----\n"
+    ),
+    "id_ecdsa": (
+        "-----BEGIN EC PRIVATE KEY-----\n"
+        "MHcCAQEEIL4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yBoAoGCCqGSM49\n"
+        "-----END EC PRIVATE KEY-----\n"
+    ),
+    "id_dsa": (
+        "-----BEGIN DSA PRIVATE KEY-----\n"
+        "MIIBuwIBAAKBgQC9pL4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB1nV5\n"
+        "-----END DSA PRIVATE KEY-----\n"
+    ),
+    # key-FIRST shapes
+    "keypair": "vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB1nV5rD4jH2k",
+    "key_pair": "tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9",
+    "keypairs": "wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3",
+    "keyfile": "/etc/fsm/secrets/service-signing-2024.pem",
+    "key_file": "/var/lib/fsm/keys/envelope-eu-west-1.der",
+    "key_material": "hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6",
+    "key_seed": "sF0dC4eT8uI2oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8",
+    "key_blob": "0dC4eT8uI2oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2",
+    "key_bytes": "C4eT8uI2oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF",
+    "key_data": "eT8uI2oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4c",
+    "keystore": "MIIKPAIBAzCCCfYGCSqGSIb3DQEHAaCCCecEggnjMIIJ3zCCBesGCSqGSIb3",
+    "keyring": "8uI2oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7t",
+    "keychain": "I2oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1",
+    # algorithm names
+    "rsa_key": "MIIEowIBAAKCAQEAvaS+LzfG0drWOsCdYRuWRfHRdCPhOgi9jOgsC1nV5",
+    "rsakey": "oP6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5",
+    "dsa_key": "P6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5q",
+    "ecdsa_key": "MHcCAQEEIL4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB",
+    "ed25519_key": "6zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ",
+    "aes_key": "zQ9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5q",
+    "cipher_key": "Q9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ",
+    "hmac_key": "9mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8",
+    "mac_key": "mK3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8d",
+    # role names
+    "signing_key": "K3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dN",
+    "signing_keys": "3aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNp",
+    "encryption_key": "aX7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpS",
+    "decryption_key": "X7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSw",
+    "master_key": "7yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwR",
+    "session_key": "yB1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRt",
+    "symmetric_key": "B1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtY",
+    "shared_key": "1nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYh",
+    "derived_key": "nV5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhF",
+    "derivation_key": "V5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFq",
+    "wrapping_key": "5rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqL",
+    "unwrap_key": "rD4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLm",
+    # cloud KMS envelope encryption
+    "data_encryption_key": "D4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmX",
+    "key_encryption_key": "4jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXc",
+    "kek": "jH2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcV",
+    "dek": "H2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVb",
+    # a real AWS KMS key id IS a canonical UUID -- the carve-out's hardest case
+    "kms_key": "8f1c62d7-4a03-4b58-9e2d-15c7a6b30f94",
+    "customer_managed_key": "2kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbN",
+    "envelope_key": "kM7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNg",
+    # TLS / PKI
+    "tls_key": (
+        "-----BEGIN PRIVATE KEY-----\n"
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC9pL4vN8bR2tY6\n"
+        "-----END PRIVATE KEY-----\n"
+    ),
+    "ssl_key": "M7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgK",
+    "server_key": "7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKr",
+    "client_key": "sk_live_4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB",
+    "cert_key": "nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrT",
+    "certificate_key": "L9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTd",
+    "pem_key": (
+        "-----BEGIN EC PRIVATE KEY-----\n"
+        "MHcCAQEEIL4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yBoAoGCCqGSM49\n"
+        "-----END EC PRIVATE KEY-----\n"
+    ),
+    "pkcs8_key": "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC9pL4v",
+    # GnuPG / OpenPGP
+    "gpg_key": (
+        "-----BEGIN PGP PRIVATE KEY BLOCK-----\n"
+        "lQOYBGXk1pkBCADh7mQ2xZ9pL4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX\n"
+        "-----END PGP PRIVATE KEY BLOCK-----\n"
+    ),
+    "gpgkey": "9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdW",
+    "pgp_key": "pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWj",
+    # JOSE / framework config
+    "jwt_signing_key": "T3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjP",
+    "jwk_private_key": "3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjPz",
+    "rails_master_key": "sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjPzC",
+    "django_signing_key": "W6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjPzCu",
+    "vault_unseal_key": "6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjPzCuA",
+    # account-recovery and licensing material
+    "recovery_key": "xE8y-R2uF-4cG7-tB1v-Z5qJ-8dNp-SwRt-YhFq",
+    "unlock_key": "E8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjPzCuAe",
+    "license_key": "8YR2U-F4CG7-TB1VZ-5QJ8D-NPSWR",
+    "activation_key": "yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjPzCuAeS",
+    "serial_key": "R2UF4-CG7TB-1VZ5Q-J8DNP-SWRTY",
+    # case variants
+    "SSH_KEY": "2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjPzCuAeSv",
+    "PrivateKey": "uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjPzCuAeSvH",
+    "Signing_Key": "F4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTdWjPzCuAeSvHn",
+}
+
+# Ordinary application values for the safe half. Every one is what the named
+# field ACTUALLY holds in the system the name was sourced from: object-storage
+# paths, DDL column lists, cache namespaces, i18n message ids, cursors,
+# counts. Several deliberately carry a carve-out shape (UUID, ULID, path,
+# whitespace, percent-encoding, colon composite), because a carve-out with no
+# safe instance is a carve-out nobody has ever measured the benefit of.
+CRYPTO_KEY_SAFE_VALUES: dict[str, object] = {
+    # AWS / GCP / Azure SDK field names
+    "s3_key": "invoices/2024/q3/invoice-10482.pdf",
+    "object_key": "tenants/acme/exports/2024/09/orders",
+    "bucket_key": "acme-prod-eu-west-1",
+    "storage_key": "uploads/users/10482/avatar.png",
+    "blob_key": "media/2024/09/14/clip-10482.mp4",
+    "file_key": "reports/quarterly/q3-2024.xlsx",
+    "partition_key": "USER#10482#PROFILE",
+    "sort_key": "ORDER#2024-09-14#10482",
+    "range_key": "2024-09-14T11:32:07Z",
+    "hash_key": "TENANT#acme",
+    "item_key": "PRODUCT#SKU-10482",
+    "table_key": "orders_by_customer",
+    "resource_key": "projects/acme/locations/eu-west1/instances/db-1",
+    # relational / NoSQL DDL vocabulary
+    "primary_key": 10482,
+    "primary_keys": ["order_id", "line_no"],
+    "foreign_key": "customer_id",
+    "foreign_keys": ["customer_id", "warehouse_id"],
+    "composite_key": "acme:orders:10482",
+    "natural_key": "ISBN-978-0-13-235088-4",
+    "surrogate_key": 90210,
+    "unique_key": "email:jane@acme.example",
+    "candidate_key": "(tenant_id, external_ref)",
+    "index_key": "idx_orders_customer_created",
+    "shard_key": "shard-07",
+    "row_key": "acme#2024-09-14#10482",
+    "column_key": "cf:metrics:latency_p99",
+    "cluster_key": "eu-west-1a",
+    "clustering_key": "created_at DESC",
+    # cache, queue and stream infrastructure
+    "redis_key": "session:user:10482:profile",
+    "memcache_key": "frag/product/10482/v3",
+    # SC-5 pins this one individually: a truncated content digest under the
+    # `<label>:<pure hex>` carve-out. Do not "fix" the filter in a way that
+    # strips it.
+    "cache_key": (
+        "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    ),
+    "cache_keys": ["frag/product/10482/v3", "frag/cart/10482"],
+    "message_key": "orders.created.10482",
+    "queue_key": "billing-retry-high",
+    "topic_key": "acme.orders.v2",
+    "record_key": "10482",
+    "stream_key": "1726312327000-0",
+    "entry_key": "line-3",
+    # ordinary domain nouns
+    "user_key": "usr_9241",
+    "tenant_key": "acme-corp",
+    "customer_key": "CUST-10482",
+    "order_key": "ORD-10482",
+    "product_key": "SKU-88231",
+    "event_key": "checkout.completed",
+    "document_key": "policies/privacy-2024-09.md",
+    "invoice_key": "INV-2024-10482",
+    # framework configuration and ORM identifiers
+    "config_key": "server.timeout_seconds",
+    "env_key": "FSM_LLM_DEFAULT_MODEL",
+    "settings_key": "notifications.email.digest",
+    "locale_key": "en-GB",
+    "translation_key": "checkout.payment.method.selector",
+    "i18n_key": "errors.validation.required",
+    "metadata_key": "source_system",
+    "state_key": "awaiting_payment",
+    "context_key": "conversation_summary",
+    "field_key": "shipping_address_line_1",
+    "name_key": "display_name",
+    "value_key": "amount_cents",
+    "label_key": "Quarterly Revenue Report 2024",
+    "route_key": "%2Fapi%2Fv2%2Forders%2Fsearch",
+    "model_key": "billing.Invoice",
+    "form_key": "step-1-step-1-step-1-step-1",
+    # HTTP / REST API conventions -- the TRUE beneficiary population of the
+    # UUID/ULID carve-out (G-1): trigger-carrying identifier names. `request_id`
+    # and `correlation_id` carry no `key` trigger and never reach layer 2, so
+    # they are NOT what that carve-out protects; these four are.
+    "idempotency_key": "3f8b2c14-9d67-4a52-b0e3-7c1f5a94d208",
+    "request_key": "01HZ8QK4PYRB6JT2WMXV3NCDGF",
+    "correlation_key": "b7e41c3a-58d2-4f19-9a06-3ed85c2f7b41",
+    "dedupe_key": "01J9ZQ4T7XKD3M8VYB2NHF6CWE",
+    "lookup_key": "email:jane.doe@acme.example",
+    "search_key": "quarterly revenue",
+    "group_key": "region=eu-west-1",
+    # language / data-structure vocabulary
+    "dict_key": "user_profile",
+    "dict_keys": ["user_profile", "billing"],
+    "map_key": "eu-west-1",
+    "ref_key": "#/components/schemas/Order",
+    # the PUBLIC half of an asymmetric pair -- invariant I-7. A public key is
+    # published BY DESIGN; the wire form is the one-line `authorized_keys`
+    # spelling, which is what an application actually stores.
+    "public_key": ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDh7mQ2xZ9pL4vN8 jane@laptop"),
+    "public_keys": [
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDh7mQ2xZ9pL4vN8 jane@laptop",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH7mQ2xZ9pL4vN8bR ops@bastion",
+    ],
+    # this framework's own generic-reference `*_key` idiom
+    "agent_key": "research_agent",
+    "workflow_key": "order_processing",
+    "conversation_key": "conv-10482",
+    "conv_key": "conv-10482",
+    "wf_key": "wf-2024-09",
+    "result_key": "extracted_fields",
+    "timer_key": "escalation_timeout",
+    "evidence_key": "audit.step.3",
+    "payload_key": "customer.address",
+    # ADVERSARIAL: ordinary English that merely contains "key"
+    "key_value_pair": "colour=blue",
+    "key_performance_indicator": "monthly_active_users",
+    "keyword": "invoice",
+    "keywords": ["invoice", "refund", "chargeback"],
+    "keyword_list": ["shipping", "returns"],
+    "search_keywords": "refund policy",
+    "keyboard_layout": "en-GB QWERTY",
+    "keyboard_shortcut": "Ctrl+Shift+P",
+    "keynote_speaker": "Dr Amara Okafor",
+    "keystone_species": "Enhydra lutris",
+    "keyspace_name": "analytics_eu",
+    "keypad_enabled": True,
+    "keyframe_index": 47,
+    "monkey_species": "Macaca fascicularis",
+    "donkey_count": 12,
+    "turkey_quantity": 3,
+    "hockey_team": "Toronto Maple Leafs",
+    "whiskey_brand": "Ardbeg Uigeadail",
+    "jockey_name": "Frankie Dettori",
+}
+
+
+# ==========================================================================
+# CARVE-OUT SHAPE COVERAGE -- SC-2, this plan's step 1.
+#
+# THE ROOT CAUSE OF ALL FIVE DEFECTS THIS PLAN CLOSES IS ONE SENTENCE: the
+# value layer's carve-outs were tuned against corpora containing ZERO
+# instances of the shapes they carve out. A carve-out with no corpus instance
+# is not a measured trade-off, it is an untested branch with a comment
+# attached.
+#
+# So each entry below is a (entry id, context name, value) triple pinning ONE
+# value SHAPE the layer-2 chain treats specially, and every shape appears on
+# BOTH sides:
+#
+#   CARVE_OUT_CREDENTIAL_ENTRIES -- the value IS credential material and the
+#       entry MUST STRIP. An entry here that is KEPT is a FAIL-OPEN.
+#   CARVE_OUT_SAFE_ENTRIES       -- the value is ordinary application data and
+#       the entry MUST BE KEPT. An entry here that is STRIPPED is an
+#       OVER-STRIP.
+#
+# The NAMES are chosen so the probe actually reaches the value layer: a name
+# layer 1 already strikes measures nothing about a value shape. That is why
+# the credential side uses innocuous business qualifiers (`webhook_key`,
+# `partner_key`, `gateway_key`) rather than `private_key` -- `stripe_key` and
+# `order_key` are the same string to the name layer (LESSONS [I:5]), and this
+# corpus is the instrument that finally says so in values.
+#
+# `test_context_unit.py` carries a MECHANICAL shape-coverage guard that
+# re-derives each shape as its OWN predicate -- it does not read these entry
+# ids -- and fails naming any shape missing a credential or a safe instance.
+# The ids are documentation; the predicates are the check.
+# ==========================================================================
+CARVE_OUT_CREDENTIAL_ENTRIES: tuple[tuple[str, str, object], ...] = (
+    # A generated API key formatted as a canonical UUID. Structurally
+    # IDENTICAL to an idempotency key (A-2): no value test can separate them.
+    ("uuid/credential", "merchant_key", "7c3f1a92-4be8-4d17-9f60-2ab5c8e10d34"),
+    # Same dilemma one alphabet over.
+    ("ulid/credential", "partner_key", "01J9ZQ4T7XKD3M8VYB2NHF6CWE"),
+    (
+        "pem/credential",
+        "vendor_key",
+        "-----BEGIN PRIVATE KEY-----\n"
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC9pL4vN8bR2tY6\n"
+        "-----END PRIVATE KEY-----\n",
+    ),
+    ("vendor_prefix/credential", "billing_key", "sk_live_9mK3aX7yB1nV5rD4jH2kM7"),
+    # `<label>:<pure hex>`. D-021 KEEPS this shape by design so that
+    # `cache_key: "sha256:..."` survives; a credential deliberately stored as
+    # `v1:<hex>` rides that carve-out out of the filter. Disclosed, not hidden.
+    (
+        "hex_composite/credential",
+        "signer_key",
+        "v1:4f9a2c7e1b8d3506af62c94e7d10b385",
+    ),
+    # `<numeric id>:<secret>` -- the Asana / Cloudinary PAT shape.
+    (
+        "id_secret_composite/credential",
+        "integration_key",
+        "1207439982556301:9fK2mQ7xL4pZ8vN3bR6tY1wJ5h",
+    ),
+    # Below the 24-character floor. The value layer is structurally blind
+    # here; only the NAME layer can carry it.
+    ("short/credential", "terminal_key", "aK9dQ2mZ7pL4x"),
+    # Internal whitespace: the wire form an `Authorization` header value has.
+    (
+        "whitespace/credential",
+        "gateway_key",
+        "Bearer 9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI",
+    ),
+    # Percent-encoded. Same bytes as a credential, outside the charset.
+    (
+        "percent/credential",
+        "upload_key",
+        "Atzr%2FIQEBLjAsAhRmHNTV5xZ8pQwLmKjNbVcXsDfGhYtRe",
+    ),
+    # Standard (non-url-safe) base64 uses `/`, and `.` separates PASETO/JWT
+    # segments -- so a real credential can match the path carve-out exactly.
+    (
+        "path_ext/credential",
+        "distribution_key",
+        "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2/aD8cE4rT7uI.Xk3f9a",
+    ),
+    (
+        "many_slash/credential",
+        "mailer_key",
+        "a8f3/d9c2b1e4/f7a0d3c6/b9e2f5a8d1c4e7b0a3d6f9Xk",
+    ),
+    # Single character class: a lowercase-only base32 secret.
+    ("single_class/credential", "legacy_key", "zqmwvjxrbtkdhngfplyscuearoibfe"),
+    # Long but repetitive -- a weak generated secret is still a secret.
+    ("low_entropy/credential", "staging_key", "aaaaaaaaaaaaAAAAAAAAAAAA1111"),
+    # TOKEN ARM ONLY. A numeric OTP seed is credential material that the
+    # token arm's `bool`/`int`/`float` KEEP rule cannot see.
+    ("numeric/credential", "provisioning_token", 837465019283746501),
+    # TOKEN ARM ONLY. Non-str, non-numeric -- fail-CLOSED by design.
+    ("non_str/credential", "wrapped_token", b"9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a"),
+)
+
+CARVE_OUT_SAFE_ENTRIES: tuple[tuple[str, str, object], ...] = (
+    ("uuid/safe", "idempotency_key", "3f8b2c14-9d67-4a52-b0e3-7c1f5a94d208"),
+    ("ulid/safe", "dedupe_key", "01HZ8QK4PYRB6JT2WMXV3NCDGF"),
+    # A CERTIFICATE is PEM-armoured and is published by design. The armour
+    # test cannot tell it from a private key, so this is the carve-out's cost
+    # measured rather than assumed.
+    (
+        "pem/safe",
+        "trust_anchor_key",
+        "-----BEGIN CERTIFICATE-----\n"
+        "MIIDdzCCAl+gAwIBAgIEAgAAuTANBgkqhkiG9w0BAQUFADBaMQswCQYDVQQGEwJJ\n"
+        "-----END CERTIFICATE-----\n",
+    ),
+    # A cache namespace that happens to start `sk-`. Ordinary data wearing a
+    # published vendor prefix.
+    ("vendor_prefix/safe", "fragment_key", "sk-user-profile-10482-v3"),
+    (
+        "hex_composite/safe",
+        "content_cache_key",
+        "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    ),
+    # A namespaced cursor whose tail is high-entropy and entirely ordinary.
+    (
+        "id_secret_composite/safe",
+        "routing_key",
+        "orders:4821:9fK2mQ7xL4pZ8vN3bR6tY1wJ5h",
+    ),
+    ("short/safe", "order_key", "ORD-10482"),
+    ("whitespace/safe", "label_key", "Quarterly Revenue Report 2024"),
+    ("percent/safe", "route_key", "%2Fapi%2Fv2%2Forders%2Fsearch"),
+    ("path_ext/safe", "s3_key", "invoices/2024/q3/invoice-10482.pdf"),
+    ("many_slash/safe", "object_key", "tenants/acme/exports/2024/09/orders"),
+    ("single_class/safe", "translation_key", "checkout.payment.method.selector"),
+    ("low_entropy/safe", "form_key", "step-1-step-1-step-1-step-1"),
+    ("numeric/safe", "retry_token", 3),
+    ("non_str/safe", "vendor_token", ["primary", "secondary"]),
+)
+
+# --------------------------------------------------------------------------
+# PINNED KNOWN-WRONG carve-out verdicts, two-sided, exactly like
+# `TOKEN_KNOWN_OVER_STRIPPED` above: an entry LEAVING either set is a fix that
+# must be recorded, an entry JOINING it is an undisclosed regression.
+#
+# These sets are DISCLOSURE, not absolution. Each id below names a live defect
+# with the plan step that owns its fix. They are populated FROM MEASUREMENT,
+# never from intent -- step 1 measures, steps 4 and 5 fix.
+# --------------------------------------------------------------------------
+#
+# MEASURED AT aa284b7, THE FIRST TIME THIS SEAM WAS EVER PROBED WITH VALUES OF
+# ITS OWN CARVE-OUT SHAPES: 11 of 15 credential shapes reach the prompt and 4
+# of 15 safe shapes do not. Those two numbers are the reason this plan exists,
+# and they were INVISIBLE to every prior round -- not because the tests were
+# weak, but because the corpus had no instance of any shape to show them.
+#
+# NOTHING IN THIS FILE MAY BE "FIXED" BY EDITING THE FILTER IN STEP 1. The
+# pins below make the defects visible and green-on-purpose; steps 4 and 5 move
+# entries OUT of these sets, and the two-sided pin is what forces that
+# movement to be recorded rather than absorbed.
+CARVE_OUT_KNOWN_FAIL_OPEN: frozenset[str] = frozenset(
+    {
+        # --- owned by plan step 4 (the UUID/ULID disposition) --------------
+        # A credential formatted as a canonical UUID or ULID is byte-identical
+        # to an idempotency key (A-2). The carve-out keeps both. Step 3
+        # measures delete/narrow/keep; step 4 ships the winner.
+        "uuid/credential",
+        "ulid/credential",
+        # --- owned by plan step 5 (the ONE charset/shape defect) -----------
+        # Four failure modes of the single rule at constants.py:953-962.
+        "short/credential",  # under the 24-character floor
+        "whitespace/credential",  # `Bearer <secret>`, outside the charset
+        "percent/credential",  # `%2F`-encoded, outside the charset
+        "path_ext/credential",  # base64 `/` + `.` matches the path carve-out
+        "many_slash/credential",  # base64 `/` runs trip count("/") >= 3
+        # --- DISCLOSED ACCEPTED GAPS, no step fixes these -----------------
+        # `v1:<hex>` rides the `<label>:<pure hex>` carve-out that exists so
+        # `cache_key: "sha256:..."` survives (D-021 states this cost outright).
+        "hex_composite/credential",
+        # The generic arm's own floors. A single-character-class or
+        # sub-3.0-bit secret is a WEAK secret; raising either floor to catch
+        # it destroys ordinary identifiers (`idx_orders_customer_created`,
+        # `checkout.payment.method.selector`) wholesale. The NAME layer is the
+        # control for these, which is exactly what
+        # `test_the_bearer_name_list_still_carries_short_credentials` pins.
+        "single_class/credential",
+        "low_entropy/credential",
+        # The token arm KEEPS `bool`/`int`/`float` by design, so a numeric OTP
+        # seed is kept. Reversing that strips every metering count in the
+        # framework -- the cure is far worse (D-021).
+        "numeric/credential",
+    }
+)
+
+CARVE_OUT_KNOWN_OVER_STRIPPED: frozenset[str] = frozenset(
+    {
+        # All four are the honest, deliberate cost of a rule that is doing its
+        # job, not defects. Each is the safe side of a shape whose credential
+        # side the same rule catches.
+        # A published certificate wears the same armour as a private key.
+        "pem/safe",
+        # A cache namespace that happens to begin `sk-`.
+        "vendor_prefix/safe",
+        # D-021 splits on the last colon and judges the tail; an ordinary
+        # high-entropy cursor tail looks exactly like an Asana PAT tail.
+        "id_secret_composite/safe",
+        # The token arm is fail-CLOSED for non-str, non-numeric values (S-2),
+        # so a list-valued `*_token` is stripped.
+        "non_str/safe",
+    }
+)

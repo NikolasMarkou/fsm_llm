@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from fsm_llm.context import ContextCompactor, clean_context_keys
 from tests.test_fsm_llm.fixtures.context_key_corpus import (
+    CARVE_OUT_CREDENTIAL_ENTRIES,
+    CARVE_OUT_KNOWN_FAIL_OPEN,
+    CARVE_OUT_KNOWN_OVER_STRIPPED,
+    CARVE_OUT_SAFE_ENTRIES,
     CRYPTO_KEY_KNOWN_OVER_STRIPPED,
     CRYPTO_KEY_SAFE_KEYS,
+    CRYPTO_KEY_SAFE_VALUES,
     CRYPTO_KEY_SECRET_KEYS,
+    CRYPTO_KEY_SECRET_VALUES,
     KNOWN_OVER_STRIPPED,
     SAFE_KEYS,
     SECRET_KEYS,
@@ -1251,11 +1257,23 @@ class TestCryptoKeyAndTokenTriggers:
 
     @staticmethod
     def _value_for(name):
-        """The corpus's own value for `name`, or the inert placeholder."""
+        """The corpus's own value for `name`, or the inert placeholder.
+
+        Step 1 of plan-2026-07-20-b8a6b855 added the two `key`-arm maps. Until
+        then this helper knew only the token arm, so every `key`-arm name in
+        `_universe()` was surveyed at the inert `"v"` -- which is a
+        well-defined question about the NAME and no question at all about the
+        control, since `stripe_key` and `order_key` are the same string to the
+        name layer and only the value separates them (LESSONS [I:5]).
+        """
         if name in TOKEN_SECRET_VALUES:
             return TOKEN_SECRET_VALUES[name]
         if name in TOKEN_SAFE_VALUES:
             return TOKEN_SAFE_VALUES[name]
+        if name in CRYPTO_KEY_SECRET_VALUES:
+            return CRYPTO_KEY_SECRET_VALUES[name]
+        if name in CRYPTO_KEY_SAFE_VALUES:
+            return CRYPTO_KEY_SAFE_VALUES[name]
         return "v"
 
     @classmethod
@@ -1316,8 +1334,26 @@ class TestCryptoKeyAndTokenTriggers:
     # -- (a) two-direction measurement -----------------------------------
     def test_no_crypto_key_material_reaches_the_prompt(self):
         """SC-4, direction 1. Every name here is private key material or the
-        container it is read from."""
-        leaked = [k for k in CRYPTO_KEY_SECRET_KEYS if self._kept(k)]
+        container it is read from.
+
+        Measured with each name's REAL credential value since step 1 of
+        plan-2026-07-20-b8a6b855. Before that this test passed `"v"` and so
+        exercised layer 1 alone, on an arm whose whole design rests on layer 2
+        deciding what the name cannot (defect 5, A-3).
+        """
+        missing = [
+            k for k in CRYPTO_KEY_SECRET_KEYS if k not in CRYPTO_KEY_SECRET_VALUES
+        ]
+        assert missing == [], (
+            f"{len(missing)} crypto-key names have no corpus value: {missing}. "
+            "A name added to CRYPTO_KEY_SECRET_KEYS without a value would be "
+            "measured against a placeholder, which is not a measurement."
+        )
+        leaked = [
+            k
+            for k in CRYPTO_KEY_SECRET_KEYS
+            if self._kept(k, CRYPTO_KEY_SECRET_VALUES[k])
+        ]
         assert leaked == [], f"{len(leaked)} crypto keys reached the prompt: {leaked}"
 
     def test_no_auth_token_reaches_the_prompt(self):
@@ -1359,10 +1395,15 @@ class TestCryptoKeyAndTokenTriggers:
     def test_ordinary_key_vocabulary_still_reaches_the_prompt(self):
         """SC-5, direction 2. Paired with the test above on purpose: a fix that
         stripped everything would pass that one and fail this one."""
+        missing = [k for k in CRYPTO_KEY_SAFE_KEYS if k not in CRYPTO_KEY_SAFE_VALUES]
+        assert missing == [], (
+            f"{len(missing)} ordinary key names have no corpus value: {missing}"
+        )
         destroyed = [
             k
             for k in CRYPTO_KEY_SAFE_KEYS
-            if k not in CRYPTO_KEY_KNOWN_OVER_STRIPPED and not self._kept(k)
+            if k not in CRYPTO_KEY_KNOWN_OVER_STRIPPED
+            and not self._kept(k, CRYPTO_KEY_SAFE_VALUES[k])
         ]
         assert destroyed == [], f"{len(destroyed)} ordinary keys stripped: {destroyed}"
 
@@ -1423,7 +1464,11 @@ class TestCryptoKeyAndTokenTriggers:
         """Two-sided, mirroring `test_the_known_over_strip_set_is_pinned_exactly`.
         A name joining this set is an undisclosed usability regression; a name
         leaving it is an improvement that must be recorded, not absorbed."""
-        actual = frozenset(k for k in CRYPTO_KEY_SAFE_KEYS if not self._kept(k))
+        actual = frozenset(
+            k
+            for k in CRYPTO_KEY_SAFE_KEYS
+            if not self._kept(k, CRYPTO_KEY_SAFE_VALUES[k])
+        )
         assert actual == CRYPTO_KEY_KNOWN_OVER_STRIPPED, (
             "the crypto-key over-strip class drifted.\n"
             f"  newly stripped (regression): "
@@ -1443,6 +1488,239 @@ class TestCryptoKeyAndTokenTriggers:
             f"{sorted(actual - TOKEN_KNOWN_OVER_STRIPPED)}\n"
             f"  newly kept (update the pin): "
             f"{sorted(TOKEN_KNOWN_OVER_STRIPPED - actual)}"
+        )
+
+    # -- (a2) carve-out shape coverage and its two-sided verdicts ---------
+    def test_every_carve_out_probe_is_decided_by_its_VALUE_not_its_name(self):
+        """ANTI-VACUITY GUARD FOR THE SHAPE CORPUS ITSELF.
+
+        A shape probe under a name layer 1 already strikes measures NOTHING
+        about the shape -- the value is never consulted. A shape probe under a
+        name that carries no trigger measures nothing either, for the opposite
+        reason. Both mistakes are silent and both produce a green test.
+
+        So attribution is pinned black-box, from both ends: every credential
+        probe's NAME must be KEPT when paired with the inert ``"v"`` (proving
+        the name alone does not decide), and every safe probe's NAME must be
+        STRIPPED when paired with a real credential (proving the name alone
+        does not rescue it). Whatever those probes then report is a statement
+        about the VALUE, which is the only thing this layer reads.
+        """
+        strong = "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI"
+        name_decides = [
+            entry_id
+            for entry_id, name, _ in CARVE_OUT_CREDENTIAL_ENTRIES
+            if not self._kept(name, "v")
+        ]
+        assert name_decides == [], (
+            f"{len(name_decides)} credential shape probes sit under a name the "
+            f"NAME layer already strips, so they measure nothing about the "
+            f"value shape they claim to cover: {name_decides}"
+        )
+        name_rescues = [
+            entry_id
+            for entry_id, name, _ in CARVE_OUT_SAFE_ENTRIES
+            if self._kept(name, strong)
+        ]
+        assert name_rescues == [], (
+            f"{len(name_rescues)} safe shape probes sit under a name that is "
+            f"kept even holding a real credential, so the filter never reads "
+            f"their value: {name_rescues}"
+        )
+
+    def test_every_layer_two_carve_out_shape_has_both_a_credential_and_a_safe_instance(
+        self,
+    ):
+        """SC-2. THE GUARD THAT WOULD HAVE PREVENTED THIS ENTIRE PLAN.
+
+        Every one of the five defects being closed here survived multiple
+        adversarial rounds for the same reason: the value layer's carve-outs
+        were tuned against corpora containing ZERO instances of the shapes
+        they carve out. `LESSONS [I:5]` records the question that was never
+        asked -- *does my corpus contain instances of the shape THIS layer
+        carves out?* -- and this test is that question, mechanised.
+
+        The predicates below are DELIBERATELY re-derived here rather than
+        imported from `fsm_llm.constants`. That duplication is the control:
+        a coverage test that asks the module under test what its own shapes
+        are can only ever confirm the module against itself, and would go
+        green the moment a carve-out was deleted. Do NOT "centralise" these.
+        """
+        import math
+        import re
+
+        uuid_shape = re.compile(
+            r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        )
+        ulid_shape = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+        path_ext_shape = re.compile(r"^\S*/\S*\.[A-Za-z0-9]{1,6}$")
+        percent_shape = re.compile(r"%[0-9A-Fa-f]{2}")
+        pure_hex = re.compile(r"^[0-9a-fA-F]+$")
+        # Independently written from vendor documentation, NOT read back out of
+        # `_CREDENTIAL_VALUE_PREFIXES` -- see the docstring.
+        vendor_prefixes = (
+            "sk-",
+            "sk_live_",
+            "sk_test_",
+            "ghp_",
+            "gho_",
+            "glpat-",
+            "xoxb-",
+            "xapp-",
+            "akia",
+            "shpat_",
+            "eyj",
+            "hf_",
+        )
+
+        def text(value):
+            return value.strip() if isinstance(value, str) else None
+
+        def entropy(sample):
+            counts = {}
+            for character in sample:
+                counts[character] = counts.get(character, 0) + 1
+            total = len(sample)
+            return -sum((n / total) * math.log2(n / total) for n in counts.values())
+
+        def classes(sample):
+            return (
+                any(c.islower() for c in sample)
+                + any(c.isupper() for c in sample)
+                + any(c.isdigit() for c in sample)
+            )
+
+        def is_pem(value):
+            body = text(value)
+            return body is not None and body.lower().startswith("-----begin")
+
+        def colon_tail(value):
+            body = text(value)
+            if body is None or ":" not in body:
+                return None
+            return body.rsplit(":", 1)[1]
+
+        shapes = {
+            "canonical UUID": lambda v: bool(uuid_shape.match(text(v) or "")),
+            "ULID": lambda v: bool(ulid_shape.match(text(v) or "")),
+            "PEM armour": is_pem,
+            "published vendor prefix": lambda v: (
+                (text(v) or "").lower().startswith(vendor_prefixes)
+            ),
+            "<label>:<pure hex> composite": lambda v: (
+                colon_tail(v) is not None and bool(pure_hex.match(colon_tail(v)))
+            ),
+            "<id>:<secret> composite": lambda v: (
+                colon_tail(v) is not None and not pure_hex.match(colon_tail(v))
+            ),
+            "sub-24-character": lambda v: text(v) is not None and 0 < len(text(v)) < 24,
+            "internal whitespace": lambda v: (
+                text(v) is not None
+                and not is_pem(v)
+                and any(c.isspace() for c in text(v))
+            ),
+            "percent-encoded": lambda v: bool(percent_shape.search(text(v) or "")),
+            "path with extension": lambda v: bool(path_ext_shape.match(text(v) or "")),
+            'count("/") >= 3': lambda v: (text(v) or "").count("/") >= 3,
+            "single character class": lambda v: (
+                text(v) is not None and len(text(v)) >= 24 and classes(text(v)) < 2
+            ),
+            "sub-3.0-bit entropy": lambda v: (
+                text(v) is not None and len(text(v)) >= 24 and entropy(text(v)) < 3.0
+            ),
+            "bool/int/float (token arm)": lambda v: isinstance(v, (bool, int, float)),
+            "non-str non-numeric (token arm)": lambda v: (
+                not isinstance(v, (str, bool, int, float))
+            ),
+        }
+
+        credential_pool = (
+            [value for _, _, value in CARVE_OUT_CREDENTIAL_ENTRIES]
+            + list(CRYPTO_KEY_SECRET_VALUES.values())
+            + list(TOKEN_SECRET_VALUES.values())
+            + [value for _, value in TOKEN_SECRET_SHORT_VALUE_ENTRIES]
+        )
+        safe_pool = (
+            [value for _, _, value in CARVE_OUT_SAFE_ENTRIES]
+            + list(CRYPTO_KEY_SAFE_VALUES.values())
+            + list(TOKEN_SAFE_VALUES.values())
+        )
+
+        uncovered = []
+        for shape, matches in shapes.items():
+            missing = [
+                side
+                for side, pool in (("credential", credential_pool), ("safe", safe_pool))
+                if not any(matches(value) for value in pool)
+            ]
+            if missing:
+                uncovered.append(f"{shape}: no {' and no '.join(missing)} instance")
+        assert uncovered == [], (
+            "the corpus cannot measure "
+            f"{len(uncovered)} of the {len(shapes)} shapes the value layer "
+            "carves out, so those carve-outs are untested branches with "
+            "comments attached:\n  " + "\n  ".join(uncovered)
+        )
+
+    def test_the_carve_out_fail_open_set_is_pinned_exactly(self):
+        """Two-sided pin on the shape probes whose CREDENTIAL side reaches the
+        prompt today. Same mechanism as `TOKEN_KNOWN_OVER_STRIPPED`: this set
+        is DISCLOSURE, not absolution.
+
+        Measured at aa284b7 as 11 of 15 -- the first time this seam was ever
+        probed with values of its own carve-out shapes. An id LEAVING this set
+        is a fix (steps 4 and 5 own most of them) and must be recorded; an id
+        JOINING it is a new leak that would otherwise go undisclosed for a
+        whole round, which is exactly how this seam got to a fifth attempt.
+        """
+        actual = frozenset(
+            entry_id
+            for entry_id, name, value in CARVE_OUT_CREDENTIAL_ENTRIES
+            if self._kept(name, value)
+        )
+        assert actual == CARVE_OUT_KNOWN_FAIL_OPEN, (
+            "the carve-out fail-open class drifted.\n"
+            f"  newly leaking (regression): "
+            f"{sorted(actual - CARVE_OUT_KNOWN_FAIL_OPEN)}\n"
+            f"  newly caught (fixed, update the pin): "
+            f"{sorted(CARVE_OUT_KNOWN_FAIL_OPEN - actual)}"
+        )
+
+    def test_the_carve_out_over_strip_set_is_pinned_exactly(self):
+        """Two-sided pin on the shape probes whose SAFE side is destroyed
+        today. Paired with the test above on purpose: a fix that strips
+        everything clears that one and fails this one, which is the single
+        discipline every prior attempt on this seam lacked (`LESSONS [I:5]`)."""
+        actual = frozenset(
+            entry_id
+            for entry_id, name, value in CARVE_OUT_SAFE_ENTRIES
+            if not self._kept(name, value)
+        )
+        assert actual == CARVE_OUT_KNOWN_OVER_STRIPPED, (
+            "the carve-out over-strip class drifted.\n"
+            f"  newly stripped (regression): "
+            f"{sorted(actual - CARVE_OUT_KNOWN_OVER_STRIPPED)}\n"
+            f"  newly kept (fixed, update the pin): "
+            f"{sorted(CARVE_OUT_KNOWN_OVER_STRIPPED - actual)}"
+        )
+
+    def test_the_carve_out_corpus_is_not_trivial(self):
+        """Vacuity guard on the shape corpus. Entry ids must be unique (they
+        are the pin keys), both sides must be populated, and neither pin set
+        may swallow its whole side -- a corpus where every probe is disclosed
+        as known-wrong asserts nothing."""
+        credential_ids = [entry_id for entry_id, _, _ in CARVE_OUT_CREDENTIAL_ENTRIES]
+        safe_ids = [entry_id for entry_id, _, _ in CARVE_OUT_SAFE_ENTRIES]
+        assert len(set(credential_ids)) == len(credential_ids), (
+            "duplicate credential entry id -- the two-sided pins key off these"
+        )
+        assert len(set(safe_ids)) == len(safe_ids), "duplicate safe entry id"
+        assert CARVE_OUT_KNOWN_FAIL_OPEN <= set(credential_ids)
+        assert CARVE_OUT_KNOWN_OVER_STRIPPED <= set(safe_ids)
+        assert len(CARVE_OUT_KNOWN_OVER_STRIPPED) < len(safe_ids), (
+            "every safe shape probe is pinned as over-stripped, so the "
+            "usability direction has nothing left to assert"
         )
 
     # -- (b) anti-tautology ----------------------------------------------
