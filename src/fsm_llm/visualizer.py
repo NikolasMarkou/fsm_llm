@@ -221,6 +221,53 @@ def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:
     )
 
 
+def _require_valid_transition_targets(states: dict[str, Any]) -> None:
+    """Reject an FSM whose transitions name a ``target_state`` absent from ``states``.
+
+    Args:
+        states: the FSM's ``states`` mapping.
+
+    Raises:
+        ValueError: naming both the source state and the missing target.
+    """
+    # DECISION plan-2026-07-20T040150-876e7164/D-013
+    # Placement mirrors `_require_initial_state` (D-021) for the SAME measured reason:
+    # the first raise is `calculate_depths`' `state_metrics[target]["depth"] = ...`
+    # (probed, not read -- it fires for all three styles), which runs before any
+    # section is built. A guard inside `create_states_section` would be dead code for
+    # `style="compact"`/`"minimal"`.
+    #
+    # Do NOT "simplify" this by wiring the visualizer into `FSMValidator`. Both
+    # `FSMValidator` and `FSMDefinition`'s pydantic `model_validator` already reject a
+    # dangling `target_state` as an ERROR -- the original framing of this defect ("the
+    # validator passes input the visualizer crashes on") is a GHOST and was falsified at
+    # HEAD. The real gap is narrower: `visualize_fsm_ascii`/`visualize_fsm_from_file` are
+    # a SEPARATE entry point that never consults either layer, so `fsm-llm-visualize` on
+    # invalid input printed the useless `"Error: 'nowhere'"`. Running the full validator
+    # here is a different, larger design change (it would make the visualizer refuse
+    # everything the validator refuses, including WARNING-only shapes it renders fine).
+    #
+    # Do NOT delete this guard on the theory that "the validator already catches this" --
+    # nothing forces a user through the validator before the visualizer.
+    #
+    # This deliberately sweeps EVERY state, not only the ones `calculate_depths` reaches.
+    # Measured: a dangling target on an UNREACHABLE state does not crash today -- it
+    # renders an arrow to a state that does not exist. Refusing it is the D-021 rule
+    # ("do not hide a malformed definition behind a plausible-looking diagram") applied
+    # to the same shape, and it is a deliberate tightening. See decisions.md D-013.
+    for state_id, state in states.items():
+        for transition in state.get("transitions", []):
+            target = transition.get("target_state", "")
+            if target in states:
+                continue
+            known = ", ".join(repr(s) for s in sorted(states)[:5]) or "<none>"
+            suffix = ", ..." if len(states) > 5 else ""
+            raise ValueError(
+                f"Transition from {state_id!r} to non-existent state {target!r} "
+                f"(defined states: {known}{suffix})"
+            )
+
+
 def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
     """
     Generate an enhanced ASCII visualization of an FSM.
@@ -233,13 +280,15 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
         A string containing the ASCII visualization
 
     Raises:
-        ValueError: if ``initial_state`` is not present in ``states``.
+        ValueError: if ``initial_state`` is not present in ``states``, or if any
+            transition names a ``target_state`` that is not a key of ``states``.
     """
     states = fsm_data.get("states", {})
     initial_state = fsm_data.get("initial_state", "")
     persona = fsm_data.get("persona", None)
 
     _require_initial_state(states, initial_state)
+    _require_valid_transition_targets(states)
 
     # Find terminal states (those with no outgoing transitions)
     terminal_states = {

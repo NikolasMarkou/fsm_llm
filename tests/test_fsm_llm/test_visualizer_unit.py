@@ -825,6 +825,137 @@ class TestMissingInitialStateIsDiagnosable:
             assert "init" in output
 
 
+# ------------------------------------------------------------------
+# G-18 / SC-17: a dangling `target_state` must say so
+# ------------------------------------------------------------------
+
+
+def _dangling_target_fsm_data():
+    return {
+        "name": "Dangling",
+        "initial_state": "a",
+        "states": {
+            "a": {
+                "id": "a",
+                "description": "first",
+                "transitions": [
+                    {"target_state": "nowhere", "description": "goes away"}
+                ],
+            },
+        },
+    }
+
+
+class TestDanglingTransitionTargetIsDiagnosable:
+    """G-18. A `target_state` absent from `states` surfaced as a bare
+    `KeyError('nowhere')` from `calculate_depths`, which
+    `visualize_fsm_from_file`'s broad `except Exception` rendered as the useless
+    `"Error: 'nowhere'"`.
+
+    The motivating framing ("the validator passes input the visualizer crashes on")
+    is a GHOST -- both `FSMValidator` and pydantic Stage 0 reject this shape as an
+    ERROR. The real gap is that the visualizer is a separate entry point that never
+    consults either. See decisions.md D-013.
+    """
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_every_style_names_both_the_source_and_the_target(self, style):
+        """The first raise is `calculate_depths`' `state_metrics[target]["depth"]`,
+        which runs for EVERY style -- confirmed by probe, not by reading.
+        """
+        with pytest.raises(ValueError) as exc_info:
+            visualize_fsm_ascii(_dangling_target_fsm_data(), style=style)
+
+        message = str(exc_info.value)
+        assert "'a'" in message, "the source state must be named: " + message
+        assert "'nowhere'" in message, "the missing target must be named: " + message
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_it_is_a_value_error_not_a_key_error(self, style):
+        """`KeyError` is a subclass of `LookupError`, not of `ValueError`, so this
+        assertion is genuinely falsified by the un-fixed source.
+        """
+        with pytest.raises(ValueError):
+            visualize_fsm_ascii(_dangling_target_fsm_data(), style=style)
+
+        with pytest.raises(Exception) as exc_info:
+            visualize_fsm_ascii(_dangling_target_fsm_data(), style=style)
+        assert not isinstance(exc_info.value, KeyError), (
+            "the bare KeyError is still escaping"
+        )
+
+    def test_cli_path_gets_the_contextual_message(self, tmp_path):
+        """`visualize_fsm_from_file` swallows everything into `f"Error: {e}"`, so the
+        CLI user is who this fix is for.
+        """
+        path = tmp_path / "dangling.json"
+        path.write_text(json.dumps(_dangling_target_fsm_data()), encoding="utf-8")
+
+        message = visualize_fsm_from_file(str(path))
+
+        assert message != "Error: 'nowhere'", (
+            "the bare KeyError message is still surfacing"
+        )
+        assert "'a'" in message and "'nowhere'" in message, message
+
+    def test_a_dangling_target_on_an_unreachable_state_is_also_rejected(self):
+        """Deliberate tightening (D-013). `calculate_depths` never visits an
+        unreachable state, so this shape rendered an arrow to a state that does not
+        exist instead of crashing. The guard sweeps every state, not the reachable set.
+        """
+        data = {
+            "name": "Orphan",
+            "initial_state": "a",
+            "states": {
+                "a": {"id": "a", "description": "first", "transitions": []},
+                "orphan": {
+                    "id": "orphan",
+                    "description": "unreachable",
+                    "transitions": [{"target_state": "nowhere"}],
+                },
+            },
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            visualize_fsm_ascii(data, style="full")
+
+        message = str(exc_info.value)
+        assert "'orphan'" in message and "'nowhere'" in message, message
+
+    def test_a_transition_with_no_target_state_at_all_is_named(self):
+        """`build_graph_representation` defaults a missing `target_state` to `""`,
+        which produced the maximally unhelpful `KeyError('')` / `"Error: ''"`.
+        """
+        data = {
+            "name": "NoTarget",
+            "initial_state": "a",
+            "states": {
+                "a": {
+                    "id": "a",
+                    "description": "first",
+                    "transitions": [{"description": "target_state key is missing"}],
+                },
+            },
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            visualize_fsm_ascii(data, style="full")
+
+        assert "'a'" in str(exc_info.value), str(exc_info.value)
+
+    def test_a_well_formed_fsm_is_unaffected(self):
+        """Over-correction guard: the new check must not reject valid input, including
+        the self-loops and back-edges the other fixtures in this file rely on.
+        """
+        for fixture in (
+            _multi_state_fsm_data,
+            _linear_fsm_data,
+            _unsorted_terminal_fsm_data,
+        ):
+            for style in ("full", "compact", "minimal"):
+                assert visualize_fsm_ascii(fixture(), style=style)
+
+
 class TestTruncationIsVisibleAndUnambiguous:
     """D-033. D-028 bought alignment with a silent head-only slice, and for rows
     carrying a state id that is worse than a ragged box: two DISTINCT states
