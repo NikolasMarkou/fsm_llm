@@ -349,7 +349,14 @@ TOKEN_ARM_CREDENTIAL = [
     ("datadog_app_token", "8f2a94c73be0d165a827fc4b90e35d17c6a04829", "credential"),
     (
         "shopify_storefront_token",
-        "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",
+        # Body deliberately contains non-hex characters. GitHub push protection
+        # flagged the original 32-hex body as a live Shopify Access Token and
+        # blocked the push -- a synthetic credential indistinguishable from a
+        # real one is a liability in a public repo. The `shpat_` PREFIX is what
+        # this entry tests (it is in `_CREDENTIAL_VALUE_PREFIXES`,
+        # constants.py:790), so the prefix is preserved and only the body is
+        # made obviously synthetic. Keep it that way.
+        "shpat_NOTAREALTOKENnotarealtokenZZZZZZ",
         "credential",
     ),
     ("twilio_sync_token", "SK4f8c02b91ae7d365c0148bf2e69a7d31", "credential"),
