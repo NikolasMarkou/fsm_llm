@@ -1418,6 +1418,140 @@ CARVE_OUT_CREDENTIAL_ENTRIES: tuple[tuple[str, str, object], ...] = (
     ("numeric/credential", "provisioning_token", 837465019283746501),
     # TOKEN ARM ONLY. Non-str, non-numeric -- fail-CLOSED by design.
     ("non_str/credential", "wrapped_token", b"9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a"),
+    # ======================================================================
+    # ADDED BY PLAN STEP 10 (adversarial-review concern 2). THESE EIGHT
+    # ENTRIES EXIST TO MAKE A NUMBER WORSE, AND THAT IS THE POINT.
+    #
+    # Step 5 disclosed gaps G2, G3 and G4 in dedicated tests that assert the
+    # gap is open (`test_the_unwrapping_is_two_shapes_deep_and_that_is_
+    # disclosed` and its two siblings). Those tests exhibit EIGHT distinct
+    # leaking credential values -- and not one of them was counted in any
+    # corpus, so no fail-open rate in this plan could see them.
+    #
+    # The four gaps INHERITED from before step 5 (G1, G5, G6, G7) DO have
+    # corpus instances and ARE counted. So the exclusion ran in exactly one
+    # direction: pre-existing gaps counted against the headline, self-inflicted
+    # gaps did not. plan.md step 5 required "every residual gap named there
+    # must have a pinned corpus instance", and the single deviation from that
+    # rule was the deviation that preserved a PASS.
+    #
+    # The values are NOT duplicated here -- the three disclosure tests now
+    # SOURCE their literals from these entries by id prefix (`g2/`, `g3/`,
+    # `g4/`), so an exhibit can never again be demonstrated by a test while
+    # being invisible to the rate. That coupling is the structural fix; adding
+    # the rows is only the arithmetic one.
+    #
+    # DO NOT "fix" the resulting fail-open figure by removing these rows,
+    # re-classifying them, or choosing a friendlier denominator. If the number
+    # is past bound, the number is past bound (plan Pre-Mortem 2).
+    # ----------------------------------------------------------------------
+    # G2, exhibit 1/3: normalisation percent-decodes ONCE. A doubly-encoded
+    # credential survives the single pass and lands back outside the charset.
+    ("g2/double_percent", "gateway_key", "Atzr%252FIQEBLjAsAhRmHNTV5xZ8pQwLmKj"),
+    # G2, exhibit 2/3: scheme-unwrapping handles TWO fields. A third field
+    # (a real `Authorization: Bearer <jwt> <nonce>` shape) defeats it.
+    (
+        "g2/three_fields",
+        "gateway_key",
+        "Bearer 9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI trailing",
+    ),
+    # G2, exhibit 3/3: a two-field value whose first field is NOT in
+    # `_AUTH_SCHEME_WORDS`. See the unlisted-scheme-word block below -- this
+    # single row was the ONLY member of that class in either corpus, and its
+    # word is invented rather than realistic, which is why step 10 adds five
+    # realistic ones beside it.
+    (
+        "g2/unlisted_scheme",
+        "gateway_key",
+        "Sigv4Custom 9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI",
+    ),
+    # G3, exhibit 1/3: `%E2%82%AC` is a VALID escape, so decoding does not
+    # drop it -- it becomes a euro sign, outside the charset, and the value is
+    # KEPT.
+    (
+        "g3/decoded_out_of_charset",
+        "upload_key",
+        "Atzr%E2%82%ACIQEBLjAsAhRmHNTV5xZ8pQwLmKj",
+    ),
+    # G3, exhibit 2/3 and 3/3: one character outside
+    # `_CREDENTIAL_VALUE_CHARSET_RE` is enough. Widening the charset is not
+    # available -- `:` is excluded so `cache_key: "sha256:..."` survives
+    # (D-021) -- so these are disclosed, not closable here.
+    ("g3/hash_character", "upload_key", "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a#D8cE4rT7uI"),
+    ("g3/at_character", "upload_key", "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a@D8cE4rT7uI"),
+    # G4, exhibit 1/2: the residual of the path fix. Every `/`-separated
+    # segment is below the length floor, so no segment is credential-shaped
+    # and the joined value reads as a path.
+    ("g4/short_segments", "mailer_key", "a8f3/d9c2/b1e4/f7a0/d3c6/b9e2/f5a8"),
+    # G4, exhibit 2/2: segments long enough but each single-character-class.
+    (
+        "g4/single_class_segments",
+        "mailer_key",
+        "zqmwvjxrbtkdh/ngfplyscuearoibfe/xkdhngfply",
+    ),
+    # ======================================================================
+    # ADDED BY PLAN STEP 10 (adversarial-review concern 1). THE
+    # UNLISTED-SCHEME-WORD CLASS, COUNTED FOR THE FIRST TIME.
+    #
+    # Step 5 shipped `_AUTH_SCHEME_WORDS`, a 22-word fail-OPEN allowlist: a
+    # two-field value is re-judged on its trailing field only when field 1 is
+    # a LISTED word. Before this block, the evidence validating that list was:
+    #   - the independently-authored holdout: ZERO scheme-wrapped credentials;
+    #   - this corpus: exactly ONE (`whitespace/credential`), and its word
+    #     (`Bearer`) is a member of the very list being validated.
+    # That is `LESSONS [I:5]`'s "allowlist corpus restating the allowlist",
+    # recurring one layer below the name layer where it was finally fixed.
+    #
+    # MEASURED AT STEP 10 on an independently derived population -- 40
+    # realistic scheme words taken from the IANA HTTP Authentication Scheme
+    # Registry, vendor `Authorization:` conventions, non-HTTP auth protocols,
+    # and the degenerate labels real config files use. 19 are listed and ALL
+    # 19 are caught; 21 are unlisted and ALL 21 leak. So the leak rate GIVEN
+    # an unlisted word is 100% by construction (that is what fail-open
+    # polarity means), and the honest figure is the COVERAGE: the 22-word list
+    # covers 19/40 = 47.5% of realistic scheme words, so 52.5% [95% Wilson
+    # 37.5%, 67.1%] of realistic scheme-wrapped credentials reach the prompt.
+    #
+    # THE FIVE ROWS BELOW ARE NOT A FIX AND MUST NOT BECOME ONE. Extending
+    # `_AUTH_SCHEME_WORDS` to catch them is `LESSONS [I:4]`'s forbidden move
+    # (patching the specific names an instrument just showed you leaking) and
+    # would repeat round 3 verbatim. The replacement the reviewer named -- a
+    # positive SHAPE test on the trailing field, judging field 2 whenever
+    # field 1 is short and alphabetic -- is a filter redesign, deliberately
+    # NOT in this step's scope. It is the maintainer's PIVOT decision.
+    #
+    # One row per derivation source, chosen for spread rather than for effect:
+    (
+        "scheme_iana/credential",
+        "gateway_key",
+        "AWS4-HMAC-SHA256 9dR2pQ7xL4mZ8vN3bK6tY1wJ5h",
+    ),
+    # NOT `webhook_key`: that name is struck at LAYER 1, so it would measure
+    # the name layer and say nothing about the scheme word. Caught by
+    # `test_every_carve_out_probe_is_decided_by_its_VALUE_not_its_name`, which
+    # is precisely the guard this plan added for it.
+    (
+        "scheme_vendor/credential",
+        "dispatch_key",
+        "SharedKey 4pT7yU1iO5aS9dF3gH8jK2lZ6xC",
+    ),
+    (
+        "scheme_oauth2/credential",
+        "partner_gateway_key",
+        "OAuth2 7bN3mQ9wE5rT1yU4iO8pA2sD6fG",
+    ),
+    (
+        "scheme_protocol/credential",
+        "correction_key",
+        "ntrip 2xZ8vC4bN6mQ1wE9rT5yU3iO7pA",
+    ),
+    # The literal word `secret` as field 1 buys a KEEP. So does `key`,
+    # `password` and `auth` -- measured, all four.
+    (
+        "scheme_degenerate/credential",
+        "handoff_key",
+        "secret 5gH2jK7lZ9xC4vB1nM6qW8eR3tY",
+    ),
 )
 
 CARVE_OUT_SAFE_ENTRIES: tuple[tuple[str, str, object], ...] = (
@@ -1456,6 +1590,78 @@ CARVE_OUT_SAFE_ENTRIES: tuple[tuple[str, str, object], ...] = (
     ("low_entropy/safe", "form_key", "step-1-step-1-step-1-step-1"),
     ("numeric/safe", "retry_token", 3),
     ("non_str/safe", "vendor_token", ["primary", "secondary"]),
+    # ======================================================================
+    # ADDED BY PLAN STEP 10 (adversarial-review concern 4). THE
+    # UNLISTED-IDENTIFIER-NOUN OVER-STRIP CLASS, COUNTED FOR THE FIRST TIME.
+    #
+    # Step 4 narrowed the UUID/ULID carve-out to `_IDENTIFIER_NOUN_VOCABULARY`,
+    # a 17-noun fail-CLOSED allowlist: a UUID-shaped value is kept only when
+    # the NAME carries a listed identifier noun. D-003 argued the polarity was
+    # safe because "an omitted noun costs OVER-STRIP, the axis with headroom
+    # (S-1)". The DIRECTION of that argument is correct. Its MAGNITUDE was
+    # never measured, and the anchor's supporting census -- "the carve-out's
+    # ENTIRE true reach at 12 entries out of 557 (2.2%)" -- is a census of THE
+    # CORPORA, not of the population. Neither corpus contained one instance of
+    # the excluded class, so 2.2% is a statement about what had been collected,
+    # not about what the rule reaches in a real application.
+    #
+    # MEASURED AT STEP 10 on an independently derived population -- 29
+    # plausible trigger-carrying identifier names from everyday messaging,
+    # workflow, storage and transactional vocabulary, each holding a canonical
+    # UUID: **26/29 = 89.7% OVER-STRIPPED** [95% Wilson 73.6%, 96.4%], six
+    # times the 15% bound. Only `pagination_token`, `continuation_token` and
+    # `sync_token` survive. The same 29 names holding a ULID score identically
+    # (26/29); holding the inert `"v"` all but two are KEPT, so the verdict is
+    # value-attributable and this is genuinely layer 2's cost.
+    #
+    # `message_key`, `event_key` and `transaction_key` holding a UUID are
+    # everyday Kafka/eventing context data. This is the largest cost step 4
+    # incurred and it is landing on the axis that HAS headroom -- see the D-010
+    # table for where it actually lands once counted.
+    #
+    # DO NOT extend `_IDENTIFIER_NOUN_VOCABULARY` to catch these nine. That is
+    # `LESSONS [I:4]`'s forbidden move and `LESSONS [I:5]`'s "fixing a class by
+    # naming its members" in one gesture. The two rows below excluded from my
+    # 29-name probe (`envelope_key`, `subscription_key`) are excluded on
+    # purpose: they strip at layer 1 on the NAME, so they would measure the
+    # name layer and say nothing about this carve-out.
+    (
+        "unlisted_noun_message/safe",
+        "message_key",
+        "6b1f0c48-2a97-4e35-8d10-c47f9b3e2a56",
+    ),
+    ("unlisted_noun_event/safe", "event_key", "d4e9107a-3c05-42fb-91a8-6de207b4c193"),
+    (
+        "unlisted_noun_transaction/safe",
+        "transaction_key",
+        "b820ff3c-15d9-4e07-a6b2-90c4e1d738ab",
+    ),
+    (
+        "unlisted_noun_workflow/safe",
+        "workflow_key",
+        "5a7c2e91-88b4-4f30-9d16-3ea0c5b72f4d",
+    ),
+    (
+        "unlisted_noun_snapshot/safe",
+        "snapshot_key",
+        "0c96d4b1-72fa-4e58-8b03-d19e6a2c7458",
+    ),
+    (
+        "unlisted_noun_document/safe",
+        "document_key",
+        "e31a5f70-6c28-4ba9-95d7-1f8b04e3c6a2",
+    ),
+    ("unlisted_noun_ledger/safe", "ledger_key", "97fb3d02-4a61-4c8e-b750-2d6ac9e15f83"),
+    (
+        "unlisted_noun_conversation/safe",
+        "conversation_token",
+        "1d40b8e6-59c3-4a72-8f91-7b52ce0d36a4",
+    ),
+    (
+        "unlisted_noun_thread/safe",
+        "thread_token",
+        "af62c1e9-30d7-4b85-a2c6-84f19b0e5d37",
+    ),
 )
 
 # --------------------------------------------------------------------------
@@ -1522,6 +1728,32 @@ CARVE_OUT_KNOWN_FAIL_OPEN: frozenset[str] = frozenset(
         # seed is kept. Reversing that strips every metering count in the
         # framework -- the cure is far worse (D-021).
         "numeric/credential",
+        # --- ADDED BY STEP 10: the G2/G3/G4 exhibits, now COUNTED ----------
+        # These eight were demonstrated by three shipped tests and counted by
+        # nothing. Disclosing a gap in a test while excluding it from the rate
+        # is disclosure that costs the headline nothing, which is the objection
+        # adversarial-review concern 2 raised. They are pinned here on exactly
+        # the same terms as the four gaps above: an id LEAVING this set is a
+        # FIX and must be recorded; the set is DISCLOSURE, not absolution.
+        "g2/double_percent",
+        "g2/three_fields",
+        "g2/unlisted_scheme",
+        "g3/decoded_out_of_charset",
+        "g3/hash_character",
+        "g3/at_character",
+        "g4/short_segments",
+        "g4/single_class_segments",
+        # --- ADDED BY STEP 10: the unlisted-scheme-word class, COUNTED -----
+        # G2 by classification, but listed separately because they are a
+        # DIFFERENT claim: the eight above show the gap is real, these five
+        # show it is BROAD. 21 of 40 independently derived realistic scheme
+        # words are unlisted, and every unlisted word leaks by construction.
+        # DO NOT close these by adding words to `_AUTH_SCHEME_WORDS`.
+        "scheme_iana/credential",
+        "scheme_vendor/credential",
+        "scheme_oauth2/credential",
+        "scheme_protocol/credential",
+        "scheme_degenerate/credential",
     }
 )
 
@@ -1540,5 +1772,25 @@ CARVE_OUT_KNOWN_OVER_STRIPPED: frozenset[str] = frozenset(
         # The token arm is fail-CLOSED for non-str, non-numeric values (S-2),
         # so a list-valued `*_token` is stripped.
         "non_str/safe",
+        # --- ADDED BY STEP 10: the unlisted-identifier-noun class, COUNTED --
+        # Nine ordinary eventing/workflow/storage identifiers holding a
+        # canonical UUID, none carrying a noun in the 17-word
+        # `_IDENTIFIER_NOUN_VOCABULARY`. All nine are destroyed. This is the
+        # measured cost of step 4's fail-CLOSED polarity, on the axis D-003
+        # correctly said it would land on -- see the block above them for the
+        # 89.7% (26/29) figure from the independent probe, and D-010 for where
+        # the over-strip rate lands once they are counted.
+        #
+        # These are NOT "defects to fix by adding nouns". Every noun added is
+        # one more member of a class named member-by-member (`LESSONS [I:5]`).
+        "unlisted_noun_message/safe",
+        "unlisted_noun_event/safe",
+        "unlisted_noun_transaction/safe",
+        "unlisted_noun_workflow/safe",
+        "unlisted_noun_snapshot/safe",
+        "unlisted_noun_document/safe",
+        "unlisted_noun_ledger/safe",
+        "unlisted_noun_conversation/safe",
+        "unlisted_noun_thread/safe",
     }
 )

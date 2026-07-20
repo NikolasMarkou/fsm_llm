@@ -2236,6 +2236,36 @@ class TestValueShapeLayer:
             {key: value}, "test-conv", strip_forbidden_keys=True
         )
 
+    @staticmethod
+    def _exhibits(prefix):
+        """The corpus rows a disclosure test exhibits, selected by id prefix.
+
+        Contract -- `prefix` is an entry-id prefix such as `"g2/"`; returns a
+        non-empty list of `(entry_id, name, value)` triples drawn from
+        `CARVE_OUT_CREDENTIAL_ENTRIES`. Raises `AssertionError` if the prefix
+        selects nothing.
+
+        THE EMPTY-SELECTION ASSERT IS THE WHOLE POINT, not defensive padding.
+        This helper exists so a gap can never again be demonstrated by a test
+        while being absent from the fail-open denominator (adversarial-review
+        concern 2). If the rows were deleted from the corpus to make a rate
+        look better, the disclosure test that depends on them must go RED --
+        silently iterating an empty tuple would restore the exact accounting
+        hole this coupling closes.
+        """
+        rows = [
+            (entry_id, name, value)
+            for entry_id, name, value in CARVE_OUT_CREDENTIAL_ENTRIES
+            if entry_id.startswith(prefix)
+        ]
+        assert rows, (
+            f"no corpus entry id starts with {prefix!r}. The gap this test "
+            "discloses has lost its corpus instances, so it is exhibited by a "
+            "test and counted by nothing -- restore the rows rather than "
+            "inlining the literals here"
+        )
+        return rows
+
     # -- D-019: is the class claim true? ----------------------------------
     def test_the_generic_arm_carries_the_control(self):
         """THE LOAD-BEARING SECURITY CLAIM OF THIS ENTIRE LAYER, PINNED.
@@ -2590,16 +2620,20 @@ class TestValueShapeLayer:
         surface `_VALUE_SCAN_LIMIT` exists to close.
 
         This test asserts the GAP, not the fix. It failing means the gap
-        closed -- update the D-005 accepted-gaps list, do not delete this."""
-        cred = "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI"
-        for label, value in (
-            ("double percent-encoding", "Atzr%252FIQEBLjAsAhRmHNTV5xZ8pQwLmKj"),
-            ("three fields", f"Bearer {cred} trailing"),
-            ("unlisted scheme word", f"Sigv4Custom {cred}"),
-        ):
-            assert self._kept("gateway_key", value), (
-                f"the {label} gap (G2) closed -- this is an improvement, but the "
-                "D-005 accepted-gaps list now overstates the failure surface"
+        closed -- update the D-005 accepted-gaps list, do not delete this.
+
+        STEP 10 (adversarial-review concern 2): the literals are no longer
+        written here. They are SOURCED from `CARVE_OUT_CREDENTIAL_ENTRIES` by
+        id prefix, so every value this test exhibits is necessarily also in the
+        corpus and therefore necessarily inside the fail-open denominator. The
+        defect being closed is not arithmetic -- it is that a gap could be
+        demonstrated by a shipped test while costing the headline nothing.
+        """
+        for entry_id, name, value in self._exhibits("g2/"):
+            assert self._kept(name, value), (
+                f"the {entry_id} gap (G2) closed -- this is an improvement, but "
+                "the D-005 accepted-gaps list now overstates the failure "
+                "surface, and this id must leave `CARVE_OUT_KNOWN_FAIL_OPEN`"
             )
 
     def test_a_credential_outside_the_charset_is_still_kept(self):
@@ -2610,15 +2644,14 @@ class TestValueShapeLayer:
 
         Asserts the GAP. `%E2%82%AC` is a VALID escape, so `errors="ignore"`
         does not drop it -- it decodes to a euro sign and lands outside the
-        charset."""
-        for value in (
-            "Atzr%E2%82%ACIQEBLjAsAhRmHNTV5xZ8pQwLmKj",
-            "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a#D8cE4rT7uI",
-            "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a@D8cE4rT7uI",
-        ):
-            assert self._kept("upload_key", value), (
-                "the charset gap (G3) closed -- update the D-005 accepted-gaps "
-                "list and re-check `cache_key: sha256:...`"
+        charset.
+
+        Literals sourced from the corpus at step 10 -- see the G2 sibling."""
+        for entry_id, name, value in self._exhibits("g3/"):
+            assert self._kept(name, value), (
+                f"the {entry_id} charset gap (G3) closed -- update the D-005 "
+                "accepted-gaps list, re-check `cache_key: sha256:...`, and "
+                "remove this id from `CARVE_OUT_KNOWN_FAIL_OPEN`"
             )
 
     def test_a_slash_credential_with_only_short_segments_is_still_kept(self):
@@ -2629,14 +2662,14 @@ class TestValueShapeLayer:
         closing it means judging the JOINED value, which strips `s3_key` and
         `object_key` (pinned above).
 
-        Asserts the GAP."""
-        for value in (
-            "a8f3/d9c2/b1e4/f7a0/d3c6/b9e2/f5a8",
-            "zqmwvjxrbtkdh/ngfplyscuearoibfe/xkdhngfply",
-        ):
-            assert self._kept("mailer_key", value), (
-                "the path-segment gap (G4) closed -- re-check `s3_key` and "
-                "`object_key` before updating the D-005 accepted-gaps list"
+        Asserts the GAP. Literals sourced from the corpus at step 10 -- see
+        the G2 sibling."""
+        for entry_id, name, value in self._exhibits("g4/"):
+            assert self._kept(name, value), (
+                f"the {entry_id} path-segment gap (G4) closed -- re-check "
+                "`s3_key` and `object_key` before updating the D-005 "
+                "accepted-gaps list, and remove this id from "
+                "`CARVE_OUT_KNOWN_FAIL_OPEN`"
             )
 
     def test_the_length_floor_is_a_measured_refusal_not_an_omission(self):
