@@ -3896,14 +3896,14 @@ _DIAGNOSTIC_UNLISTED_HEADS = (
 )
 # The RESOURCE/PRINCIPAL half of the shipped identifier-noun vocabulary plus its
 # OBSERVABILITY half -- the nouns that make a bare UUID reachable by the carve-out.
-_DIAGNOSTIC_LISTED_NOUNS = frozenset(
+# Held as two halves and unioned rather than as one flat literal, because step 5b
+# needs the resource half on its own and two hand-maintained copies of the same
+# vocabulary is the duplication smell, not the pattern.
+_DIAGNOSTIC_LISTED_RESOURCE_NOUNS = frozenset(
+    {"session", "job", "run", "lease", "tenant", "batch"}
+)
+_DIAGNOSTIC_OBSERVABILITY_NOUNS = frozenset(
     {
-        "session",
-        "job",
-        "run",
-        "lease",
-        "tenant",
-        "batch",
         "trace",
         "correlation",
         "span",
@@ -3917,6 +3917,17 @@ _DIAGNOSTIC_LISTED_NOUNS = frozenset(
         "shard",
     }
 )
+_DIAGNOSTIC_LISTED_NOUNS = (
+    _DIAGNOSTIC_LISTED_RESOURCE_NOUNS | _DIAGNOSTIC_OBSERVABILITY_NOUNS
+)
+# The wider RESOURCE/PRINCIPAL name FAMILY. This is NOT an approximation of any
+# shipped vocabulary -- `worker`, `pool`, `queue`, `task`, `stage`, `project` and
+# `account` are ordinary English resource/principal nouns that a context key can
+# be built from, listed or not. It exists to SLICE already-authored rows into the
+# step-5b population; it decided no ground truth.
+_DIAGNOSTIC_RESOURCE_NOUN_FAMILY = _DIAGNOSTIC_LISTED_RESOURCE_NOUNS | frozenset(
+    {"worker", "pool", "queue", "task", "stage", "project", "account"}
+)
 
 _CANONICAL_UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
@@ -3929,14 +3940,33 @@ def _looks_like_bare_identifier(value: str) -> bool:
     return bool(_CANONICAL_UUID_RE.match(value) or _CROCKFORD_ULID_RE.match(value))
 
 
-def _name_carries_a_listed_noun(name: str) -> bool:
+def _wrapped_identifier(value: str) -> bool:
+    """A two-field value whose SECOND field is a bare UUID/ULID -- the
+    `<head> <uuid>` shape. Hoisted to module level at step 5b because a second
+    guard needs it; a copy kept in lockstep by hand is the defect."""
+    return (
+        " " in value
+        and value.count(" ") == 1
+        and _looks_like_bare_identifier(value.split(" ", 1)[1])
+    )
+
+
+def _name_tokens(name: str) -> set:
     """DIAGNOSTIC. Approximates the production name-token split with a local
     regex rather than importing `constants.py` -- these guards must keep working
     on a tree where the vocabulary has been redesigned or deleted."""
-    return bool(
-        {t for t in re.split(r"[^a-z0-9]+", name.lower()) if t}
-        & _DIAGNOSTIC_LISTED_NOUNS
-    )
+    return {t for t in re.split(r"[^a-z0-9]+", name.lower()) if t}
+
+
+def _name_carries_a_listed_noun(name: str) -> bool:
+    """DIAGNOSTIC. See `_name_tokens`."""
+    return bool(_name_tokens(name) & _DIAGNOSTIC_LISTED_NOUNS)
+
+
+def _name_carries_a_resource_noun(name: str) -> bool:
+    """DIAGNOSTIC. Membership of the wider RESOURCE/PRINCIPAL name family, which
+    is a family of English nouns and not a shipped vocabulary."""
+    return bool(_name_tokens(name) & _DIAGNOSTIC_RESOURCE_NOUN_FAMILY)
 
 
 class TestCensusCorpusAdequacy:
@@ -4023,7 +4053,7 @@ class TestCensusCorpusAdequacy:
         assert "THIS CORPUS IS HALF MIRROR" in source
         assert "NOT INDEPENDENT EVIDENCE" in source
         assert (
-            "321 rows  /  176 distinct VALUES  /  124 values present in BOTH" in source
+            "341 rows  /  196 distinct VALUES  /  124 values present in BOTH" in source
         )
         assert "THE F-05 BLOCK WAS PLAN-SPECIFIED" in source
         assert "bias the measured over-strip rate DOWNWARD" in source
@@ -4042,6 +4072,13 @@ class TestCensusCorpusAdequacy:
         assert "CONTESTED_RESOURCE_NOUN_ROWS" in source
         assert "pre-committed to a counterfactual" in source
         assert "TWO GRID CELLS ARE STRUCTURALLY EMPTY" in source
+
+        # Step-5b disclosure. The population that was missing entirely, and the
+        # fact that the same rule was applied unchanged to fill it. Pinned for
+        # the same reason as the rest: it is a sentence that makes a later
+        # measurement mean less than it looks like it means.
+        assert "ORDINARY VALUES UNDER RESOURCE/PRINCIPAL NOUNS" in source
+        assert "CONTESTED_RESOURCE_NOUN_SAFE_ROWS" in source
 
     def test_every_census_ground_truth_is_one_of_the_two_legal_strings(self):
         """A third label -- `"ambiguous"`, `""`, `None` -- would be silently
@@ -4121,6 +4158,11 @@ class TestCensusCorpusAdequacy:
 
             274 rows / 129 values / 124 both / d=135   ratio 0.471  (step 2)
             321 rows / 176 values / 124 both / d=182   ratio 0.548  (step 3)
+            341 rows / 196 values / 124 both / d=202   ratio 0.575  (step 5b)
+
+        **STEP 5b RE-PINNED THEM AGAIN AND THE RATCHET IMPROVED AGAIN.** 20 rows
+        of ordinary values under RESOURCE/PRINCIPAL-noun names -- a population
+        the census carried ZERO of -- each a NEW value in exactly ONE arm.
 
         THE FOUR COUNTS ARE PINNED EXACTLY, ON PURPOSE, so any later addition has
         to state its effect on the mirror rather than absorb it silently. The two
@@ -4129,12 +4171,12 @@ class TestCensusCorpusAdequacy:
         never fall below what step 3 achieved. Adding a mirrored row (a value
         already present in the other arm) lowers the ratio and fails here.
 
-        `d` (182) exceeds the distinct-VALUE count (176) because six values are
+        `d` (202) exceeds the distinct-VALUE count (196) because six values are
         ground-truthed BOTH ways across the corpus -- the F-02 class, where the
         same string is an identifier under one name and a credential under
         another. That gap is a feature of the corpus, not an inconsistency. All
         six are original rows: a value confined to one arm under one truth cannot
-        be one, so step 3's additions could not and did not widen that gap.
+        be one, so neither step 3's nor step 5b's additions could widen that gap.
         """
         from tests.test_fsm_llm.fixtures.census_key_corpus import CENSUS, arm_of
 
@@ -4149,11 +4191,11 @@ class TestCensusCorpusAdequacy:
         both_arms = sum(1 for arms in arms_by_value.values() if len(arms) > 1)
         shapes = distinct_shape_count([(value, truth) for _n, value, truth in CENSUS])
 
-        assert (rows, distinct_values, both_arms, shapes) == (321, 176, 124, 182), (
+        assert (rows, distinct_values, both_arms, shapes) == (341, 196, 124, 202), (
             "the census's mirror moved. Measured: "
             f"{rows} rows / {distinct_values} distinct values / {both_arms} "
             f"values in BOTH arms / d={shapes} distinct (value, truth) shapes. "
-            "Expected 321 / 176 / 124 / 182.\n"
+            "Expected 341 / 196 / 124 / 202.\n"
             "If rows were ADDED, update these four numbers here and record the "
             "new distinct/row ratio -- that is the point of pinning them. If "
             "the ratio FELL, the added rows were mirrored across both arms and "
@@ -4173,11 +4215,12 @@ class TestCensusCorpusAdequacy:
             "every denominator without adding evidence. Author distinct values "
             "in exactly one arm instead."
         )
-        # RATCHET clause 2: never worse than what step 3 actually achieved.
-        assert distinct_values / rows >= 176 / 321, (
+        # RATCHET clause 2: never worse than the best ratio yet achieved --
+        # re-pinned at step 5b from step 3's 176/321 = 0.548 to 196/341 = 0.575.
+        assert distinct_values / rows >= 196 / 341, (
             f"the census's distinct/row ratio fell to {distinct_values}/{rows} "
-            f"= {distinct_values / rows:.3f}, below the 176/321 = "
-            f"{176 / 321:.3f} step 3 achieved. The ratchet only turns one way."
+            f"= {distinct_values / rows:.3f}, below the 196/341 = "
+            f"{196 / 341:.3f} step 5b achieved. The ratchet only turns one way."
         )
 
     def test_the_decisive_cells_are_not_vacuous(self):
@@ -4196,6 +4239,7 @@ class TestCensusCorpusAdequacy:
         from tests.test_fsm_llm.fixtures.census_key_corpus import (
             CENSUS,
             CONTESTED_RESOURCE_NOUN_ROWS,
+            CONTESTED_RESOURCE_NOUN_SAFE_ROWS,
         )
 
         def _shapes(predicate) -> set:
@@ -4207,13 +4251,6 @@ class TestCensusCorpusAdequacy:
 
         def _head(value: str) -> str:
             return value.split(" ", 1)[0] + " " if " " in value else ""
-
-        def _wrapped_identifier(value: str) -> bool:
-            return (
-                " " in value
-                and value.count(" ") == 1
-                and _looks_like_bare_identifier(value.split(" ", 1)[1])
-            )
 
         # (i) THE EMPTY CELL: bare UUID/ULID, LISTED noun, ground truth
         # `credential`. D-006 measured this at n = 0. It is where an
@@ -4290,21 +4327,83 @@ class TestCensusCorpusAdequacy:
             "resulting +2.9 pp as the price of the change. Measure it."
         )
 
-        # The contested rows must be real, credential-truthed census rows, so
-        # step 7's counterfactual selects mechanically instead of by grep.
+        # The contested rows must be real census rows carrying the ground truth
+        # their tuple claims, so step 7's counterfactual selects mechanically
+        # instead of by grep. Both tuples are checked by ONE loop: the contest
+        # runs in both directions (step 3 marked credential rows a reasonable
+        # author could call identifiers, step 5b marked safe rows a reasonable
+        # author could call credentials) and a second copy of these three
+        # assertions would be the duplication smell.
         truths = {name: truth for name, _value, truth in CENSUS}
-        missing = [n for n in CONTESTED_RESOURCE_NOUN_ROWS if n not in truths]
-        assert not missing, f"contested rows absent from the census: {missing}"
-        mislabelled = [
-            n for n in CONTESTED_RESOURCE_NOUN_ROWS if truths[n] != "credential"
-        ]
-        assert not mislabelled, (
-            f"contested rows not ground-truthed credential: {mislabelled}. The "
-            "counterfactual re-truths them to `safe`; a row already `safe` "
-            "makes that counterfactual a no-op and hides the contest."
+        for tuple_name, contested, expected_truth in (
+            (
+                "CONTESTED_RESOURCE_NOUN_ROWS",
+                CONTESTED_RESOURCE_NOUN_ROWS,
+                "credential",
+            ),
+            (
+                "CONTESTED_RESOURCE_NOUN_SAFE_ROWS",
+                CONTESTED_RESOURCE_NOUN_SAFE_ROWS,
+                "safe",
+            ),
+        ):
+            missing = [n for n in contested if n not in truths]
+            assert not missing, f"{tuple_name} rows absent from the census: {missing}"
+            mislabelled = [n for n in contested if truths[n] != expected_truth]
+            assert not mislabelled, (
+                f"{tuple_name} rows not ground-truthed {expected_truth}: "
+                f"{mislabelled}. The counterfactual re-truths each row to the "
+                "OPPOSITE label; a row already carrying that label makes the "
+                "counterfactual a no-op and hides the contest."
+            )
+            assert len(set(contested)) == len(contested), (
+                f"{tuple_name} has duplicate entries"
+            )
+        assert not (
+            set(CONTESTED_RESOURCE_NOUN_ROWS) & set(CONTESTED_RESOURCE_NOUN_SAFE_ROWS)
+        ), "a row is marked contested in both directions at once"
+
+    def test_the_resource_noun_ordinary_value_population_is_not_vacuous(self):
+        """SC-2, step 5b. The population the census carried ZERO rows of.
+
+        Every RESOURCE/PRINCIPAL-noun row in the census was a credential, while
+        the comparable OBSERVABILITY-noun family had 16 ordinary-value rows. One
+        family of names was represented only by its credential-bearing side, so
+        no measurement could see what an ORDINARY value under such a name costs
+        -- structurally the same defect D-006 found as the empty decisive cell,
+        one axis over.
+
+        The floor is COMPUTED off the corpus and counts DISTINCT SHAPES, like
+        every other floor in this class. The `<head> <uuid>` wrapped shapes are
+        excluded because they are already measured by the grid above; this
+        population is ORDINARY values -- bare identifiers, slugs, enum words,
+        labels, semvers, timestamps, dotted paths, small numerics.
+        """
+        from tests.test_fsm_llm.fixtures.census_key_corpus import CENSUS
+
+        population = {
+            (value, truth)
+            for name, value, truth in CENSUS
+            if truth == "safe"
+            and _name_carries_a_resource_noun(name)
+            and value.strip()
+            and not _wrapped_identifier(value)
+        }
+        assert len(population) >= 10, (
+            "ordinary non-credential values under RESOURCE/PRINCIPAL-noun names: "
+            f"{len(population)} distinct shapes. This population was EMPTY before "
+            "step 5b. Do not satisfy this floor by mirroring a value across both "
+            "arms -- the mirror ratchet fails instead."
         )
-        assert len(set(CONTESTED_RESOURCE_NOUN_ROWS)) == len(
-            CONTESTED_RESOURCE_NOUN_ROWS
+
+        # Canonical UUIDs specifically. A UUID is the shape where 'ordinary
+        # identifier' and 'credential' are least separable (F-02), so a
+        # population of slugs and enum words would look full while carrying
+        # none of the information this cell exists for.
+        uuid_shapes = {v for v, _t in population if _CANONICAL_UUID_RE.match(v)}
+        assert len(uuid_shapes) >= 4, (
+            f"only {len(uuid_shapes)} canonical-UUID shapes in the population. "
+            "The easy values do not price the hard class."
         )
 
     def test_the_census_corpus_shares_no_name_with_either_sibling_corpus(self):

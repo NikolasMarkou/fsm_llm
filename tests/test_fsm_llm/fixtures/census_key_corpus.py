@@ -60,12 +60,13 @@ THIS CORPUS IS HALF MIRROR -- THE ARM SPLIT IS NOT INDEPENDENT EVIDENCE
 Measured, not estimated (`test_the_census_mirror_is_measured_and_pinned` pins all
 four numbers and fails if they drift):
 
-    321 rows  /  176 distinct VALUES  /  124 values present in BOTH arms
-    182 distinct (value, ground_truth) SHAPES
+    341 rows  /  196 distinct VALUES  /  124 values present in BOTH arms
+    202 distinct (value, ground_truth) SHAPES
 
-    (iteration 2 step 2 measured 274 / 129 / 124 / 135; step 3 added 47 rows, every
-     one a NEW value in exactly ONE arm, so the both-arms count did not move and the
-     distinct/row RATCHET improved from 129/274 = 0.471 to 176/321 = 0.548.)
+    (iteration 2 step 2 measured 274 / 129 / 124 / 135; step 3 added 47 rows and step
+     5b added 20 more, every one of the 67 a NEW value in exactly ONE arm, so the
+     both-arms count has not moved at all and the distinct/row RATCHET improved from
+     129/274 = 0.471 to 176/321 = 0.548 to 196/341 = 0.575.)
 
 So the `*_key` arm and the `*_token` arm are near-perfect mirrors of one another for
 the ORIGINAL 274 rows: the SAME value was typed under a `*_key` name and again under
@@ -84,11 +85,11 @@ without knowing them:
 THE UNIT OF MEASUREMENT IS THEREFORE THE DISTINCT `(value, ground_truth)` SHAPE,
 counted by `distinct_shape_count()` in `test_context_unit.py`. Every cell reported
 from this corpus carries `n` (rows) AND `d` (shapes), with the SHAPE-level rate as
-the primary figure; a row-level rate is never quoted alone. `d` (182) exceeds the
-distinct-value count (176) because six values are ground-truthed BOTH ways -- the
+the primary figure; a row-level rate is never quoted alone. `d` (202) exceeds the
+distinct-value count (196) because six values are ground-truthed BOTH ways -- the
 F-02 class, where one string is an identifier under one name and a credential under
-another. All six are original rows; step 3 added none, because a value that appears
-in exactly one arm under exactly one truth cannot be one.
+another. All six are original rows; steps 3 and 5b added none, because a value that
+appears in exactly one arm under exactly one truth cannot be one.
 
 Any row added to this file must be a value that appears NOWHERE else in the corpus
 and in exactly ONE arm, so that the distinct/row ratio improves. That direction is
@@ -194,6 +195,36 @@ either name family. So `head LISTED / noun LISTED / safe` and
 meant inventing a row to make a table look complete. They stay empty and are
 disclosed here instead.
 
+ORDINARY VALUES UNDER RESOURCE/PRINCIPAL NOUNS (iteration 2, step 5b) -- 20 ROWS
+================================================================================
+After step 3 the census contained **zero** rows in one whole population: an
+ORDINARY, non-credential value under a RESOURCE/PRINCIPAL-noun name (`session`,
+`job`, `run`, `lease`, `tenant`, `batch`, `worker`, `pool`, `queue`, `task`,
+`stage`, `project`, `account`). The comparable OBSERVABILITY-noun family had 16
+such rows. So one family of names was represented here only by its
+credential-bearing side, and no measurement could see what an ordinary value under
+such a name costs -- the same defect D-006 found as the empty decisive cell, one
+axis over.
+
+20 rows were added, ground-truthed `safe` by the rule below applied UNCHANGED: each
+root names WHICH resource (`..._id`, `..._name`, `..._stage`, `..._version`,
+`..._depth`, `..._label`, `..._started_at`, `..._slug`, `..._index`) rather than a
+CAPABILITY over it. The values are ordinary application data a conversational agent
+must legitimately carry into a prompt: canonical UUIDs used as plain identifiers, a
+ULID, small numeric ids, slugs, status words, a human-readable label, a semver, ISO
+timestamps, a dotted config path, a short non-secret code. **Five are canonical
+UUIDs on purpose** -- a UUID is the shape where "ordinary identifier" and
+"credential" are least separable (F-02), so it is where this population carries the
+most information.
+
+Measured, not asserted: this population is **d = 22 distinct shapes** (the 20 new
+rows plus two pre-existing ones, `tenant_realm_key` and `account_key`), pinned by
+`test_the_resource_noun_ordinary_value_population_is_not_vacuous`.
+
+Four of the 20 are CONTESTED in the opposite direction to step 3's eleven and are
+marked in `CONTESTED_RESOURCE_NOUN_SAFE_ROWS`. Step 7's counterfactual runs over the
+UNION of the two tuples.
+
 THE GROUND-TRUTH RULE FOR AMBIGUOUS RESOURCE NOUNS -- CONTESTABLE BY CONSTRUCTION
 ================================================================================
 Written down BEFORE any row of the decisive cells was authored, because the cell is
@@ -216,8 +247,10 @@ resource (`..._id`, `..._offset`, `..._page`, `..._step`, `..._placement`,
 
 **This is the one place in this corpus where a reasonable author could differ**, and
 it is disclosed rather than defended. The rows where the contest is live are marked
-mechanically in `CONTESTED_RESOURCE_NOUN_ROWS` below -- a module-level tuple, so a
-later step SELECTS them rather than re-deriving them by grep.
+mechanically in `CONTESTED_RESOURCE_NOUN_ROWS` (credential rows a reasonable author
+could call identifiers) and `CONTESTED_RESOURCE_NOUN_SAFE_ROWS` (safe rows a
+reasonable author could call credentials) below -- module-level tuples, so a later
+step SELECTS them rather than re-deriving them by grep.
 
 **Step 7 of plan-2026-07-20T144233-47e8c662 is pre-committed to a counterfactual
 re-score over exactly that tuple**: every contested row (a) re-truthed to the
@@ -235,7 +268,9 @@ be decided without reading the filter or either sibling corpus.
   none -- every one of the 47 decisive-cell rows was decidable from the rule above
   plus public product knowledge, without opening `constants.py` or either sibling
   corpus. The two structurally-empty grid cells described above are NOT STOP-4
-  drops: they are decided BY the rule, not blocked by it.)
+  drops: they are decided BY the rule, not blocked by it. Iteration 2 step 5b:
+  none -- all 20 ordinary-value rows were decided from the same rule, and no
+  filter verdict on any of them was measured or observed while authoring.)
 
 Every census shape that reached this file was decidable from the census verdict
 column plus the name's semantic root. The census's own AMBIGUOUS shapes
@@ -260,6 +295,10 @@ CONSTRAINTS ON THIS FILE
   Not one ground-truth verdict changed as a result: the qualifier never crosses the
   identifier-ish / secret-ish boundary that decides the call. Collisions were detected
   mechanically, by set intersection, without reading a single sibling-corpus entry.
+  Step 5b hit exactly ONE collision the same way (`lease_holder_key` -> renamed
+  `lease_holder_ref_key`); the intersection reported the NAME only, and the row's
+  ground truth was decided before the check ran, so nothing about a sibling corpus's
+  content entered this file.
 
 INTERFACE
 ================================================================================
@@ -274,6 +313,7 @@ from tests.test_fsm_llm.fixtures.holdout_key_corpus import arm_of
 __all__ = [
     "CENSUS",
     "CONTESTED_RESOURCE_NOUN_ROWS",
+    "CONTESTED_RESOURCE_NOUN_SAFE_ROWS",
     "GROUND_TRUTH_VALUES",
     "KEY_ARM_CREDENTIAL",
     "KEY_ARM_SAFE",
@@ -309,6 +349,28 @@ CONTESTED_RESOURCE_NOUN_ROWS: tuple[str, ...] = (
     "session_ticket_token",
     "shard_rebalance_key",
     "vault_lease_renewal_key",
+)
+
+# The SAME contest, running the other way. Step 5b authored ordinary
+# non-credential values under RESOURCE/PRINCIPAL-noun names -- a population the
+# census carried ZERO rows of -- and four of those names are open to challenge
+# in the opposite direction: a reasonable author reading the same name could
+# call each of these a CREDENTIAL instead of an identifier. `..._account_key`
+# and `..._handle_token` read credential-ish in some product vocabularies;
+# `..._holder_ref_key` names a principal; `..._short_code_token` has the shape
+# of an OAuth authorization code, which is a credential.
+#
+# INTERFACE CONTRACT: identical to `CONTESTED_RESOURCE_NOUN_ROWS` above, except
+# that every name here is a `safe` row and the counterfactual re-truths it to
+# `credential`. Consumers select by membership. Step 7's counterfactual re-score
+# runs over the UNION of the two tuples -- "re-truthed to the opposite label"
+# and "dropped" are both well defined per row without knowing which tuple it
+# came from, which is why the split is by ground truth rather than by step.
+CONTESTED_RESOURCE_NOUN_SAFE_ROWS: tuple[str, ...] = (
+    "job_run_short_code_token",
+    "lease_holder_ref_key",
+    "session_handle_token",
+    "tenant_account_key",
 )
 
 # A >200-character unstructured high-entropy blob (census S48). Held as a named
@@ -643,6 +705,32 @@ KEY_ARM_SAFE: list[tuple[str, str, str]] = [
     ("contract_clause_key", "Clause 02ac9f84-a057-4bb8-a268-ee7774471edb", "safe"),
     ("asset_serial_key", "Asset c43080f0-a535-41d4-a125-f7e137d5f774", "safe"),
     ("article_revision_key", "Revision f06a71f2-68ec-486c-991c-4ddbd3b571b2", "safe"),
+    # ========================================================================
+    # ITERATION 2, STEP 5b -- ORDINARY VALUES UNDER RESOURCE/PRINCIPAL NOUNS,
+    # key arm. The census carried ZERO of these: every RESOURCE/PRINCIPAL-noun
+    # row here was a credential, while the OBSERVABILITY-noun family had 16
+    # ordinary-value rows. One whole family of names was represented only by
+    # its credential-bearing side, so what an ORDINARY value costs under such a
+    # name could not be measured at all.
+    #
+    # Ground truth is the banner's rule, applied unchanged: each root below
+    # names WHICH resource (`..._id`, `..._name`, `..._stage`, `..._version`,
+    # `..._started_at`, `..._depth`, `..._label`) rather than a CAPABILITY over
+    # it, so each is `safe`. Several are canonical UUIDs on purpose -- a UUID is
+    # where "ordinary identifier" and "credential" are least separable (F-02),
+    # so it is the shape this population carries the most information at.
+    # ========================================================================
+    ("session_owner_id_key", "5c4b2d17-3e6a-4f8b-9c01-7ad2e5f30b64", "safe"),
+    ("job_definition_id_key", "b81f0e2c-77d4-4a19-8f53-6c9ab0d17e42", "safe"),
+    ("worker_pool_name_key", "gpu-pool-eu-west-1", "safe"),
+    ("queue_depth_key", "137", "safe"),
+    ("task_stage_key", "awaiting_review", "safe"),
+    ("project_display_label_key", "Northwind Migration Phase 2", "safe"),
+    ("stage_pipeline_version_key", "2.11.0", "safe"),
+    ("batch_window_started_at_key", "2026-03-14T08:45:12Z", "safe"),
+    # -- CONTESTED under the banner's rule (see CONTESTED_RESOURCE_NOUN_SAFE_ROWS).
+    ("tenant_account_key", "9d3f61a8-52c7-4e10-b6d5-3f8c47a2e109", "safe"),
+    ("lease_holder_ref_key", "0f7a2c9e-4b13-4d86-9a52-c1e8b60f3d47", "safe"),
 ]
 
 
@@ -909,6 +997,21 @@ TOKEN_ARM_SAFE: list[tuple[str, str, str]] = [
     ("survey_response_token", "Response 94eb4bf5-5c3e-4a54-ac95-5a13d2ff8cad", "safe"),
     ("booking_slot_token", "Booking 01T43DSTJ86P1D736XTAK0R2C2", "safe"),
     ("route_leg_token", "Leg 7de6a7a8-139f-45a0-b714-80867b42b892", "safe"),
+    # ========================================================================
+    # ITERATION 2, STEP 5b -- ORDINARY VALUES UNDER RESOURCE/PRINCIPAL NOUNS,
+    # token arm. See the key-arm block for why this population was missing.
+    # ========================================================================
+    ("run_attempt_number_token", "4", "safe"),
+    ("session_owner_slug_token", "acme-north-ops", "safe"),
+    ("pool_config_path_token", "runtime.pools.gpu.autoscale", "safe"),
+    ("account_plan_status_token", "provisioned", "safe"),
+    ("project_workspace_id_token", "01J9Z6Q4T7YB3K8N2MRCV5XDPA", "safe"),
+    ("queue_partition_index_token", "7", "safe"),
+    ("tenant_region_label_token", "EU (Frankfurt)", "safe"),
+    ("worker_lease_expires_at_token", "2026-05-02T17:20:00Z", "safe"),
+    # -- CONTESTED under the banner's rule (see CONTESTED_RESOURCE_NOUN_SAFE_ROWS).
+    ("session_handle_token", "c6b84f02-9d71-4a53-8e26-b0f31d7c5a98", "safe"),
+    ("job_run_short_code_token", "RUN-7HQ2X", "safe"),
 ]
 
 
