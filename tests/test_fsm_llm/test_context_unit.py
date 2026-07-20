@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
+from fsm_llm.constants import (
+    _looks_like_credential_value,
+    _token_value_is_credential,
+    has_internal_prefix,
+    is_forbidden_context_entry,
+)
 from fsm_llm.context import ContextCompactor, clean_context_keys
 from tests.test_fsm_llm.fixtures.context_key_corpus import (
     CARVE_OUT_CREDENTIAL_ENTRIES,
@@ -2940,6 +2945,113 @@ class TestHostileStrSubclasses:
                     f"{expected!r}: the D-006 prefix guard changed a verdict"
                 )
 
+    # -- D-009: the FIFTH site, and the second full sweep ------------------
+    ULID = "01J9ZQ4T7XKD3M8VYB2NHF6CWE"
+
+    def test_a_non_str_name_fails_closed_under_a_uuid_value(self):
+        """D-009 -- the FIFTH raise site, and the one step 6's sweep could not
+        have caught because step 4 had already introduced it and step 6's census
+        looked at `str` SUBCLASS hostility rather than at the *name*'s TYPE.
+
+        `str.lower(name)` is raise-proof for a subclass and raises `TypeError`
+        for a non-`str`. Reachable only when the value is UUID/ULID-shaped --
+        the same latency that hid site C from step 4, which is why "we swept
+        once" is not a defence and this file now sweeps the name TYPE axis too.
+
+        The assertion is the STRIP, not the absence of a `TypeError`
+        (`LESSONS [I:5]`): blanking the name to `""` must cost the value its
+        D-003 identifier-noun carve-out, so a UUID/ULID value under a nameless
+        call STRIPS. A guard that swallowed the error and returned False would
+        satisfy "no exception" while handing the credential to the prompt.
+        """
+        for shaped in (self.UUID, self.ULID):
+            for name in (
+                123,
+                None,
+                b"trace_key",
+                ("a",),
+                ["a"],
+                {"a": 1},
+                1.5,
+                object(),
+            ):
+                for probe in (_looks_like_credential_value, _token_value_is_credential):
+                    verdict = probe(shaped, name)
+                    assert verdict is True, (
+                        f"{probe.__name__}(<{shaped[:8]}...>, name={name!r}) returned "
+                        f"{verdict!r}. A name that cannot be read supplies no "
+                        "identifier noun, so the D-003 carve-out must NOT apply and "
+                        "the value must STRIP (fail-closed, S-2)."
+                    )
+
+    def test_a_str_subclass_name_keeps_its_carve_out_under_a_uuid_value(self):
+        """The other half of D-009's polarity call, and the reason the guard is
+        `isinstance` rather than the `type(name) is str` the review suggested.
+
+        A `str` SUBCLASS name is READ, not blanked. Blanking it would delete its
+        carve-out and strip it -- which is precisely the polarity D-006 site B
+        rejected for KEYS, because failing closed on every subclass key strips
+        unrelated names wholesale. So a subclass name must behave EXACTLY like
+        the plain `str` it wraps, on both sides of the carve-out.
+        """
+        for hostile in self._hostile_types():
+            for shaped in (self.UUID, self.ULID):
+                assert (
+                    _looks_like_credential_value(shaped, hostile("trace_key")) is False
+                ), (
+                    f"{hostile.__name__}('trace_key') lost its D-003 carve-out: a "
+                    "subclass name must be read, not blanked"
+                )
+                assert (
+                    _looks_like_credential_value(shaped, hostile("merchant_key"))
+                    is True
+                ), f"{hostile.__name__}('merchant_key') leaked a UUID/ULID credential"
+
+    def test_the_public_entry_point_never_raises_for_any_key_or_value(self):
+        """The claim `is_forbidden_context_entry`'s docstring actually makes.
+
+        The second full sweep (step 9) drove 9,557 cells -- 13 hostile
+        subclasses x 18 value shapes x both parameters x 9 non-`str` types --
+        and the public entry point raised on NONE of them. That is the property
+        the three call sites (`context.py`, `prompts.py`, `runner.py`) depend
+        on, so it is asserted here rather than left to a scratchpad script.
+
+        The five private helpers are NOT covered by this claim and their
+        docstrings say so: they are raise-proof for an exact `str`, which is all
+        the containment argument buys and all any caller in this package can
+        reach.
+        """
+        shapes = [
+            self.SECRET,
+            self.SAFE,
+            self.UUID,
+            self.ULID,
+            "",
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEpQ\n-----END-----",
+            "Bearer 9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT",
+            "Atzr%2FIQEBLjAsAhRAgn8u9dR2pQ7xL4mZ8vN3bK6tY1wJ",
+            "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b",
+            "invoices/2024/q3/invoice-10482.pdf",
+            "9dR2pQ7xL4mZ8vN3bK6tY1w#J5hG0sF2aD8cE4rT@uI",
+        ]
+        non_str = [123, None, b"x", ("a",), ["a"], {"a": 1}, 1.5, True, object()]
+        names = ["trace_key", "stripe_key", "batch_key", "consul_acl_token", "sk"]
+
+        for hostile in self._hostile_types():
+            for shape in shapes:
+                for name in names:
+                    assert isinstance(
+                        is_forbidden_context_entry(hostile(name), shape), bool
+                    )
+                    assert isinstance(
+                        is_forbidden_context_entry(name, hostile(shape)), bool
+                    )
+        for odd in non_str:
+            for shape in shapes:
+                assert isinstance(is_forbidden_context_entry(odd, shape), bool)
+            for name in names:
+                assert isinstance(is_forbidden_context_entry(name, odd), bool)
+
     def test_the_guard_leaks_nothing_into_a_log_or_a_traceback(self):
         """Invariant 2: no new path logs the value or re-raises carrying it.
 
@@ -3214,4 +3326,150 @@ class TestBurnedHoldoutCorpus:
             "struck on their NAME at layer 1. Below half, this corpus's "
             "fail-open figure is a statement about the name layer and must not "
             "be quoted as evidence about the value layer."
+        )
+
+
+class TestShippedCorpusBounds:
+    """The OTHER twelve cells. Added at step 9 for adversarial-review NOTE 9.
+
+    `decisions.md` D-005/D-006/D-008 all headline **ALL 24 CELLS PASS**. Until
+    this class existed, only six of those twenty-four survived in the test
+    suite: `test_the_burned_holdout_scores_inside_both_bounds_on_both_arms`
+    mechanised the holdout, and the shipped corpus's twelve rested on exact pin
+    sets. An exact pin set is a strong guard -- arguably stronger against drift,
+    since it names every entry -- but it pins IDENTITY, not a BOUND. It cannot
+    answer "is fail-open still under 5%?", because it does not compute a rate.
+    A headline nobody can re-derive from the suite is a headline on trust.
+
+    THE COMPARISON IS DELIBERATE AND IS THE SAME ONE THE HOLDOUT TEST USES.
+    SC-3 and SC-4 read "fail-open <= 5%" and "over-strip <= 15%", so the bound
+    is INCLUSIVE and a cell fails on `pct > bound`. A cell landing EXACTLY on
+    its bound therefore PASSES, by construction and not by accident -- and the
+    holdout's token arm is exactly there today (2/40 = 5.0%), one leaking entry
+    away from red. That is disclosed here rather than left as a property of the
+    operator, which is what adversarial-review concern 5 objected to. Do NOT
+    "fix" this to `>=`: that would silently tighten a criterion mid-plan, which
+    is the same category of move as loosening one.
+
+    THERE IS NO TOLERANCE AND NO SKIP, ON PURPOSE. A bounds test that cannot go
+    red is not a control. If a later step adds corpus entries that push a cell
+    past its bound, this test must fail LOUDLY and print the measured figure --
+    that is the stop trigger firing (plan Pre-Mortem 2), not a test to relax.
+    """
+
+    @staticmethod
+    def _stripped(key, value):
+        return key not in clean_context_keys(
+            {key: value}, "test-conv", strip_forbidden_keys=True
+        )
+
+    @staticmethod
+    def _entries():
+        """Every shipped `key`/`token` slice entry as `(name, value, truth)`.
+
+        Mirrors the measurement harness exactly: the four name tuples with
+        their value maps, both carve-out shape-coverage tuples, and the token
+        arm's short-value entries. The password corpus (`SECRET_KEYS` /
+        `SAFE_KEYS`) is a DIFFERENT slice with different bounds and is not
+        counted here -- mixing it in would silently change every denominator.
+        """
+        out = []
+        for names, values, truth in (
+            (CRYPTO_KEY_SECRET_KEYS, CRYPTO_KEY_SECRET_VALUES, "credential"),
+            (CRYPTO_KEY_SAFE_KEYS, CRYPTO_KEY_SAFE_VALUES, "safe"),
+            (TOKEN_SECRET_KEYS, TOKEN_SECRET_VALUES, "credential"),
+            (TOKEN_SAFE_KEYS, TOKEN_SAFE_VALUES, "safe"),
+        ):
+            for name in names:
+                out.append((name, values[name], truth))
+        for _shape, name, value in CARVE_OUT_CREDENTIAL_ENTRIES:
+            out.append((name, value, "credential"))
+        for _shape, name, value in CARVE_OUT_SAFE_ENTRIES:
+            out.append((name, value, "safe"))
+        for name, value in TOKEN_SECRET_SHORT_VALUE_ENTRIES:
+            out.append((name, value, "credential"))
+        return out
+
+    @staticmethod
+    def _arm(name):
+        return "token" if "token" in name.lower() else "key"
+
+    def test_the_shipped_corpus_scores_inside_both_bounds_on_both_arms(self):
+        """The shipped mirror of the holdout's six-cell bounds check.
+
+        Six cells here plus six there is the whole of the "24 cells" claim
+        (two axes x three scopes x two corpora), so after this test the claim
+        is mechanised end to end rather than half-mechanised and half-asserted.
+        """
+        bounds = {"over-strip": 15.0, "fail-open": 5.0}
+        counts = {
+            (axis, arm): [0, 0] for axis in bounds for arm in ("key", "token", "total")
+        }
+        offenders = {
+            (axis, arm): [] for axis in bounds for arm in ("key", "token", "total")
+        }
+
+        for name, value, truth in self._entries():
+            axis = "fail-open" if truth == "credential" else "over-strip"
+            stripped = self._stripped(name, value)
+            wrong = (not stripped) if truth == "credential" else stripped
+            for arm in (self._arm(name), "total"):
+                counts[(axis, arm)][0] += 1
+                counts[(axis, arm)][1] += int(wrong)
+                if wrong:
+                    offenders[(axis, arm)].append(name)
+
+        vacuous = [key for key, (total, _) in counts.items() if total == 0]
+        assert vacuous == [], f"empty cells make this test vacuous: {vacuous}"
+
+        failures = []
+        for (axis, arm), (total, wrong) in sorted(counts.items()):
+            pct = 100.0 * wrong / total
+            if pct > bounds[axis]:
+                failures.append(
+                    f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) exceeds the "
+                    f"{bounds[axis]:.0f}% bound. Offending entries: "
+                    f"{sorted(offenders[(axis, arm)])}"
+                )
+        assert failures == [], (
+            "the SHIPPED corpus no longer scores inside its bounds:\n  "
+            + "\n  ".join(failures)
+            + "\n\nThis is a measured statistic, not a test to relax. If entries "
+            "were just ADDED that exhibit a known gap, the bound has genuinely "
+            "been exceeded and that is the plan's stop trigger firing -- report "
+            "it as a FAILED bound, not as a denominator problem. If nothing was "
+            "added, the filter regressed; find what changed. Either way, do NOT "
+            "re-tune a threshold to the entries named above "
+            "(`plans/LESSONS.md` [I:4])."
+        )
+
+    def test_the_shipped_bounds_test_counts_the_whole_corpus(self):
+        """ANTI-VACUITY. The failure mode this class exists to prevent is a
+        bounds test whose enumeration silently drops the entries that would
+        break it -- which is the accounting objection adversarial review raised
+        against the headline in the first place.
+
+        So the enumeration is checked against the corpus's own declared sizes,
+        two-sided: dropping a tuple, or double-counting one, fails here rather
+        than quietly moving a denominator.
+        """
+        entries = self._entries()
+        expected = (
+            len(CRYPTO_KEY_SECRET_KEYS)
+            + len(CRYPTO_KEY_SAFE_KEYS)
+            + len(TOKEN_SECRET_KEYS)
+            + len(TOKEN_SAFE_KEYS)
+            + len(CARVE_OUT_CREDENTIAL_ENTRIES)
+            + len(CARVE_OUT_SAFE_ENTRIES)
+            + len(TOKEN_SECRET_SHORT_VALUE_ENTRIES)
+        )
+        assert len(entries) == expected, (
+            f"the bounds enumeration covers {len(entries)} entries but the "
+            f"corpus declares {expected}; a denominator has drifted"
+        )
+        credentials = sum(1 for _n, _v, t in entries if t == "credential")
+        safes = len(entries) - credentials
+        assert credentials > 150 and safes > 190, (
+            f"vacuity: {credentials} credential / {safes} safe entries is too "
+            "few for these rates to mean anything"
         )

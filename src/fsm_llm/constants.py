@@ -1040,7 +1040,9 @@ def _colon_composite_tail(stripped: str) -> str | None:
 
     Returns ``None`` when *stripped* carries no colon, and when the value is
     the ``<label>:<hex digest>`` integrity shape. NEVER logs *stripped*.
-    Never raises.
+    Never raises for any EXACT ``str`` *stripped* -- which is all it is ever
+    given, by the containment argument in the D-006 block below. See that block
+    for why the qualifier is there and why the guard is not repeated here.
     """
     if ":" not in stripped:
         return None
@@ -1051,7 +1053,10 @@ def _colon_composite_tail(stripped: str) -> str | None:
 
 
 def _shannon_entropy(text: str) -> float:
-    """Bits of Shannon entropy per character of *text*. Never raises."""
+    """Bits of Shannon entropy per character of *text*.
+
+    Never raises for any EXACT ``str`` *text* (D-006 containment argument).
+    """
     if not text:
         return 0.0
     counts: dict[str, int] = {}
@@ -1162,6 +1167,49 @@ def _shannon_entropy(text: str) -> float:
 #     D-021's disclosed gap, restated here so the surface is complete. Pinned:
 #     `hex_composite/credential` in `CARVE_OUT_KNOWN_FAIL_OPEN`.
 #
+# DECISION plan-2026-07-20T103203-b8a6b855/D-009
+# ACCEPTED GAPS OF THE **OTHER** RULES ON THIS CHAIN. G1-G7 above are
+# this rule's residual and only this rule's. G8-G9 belong to the D-003
+# identifier-noun carve-out and to the layer-1 qualifier alternation
+# respectively, and are listed HERE, next to G1-G7, for one reason: an editor
+# looking for "what does this chain still get wrong" must find the whole answer
+# in one place. Their OWNERS are elsewhere; do not fold them into the rule above.
+#
+#  G8 DOTTED / HIERARCHICAL IDENTIFIERS OVER-STRIP. The D-003 carve-out only
+#     applies under a UUID/ULID-shaped value, so an identifier in any OTHER
+#     common real format falls through to the generic arm and is STRIPPED even
+#     when its name carries a LISTED noun. MEASURED at HEAD:
+#       metric_key        "svc.checkout.latency.p99.eu-central-1"      STRIP
+#       routing_key       "orders.eu-central-1.v2.created.high-..."     STRIP
+#       trace_token       "00-4bf92f35...-00f067aa0ba902b7-01" (W3C)   STRIP
+#       correlation_token "4bf92f3577b34da6a3ce929d0e0e4736" (32 hex)  STRIP
+#     `trace` and `correlation` ARE in `_IDENTIFIER_NOUN_VOCABULARY`, so the
+#     vocabulary does not protect the identifiers it was named for in their most
+#     common wire formats -- which is the honest limit of the D-003 result and
+#     is stated here rather than left for a fourth adversarial pass to find.
+#     This is OVER-strip, the axis with headroom (S-1: 3.4% against a 15%
+#     bound), which is why it is disclosed rather than fixed: widening the
+#     carve-out to non-UUID shapes would hand the fail-open axis a class it
+#     cannot separate by value (A-2). Pinned two-sided by `metric_key` in
+#     `CRYPTO_KEY_KNOWN_OVER_STRIPPED` and `trace_token`/`correlation_token` in
+#     `TOKEN_KNOWN_OVER_STRIPPED`. Raised as pass-3 concern 11 and carried.
+#  G9 DIGEST-FUNCTION QUALIFIERS ARE NOT CRYPTO-KEY QUALIFIERS -- DELIBERATE.
+#     `sha256_key`, `sha1_key`, `sha512_key`, `md5_key` and `blake3_key` are
+#     KEPT on the NAME while `aes256_key`, `aes128_key`, `rsa2048_key`,
+#     `rsa4096_key`, `hmac256_key`, `ecdsa_key` and `ed25519_key` are STRUCK on
+#     it. That boundary is not an omission from `_CRYPTO_KEY_QUALIFIERS`: SHA,
+#     MD5 and BLAKE name DIGEST functions, and a `sha256_key` is as often a
+#     cache or content-address handle as key material -- `cache_key:
+#     "sha256:..."` is SC-5-pinned to be KEPT by the prior plan for exactly this
+#     reason. HMAC is struck because HMAC genuinely is keyed. MEASURED, and this
+#     is why it is not "fixed": all five digest names STRIP anyway once they
+#     carry a real 64-hex digest value, so adding `sha|md5|blake` as qualifiers
+#     buys ZERO fail-open and costs five names' worth of pure over-strip --
+#     "spending headroom that buys nothing is not a trade, it is waste"
+#     (D-003's own argument against disposition (a)). Raised as pass-3
+#     concern 12 and answered here. Do NOT add digest names to
+#     `_CRYPTO_KEY_QUALIFIERS`.
+#
 # MEASURED (both corpora, both axes, per-arm/slice-total; bounds 15%/5%): shipped
 # over-strip 2.6/4.4/3.4 and holdout 2.0/2.0/2.0 BOTH UNCHANGED to the entry --
 # the `LESSONS [I:4]` check this edit most needed, since it pushes toward STRIP on
@@ -1174,7 +1222,8 @@ def _normalise_credential_value(stripped: str) -> str:
     percent-decoding, then `<auth-scheme> <credential>` unwrapping. A value
     carrying neither is returned unchanged. The result is never longer than the
     input, so the ``_VALUE_SCAN_LIMIT`` bound still holds. NEVER logs
-    *stripped*. Never raises.
+    *stripped*. Never raises for any EXACT ``str`` *stripped* (D-006
+    containment argument).
     """
     if "%" in stripped:
         # `errors="ignore"` DROPS undecodable bytes rather than substituting
@@ -1194,7 +1243,8 @@ def _generic_shape_is_credential(text: str) -> bool:
     out of :func:`_looks_like_credential_value` because `_is_path_shaped` needs
     to ask the same question of a path's individual segments, and two
     hand-maintained copies of a security threshold is a defect, not a pattern.
-    NEVER logs *text*. Never raises.
+    NEVER logs *text*. Never raises for any EXACT ``str`` *text* (D-006
+    containment argument).
     """
     if len(text) < _MIN_CREDENTIAL_VALUE_LENGTH:
         return False
@@ -1220,7 +1270,8 @@ def _is_path_shaped(stripped: str) -> bool:
 
     A trigger (file extension, or four-plus `/`-separated fields) is necessary
     but NOT sufficient: the carve-out applies only when no individual segment is
-    itself credential material. NEVER logs *stripped*. Never raises.
+    itself credential material. NEVER logs *stripped*. Never raises for any
+    EXACT ``str`` *stripped* (D-006 containment argument).
     """
     if "/" not in stripped:
         return False
@@ -1258,10 +1309,13 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     rule only: the fail-closed UUID/ULID identifier-noun carve-out (D-003). It
     defaults to ``""``, which is the fail-closed direction -- a caller that
     supplies no name gets no carve-out. Read through the unbound
-    ``str.lower``, so a hostile ``str`` subclass cannot hook it.
+    ``str.lower``, so a hostile ``str`` subclass cannot hook it; a non-``str``
+    *name* is blanked to ``""`` first, which is the same fail-closed direction
+    (D-009).
 
     NEVER logs *value* and never re-raises with it attached. Never raises, for
-    ANY input including a hostile ``str`` subclass (D-006). Inspects at most
+    ANY *value* and ANY *name* of ANY type, including hostile ``str``
+    subclasses of either (D-006, D-009). Inspects at most
     ``_VALUE_SCAN_LIMIT`` leading characters, so cost is bounded regardless of
     how large the context value is.
     """
@@ -1280,6 +1334,20 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     # Do NOT "simplify" this to unbound slicing. Everything downstream then holds
     # an EXACT `str` (every `str` method returns one), which is what makes
     # "Never raises" TRUE rather than aspirational on the helpers below.
+    #
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-009 -- the containment
+    # argument's EXACT SCOPE, measured rather than asserted. This guard is what
+    # makes the five helpers below raise-proof, so their claim is scoped to what
+    # it actually buys: "never raises for any EXACT `str`". Called DIRECTLY with
+    # a hostile subclass -- which nothing in this package does, and which the
+    # sweep confirms is the only way to reach them unguarded -- they DO raise
+    # (measured: 147 cells across `_shannon_entropy`, `_colon_composite_tail`,
+    # `_normalise_credential_value`, `_generic_shape_is_credential`,
+    # `_is_path_shaped`). Repeating this guard five times was REJECTED: it would
+    # give five choke points where the design's whole claim is that there is
+    # one, and it buys nothing a caller inside this module can reach. The
+    # honest move is the narrowed docstring, not a bare "Never raises" that a
+    # direct caller can falsify. Do NOT widen those claims back.
     # Pinned two-sided by `test_a_hostile_str_subclass_value_fails_closed` and
     # `test_a_benign_str_subclass_value_also_fails_closed`.
     # See decisions.md D-006; `memory.py` D-016 is sites one and two.
@@ -1331,6 +1399,30 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
         # site reachable ONLY under a UUID/ULID value, which is why it survived
         # step 4. Deleting it is verdict-identical (`str.lower("")` splits to
         # `[""]`, not in the vocabulary). Do NOT restore it as an optimisation.
+        #
+        # DECISION plan-2026-07-20T103203-b8a6b855/D-009 -- site E, the FIFTH
+        # raise site, and the reason a sweep must be re-run after the last edit
+        # rather than after the edit that motivated it. `str.lower(name)` is
+        # raise-proof for a `str` SUBCLASS (that is why D-006 chose it) but
+        # raises `TypeError` for a NON-`str` name -- and only when the value is
+        # UUID/ULID-shaped, the same latency that hid site C from step 4. Not
+        # live-path reachable (`is_forbidden_context_entry` guards
+        # `isinstance(key, str)` first), but the docstring above claims "for ANY
+        # input" and a non-`str` name is an input.
+        #
+        # `isinstance`, NOT `type(name) is str`, and the difference is a
+        # deliberate polarity call. Blanking a str SUBCLASS name would delete
+        # its carve-out and STRIP it -- which contradicts D-006 site B, where
+        # failing closed on subclass KEYS was rejected precisely because it
+        # would strip unrelated names wholesale. A subclass name is read safely
+        # by the unbound `str.lower` below (probed: 13 hostile subclasses x 18
+        # value shapes x 2 entry points, zero raises), so there is nothing to
+        # fail closed ABOUT. A non-`str` name has no name to read, and `""` is
+        # the fail-CLOSED direction: no token matches the identifier-noun
+        # vocabulary, so no carve-out applies and a UUID/ULID value STRIPS.
+        # Pinned by `test_a_non_str_name_fails_closed_under_a_uuid_value`.
+        if not isinstance(name, str):
+            name = ""
         tokens = _NAME_TOKEN_SPLIT_RE.split(str.lower(name))
         if any(token in _IDENTIFIER_NOUN_VOCABULARY for token in tokens):
             return False
@@ -1392,7 +1484,9 @@ def _token_value_is_credential(value: object, name: str = "") -> bool:
     pagination cursors are indistinguishable from bearer tokens by value -- and
     those are handled by name in ``_SAFE_TOKEN_QUALIFIERS`` instead.
 
-    NEVER logs *value*. Never raises.
+    NEVER logs *value*. Never raises, for ANY *value* and ANY *name* of ANY
+    type -- it delegates to :func:`_looks_like_credential_value`, so it
+    inherits that function's guards and nothing else (D-006, D-009).
     """
     # A number cannot carry key material. `bool` is an `int` subclass and is
     # covered here on purpose: `True` carries no material either.

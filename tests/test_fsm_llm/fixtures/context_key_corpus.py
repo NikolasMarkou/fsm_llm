@@ -540,6 +540,14 @@ CRYPTO_KEY_SAFE_KEYS: tuple[str, ...] = (
     "hockey_team",
     "whiskey_brand",
     "jockey_name",
+    # DOTTED / HIERARCHICAL IDENTIFIER (accepted gap G8; pass-3 concern 11).
+    # Added at step 9 so this class stops being invisible. An ordinary metrics
+    # path -- not secret, not generated, and STRIPPED, because the D-003
+    # identifier-noun carve-out only applies under a UUID/ULID-shaped value and
+    # this shape is neither. It is pinned in `CRYPTO_KEY_KNOWN_OVER_STRIPPED`
+    # below, which was EMPTY before this entry: the key arm shipped with zero
+    # disclosed over-strip cost while the class demonstrably existed.
+    "metric_key",
 )
 
 # --------------------------------------------------------------------------
@@ -548,7 +556,30 @@ CRYPTO_KEY_SAFE_KEYS: tuple[str, ...] = (
 # the fail-closed default cannot drift silently in either direction.
 # Populated from the measurement, not from intent -- see D-014.
 # --------------------------------------------------------------------------
-CRYPTO_KEY_KNOWN_OVER_STRIPPED: frozenset[str] = frozenset()
+CRYPTO_KEY_KNOWN_OVER_STRIPPED: frozenset[str] = frozenset(
+    {
+        # ACCEPTED GAP G8 (`constants.py`, D-009); pass-3 concern 11, open
+        # across two plans and pinned here for the first time.
+        #
+        # `metric_key: "svc.checkout.latency.p99.eu-central-1"`. A dotted
+        # metrics path clears the 24-character floor with a mixed character
+        # class and enough entropy to read as generated -- it IS generated; it
+        # is not secret. The D-003 identifier-noun carve-out cannot rescue it
+        # because that carve-out only fires under a UUID/ULID-shaped value.
+        #
+        # This set was EMPTY until step 9, which meant the key arm shipped
+        # claiming zero disclosed over-strip cost. That was never true; it was
+        # unmeasured. The class is real and its siblings on the token arm
+        # (`trace_token`, `correlation_token`) are pinned in
+        # `TOKEN_KNOWN_OVER_STRIPPED` for the same reason.
+        #
+        # DISCLOSED, NOT FIXED, and the direction is the argument: this is
+        # OVER-strip, the axis with headroom (3.4% slice-total against a 15%
+        # bound), whereas widening the carve-out to non-UUID shapes would hand
+        # the FAIL-OPEN axis a class no value test can separate (plan A-2).
+        "metric_key",
+    }
+)
 
 
 # ==========================================================================
@@ -776,6 +807,14 @@ TOKEN_SAFE_KEYS: tuple[str, ...] = (
     # written from. Both over-strip; see TOKEN_KNOWN_OVER_STRIPPED.
     "bookmark_token",
     "seek_token",
+    # DOTTED / HIERARCHICAL IDENTIFIERS in their real wire formats (accepted
+    # gap G8; pass-3 concern 11). Added at step 9. Both carry a noun that IS in
+    # `_IDENTIFIER_NOUN_VOCABULARY` and both over-strip anyway, because the
+    # D-003 carve-out only fires under a UUID/ULID-shaped value and neither W3C
+    # `traceparent` nor a bare 32-hex trace id is one. Pinned in
+    # `TOKEN_KNOWN_OVER_STRIPPED`.
+    "trace_token",
+    "correlation_token",
 )
 
 # --------------------------------------------------------------------------
@@ -801,12 +840,26 @@ TOKEN_SAFE_KEYS: tuple[str, ...] = (
 #     head (`tokens_str` names the token AS A STRING). Pre-existing D-019
 #     behaviour, not introduced here, and the name is unusual enough that the
 #     head is worth more than the name.
+#
+#   `trace_token`, `correlation_token` -- ACCEPTED GAP G8 (`constants.py`,
+#     D-009); pass-3 concern 11, open across two plans and pinned here for the
+#     first time at step 9. These are the sharpest form of the class, and the
+#     reason they are worth two corpus entries rather than a sentence: BOTH
+#     names carry a noun that IS a member of `_IDENTIFIER_NOUN_VOCABULARY`
+#     (`trace`, `correlation`), so the D-003 carve-out was written FOR them --
+#     and it does not reach them, because it fires only under a UUID/ULID
+#     value and these hold a W3C `traceparent` and a bare 32-hex trace id
+#     respectively. The vocabulary does not protect the identifiers it was
+#     named for in their most common real formats. That is the honest limit of
+#     the D-003 result, and it now costs two visible entries instead of none.
 # --------------------------------------------------------------------------
 TOKEN_KNOWN_OVER_STRIPPED: frozenset[str] = frozenset(
     {
         "bookmark_token",
         "seek_token",
         "max_output_tokens_str",
+        "trace_token",
+        "correlation_token",
     }
 )
 
@@ -923,6 +976,13 @@ _TOKEN_SAFE_NON_COUNT_VALUES: dict[str, object] = {
     # over-strips. Their values are what makes them unsalvageable.
     "bookmark_token": "eyJvZmZzZXQiOjQyMCwic29ydCI6ImNyZWF0ZWQifQ==",
     "seek_token": "MDAwMDQyMHxjcmVhdGVkX2F0fGRlc2M=",
+    # ACCEPTED GAP G8 / pass-3 concern 11. These MUST be spelled out here: the
+    # numeric default below would make the token arm keep them on the `int`
+    # rule and the class would stay invisible, which is exactly the defect
+    # being closed. The formats are the published ones -- a W3C `traceparent`
+    # header value and a bare W3C trace id -- not shapes chosen to strip.
+    "trace_token": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "correlation_token": "4bf92f3577b34da6a3ce929d0e0e4736",
 }
 
 TOKEN_SAFE_VALUES: dict[str, object] = {
@@ -1236,6 +1296,10 @@ CRYPTO_KEY_SAFE_VALUES: dict[str, object] = {
     "hockey_team": "Toronto Maple Leafs",
     "whiskey_brand": "Ardbeg Uigeadail",
     "jockey_name": "Frankie Dettori",
+    # ACCEPTED GAP G8 / pass-3 concern 11. A Prometheus-style metrics path:
+    # 37 characters, mixed class, dotted and dashed. Entirely ordinary, and
+    # STRIPPED. Pinned in `CRYPTO_KEY_KNOWN_OVER_STRIPPED`.
+    "metric_key": "svc.checkout.latency.p99.eu-central-1",
 }
 
 

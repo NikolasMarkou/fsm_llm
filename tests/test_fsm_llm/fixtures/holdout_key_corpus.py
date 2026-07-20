@@ -46,9 +46,31 @@ on the NAME -- key arm 51.2%, token arm 65.0%. A probe under a name layer 1
 already strikes measures the NAME layer and says nothing about the value
 layer; a majority-value-attributable corpus is the precondition for reading
 its fail-open figure as a statement about the control this plan changed.
-(For contrast, the shipped corpus's key arm is only 3.0% value-attributable
+(For contrast, the shipped corpus's key arm is only **9.8%** value-attributable
 and its key-arm fail-open figure must NEVER be read as a value-layer
 measurement.)
+
+    CORRECTION (step 9, adversarial review concern 8). This banner shipped
+    at step 8 reading "only 3.0% value-attributable". That number is WRONG.
+    3.0% was the step-2 BASELINE figure, measured at `034b0ec` BEFORE steps
+    4, 5 and 8 moved five shipped key-arm credentials out of `leaked` and
+    into value-attributable; it was carried into a step-8 file unchanged.
+    The figure at the commit this banner ships in is **9.8% (10/102)**, and
+    `test_context_unit.py`'s sibling comment ("~9%") and `decisions.md` D-008
+    ("9.8%") both had it right -- this banner was the outlier of three.
+    Recorded rather than silently overwritten, per the convention step 8
+    established for its own two numeric corrections; the whole point of that
+    convention is that a security artifact's numbers are auditable, and a
+    number that was quietly swapped teaches nobody why it was wrong.
+    The 3.0% -> 9.8% change does NOT weaken the sentence it sits in: at 9.8%
+    the shipped key arm is still nowhere near a majority, so the contrast
+    being drawn -- that this holdout can speak about layer 2 and that corpus
+    cannot -- holds exactly as stated, and holds for the same reason.
+
+    Every other number in this banner was re-verified against a live
+    measurement at step 9 (entry counts, arm splits, the two intersection
+    figures, the step-2 shares, and the byte lengths quoted in the residual-
+    leak notes below). No further defect was found.
 
 DISJOINTNESS vs `context_key_corpus.py`, mechanically enforced by
 `test_the_burned_holdout_is_disjoint_from_the_regression_corpus`:
