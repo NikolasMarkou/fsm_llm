@@ -281,58 +281,95 @@ _PASSWORD_POLICY_SUFFIXES = (
     "|fail|failed|failure|failures|complete|completed|create|created"
 )
 
-# DECISION plan-2026-07-20T040150-876e7164/D-014
-# (supersedes D-031's qualifier DENYLIST for the `key` trigger, and the six-word
-#  auth-token qualifier list for the `token` trigger. Same shape as D-026/D-030's
-#  password control: a fail-CLOSED whole-decomposition ALLOWLIST.)
+# DECISION plan-2026-07-20T040150-876e7164/D-015
+# (CORRECTS D-014, which is superseded for the `key` trigger and AMENDED for the
+#  `token` trigger. D-014's own in-code text made a class claim that was false
+#  for the code it annotated; that text is replaced here rather than preserved.)
 #
-# WHAT WAS WRONG. Both triggers previously said "strip only when the qualifier is
-# on this list", so every qualifier NOT on the list FAILED OPEN. Measured at the
-# previous HEAD: 46 of 52 real crypto-key names leaked (`ssh_key`, `deploy_key`,
-# `rsa_key`, `keypair`, `keyfile`, `id_rsa`, ...) and 27 of 27 real auth-token
-# names leaked (`csrf_token`, `session_token`, `jwt_token`, ...) -- the token
-# blind spot was TOTAL. That is the "fix a class by naming its members" shape
-# LESSONS [I:5] records as this codebase's recurring failure.
+# WHAT D-014 GOT RIGHT. Before it, both triggers said "strip only when the
+# qualifier is on this list", so every qualifier NOT on the list FAILED OPEN:
+# 46 of 52 real crypto-key names leaked (`ssh_key`, `deploy_key`, `rsa_key`,
+# `keypair`, `id_rsa`, ...) and 27 of 27 real auth-token names leaked
+# (`csrf_token`, `session_token`, `jwt_token`, ...). That had to change.
 #
-# WHAT THIS IS. The polarity is INVERTED. A key is now KEPT only when its whole
-# decomposition around the trigger word is allowlisted; anything unrecognised
-# STRIPS. Three shapes are covered, because a `*_key`-suffix-shaped pattern is
-# structurally blind to the other two:
-#   suffix        `ssh_key`, `deploy_key`, `rsa_key`   -> alternative 2
-#   prefix        `key_pair`, `key_material`, `keyfile`-> alternative 3
-#   concatenated  `sshkey`, `privkey`, `csrftoken`     -> alternative 2
-# plus the bare article (`key`, `keys`, `token`, `tokens`) -> alternative 1.
+# WHAT D-014 GOT WRONG, AND WHY IT IS FIXED HERE. Two defects, both found by
+# adversarial review of the shipped code:
 #
-# DO NOT convert either allowlist back into a qualifier DENYLIST. That is
-# precisely what leaked 46/52 and 27/27. `FSMContext.data` is an open dict of
-# arbitrary consumer keys, so no denylist of qualifiers can ever be complete,
-# and its incompleteness fails OPEN (a credential in a prompt) rather than
-# closed (a lost context key).
+#   (1) THE SCAN WAS NOT ANCHORED. D-014's negative lookaheads inspected only
+#       the qualifier IMMEDIATELY before the trigger, so prepending anything to
+#       an allowlisted qualifier defeated the strip: `csrf_token` stripped but
+#       `csrf_max_token` was KEPT; `ssh_key` stripped but `ssh_cache_key` was
+#       KEPT; `private_key` stripped but `private_public_key` was KEPT. The
+#       "whole decomposition" claim was therefore false. Fixed for `token` by
+#       anchoring the lookahead to the START of the name (`(?:qual[-_.]?)+`, so
+#       EVERY qualifier before the trigger must be allowlisted).
 #
-# DO NOT relax `[a-z0-9]+` to `[a-z0-9]*`. This is the G-14 trap and it LOOKS
-# CORRECT BY INSPECTION: with zero-or-more, the `.*[\W_]` skip-prefix consumes
-# the safe qualifier (`cache_`) and the qualifier then matches EMPTY against the
-# trailing bare `key`, so the negative lookahead is silently defeated for EVERY
-# allowlisted word. Measured on the explorer's first draft: 0 of 32 safe names
-# kept. Measured again here on the exact shipped pattern: relaxing it flips 41
-# `key` names and 34 `token` names from kept to stripped.
+#   (2) THE POLARITY WAS WRONG FOR `key`. The two triggers have OPPOSITE
+#       vocabulary structure and D-014 shipped the same polarity for both:
+#         `token` -- the SAFE space is small and closed (LLM metering, NLP
+#                    special tokens, pagination cursors) and the DANGEROUS space
+#                    is open (any `<service>_token` bearer credential), so a
+#                    fail-closed ALLOWLIST is the right shape. KEPT.
+#         `key`   -- INVERTED. The SAFE space is unbounded (`s3_key`,
+#                    `user_key`, `order_key`, `config_key`, `context_key`,
+#                    `item_key`, any `<noun>_key`) while the DANGEROUS space is
+#                    a finite, well-known crypto vocabulary. A fail-closed
+#                    allowlist over an unbounded safe space produced a MEASURED
+#                    42% over-strip against an independently-sourced corpus
+#                    (31 names, all newly regressed by D-014) -- see
+#                    findings/review-iter-1.md. So `key` is now a crypto
+#                    qualifier DENYLIST.
 #
-# DO NOT "fix" an over-strip complaint by adding a word here without re-running
-# BOTH directions and the ReDoS timing (tests/test_fsm_llm/test_context_unit.py,
-# class TestCryptoKeyAndTokenAllowlists). Because a key is kept when its whole
-# decomposition is allowlisted, every word added here is also independently
-# keepable as the ENTIRE qualifier -- the same coupling D-030 documents.
+# WHAT THIS IS, STATED PRECISELY -- NO CLASS CLAIM FOR `key`.
+#   `key`   : an ENUMERATED DENYLIST of crypto vocabulary. It is NOT a class
+#             control. It FAILS OPEN on any crypto qualifier nobody enumerated
+#             (`foo_key` for some future algorithm `foo` reaches the prompt).
+#             That is a real, permanent cost and it is exactly the failure shape
+#             LESSONS [I:5] warns about; it is accepted here only because the
+#             alternative -- fail-closed over an unbounded safe space -- was
+#             measured and destroyed 42% of ordinary application vocabulary on
+#             the live prompt path. The four STRONG triggers (`secret`,
+#             `credential`, `password`, and `private` inside this list) remain
+#             an INDEPENDENT backstop layer above it.
+#   `token` : a fail-CLOSED, START-ANCHORED ALLOWLIST for the `<qual>_token`
+#             suffix shape. Unrecognised qualifiers strip. This half IS a class
+#             control and the claim is safe to make for it.
+#             The `token_<head>` PREFIX shape is a denylist of value-bearing
+#             heads, for the same reason `key` is: `token_count`,
+#             `token_max_length`, `token_per_second`, `tokenizer_config` are
+#             unbounded ordinary vocabulary.
 #
-# THE RESIDUAL IS AN ENUMERATED LIST, NOT A CLASS, AND IS DISCLOSED AS SUCH.
-# `kek`, `dek`, `id_rsa`, `id_dsa`, `id_ecdsa` and `id_ed25519` contain no "key"
-# substring at all, so NO `key`-shaped pattern can structurally reach them. They
-# get their own explicit entry below. That entry is a denylist and will be
-# incomplete; honest enumeration beats a false class claim (D-001 alternative 3).
+# DO NOT convert the `token` SUFFIX allowlist into a denylist. That is what
+# leaked 27/27, and bearer-token qualifiers are open-ended.
+# DO NOT convert the `key` denylist back into an allowlist without re-running
+# the independent-corpus measurement in
+# tests/test_fsm_llm/test_context_unit.py::TestCryptoKeyAndTokenTriggers; that
+# is the measurement D-014 skipped (its corpus was a 1:1 restatement of its own
+# allowlist, 36/36 and 21/21, so it measured nothing).
+# DO NOT relax `[a-z0-9]+` to `[a-z0-9]*` in the token suffix arm. G-14: with
+# zero-or-more, the `.*[\W_]` skip-prefix consumes the safe qualifier and the
+# qualifier then matches EMPTY against a bare trigger, silently defeating the
+# lookahead for EVERY allowlisted word.
+# DO NOT replace `_CRYPTO_GAP`'s bounded `{0,64}?` with `*?`. The gap sits
+# inside an `(?:^|.*[\W_])` scan, so an unbounded lazy gap makes the pattern
+# QUADRATIC on inputs like `"ssh_"*n` -- a DoS on the prompt path, where this
+# runs with the per-conversation lock held. The bound is what keeps it linear
+# (measured: per-character time varies 1.63x over 7 doublings).
 #
-# `public` is deliberately IN the keep list (a public key is not a secret, and
-# invariant I-7 pins it via tests/test_fsm_llm_regression/test_regression_iter2.py).
-# `license` is deliberately OUT: a software license key is credential-adjacent.
-# See decisions.md D-014.
+# KNOWN AND ACCEPTED GAPS, enumerated rather than papered over:
+#   - camelCase multi-word (`sshPublicKey`) is NOT reached: the gap scan needs
+#     the crypto word to end at a separator or directly abut `key`.
+#   - a crypto word that is not at a word boundary (`mysshkey`) is not reached.
+#   - `kek`, `dek`, `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519` contain no
+#     "key" substring at all and get their own explicit entry below.
+#   - `product_key` is deliberately KEPT: it is genuinely ambiguous (Windows
+#     product key vs. a product table's key) and the independent corpus counts
+#     it as ordinary. `license_key`, `activation_key` and `serial_key` remain
+#     stripped as the unambiguous license-credential spellings.
+#   - `public` is NOT in the crypto denylist (a public key is not a secret;
+#     invariant I-7, pinned by tests/test_fsm_llm_regression/test_regression_iter2.py).
+#     `ssh_public_key` still strips, because `ssh` is.
+# See decisions.md D-015.
 
 # Consume a trailing plural `s` when -- and only when -- it is a plural. The
 # alternation is NOT a stylistic `s?`: `s?` would let the engine backtrack to the
@@ -352,53 +389,96 @@ _TOKEN_TRIGGER = rf"token{_TRIGGER_PLURAL}"
 # retried at every separator position.
 _WORD_END = r"(?:[\W_]|$)"
 
-# KEEP-list for a qualifier sitting immediately before `key`: database, cache,
-# object-store, i18n and generic-reference vocabulary. 11 of the last five
-# entries are this framework's OWN `*_key` idiom, which the previous plan's
-# textbook-DB allowlist did not contain and therefore destroyed (G-12).
-_SAFE_KEY_QUALIFIERS = (
-    "primary|foreign|composite|natural|surrogate|cache|sort|partition"
-    "|idempotency|shard|group|object|bucket|row|index|dict|map|public"
-    "|unique|lookup|search|hash|agent|workflow|conversation|conv|wf"
-    "|result|timer|evidence|payload|stream|ref|translation|i18n|locale"
+# STRIP-list (DENYLIST -- see the polarity paragraph in D-015 above) of crypto
+# vocabulary. A `*key*` name strips when ANY of these words appears at a word
+# boundary anywhere before the trigger, so `ssh_key`, `ssh_cache_key` and
+# `ssh_public_key` all strip while `s3_key`, `cache_key` and `public_key` are
+# kept. Grouped by source vocabulary so that additions land in the right group
+# and the coverage gaps are visible.
+_CRYPTO_KEY_QUALIFIERS = (
+    # asymmetric algorithms and their file-name spellings
+    "rsa|dsa|ecdsa|eddsa|ed25519|x25519|curve25519|ecc|elliptic"
+    # symmetric primitives, MACs and password-hashing KDFs
+    "|aes|des|3des|blowfish|chacha|chacha20|salsa20|rc4|idea|cipher|ciphers"
+    "|hmac|mac|cmac|poly1305|kdf|hkdf|pbkdf2|scrypt|bcrypt|argon2"
+    # transport security and PKI container formats
+    "|tls|ssl|dtls|mtls|x509|pem|der|pkcs[0-9]*|pfx|p12|jks|csr"
+    "|cert|certs|certificate|certificates|ca|cacert|truststore"
+    # SSH, PGP and host identity
+    "|ssh|sshd|openssh|gpg|pgp|openpgp|host|hosts|known"
+    # the ROLE a key plays -- this group, not the algorithm group, is what
+    # catches the majority of real names
+    "|private|priv|secret|master|signing|sign|signature|verification"
+    "|encryption|encrypt|encrypted|decryption|decrypt|symmetric|asymmetric"
+    "|shared|derive|derived|derivation|wrap|wrapping|unwrap|unwrapping"
+    "|kek|dek|envelope|seal|unseal|sealing"
+    # credential-adjacent roles (these also have independent strong triggers,
+    # which is deliberate -- defence in depth, not redundancy)
+    "|api|access|auth|oauth|jwt|jwk|jwks|session|bearer|credential"
+    "|deploy|deployment|authorized|authorised|root|admin|server|client"
+    # secret-management platforms and key stores
+    "|kms|hsm|vault|keystore|keyvault|managed|cmk|byok"
+    # seeds, salts and account-recovery material
+    "|seed|salt|entropy|nonce|mnemonic|passphrase|recovery|restore|backup"
+    "|unlock|activation|license|licence|serial|subscription"
+    # framework config spellings whose VALUE is key material
+    "|rails|django|secretkeybase|webhook"
 )
 
-# KEEP-list of ordinary English words whose spelling merely ENDS in "key". These
-# are not qualifiers -- there is no separator to decompose on -- so they cannot
-# live in the list above. This group exists because matching the concatenated
-# shape (`sshkey`, `privkey`) necessarily also matches `monkey`. The group is
-# closed and short; missing a word costs a stripped context key, never a leak.
-_SAFE_KEY_WORDS = (
-    "monkey|donkey|turkey|hockey|jockey|whiskey|lackey|malarkey|turnkey|flunkey|mickey"
+# STRIP-list of heads sitting immediately AFTER a leading `key`. Position is
+# load-bearing and the asymmetry is intentional: `key_blob` is a blob OF a key
+# (strip) while `blob_key` is a key OF a blob (keep); `keyfile` is a file
+# holding key material (strip) while `file_key` identifies a file (keep).
+# Anything not on this list keeps, so `keyword`, `keyboard_layout`,
+# `keystone_species`, `key_value_pair` and `key_performance_indicator` need no
+# allowlist of their own -- which is why D-014's `_SAFE_KEY_WORDS` and
+# `_SAFE_KEY_HEADS` are gone rather than moved.
+_KEY_MATERIAL_HEADS = (
+    "pair|pairs|file|files|store|stores|storage|ring|rings|chain|chains"
+    "|material|blob|blobs|bytes|byte|data|content|contents|body|payload"
+    "|pem|der|b64|base64|hex|seed|salt|phrase|passphrase|fingerprint"
+    "|thumbprint|digest|secret|secrets|vault|vaults|holder|slot"
 )
 
-# KEEP-list for a head sitting immediately AFTER a leading `key`. `keystore`,
-# `keyring`, `keychain`, `keyfile`, `keypair` and `key_material` all name key
-# material or its container and are deliberately absent.
-_SAFE_KEY_HEADS = "word|board|note|stone|space|pad|frame|hole|stroke"
+# Bounded lazy gap between a crypto qualifier and the trigger, so that EVERY
+# intervening word is skipped rather than only the last one (the D-014 defect).
+# The `{0,64}` bound is a ReDoS control, NOT a style choice -- see D-015.
+_CRYPTO_GAP = r"[a-z0-9_.\-]{0,64}?"
 
-# KEEP-list for a qualifier immediately before `token`. Two crisply-ruled groups,
-# and no others: (1) words denoting a METERING DIMENSION -- this is an LLM
-# framework, so `max_tokens`/`prompt_tokens`/`completion_tokens`/`cached_tokens`
-# are pervasive, ordinary and non-secret, and stripping them is the tightest
-# collateral constraint in this control; (2) words denoting a PAGINATION CURSOR
-# (`nextPageToken`, `NextToken`, `continuationToken`, `syncToken`), which are
-# opaque list-API offsets, not bearer credentials. Every bearer-style qualifier
-# -- `csrf`, `session`, `jwt`, `id`, `device`, `magic`, `invite`, `activation`,
-# `recovery`, `access`, `refresh`, `bearer`, `auth`, `api`, `reset` -- is absent
-# and therefore strips.
+# The crypto word must either end at a word boundary (`ssh_...`) or abut the
+# trigger directly (`sshkey`). Without this, the gap would let a crypto word
+# match as a mere PREFIX of an unrelated word (`secretary_monkey`).
+_CRYPTO_AT_WORD = rf"(?:{_CRYPTO_KEY_QUALIFIERS})(?:(?![a-z0-9])|(?=key))"
+
+# KEEP-list for the qualifiers before `token`. THIS ONE IS AN ALLOWLIST and it
+# is START-ANCHORED in the pattern below: every qualifier between the start of
+# the name and the trigger must be on this list, so `csrf_max_token` strips even
+# though `max` is allowlisted. Three crisply-ruled groups and no others:
+# (1) METERING DIMENSIONS -- this is an LLM framework, so `max_tokens`/
+# `prompt_tokens`/`completion_tokens`/`cached_tokens` are pervasive, ordinary
+# and non-secret, and stripping them is the tightest collateral constraint in
+# this control; (2) NLP SPECIAL TOKENS (`bos_token`, `eos_token`, `pad_token`,
+# `mask_token` -- HuggingFace tokenizer vocabulary, a token here is a symbol,
+# not a credential); (3) PAGINATION CURSORS (`nextPageToken`, `NextToken`,
+# `continuationToken`, `syncToken`), opaque list-API offsets. Every bearer-style
+# qualifier -- `csrf`, `session`, `jwt`, `id`, `device`, `magic`, `invite`,
+# `activation`, `recovery`, `access`, `refresh`, `bearer`, `auth`, `api`,
+# `reset` -- is absent and therefore strips.
 _SAFE_TOKEN_QUALIFIERS = (
     "max|min|prompt|completion|input|output|total|count|usage|used|limit"
     "|budget|remaining|average|avg|estimated|estimate|cached|reasoning"
     "|audio|text|image|per|page|next|continuation|pagination|sync"
+    "|bos|eos|eot|sos|pad|unk|mask|sep|cls|special|delimiter|stop"
 )
 
-# KEEP-list for a head immediately AFTER a leading `token`: the `tokenize`
-# word-forms (where "token" is a morpheme, not an artefact) and the metering
-# nouns. Ordered longest-first so `izer`/`ization` win over `ize`.
-_SAFE_TOKEN_HEADS = (
-    "ization|izing|izer|ized|ize|counter|count|usage|used|limit|budget"
-    "|remaining|total|number|length|size"
+# STRIP-list of heads immediately AFTER a leading `token`, mirroring
+# `_KEY_MATERIAL_HEADS` and for the same reason: `token_<head>` has an unbounded
+# ordinary tail (`token_count`, `token_max_length`, `token_per_second`,
+# `token_ids`, `tokenizer_config`) and a small dangerous one. Only the heads
+# that name the VALUE strip.
+_TOKEN_MATERIAL_HEADS = (
+    "value|values|secret|secrets|string|strings|hash|hashes|data|blob|blobs"
+    "|bytes|b64|base64|hex|digest|jwt|bearer|credential|credentials"
 )
 
 FORBIDDEN_CONTEXT_PATTERNS = [
@@ -409,24 +489,23 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     r"(?:^|.*[\W_])secret(?:s)?(?:[\W_].*|$)",  # Secret-related keys (not "secretary")
     r".*(?:api[-_.]?key|key[-_.]?api).*",  # API key patterns (both orderings, with dash/underscore/dot)
     r"(?:^|.*[\W_])credential(?:s)?(?:[\W_].*|$)",  # Credential-related keys
-    # DECISION plan-2026-07-20T040150-876e7164/D-014 -- cryptographic key
-    # material, fail-CLOSED. Read the D-014 block above before editing; in
-    # particular do not re-invert this to a qualifier denylist and do not relax
-    # `[a-z0-9]+` to `[a-z0-9]*`.
+    # DECISION plan-2026-07-20T040150-876e7164/D-015 -- cryptographic key
+    # material. This is an ENUMERATED CRYPTO DENYLIST and it FAILS OPEN on
+    # vocabulary nobody listed; it is NOT a class control and must not be
+    # described as one. Read the D-015 block above before editing.
     #   1. the bare article: `key`, `keys`
-    #   2. anything-then-key, unless the qualifier is allowlisted or the whole
-    #      word merely ends in "key": strips `ssh_key`, `sshkey`, `deploy_key`;
-    #      keeps `cache_key`, `public_key`, `agent_key`, `monkey_species`
-    #   3. key-then-anything, unless the head is allowlisted: strips `keyfile`,
-    #      `key_pair`, `keystore`; keeps `keyword`, `keyboard_layout`, `keystone`
+    #   2. a crypto qualifier at a word boundary ANYWHERE before the trigger:
+    #      strips `ssh_key`, `sshkey`, `ssh_cache_key`, `ssh_public_key`,
+    #      `private_public_key`; keeps `s3_key`, `cache_key`, `public_key`,
+    #      `user_key`, `monkey_species`
+    #   3. key-then-material-head: strips `keyfile`, `key_pair`, `keystore`,
+    #      `key_material`; keeps `keyword`, `keyboard_layout`, `key_value_pair`,
+    #      `key_performance_indicator`
     rf"(?:{_KEY_TRIGGER}$)"
-    rf"|(?:^|.*[\W_])"
-    rf"(?!(?:{_SAFE_KEY_QUALIFIERS})[-_.]?{_KEY_TRIGGER}{_WORD_END})"
-    rf"(?!(?:{_SAFE_KEY_WORDS})s?{_WORD_END})"
-    rf"[a-z0-9]+[-_.]?{_KEY_TRIGGER}{_WORD_END}"
+    rf"|(?:^|.*[\W_]){_CRYPTO_AT_WORD}{_CRYPTO_GAP}{_KEY_TRIGGER}{_WORD_END}"
     rf"|(?:^|.*[\W_]){_KEY_TRIGGER}[-_.]?"
-    rf"(?!(?:{_SAFE_KEY_HEADS})s?{_WORD_END})[a-z0-9]+{_WORD_END}",
-    # DECISION plan-2026-07-20T040150-876e7164/D-014 -- the ENUMERATED residual.
+    rf"(?:{_KEY_MATERIAL_HEADS})s?{_WORD_END}",
+    # DECISION plan-2026-07-20T040150-876e7164/D-015 -- the ENUMERATED residual.
     # These name key material but contain no "key" substring, so the pattern
     # above cannot structurally reach them. This entry is a DENYLIST and is
     # therefore incomplete by construction; it is disclosed as a list, never
@@ -434,21 +513,25 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     # list-shaped -- it is the explicit admission that one narrow corner is.
     r"(?:^|.*[\W_])(?:kek|dek|id[-_.]?rsa|id[-_.]?dsa|id[-_.]?ecdsa"
     r"|id[-_.]?ed25519)(?:[\W_]|$)",
-    # DECISION plan-2026-07-20T040150-876e7164/D-014 -- auth tokens, fail-CLOSED,
-    # same three shapes and the same two prohibitions as the `key` entry above.
-    # Strips `csrf_token`, `csrftoken`, `session_token`, `jwt_token`, `id_token`,
-    # `token_value`; keeps `max_tokens`, `prompt_tokens`, `token_count`,
-    # `tokenizer`, `next_page_token`.
+    # DECISION plan-2026-07-20T040150-876e7164/D-015 -- auth tokens. The SUFFIX
+    # arm is a fail-CLOSED allowlist and IS a class control; the negative
+    # lookahead is anchored at the START of the name, so every qualifier before
+    # the trigger must be allowlisted -- `csrf_max_token` strips even though
+    # `max` is on the list. The PREFIX arm is a value-head denylist, for the
+    # same unbounded-safe-tail reason as `key`.
+    # Strips `csrf_token`, `csrftoken`, `session_token`, `jwt_token`,
+    # `id_token`, `csrf_max_token`, `bearer_cached_token`, `token_value`;
+    # keeps `max_tokens`, `prompt_tokens`, `token_count`, `tokenizer_config`,
+    # `token_max_length`, `bos_token`, `next_page_token`.
     # This SUBSUMES the six-word `(api|auth|access|refresh|bearer|reset)_token`
     # list it replaces, and also the `oauth[-_.]?token` entry that follows it --
     # that entry is retained deliberately as an independently-pinned explicit
     # statement, not because it is still load-bearing.
     rf"(?:{_TOKEN_TRIGGER}$)"
-    rf"|(?:^|.*[\W_])"
-    rf"(?!(?:{_SAFE_TOKEN_QUALIFIERS})[-_.]?{_TOKEN_TRIGGER}{_WORD_END})"
-    rf"[a-z0-9]+[-_.]?{_TOKEN_TRIGGER}{_WORD_END}"
+    rf"|(?!(?:(?:{_SAFE_TOKEN_QUALIFIERS})[-_.]?)+{_TOKEN_TRIGGER}{_WORD_END})"
+    rf"(?:^|.*[\W_])[a-z0-9]+[-_.]?{_TOKEN_TRIGGER}{_WORD_END}"
     rf"|(?:^|.*[\W_]){_TOKEN_TRIGGER}[-_.]?"
-    rf"(?!(?:{_SAFE_TOKEN_HEADS})s?{_WORD_END})[a-z0-9]+{_WORD_END}",
+    rf"(?:{_TOKEN_MATERIAL_HEADS})s?{_WORD_END}",
     r"(?:^|.*[\W_])oauth[-_.]?token(?:s)?(?:[\W_].*|$)",  # OAuth token patterns
 ]
 

@@ -1097,13 +1097,20 @@ class TestIndependentVocabularyKeyCorpus:
         )
 
 
-class TestCryptoKeyAndTokenAllowlists:
-    """D-014. The `key` and `token` triggers were qualifier DENYLISTS, so every
-    qualifier not enumerated FAILED OPEN: 46/52 real crypto-key names and 27/27
-    real auth-token names reached the LLM prompt. Both are now fail-CLOSED
-    whole-decomposition ALLOWLISTS.
+class TestCryptoKeyAndTokenTriggers:
+    """D-015 (correcting D-014). The two triggers now have DIFFERENT polarity,
+    because their vocabularies have opposite structure:
 
-    Three controls, and they are deliberately inseparable:
+      `key`   -- an ENUMERATED CRYPTO DENYLIST. Not a class control; it fails
+                 OPEN on crypto vocabulary nobody listed. D-014 shipped a
+                 fail-closed allowlist here and it destroyed 42% of an
+                 independently-sourced safe corpus (31 names) on the live
+                 prompt path.
+      `token` -- a fail-CLOSED, START-ANCHORED allowlist for the `<qual>_token`
+                 suffix shape, plus a value-head denylist for the `token_<head>`
+                 prefix shape.
+
+    Four controls, deliberately inseparable:
 
     (a) TWO-DIRECTION measurement. The secret half alone is satisfied by
         "strip everything", which is a strictly worse outcome than the leak it
@@ -1111,15 +1118,21 @@ class TestCryptoKeyAndTokenAllowlists:
         denylist that was already there. Both halves are asserted, and the
         residual over-strip is pinned two-sided so it cannot drift in either
         direction unannounced.
-    (b) ANTI-VACUITY. G-14: the explorer's first draft of this pattern kept
-        0/32 safe names and LOOKED CORRECT BY INSPECTION, because a
-        `[a-z0-9]*` qualifier let the skip-prefix consume the safe word and
-        re-match a bare `key`. Every negative lookahead in the shipped pattern
-        is therefore shown to CHANGE the result set when it alone is removed.
-    (c) ReDoS. These patterns run on the prompt path while the per-conversation
-        lock is held, over context keys that are arbitrary consumer input.
+    (b) ANTI-TAUTOLOGY. D-014 passed (a) with 0/100 over-strip while shipping a
+        live bypass, because 36/36 and 21/21 of its safe corpus's qualifiers
+        were themselves members of its own allowlist. A corpus grown from the
+        vocabulary under test cannot see what that vocabulary omits. The guard
+        below measures that OVERLAP mechanically, which is the check the
+        "no verbatim constant" guard structurally could not perform.
+    (c) ANCHORING. D-014's lookaheads inspected only the qualifier immediately
+        before the trigger, so `ssh_cache_key`, `csrf_max_token` and
+        `signing_public_key` were all KEPT. The prefix-bypass shape is probed
+        by name here.
+    (d) ANTI-VACUITY and ReDoS. G-14; and these patterns run on the prompt path
+        while the per-conversation lock is held, over context keys that are
+        arbitrary consumer input.
 
-    All three operate on the EXACT SHIPPED PATTERNS read back out of
+    All of it operates on the EXACT SHIPPED PATTERNS read back out of
     `fsm_llm.constants`, never on a copy restated here.
     """
 
@@ -1142,25 +1155,23 @@ class TestCryptoKeyAndTokenAllowlists:
         )
 
     @staticmethod
-    def _lookaheads():
-        """Rebuild each shipped negative lookahead from the shipped parts, so
-        the surgery below can only ever act on text that is really in the
-        pattern (asserted by `_locate`)."""
+    def _vocabularies():
+        """The four shipped vocabulary alternations, by name, each paired with
+        the direction its removal must move the result set.
+
+        `deny` groups make keys STRIP, so neutralising one must make keys
+        newly KEPT. `allow` groups make keys KEEP, so neutralising one must
+        make keys newly STRIPPED. Asserting the direction is what stops a
+        future edit from inverting a polarity unnoticed -- the exact defect
+        D-015 exists to correct.
+        """
         from fsm_llm import constants as c
 
         return {
-            "key/qualifier-allowlist": (
-                f"(?!(?:{c._SAFE_KEY_QUALIFIERS})[-_.]?{c._KEY_TRIGGER}{c._WORD_END})"
-            ),
-            "key/english-word-allowlist": (
-                f"(?!(?:{c._SAFE_KEY_WORDS})s?{c._WORD_END})"
-            ),
-            "key/head-allowlist": f"(?!(?:{c._SAFE_KEY_HEADS})s?{c._WORD_END})",
-            "token/qualifier-allowlist": (
-                f"(?!(?:{c._SAFE_TOKEN_QUALIFIERS})"
-                f"[-_.]?{c._TOKEN_TRIGGER}{c._WORD_END})"
-            ),
-            "token/head-allowlist": (f"(?!(?:{c._SAFE_TOKEN_HEADS})s?{c._WORD_END})"),
+            "key/crypto-denylist": (c._CRYPTO_KEY_QUALIFIERS, "deny"),
+            "key/material-head-denylist": (c._KEY_MATERIAL_HEADS, "deny"),
+            "token/qualifier-allowlist": (c._SAFE_TOKEN_QUALIFIERS, "allow"),
+            "token/material-head-denylist": (c._TOKEN_MATERIAL_HEADS, "deny"),
         }
 
     @staticmethod
@@ -1202,8 +1213,10 @@ class TestCryptoKeyAndTokenAllowlists:
         both classes."""
         assert len(CRYPTO_KEY_SECRET_KEYS) >= 46
         assert len(TOKEN_SECRET_KEYS) >= 27
-        assert len(CRYPTO_KEY_SAFE_KEYS) >= 40
-        assert len(TOKEN_SAFE_KEYS) >= 30
+        # Raised for D-015: the safe halves are the measurement that D-014's
+        # tautology defeated, so gutting them must fail loudly.
+        assert len(CRYPTO_KEY_SAFE_KEYS) >= 90
+        assert len(TOKEN_SAFE_KEYS) >= 55
         assert not (set(CRYPTO_KEY_SECRET_KEYS) & set(CRYPTO_KEY_SAFE_KEYS))
         assert not (set(TOKEN_SECRET_KEYS) & set(TOKEN_SAFE_KEYS))
         assert CRYPTO_KEY_KNOWN_OVER_STRIPPED <= set(CRYPTO_KEY_SAFE_KEYS)
@@ -1226,11 +1239,10 @@ class TestCryptoKeyAndTokenAllowlists:
         pasted = [
             name
             for name in (
-                "_SAFE_KEY_QUALIFIERS",
-                "_SAFE_KEY_WORDS",
-                "_SAFE_KEY_HEADS",
+                "_CRYPTO_KEY_QUALIFIERS",
+                "_KEY_MATERIAL_HEADS",
                 "_SAFE_TOKEN_QUALIFIERS",
-                "_SAFE_TOKEN_HEADS",
+                "_TOKEN_MATERIAL_HEADS",
                 "_PASSWORD_POLICY_SUFFIXES",
             )
             if getattr(c, name) in source
@@ -1337,61 +1349,219 @@ class TestCryptoKeyAndTokenAllowlists:
             f"{sorted(TOKEN_KNOWN_OVER_STRIPPED - actual)}"
         )
 
-    # -- (b) anti-vacuity -------------------------------------------------
-    def test_every_negative_lookahead_changes_the_result_set(self):
+    # -- (b) anti-tautology ----------------------------------------------
+    def test_the_safe_corpus_is_not_a_restatement_of_the_shipped_vocabulary(self):
+        """THE GUARD THAT WOULD HAVE CAUGHT D-014.
+
+        D-014's safe corpus reported 0/100 over-strip while the shipped pattern
+        carried a live bypass, because every `*_key`/`*_token` qualifier in that
+        corpus (36/36 and 21/21) was itself a member of the allowlist being
+        tested. A corpus grown from the vocabulary under test is structurally
+        blind to what that vocabulary omits, so its green is a restatement of
+        the pattern rather than a measurement of it.
+
+        `test_the_corpus_does_not_paste_the_pattern_it_tests` cannot see this:
+        no constant is pasted verbatim, the words are merely the same words.
+        This test measures the OVERLAP instead, and requires that a substantial
+        majority of the safe corpus's vocabulary be words the pattern author
+        never enumerated -- i.e. that the corpus can actually disagree with the
+        implementation.
+        """
+        import re as _re
+
+        from fsm_llm import constants as c
+
+        shipped_words = set()
+        for blob in (
+            c._CRYPTO_KEY_QUALIFIERS,
+            c._KEY_MATERIAL_HEADS,
+            c._SAFE_TOKEN_QUALIFIERS,
+            c._TOKEN_MATERIAL_HEADS,
+        ):
+            shipped_words |= {w for w in blob.split("|") if w}
+
+        def qualifiers(names):
+            out = set()
+            for name in names:
+                for word in _re.split(r"[^a-zA-Z0-9]+", name.lower()):
+                    if word and word not in ("key", "keys", "token", "tokens"):
+                        out.add(word)
+            return out
+
+        measured = {}
+        for label, corpus, floor in (
+            ("key", CRYPTO_KEY_SAFE_KEYS, 0.50),
+            ("token", TOKEN_SAFE_KEYS, 0.25),
+        ):
+            words = qualifiers(corpus)
+            outside = {w for w in words if w not in shipped_words}
+            fraction = len(outside) / len(words)
+            measured[label] = (len(outside), len(words), round(fraction, 3))
+            assert fraction >= floor, (
+                f"{label}: only {len(outside)}/{len(words)} "
+                f"({fraction:.0%}) of the safe corpus's qualifier words are "
+                "absent from the shipped vocabulary. The corpus is drifting "
+                "back into a restatement of the pattern it is supposed to "
+                "audit -- re-source it from real tooling (cloud SDKs, DB docs, "
+                "framework config) before touching the pattern. See D-015."
+            )
+
+        # And a corpus that cannot disagree is useless even if it is
+        # independent, so pin that it still measures a real keep-rate.
+        for label, corpus in (
+            ("key", CRYPTO_KEY_SAFE_KEYS),
+            ("token", TOKEN_SAFE_KEYS),
+        ):
+            kept = sum(1 for k in corpus if self._kept(k))
+            assert kept / len(corpus) >= 0.85, (
+                f"{label}: independent corpus keep-rate is {kept}/{len(corpus)}. "
+                "The Pre-Mortem stop trigger for this step is >15% over-strip; "
+                "STOP and report rather than tuning the vocabulary against the "
+                "corpus, which recreates the tautology in reverse."
+            )
+
+    # -- (c) anchoring ----------------------------------------------------
+    def test_the_qualifier_scan_is_anchored_not_last_qualifier_only(self):
+        """D-015 / the R1 finding, as a checked-in regression probe.
+
+        D-014's negative lookaheads inspected ONLY the qualifier immediately
+        before the trigger word, so prepending anything to an allowlisted
+        qualifier defeated the strip. Every STRIP name in the second group
+        below was KEPT by the shipped D-014 pattern.
+
+        Both halves are asserted together on purpose: the anchoring fix is only
+        correct if it leaves the ordinary vocabulary alone, and the `key` half
+        of the fix is a polarity inversion whose whole justification is that it
+        keeps names like `s3_key` and `config_key`.
+        """
+        must_keep = (
+            # invariant I-7, also pinned in tests/test_fsm_llm_regression/
+            "public_key",
+            # the unbounded ordinary `<noun>_key` space that D-014 destroyed
+            "s3_key",
+            "user_key",
+            "order_key",
+            "config_key",
+            "context_key",
+            "state_key",
+            "item_key",
+            "cache_key",
+            "primary_key",
+            "foreign_key",
+            "idempotency_key",
+            # LLM metering and NLP vocabulary
+            "max_tokens",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "token_count",
+            "tokenizer",
+            "next_page_token",
+            "continuation_token",
+        )
+        must_strip = (
+            # plain crypto/bearer shapes
+            "private_key",
+            "ssh_key",
+            "master_key",
+            "signing_key",
+            "encryption_key",
+            "api_key",
+            "csrf_token",
+            "jwt_token",
+            "session_token",
+            # THE BYPASS: an allowlisted qualifier with junk prepended. Every
+            # one of these was KEPT before D-015.
+            "ssh_public_key",
+            "private_public_key",
+            "signing_public_key",
+            "ssh_cache_key",
+            "master_index_key",
+            "signing_search_key",
+            "hmac_row_key",
+            "csrf_max_token",
+            "jwt_page_token",
+            "session_sync_token",
+            "bearer_cached_token",
+        )
+        assert [k for k in must_keep if not self._kept(k)] == []
+        assert [k for k in must_strip if self._kept(k)] == []
+
+    # -- (d) anti-vacuity -------------------------------------------------
+    def test_every_shipped_vocabulary_changes_the_result_set(self):
         """SC-6, second clause. A guard whose removal changes nothing is not a
         guard -- it is decoration that a future reader will delete, correctly
-        observing that no test covers it. Each of the five allowlists is
-        removed on its own and shown to matter on its own."""
+        observing that no test covers it. Each vocabulary is neutralised on its
+        own, shown to matter on its own, AND shown to move the result set in
+        the direction its polarity implies."""
         from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
 
         base = self._result_set(FORBIDDEN_CONTEXT_PATTERNS)
         vacuous = {}
-        for label, fragment in self._lookaheads().items():
-            index = self._locate(fragment)
-            got = self._result_set(self._mutated(index, fragment, ""))
+        for label, (vocabulary, polarity) in self._vocabularies().items():
+            index = self._locate(vocabulary)
+            # `(?!)` can never match, so the group is neutralised in place
+            # without disturbing the surrounding structure.
+            got = self._result_set(self._mutated(index, vocabulary, "(?!)"))
             delta = got ^ base
             if not delta:
                 vacuous[label] = "no change"
+            elif polarity == "deny":
+                assert delta <= base, (
+                    f"{label}: neutralising a STRIP-list made keys newly "
+                    "STRIPPED, which means its polarity is inverted somewhere"
+                )
             else:
                 assert delta <= got, (
-                    f"{label}: removing a KEEP-list made keys KEPT, which means "
-                    "its polarity is inverted somewhere"
+                    f"{label}: neutralising a KEEP-list made keys newly KEPT, "
+                    "which means its polarity is inverted somewhere"
                 )
         assert vacuous == {}, (
             f"vacuous guards (removing them changes nothing): {vacuous}. "
             "This is the G-14 shape -- reject the pattern, do not ship it."
         )
 
-    def test_the_qualifier_is_one_or_more_not_zero_or_more(self):
+    def test_the_token_qualifier_is_one_or_more_not_zero_or_more(self):
         """SC-6/G-14, stated twice because it is the single defect this seam has
         actually shipped. Structurally: `[a-z0-9]*` must not appear. Behaviourally:
-        relaxing it must visibly destroy the allowlists, which proves the `+` is
-        load-bearing rather than incidental."""
+        relaxing it must visibly destroy the allowlist, which proves the `+` is
+        load-bearing rather than incidental. Only the `token` suffix arm still
+        has an allowlist to defeat -- the `key` trigger no longer does."""
         from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
 
         base = self._result_set(FORBIDDEN_CONTEXT_PATTERNS)
-        for label, fragment in (
-            ("key", self._lookaheads()["key/qualifier-allowlist"]),
-            ("token", self._lookaheads()["token/qualifier-allowlist"]),
-        ):
-            index = self._locate(fragment)
-            shipped = FORBIDDEN_CONTEXT_PATTERNS[index]
-            assert "[a-z0-9]*" not in shipped, (
-                f"{label}: a zero-or-more qualifier lets `.*[\\W_]` consume the "
-                "safe qualifier and re-match a bare trigger, silently defeating "
-                "the negative lookahead for EVERY allowlisted word (G-14)"
-            )
-            assert "[a-z0-9]+" in shipped
-            got = self._result_set(
-                self._mutated(index, "[a-z0-9]+[-_.]?", "[a-z0-9]*[-_.]?")
-            )
-            newly_stripped = got - base
-            assert len(newly_stripped) >= 10, (
-                f"{label}: relaxing the qualifier to zero-or-more changed only "
-                f"{sorted(newly_stripped)}. The `+` is supposed to be what keeps "
-                "the whole allowlist alive; if it is not, the pattern is vacuous."
-            )
+        vocabulary, _ = self._vocabularies()["token/qualifier-allowlist"]
+        index = self._locate(vocabulary)
+        shipped = FORBIDDEN_CONTEXT_PATTERNS[index]
+        assert "[a-z0-9]*" not in shipped, (
+            "token: a zero-or-more qualifier lets `.*[\\W_]` consume the safe "
+            "qualifier and re-match a bare trigger, silently defeating the "
+            "negative lookahead for EVERY allowlisted word (G-14)"
+        )
+        assert "[a-z0-9]+" in shipped
+        got = self._result_set(
+            self._mutated(index, "[a-z0-9]+[-_.]?", "[a-z0-9]*[-_.]?")
+        )
+        newly_stripped = got - base
+        assert len(newly_stripped) >= 10, (
+            "token: relaxing the qualifier to zero-or-more changed only "
+            f"{sorted(newly_stripped)}. The `+` is supposed to be what keeps "
+            "the whole allowlist alive; if it is not, the pattern is vacuous."
+        )
+
+    def test_the_crypto_gap_is_bounded(self):
+        """D-015 ReDoS control, asserted structurally as well as by timing.
+        The gap scan sits inside an `(?:^|.*[\\W_])` scan, so an unbounded lazy
+        gap makes the `key` pattern QUADRATIC on inputs like `"ssh_"*n` -- a
+        denial of service on the prompt path, where this runs with the
+        per-conversation lock held."""
+        from fsm_llm import constants as c
+
+        assert "{0,64}?" in c._CRYPTO_GAP, (
+            "the crypto gap lost its bound; an unbounded lazy gap is quadratic "
+            "here, not merely slower. See D-015 and the timing test below."
+        )
+        assert self._locate(c._CRYPTO_GAP) is not None
 
     # -- (c) ReDoS --------------------------------------------------------
     def test_the_patterns_are_linear_on_adversarial_input(self):
@@ -1418,6 +1588,11 @@ class TestCryptoKeyAndTokenAllowlists:
             'near-miss repeat "cach"*n+"_key"': lambda n: "cach" * n + "_key",
             'separator flood "a_"*n': lambda n: "a_" * n,
             'near-miss repeat "tok"*n+"_token"': lambda n: "tok" * n + "_token",
+            # D-015: the `key` trigger is now a crypto DENYLIST reached through
+            # a bounded lazy gap, so its worst case is a flood of crypto words
+            # that never reaches a trigger. Unbounded, these two go quadratic.
+            'crypto-word flood "ssh_"*n': lambda n: "ssh_" * n,
+            'crypto near-miss "priv"*n+"_ke"': lambda n: "priv" * n + "_ke",
             'allowlisted repeat "cache_key_"*n': lambda n: "cache_key_" * n,
             'allowlisted repeat "max_tokens_"*n': lambda n: "max_tokens_" * n,
         }

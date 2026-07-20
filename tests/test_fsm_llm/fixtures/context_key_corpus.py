@@ -339,7 +339,6 @@ CRYPTO_KEY_SECRET_KEYS: tuple[str, ...] = (
     "unlock_key",
     "license_key",
     "activation_key",
-    "product_key",
     "serial_key",
     # case variants -- the control is case-insensitive and must stay so
     "SSH_KEY",
@@ -352,14 +351,57 @@ CRYPTO_KEY_SECRET_KEYS: tuple[str, ...] = (
 # has by far the largest legitimate surface of any word in this control, which
 # is why the collateral half is bigger than the secret half.
 #
+# REBUILT for D-015. The D-014 version of this list was a TAUTOLOGY: adversarial
+# review measured that 36 of its 36 `*_key` qualifiers were themselves members
+# of the shipped `_SAFE_KEY_QUALIFIERS` allowlist, so "0/100 over-strip" was a
+# restatement of the pattern, not a measurement of it. The names below are drawn
+# from vocabulary the pattern author did not choose:
+#   - AWS SDK / boto3 (`s3_key`, `partition_key`, `sort_key`, `range_key`)
+#   - PostgreSQL, MySQL and Cassandra DDL (`candidate_key`, `clustering_key`,
+#     `cluster_key`, `column_key`)
+#   - Redis / memcached / Kafka (`redis_key`, `memcache_key`, `message_key`,
+#     `topic_key`, `queue_key`)
+#   - Django / Rails / Spring / Laravel config and ORM identifiers
+#     (`settings_key`, `route_key`, `model_key`, `form_key`, `label_key`)
+#   - HTTP/REST conventions (`idempotency_key`, `correlation_key`,
+#     `request_key`, `dedupe_key`)
+#   - ordinary domain nouns (`user_key`, `tenant_key`, `customer_key`,
+#     `order_key`, `product_key`, `invoice_key`, `document_key`)
+# The 31 names the reviewer's independent corpus flagged as regressed by D-014
+# are ALL present here, deliberately, so that the regression cannot recur
+# silently. `tests/test_fsm_llm/test_context_unit.py` carries a MECHANICAL
+# anti-tautology guard over this list -- see
+# `test_the_safe_corpus_is_not_a_restatement_of_the_shipped_vocabulary`.
+#
 # The last group is the adversarial one: ordinary English words that merely
-# CONTAIN the letters k-e-y. A fail-closed pattern that matches concatenated
-# shapes (needed for `sshkey`/`privkey`) will eat `monkey` and `keyboard`
-# unless it is written carefully, and a safe set without them would validate
-# whatever the implementation happens to do (LESSONS [I:5]).
+# CONTAIN the letters k-e-y. A pattern that matches concatenated shapes (needed
+# for `sshkey`/`privkey`) will eat `monkey` and `keyboard` unless it is written
+# carefully, and a safe set without them would validate whatever the
+# implementation happens to do (LESSONS [I:5]).
+#
+# CONTESTED NAME, disclosed rather than silently resolved: `product_key` lives
+# HERE and not in the strip list above, where D-014 put it. It is genuinely
+# ambiguous -- a Windows product key is a license credential, a product table's
+# key is ordinary data -- and the independently-sourced corpus counts it as
+# ordinary. `license_key`, `activation_key` and `serial_key` remain in the strip
+# list as the unambiguous license-credential spellings. See D-015.
 # --------------------------------------------------------------------------
 CRYPTO_KEY_SAFE_KEYS: tuple[str, ...] = (
-    # relational / NoSQL database vocabulary
+    # AWS / GCP / Azure SDK field names
+    "s3_key",
+    "object_key",
+    "bucket_key",
+    "storage_key",
+    "blob_key",
+    "file_key",
+    "partition_key",
+    "sort_key",
+    "range_key",
+    "hash_key",
+    "item_key",
+    "table_key",
+    "resource_key",
+    # relational / NoSQL DDL vocabulary
     "primary_key",
     "primary_keys",
     "foreign_key",
@@ -368,25 +410,64 @@ CRYPTO_KEY_SAFE_KEYS: tuple[str, ...] = (
     "natural_key",
     "surrogate_key",
     "unique_key",
+    "candidate_key",
     "index_key",
-    "partition_key",
-    "sort_key",
     "shard_key",
     "row_key",
-    # caching, object storage and HTTP idioms
+    "column_key",
+    "cluster_key",
+    "clustering_key",
+    # cache, queue and stream infrastructure
+    "redis_key",
+    "memcache_key",
     "cache_key",
     "cache_keys",
+    "message_key",
+    "queue_key",
+    "topic_key",
+    "record_key",
+    "stream_key",
+    "entry_key",
+    # ordinary domain nouns
+    "user_key",
+    "tenant_key",
+    "customer_key",
+    "order_key",
+    "product_key",
+    "event_key",
+    "document_key",
+    "invoice_key",
+    # framework configuration and ORM identifiers
+    "config_key",
+    "env_key",
+    "settings_key",
+    "locale_key",
+    "translation_key",
+    "i18n_key",
+    "metadata_key",
+    "state_key",
+    "context_key",
+    "field_key",
+    "name_key",
+    "value_key",
+    "label_key",
+    "route_key",
+    "model_key",
+    "form_key",
+    # HTTP / REST API conventions (Stripe's idempotency header, W3C trace
+    # correlation, ordinary dedupe idioms)
+    "idempotency_key",
+    "request_key",
+    "correlation_key",
+    "dedupe_key",
     "lookup_key",
     "search_key",
-    "hash_key",
-    "bucket_key",
-    "object_key",
     "group_key",
-    "idempotency_key",
     # language / data-structure vocabulary
     "dict_key",
     "dict_keys",
     "map_key",
+    "ref_key",
     # the PUBLIC half of an asymmetric pair -- pinned by an existing regression
     # test (tests/test_fsm_llm_regression/test_regression_iter2.py), invariant I-7
     "public_key",
@@ -401,13 +482,10 @@ CRYPTO_KEY_SAFE_KEYS: tuple[str, ...] = (
     "timer_key",
     "evidence_key",
     "payload_key",
-    "stream_key",
-    "ref_key",
-    # i18n / localisation (gettext, Rails i18n, Django)
-    "translation_key",
-    "i18n_key",
-    "locale_key",
-    # ADVERSARIAL: ordinary English words that merely contain "key"
+    # ADVERSARIAL: ordinary English words that merely contain "key", plus the
+    # two `key_*` phrases whose head is NOT key material
+    "key_value_pair",
+    "key_performance_indicator",
     "keyword",
     "keywords",
     "keyword_list",
@@ -516,15 +594,30 @@ TOKEN_SECRET_KEYS: tuple[str, ...] = (
     "upload_token",
     "download_token",
     "share_token",
+    # `token_<head>` where the head names the VALUE -- the prefix shape, which
+    # the D-014 corpus did not exercise at all
+    "token_value",
+    "token_secret",
+    "token_hash",
+    "token_string",
     # case variants
     "AUTH_TOKEN",
     "SessionToken",
 )
 
 # --------------------------------------------------------------------------
-# SHOULD REACH THE PROMPT. Metering counts, tokenizer word-forms and pagination
-# cursors. None of these is a bearer credential; all of them are things an LLM
-# genuinely benefits from seeing.
+# SHOULD REACH THE PROMPT. Metering counts, tokenizer word-forms, NLP special
+# tokens and pagination cursors. None of these is a bearer credential; all of
+# them are things an LLM genuinely benefits from seeing.
+#
+# REBUILT for D-015, same reason as the `key` half: 21 of 21 of the D-014
+# version's qualifiers were members of the shipped `_SAFE_TOKEN_QUALIFIERS`
+# allowlist. The names added here come from the HuggingFace `tokenizers` /
+# `transformers` special-token API (`bos_token`, `eos_token`, `pad_token`,
+# `unk_token`, `mask_token`, `sep_token`, `cls_token`, `token_type_ids`,
+# `token_ids`) and from ordinary throughput/cost telemetry vocabulary
+# (`token_per_second`, `token_throughput`, `token_ratio`, `token_cost`) --
+# neither of which the allowlist author enumerated.
 # --------------------------------------------------------------------------
 TOKEN_SAFE_KEYS: tuple[str, ...] = (
     # LLM metering -- the tightest collateral constraint in the whole plan
@@ -557,6 +650,27 @@ TOKEN_SAFE_KEYS: tuple[str, ...] = (
     "audio_tokens",
     "text_tokens",
     "image_tokens",
+    # throughput / cost telemetry -- `token_<head>` with an ordinary tail
+    "token_max_length",
+    "token_per_second",
+    "token_throughput",
+    "token_ratio",
+    "token_cost",
+    "token_index",
+    "token_offset",
+    "token_position",
+    # HuggingFace tokenizer outputs and special tokens: a "token" here is a
+    # vocabulary symbol, not a bearer credential
+    "token_ids",
+    "token_type_ids",
+    "bos_token",
+    "eos_token",
+    "pad_token",
+    "unk_token",
+    "mask_token",
+    "sep_token",
+    "cls_token",
+    "special_tokens",
     # tokenizer word-forms -- "token" is a morpheme here, not an artefact
     "tokenizer",
     "tokenizers",
