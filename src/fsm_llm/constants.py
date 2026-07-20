@@ -698,8 +698,14 @@ COMPILED_FORBIDDEN_CONTEXT_PATTERNS = [
 #     protocol constants that the vendors deliberately made self-identifying so
 #     that scanners can find them -- they are not vocabulary this author invented.
 #     It is still a list. It is disclosed as one and it is NOT the arm the class
-#     claim rests on; `test_the_generic_arm_carries_the_control` pins that the
-#     generic arm, alone, catches the majority of the credential corpus.
+#     claim rests on. CORRECTION (CLOSE, plan-2026-07-20T040150-876e7164): this
+#     comment previously cited `test_the_generic_arm_carries_the_control` as
+#     pinning that claim; that test does not exist anywhere in this repo (pass-3
+#     adversarial review, findings/review-iter-1-pass3.md CRITICAL 3). The claim
+#     that the generic arm rather than the prefix denylist carries most of the
+#     detections is UNPINNED -- true on the executor's own scratchpad
+#     measurement (73% generic / 27% prefix) but not enforced by any shipped
+#     test. Treat it as disclosed and unverified, not as a checked invariant.
 #
 # SCOPE IS THE BLAST-RADIUS BOUND AND IT IS DELIBERATE. This layer runs ONLY for
 # names that carry a `key` trigger which layer 1 left UNRESOLVED, plus a short
