@@ -14,7 +14,7 @@ from collections.abc import Iterable
 INTERNAL_KEY_PREFIXES = ["_", "system_", "internal_", "__"]
 
 
-# DECISION plan-2026-07-19-4b664252/D-009
+# DECISION plan-2026-07-19T191147-4b664252/D-009
 # This helper exists because the identical `any(key.startswith(p) ...)`
 # expression was copy-pasted to FIVE call sites (context.py, fsm.py,
 # definitions.py x2, prompts.py) and NONE of them case-folded -- so
@@ -45,7 +45,7 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
     return any(lowered.startswith(prefix.lower()) for prefix in prefixes)
 
 
-# DECISION plan-2026-07-19-4b664252/D-011
+# DECISION plan-2026-07-19T191147-4b664252/D-011
 # One bound for BOTH recursive context filters (`context.clean_context_keys`
 # and `prompts.BasePromptBuilder._filter_context_for_security`). Do NOT
 # re-declare a local depth limit in either module: two hand-maintained copies
@@ -151,7 +151,7 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
     "context_length",
 }
 
-# DECISION plan-2026-07-19-4b664252/D-009
+# DECISION plan-2026-07-19T191147-4b664252/D-009
 # These patterns fail in BOTH directions, and both are real harm:
 #   - Over-match STRIPS legitimate user data out of context and out of the
 #     LLM prompt, silently degrading replies. The old password pattern's
@@ -172,7 +172,7 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
 # similar to a positive. A negative set of obviously-safe keys ("username",
 # "email") validates whatever the implementation happens to do.
 #
-# DECISION plan-2026-07-19-4b664252/D-016 (SUPERSEDES the `password_hash`
+# DECISION plan-2026-07-19T191147-4b664252/D-016 (SUPERSEDES the `password_hash`
 # "accepted gap" that D-009 recorded here)
 # D-009 claimed "no regex can separate `password_hash` from
 # `password_reset_flow_enabled`" and therefore terminal-anchored the password

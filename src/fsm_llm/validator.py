@@ -722,7 +722,7 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
 
 
 def main(fsm_path):
-    # DECISION plan-2026-07-19-4b664252/D-014
+    # DECISION plan-2026-07-19T191147-4b664252/D-014
     # NOT redundant — do not delete. `logging.py` calls `logger.disable("fsm_llm")`
     # at import time, which is correct LIBRARY hygiene (a library must not hijack a
     # host application's logging). But this function IS the application: it is the

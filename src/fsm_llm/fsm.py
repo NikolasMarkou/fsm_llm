@@ -280,7 +280,7 @@ class FSMManager:
                 current_state=instance.current_state,
             )
         except Exception as cleanup_err:
-            # DECISION plan-2026-07-19-4b664252/D-006
+            # DECISION plan-2026-07-19T191147-4b664252/D-006
             # The CLEANUP exception wins; `original` becomes its `__cause__`.
             # Do NOT "fix" this back to logging `cleanup_err` and re-raising
             # `original`: that was the F-07 defect. A `critical=True` handler

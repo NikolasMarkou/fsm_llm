@@ -316,7 +316,7 @@ class BasePromptBuilder:
             )
         return result
 
-    # DECISION plan-2026-07-19-4b664252/D-011
+    # DECISION plan-2026-07-19T191147-4b664252/D-011
     # This filter is the LAST line of defense before context text reaches the
     # LLM. `clean_context_keys` does NOT cover it: that function has exactly one
     # first-party caller (`pipeline.py`, with strip_forbidden_keys=False) and is
@@ -1381,7 +1381,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 sections.append(f"Already extracted: {ctx_json}")
 
         # Conversation history (compact)
-        # DECISION plan-2026-07-19-4b664252/D-012
+        # DECISION plan-2026-07-19T191147-4b664252/D-012
         # This block assembles its own history text, so it must apply the SAME
         # capping the base builders get from `_manage_conversation_history` --
         # it previously took `get_recent()` and emitted it whole, so a
@@ -1395,7 +1395,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             recent = instance.context.conversation.get_recent(
                 self.config.max_history_messages
             )
-            # DECISION plan-2026-07-19-4b664252/D-019
+            # DECISION plan-2026-07-19T191147-4b664252/D-019
             # Emit ONE single-key dict per (role, message) pair. Do NOT collapse
             # an entry's roles into a single dict keyed by "user"/"system": the
             # role mapping is many-to-one (`"user" if role == "user" else

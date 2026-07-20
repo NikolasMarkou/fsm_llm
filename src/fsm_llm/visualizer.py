@@ -1297,7 +1297,7 @@ def visualize_fsm_from_file(json_file: str, style: str = "full") -> str:
 
 
 def main(fsm_path, style: str = "full"):
-    # DECISION plan-2026-07-19-4b664252/D-014
+    # DECISION plan-2026-07-19T191147-4b664252/D-014
     # NOT redundant — do not delete. See the twin anchor in `validator.py:main`.
     # `logging.py`'s import-time `logger.disable("fsm_llm")` is deliberate library
     # hygiene; this function is the APPLICATION (the `fsm-llm-visualize` console

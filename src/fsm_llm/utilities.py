@@ -137,7 +137,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # Find all potential JSON start positions
         brace_positions = [m.start() for m in re.finditer(r"\{", text)]
 
-        # DECISION plan-2026-07-19-4b664252/D-002
+        # DECISION plan-2026-07-19T191147-4b664252/D-002
         # The closing partner of every `{` is precomputed ONCE, innermost-first,
         # instead of rescanning text[start_pos:] from every start position. That
         # rescan was O(n^2): 20,000 bare `{` characters took 18.2s of CPU on

@@ -84,7 +84,7 @@ class WorkingMemory:
                 not appear in LLM prompts.  Defaults to ``{"metadata"}``.
         """
         buffer_names = buffers or DEFAULT_BUFFERS
-        # DECISION plan-2026-07-19-4b664252/D-007: single NON-REENTRANT lock guarding
+        # DECISION plan-2026-07-19T191147-4b664252/D-007: single NON-REENTRANT lock guarding
         # every read and write of `_buffers`. Acquisitions must NEVER nest: a public
         # method that needs another's body calls the lock-free `_*_locked()` twin
         # (`_get_all_data_locked`, `_update_buffer_locked`), mirroring
@@ -407,7 +407,7 @@ class WorkingMemory:
             memory._buffers[name] = dict(contents)
         return memory
 
-    # DECISION plan-2026-07-19-4b664252/D-018
+    # DECISION plan-2026-07-19T191147-4b664252/D-018
     # `threading.Lock` is not picklable, so introducing `self._lock` in D-007
     # silently made `WorkingMemory` un-`deepcopy`-able and un-`pickle`-able
     # (`TypeError: cannot pickle '_thread.lock' object`). Nothing in-tree hit it

@@ -461,7 +461,7 @@ class MessagePipeline:
             # Store the accumulated response when the stream completed OR the
             # consumer abandoned it — but never when it errored (see D-015).
             #
-            # DECISION plan-2026-07-19-4b664252/D-003
+            # DECISION plan-2026-07-19T191147-4b664252/D-003
             # TWO DISTINCT suppression conditions, deliberately not merged:
             #   * `persist` is False only for a mid-stream ERROR (D-015 above).
             #   * `full_message` is empty when the provider produced no real text
@@ -542,7 +542,7 @@ class MessagePipeline:
             if extraction_response.extracted_data:
                 committed = extraction_response.extracted_data
 
-                # DECISION plan-2026-07-19-4b664252/D-005
+                # DECISION plan-2026-07-19T191147-4b664252/D-005
                 # SHAPE (c) of three DIFFERENT partial-commit contracts in this file.
                 # Roll back ONLY the keys this statement commits, then re-raise:
                 #   (a) _execute_state_transition — FULL context snapshot restore, because

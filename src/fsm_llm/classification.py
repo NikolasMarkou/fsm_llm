@@ -198,7 +198,7 @@ class Classifier:
         )
         call_params["messages"] = messages
 
-        # DECISION plan-2026-07-19-4b664252/D-004: wrap the litellm boundary
+        # DECISION plan-2026-07-19T191147-4b664252/D-004: wrap the litellm boundary
         # HERE, not by widening pipeline.py's classification except tuple.
         # Real transient litellm classes (RateLimitError/Timeout/
         # APIConnectionError) descend from openai.APIError -> Exception and

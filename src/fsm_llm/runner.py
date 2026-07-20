@@ -32,7 +32,7 @@ _REDACTED = "<redacted>"
 # Values are replaced rather than dropped so an operator debugging the CLI can
 # still see WHICH keys exist; a dropped key looks identical to a missing one.
 #
-# DECISION plan-2026-07-19-4b664252/D-014
+# DECISION plan-2026-07-19T191147-4b664252/D-014
 # The recursion is NOT optional and the replace-don't-drop rule above is NOT a
 # harmonization bug. `clean_context_keys` (D-010) and `prompts.py`'s
 # `_filter_context_for_security` (D-011) DROP a matched key; this one keeps the
