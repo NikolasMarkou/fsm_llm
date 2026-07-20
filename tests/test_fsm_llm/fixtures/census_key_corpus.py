@@ -60,13 +60,18 @@ THIS CORPUS IS HALF MIRROR -- THE ARM SPLIT IS NOT INDEPENDENT EVIDENCE
 Measured, not estimated (`test_the_census_mirror_is_measured_and_pinned` pins all
 four numbers and fails if they drift):
 
-    274 rows  /  129 distinct VALUES  /  124 values present in BOTH arms
-    135 distinct (value, ground_truth) SHAPES
+    321 rows  /  176 distinct VALUES  /  124 values present in BOTH arms
+    182 distinct (value, ground_truth) SHAPES
 
-So the `*_key` arm and the `*_token` arm are near-perfect mirrors of one another:
-the SAME value was typed under a `*_key` name and again under a `*_token` name for
-124 of the 129 values here. The consequences, stated plainly because iteration 1 of
-plan-2026-07-20T144233-47e8c662 reported 18 cells without knowing them:
+    (iteration 2 step 2 measured 274 / 129 / 124 / 135; step 3 added 47 rows, every
+     one a NEW value in exactly ONE arm, so the both-arms count did not move and the
+     distinct/row RATCHET improved from 129/274 = 0.471 to 176/321 = 0.548.)
+
+So the `*_key` arm and the `*_token` arm are near-perfect mirrors of one another for
+the ORIGINAL 274 rows: the SAME value was typed under a `*_key` name and again under
+a `*_token` name for 124 of the first 129 values here. The consequences, stated
+plainly because iteration 1 of plan-2026-07-20T144233-47e8c662 reported 18 cells
+without knowing them:
 
   * **A per-arm rate and the slice-total are largely the same observations
     recounted.** "The key arm AND the token arm AND the total all breached" is ONE
@@ -79,10 +84,11 @@ plan-2026-07-20T144233-47e8c662 reported 18 cells without knowing them:
 THE UNIT OF MEASUREMENT IS THEREFORE THE DISTINCT `(value, ground_truth)` SHAPE,
 counted by `distinct_shape_count()` in `test_context_unit.py`. Every cell reported
 from this corpus carries `n` (rows) AND `d` (shapes), with the SHAPE-level rate as
-the primary figure; a row-level rate is never quoted alone. `d` (135) exceeds the
-distinct-value count (129) because six values are ground-truthed BOTH ways -- the
+the primary figure; a row-level rate is never quoted alone. `d` (182) exceeds the
+distinct-value count (176) because six values are ground-truthed BOTH ways -- the
 F-02 class, where one string is an identifier under one name and a credential under
-another.
+another. All six are original rows; step 3 added none, because a value that appears
+in exactly one arm under exactly one truth cannot be one.
 
 Any row added to this file must be a value that appears NOWHERE else in the corpus
 and in exactly ONE arm, so that the distinct/row ratio improves. That direction is
@@ -155,12 +161,81 @@ GROUND-TRUTH CALLS OPEN TO CHALLENGE (disclosed, not hidden)
   the public half as a hard false-positive class for any PEM-shape-triggers-strip
   rule.
 
+THE DECISIVE CELLS (iteration 2, step 3) -- WHY 47 ROWS WERE ADDED
+================================================================================
+D-006 measured the cell that decides this whole seam at **n = 0**: a BARE canonical
+UUID/ULID, under a name carrying a LISTED identifier noun, whose ground truth is
+`credential`. That is exactly where an identifier-noun carve-out must fail, and the
+corpus could not speak to it. Three populations were authored to fix that, blind,
+from name semantics and public product knowledge only:
+
+  (i)   **The empty cell.** 12 bare UUID/ULID rows under the LISTED resource nouns
+        `session`, `job`, `run`, `lease`, `tenant`, `batch`, ground-truthed
+        `credential`, each grounded in a shipping product that issues a
+        UUID-shaped capability (Consul session IDs, Vault AppRole/lease
+        credentials, Nomad ACL SecretIDs, Keycloak client credentials, GitLab CI
+        job credentials, runner enrolment credentials). d = 12 (floor: 8).
+  (ii)  **The `<head> <uuid>` 2x2x2 grid**, {listed head, unlisted head} x {listed
+        noun, unlisted noun} x {credential, safe}. D-006 could measure ONE of these
+        cells at n = 1 and found two EMPTY. 27 rows added, >= 4 distinct shapes in
+        every cell that can be populated at all.
+  (iii) **`<English noun> <UUID>` safe rows, widened.** The +2.9 pp that fired
+        STOP-2 in iteration 1 came from exactly TWO distinct shapes
+        (`Policy <uuid>`, `Request <uuid>`) -- an UNBOUNDED class sampled at two.
+        8 further distinct English-noun heads added so the class is MEASURED
+        rather than sampled.
+
+TWO GRID CELLS ARE STRUCTURALLY EMPTY, AND THAT IS A RESULT, NOT AN OMISSION.
+`<listed scheme head> <uuid>` ground-truthed **safe** cannot be authored without
+contradicting this corpus's own disclosed rule (below): a value that literally
+carries an RFC 6750 / RFC 7235 scheme head is an Authorization header value under
+either name family. So `head LISTED / noun LISTED / safe` and
+`head LISTED / noun UNLISTED / safe` are empty BY THE RULE. Filling them would have
+meant inventing a row to make a table look complete. They stay empty and are
+disclosed here instead.
+
+THE GROUND-TRUTH RULE FOR AMBIGUOUS RESOURCE NOUNS -- CONTESTABLE BY CONSTRUCTION
+================================================================================
+Written down BEFORE any row of the decisive cells was authored, because the cell is
+defined by the exact ambiguity it adjudicates. F-02 derived the trap blind: the SAME
+36-character string is a session identifier and a session credential, and no shape
+predicate can tell them apart.
+
+    `session_token`  = <uuid>  is a CREDENTIAL.
+    `session_id_key` = <uuid>  is an IDENTIFIER.
+    The same 36-character string is both.
+
+    **THE RULE: the name's semantic root, plus the `*_token` / `*_key` trigger,
+    decides. Never the value. Never the filter.**
+
+A name whose root names a CAPABILITY over a resource (`..._grant`, `..._ticket`,
+`..._capability`, `..._enrolment`, `..._dispatch`, `..._client`, `..._provisioning`,
+`..._handoff`, a CI job credential) is `credential`. A name whose root names WHICH
+resource (`..._id`, `..._offset`, `..._page`, `..._step`, `..._placement`,
+`..._window`, `..._slot`) is `safe`.
+
+**This is the one place in this corpus where a reasonable author could differ**, and
+it is disclosed rather than defended. The rows where the contest is live are marked
+mechanically in `CONTESTED_RESOURCE_NOUN_ROWS` below -- a module-level tuple, so a
+later step SELECTS them rather than re-deriving them by grep.
+
+**Step 7 of plan-2026-07-20T144233-47e8c662 is pre-committed to a counterfactual
+re-score over exactly that tuple**: every contested row (a) re-truthed to the
+opposite label and (b) dropped entirely, with each stop trigger's verdict stated
+under each counterfactual. That is the technique the iteration-1 adversarial review
+used to retire the previously-contested `<auth-scheme> <uuid>` call, and it is what
+stops a contestable authoring choice from silently selecting a design.
+
 STOP-4 DROPS
 ================================================================================
 STOP-4 (plan.md Pre-Mortem 4) requires dropping any entry whose ground truth cannot
 be decided without reading the filter or either sibling corpus.
 
-  **Entries dropped under STOP-4: none.**
+  **Entries dropped under STOP-4: none.** (Iteration 1: none. Iteration 2 step 3:
+  none -- every one of the 47 decisive-cell rows was decidable from the rule above
+  plus public product knowledge, without opening `constants.py` or either sibling
+  corpus. The two structurally-empty grid cells described above are NOT STOP-4
+  drops: they are decided BY the rule, not blocked by it.)
 
 Every census shape that reached this file was decidable from the census verdict
 column plus the name's semantic root. The census's own AMBIGUOUS shapes
@@ -198,6 +273,7 @@ from tests.test_fsm_llm.fixtures.holdout_key_corpus import arm_of
 
 __all__ = [
     "CENSUS",
+    "CONTESTED_RESOURCE_NOUN_ROWS",
     "GROUND_TRUTH_VALUES",
     "KEY_ARM_CREDENTIAL",
     "KEY_ARM_SAFE",
@@ -207,6 +283,33 @@ __all__ = [
 ]
 
 GROUND_TRUTH_VALUES = frozenset({"credential", "safe"})
+
+# The rows where the resource-noun ground-truth rule in the banner is genuinely
+# open to challenge -- a reasonable author reading the same name could call each of
+# these an IDENTIFIER instead of a CREDENTIAL. Every one is currently ground-truthed
+# `credential`.
+#
+# INTERFACE CONTRACT: a tuple of context-key NAMES present in `CENSUS`. Consumers
+# select rows by membership, never by re-deriving the list from a grep or a regex
+# over the file. Two consumers exist by construction: the corpus-adequacy guard in
+# `test_context_unit.py` (which asserts every name here is a real `credential` row),
+# and step 7's counterfactual re-score, which must re-run its measurement twice --
+# once with these rows re-truthed to `safe`, once with them dropped -- and report
+# whether either stop trigger's verdict changes. Adding a row here WIDENS that
+# counterfactual; it never changes a measured number on its own.
+CONTESTED_RESOURCE_NOUN_ROWS: tuple[str, ...] = (
+    "batch_ingest_token",
+    "consul_session_grant_key",
+    "cursor_resume_token",
+    "job_dispatch_wrapped_key",
+    "lease_capability_token",
+    "lease_renewal_wrapped_token",
+    "nomad_job_dispatch_token",
+    "partition_rebalance_key",
+    "session_ticket_token",
+    "shard_rebalance_key",
+    "vault_lease_renewal_key",
+)
 
 # A >200-character unstructured high-entropy blob (census S48). Held as a named
 # constant because it is used in both arms and a wrapped literal would be unreadable.
@@ -348,6 +451,72 @@ KEY_ARM_CREDENTIAL: list[tuple[str, str, str]] = [
     ("correlation_ctx_key", f"Bearer {_ULID}", "credential"),
     ("dedupe_ctl_key", f"OAuth2 {_UUID_LOWER}", "credential"),
     ("idempotency_ctl_key", f"SharedKey {_UUID_V7}", "credential"),
+    # ========================================================================
+    # ITERATION 2, STEP 3 -- THE DECISIVE CELL (i). D-006 measured this at n = 0.
+    # BARE canonical UUID/ULID, name carries a LISTED resource noun (`session`,
+    # `job`, `run`, `lease`, `tenant`, `batch`), ground truth `credential`.
+    # Grounded in shipping products that issue UUID-shaped capabilities; decided
+    # by the banner's resource-noun rule (semantic root + `*_key` trigger), never
+    # by the value and never by the filter. Every value below is NEW and appears
+    # in exactly ONE arm.
+    # ========================================================================
+    # Consul creates sessions via /v1/session/create and returns a UUID; holding
+    # it renews and releases locks. CONTESTED: it is also a session identifier.
+    ("consul_session_grant_key", "36fd1dfa-19a5-4345-85c5-b0a2d2ee8235", "credential"),
+    # A GitLab CI job credential authenticates API calls AS the job.
+    ("gitlab_job_ci_key", "97c18e97-ef6c-4497-b0b2-10bd7c5633ab", "credential"),
+    # Vault lease renewal: presenting it extends the lease. CONTESTED -- a lease
+    # id reads as an identifier to a reader who has not tried to renew one.
+    ("vault_lease_renewal_key", "fdba6878-b9f6-49f7-a9e7-3a7791603f01", "credential"),
+    # Per-tenant API credential issued at provisioning time.
+    ("tenant_provisioning_key", "7a3237a3-c11e-416c-b68c-66774098a037", "credential"),
+    ("batch_upload_grant_key", "01FHTQDXQGPC1917467W1XYK2S", "credential"),
+    ("run_replay_grant_key", "872ddbe6-3d8c-4a71-8290-35ba0dfbe305", "credential"),
+    # ========================================================================
+    # ITERATION 2, STEP 3 -- GRID (ii). `<head> <uuid>`, key arm, credential.
+    # Heads are labelled listed/unlisted DIAGNOSTICALLY (same status as the head
+    # labels in `test_the_census_contains_every_population_it_was_built_for`);
+    # no ground truth below was decided by whether a head is listed. The truth
+    # is the banner's disclosed call: a value carrying an RFC 6750 / RFC 7235
+    # scheme head is an Authorization header value under either name family.
+    # ========================================================================
+    # (A) head LISTED x noun LISTED x credential -- D-006 measured this at n = 1.
+    (
+        "tenant_scoped_access_key",
+        "Bearer 860805af-e709-4a4b-937d-cecdcdf9d101",
+        "credential",
+    ),
+    ("job_dispatch_wrapped_key", "token 01EQAZ88A4GFSTTHQMKD7PYX1Z", "credential"),
+    (
+        "shard_rebalance_key",
+        "digest 576297d4-1347-4f89-9326-a6be1fba5592",
+        "credential",
+    ),
+    # (B) head LISTED x noun UNLISTED x credential
+    (
+        "manifest_signing_key",
+        "Bearer 71056dab-8092-4770-9bad-b8409fc80346",
+        "credential",
+    ),
+    ("docket_access_key", "token 01X4MAETWH5NXZTYRZMD02ZEX5", "credential"),
+    # (C) head UNLISTED x noun LISTED x credential
+    (
+        "partition_rebalance_key",
+        "OAuth2 59259872-fa09-4109-8244-700e712dd042",
+        "credential",
+    ),
+    (
+        "lease_handoff_key",
+        "Kerberos5 d89cb7db-2821-4fa9-b218-50489c5510a1",
+        "credential",
+    ),
+    # (E) head UNLISTED x noun UNLISTED x credential -- D-006 found this EMPTY.
+    (
+        "dossier_release_key",
+        "Sigv4Custom 494d89cf-182e-41da-862e-0a11042e72f5",
+        "credential",
+    ),
+    ("escrow_release_key", "PLAIN 2e594f42-8346-4812-88da-bf1ca3fff8f2", "credential"),
 ]
 
 
@@ -450,6 +619,30 @@ KEY_ARM_SAFE: list[tuple[str, str, str]] = [
     # -- unicode label under a `*_key` name (S50 resolved safe by name semantics)
     ("city_key", "Z\N{LATIN SMALL LETTER U WITH DIAERESIS}rich Hauptbahnhof", "safe"),
     ("locale_code_key", "fr-CA", "safe"),
+    # ========================================================================
+    # ITERATION 2, STEP 3 -- GRID (ii), safe half, key arm.
+    # (D) head UNLISTED (non-auth English noun) x noun LISTED x safe
+    # (F) head UNLISTED (non-auth English noun) x noun UNLISTED x safe
+    # The name root says WHICH resource, not a capability over it, so the
+    # banner's rule makes these `safe`.
+    # ========================================================================
+    ("run_step_key", "Segment d4aaee4b-9638-4e64-b34a-53ac1c72923e", "safe"),
+    ("shard_placement_key", "Record 71099285-e48b-44c5-8dea-c22f3a71bdff", "safe"),
+    ("replay_window_key", "Draft b0dfc5b1-5791-40f7-af39-ca9cc78c3719", "safe"),
+    ("manifest_line_key", "Shipment f251e24c-8a6f-4f00-9e0d-8ed053508434", "safe"),
+    ("roster_slot_key", "Position 58dbe200-870d-4d4e-983f-7499b9a4f7ce", "safe"),
+    # ========================================================================
+    # ITERATION 2, STEP 3 -- POPULATION (iii): `<English noun> <UUID>` WIDENED.
+    # Iteration 1's entire +2.9 pp over-strip figure came from TWO distinct
+    # shapes, `Policy <uuid>` and `Request <uuid>`. The class of English nouns
+    # that can precede an identifier is UNBOUNDED, so a two-shape sample sets
+    # the measured cost by accident. These rows make the class measured.
+    # DO NOT delete them to improve a rate; that is the forbidden move.
+    # ========================================================================
+    ("catalogue_item_key", "Item 01E8HZV2KK249KWS0DGBW0SK2C", "safe"),
+    ("contract_clause_key", "Clause 02ac9f84-a057-4bb8-a268-ee7774471edb", "safe"),
+    ("asset_serial_key", "Asset c43080f0-a535-41d4-a125-f7e137d5f774", "safe"),
+    ("article_revision_key", "Revision f06a71f2-68ec-486c-991c-4ddbd3b571b2", "safe"),
 ]
 
 
@@ -534,6 +727,66 @@ TOKEN_ARM_CREDENTIAL: list[tuple[str, str, str]] = [
     ("session_bearer_token", f"Bearer {_UUID_LOWER}", "credential"),
     ("trace_ctx_token", f"OAuth2 {_UUID_LOWER}", "credential"),
     ("dedupe_ctl_token", f"SharedKey {_UUID_V7}", "credential"),
+    # ========================================================================
+    # ITERATION 2, STEP 3 -- THE DECISIVE CELL (i), token arm.
+    # BARE canonical UUID/ULID under a LISTED resource noun, `credential`.
+    # ========================================================================
+    ("session_handoff_token", "739e7ff9-e69e-466c-b4cc-4b4abc86e316", "credential"),
+    # Nomad ACL SecretIDs are canonical UUIDs. CONTESTED: "dispatch" could name
+    # the dispatch rather than the capability to dispatch.
+    ("nomad_job_dispatch_token", "b693b8eb-c0d5-44ab-8de3-6377e8e51da2", "credential"),
+    # Keycloak issues UUID-shaped client credentials by default.
+    (
+        "keycloak_tenant_client_token",
+        "e3368415-855e-40d1-b382-a3f418082508",
+        "credential",
+    ),
+    # CONTESTED: a lease capability handle is also a lease identifier.
+    ("lease_capability_token", "013TGVCMBCR4PGH6HHFVY5RNC6", "credential"),
+    (
+        "run_worker_enrolment_token",
+        "02c33d86-deb4-46fc-8c5d-3181fee37282",
+        "credential",
+    ),
+    # A TLS/Kerberos session ticket resumes a session on presentation.
+    # CONTESTED: "ticket" also reads as an identifier in issue-tracker English.
+    ("session_ticket_token", "05a5c559-ce35-42ff-a6b1-5803990500a7", "credential"),
+    # ========================================================================
+    # ITERATION 2, STEP 3 -- GRID (ii), credential half, token arm.
+    # ========================================================================
+    # (A) head LISTED x noun LISTED x credential
+    (
+        "lease_renewal_wrapped_token",
+        "Basic c4e87120-24a7-42f6-92cd-1eeb373be391",
+        "credential",
+    ),
+    ("run_attach_token", "apikey a99184f5-1457-4b38-8887-9e46e61759c4", "credential"),
+    # (B) head LISTED x noun UNLISTED x credential
+    (
+        "voucher_redeem_token",
+        "Basic 2b91304d-6f48-42b0-8a13-96f741f395cb",
+        "credential",
+    ),
+    ("roster_sync_token", "apikey 23e7c536-6472-43a9-a91b-5b97cc291697", "credential"),
+    # (C) head UNLISTED x noun LISTED x credential
+    (
+        "cursor_resume_token",
+        "SharedKey ce40bcea-f557-4ea3-a61d-f6331839f384",
+        "credential",
+    ),
+    ("tenant_federation_token", "GSSAPI 019B0ZAW2W2HHKFHEZZAWEPN56", "credential"),
+    ("batch_ingest_token", "SASL d36ef446-21f7-4ee2-ad1d-5e22b61edac8", "credential"),
+    # (E) head UNLISTED x noun UNLISTED x credential -- D-006 found this EMPTY.
+    (
+        "parcel_carrier_token",
+        "X-Api-Key 6bbf646e-684b-447d-b3b4-47e7e2fb49bf",
+        "credential",
+    ),
+    (
+        "warrant_issue_token",
+        "AWS4-HMAC-SHA256 0188X3DZ6Z66GQ81P8CDEGE2QX",
+        "credential",
+    ),
 ]
 
 
@@ -641,6 +894,21 @@ TOKEN_ARM_SAFE: list[tuple[str, str, str]] = [
         "safe",
     ),
     ("region_name_token", "fr-CA", "safe"),
+    # ========================================================================
+    # ITERATION 2, STEP 3 -- GRID (ii), safe half, token arm.
+    # (D) noun LISTED x safe, (F) noun UNLISTED x safe.
+    # ========================================================================
+    ("cursor_page_token", "Entry 019cbf7a-feba-4e73-9952-f54c6290ed3a", "safe"),
+    ("partition_offset_token", "Sequence 0171CXXTNQB8V5G4G46DV8SGTF", "safe"),
+    ("docket_entry_token", "Invoice 7dbe1ed5-9379-4dad-b507-277d7da4fa97", "safe"),
+    ("dossier_index_token", "Folder 72f4906f-d2f6-450c-8d46-49c808e1d122", "safe"),
+    # ========================================================================
+    # ITERATION 2, STEP 3 -- POPULATION (iii), token arm. See the key-arm block.
+    # ========================================================================
+    ("warehouse_bin_token", "Bin 89404757-a396-4118-bf3d-397321768f72", "safe"),
+    ("survey_response_token", "Response 94eb4bf5-5c3e-4a54-ac95-5a13d2ff8cad", "safe"),
+    ("booking_slot_token", "Booking 01T43DSTJ86P1D736XTAK0R2C2", "safe"),
+    ("route_leg_token", "Leg 7de6a7a8-139f-45a0-b714-80867b42b892", "safe"),
 ]
 
 

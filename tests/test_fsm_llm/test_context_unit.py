@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 import pytest
 
@@ -3863,6 +3864,81 @@ class TestShippedCorpusBounds:
         )
 
 
+# ---------------------------------------------------------------------------
+# DIAGNOSTIC LABELS FOR THE CENSUS GUARDS -- adversarial review Concern 11.
+#
+# These three tuples name scheme heads and identifier nouns that the SHIPPED
+# filter does or does not enumerate. That labelling IS derived from knowledge of
+# `constants.py`, and it is a DIAGNOSTIC label only: it is used to check that the
+# census COVERS both sides of the class this plan exists to measure, and to slice
+# already-authored rows into cells. **No `ground_truth` value in
+# `census_key_corpus.py` was decided by any of these tuples**, and the corpus file
+# itself never imports `fsm_llm.constants` (mechanically guarded above).
+#
+# Defined at module level rather than inside one test because two guards now need
+# them -- the population guard and the decisive-cell non-vacuity guard. Two copies
+# that must be kept in lockstep by hand is a defect, not a pattern.
+# ---------------------------------------------------------------------------
+_DIAGNOSTIC_LISTED_HEADS = ("Bearer ", "Basic ", "token ", "apikey ", "digest ")
+_DIAGNOSTIC_UNLISTED_HEADS = (
+    "OAuth2 ",
+    "AWS4-HMAC-SHA256 ",
+    "SharedKey ",
+    "ntrip ",
+    "secret ",
+    "Sigv4Custom ",
+    "GSSAPI ",
+    "Kerberos5 ",
+    "X-Api-Key ",
+    "SASL ",
+    "PLAIN ",
+    "OCPP16 ",
+)
+# The RESOURCE/PRINCIPAL half of the shipped identifier-noun vocabulary plus its
+# OBSERVABILITY half -- the nouns that make a bare UUID reachable by the carve-out.
+_DIAGNOSTIC_LISTED_NOUNS = frozenset(
+    {
+        "session",
+        "job",
+        "run",
+        "lease",
+        "tenant",
+        "batch",
+        "trace",
+        "correlation",
+        "span",
+        "request",
+        "idempotency",
+        "dedup",
+        "dedupe",
+        "replay",
+        "cursor",
+        "partition",
+        "shard",
+    }
+)
+
+_CANONICAL_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
+)
+_CROCKFORD_ULID_RE = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}\Z")
+
+
+def _looks_like_bare_identifier(value: str) -> bool:
+    """Canonical UUID or Crockford ULID, with nothing around it."""
+    return bool(_CANONICAL_UUID_RE.match(value) or _CROCKFORD_ULID_RE.match(value))
+
+
+def _name_carries_a_listed_noun(name: str) -> bool:
+    """DIAGNOSTIC. Approximates the production name-token split with a local
+    regex rather than importing `constants.py` -- these guards must keep working
+    on a tree where the vocabulary has been redesigned or deleted."""
+    return bool(
+        {t for t in re.split(r"[^a-z0-9]+", name.lower()) if t}
+        & _DIAGNOSTIC_LISTED_NOUNS
+    )
+
+
 class TestCensusCorpusAdequacy:
     """SC-1. Guards on the census corpus ITSELF, not on the filter.
 
@@ -3947,11 +4023,25 @@ class TestCensusCorpusAdequacy:
         assert "THIS CORPUS IS HALF MIRROR" in source
         assert "NOT INDEPENDENT EVIDENCE" in source
         assert (
-            "274 rows  /  129 distinct VALUES  /  124 values present in BOTH" in source
+            "321 rows  /  176 distinct VALUES  /  124 values present in BOTH" in source
         )
         assert "THE F-05 BLOCK WAS PLAN-SPECIFIED" in source
         assert "bias the measured over-strip rate DOWNWARD" in source
         assert "IS A DIAGNOSTIC LABEL" in source
+
+        # Step-3 disclosures. The ground-truth rule for the ambiguous resource
+        # nouns is the single most contestable sentence in this corpus, and the
+        # pre-commitment to a counterfactual re-score is what keeps a contestable
+        # authoring choice from silently selecting a design. Both are pinned
+        # verbatim so a rewrite cannot quietly soften either.
+        assert "CONTESTABLE BY CONSTRUCTION" in source
+        assert (
+            "**THE RULE: the name's semantic root, plus the `*_token` / `*_key` "
+            "trigger,\n    decides. Never the value. Never the filter.**" in source
+        )
+        assert "CONTESTED_RESOURCE_NOUN_ROWS" in source
+        assert "pre-committed to a counterfactual" in source
+        assert "TWO GRID CELLS ARE STRUCTURALLY EMPTY" in source
 
     def test_every_census_ground_truth_is_one_of_the_two_legal_strings(self):
         """A third label -- `"ambiguous"`, `""`, `None` -- would be silently
@@ -4014,28 +4104,37 @@ class TestCensusCorpusAdequacy:
     def test_the_census_mirror_is_measured_and_pinned(self):
         """THE MIRROR GUARD. Adversarial review Concern 3, mechanised.
 
-        The census is 274 ROWS but only 129 distinct VALUES, and 124 of those
-        appear in BOTH the `*_key` and the `*_token` arm. So the two arms are
-        near-perfect mirrors of each other, the slice-total is the same rows a
-        third time, and iteration 1's "three over-strip cells breached, either
-        clause alone would have fired it" was largely ONE observation counted
-        three times. That fact was measurable from the corpus at any point in
-        iteration 1 and nothing in the suite measured it, so nobody reading the
-        18-cell tables could see it. This test makes it impossible for that to
-        recur: the mirror is now a number the suite prints.
+        At iteration 2 step 2 the census was 274 ROWS but only 129 distinct
+        VALUES, and 124 of those appeared in BOTH the `*_key` and the `*_token`
+        arm. So the two arms were near-perfect mirrors of each other, the
+        slice-total was the same rows a third time, and iteration 1's "three
+        over-strip cells breached, either clause alone would have fired it" was
+        largely ONE observation counted three times. That fact was measurable
+        from the corpus at any point in iteration 1 and nothing in the suite
+        measured it, so nobody reading the 18-cell tables could see it. This test
+        makes it impossible for that to recur: the mirror is a number the suite
+        prints.
 
-        THE FOUR COUNTS ARE PINNED EXACTLY, ON PURPOSE. Step 3 of this plan adds
-        decisive-cell rows, every one of them a DISTINCT value in exactly ONE
-        arm, so all four numbers must move and this test must be updated in that
-        same commit -- deliberately, so the improvement is stated rather than
-        absorbed silently. The ratchet below is what makes the direction
-        binding: the distinct/row RATIO may never fall. Adding a mirrored row
-        (a value already present in the other arm) lowers it and fails here.
+        **STEP 3 RE-PINNED THESE NUMBERS AND THE RATCHET IMPROVED.** 47
+        decisive-cell rows were added, every one a NEW value in exactly ONE arm,
+        so the both-arms count did NOT move:
 
-        `d` (135) exceeds the distinct-VALUE count (129) because six values are
+            274 rows / 129 values / 124 both / d=135   ratio 0.471  (step 2)
+            321 rows / 176 values / 124 both / d=182   ratio 0.548  (step 3)
+
+        THE FOUR COUNTS ARE PINNED EXACTLY, ON PURPOSE, so any later addition has
+        to state its effect on the mirror rather than absorb it silently. The two
+        ratchet clauses below are what make the DIRECTION binding: the
+        distinct/row ratio must stay strictly better than step 2's, and it may
+        never fall below what step 3 achieved. Adding a mirrored row (a value
+        already present in the other arm) lowers the ratio and fails here.
+
+        `d` (182) exceeds the distinct-VALUE count (176) because six values are
         ground-truthed BOTH ways across the corpus -- the F-02 class, where the
         same string is an identifier under one name and a credential under
-        another. That gap is a feature of the corpus, not an inconsistency.
+        another. That gap is a feature of the corpus, not an inconsistency. All
+        six are original rows: a value confined to one arm under one truth cannot
+        be one, so step 3's additions could not and did not widen that gap.
         """
         from tests.test_fsm_llm.fixtures.census_key_corpus import CENSUS, arm_of
 
@@ -4050,11 +4149,11 @@ class TestCensusCorpusAdequacy:
         both_arms = sum(1 for arms in arms_by_value.values() if len(arms) > 1)
         shapes = distinct_shape_count([(value, truth) for _n, value, truth in CENSUS])
 
-        assert (rows, distinct_values, both_arms, shapes) == (274, 129, 124, 135), (
+        assert (rows, distinct_values, both_arms, shapes) == (321, 176, 124, 182), (
             "the census's mirror moved. Measured: "
             f"{rows} rows / {distinct_values} distinct values / {both_arms} "
             f"values in BOTH arms / d={shapes} distinct (value, truth) shapes. "
-            "Expected 274 / 129 / 124 / 135.\n"
+            "Expected 321 / 176 / 124 / 182.\n"
             "If rows were ADDED, update these four numbers here and record the "
             "new distinct/row ratio -- that is the point of pinning them. If "
             "the ratio FELL, the added rows were mirrored across both arms and "
@@ -4064,13 +4163,148 @@ class TestCensusCorpusAdequacy:
             "are largely the same observations recounted."
         )
 
-        assert distinct_values / rows >= 129 / 274, (
+        # RATCHET clause 1: strictly better than the step-2 baseline. This is the
+        # mechanism that stops a future step re-mirroring the corpus back.
+        assert distinct_values / rows > 129 / 274, (
+            f"the census's distinct/row ratio is {distinct_values}/{rows} "
+            f"= {distinct_values / rows:.3f}, not strictly better than the "
+            f"129/274 = {129 / 274:.3f} it started iteration 2 at. Rows were "
+            "added that duplicate values already in the corpus, which inflates "
+            "every denominator without adding evidence. Author distinct values "
+            "in exactly one arm instead."
+        )
+        # RATCHET clause 2: never worse than what step 3 actually achieved.
+        assert distinct_values / rows >= 176 / 321, (
             f"the census's distinct/row ratio fell to {distinct_values}/{rows} "
-            f"= {distinct_values / rows:.3f}, below the 129/274 = "
-            f"{129 / 274:.3f} it started iteration 2 at. Rows were added that "
-            "duplicate values already in the corpus, which inflates every "
-            "denominator without adding evidence. Author distinct values in "
-            "exactly one arm instead."
+            f"= {distinct_values / rows:.3f}, below the 176/321 = "
+            f"{176 / 321:.3f} step 3 achieved. The ratchet only turns one way."
+        )
+
+    def test_the_decisive_cells_are_not_vacuous(self):
+        """SC-2. The three populations iteration 2 exists to author.
+
+        Every floor below is COMPUTED from the corpus, never asserted as a
+        constant, and every one counts DISTINCT SHAPES rather than rows -- a
+        cell of eight rows carrying two values is the exact defect review
+        Concern 3 found and Concern 5 priced. `<Noun> <UUID>` is an UNBOUNDED
+        class and iteration 1 sampled it at two shapes; that sample, not the
+        change, produced the +2.9 pp that fired STOP-2.
+
+        The head / noun labels are DIAGNOSTIC (see the module-level block). They
+        slice already-authored rows into cells; they decided no ground truth.
+        """
+        from tests.test_fsm_llm.fixtures.census_key_corpus import (
+            CENSUS,
+            CONTESTED_RESOURCE_NOUN_ROWS,
+        )
+
+        def _shapes(predicate) -> set:
+            return {
+                (value, truth)
+                for name, value, truth in CENSUS
+                if predicate(name, value, truth)
+            }
+
+        def _head(value: str) -> str:
+            return value.split(" ", 1)[0] + " " if " " in value else ""
+
+        def _wrapped_identifier(value: str) -> bool:
+            return (
+                " " in value
+                and value.count(" ") == 1
+                and _looks_like_bare_identifier(value.split(" ", 1)[1])
+            )
+
+        # (i) THE EMPTY CELL: bare UUID/ULID, LISTED noun, ground truth
+        # `credential`. D-006 measured this at n = 0. It is where an
+        # identifier-noun carve-out must fail, and it cannot be inferred.
+        decisive = _shapes(
+            lambda n, v, t: (
+                t == "credential"
+                and _looks_like_bare_identifier(v)
+                and _name_carries_a_listed_noun(n)
+            )
+        )
+        assert len(decisive) >= 8, (
+            "the decisive cell (bare UUID/ULID under a LISTED identifier noun, "
+            f"ground truth credential) has only {len(decisive)} distinct "
+            "shapes. D-006 measured it at n = 0 and iteration 2 exists to "
+            "populate it. Do NOT satisfy this by mirroring a value across both "
+            "arms -- the mirror ratchet will fail instead."
+        )
+
+        # (ii) The `<head> <uuid>` 2x2x2 grid. The two `head LISTED / safe`
+        # cells are STRUCTURALLY EMPTY by the corpus's own ground-truth rule (a
+        # value carrying an RFC 6750 scheme head is an Authorization header
+        # value under either name family), so they are asserted empty rather
+        # than populated -- filling them would mean inventing a row to make a
+        # table look complete.
+        grid: dict = {}
+        for name, value, truth in CENSUS:
+            if not _wrapped_identifier(value):
+                continue
+            head = _head(value)
+            if head.startswith(_DIAGNOSTIC_LISTED_HEADS):
+                head_label = "listed"
+            elif head.startswith(_DIAGNOSTIC_UNLISTED_HEADS):
+                head_label = "unlisted-auth"
+            else:
+                head_label = "unlisted-plain"
+            noun = "listed" if _name_carries_a_listed_noun(name) else "unlisted"
+            grid.setdefault((head_label, noun, truth), set()).add((value, truth))
+
+        structurally_empty = [
+            cell for cell in grid if cell[0] == "listed" and cell[2] == "safe"
+        ]
+        assert not structurally_empty, (
+            "a `<listed scheme head> <uuid>` row is ground-truthed safe: "
+            f"{structurally_empty}. That contradicts the corpus's own disclosed "
+            "rule. Change the rule in the banner first, or drop the row."
+        )
+
+        thin = {
+            cell: sorted(v for v, _t in shapes)
+            for cell, shapes in grid.items()
+            if len(shapes) < 4
+        }
+        assert not thin, (
+            f"`<head> <uuid>` grid cells below 4 distinct shapes: {thin}. "
+            "D-006 could measure one of these cells at n = 1 and found two "
+            "EMPTY; a design selected on a one-observation cell is selected by "
+            "accident."
+        )
+
+        # (iii) `<English noun> <UUID>` safe rows -- the UNBOUNDED class.
+        widened = _shapes(
+            lambda n, v, t: (
+                t == "safe"
+                and _wrapped_identifier(v)
+                and not _head(v).startswith(
+                    _DIAGNOSTIC_LISTED_HEADS + _DIAGNOSTIC_UNLISTED_HEADS
+                )
+            )
+        )
+        assert len(widened) >= 8, (
+            f"`<English noun> <UUID>` safe shapes: {len(widened)}. Iteration 1 "
+            "sampled this UNBOUNDED class at TWO shapes and reported the "
+            "resulting +2.9 pp as the price of the change. Measure it."
+        )
+
+        # The contested rows must be real, credential-truthed census rows, so
+        # step 7's counterfactual selects mechanically instead of by grep.
+        truths = {name: truth for name, _value, truth in CENSUS}
+        missing = [n for n in CONTESTED_RESOURCE_NOUN_ROWS if n not in truths]
+        assert not missing, f"contested rows absent from the census: {missing}"
+        mislabelled = [
+            n for n in CONTESTED_RESOURCE_NOUN_ROWS if truths[n] != "credential"
+        ]
+        assert not mislabelled, (
+            f"contested rows not ground-truthed credential: {mislabelled}. The "
+            "counterfactual re-truths them to `safe`; a row already `safe` "
+            "makes that counterfactual a no-op and hides the contest."
+        )
+        assert len(set(CONTESTED_RESOURCE_NOUN_ROWS)) == len(
+            CONTESTED_RESOURCE_NOUN_ROWS
         )
 
     def test_the_census_corpus_shares_no_name_with_either_sibling_corpus(self):
@@ -4116,24 +4350,10 @@ class TestCensusCorpusAdequacy:
             return sum(1 for value in values.values() if predicate(value))
 
         # Scheme-word class, listed-style heads and unlisted heads (the class the
-        # whole plan exists to fix). Heads are named here, not imported.
-        listed_heads = ("Bearer ", "Basic ", "token ", "apikey ", "digest ")
-        unlisted_heads = (
-            "OAuth2 ",
-            "AWS4-HMAC-SHA256 ",
-            "SharedKey ",
-            "ntrip ",
-            "secret ",
-            "Sigv4Custom ",
-            "GSSAPI ",
-            "Kerberos5 ",
-            "X-Api-Key ",
-            "SASL ",
-            "PLAIN ",
-            "OCPP16 ",
-        )
-        assert _count(lambda v: v.startswith(listed_heads)) >= 10
-        assert _count(lambda v: v.startswith(unlisted_heads)) >= 24
+        # whole plan exists to fix). Heads are named, not imported -- see the
+        # module-level DIAGNOSTIC LABELS block for why that is sound.
+        assert _count(lambda v: v.startswith(_DIAGNOSTIC_LISTED_HEADS)) >= 10
+        assert _count(lambda v: v.startswith(_DIAGNOSTIC_UNLISTED_HEADS)) >= 24
 
         # F-05's over-strip casualties: two-field metadata under *_key / *_token
         # names, ground-truthed safe. Without these the over-strip cost of the
