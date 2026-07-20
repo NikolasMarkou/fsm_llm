@@ -33,6 +33,15 @@ DEFAULT_BUFFERS = (BUFFER_CORE, BUFFER_SCRATCH, BUFFER_ENVIRONMENT, BUFFER_REASO
 # LLM context.
 DEFAULT_HIDDEN_BUFFERS = frozenset({BUFFER_METADATA})
 
+# Types whose `str()` is a built-in that cannot re-enter `WorkingMemory`, so
+# `search` may coerce them while holding the lock. Membership is tested with
+# `type(value) in`, never `isinstance` — a subclass can override `__str__`.
+# Containers (`list`/`dict`/`tuple`/`set`) are deliberately ABSENT: their `str()`
+# recurses into elements of arbitrary type. See `search` and decisions.md D-011.
+_LOCK_SAFE_STR_TYPES = frozenset(
+    {int, float, bool, complex, bytes, bytearray, type(None)}
+)
+
 
 class WorkingMemory:
     """Structured working memory with named buffers.
@@ -295,6 +304,39 @@ class WorkingMemory:
         query_lower = query.lower()
         results: list[tuple[str, str, Any]] = []
 
+        # DECISION plan-2026-07-20T040150-876e7164/D-011
+        # `str(value)` must NOT run while `self._lock` is held. It calls
+        # arbitrary third-party `__str__`, and an object that re-enters this
+        # same WorkingMemory from its `__str__` (e.g. an agent object that
+        # summarises the memory it holds a reference to) DEADLOCKS on the
+        # non-reentrant lock — measured as a HANG, not an exception, so nothing
+        # reports it. Values whose coercion cannot be decided under the lock are
+        # collected as `already_matched=False` and resolved in pass 2, after the
+        # release. Do NOT move that coercion back inside the `with` block.
+        #
+        # Do NOT "fix" the self-deadlock by making `_lock` an `RLock` either.
+        # D-007 chose a non-reentrant lock deliberately so lock scope stays
+        # answerable by inspection; the sanctioned escape when a critical
+        # section needs another method's body is the shell/`_locked()` split
+        # (`_get_all_data_locked`, `_update_buffer_locked`). Here even that
+        # would not help — the callee is not ours, so the only correct answer is
+        # to not be holding the lock when it runs.
+        #
+        # Do NOT go further and snapshot every entry to match entirely outside
+        # the lock. That is the obvious-looking shape and it is WRONG: holding
+        # the lock across the scan is what backpressures a concurrent writer,
+        # and dropping it makes the deferred pass a lock-free window
+        # proportional to the number of deferred values, which a hot writer
+        # exploits. Measured on
+        # `test_concurrent_set_during_search_and_get_all_data`: the full-snapshot
+        # shape went superlinear (807k-1.25M keys after 20 reads vs. 82k for the
+        # pre-hoist code) and never finished. `_LOCK_SAFE_STR_TYPES` is what
+        # keeps that window near-zero for ordinary payloads.
+        #
+        # The early cutoff counts DECIDED matches only, so the scanned range is
+        # a superset of the pre-hoist one and pass 2 re-applies the true `limit`
+        # in scan order — the returned list is identical, entry for entry.
+        # See decisions.md D-011.
         with self._lock:
             # Search core first, then other buffers in order (skip hidden)
             search_order = []
@@ -304,28 +346,60 @@ class WorkingMemory:
                 if name != BUFFER_CORE and name not in self._hidden_buffers:
                     search_order.append(name)
 
+            # (buffer, key, value, already_matched); `False` means "undecided,
+            # needs `str(value)`", which must not happen under the lock.
+            pending: list[tuple[str, str, Any, bool]] = []
+            decided = 0
+
             for buffer_name in search_order:
+                if decided >= limit:
+                    break
                 for key, value in self._buffers[buffer_name].items():
-                    if len(results) >= limit:
+                    if decided >= limit:
                         break
 
                     # Match on key name
                     if query_lower in key.lower():
-                        results.append((buffer_name, key, value))
+                        pending.append((buffer_name, key, value, True))
+                        decided += 1
                         continue
 
                     # Match on string value
-                    if isinstance(value, str) and query_lower in value.lower():
-                        results.append((buffer_name, key, value))
+                    if isinstance(value, str):
+                        if query_lower in value.lower():
+                            pending.append((buffer_name, key, value, True))
+                            decided += 1
                         continue
 
-                    # Match on string representation of non-string values
-                    try:
-                        value_str = str(value)
-                        if query_lower in value_str.lower():
-                            results.append((buffer_name, key, value))
-                    except Exception:
-                        pass
+                    # A built-in scalar's `str()` cannot run third-party code,
+                    # so it is decided here and never enlarges the lock-free
+                    # window below. EXACT type, not `isinstance`: a subclass may
+                    # override `__str__`, which is precisely the hole.
+                    if type(value) in _LOCK_SAFE_STR_TYPES:
+                        if query_lower in str(value).lower():
+                            pending.append((buffer_name, key, value, True))
+                            decided += 1
+                        continue
+
+                    # Anything else: deciding it needs a `str()` that may call
+                    # back into this instance. Defer past the release.
+                    pending.append((buffer_name, key, value, False))
+
+        for buffer_name, key, value, already_matched in pending:
+            if len(results) >= limit:
+                break
+
+            if already_matched:
+                results.append((buffer_name, key, value))
+                continue
+
+            # Match on string representation of non-string values
+            try:
+                value_str = str(value)
+                if query_lower in value_str.lower():
+                    results.append((buffer_name, key, value))
+            except Exception:
+                pass
 
         return results[:limit]
 

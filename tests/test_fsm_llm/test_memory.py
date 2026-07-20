@@ -1,6 +1,7 @@
 """Tests for WorkingMemory structured buffer system."""
 
 import threading
+from typing import Any
 
 import pytest
 
@@ -474,6 +475,122 @@ class TestWorkingMemoryConcurrency:
         thread.start()
         assert done.wait(timeout=10), "a public method self-deadlocked on the lock"
         assert error == [], f"public method raised: {error[0]!r}"
+
+    def test_search_survives_a_value_whose_str_reenters_the_same_memory(self):
+        """SC-15: `str(value)` runs OUTSIDE the lock, so a re-entrant `__str__`
+        cannot deadlock `search` (D-011).
+
+        The pre-fix failure mode is a HANG, not an exception — probed at a 5s
+        timeout with the thread still alive. So this runs on a worker with a
+        hard `join(timeout=...)` watchdog: without it, a regression would wedge
+        the whole suite instead of failing this one test.
+        """
+        memory = WorkingMemory()
+
+        class ReentrantStr:
+            """A third-party-shaped value that summarises the memory holding it."""
+
+            def __init__(self, owner: WorkingMemory) -> None:
+                self._owner = owner
+
+            def __str__(self) -> str:
+                # Re-enters the SAME instance from inside `search`'s coercion.
+                return f"summary of {self._owner.get(BUFFER_CORE, 'plain')}"
+
+        memory.set(BUFFER_CORE, "plain", "alpha")
+        memory.set(BUFFER_CORE, "reentrant", ReentrantStr(memory))
+
+        done = threading.Event()
+        outcome: list[Any] = []
+        error: list[BaseException] = []
+
+        def exercise():
+            try:
+                outcome.append(memory.search("summary"))
+            except BaseException as e:  # reported to the main thread
+                error.append(e)
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=exercise, daemon=True)
+        thread.start()
+
+        assert done.wait(timeout=10), (
+            "search() deadlocked: str(value) re-entered the non-reentrant lock"
+        )
+        assert error == [], f"search raised: {error[0]!r}"
+        # Not merely "did not hang" — the re-entrant value must actually MATCH,
+        # or a fix that skipped coercion entirely would pass the watchdog.
+        assert [(b, k) for b, k, _ in outcome[0]] == [(BUFFER_CORE, "reentrant")]
+
+    def test_int_subclass_with_a_reentrant_str_is_still_deferred(self):
+        """`_LOCK_SAFE_STR_TYPES` is matched by EXACT type, not `isinstance`.
+
+        An `int` subclass that overrides `__str__` is the hole an `isinstance`
+        check would leave open — it would be coerced under the lock and deadlock
+        exactly like the plain object case.
+        """
+        memory = WorkingMemory()
+
+        class SneakyInt(int):
+            def __str__(self) -> str:
+                return f"sneaky {memory.get(BUFFER_CORE, 'plain')}"
+
+        memory.set(BUFFER_CORE, "plain", "alpha")
+        # The key must NOT contain the query, or the key-name match short-
+        # circuits before any coercion and the test is vacuous.
+        memory.set(BUFFER_CORE, "wrapped", SneakyInt(7))
+
+        done = threading.Event()
+        outcome: list[Any] = []
+
+        def exercise():
+            try:
+                outcome.append(memory.search("sneaky"))
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=exercise, daemon=True)
+        thread.start()
+
+        assert done.wait(timeout=10), (
+            "an int subclass with a re-entrant __str__ was coerced under the lock"
+        )
+        assert [(b, k) for b, k, _ in outcome[0]] == [(BUFFER_CORE, "wrapped")]
+
+    def test_lock_is_not_reentrant(self):
+        """I-6: the D-007 non-reentrant lock must not be "simplified" to an
+        `RLock` to make a future self-deadlock go away. Asserted on the object,
+        not by grepping the file, so a re-export or alias cannot dodge it."""
+        memory = WorkingMemory()
+
+        assert type(memory._lock) is type(threading.Lock()), (
+            f"WorkingMemory._lock is {type(memory._lock).__name__}, not a plain Lock"
+        )
+        assert not isinstance(memory._lock, type(threading.RLock()))
+
+    def test_search_result_order_and_limit_are_unchanged_by_the_hoist(self):
+        """The snapshot must not reorder results or change which entries the
+        `limit` cutoff considers — buffer order, then insertion order."""
+        memory = WorkingMemory()
+        memory.set(BUFFER_SCRATCH, "s_match_1", "hit")
+        memory.set(BUFFER_SCRATCH, "s_match_2", "hit")
+        memory.set(BUFFER_CORE, "c_match_1", "hit")
+        memory.set(BUFFER_CORE, "c_match_2", 12345)  # matches via str() coercion
+
+        assert [(b, k) for b, k, _ in memory.search("hit")] == [
+            (BUFFER_CORE, "c_match_1"),
+            (BUFFER_SCRATCH, "s_match_1"),
+            (BUFFER_SCRATCH, "s_match_2"),
+        ]
+        # Core is searched first, so the limit cuts the scratch matches.
+        assert [(b, k) for b, k, _ in memory.search("hit", limit=1)] == [
+            (BUFFER_CORE, "c_match_1")
+        ]
+        # Coercion-only match still reached outside the lock.
+        assert [(b, k) for b, k, _ in memory.search("2345")] == [
+            (BUFFER_CORE, "c_match_2")
+        ]
 
     def test_import_flat_data_still_merges_after_lock_split(self):
         """`import_flat_data` routes through `_update_buffer_locked`, not `update_buffer`."""
