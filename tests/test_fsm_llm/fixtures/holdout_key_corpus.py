@@ -122,7 +122,11 @@ KEY_ARM_CREDENTIAL = [
     ("pusher_secret_key", "c48e0b17ad926f3510e7cb84d2f60a9b", "credential"),
     (
         "contentful_delivery_key",
-        "CFPAT-8Kq2mZr7vXn41LdBs0WgYtEuHcJi5AoP3fN",
+        # Desensitized, same reason as `shopify_storefront_token` below.
+        # `CFPAT-` is not in `_CREDENTIAL_VALUE_PREFIXES`, so this entry is
+        # judged by the GENERIC shape arm; length (41) and character-class
+        # count are preserved and it was re-measured to STRIP.
+        "CFPAT-NOTAREALTOKENnotarealtokenZZZZZZZZZ",
         "credential",
     ),
     ("sendbird_master_key", "0d7a1f6b39ce85204817acfd6e2b930514cc7f8a", "credential"),
@@ -359,8 +363,19 @@ TOKEN_ARM_CREDENTIAL = [
         "shpat_NOTAREALTOKENnotarealtokenZZZZZZ",
         "credential",
     ),
-    ("twilio_sync_token", "SK4f8c02b91ae7d365c0148bf2e69a7d31", "credential"),
-    ("stripe_connect_token", "sk_live_9Kp2Rm7Vt4XqL8bYn1Wd3Gc6Za0Ue5Jh", "credential"),
+    # SAME DESENSITIZATION AS `shopify_storefront_token` ABOVE, AND FOR THE SAME
+    # REASON. Vendor PREFIX preserved (it is the shape under test); body made
+    # obviously non-credential. `twilio_sync_token` is judged by the GENERIC
+    # shape arm (`SK` is not in `_CREDENTIAL_VALUE_PREFIXES`), so its body still
+    # holds 34 characters across two character classes; `stripe_connect_token`
+    # rides the `sk_live_` prefix arm and needs only the prefix. Both were
+    # re-measured to STRIP after the edit. Do not restore realistic bodies.
+    ("twilio_sync_token", "SKnotarealtokenNOTAREALTOKENzzzzzz", "credential"),
+    (
+        "stripe_connect_token",
+        "sk_live_NOTAREALTOKENnotarealtokenZZZZZZZZ",
+        "credential",
+    ),
     (
         "intercom_access_token",
         "dG9rOjBhNGQ3ZjE5YzYyYmUzODA1NGYxYWM3YjlkMmU2MDM1",
@@ -373,7 +388,11 @@ TOKEN_ARM_CREDENTIAL = [
     ),
     (
         "hubspot_private_token",
-        "pat-eu1-9f3a71ce-4d05-4827-96bd-94ac3e5f0187",
+        # Desensitized, same reason as `shopify_storefront_token` above. Only
+        # `pat-na` is in `_CREDENTIAL_VALUE_PREFIXES`, so the `pat-eu1-` form is
+        # judged by the GENERIC shape arm; the body keeps the dashed segmenting
+        # and the length/character-class shape and was re-measured to STRIP.
+        "pat-eu1-NOTAREAL-TOKE-NNOT-AREAL-notarealtokenZZ",
         "credential",
     ),
     (

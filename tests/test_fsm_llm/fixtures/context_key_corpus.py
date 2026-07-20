@@ -1037,7 +1037,14 @@ CRYPTO_KEY_SECRET_VALUES: dict[str, object] = {
         "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2\n"
         "-----END OPENSSH PRIVATE KEY-----\n"
     ),
-    "deploy_key": "ghp_7mQ2xZ9pL4vN8bR2tY6wJ1hG5sF0dC4eT8uI",
+    # DESENSITIZED. GitHub push protection blocks synthetic values that are
+    # byte-indistinguishable from live credentials (it already blocked this
+    # repo once, on the `shpat_` body in `holdout_key_corpus.py`). The vendor
+    # PREFIX is what these entries test -- `ghp_` is in
+    # `_CREDENTIAL_VALUE_PREFIXES` -- so the prefix is preserved and only the
+    # body is made obviously synthetic. Re-measured: still STRIPS. Do not
+    # restore a realistic body.
+    "deploy_key": "ghp_NOTAREALTOKENnotarealtokenZZZZZZZZZZ",
     "deployment_key": "glpat-9pL4vN8bR2tY6wJ1hG5s",
     "authorized_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDh7mQ2xZ9pL4 ci@runner",
     "authorized_keys": (
@@ -1128,7 +1135,9 @@ CRYPTO_KEY_SECRET_VALUES: dict[str, object] = {
     ),
     "ssl_key": "M7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgK",
     "server_key": "7nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKr",
-    "client_key": "sk_live_4vN8bR2tY6wJ1hG5sF0dC4eT8uI2oP6zQ9mK3aX7yB",
+    # Desensitized, same reason as `deploy_key` above; `sk_live_` prefix (the
+    # shape under test) preserved, body made obviously synthetic.
+    "client_key": "sk_live_NOTAREALTOKENnotarealtokenZZZZZZZZZZZZZZZZZZ",
     "cert_key": "nL9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrT",
     "certificate_key": "L9pT3sW6xE8yR2uF4cG7tB1vZ5qJ8dNpSwRtYhFqLmXcVbNgKrTd",
     "pem_key": (
@@ -1347,7 +1356,11 @@ CARVE_OUT_CREDENTIAL_ENTRIES: tuple[tuple[str, str, object], ...] = (
         "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC9pL4vN8bR2tY6\n"
         "-----END PRIVATE KEY-----\n",
     ),
-    ("vendor_prefix/credential", "billing_key", "sk_live_9mK3aX7yB1nV5rD4jH2kM7"),
+    # Body desensitized (see `deploy_key` above). The LENGTH is load-bearing for
+    # the prose below, so the replacement is exactly 30 characters and was
+    # re-measured: `_generic_shape_is_credential` still returns True for it
+    # unaided, which is the claim the next paragraph rests on.
+    ("vendor_prefix/credential", "billing_key", "sk_live_NOTAREALTOKENnotarealt"),
     # SHAPE-COVERAGE GAP CLOSED BY PLAN STEP 8. The entry above is 30
     # characters, so it clears the 24-character floor and the GENERIC shape arm
     # catches it unaided -- the enumerated `_CREDENTIAL_VALUE_PREFIXES` denylist
@@ -1367,7 +1380,13 @@ CARVE_OUT_CREDENTIAL_ENTRIES: tuple[tuple[str, str, object], ...] = (
     # DO NOT delete `_CREDENTIAL_VALUE_PREFIXES` on the strength of the generic
     # arm's share. This row is the counter-example: 20 characters, `AKIA`
     # prefix, synthesized (not copied from vendor documentation).
-    ("vendor_prefix_short/credential", "kiosk_key", "AKIA7QM2VP9RTLC4YB8K"),
+    #
+    # Body desensitized (see `deploy_key` above). The 20-character LENGTH is
+    # load-bearing for the paragraph above -- it is what puts the row BELOW the
+    # 24-character floor -- so the replacement is exactly 20 characters and was
+    # re-measured: `_generic_shape_is_credential` still returns False for it,
+    # and the entry still STRIPS via the `AKIA` prefix arm alone.
+    ("vendor_prefix_short/credential", "kiosk_key", "AKIANOTAREALTOKENZZZ"),
     # `<label>:<pure hex>`. D-021 KEEPS this shape by design so that
     # `cache_key: "sha256:..."` survives; a credential deliberately stored as
     # `v1:<hex>` rides that carve-out out of the filter. Disclosed, not hidden.
