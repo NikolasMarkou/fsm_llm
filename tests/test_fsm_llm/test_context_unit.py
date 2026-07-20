@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import pathlib
 import re
 
 import pytest
@@ -3969,6 +3970,53 @@ def _name_carries_a_resource_noun(name: str) -> bool:
     return bool(_name_tokens(name) & _DIAGNOSTIC_RESOURCE_NOUN_FAMILY)
 
 
+# Vendor secret-token prefixes that GitHub push protection blocks on. ONE
+# definition, two readers: the census zero-hit guard and the three-corpus
+# inventory pin below. Each is split so THIS file never carries a scannable
+# literal of its own.
+_VENDOR_SECRET_PREFIXES: tuple[str, ...] = (
+    "AIza",
+    "AKIA",
+    "CFP" + "AT-",
+    "gh" + "o_",
+    "gh" + "p_",
+    "gh" + "s_",
+    "glp" + "at-",
+    "pat-" + "eu1-",
+    "pat-" + "na1-",
+    "rk" + "_live_",
+    "shp" + "at_",
+    "sk" + "-ant-",
+    "sk" + "_live_",
+    "xox" + "b-",
+    "xox" + "p-",
+)
+
+# The D-009 allowlisted inventory, pinned. Keys are fixture module basenames
+# under `tests/test_fsm_llm/fixtures/`; values are `{prefix: occurrences in the
+# module's SOURCE TEXT}`. `census_key_corpus.py` is `{}` by rule -- it is this
+# plan's own artifact and was authored under a no-vendor-prefix constraint.
+# Re-pin ONLY alongside a deliberate, explained corpus change.
+_KNOWN_VENDOR_PREFIX_INVENTORY: dict[str, dict[str, int]] = {
+    "census_key_corpus.py": {},
+    "context_key_corpus.py": {
+        "AKIA": 4,
+        "gh" + "p_": 3,
+        "glp" + "at-": 1,
+        "shp" + "at_": 1,
+        "sk" + "_live_": 4,
+        "xox" + "b-": 1,
+    },
+    "holdout_key_corpus.py": {
+        "CFP" + "AT-": 2,
+        "gh" + "s_": 1,
+        "pat-" + "eu1-": 2,
+        "shp" + "at_": 2,
+        "sk" + "_live_": 2,
+    },
+}
+
+
 class TestCensusCorpusAdequacy:
     """SC-1. Guards on the census corpus ITSELF, not on the filter.
 
@@ -4529,20 +4577,54 @@ class TestCensusCorpusAdequacy:
         """
         from tests.test_fsm_llm.fixtures.census_key_corpus import CENSUS
 
-        # Split so this file does not itself carry a scannable literal.
-        forbidden = (
-            "sk" + "_live_",
-            "sk" + "-ant-",
-            "gh" + "p_",
-            "gh" + "o_",
-            "AKIA",
-            "xox" + "b-",
-            "CFP" + "AT-",
-            "AIza",
-        )
         offenders = sorted(
             name
             for name, value, _truth in CENSUS
-            if any(prefix in value for prefix in forbidden)
+            if any(prefix in value for prefix in _VENDOR_SECRET_PREFIXES)
         )
         assert not offenders, f"vendor-real secret prefixes in the census: {offenders}"
+
+    def test_the_three_corpora_carry_exactly_the_known_vendor_prefix_inventory(self):
+        """D-009 residual risk. The maintainer allowlisted five vendor secret
+        shapes in `holdout_key_corpus.py` so this repo could push again. That
+        allowlist is not licence to write MORE of them.
+
+        This is an INVENTORY pin, not a zero-hit rule, because a zero-hit rule
+        would fail on shipped data: the holdout legitimately carries the vendor
+        shapes GitHub flagged, and they are deliberately NOT desensitized (a
+        holdout leak is REPORTED, never patched). So the assertion is that the
+        inventory is EXACTLY the set below -- a NEW vendor-shaped literal in any
+        of the three corpora fails this gate, in either direction.
+
+        SOURCE TEXT, not the parsed corpus objects, deliberately: GitHub's
+        scanner reads bytes, so a literal introduced in a banner or a comment is
+        just as blocking as one in a row, and the parsed-object view cannot see
+        it. Counts therefore include prose mentions of a prefix.
+
+        This is a cheap belt, not GitHub's scanner -- only a push attempt gets
+        the authoritative answer, and F-15's grep-derived list was already proven
+        incomplete once (D-009). Notably it does NOT cover the Asana shape,
+        whose `<digit>/<digits>` form is too generic to scan for without false
+        positives; that one is covered by the allowlist alone.
+        """
+        fixtures = pathlib.Path(__file__).parent / "fixtures"
+        measured = {
+            module: {
+                prefix: text.count(prefix)
+                for prefix in _VENDOR_SECRET_PREFIXES
+                if prefix in text
+            }
+            for module, text in (
+                (name, (fixtures / name).read_text(encoding="utf-8"))
+                for name in sorted(_KNOWN_VENDOR_PREFIX_INVENTORY)
+            )
+        }
+        assert measured == _KNOWN_VENDOR_PREFIX_INVENTORY, (
+            "the vendor-prefix inventory of the three corpora moved.\n"
+            f"  expected: {_KNOWN_VENDOR_PREFIX_INVENTORY}\n"
+            f"  measured: {measured}\n"
+            "If a literal was ADDED: remove it. The D-009 allowlist covers the "
+            "five shapes already in the holdout and nothing else, and a new one "
+            "re-blocks the push for the whole repo. If a literal was REMOVED on "
+            "purpose, re-pin this dict in the SAME commit and say which row."
+        )

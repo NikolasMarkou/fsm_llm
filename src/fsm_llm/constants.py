@@ -922,6 +922,28 @@ _ULID_VALUE_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 # The identifier nouns that earn the carve-out above. Authored before any
 # disposition was measured; see the D-003 block for what its 12/12 fit is and
 # is not worth.
+#
+# DECISION plan-2026-07-20T144233-47e8c662/D-018
+# SECOND MEASURED NEGATIVE (the first is D-006 below, on `_AUTH_SCHEME_WORDS`).
+# Splitting these nouns by POLARITY -- observability (a UUID is an identifier)
+# vs resource/principal (it may be a credential) -- was priced against a
+# purpose-built exposure population authored blind. It bought 12 fail-open
+# shapes and charged 4 new over-strips: `job_definition_id_key`,
+# `lease_holder_ref_key`, `session_handle_token`, `tenant_account_key` -- 4 of
+# the 4 rows capable of testing it. Holds under both contested-row
+# counterfactuals (re-truthed, dropped).
+# Splitting CANNOT repair it: the read site below is `any(token in ...)`, a
+# DISJUNCTION, and `run_replay_grant_key` carries `run` AND `replay`, so one
+# observability token restores the carve-out and the credential still leaks.
+# A polarity dimension over a list does not repair a disjunction over it.
+# TWO-AXIS CHARGE: 10 fail-open shapes AND 2 over-strip shapes on the census
+# (D-014). Extending worsens the first, shrinking worsens the second -- the
+# signature of a WRONG PREDICATE, not a short list.
+# DO NOT: split by polarity (measured, rejected); extend; shrink; delete the
+# carve-out (prior plan's D-003 disposition (a)); or make it unconditional
+# (disposition (c) -- measured, strictly dominated; F-06). Working: D-014,
+# D-017, D-018. Visible only to
+# `tests/test_fsm_llm/fixtures/census_key_corpus.py` (role: INDEPENDENCE).
 _IDENTIFIER_NOUN_VOCABULARY = frozenset(
     {
         "idempotency",
