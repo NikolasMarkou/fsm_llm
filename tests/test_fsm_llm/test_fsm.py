@@ -655,6 +655,154 @@ class TestGetConversationDataFiltering:
         assert data["preference"] == "dark mode"
 
 
+class TestGetConversationDataNestedFiltering:
+    """The internal-prefix filter applies at EVERY nesting level (D-010).
+
+    Both clauses matter together: a fix that recursed but dropped the whole
+    nested dict would pass the "secret is gone" clause while destroying the
+    caller's data, and a fix that kept everything would pass the "sibling
+    survives" clause while leaking. Neither clause alone pins the behaviour.
+    """
+
+    @staticmethod
+    def _manager_with(data):
+        from unittest.mock import Mock
+
+        from fsm_llm.definitions import FSMContext, FSMInstance
+
+        manager = FSMManager(llm_interface=Mock(spec=LLMInterface))
+        context = FSMContext()
+        context.data.update(data)
+        manager.instances["conv-1"] = FSMInstance(
+            fsm_id="f", current_state="start", context=context
+        )
+        return manager
+
+    def test_nested_internal_key_stripped_and_sibling_kept(self):
+        """The exact shape probed in findings/core-partial-twins.md item 3."""
+        manager = self._manager_with(
+            {"user": {"_internal_note": "secret", "name": "bob"}, "system_flag": True}
+        )
+
+        data = manager.get_conversation_data("conv-1")
+
+        assert data == {"user": {"name": "bob"}}
+
+    def test_every_internal_prefix_stripped_at_depth_case_insensitively(self):
+        """Nesting must not weaken the predicate: same prefixes, same casing."""
+        nested = {
+            "_lead": "x",
+            "__dunder": "x",
+            "System_flag": "x",
+            "INTERNAL_id": "x",
+            "keep": "x",
+        }
+        manager = self._manager_with({"outer": {"inner": nested}})
+
+        data = manager.get_conversation_data("conv-1")
+
+        assert data == {"outer": {"inner": {"keep": "x"}}}
+
+    def test_dicts_inside_lists_and_tuples_are_filtered(self):
+        """``{"users": [{"_note": ...}]}`` is the same leak as the flat form."""
+        manager = self._manager_with(
+            {
+                "users": [{"_note": "secret", "name": "bob"}],
+                "pairs": ({"_note": "secret", "name": "ann"},),
+            }
+        )
+
+        data = manager.get_conversation_data("conv-1")
+
+        assert data["users"] == [{"name": "bob"}]
+        assert data["pairs"] == ({"name": "ann"},)
+
+    def test_scalars_and_falsy_values_survive_at_depth(self):
+        """Recursion must not become a truthiness filter."""
+        manager = self._manager_with(
+            {"a": {"b": {"empty_list": [], "zero": 0, "false": False, "blank": ""}}}
+        )
+
+        data = manager.get_conversation_data("conv-1")
+
+        assert data == {
+            "a": {"b": {"empty_list": [], "zero": 0, "false": False, "blank": ""}}
+        }
+
+    def test_non_str_key_is_kept_but_its_value_is_still_filtered(self):
+        """``has_internal_prefix`` cannot match a non-str key (constants D-017)."""
+        manager = self._manager_with({7: {"_note": "secret", "name": "bob"}})
+
+        data = manager.get_conversation_data("conv-1")
+
+        assert data == {7: {"name": "bob"}}
+
+    def test_depth_bound_is_fail_closed_and_shared_with_the_sibling_filters(self):
+        """A container past the bound is DROPPED, never returned unfiltered.
+
+        The bound is pinned against ``clean_context_keys`` rather than against a
+        hardcoded number, so re-declaring a local depth limit in ``fsm.py``
+        fails this test (D-011: one bound for every context filter).
+        """
+        from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
+        from fsm_llm.context import clean_context_keys
+
+        # Build {"n": {"n": ... {"payload": {"_secret": "x"}}}} with the payload
+        # dict sitting exactly one level past the bound.
+        payload = {"_secret": "x", "kept": "y"}
+        too_deep = payload
+        for _ in range(MAX_CONTEXT_FILTER_DEPTH + 1):
+            too_deep = {"n": too_deep}
+
+        manager = self._manager_with(dict(too_deep))
+        data = manager.get_conversation_data("conv-1")
+
+        # Walk to the deepest surviving level: the payload must be gone whole,
+        # not present-and-unfiltered.
+        cursor = data
+        for _ in range(MAX_CONTEXT_FILTER_DEPTH):
+            cursor = cursor["n"]
+        assert cursor == {}, f"container past the bound survived: {cursor!r}"
+
+        # Same input, same disposition as the two sibling filters.
+        assert data == clean_context_keys(dict(too_deep), "conv-1")
+
+    def test_just_inside_the_bound_is_still_filtered_normally(self):
+        """Vacuity guard: the bound must not be swallowing the whole input."""
+        from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
+
+        payload = {"_secret": "x", "kept": "y"}
+        inside = payload
+        for _ in range(MAX_CONTEXT_FILTER_DEPTH):
+            inside = {"n": inside}
+
+        manager = self._manager_with(dict(inside))
+        data = manager.get_conversation_data("conv-1")
+
+        cursor = data
+        for _ in range(MAX_CONTEXT_FILTER_DEPTH):
+            cursor = cursor["n"]
+        assert cursor == {"kept": "y"}
+
+    def test_self_referential_dict_terminates(self):
+        """The bound, not a `seen` set, is what stops a cycle (D-010)."""
+        cyclic: dict = {"name": "bob"}
+        cyclic["self"] = cyclic
+
+        manager = self._manager_with({"root": cyclic})
+
+        assert manager.get_conversation_data("conv-1")["root"]["name"] == "bob"
+
+    def test_matched_keys_are_dropped_not_redacted(self):
+        """This site DROPS; ``runner._redact_context`` is the redactor (D-010)."""
+        manager = self._manager_with({"user": {"_internal_note": "secret"}})
+
+        data = manager.get_conversation_data("conv-1")
+
+        assert "_internal_note" not in data["user"]
+        assert "<redacted>" not in repr(data)
+
+
 class TestFsmHandlerContractTwins:
     """A ``critical=True`` handler's raise must not vanish inside ``fsm.py``.
 

@@ -21,6 +21,7 @@ from typing import Any
 from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
+    MAX_CONTEXT_FILTER_DEPTH,
     has_internal_prefix,
 )
 from .definitions import (
@@ -45,6 +46,74 @@ from .prompts import (
 )
 from .transition_evaluator import TransitionEvaluator
 from .utilities import load_fsm_definition
+
+# --------------------------------------------------------------
+# Caller-visible context filter
+# --------------------------------------------------------------
+
+# Sentinel: a container past MAX_CONTEXT_FILTER_DEPTH, which the caller drops.
+_TOO_DEEP = object()
+
+
+# DECISION plan-2026-07-20T040150-876e7164/D-010
+# This filter DROPS an internal-prefixed key. It does NOT replace the value
+# with "<redacted>" -- do NOT "harmonize" it into a redactor. `plans/SYSTEM.md`
+# claims this site redacts "by original design"; that claim is FALSE at HEAD
+# and was false before this change too (the pre-change body was a single
+# `{k: v ... if not has_internal_prefix(k)}` comprehension). The redact-don't-
+# drop site is `runner._redact_context` (D-015/D-014), whose job is to show a
+# CLI operator WHICH keys exist. This one feeds `API.get_data()`, whose return
+# value is application DATA: injecting the literal string "<redacted>" into it
+# would make a filtered key indistinguishable from a real value.
+#
+# Do NOT remove the depth bound and do NOT return an unfiltered sub-tree at it.
+# Behaviour AT the bound is fail-CLOSED (drop), the same as
+# `context.clean_context_keys` (D-010) and
+# `prompts.BasePromptBuilder._filter_context_for_security` (D-011) -- three
+# filters, one bound, one disposition here. The bound is also what makes a
+# self-referential dict (`d["self"] = d`) terminate.
+#
+# Do NOT "reuse" `clean_context_keys` here instead: it also drops None values
+# and empty-string keys (a behaviour change for `get_data`) and logs a
+# forbidden-pattern WARNING, which on a per-turn read accessor is log spam.
+# What IS shared, and must stay shared, is `has_internal_prefix` and
+# `MAX_CONTEXT_FILTER_DEPTH` -- never re-declare either here.
+# See decisions.md D-010.
+def _strip_internal_value(value: Any, depth: int) -> Any:
+    """Filter one value; returns ``_TOO_DEEP`` for a container past the bound.
+
+    Containers are rebuilt; scalars are returned unchanged at any depth (they
+    carry no keys to filter).
+    """
+    if not isinstance(value, (dict, list, tuple)):
+        return value
+    if depth > MAX_CONTEXT_FILTER_DEPTH:
+        return _TOO_DEEP
+    if isinstance(value, dict):
+        return _strip_internal_mapping(value, depth)
+
+    # Lists/tuples are in scope: `{"users": [{"_note": "x"}]}` is the same leak
+    # as `{"user": {"_note": "x"}}` and must not survive it.
+    items = [_strip_internal_value(item, depth + 1) for item in value]
+    kept = [item for item in items if item is not _TOO_DEEP]
+    return tuple(kept) if isinstance(value, tuple) else kept
+
+
+def _strip_internal_mapping(source: dict[Any, Any], depth: int) -> dict[Any, Any]:
+    """Apply the internal-prefix drop at one level, then recurse into values."""
+    result: dict[Any, Any] = {}
+    for key, value in source.items():
+        # A non-`str` key carries no prefix to match and `has_internal_prefix`
+        # would raise on it (constants.py D-017), so it is kept -- its VALUE is
+        # still filtered.
+        if isinstance(key, str) and has_internal_prefix(key):
+            continue
+        filtered = _strip_internal_value(value, depth + 1)
+        if filtered is _TOO_DEEP:
+            continue
+        result[key] = filtered
+    return result
+
 
 # --------------------------------------------------------------
 # FSM Manager
@@ -501,14 +570,20 @@ class FSMManager:
     def get_conversation_data(
         self, conversation_id: str, log: Any = None
     ) -> dict[str, Any]:
-        """Get collected context data (internal metadata keys filtered out)."""
+        """Get collected context data (internal metadata keys filtered out).
+
+        The internal-prefix filter is applied at every nesting level -- inside
+        nested dicts and inside dicts nested in lists/tuples -- so
+        ``{"user": {"_internal_note": "x"}}`` is filtered like its flat
+        equivalent. Matched keys are DROPPED (not redacted). Recursion is
+        bounded at ``MAX_CONTEXT_FILTER_DEPTH``; a container deeper than that is
+        dropped rather than returned unfiltered. See D-010.
+        """
         if conversation_id not in self.instances:
             raise FSMError(f"Conversation {conversation_id} not found")
 
         instance = self.instances[conversation_id]
-        return {
-            k: v for k, v in instance.context.data.items() if not has_internal_prefix(k)
-        }
+        return _strip_internal_mapping(instance.context.data, 0)
 
     @with_conversation_context
     def get_conversation_state(self, conversation_id: str, log: Any = None) -> str:
