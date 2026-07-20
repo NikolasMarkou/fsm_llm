@@ -358,15 +358,29 @@ class WorkingMemory:
                     if decided >= limit:
                         break
 
-                    # Match on key name
-                    if query_lower in key.lower():
+                    # DECISION plan-2026-07-20T040150-876e7164/D-016
+                    # `str.lower(key)`, NOT `key.lower()`: the unbound builtin
+                    # cannot be overridden by a `str` SUBCLASS, so no consumer
+                    # type can run code here while `self._lock` is held. Do NOT
+                    # "simplify" this back to `key.lower()`.
+                    if query_lower in str.lower(key):
                         pending.append((buffer_name, key, value, True))
                         decided += 1
                         continue
 
-                    # Match on string value
-                    if isinstance(value, str):
-                        if query_lower in value.lower():
+                    # DECISION plan-2026-07-20T040150-876e7164/D-016
+                    # EXACT type, not `isinstance`. D-011 stated this rule
+                    # correctly one arm below and then failed to apply it here,
+                    # leaving a live deadlock: a `str` subclass overriding
+                    # `.lower()` re-enters `search()` under `self._lock` and
+                    # hangs the conversation (demonstrated, hung a 5s watchdog).
+                    # A `str` subclass now falls through to the deferred pass
+                    # below, where the lock is NOT held. Do NOT widen this to
+                    # `isinstance(value, str)`. I-6: the lock stays a plain
+                    # `Lock`, never an `RLock` -- an `RLock` would convert this
+                    # deadlock into silent unbounded re-entrancy, which is worse.
+                    if type(value) is str:
+                        if query_lower in str.lower(value):
                             pending.append((buffer_name, key, value, True))
                             decided += 1
                         continue

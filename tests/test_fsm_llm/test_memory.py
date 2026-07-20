@@ -558,6 +558,82 @@ class TestWorkingMemoryConcurrency:
         )
         assert [(b, k) for b, k, _ in outcome[0]] == [(BUFFER_CORE, "wrapped")]
 
+    def test_str_subclass_value_with_a_reentrant_lower_is_still_deferred(self):
+        """D-016. The `isinstance(value, str)` arm was the SAME hole one line
+        above the frozenset written to close it: D-011 stated the rule
+        ("EXACT type, not `isinstance`") and then did not apply it to the arm
+        directly above. `str.lower` is overridable, so a `str` subclass ran
+        third-party code under `self._lock` and deadlocked — demonstrated by
+        adversarial review, which hung the full 5s watchdog.
+
+        Note the value must be a `str` SUBCLASS, not a plain object: that is
+        the whole point. `test_search_survives_...` covers the non-`str` path
+        and passed throughout, which is why this hole survived.
+        """
+        memory = WorkingMemory()
+
+        class ReentrantStr(str):
+            def lower(self) -> str:
+                # Re-enters the SAME instance from inside the locked scan.
+                memory.get(BUFFER_CORE, "plain")
+                return str.lower(self)
+
+        memory.set(BUFFER_CORE, "plain", "alpha")
+        # The key must NOT contain the query, or the key-name match
+        # short-circuits before `.lower()` is ever reached and this is vacuous.
+        memory.set(BUFFER_CORE, "wrapped", ReentrantStr("sneaky payload"))
+
+        done = threading.Event()
+        outcome: list[Any] = []
+
+        def exercise():
+            try:
+                outcome.append(memory.search("sneaky"))
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=exercise, daemon=True)
+        thread.start()
+
+        assert done.wait(timeout=10), (
+            "search() deadlocked: a str subclass's .lower() ran under the lock"
+        )
+        # Not merely "did not hang": the deferred value must still MATCH, or a
+        # fix that simply skipped `str` subclasses would pass the watchdog.
+        assert [(b, k) for b, k, _ in outcome[0]] == [(BUFFER_CORE, "wrapped")]
+
+    def test_str_subclass_key_with_a_reentrant_lower_is_not_called(self):
+        """D-016, the sibling hole. `key.lower()` on the key-name arm is
+        reachable by a `str`-subclass KEY for exactly the same reason, so it
+        goes through the unbound `str.lower`, which a subclass cannot override.
+        """
+        memory = WorkingMemory()
+
+        class ReentrantKey(str):
+            def lower(self) -> str:  # pragma: no cover - must never be called
+                memory.get(BUFFER_CORE, "plain")
+                return str.lower(self)
+
+        memory.set(BUFFER_CORE, "plain", "alpha")
+        memory.set(BUFFER_CORE, ReentrantKey("sneaky_key"), "value")
+
+        done = threading.Event()
+        outcome: list[Any] = []
+
+        def exercise():
+            try:
+                outcome.append(memory.search("sneaky"))
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=exercise, daemon=True)
+        thread.start()
+
+        assert done.wait(timeout=10), (
+            "search() deadlocked: a str subclass KEY's .lower() ran under the lock"
+        )
+        assert [(b, k) for b, k, _ in outcome[0]] == [(BUFFER_CORE, "sneaky_key")]
+
     def test_lock_is_not_reentrant(self):
         """I-6: the D-007 non-reentrant lock must not be "simplified" to an
         `RLock` to make a future self-deadlock go away. Asserted on the object,
