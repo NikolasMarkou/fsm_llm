@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from fsm_llm.constants import (
@@ -3136,6 +3138,121 @@ class TestHostileStrSubclasses:
         assert cleaned.get("keep_me") == "ok"
 
 
+# --------------------------------------------------------------
+# The measurement instrument every bounds figure below depends on
+# --------------------------------------------------------------
+_WILSON_Z_95 = 1.959963985
+
+
+def wilson_interval(successes: int, n: int) -> tuple[float, float]:
+    """95% Wilson SCORE interval for `successes`/`n`, as PERCENTAGES (0-100).
+
+    Every rate this seam has reported across six planning attempts carried a
+    hand-computed Wilson interval, or no interval at all. `plans/LESSONS.md`
+    [I:4]: *report a Wilson interval with every rate, or a bound is theatre* --
+    a discipline that, until this function existed, lived only in prose. It is
+    the source of every interval in every scorer in this file; no interval in
+    this seam's artifacts is hand-computed any more.
+
+    The Wilson score interval rather than the normal (Wald) approximation
+    because the cells here are small and frequently land on 0 or n, where Wald
+    collapses to a degenerate zero-width interval and reports certainty it has
+    not earned. Wilson stays inside [0, 1] and stays non-degenerate there.
+
+    `n == 0` RAISES rather than returning `(0.0, 0.0)`. An empty cell is a
+    vacuity bug -- a bounds test scoring nothing passes every bound -- and both
+    scorers below already assert against empty cells. Returning a plausible
+    interval for a cell that measured nothing would launder that bug into a
+    number. `successes` outside `[0, n]` raises for the same reason: nonsense
+    in must not produce a publishable-looking interval out.
+    """
+    if n <= 0:
+        raise ValueError(
+            f"wilson_interval: n must be positive, got {n}. An empty cell is a "
+            "vacuity bug, not a rate of 0%."
+        )
+    if successes < 0 or successes > n:
+        raise ValueError(
+            f"wilson_interval: successes must be in [0, {n}], got {successes}."
+        )
+
+    z = _WILSON_Z_95
+    p = successes / n
+    denom = 1.0 + z**2 / n
+    center = (p + z**2 / (2 * n)) / denom
+    half = z * math.sqrt(p * (1.0 - p) / n + z**2 / (4 * n**2)) / denom
+    return (100.0 * max(0.0, center - half), 100.0 * min(1.0, center + half))
+
+
+class TestWilsonInterval:
+    """Pins for the instrument itself.
+
+    This function is now upstream of every bound quoted anywhere in this seam,
+    so it gets its own tests. An unverified instrument reporting verified-looking
+    numbers is precisely the defect it was introduced to fix.
+    """
+
+    def test_a_zero_numerator_matches_the_hand_computed_value(self):
+        """0/60 is the cell shape assumption A-6 rests on: at the n these
+        corpora can reach, a 5% bound cannot be EXCLUDED by an interval, because
+        even a PERFECT cell's upper bound sits above it. That is why the success
+        criteria are point-estimate criteria by explicit construction."""
+        lo, hi = wilson_interval(0, 60)
+        assert lo == 0.0
+        assert hi == pytest.approx(6.02, abs=0.05), (
+            "0/60's upper bound moved away from the ~6.0% that A-6 is argued "
+            "from; the argument for point-estimate criteria depends on it"
+        )
+
+    def test_it_reproduces_the_published_holdout_figure(self):
+        """1/50 -> roughly [0.4%, 10.5%] -- the interval the PRIOR plan
+        published for its holdout, computed BY HAND five attempts ago. Getting
+        the same numbers out of this function is a free cross-check of the
+        mechanisation against the hand arithmetic it replaces."""
+        lo, hi = wilson_interval(1, 50)
+        assert lo == pytest.approx(0.35, abs=0.05)
+        assert hi == pytest.approx(10.50, abs=0.05)
+
+    def test_the_boundary_cells_stay_inside_zero_and_one_hundred(self):
+        """`successes == 0` and `successes == n` are the two cells a Wald
+        interval degenerates on. Neither may escape [0, 100] and neither may
+        produce a NaN out of `sqrt` of a rounding-negative variance."""
+        for n in (1, 7, 60, 184, 500):
+            for successes in (0, n):
+                lo, hi = wilson_interval(successes, n)
+                assert not math.isnan(lo) and not math.isnan(hi)
+                assert 0.0 <= lo <= hi <= 100.0, (
+                    f"{successes}/{n} produced [{lo}, {hi}]"
+                )
+
+    def test_the_interval_always_contains_the_point_estimate(self):
+        """The property that makes the disclosure meaningful. If an interval
+        could exclude its own point estimate, a scorer could report a cell as
+        in-bounds while its interval said otherwise."""
+        for n in (1, 3, 12, 40, 115, 184, 240):
+            for successes in range(n + 1):
+                lo, hi = wilson_interval(successes, n)
+                point = 100.0 * successes / n
+                assert lo <= point + 1e-9 and point <= hi + 1e-9, (
+                    f"{successes}/{n}: point {point} outside [{lo}, {hi}]"
+                )
+
+    def test_an_empty_cell_raises_rather_than_reporting_zero_percent(self):
+        """The whole reason this is a function and not an inline expression."""
+        with pytest.raises(ValueError):
+            wilson_interval(0, 0)
+        with pytest.raises(ValueError):
+            wilson_interval(0, -1)
+
+    def test_nonsense_counts_raise(self):
+        """More successes than trials, or a negative count, must not silently
+        yield a plausible interval."""
+        with pytest.raises(ValueError):
+            wilson_interval(5, 4)
+        with pytest.raises(ValueError):
+            wilson_interval(-1, 10)
+
+
 class TestBurnedHoldoutCorpus:
     """The independence corpus, after it was spent.
 
@@ -3310,17 +3427,30 @@ class TestBurnedHoldoutCorpus:
         assert vacuous == [], f"empty cells make this test vacuous: {vacuous}"
 
         failures = []
+        report = []
         for (axis, arm), (total, wrong) in sorted(counts.items()):
             pct = 100.0 * wrong / total
+            lo, hi = wilson_interval(wrong, total)
+            report.append(
+                f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) "
+                f"95% Wilson [{lo:.1f}, {hi:.1f}] n={total}"
+            )
             if pct > bounds[axis]:
                 failures.append(
                     f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) "
+                    f"95% Wilson [{lo:.1f}, {hi:.1f}] n={total} "
                     f"> {bounds[axis]:.0f}% bound"
                 )
         assert failures == [], (
             "the BURNED holdout no longer scores inside its bounds:\n  "
             + "\n  ".join(failures)
-            + "\n\nThis corpus is a regression artifact, so a cell moving out of "
+            + "\n\nAll six cells, point estimate with 95% Wilson interval and n:\n  "
+            + "\n  ".join(report)
+            + "\n\nThe bound is compared against the POINT ESTIMATE, deliberately "
+            "(assumption A-6: at these n a 5% bound cannot be excluded by an "
+            "interval -- 0/60's upper bound is already ~6%). The interval is "
+            "mandatory DISCLOSURE, not a second gate; do not re-read it as one."
+            "\n\nThis corpus is a regression artifact, so a cell moving out of "
             "bounds is a REGRESSION in the filter, not a new independence "
             "measurement. Do not re-tune a threshold to the specific entries "
             "named above (`plans/LESSONS.md` [I:4]); find what changed."
@@ -3478,18 +3608,30 @@ class TestShippedCorpusBounds:
         assert vacuous == [], f"empty cells make this test vacuous: {vacuous}"
 
         failures = []
+        report = []
         for (axis, arm), (total, wrong) in sorted(counts.items()):
             pct = 100.0 * wrong / total
+            lo, hi = wilson_interval(wrong, total)
+            report.append(
+                f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) "
+                f"95% Wilson [{lo:.1f}, {hi:.1f}] n={total}"
+            )
             if pct > bounds[axis]:
                 failures.append(
-                    f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) exceeds the "
+                    f"{axis} / {arm} arm: {pct:.1f}% ({wrong}/{total}) "
+                    f"95% Wilson [{lo:.1f}, {hi:.1f}] n={total} exceeds the "
                     f"{bounds[axis]:.0f}% bound. Offending entries: "
                     f"{sorted(offenders[(axis, arm)])}"
                 )
         assert failures == [], (
             "the SHIPPED corpus no longer scores inside its bounds:\n  "
             + "\n  ".join(failures)
-            + "\n\nThis is a measured statistic, not a test to relax. If entries "
+            + "\n\nAll six cells, point estimate with 95% Wilson interval and n:\n  "
+            + "\n  ".join(report)
+            + "\n\nThe bound is compared against the POINT ESTIMATE, deliberately "
+            "(assumption A-6: at these n a 5% bound cannot be excluded by an "
+            "interval). The interval is mandatory DISCLOSURE, not a second gate."
+            "\n\nThis is a measured statistic, not a test to relax. If entries "
             "were just ADDED that exhibit a known gap, the bound has genuinely "
             "been exceeded and that is the plan's stop trigger firing -- report "
             "it as a FAILED bound, not as a denominator problem. If nothing was "
