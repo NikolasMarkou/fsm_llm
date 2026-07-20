@@ -704,14 +704,21 @@ COMPILED_FORBIDDEN_CONTEXT_PATTERNS = [
 #     protocol constants that the vendors deliberately made self-identifying so
 #     that scanners can find them -- they are not vocabulary this author invented.
 #     It is still a list. It is disclosed as one and it is NOT the arm the class
-#     claim rests on. CORRECTION (CLOSE, plan-2026-07-20T040150-876e7164): this
-#     comment previously cited `test_the_generic_arm_carries_the_control` as
-#     pinning that claim; that test does not exist anywhere in this repo (pass-3
-#     adversarial review, findings/review-iter-1-pass3.md CRITICAL 3). The claim
-#     that the generic arm rather than the prefix denylist carries most of the
-#     detections is UNPINNED -- true on the executor's own scratchpad
-#     measurement (73% generic / 27% prefix) but not enforced by any shipped
-#     test. Treat it as disclosed and unverified, not as a checked invariant.
+#     claim rests on. HISTORY, kept because it is the reason to distrust an
+#     uncited claim here: this comment once cited
+#     `test_the_generic_arm_carries_the_control` as pinning that claim while no
+#     such test existed (pass-3 adversarial review, CRITICAL 3), and the
+#     citation was retracted at CLOSE of plan-2026-07-20T040150-876e7164.
+#     The test NOW EXISTS (plan-2026-07-20T103203-b8a6b855 step 7) and the claim
+#     is a checked invariant again, measured rather than asserted: neutralising
+#     `_CREDENTIAL_VALUE_PREFIXES` to `()` loses **0 of 148** credential
+#     detections on the shipped corpus -- the generic arm carries 100%, not the
+#     73% the retracted citation claimed. The prefix arm's real and only
+#     contribution is the SHORT tail: a published vendor credential under the
+#     24-character length floor (`AKIA...` at 20 chars, `xoxb-...`) is detected
+#     by it ALONE, and the test pins that too. So do NOT delete this list on the
+#     strength of the 100% figure -- it buys the tail, and the 100% is measured
+#     over a corpus whose vendor-prefixed credential happens to be 30 characters.
 #
 # SCOPE IS THE BLAST-RADIUS BOUND AND IT IS DELIBERATE. This layer runs ONLY for
 # names that carry a `key` trigger which layer 1 left UNRESOLVED, plus a short

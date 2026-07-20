@@ -1107,6 +1107,78 @@ class TestIndependentVocabularyKeyCorpus:
         )
 
 
+def _shipped_vocabulary_union() -> set[str]:
+    """THE anti-tautology denominator: the UNION of every word list that ships.
+
+    ONE definition, read back out of `fsm_llm.constants` at call time, shared by
+    both anti-tautology tests. Do NOT inline a second copy: two hand-maintained
+    denominators drift, and denominator SELECTION is itself the thing under
+    audit at this seam (`plans/plan-2026-07-20T040150-876e7164/findings/
+    review-iter-1-pass3.md`, "Adjudication of the 44%", defect 1 -- the prior
+    plan reported a per-arm SPLIT figure while its own criterion said "absent
+    from EVERY shipped alternation", and the looser of the two available
+    denominators was the one reported).
+
+    UNION, not SPLIT, and the difference is real. Measured on the shipped
+    corpora at this commit:
+
+        half         SPLIT    UNION
+        key/SAFE     87.7%    85.8%
+        key/CRED     18.1%    16.7%
+        token/SAFE   56.2%    56.2%
+        token/CRED   48.3%    41.7%
+
+    The token credential half is the one that moves most (-6.6pp) and it is the
+    half nothing used to gate at all.
+
+    Returns: a set of lowercased vocabulary words, drawn from all SEVEN shipped
+    lists. Never raises; never mutates `constants`.
+    """
+    from fsm_llm import constants as c
+
+    words: set[str] = set()
+    for blob in (
+        c._CRYPTO_KEY_QUALIFIERS,
+        c._KEY_MATERIAL_HEADS,
+        c._SAFE_TOKEN_QUALIFIERS,
+        # D-021 added a vocabulary to the token arm; SC-21 says "absent from
+        # EVERY shipped alternation", so it belongs here. Omitting it would
+        # inflate the figure by counting `csrf`, `jwt` and `session` as words
+        # the author never enumerated.
+        c._BEARER_TOKEN_QUALIFIERS,
+        c._TOKEN_MATERIAL_HEADS,
+    ):
+        words |= {w for w in blob.split("|") if w}
+    # D-003's identifier nouns gate the UUID/ULID carve-out. A frozenset rather
+    # than an alternation blob, but still a list of words this codebase's author
+    # enumerated. Omitting it inflates the key arm from 0.858 to 0.925.
+    words |= set(c._IDENTIFIER_NOUN_VOCABULARY)
+    # D-005's HTTP scheme words are the SEVENTH list and the newest. They are
+    # value-side rather than name-side, which is the argument for leaving them
+    # out -- and they are included anyway, because the stricter reading of the
+    # denominator wins on this seam and this one is free. MEASURED: adding them
+    # changes no half's figure by a single word (all 22 that matter, `bearer`,
+    # `jwt`, `hmac`, `oauth`, `digest`, `basic`, `signature`, were already in
+    # the union via the name lists). Recorded so a future reader does not
+    # re-derive it: it is a no-op TODAY, not by construction.
+    words |= set(c._AUTH_SCHEME_WORDS)
+    return words
+
+
+def _qualifier_words(names) -> set[str]:
+    """The vocabulary a corpus of context-key names actually uses, minus the
+    trigger words themselves (which every name in both arms carries by
+    construction and which therefore cannot discriminate)."""
+    import re as _re
+
+    out: set[str] = set()
+    for name in names:
+        for word in _re.split(r"[^a-zA-Z0-9]+", name.lower()):
+            if word and word not in ("key", "keys", "token", "tokens"):
+                out.add(word)
+    return out
+
+
 class TestCryptoKeyAndTokenTriggers:
     """D-015 (correcting D-014). The two triggers now have DIFFERENT polarity,
     because their vocabularies have opposite structure:
@@ -1741,41 +1813,13 @@ class TestCryptoKeyAndTokenTriggers:
         majority of the safe corpus's vocabulary be words the pattern author
         never enumerated -- i.e. that the corpus can actually disagree with the
         implementation.
+
+        DENOMINATOR: the UNION of all seven shipped lists, not a per-arm SPLIT.
+        See `_shipped_vocabulary_union` for why, and for the measured gap
+        between the two readings.
         """
-        import re as _re
-
-        from fsm_llm import constants as c
-
-        shipped_words = set()
-        for blob in (
-            c._CRYPTO_KEY_QUALIFIERS,
-            c._KEY_MATERIAL_HEADS,
-            c._SAFE_TOKEN_QUALIFIERS,
-            # D-021 added a vocabulary to this arm, and SC-21 says "absent from
-            # EVERY shipped alternation" -- so it belongs here. Omitting it
-            # would inflate the measured independence by counting `csrf`,
-            # `jwt` and `session` as words the author never enumerated.
-            c._BEARER_TOKEN_QUALIFIERS,
-            c._TOKEN_MATERIAL_HEADS,
-        ):
-            shipped_words |= {w for w in blob.split("|") if w}
-        # D-003 ships a THIRD vocabulary -- the identifier nouns that gate the
-        # UUID/ULID carve-out. It is a set rather than an alternation blob, but
-        # it is still "a shipped alternation" in SC-21's sense and still a list
-        # of words this codebase's author enumerated. Omitting it would inflate
-        # the key arm's measured independence from 0.858 to 0.925 by counting
-        # `idempotency`, `correlation`, `request`, `tenant`, `shard`,
-        # `partition` and `session` as words nobody enumerated -- which is the
-        # exact accounting error this whole test exists to catch.
-        shipped_words |= set(c._IDENTIFIER_NOUN_VOCABULARY)
-
-        def qualifiers(names):
-            out = set()
-            for name in names:
-                for word in _re.split(r"[^a-zA-Z0-9]+", name.lower()):
-                    if word and word not in ("key", "keys", "token", "tokens"):
-                        out.add(word)
-            return out
+        shipped_words = _shipped_vocabulary_union()
+        qualifiers = _qualifier_words
 
         # D-021 raises the token floor from 0.25 to SC-21's stated 0.50. The
         # 0.25 was a concession to a corpus that could not do better: before
@@ -1815,6 +1859,78 @@ class TestCryptoKeyAndTokenTriggers:
                 "STOP and report rather than tuning the vocabulary against the "
                 "corpus, which recreates the tautology in reverse."
             )
+
+    def test_the_credential_corpus_independence_is_measured_and_disclosed(self):
+        """THE CREDENTIAL SIDE OF THE ANTI-TAUTOLOGY GUARD -- gated for the
+        first time here (pass-3 review, "Adjudication of the 44%", defect 2:
+        "the credential-side floor is enforced by nothing", so the reported
+        figures "are scratchpad-only and will drift silently").
+
+        THIS TEST DELIBERATELY DOES NOT ASSERT THE 0.50 FLOOR, AND THAT IS THE
+        POINT. Measured against the union at this commit:
+
+            key/CRED    12/72 = 16.7%
+            token/CRED  25/60 = 41.7%
+
+        Both are far below the 0.50 the SAFE halves clear. That is NOT a defect
+        to be fixed and the corpus MUST NOT be rewritten to clear it. It is the
+        H-7 category distinction this plan has held throughout, and it is what
+        `context_key_corpus.py`'s own banner says in the first line of the file:
+
+            THIS IS A REGRESSION-PROBE + SHAPE-COVERAGE ARTIFACT.
+            IT IS NOT AN INDEPENDENCE STATISTIC.
+
+        A credential corpus is assembled from the vocabulary of real credentials
+        -- `rsa`, `hmac`, `jwt`, `pem`, `signing`, `master`, `vault` -- which is
+        necessarily the same vocabulary a credential DENYLIST enumerates. Low
+        overlap-independence is what a *correct* credential regression probe
+        looks like; a credential corpus scoring 90% independent would mean it had
+        stopped naming credentials. The SAFE halves are the ones where the floor
+        is meaningful, because there the shared vocabulary is evidence the corpus
+        was grown from the allowlist under test (D-014, which passed at 0/100
+        over-strip while shipping a live bypass).
+
+        So what is pinned instead is a TWO-SIDED BAND, and it is a real pin:
+
+          * a DROP below the band means the credential corpus has been diluted
+            with names that are not credential vocabulary, weakening the
+            regression probe;
+          * a RISE above the band is the failure this whole plan is written to
+            catch -- somebody "fixing" the number by rewriting the corpus rather
+            than disclosing it, which is exactly what `LESSONS [I:4]` forbids and
+            what SC-8 says must never happen.
+
+        Both directions fail loudly. Neither is cleared by editing the corpus.
+        """
+        shipped_words = _shipped_vocabulary_union()
+
+        # (measured, tolerance) -- +-0.05 absolute. Wide enough that adding a
+        # handful of corpus names does not thrash the gate; narrow enough that
+        # a rewrite of either credential half cannot pass unnoticed.
+        for label, corpus, expected in (
+            ("key", CRYPTO_KEY_SECRET_KEYS, 0.167),
+            ("token", TOKEN_SECRET_KEYS, 0.417),
+        ):
+            words = _qualifier_words(corpus)
+            outside = {w for w in words if w not in shipped_words}
+            fraction = len(outside) / len(words)
+            assert abs(fraction - expected) <= 0.05, (
+                f"{label} credential half: vocabulary independence is "
+                f"{len(outside)}/{len(words)} ({fraction:.1%}), pinned at "
+                f"{expected:.1%} +-5pp.\n"
+                "  If it ROSE: was the corpus rewritten to clear the 0.50 "
+                "floor? SC-8 says a figure below the floor is DISCLOSED and "
+                "pinned, NEVER cleared by rewriting the corpus. Revert.\n"
+                "  If it FELL: the credential corpus is drifting away from real "
+                "credential vocabulary and the regression probe is weakening.\n"
+                "  If a shipped vocabulary genuinely grew, re-measure, update "
+                "this pin, and say so in decisions.md."
+            )
+
+        # Vacuity guard: a band around a figure computed from an EMPTY word set
+        # would pass trivially. Both halves must have real vocabulary.
+        assert len(_qualifier_words(CRYPTO_KEY_SECRET_KEYS)) > 50
+        assert len(_qualifier_words(TOKEN_SECRET_KEYS)) > 50
 
     # -- (c) anchoring ----------------------------------------------------
     def test_the_qualifier_scan_is_anchored_not_last_qualifier_only(self):
@@ -2108,6 +2224,119 @@ class TestValueShapeLayer:
         return key in clean_context_keys(
             {key: value}, "test-conv", strip_forbidden_keys=True
         )
+
+    # -- D-019: is the class claim true? ----------------------------------
+    def test_the_generic_arm_carries_the_control(self):
+        """THE LOAD-BEARING SECURITY CLAIM OF THIS ENTIRE LAYER, PINNED.
+
+        `constants.py`'s D-019 block argues that layer 2 is a CLASS control and
+        not an enumerated vendor list, on the grounds that the GENERIC arm
+        (charset + character-class mix + length + Shannon entropy) does the work
+        while the PREFIX arm (`_CREDENTIAL_VALUE_PREFIXES`: `sk_live_`, `ghp_`,
+        `AKIA`, `AIza`, `xoxb-`, ...) is a disclosed denylist that "is NOT the
+        arm the class claim rests on".
+
+        That claim shipped UNPINNED for four attempts. A prior round cited a
+        test of THIS NAME as pinning it; the test did not exist, and the citation
+        was retracted at CLOSE of `plan-2026-07-20T040150-876e7164` (see the
+        D-019 block). This is that test, written for real, now that step 1 has
+        given the corpus credential VALUES to measure against.
+
+        METHOD. Neutralise `_CREDENTIAL_VALUE_PREFIXES` to the empty tuple --
+        `str.startswith(())` is always `False`, so the enumerated arm is
+        switched off without touching any other rule -- and re-run every
+        credential value in the shipped corpus. The question is what fraction of
+        the detections the generic arm still makes on its own.
+
+        MEASURED AT THIS COMMIT: **100% (148/148)**. Every single credential the
+        filter detects, it detects on shape alone. The prefix arm contributes
+        ZERO unique detections on this corpus. That is stronger than the 73%/27%
+        the retracted citation claimed from a scratchpad.
+
+        AND THE HONEST CAVEAT, asserted below rather than left in prose: 100% is
+        partly an artifact of WHICH vendor credentials this corpus holds. The
+        prefix arm IS load-bearing, in exactly one place -- a published vendor
+        credential SHORTER than the 24-character length floor. `AKIA...` (20
+        chars) and `xoxb-...` are detected by the prefix arm ONLY. The corpus's
+        `vendor_prefix/credential` instance is 30 characters, so it never
+        exercises that region. So: do NOT read this test as licence to delete
+        `_CREDENTIAL_VALUE_PREFIXES`. It buys the short tail, and the second half
+        of this test pins that it does.
+
+        The floor is 0.50 -- a genuine majority claim, deliberately NOT a
+        restatement of the measured 1.00. If it ever drops below half, the class
+        argument in the D-019 block has become false and the block must be
+        rewritten before the filter is.
+        """
+        from fsm_llm import constants as c
+
+        credentials: list[tuple[str, object]] = []
+        credentials += list(CRYPTO_KEY_SECRET_VALUES.items())
+        credentials += list(TOKEN_SECRET_VALUES.items())
+        credentials += list(TOKEN_SECRET_SHORT_VALUE_ENTRIES)
+        credentials += [(n, v) for _, n, v in CARVE_OUT_CREDENTIAL_ENTRIES]
+
+        head_detections = 0
+        generic_detections = 0
+        prefix_only: list[str] = []
+
+        saved = c._CREDENTIAL_VALUE_PREFIXES
+        try:
+            for name, value in credentials:
+                if type(value) is not str:
+                    continue
+                c._CREDENTIAL_VALUE_PREFIXES = saved
+                at_head = c._looks_like_credential_value(value, name)
+                c._CREDENTIAL_VALUE_PREFIXES = ()
+                generic = c._looks_like_credential_value(value, name)
+                if at_head:
+                    head_detections += 1
+                    if generic:
+                        generic_detections += 1
+                    else:
+                        prefix_only.append(name)
+        finally:
+            c._CREDENTIAL_VALUE_PREFIXES = saved
+
+        assert head_detections > 100, (
+            "vacuity guard: the corpus must actually produce detections to "
+            f"apportion, got {head_detections}"
+        )
+        share = generic_detections / head_detections
+        assert share > 0.50, (
+            f"THE CLASS CLAIM IS NOW FALSE. The generic shape arm carries only "
+            f"{generic_detections}/{head_detections} ({share:.1%}) of layer 2's "
+            "credential detections; the enumerated vendor-prefix denylist "
+            f"carries the rest ({sorted(prefix_only)}).\n"
+            "The D-019 block in constants.py argues this layer is a CLASS "
+            "control because the generic arm does the work. Below 50% that "
+            "argument is a vendor list wearing a class control's justification. "
+            "Fix the WRITE-UP first -- retract or restate the class claim -- "
+            "before touching the filter to make the number come back."
+        )
+
+        # The other side: the prefix arm is not dead weight. A published vendor
+        # credential under the 24-char length floor is detected by it ALONE.
+        # These two are absent from the corpus on purpose (they are published
+        # constants, and `test_the_corpus_does_not_paste_the_pattern_it_tests`
+        # governs what may be pasted into a fixture) and are probed inline.
+        for name, short_vendor_value in (
+            ("aws_key", "AKIAIOSFODNN7EXAMPLE"),
+            ("slack_token", "xoxb-1234"),
+        ):
+            assert c._looks_like_credential_value(short_vendor_value, name), (
+                f"{name}: a published vendor credential stopped being detected"
+            )
+            c._CREDENTIAL_VALUE_PREFIXES = ()
+            try:
+                assert not c._looks_like_credential_value(short_vendor_value, name), (
+                    f"{name}: this probe no longer demonstrates that the prefix "
+                    "arm is load-bearing -- the generic arm now catches it too, "
+                    "so pick a shorter/lower-entropy vendor format or retire "
+                    "the second half of this test."
+                )
+            finally:
+                c._CREDENTIAL_VALUE_PREFIXES = saved
 
     # -- D-021: the token arm's polarity ---------------------------------
     def test_a_metering_count_is_kept_and_a_bearer_string_is_stripped(self):
