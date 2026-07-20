@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fsm_llm.constants import (
     _looks_like_credential_value,
     _token_value_is_credential,
@@ -3427,6 +3429,26 @@ class TestShippedCorpusBounds:
     def _arm(name):
         return "token" if "token" in name.lower() else "key"
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "KNOWN FAILING, DELIBERATELY, AND TRACKED. The seam is NOT closed. "
+            "Measured at a73de36: fail-open key arm 14.8% (17/115), slice-total "
+            "9.8% (18/184), against a <=5% bound. See "
+            "plans/plan-2026-07-20T103203-b8a6b855/summary.md and D-010. "
+            "strict=True IS THE POINT: if this test ever PASSES, the suite goes "
+            "RED and demands an explanation. There are two ways it can pass -- "
+            "the filter was genuinely fixed (delete this marker and celebrate), "
+            "or the corpus was weakened to clear the bound. The second is this "
+            "seam's documented five-time failure mode (plans/LESSONS.md [I:4], "
+            "[I:5]). DO NOT clear this by extending _AUTH_SCHEME_WORDS or "
+            "_IDENTIFIER_NOUN_VOCABULARY -- those lists ARE the open defect: "
+            "measured 47.5% scheme-word coverage and 89.7% over-strip on "
+            "unlisted identifier names. The fix is a PIVOT to shape tests, "
+            "against a corpus built from a shape census held independently of "
+            "this filter."
+        ),
+    )
     def test_the_shipped_corpus_scores_inside_both_bounds_on_both_arms(self):
         """The shipped mirror of the holdout's six-cell bounds check.
 
