@@ -635,6 +635,18 @@ def _op_var(values: list, data: dict[str, Any], _depth: int) -> Any:
     if not values:
         logger.error("var operator requires at least one argument")
         return None
+    # DECISION plan-2026-07-20T040150-876e7164/D-012
+    # `values[2:]` stays DROPPED. This is observability only: log, then carry on
+    # with `values[0]`/`values[1]` exactly as before. Do NOT "finish the job" by
+    # returning `None` or raising here — `_op_var` is the most-used operator in
+    # every FSM definition in this repo, so a hard failure would turn a typo in
+    # a rarely-taken transition condition into a broken conversation, and the
+    # three sibling handlers that bound their arity (`_op_missing_some`,
+    # `_op_has_context`, `_op_context_length`) all return a NEUTRAL value rather
+    # than raising too. What was wrong was the SILENCE, not the leniency.
+    # See decisions.md D-012.
+    if len(values) > 2:
+        logger.error(f"var operator requires 1 or 2 arguments, got {len(values)}")
     var_name = values[0]
     default = values[1] if len(values) > 1 else None
     return get_var(data, var_name, default)

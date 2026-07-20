@@ -542,3 +542,66 @@ class TestSoftEqualsBoolVersusStringRule:
         assert soft_equals(True, None) is False
         assert soft_equals(False, None) is False
         assert soft_equals(None, "None") is False
+
+
+# ---------------------------------------------------------------------------
+# G-21: `_op_var` silently dropped `values[2:]`, unlike its three siblings
+# ---------------------------------------------------------------------------
+
+
+class TestVarArgumentArity:
+    """SC-16: `{"var": [name, default, junk]}` drops `junk` — now audibly.
+
+    `_op_var` was the only one of the four data-access operator handlers with no
+    arity bound and no log line; `_op_missing_some`, `_op_has_context` and
+    `_op_context_length` all bound theirs and `logger.error` on violation. This
+    is convergence on that in-file pattern, not a new rule.
+    """
+
+    def test_extra_args_are_still_dropped_and_the_result_is_unchanged(self):
+        """D-012: observability only. The RETURN VALUE must not move."""
+        # Missing key -> the default is used; the junk argument changes nothing.
+        assert evaluate_logic({"var": ["x", "d", "junk"]}, {}) == "d"
+        assert evaluate_logic({"var": ["x", "d", "junk"]}, {"x": "found"}) == "found"
+        assert evaluate_logic({"var": ["x", "d", "a", "b"]}, {}) == "d"
+        # A present-but-None key still wins over the default (unchanged).
+        assert evaluate_logic({"var": ["x", "d", "junk"]}, {"x": None}) is None
+        # ...and every form is identical to the same call without the extras.
+        for data in ({}, {"x": None}, {"x": "found"}):
+            assert evaluate_logic({"var": ["x", "d", "junk"]}, data) == evaluate_logic(
+                {"var": ["x", "d"]}, data
+            )
+
+    def test_extra_args_emit_an_error_naming_the_argument_count(self):
+        """SC-16: the drop is reported, and the message names how many arrived."""
+        with _captured_fsm_llm_warnings() as records:
+            result = evaluate_logic({"var": ["x", "d", "junk"]}, {})
+
+        assert result == "d"
+        errors = [r for r in records if "var operator" in r]
+        assert len(errors) == 1, records
+        assert "ERROR" in errors[0], errors[0]
+        assert "got 3" in errors[0], errors[0]
+
+    def test_the_bound_fires_only_past_two_arguments(self):
+        """Vacuity guard: the legal 1- and 2-argument forms stay silent.
+
+        Without this, a bound of `len(values) > 0` would pass the test above.
+        """
+        with _captured_fsm_llm_warnings() as records:
+            assert evaluate_logic({"var": "x"}, {"x": 1}) == 1
+            assert evaluate_logic({"var": ["x"]}, {"x": 1}) == 1
+            assert evaluate_logic({"var": ["x", "d"]}, {}) == "d"
+        assert [r for r in records if "var operator" in r] == []
+
+    def test_the_message_matches_its_siblings_shape(self):
+        """The three arity-bounding siblings share one message shape; so does
+        this one, so an operator log is greppable by a single pattern."""
+        with _captured_fsm_llm_warnings() as records:
+            evaluate_logic({"var": ["x", "d", "junk"]}, {})
+            evaluate_logic({"missing_some": [1]}, {})
+            evaluate_logic({"has_context": [{}, "k", "extra"]}, {})
+            evaluate_logic({"context_length": [{}]}, {})
+
+        arity_errors = [r for r in records if "requires" in r and ", got " in r]
+        assert len(arity_errors) == 4, records
