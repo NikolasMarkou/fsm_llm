@@ -14,6 +14,7 @@ from fsm_llm_agents import (
     ToolRegistry,
     tool,
 )
+from fsm_llm_agents.exceptions import AgentError
 
 
 @tool
@@ -158,3 +159,58 @@ class TestLoop:
         assert msg["tool_calls"][0]["function"]["name"] == "weather"
         # arguments serialized as a JSON string per OpenAI format
         assert isinstance(msg["tool_calls"][0]["function"]["arguments"], str)
+
+
+class TestLitellmBoundaryWrap:
+    """F-03 / SC-10 — `_litellm_complete` is the agent's raw provider boundary.
+    A provider failure must surface as an ``AgentError`` (the package root)
+    with the provider exception preserved as ``__cause__``.
+
+    DECISION plan-2026-07-20T040150-876e7164/D-006.
+    """
+
+    @staticmethod
+    def _agent():
+        # complete_fn=None so `_complete` routes to the real litellm path.
+        return NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model"),
+        )
+
+    def test_provider_failure_raises_agent_error_chained(self, monkeypatch):
+        provider_error = RuntimeError("provider timeout")
+
+        def explode(**kwargs):
+            raise provider_error
+
+        monkeypatch.setattr("litellm.completion", explode)
+
+        with pytest.raises(AgentError) as excinfo:
+            self._agent()._litellm_complete([{"role": "user", "content": "q"}], [])
+
+        assert excinfo.value.__cause__ is provider_error
+        assert not isinstance(excinfo.value, RuntimeError)
+
+    def test_wrap_reaches_the_run_loop(self, monkeypatch):
+        """The wrap is on the path `run()` actually takes when no complete_fn
+        is injected — not only on a directly-called private helper."""
+
+        def explode(**kwargs):
+            raise RuntimeError("provider down")
+
+        monkeypatch.setattr("litellm.completion", explode)
+
+        with pytest.raises(AgentError):
+            self._agent()._complete([{"role": "user", "content": "q"}], [])
+
+    def test_parsing_errors_are_not_relabelled_as_provider_failures(self, monkeypatch):
+        """Only the network call is inside the try. A malformed response object
+        must raise as itself, not be reported as an LLM call failure."""
+
+        def bad_shape(**kwargs):
+            return object()  # no `.choices`
+
+        monkeypatch.setattr("litellm.completion", bad_shape)
+
+        with pytest.raises(AttributeError):
+            self._agent()._litellm_complete([{"role": "user", "content": "q"}], [])

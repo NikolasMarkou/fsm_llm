@@ -95,14 +95,28 @@ class NativeFunctionCallingReactAgent(BaseAgent):
     ) -> dict[str, Any]:
         import litellm
 
-        response = litellm.completion(
-            model=self.config.model,
-            messages=messages,
-            tools=schemas or None,
-            tool_choice="auto" if schemas else None,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-        )
+        # DECISION plan-2026-07-20T040150-876e7164/D-006: wrap the litellm
+        # boundary so a provider outage reaches this agent's caller as an
+        # AgentError, not as a raw openai.APIError that no `except AgentError`
+        # can see. Deliberately the CONCRETE `AgentError` root — do NOT
+        # introduce an `LLMCallError` (or similar) subtype for this: one call
+        # site does not earn a new exception class, and the plan's Complexity
+        # Budget is 0/2 new abstractions (D-001 records the refusal
+        # explicitly). If a SECOND provider-call site ever needs the same type,
+        # the subtype is earned then, not now. Only the network call belongs
+        # inside the try — the tool_call parsing below must keep raising its
+        # own programming errors unwrapped. See decisions.md D-006.
+        try:
+            response = litellm.completion(
+                model=self.config.model,
+                messages=messages,
+                tools=schemas or None,
+                tool_choice="auto" if schemas else None,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+            )
+        except Exception as e:
+            raise AgentError(f"Native function-calling LLM call failed: {e!s}") from e
         msg = response.choices[0].message
         tool_calls: list[dict[str, Any]] = []
         for tc in getattr(msg, "tool_calls", None) or []:

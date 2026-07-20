@@ -25,6 +25,7 @@ from fsm_llm.logging import logger
 from fsm_llm.utilities import extract_json_from_text
 
 from .definitions import AgentConfig, AgentResult, EvaluationResult
+from .exceptions import EvaluationError
 from .react import ReactAgent
 from .tools import ToolRegistry
 
@@ -73,11 +74,26 @@ _JUDGE_PROMPT = (
 def _default_complete(model: str, prompt: str) -> str:
     import litellm
 
-    response = litellm.completion(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0,
-    )
+    # DECISION plan-2026-07-20T040150-876e7164/D-006: wrap the litellm boundary
+    # HERE so a provider outage leaves this function as an AgentError subclass,
+    # never as a raw openai.APIError. `EvaluationError` rather than the bare
+    # `AgentError` root because this function exists only to back
+    # `default_llm_judge` — at this call site an LLM failure IS an evaluation
+    # failure. Do NOT narrow the clause to named litellm classes: RateLimitError
+    # / Timeout / APIConnectionError all descend from openai.APIError ->
+    # Exception and share no narrower common base, which is the same reasoning
+    # `fsm_llm/classification.py` records under its D-004 wrap. Do NOT drop the
+    # `from e`: `judge()` below renders the exception into its user-facing
+    # feedback string, and losing __cause__ erases the provider's own message.
+    # See decisions.md D-006.
+    try:
+        response = litellm.completion(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+        )
+    except Exception as e:
+        raise EvaluationError(f"LLM judge completion failed: {e!s}") from e
     return response.choices[0].message.content or ""
 
 

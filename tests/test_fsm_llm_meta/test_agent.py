@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """Tests for MetaBuilderAgent — agentic architecture."""
 
+from typing import ClassVar
+
 import pytest
 
 from fsm_llm_agents.definitions import (
@@ -9,7 +11,12 @@ from fsm_llm_agents.definitions import (
     MetaBuilderConfig,
     MetaBuilderResult,
 )
-from fsm_llm_agents.exceptions import MetaBuilderError, MetaValidationError
+from fsm_llm_agents.exceptions import (
+    AgentError,
+    BuilderError,
+    MetaBuilderError,
+    MetaValidationError,
+)
 from fsm_llm_agents.meta_builder import MetaBuilderAgent
 
 
@@ -330,3 +337,96 @@ class TestLegacyFSMDefinition:
         assert isinstance(fsm, dict)
         assert "name" in fsm
         assert "states" in fsm
+
+
+class TestLlmCallProviderFailure:
+    """F-03 / SC-10 — `_llm_call` used to convert ANY provider failure into
+    ``""`` via `except Exception: return ""`, making a total outage
+    indistinguishable from a model that answered with nothing. It must now
+    raise ``BuilderError`` (an ``AgentError`` subclass) chained from the
+    provider exception.
+
+    DECISION plan-2026-07-20T040150-876e7164/D-006.
+    """
+
+    @staticmethod
+    def _explode(exc):
+        def _completion(**kwargs):
+            raise exc
+
+        return _completion
+
+    def test_provider_failure_raises_builder_error_chained(self, monkeypatch):
+        provider_error = RuntimeError("provider unreachable")
+        monkeypatch.setattr("litellm.completion", self._explode(provider_error))
+
+        agent = MetaBuilderAgent()
+        with pytest.raises(BuilderError) as excinfo:
+            agent._llm_call("design an FSM")
+
+        # Wraps to the package root, never to core's FSMError surface (I-5).
+        assert isinstance(excinfo.value, AgentError)
+        assert excinfo.value.__cause__ is provider_error
+
+    def test_provider_failure_does_not_return_empty_string(self, monkeypatch):
+        """The exact inverse defect: the un-fixed source returned `""` here."""
+        monkeypatch.setattr(
+            "litellm.completion", self._explode(RuntimeError("provider unreachable"))
+        )
+
+        agent = MetaBuilderAgent()
+        result = None
+        try:
+            result = agent._llm_call("design an FSM")
+        except BuilderError:
+            pass
+        assert result is None, "provider failure must not be reported as an answer"
+
+    def test_empty_answer_still_returns_empty_string(self, monkeypatch):
+        """`""` keeps its one true meaning — the model answered with nothing.
+        Pins that the fix did not turn a legitimate empty answer into an error."""
+
+        class _Msg:
+            content = ""
+
+        class _Choice:
+            message = _Msg()
+
+        class _Resp:
+            choices: ClassVar[list] = [_Choice()]
+
+        monkeypatch.setattr("litellm.completion", lambda **kwargs: _Resp())
+
+        assert MetaBuilderAgent()._llm_call("say nothing") == ""
+
+    def test_provider_failure_propagates_out_of_the_build_pipeline(self, monkeypatch):
+        """Previously the `""` flowed into `_parse_extraction_response`, yielded
+        an empty spec, logged 'builder will be incomplete' and returned
+        NORMALLY — so `run()` emitted a stub artifact after a total outage."""
+        monkeypatch.setattr(
+            "litellm.completion", self._explode(RuntimeError("provider unreachable"))
+        )
+
+        agent = MetaBuilderAgent()
+        builder = agent._create_builder(ArtifactType.FSM)
+        with pytest.raises(BuilderError):
+            agent._run_deterministic_pipeline("build a bot", ArtifactType.FSM, builder)
+
+    def test_collect_response_fallback_survives_the_raise(self, monkeypatch):
+        """A-5 census pin (decisions.md D-007). `_generate_collect_response` is
+        the ONE caller that reads the result as a truthiness sentinel
+        (`if response and len(response) > 10`), but it already wraps the call in
+        `except Exception`, so the raise routes to the byte-identical fallback.
+        This test is what makes that claim measured rather than asserted."""
+        monkeypatch.setattr(
+            "litellm.completion", self._explode(RuntimeError("provider unreachable"))
+        )
+
+        agent = MetaBuilderAgent()
+        agent._artifact_type = ArtifactType.FSM
+        agent._messages = ["I want a support bot"]
+
+        reply = agent._generate_collect_response("I want a support bot")
+
+        assert "Say 'build it' when ready" in reply
+        assert reply.strip() != ""

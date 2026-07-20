@@ -28,7 +28,7 @@ from .definitions import (
     MetaBuilderConfig,
     MetaBuilderResult,
 )
-from .exceptions import MetaBuilderError, MetaValidationError
+from .exceptions import BuilderError, MetaBuilderError, MetaValidationError
 from .meta_builders import (
     AgentBuilder,
     ArtifactBuilder,
@@ -517,7 +517,12 @@ class MetaBuilderAgent:
                 prompt so the model sees it as context.
 
         Returns:
-            Response text, or empty string on failure.
+            Response text. An empty string means the model genuinely answered
+            with nothing — it is NOT a failure signal.
+
+        Raises:
+            BuilderError: The provider call failed (outage, auth, rate limit,
+                timeout). Callers must distinguish this from an empty answer.
         """
         from fsm_llm.ollama import is_ollama_model
 
@@ -556,20 +561,44 @@ class MetaBuilderAgent:
                 },
             }
 
+        # DECISION plan-2026-07-20T040150-876e7164/D-006: this clause used to be
+        # `except Exception as e: logger.error(...); return ""`. Do NOT restore
+        # that. It reported a provider outage as an EMPTY ANSWER, which is
+        # strictly worse than an exception: `_run_deterministic_pipeline` fed
+        # the `""` to `_parse_extraction_response`, got `{}`, logged
+        # "builder will be incomplete" and returned normally — so a total
+        # provider failure and a model that answered with nothing were
+        # indistinguishable, and `run()` went on to emit a stub artifact as if
+        # the build had merely underperformed. `""` is now reserved for its one
+        # true meaning: the model answered with nothing.
+        #
+        # The try is also NARROWED to the network call alone (it previously
+        # spanned the content/thinking extraction below), so a bug in that
+        # parsing keeps raising as itself instead of being relabelled a
+        # provider failure. Do not widen it back. `except Exception` is correct
+        # HERE for the same reason `fsm_llm/classification.py` D-004 records:
+        # litellm's transient classes descend from openai.APIError -> Exception
+        # and share no narrower common base.
+        #
+        # Both in-repo callers were censused before this landed (see
+        # decisions.md D-007): `_generate_collect_response` already wraps its
+        # call in `except Exception` and returns an identical fallback string,
+        # and `_execute_build` already catches and routes to its
+        # validation-error path. See decisions.md D-006.
         try:
             response = litellm.completion(**call_params)
-            content = response.choices[0].message.content
-            if not content and hasattr(response.choices[0].message, "thinking"):
-                thinking = response.choices[0].message.thinking or ""
-                if thinking:
-                    for line in reversed(thinking.strip().split("\n")):
-                        line = line.strip()
-                        if line and not line.startswith("<"):
-                            return cast(str, line)
-            return content.strip() if content else ""
         except Exception as e:
-            logger.error(f"LLM call failed: {e}")
-            return ""
+            raise BuilderError(f"Meta-builder LLM call failed: {e!s}") from e
+
+        content = response.choices[0].message.content
+        if not content and hasattr(response.choices[0].message, "thinking"):
+            thinking = response.choices[0].message.thinking or ""
+            if thinking:
+                for line in reversed(thinking.strip().split("\n")):
+                    line = line.strip()
+                    if line and not line.startswith("<"):
+                        return cast(str, line)
+        return content.strip() if content else ""
 
     # ------------------------------------------------------------------
     # Turn-by-turn API (for monitor server + interactive)

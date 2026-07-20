@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fsm_llm_agents import (
     AgentConfig,
     ToolRegistry,
@@ -9,7 +11,9 @@ from fsm_llm_agents import (
     react_worker_factory,
     tool,
 )
+from fsm_llm_agents.composition import _default_complete
 from fsm_llm_agents.definitions import AgentResult, AgentTrace, EvaluationResult
+from fsm_llm_agents.exceptions import AgentError, EvaluationError
 
 
 @tool
@@ -130,3 +134,55 @@ class TestDefaultLlmJudge:
         judge = default_llm_judge(complete_fn=lambda m, p: '{"score": 0.8}')
         out = judge("output text", {"task": "t"})
         assert isinstance(out, EvaluationResult)
+
+
+class TestDefaultCompleteLitellmBoundary:
+    """F-03 / SC-10 — `_default_complete` is a raw litellm boundary. A provider
+    failure must leave it as an ``AgentError`` subclass with the provider
+    exception preserved as ``__cause__``, never as a raw provider exception.
+
+    DECISION plan-2026-07-20T040150-876e7164/D-006.
+    """
+
+    @staticmethod
+    def _explode(exc):
+        def _completion(**kwargs):
+            raise exc
+
+        return _completion
+
+    def test_provider_failure_raises_evaluation_error(self, monkeypatch):
+        provider_error = RuntimeError("provider connection reset")
+        monkeypatch.setattr("litellm.completion", self._explode(provider_error))
+
+        with pytest.raises(EvaluationError) as excinfo:
+            _default_complete("mock/model", "grade this")
+
+        # Wrapped to the package root, not to core's FSMError surface (I-5).
+        assert isinstance(excinfo.value, AgentError)
+        # The provider exception survives for diagnosis (SC-10).
+        assert excinfo.value.__cause__ is provider_error
+
+    def test_raw_provider_exception_does_not_escape(self, monkeypatch):
+        provider_error = RuntimeError("rate limited")
+        monkeypatch.setattr("litellm.completion", self._explode(provider_error))
+
+        # The un-fixed source let this same RuntimeError out untouched.
+        with pytest.raises(AgentError):
+            _default_complete("mock/model", "grade this")
+
+    def test_judge_still_degrades_gracefully_over_the_wrap(self, monkeypatch):
+        """The wrap must not change `judge()`'s contract — it already catches
+        broadly and reports not-passed. Pins that this is a typing fix, not a
+        behavior change for the judge's own callers."""
+        monkeypatch.setattr(
+            "litellm.completion", self._explode(RuntimeError("provider down"))
+        )
+
+        result = default_llm_judge(model="mock/model")("some answer", {"task": "T"})
+
+        assert result.passed is False
+        assert result.score == 0.0
+        assert "judge error" in result.feedback
+        # The provider's own message reaches the feedback via the chained message.
+        assert "provider down" in result.feedback
