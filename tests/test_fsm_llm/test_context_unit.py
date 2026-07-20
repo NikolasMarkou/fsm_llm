@@ -1758,6 +1758,15 @@ class TestCryptoKeyAndTokenTriggers:
             c._TOKEN_MATERIAL_HEADS,
         ):
             shipped_words |= {w for w in blob.split("|") if w}
+        # D-003 ships a THIRD vocabulary -- the identifier nouns that gate the
+        # UUID/ULID carve-out. It is a set rather than an alternation blob, but
+        # it is still "a shipped alternation" in SC-21's sense and still a list
+        # of words this codebase's author enumerated. Omitting it would inflate
+        # the key arm's measured independence from 0.858 to 0.925 by counting
+        # `idempotency`, `correlation`, `request`, `tenant`, `shard`,
+        # `partition` and `session` as words nobody enumerated -- which is the
+        # exact accounting error this whole test exists to catch.
+        shipped_words |= set(c._IDENTIFIER_NOUN_VOCABULARY)
 
         def qualifiers(names):
             out = set()
@@ -2159,6 +2168,78 @@ class TestValueShapeLayer:
             assert self._kept(allowlisted, cursor)
         for not_allowlisted in ("harvest_token", "session_token"):
             assert not self._kept(not_allowlisted, cursor)
+
+    # -- D-003: the fail-closed UUID/ULID identifier-noun carve-out -------
+    def test_a_uuid_valued_credential_under_an_unlisted_name_now_strips(self):
+        """THE FIX. Until D-003 the UUID/ULID carve-out was unconditional, so
+        an API key generated as a canonical UUID was byte-identical to an
+        idempotency key (A-2) and was KEPT. It is now conditioned on the NAME,
+        and none of these names carries an identifier noun, so all of them
+        fall through to the generic shape arm and strip.
+
+        The three `*_token` names are the independently-authored holdout's
+        entire token-arm UUID leak class -- the largest single fail-open class
+        the holdout found, on a corpus that had never seen the pattern."""
+        for name, value in (
+            # both alphabets on the key arm, from the shipped shape corpus
+            ("merchant_key", "7c3f1a92-4be8-4d17-9f60-2ab5c8e10d34"),
+            ("partner_key", "01J9ZQ4T7XKD3M8VYB2NHF6CWE"),
+            # the token arm, from the holdout
+            ("consul_acl_token", "b41d7f6e-2c90-4a83-95e1-7fd0c6a3b82f"),
+            ("nomad_management_token", "e07c4a19-83b5-4d62-a1f7-90cb2e5d4b18"),
+            ("keycloak_offline_token", "5a9e2c71-64f8-4b03-8d1a-3ce7f096b25d"),
+        ):
+            assert not self._kept(name, value), (
+                f"{name} carries a UUID/ULID-shaped credential and reached the "
+                "prompt -- the D-003 carve-out has been widened back toward "
+                "unconditional (disposition (c)), which leaks"
+            )
+
+    def test_a_uuid_valued_identifier_under_a_listed_noun_is_still_kept(self):
+        """THE COST CONTROL, and the reason disposition (a) (delete the
+        carve-out outright) was NOT shipped. (a) fixes exactly the same five
+        credentials the test above pins and additionally destroys these -- real
+        application data, silently removed from a prompt for no security gain.
+
+        A failure here means the vocabulary shrank or the carve-out was
+        deleted; either way over-strip has been spent buying nothing."""
+        for name, value in (
+            ("idempotency_key", "3f8b2c14-9d67-4a52-b0e3-7c1f5a94d208"),
+            ("correlation_key", "3f8b2c14-9d67-4a52-b0e3-7c1f5a94d208"),
+            ("dedupe_key", "01HZ8QK4PYRB6JT2WMXV3NCDGF"),
+            ("request_key", "01HZ8QK4PYRB6JT2WMXV3NCDGF"),
+            # the holdout's one independent safe UUID, matched via `replay` --
+            # a noun that does NOT appear in the pre-D-003 code comment, and
+            # therefore the only non-circular member of this list.
+            ("replay_guard_key", "9c2e4f81-70a3-4b56-8e2d-1f45a9c70b63"),
+        ):
+            assert self._kept(name, value), (
+                f"{name} is an ordinary identifier and was stripped -- this is "
+                "disposition (a)'s measured cost, which D-003 declined to pay"
+            )
+
+    def test_the_identifier_noun_carve_out_is_fail_closed_for_unknown_names(self):
+        """THE POLARITY, pinned on its own because it IS the design (plan S-2).
+
+        A name that is neither a listed identifier noun nor an enumerated
+        credential name gets NO carve-out and strips. That is what makes an
+        omission in the vocabulary cost over-strip -- the axis with headroom --
+        instead of fail-open. A future editor who flips this to fail-open (keep
+        unless denylisted) reintroduces the `LESSONS [I:5]` failure shape that
+        this seam has now hit five times.
+
+        Matching is token-wise, not substring: `obatchment_key` must not ride
+        `batch` into the carve-out."""
+        uuid_value = "7c3f1a92-4be8-4d17-9f60-2ab5c8e10d34"
+        for unknown in ("harvest_key", "widget_key", "obatchment_key"):
+            assert not self._kept(unknown, uuid_value), (
+                f"{unknown} matches no identifier noun and no credential "
+                "vocabulary, so the fail-CLOSED default must strip it"
+            )
+        # And the listed-noun side of the same probe, so this is not vacuous.
+        # `batch_key` is used rather than `session_key` because layer 1 strikes
+        # `session_key` on the NAME and it never reaches this rule at all.
+        assert self._kept("batch_key", uuid_value)
 
     # -- D-021: colon composites -----------------------------------------
     def test_a_colon_composite_credential_is_split_and_judged_on_its_tail(self):

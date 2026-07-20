@@ -816,14 +816,124 @@ _CREDENTIAL_VALUE_PREFIXES = (
 # the whitespace rejection below.
 _PEM_PREFIX = "-----begin"
 
-# Canonical UUID. Idempotency keys, dedup keys, correlation keys and request ids
-# are UUIDs and are ordinary application data, not credentials.
+# DECISION plan-2026-07-20T103203-b8a6b855/D-003
+# THE UUID/ULID CARVE-OUT IS NAME-CONDITIONED AND FAIL-CLOSED. It fires only
+# when the NAME carries a token from `_IDENTIFIER_NOUN_VOCABULARY` below. An
+# unlisted name does NOT get the carve-out: it falls through to the generic
+# shape arm and STRIPS. That polarity is the design, not an implementation
+# detail (plan S-2).
+#
+# WHY. The comment this block replaces justified an UNCONDITIONAL carve-out
+# with "idempotency keys, dedup keys, correlation keys and request ids are
+# UUIDs". Three of those four cannot reach this code at all: `request_id`,
+# `correlation_id` and `tenant_id` carry no `key`/`token` trigger, so layer 1
+# never refers them to layer 2 (A-1/H-2, probe-confirmed). A census of both
+# corpora put the carve-out's ENTIRE true reach at 12 entries out of 557
+# (2.2%) -- 7 safe, 5 credential. Unconditional, it bought 7 correct KEEPs and
+# paid 5 fail-open leaks on the axis that was already over budget.
+#
+# MEASURED -- all three dispositions x both axes x per-arm AND slice-total, on
+# the shipped regression-probe corpus and on an independently-authored
+# 181-entry holdout. Bounds: over-strip <= 15%, fail-open <= 5%.
+#
+#   disposition | corpus  | over-strip key/token/total | fail-open key/token/total
+#   ------------|---------|----------------------------|--------------------------
+#   (c) keep    | shipped |      2.6 / 4.4 / 3.4       |     9.9 / 1.4 / 6.5
+#   (c) keep    | holdout |      2.0 / 2.0 / 2.0       |     2.4 / 12.5 / 7.4
+#   (a) delete  | shipped |      7.8 / 4.4 / 6.3       |     7.9 / 1.4 / 5.3
+#   (a) delete  | holdout |      4.0 / 2.0 / 3.0       |     2.4 / 5.0 / 3.7
+#   (b) narrow  | shipped |      2.6 / 4.4 / 3.4       |     7.9 / 1.4 / 5.3
+#   (b) narrow  | holdout |      2.0 / 2.0 / 2.0       |     2.4 / 5.0 / 3.7
+#
+# (b) IS WHAT SHIPPED, and it is set inclusion rather than a judgement call:
+# (b)'s verdict-change set is a proper SUBSET of (a)'s. Both fix the same 5
+# credentials; (a) additionally over-strips 7 safe identifiers and buys nothing
+# for them. (c) is dominated outright -- there is no cell where it beats (b).
+#
+# WHAT THIS CLAIM IS WORTH. READ THIS BEFORE CITING IT.
+# The vocabulary was authored BEFORE any disposition was measured and nothing
+# was added to it in response to a measurement. Reconciled after the fact it is
+# 12/12 correct on the carve-out's true population -- BUT THAT 12/12 IS PARTLY
+# CIRCULAR AND MUST BE DISCOUNTED. Four of the shipped corpus's safe UUID names
+# are the same nouns the comment this block replaces already listed, so the
+# corpus, the old comment and the vocabulary share ancestry and their agreement
+# is not evidence. THE INDEPENDENT EVIDENCE IS N=4, ON THE HOLDOUT ONLY:
+# `replay_guard_key` kept via `replay` (a noun absent from the old comment) and
+# three non-identifier credential UUIDs stripped. So the alignment between
+# identifier-noun naming and safe/credential ground truth is MEASURED AND
+# NARROW at N=4. It is NOT a general property of the world and must never be
+# cited as one.
+# Coverage of the list itself, measured not remembered: 11 of the 17 nouns
+# appear on some name in some corpus, and only 5 (`idempotency`, `dedupe`,
+# `correlation`, `request`, `replay`) ever gate a UUID/ULID-shaped value, which
+# is the only population this rule reaches. The other 12 are carried on
+# published-convention argument alone and are DISCLOSED as unmeasured, not
+# claimed. (decisions.md D-003 says "six ... exercised by NEITHER corpus" and
+# then lists nine; both figures are wrong and the ones here are the measured
+# replacement.)
+# The standing cost is A-2 -- UUID credentials and UUID identifiers are not
+# separable by value -- so an adversary who names a UUID-valued credential
+# `batch_key`, `trace_key` or `cursor_key` gets it KEPT (probed, all three).
+# That is disclosed, not fixed. Note that `session_key` is NOT such an example
+# even though `session` is listed: layer 1 strikes it on the NAME and it never
+# reaches this rule.
+#
+# DO NOT:
+#  * restore the unconditional carve-out. That is disposition (c), and it
+#    leaked all three of the holdout's independent token-arm UUID credentials.
+#  * add a vendor name to a denylist to catch an observed leak. Fixing a class
+#    by naming its members is this seam's recurring failure shape
+#    (plans/LESSONS.md [I:5]), and it is precisely why this list is
+#    fail-CLOSED: an omitted noun costs OVER-STRIP, the axis with headroom
+#    (S-1), and can never cost fail-open. A denylist inverts that.
+#  * split UUID from ULID. Measured separately they behave identically in kind
+#    -- each carries both a safe and a credential instance, each fails open on
+#    its credential instance under (c), each is fully repaired by (b) at zero
+#    over-strip cost. They differ only in magnitude. Narrowing one alone leaves
+#    `partner_key: 01J9ZQ4T7XKD3M8VYB2NHF6CWE` live for no measured gain.
+#
+# Pinned two-sided (both arms, both alphabets, both polarities) by
+# `test_a_uuid_valued_credential_under_an_unlisted_name_now_strips`,
+# `test_a_uuid_valued_identifier_under_a_listed_noun_is_still_kept` and
+# `test_the_identifier_noun_carve_out_is_fail_closed_for_unknown_names` in
+# tests/test_fsm_llm/test_context_unit.py. See decisions.md D-003.
+
+# Canonical UUID.
 _UUID_VALUE_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
 )
 
 # ULID (Crockford base32, 26 chars) -- the other standard opaque request id.
 _ULID_VALUE_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+# The identifier nouns that earn the carve-out above. Authored before any
+# disposition was measured; see the D-003 block for what its 12/12 fit is and
+# is not worth.
+_IDENTIFIER_NOUN_VOCABULARY = frozenset(
+    {
+        "idempotency",
+        "dedup",
+        "dedupe",
+        "partition",
+        "trace",
+        "correlation",
+        "request",
+        "tenant",
+        "shard",
+        "lease",
+        "span",
+        "replay",
+        "cursor",
+        "batch",
+        "job",
+        "run",
+        "session",
+    }
+)
+
+# Names are matched token-wise, not by substring: `session_key` matches and
+# `obsession_key` does not.
+_NAME_TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
 
 # Object-storage / filesystem paths. `/` cannot simply be dropped from the
 # credential charset below, because standard (non-url-safe) base64 uses it, so
@@ -905,7 +1015,7 @@ def _shannon_entropy(text: str) -> float:
     return entropy
 
 
-def _looks_like_credential_value(value: object) -> bool:
+def _looks_like_credential_value(value: object, name: str = "") -> bool:
     """Return True if *value* has the SHAPE of credential material.
 
     This is layer 2 of the context-key security filter and it is only ever
@@ -917,6 +1027,12 @@ def _looks_like_credential_value(value: object) -> bool:
     Non-``str`` values are never credentials by this test: an ``int``, ``bool``
     or ``float`` cannot carry key material, and containers are recursed into by
     the callers rather than inspected here.
+
+    *name* is the context key the value was stored under, and is read by ONE
+    rule only: the fail-closed UUID/ULID identifier-noun carve-out (D-003). It
+    defaults to ``""``, which is the fail-closed direction -- a caller that
+    supplies no name gets no carve-out. Read through the unbound
+    ``str.lower``, so a hostile ``str`` subclass cannot hook it.
 
     NEVER logs *value*. Never raises. Inspects at most
     ``_VALUE_SCAN_LIMIT`` leading characters, so cost is bounded regardless of
@@ -956,8 +1072,17 @@ def _looks_like_credential_value(value: object) -> bool:
     # Generic arm. Everything below here is shape, not vocabulary.
     if not _CREDENTIAL_VALUE_CHARSET_RE.match(stripped):
         return False
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-003 -- the carve-out is
+    # name-conditioned and fail-CLOSED. An unlisted name gets no carve-out and
+    # falls through to the rules below, which strip a canonical UUID/ULID. Do
+    # NOT drop the vocabulary test to "simplify" this back to unconditional;
+    # that is the measured disposition (c) and it leaks. Full table, the N=4
+    # limit on the claim, and what NOT to do: see the D-003 block above
+    # `_UUID_VALUE_RE`.
     if _UUID_VALUE_RE.match(stripped) or _ULID_VALUE_RE.match(stripped):
-        return False
+        tokens = _NAME_TOKEN_SPLIT_RE.split(str.lower(name)) if name else ()
+        if any(token in _IDENTIFIER_NOUN_VOCABULARY for token in tokens):
+            return False
     if _PATH_VALUE_RE.match(stripped) or stripped.count("/") >= 3:
         return False
 
@@ -1011,7 +1136,7 @@ _TOKEN_VALUE_SCAN_NAME_RE = re.compile(
 )
 
 
-def _token_value_is_credential(value: object) -> bool:
+def _token_value_is_credential(value: object, name: str = "") -> bool:
     """Layer-2 verdict for the TOKEN arm: is *value* credential material?
 
     Differs from :func:`_looks_like_credential_value` in its DEFAULT, and only
@@ -1037,7 +1162,7 @@ def _token_value_is_credential(value: object) -> bool:
     # `value=None` and therefore the old unconditional strip.
     if not isinstance(value, str):
         return True
-    return _looks_like_credential_value(value)
+    return _looks_like_credential_value(value, name)
 
 
 def is_forbidden_context_entry(key: object, value: object = None) -> bool:
@@ -1084,7 +1209,7 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     # must get the STRICTER of the two defaults, and the token arm's is
     # fail-CLOSED where the key arm's is fail-open. Do not reorder these.
     if _TOKEN_VALUE_SCAN_NAME_RE.match(key):
-        return _token_value_is_credential(value)
+        return _token_value_is_credential(value, key)
 
     if value is None:
         return False
@@ -1096,7 +1221,7 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     ):
         return False
 
-    return _looks_like_credential_value(value)
+    return _looks_like_credential_value(value, key)
 
 
 # --------------------------------------------------------------

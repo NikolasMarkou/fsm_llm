@@ -1396,12 +1396,15 @@ CARVE_OUT_SAFE_ENTRIES: tuple[tuple[str, str, object], ...] = (
 # movement to be recorded rather than absorbed.
 CARVE_OUT_KNOWN_FAIL_OPEN: frozenset[str] = frozenset(
     {
-        # --- owned by plan step 4 (the UUID/ULID disposition) --------------
-        # A credential formatted as a canonical UUID or ULID is byte-identical
-        # to an idempotency key (A-2). The carve-out keeps both. Step 3
-        # measures delete/narrow/keep; step 4 ships the winner.
-        "uuid/credential",
-        "ulid/credential",
+        # --- FIXED by plan step 4 (D-003), no longer listed ----------------
+        # `uuid/credential` (`merchant_key`) and `ulid/credential`
+        # (`partner_key`) both leaked here until step 4 narrowed the UUID/ULID
+        # carve-out to a fail-closed identifier-noun vocabulary. Neither name
+        # carries an identifier noun, so both now fall through to the generic
+        # shape arm and STRIP. Their absence from this set is the mechanical
+        # proof of that fix; their safe counterparts (`uuid/safe`,
+        # `ulid/safe`) are still kept and are pinned by
+        # `CARVE_OUT_KNOWN_OVER_STRIPPED` NOT listing them.
         # --- owned by plan step 5 (the ONE charset/shape defect) -----------
         # Four failure modes of the single rule at constants.py:953-962.
         "short/credential",  # under the 24-character floor
