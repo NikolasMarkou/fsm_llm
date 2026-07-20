@@ -1405,18 +1405,28 @@ CARVE_OUT_KNOWN_FAIL_OPEN: frozenset[str] = frozenset(
         # proof of that fix; their safe counterparts (`uuid/safe`,
         # `ulid/safe`) are still kept and are pinned by
         # `CARVE_OUT_KNOWN_OVER_STRIPPED` NOT listing them.
-        # --- owned by plan step 5 (the ONE charset/shape defect) -----------
-        # Four failure modes of the single rule at constants.py:953-962.
-        "short/credential",  # under the 24-character floor
-        "whitespace/credential",  # `Bearer <secret>`, outside the charset
-        "percent/credential",  # `%2F`-encoded, outside the charset
-        "path_ext/credential",  # base64 `/` + `.` matches the path carve-out
-        "many_slash/credential",  # base64 `/` runs trip count("/") >= 3
+        # --- FIXED by plan step 5 (D-005), no longer listed ----------------
+        # `whitespace/credential` (`gateway_key`), `percent/credential`
+        # (`upload_key`), `path_ext/credential` (`distribution_key`) and
+        # `many_slash/credential` (`mailer_key`) all leaked here until step 5
+        # unified the charset/shape rule: transport unwrapping now runs before
+        # the charset test, and the path carve-out now requires that no
+        # `/`-separated segment is itself credential-shaped. Their absence from
+        # this set is the mechanical proof of that fix, and their safe
+        # counterparts (`whitespace/safe`, `percent/safe`, `path_ext/safe`,
+        # `many_slash/safe`) are still kept -- pinned by
+        # `CARVE_OUT_KNOWN_OVER_STRIPPED` NOT listing them.
         # --- DISCLOSED ACCEPTED GAPS, no step fixes these -----------------
-        # `v1:<hex>` rides the `<label>:<pure hex>` carve-out that exists so
+        # G1 of the D-005 accepted-gaps list. Under the 24-character floor, so
+        # the value layer is structurally blind and the NAME layer is the only
+        # control. Step 5 MEASURED every lower floor and refused all of them:
+        # any floor reaching 13 characters puts holdout over-strip at 18-22%,
+        # past the 15% bound. See the D-005 block in constants.py.
+        "short/credential",
+        # G7. `v1:<hex>` rides the `<label>:<pure hex>` carve-out that exists so
         # `cache_key: "sha256:..."` survives (D-021 states this cost outright).
         "hex_composite/credential",
-        # The generic arm's own floors. A single-character-class or
+        # G5 and G6. The generic arm's own floors. A single-character-class or
         # sub-3.0-bit secret is a WEAK secret; raising either floor to catch
         # it destroys ordinary identifiers (`idx_orders_customer_created`,
         # `checkout.payment.method.selector`) wholesale. The NAME layer is the

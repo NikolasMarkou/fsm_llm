@@ -2269,6 +2269,150 @@ class TestValueShapeLayer:
             )
         assert self._kept("rate_limit_key", "ip:203.0.113.7")
 
+    # -- D-005: the ONE charset/shape rule, and its ONE gaps list ---------
+    def test_transport_wrapped_credentials_are_unwrapped_and_stripped(self):
+        """D-005 fix 1. `Bearer <cred>` and `%2F`-encoded values used to fall
+        outside `_CREDENTIAL_VALUE_CHARSET_RE` and were KEPT -- the value was
+        dismissed as "structured application data" purely because it wore
+        transport syntax. Both are normalised once, then judged."""
+        for name, value in (
+            ("gateway_key", "Bearer 9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI"),
+            ("gateway_key", "Basic OWRSMnBRN3hMNG1aOHZOM2JLNnRZMXdKNWhHMHNGMmE"),
+            ("upload_key", "Atzr%2FIQEBLjAsAhRmHNTV5xZ8pQwLmKjNbVcXsDfGhYtRe"),
+            # The unwrap runs BEFORE the vendor-prefix arm on purpose, so a
+            # wrapped self-identifying credential still reaches it.
+            ("billing_key", "Bearer sk_live_9mK3aX7yB1nV5rD4jH2kM7"),
+        ):
+            assert not self._kept(name, value), (
+                f"{name} carries a transport-wrapped credential and reached the "
+                "prompt -- `_normalise_credential_value` has been bypassed"
+            )
+
+    def test_a_slash_bearing_base64_credential_is_no_longer_read_as_a_path(self):
+        """D-005 fix 2, and the measured falsification of the old in-code claim
+        that "the extension test alone carries almost all of it -- random base64
+        does not end in `.pdf`". Standard base64 emits `/` and PASETO/JWT
+        segments are `.`-joined, so both old path triggers fire on real
+        credentials. The segment test is what separates them."""
+        for name, value in (
+            # extension-shaped tail: matched the old `_PATH_VALUE_RE`
+            (
+                "distribution_key",
+                "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2/aD8cE4rT7uI.Xk3f9a",
+            ),
+            # four fields: matched the old bare `count("/") >= 3`
+            ("mailer_key", "a8f3/d9c2b1e4/f7a0d3c6/b9e2f5a8d1c4e7b0a3d6f9Xk"),
+        ):
+            assert not self._kept(name, value), (
+                f"{name} is base64 with slashes and reached the prompt -- the "
+                "path carve-out no longer requires positive segment evidence"
+            )
+
+    def test_ordinary_paths_and_sentences_are_still_kept(self):
+        """THE COST CONTROL for the whole D-005 edit, and the `LESSONS [I:4]`
+        check it most needed: this edit pushes toward STRIP on three fronts at
+        once, and fixing a filter's over-match is exactly how an under-match
+        gets traded for a usability defect in the same commit. Every value here
+        is ordinary application data whose shape overlaps a shape D-005 now
+        catches. Over-strip did not move by one entry on either corpus, and this
+        test is what keeps it that way."""
+        for name, value in (
+            ("s3_key", "invoices/2024/q3/invoice-10482.pdf"),
+            ("object_key", "tenants/acme/exports/2024/09/orders"),
+            ("route_key", "%2Fapi%2Fv2%2Forders%2Fsearch"),
+            ("label_key", "Quarterly Revenue Report 2024"),
+            ("cache_key", "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2"),
+            ("order_key", "ORD-10482"),
+        ):
+            assert self._kept(name, value), (
+                f"{name} is ordinary application data and was stripped -- D-005 "
+                "has over-corrected (Pre-Mortem 4)"
+            )
+
+    def test_the_unwrapping_is_two_shapes_deep_and_that_is_disclosed(self):
+        """ACCEPTED GAP G2, pinned. Normalisation applies percent-decoding once
+        and scheme-unwrapping once. Deeper or differently-shaped wrapping is
+        still KEPT, and iterating to a fixed point was rejected because it turns
+        a bounded normaliser into an unbounded one and reopens the decode
+        surface `_VALUE_SCAN_LIMIT` exists to close.
+
+        This test asserts the GAP, not the fix. It failing means the gap
+        closed -- update the D-005 accepted-gaps list, do not delete this."""
+        cred = "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI"
+        for label, value in (
+            ("double percent-encoding", "Atzr%252FIQEBLjAsAhRmHNTV5xZ8pQwLmKj"),
+            ("three fields", f"Bearer {cred} trailing"),
+            ("unlisted scheme word", f"Sigv4Custom {cred}"),
+        ):
+            assert self._kept("gateway_key", value), (
+                f"the {label} gap (G2) closed -- this is an improvement, but the "
+                "D-005 accepted-gaps list now overstates the failure surface"
+            )
+
+    def test_a_credential_outside_the_charset_is_still_kept(self):
+        """ACCEPTED GAP G3, pinned. A credential carrying any character outside
+        `_CREDENTIAL_VALUE_CHARSET_RE` after normalisation is KEPT. Widening the
+        charset is not available: `:` is excluded so `cache_key: "sha256:..."`
+        survives (D-021), which `test_a_labelled_hex_digest_is_still_kept` pins.
+
+        Asserts the GAP. `%E2%82%AC` is a VALID escape, so `errors="ignore"`
+        does not drop it -- it decodes to a euro sign and lands outside the
+        charset."""
+        for value in (
+            "Atzr%E2%82%ACIQEBLjAsAhRmHNTV5xZ8pQwLmKj",
+            "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a#D8cE4rT7uI",
+            "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a@D8cE4rT7uI",
+        ):
+            assert self._kept("upload_key", value), (
+                "the charset gap (G3) closed -- update the D-005 accepted-gaps "
+                "list and re-check `cache_key: sha256:...`"
+            )
+
+    def test_a_slash_credential_with_only_short_segments_is_still_kept(self):
+        """ACCEPTED GAP G4, pinned -- the residual of the path fix. A
+        slash-bearing credential whose segments are EACH below the length floor
+        or single-class reads as a path and is KEPT. Strictly smaller than the
+        `count("/") >= 3` gap it replaced, and disclosed rather than closed:
+        closing it means judging the JOINED value, which strips `s3_key` and
+        `object_key` (pinned above).
+
+        Asserts the GAP."""
+        for value in (
+            "a8f3/d9c2/b1e4/f7a0/d3c6/b9e2/f5a8",
+            "zqmwvjxrbtkdh/ngfplyscuearoibfe/xkdhngfply",
+        ):
+            assert self._kept("mailer_key", value), (
+                "the path-segment gap (G4) closed -- re-check `s3_key` and "
+                "`object_key` before updating the D-005 accepted-gaps list"
+            )
+
+    def test_the_length_floor_is_a_measured_refusal_not_an_omission(self):
+        """ACCEPTED GAP G1, pinned TWO-SIDED, and the reason it is a gap.
+
+        Credentials under `_MIN_CREDENTIAL_VALUE_LENGTH` are invisible to the
+        generic arm; the NAME layer is their only control. D-005 swept the floor
+        against both corpora and refused every lower value: the shortest pinned
+        credential is 13 characters and any floor reaching it puts holdout
+        over-strip at 18-22%, past the 15% bound. The safe side below is what
+        that would have destroyed."""
+        from fsm_llm.constants import _MIN_CREDENTIAL_VALUE_LENGTH
+
+        assert _MIN_CREDENTIAL_VALUE_LENGTH == 24, (
+            "the length floor moved. Re-run the two-axis floor sweep before "
+            "accepting this: floor 22 costs 3 over-strips to catch 1 credential "
+            "and floor 13 breaks the 15% bound on the holdout key arm"
+        )
+        assert self._kept("terminal_key", "aK9dQ2mZ7pL4x"), "G1 closed"
+        for name, value in (
+            ("field_key", "customer_email_v2"),
+            ("natural_key", "SKU-8841-BLK-XL"),
+            ("order_key", "ORD-10482"),
+        ):
+            assert self._kept(name, value), (
+                f"{name} is what lowering the floor destroys -- it is the "
+                "measured cost D-005 declined to pay"
+            )
+
     # -- D-019 bypasses caught in adversarial review pass 2 ---------------
     def test_the_crypto_gap_reach_cliff_is_pinned_two_sided(self):
         """The `_CRYPTO_GAP` bound is a ReDoS control AND a hard limit on the

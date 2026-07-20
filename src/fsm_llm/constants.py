@@ -7,6 +7,7 @@ Constants and configuration values for the FSM-LLM framework.
 import math
 import re
 from collections.abc import Iterable
+from urllib.parse import unquote
 
 # --------------------------------------------------------------
 # Internal Context Key Prefixes
@@ -938,16 +939,53 @@ _NAME_TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
 # Object-storage / filesystem paths. `/` cannot simply be dropped from the
 # credential charset below, because standard (non-url-safe) base64 uses it, so
 # paths need an explicit carve-out instead. `s3_key`, `blob_key`, `object_key`
-# and `upload_key` hold paths and are ordinary application data; a path ending
-# in a file extension, or carrying three or more separators, is not a secret.
-# The extension test alone carries almost all of it -- random base64 does not
-# end in `.pdf`.
+# and `upload_key` hold paths and are ordinary application data.
+# This regex is only the TRIGGER for the path carve-out, never the whole of it:
+# see `_is_path_shaped` and the D-005 block below for why an extension is not
+# sufficient evidence on its own.
 _PATH_VALUE_RE = re.compile(r"^[^\s]*/[^\s]*\.[A-Za-z0-9]{1,6}$")
 
+# `<n>` or more `/`-separated fields is the other path trigger. Pulled out of
+# the expression it used to be inlined in so the two triggers read as one rule.
+_PATH_SEGMENT_TRIGGER = 4
+
 # The charset a credential value is drawn from: base64 / base64url / base32 / hex
-# plus the separators vendors use. Anything outside it (a space, `/` in a path,
-# `#`, `:`, `@`) means the value is structured application data, not a secret.
+# plus the separators vendors use. Anything outside it (a space, `#`, `:`, `@`)
+# means the value is structured application data, not a secret. Values that
+# merely WRAP a credential in transport syntax are normalised into this charset
+# by `_normalise_credential_value` before the test, rather than being dismissed.
 _CREDENTIAL_VALUE_CHARSET_RE = re.compile(r"^[A-Za-z0-9+/=_.\-]+$")
+
+# HTTP authentication scheme words (RFC 7235 / the IANA registry, plus the
+# non-registered spellings that appear in the wild). A value of the form
+# `<scheme> <credential>` is a credential wearing an `Authorization` header's
+# wire syntax, not a sentence. DATA, not control flow: one word per line.
+_AUTH_SCHEME_WORDS = frozenset(
+    {
+        "apikey",
+        "basic",
+        "bearer",
+        "concealed",
+        "digest",
+        "dpop",
+        "gnap",
+        "hmac",
+        "hoba",
+        "jwt",
+        "mac",
+        "mutual",
+        "negotiate",
+        "ntlm",
+        "oauth",
+        "privatetoken",
+        "scram-sha-1",
+        "scram-sha-256",
+        "signature",
+        "ssws",
+        "token",
+        "vapid",
+    }
+)
 
 # DECISION plan-2026-07-20T040150-876e7164/D-021
 # COLON-COMPOSITE CREDENTIALS. `:` is deliberately OUTSIDE the charset above,
@@ -1015,6 +1053,180 @@ def _shannon_entropy(text: str) -> float:
     return entropy
 
 
+# DECISION plan-2026-07-20T103203-b8a6b855/D-005
+# THE CHARSET/SHAPE RULE IS ONE RULE. Internal whitespace, percent-encoding,
+# `count("/") >= 3` and the 24-character length floor were four separate
+# failure modes of the single test below, and they were patched, disclosed and
+# reasoned about separately for three plans. They are now one rule with ONE
+# accepted-gaps list. Do NOT re-split it.
+#
+# WHAT CHANGED, AND WHY EACH CHANGE IS THE ONE IT IS
+#
+# 1. TRANSPORT UNWRAPPING BEFORE JUDGEMENT (`_normalise_credential_value`).
+#    Percent-decode once, then unwrap `<scheme> <credential>` once, BEFORE the
+#    vendor-prefix and charset tests. Both shapes previously fell outside the
+#    charset and were KEPT, so `gateway_key: "Bearer 9dR2...uI"` and
+#    `upload_key: "Atzr%2FIQEB..."` reached the prompt intact. The result is
+#    never longer than the input, so `_VALUE_SCAN_LIMIT` still bounds the path
+#    and there is no decode bomb. `errors="ignore"` DROPS undecodable bytes
+#    rather than substituting U+FFFD, which would land outside the charset and
+#    buy the value a KEEP -- the fail-OPEN direction (S-2).
+#
+# 2. THE PATH CARVE-OUT NEEDS POSITIVE SEGMENT EVIDENCE (`_is_path_shaped`).
+#    The old rule was `_PATH_VALUE_RE.match(v) or v.count("/") >= 3`, defended
+#    by an in-code comment claiming "the extension test alone carries almost all
+#    of it -- random base64 does not end in `.pdf`". MEASURED FALSE: standard
+#    base64 emits `/` and PASETO/JWT segments are `.`-joined, so real credentials
+#    satisfy BOTH triggers --
+#      distribution_key = "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2/aD8cE4rT7uI.Xk3f9a"
+#      mailer_key       = "a8f3/d9c2b1e4/f7a0d3c6/b9e2f5a8d1c4e7b0a3d6f9Xk"
+#    Neither trigger is evidence of a PATH. The evidence is what the SEGMENTS
+#    are: a path's segments are human-authored words (`invoices`, `2024`,
+#    `invoice-10482.pdf`), none credential material alone; a base64 blob's are.
+#    So the triggers stay and a NECESSARY condition is added -- no segment may be
+#    credential-shaped by the generic arm's own test. That is why
+#    `_generic_shape_is_credential` is called on the whole value AND each
+#    segment: one threshold, one definition, two call sites. Do NOT reintroduce
+#    the bare `count("/") >= 3`; it is what handed `mailer_key` to the prompt.
+#
+# 3. THE 24-CHARACTER LENGTH FLOOR STAYS AT 24 -- a MEASURED refusal, not an
+#    omission. Sweeping it against both corpora (both axes, per-arm and
+#    slice-total) gives, on the independent holdout's key arm:
+#      floor 24 -> over-strip  2.0% | floor 22 -> 4.0% | floor 20 -> 10.0%
+#      floor 18 -> 12.0%            | floor 14 -> 18.0% | floor 13 -> 22.0%
+#    The shortest pinned credential is 13 characters and ANY floor reaching it
+#    puts holdout over-strip at 18-22%, past the 15% bound -- destroying
+#    `alert_rule_key`, `dashboard_panel_key`, `shipping_zone_key` and a dozen
+#    more ordinary values to catch one. Floor 22 is inside both bounds and was
+#    still REFUSED: the sole credential it catches is a leak observed in the
+#    holdout AFTER measurement, and tuning a threshold to instances you just
+#    watched leak is the one move `plans/LESSONS.md [I:4]` forbids outright.
+#    Do NOT lower this floor without re-running the sweep.
+#
+# ACCEPTED GAPS -- THE COMPLETE RESIDUAL FAILURE SURFACE OF THIS RULE.
+# Every credential shape below is still KEPT. This list is the whole of it, in
+# one place on purpose, so an editor sees the failure surface at once instead of
+# rediscovering it one carve-out at a time. Each gap names its pin.
+#
+#  G1 LENGTH. Credentials under `_MIN_CREDENTIAL_VALUE_LENGTH` (24) are
+#     invisible to this entire arm. The NAME layer is their only control.
+#     Pinned: `short/credential` (`terminal_key`, 13 chars) in
+#     `CARVE_OUT_KNOWN_FAIL_OPEN`, two-sided against `short/safe`
+#     (`order_key: "ORD-10482"`). See point 3 for why it is not lowered.
+#  G2 UNWRAPPING DEPTH. Normalisation is exactly two shapes deep and runs each
+#     ONCE. Double-encoding (`%252F`), a three-or-more-field whitespace value
+#     (`Bearer <cred> trailing`), and a two-field value whose head is not in
+#     `_AUTH_SCHEME_WORDS` (`Sigv4Custom <cred>`) all stay outside the charset
+#     and are KEPT. Iterating to a fixed point was rejected: it converts a
+#     bounded normaliser into an unbounded one and reopens the decode surface
+#     `_VALUE_SCAN_LIMIT` exists to close. Pinned by
+#     `test_the_unwrapping_is_two_shapes_deep_and_that_is_disclosed`.
+#  G3 CHARSET. A credential carrying any character outside
+#     `_CREDENTIAL_VALUE_CHARSET_RE` after normalisation -- `#`, `@`, or a
+#     non-ASCII character from a VALID escape such as `%E2%82%AC` -- is KEPT.
+#     Widening the charset is not available: `:` is excluded so that
+#     `cache_key: "sha256:..."` survives (D-021, SC-5-pinned). Pinned by
+#     `test_a_credential_outside_the_charset_is_still_kept`.
+#  G4 PATH SEGMENTS. A slash-bearing credential whose segments are EACH below
+#     the floor or single-class reads as a path and is KEPT
+#     (`a8f3/d9c2/b1e4/f7a0/d3c6/b9e2/f5a8`). This is the residual of fix 2 and
+#     is strictly smaller than the `count("/") >= 3` it replaced. Pinned by
+#     `test_a_slash_credential_with_only_short_segments_is_still_kept`.
+#  G5 CHARACTER CLASSES and G6 ENTROPY -- `classes < 2` and the 3.0-bit floor in
+#     `_generic_shape_is_credential`. Pinned: `single_class/credential`
+#     (`legacy_key`, 30 lowercase chars) and `low_entropy/credential`
+#     (`staging_key`, `aaaa...AAAA1111`), both in `CARVE_OUT_KNOWN_FAIL_OPEN`.
+#     MAINTAINER RULING, RECORDED VERBATIM: "these are the generic arm's CORE
+#     THRESHOLDS, not carve-outs. Tightening them is exactly the over-correction
+#     Pre-Mortem 4 names, and `staging_key`'s ground truth as a credential is
+#     itself questionable -- by this seam's own foundational lesson
+#     (LESSONS [I:5], 'a credential's VALUE is high-entropy by definition; a
+#     low-entropy secret is already broken'), a 3-bit-entropy string is not
+#     credential material in any meaningful sense. Disclosing them is correct;
+#     tightening a threshold to catch them would trade a security defect for a
+#     usability defect across the entire generic arm." DISCLOSE, DO NOT FIX.
+#  G7 COLON COMPOSITES. `signer_key: "v1:<hex>"` rides the `<label>:<pure hex>`
+#     carve-out that exists so `cache_key: "sha256:..."` survives. Prior-plan
+#     D-021's disclosed gap, restated here so the surface is complete. Pinned:
+#     `hex_composite/credential` in `CARVE_OUT_KNOWN_FAIL_OPEN`.
+#
+# MEASURED (both corpora, both axes, per-arm/slice-total; bounds 15%/5%): shipped
+# over-strip 2.6/4.4/3.4 and holdout 2.0/2.0/2.0 BOTH UNCHANGED to the entry --
+# the `LESSONS [I:4]` check this edit most needed, since it pushes toward STRIP on
+# three fronts; shipped fail-open 7.9/1.4/5.3 -> 4.0/1.4/2.9, holdout 2.4/5.0/3.7
+# unchanged. All 24 cells inside both bounds. See decisions.md D-005.
+def _normalise_credential_value(stripped: str) -> str:
+    """Unwrap transport syntax from *stripped*, returning the payload to judge.
+
+    Two normalisations, applied in this order and at most once each:
+    percent-decoding, then `<auth-scheme> <credential>` unwrapping. A value
+    carrying neither is returned unchanged. The result is never longer than the
+    input, so the ``_VALUE_SCAN_LIMIT`` bound still holds. NEVER logs
+    *stripped*. Never raises.
+    """
+    if "%" in stripped:
+        # `errors="ignore"` DROPS undecodable bytes rather than substituting
+        # U+FFFD, which keeps the result inside the credential charset. That is
+        # the fail-CLOSED direction (S-2): a mangled escape must not buy a KEEP.
+        stripped = unquote(stripped, errors="ignore")
+    fields = str.split(stripped)
+    if len(fields) == 2 and str.lower(fields[0]) in _AUTH_SCHEME_WORDS:
+        stripped = fields[1]
+    return stripped
+
+
+def _generic_shape_is_credential(text: str) -> bool:
+    """The generic shape arm: length, charset, character-class mix, entropy.
+
+    Vocabulary-free by construction -- it reads only the shape of *text*. Split
+    out of :func:`_looks_like_credential_value` because `_is_path_shaped` needs
+    to ask the same question of a path's individual segments, and two
+    hand-maintained copies of a security threshold is a defect, not a pattern.
+    NEVER logs *text*. Never raises.
+    """
+    if len(text) < _MIN_CREDENTIAL_VALUE_LENGTH:
+        return False
+    if not _CREDENTIAL_VALUE_CHARSET_RE.match(text):
+        return False
+    # A credential mixes character classes; human-readable identifiers
+    # (`checkout.button.submit`, `idx_users_email`, `region-eu-central-1`) are
+    # overwhelmingly single-case. Require at least two of lower/upper/digit.
+    classes = 0
+    if any(character.islower() for character in text):
+        classes += 1
+    if any(character.isupper() for character in text):
+        classes += 1
+    if any(character.isdigit() for character in text):
+        classes += 1
+    if classes < 2:
+        return False
+    return _shannon_entropy(text) >= _MIN_CREDENTIAL_VALUE_ENTROPY
+
+
+def _is_path_shaped(stripped: str) -> bool:
+    """True if *stripped* is an object-storage / filesystem path.
+
+    A trigger (file extension, or four-plus `/`-separated fields) is necessary
+    but NOT sufficient: the carve-out applies only when no individual segment is
+    itself credential material. NEVER logs *stripped*. Never raises.
+    """
+    if "/" not in stripped:
+        return False
+    segments = stripped.split("/")
+    # Segment count first, THEN the regex: `or` short-circuits, and
+    # `_PATH_VALUE_RE`'s two adjacent `[^\s]*` runs have a measured backtracking
+    # cliff on slash-and-dot-heavy input (~490us at the `_VALUE_SCAN_LIMIT`
+    # boundary, vs ~46us when the count test answers first). Verdict-identical;
+    # cost is not. Do NOT swap these back.
+    triggered = (
+        len(segments) >= _PATH_SEGMENT_TRIGGER
+        or _PATH_VALUE_RE.match(stripped) is not None
+    )
+    if not triggered:
+        return False
+    return not any(_generic_shape_is_credential(segment) for segment in segments)
+
+
 def _looks_like_credential_value(value: object, name: str = "") -> bool:
     """Return True if *value* has the SHAPE of credential material.
 
@@ -1049,7 +1261,10 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     if lowered.startswith(_PEM_PREFIX):
         return True
 
-    stripped = sample.strip()
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-005 -- unwrapping runs BEFORE
+    # the vendor-prefix test on purpose, so `Bearer sk_live_...` reaches the
+    # enumerated arm. See the D-005 block above `_normalise_credential_value`.
+    stripped = _normalise_credential_value(sample.strip())
 
     # Published vendor prefixes (enumerated arm). This is tested BEFORE the
     # length floor on purpose: a self-identifying vendor prefix is conclusive
@@ -1066,11 +1281,8 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     if composite_tail is not None:
         stripped = composite_tail
 
-    if len(stripped) < _MIN_CREDENTIAL_VALUE_LENGTH:
-        return False
-
     # Generic arm. Everything below here is shape, not vocabulary.
-    if not _CREDENTIAL_VALUE_CHARSET_RE.match(stripped):
+    if not _generic_shape_is_credential(stripped):
         return False
     # DECISION plan-2026-07-20T103203-b8a6b855/D-003 -- the carve-out is
     # name-conditioned and fail-CLOSED. An unlisted name gets no carve-out and
@@ -1083,23 +1295,13 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
         tokens = _NAME_TOKEN_SPLIT_RE.split(str.lower(name)) if name else ()
         if any(token in _IDENTIFIER_NOUN_VOCABULARY for token in tokens):
             return False
-    if _PATH_VALUE_RE.match(stripped) or stripped.count("/") >= 3:
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-005 -- positive path evidence.
+    # Do NOT restore the bare `stripped.count("/") >= 3`; standard base64 emits
+    # slash runs and that test alone handed `mailer_key` to the prompt.
+    if _is_path_shaped(stripped):
         return False
 
-    # A credential mixes character classes; human-readable identifiers
-    # (`checkout.button.submit`, `idx_users_email`, `region-eu-central-1`) are
-    # overwhelmingly single-case. Require at least two of lower/upper/digit.
-    classes = 0
-    if any(character.islower() for character in stripped):
-        classes += 1
-    if any(character.isupper() for character in stripped):
-        classes += 1
-    if any(character.isdigit() for character in stripped):
-        classes += 1
-    if classes < 2:
-        return False
-
-    return _shannon_entropy(stripped) >= _MIN_CREDENTIAL_VALUE_ENTROPY
+    return True
 
 
 # Names for which layer 2 is consulted: a `key`/`keys` trigger that layer 1 did
