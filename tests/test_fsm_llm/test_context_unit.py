@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from fsm_llm.context import ContextCompactor, clean_context_keys
 from tests.test_fsm_llm.fixtures.context_key_corpus import (
+    CRYPTO_KEY_KNOWN_OVER_STRIPPED,
+    CRYPTO_KEY_SAFE_KEYS,
+    CRYPTO_KEY_SECRET_KEYS,
     KNOWN_OVER_STRIPPED,
     SAFE_KEYS,
     SECRET_KEYS,
+    TOKEN_KNOWN_OVER_STRIPPED,
+    TOKEN_SAFE_KEYS,
+    TOKEN_SECRET_KEYS,
 )
 
 
@@ -1089,3 +1095,351 @@ class TestIndependentVocabularyKeyCorpus:
             f"  newly kept (fixed, update the pin): "
             f"{sorted(KNOWN_OVER_STRIPPED - actual)}"
         )
+
+
+class TestCryptoKeyAndTokenAllowlists:
+    """D-014. The `key` and `token` triggers were qualifier DENYLISTS, so every
+    qualifier not enumerated FAILED OPEN: 46/52 real crypto-key names and 27/27
+    real auth-token names reached the LLM prompt. Both are now fail-CLOSED
+    whole-decomposition ALLOWLISTS.
+
+    Three controls, and they are deliberately inseparable:
+
+    (a) TWO-DIRECTION measurement. The secret half alone is satisfied by
+        "strip everything", which is a strictly worse outcome than the leak it
+        replaces (LESSONS [I:5]); the safe half alone is satisfied by the
+        denylist that was already there. Both halves are asserted, and the
+        residual over-strip is pinned two-sided so it cannot drift in either
+        direction unannounced.
+    (b) ANTI-VACUITY. G-14: the explorer's first draft of this pattern kept
+        0/32 safe names and LOOKED CORRECT BY INSPECTION, because a
+        `[a-z0-9]*` qualifier let the skip-prefix consume the safe word and
+        re-match a bare `key`. Every negative lookahead in the shipped pattern
+        is therefore shown to CHANGE the result set when it alone is removed.
+    (c) ReDoS. These patterns run on the prompt path while the per-conversation
+        lock is held, over context keys that are arbitrary consumer input.
+
+    All three operate on the EXACT SHIPPED PATTERNS read back out of
+    `fsm_llm.constants`, never on a copy restated here.
+    """
+
+    # -- helpers ---------------------------------------------------------
+    @staticmethod
+    def _kept(key):
+        return key in clean_context_keys(
+            {key: "v"}, "test-conv", strip_forbidden_keys=True
+        )
+
+    @staticmethod
+    def _universe():
+        return (
+            tuple(CRYPTO_KEY_SECRET_KEYS)
+            + tuple(CRYPTO_KEY_SAFE_KEYS)
+            + tuple(TOKEN_SECRET_KEYS)
+            + tuple(TOKEN_SAFE_KEYS)
+            + tuple(SECRET_KEYS)
+            + tuple(SAFE_KEYS)
+        )
+
+    @staticmethod
+    def _lookaheads():
+        """Rebuild each shipped negative lookahead from the shipped parts, so
+        the surgery below can only ever act on text that is really in the
+        pattern (asserted by `_locate`)."""
+        from fsm_llm import constants as c
+
+        return {
+            "key/qualifier-allowlist": (
+                f"(?!(?:{c._SAFE_KEY_QUALIFIERS})[-_.]?{c._KEY_TRIGGER}{c._WORD_END})"
+            ),
+            "key/english-word-allowlist": (
+                f"(?!(?:{c._SAFE_KEY_WORDS})s?{c._WORD_END})"
+            ),
+            "key/head-allowlist": f"(?!(?:{c._SAFE_KEY_HEADS})s?{c._WORD_END})",
+            "token/qualifier-allowlist": (
+                f"(?!(?:{c._SAFE_TOKEN_QUALIFIERS})"
+                f"[-_.]?{c._TOKEN_TRIGGER}{c._WORD_END})"
+            ),
+            "token/head-allowlist": (f"(?!(?:{c._SAFE_TOKEN_HEADS})s?{c._WORD_END})"),
+        }
+
+    @staticmethod
+    def _locate(fragment):
+        """Index of the single shipped pattern containing `fragment`."""
+        from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
+
+        hits = [i for i, p in enumerate(FORBIDDEN_CONTEXT_PATTERNS) if fragment in p]
+        assert len(hits) == 1, (
+            "the anti-vacuity surgery could not find its target exactly once in "
+            f"the SHIPPED patterns (found {len(hits)}). The guard is now testing "
+            "nothing -- re-derive it from constants.py."
+        )
+        return hits[0]
+
+    @classmethod
+    def _result_set(cls, patterns):
+        import re
+
+        compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
+        return frozenset(
+            k for k in cls._universe() if any(c.match(k) for c in compiled)
+        )
+
+    @classmethod
+    def _mutated(cls, index, old, new):
+        from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
+
+        patterns = list(FORBIDDEN_CONTEXT_PATTERNS)
+        patterns[index] = patterns[index].replace(old, new)
+        assert patterns[index] != FORBIDDEN_CONTEXT_PATTERNS[index]
+        return patterns
+
+    # -- corpus integrity ------------------------------------------------
+    def test_the_new_corpora_are_not_trivial(self):
+        """Vacuity guard on the corpus itself: the leak sets must be at least
+        as large as the measured leaks they close (46 crypto, 27 token), the
+        safe sets must be big enough to discriminate, and no name may claim
+        both classes."""
+        assert len(CRYPTO_KEY_SECRET_KEYS) >= 46
+        assert len(TOKEN_SECRET_KEYS) >= 27
+        assert len(CRYPTO_KEY_SAFE_KEYS) >= 40
+        assert len(TOKEN_SAFE_KEYS) >= 30
+        assert not (set(CRYPTO_KEY_SECRET_KEYS) & set(CRYPTO_KEY_SAFE_KEYS))
+        assert not (set(TOKEN_SECRET_KEYS) & set(TOKEN_SAFE_KEYS))
+        assert CRYPTO_KEY_KNOWN_OVER_STRIPPED <= set(CRYPTO_KEY_SAFE_KEYS)
+        assert TOKEN_KNOWN_OVER_STRIPPED <= set(TOKEN_SAFE_KEYS)
+
+    def test_the_corpus_does_not_paste_the_pattern_it_tests(self):
+        """Strengthens the import-based independence guard, whose weakness was
+        called out explicitly (`findings/crypto-key-class-control.md` Risk 5):
+        pasting a literal copy of a `constants.py` qualifier string satisfies
+        the import check while defeating its entire purpose. A corpus built
+        from the vocabulary under test is structurally blind to what that
+        vocabulary omits, which is the failure LESSONS [I:5] records firing
+        three consecutive times on this exact seam."""
+        import pathlib
+
+        from fsm_llm import constants as c
+        from tests.test_fsm_llm.fixtures import context_key_corpus
+
+        source = pathlib.Path(context_key_corpus.__file__).read_text()
+        pasted = [
+            name
+            for name in (
+                "_SAFE_KEY_QUALIFIERS",
+                "_SAFE_KEY_WORDS",
+                "_SAFE_KEY_HEADS",
+                "_SAFE_TOKEN_QUALIFIERS",
+                "_SAFE_TOKEN_HEADS",
+                "_PASSWORD_POLICY_SUFFIXES",
+            )
+            if getattr(c, name) in source
+        ]
+        assert pasted == [], (
+            f"the corpus contains a verbatim copy of {pasted} from constants.py, "
+            "so it can only confirm the pattern against its own vocabulary"
+        )
+
+    # -- (a) two-direction measurement -----------------------------------
+    def test_no_crypto_key_material_reaches_the_prompt(self):
+        """SC-4, direction 1. Every name here is private key material or the
+        container it is read from."""
+        leaked = [k for k in CRYPTO_KEY_SECRET_KEYS if self._kept(k)]
+        assert leaked == [], f"{len(leaked)} crypto keys reached the prompt: {leaked}"
+
+    def test_no_auth_token_reaches_the_prompt(self):
+        """SC-4, direction 1. Possession of any of these values is sufficient
+        to act as somebody."""
+        leaked = [k for k in TOKEN_SECRET_KEYS if self._kept(k)]
+        assert leaked == [], f"{len(leaked)} auth tokens reached the prompt: {leaked}"
+
+    def test_ordinary_key_vocabulary_still_reaches_the_prompt(self):
+        """SC-5, direction 2. Paired with the test above on purpose: a fix that
+        stripped everything would pass that one and fail this one."""
+        destroyed = [
+            k
+            for k in CRYPTO_KEY_SAFE_KEYS
+            if k not in CRYPTO_KEY_KNOWN_OVER_STRIPPED and not self._kept(k)
+        ]
+        assert destroyed == [], f"{len(destroyed)} ordinary keys stripped: {destroyed}"
+
+    def test_ordinary_token_vocabulary_still_reaches_the_prompt(self):
+        """SC-5, direction 2. This is the tightest collateral constraint in the
+        plan: this is an LLM framework and `*_tokens` metering vocabulary is
+        pervasive, ordinary and non-secret."""
+        destroyed = [
+            k
+            for k in TOKEN_SAFE_KEYS
+            if k not in TOKEN_KNOWN_OVER_STRIPPED and not self._kept(k)
+        ]
+        assert destroyed == [], f"{len(destroyed)} ordinary keys stripped: {destroyed}"
+
+    def test_the_named_hard_invariants_hold_individually(self):
+        """The corpus assertions are set-shaped, so a future corpus edit could
+        drop one of these without any test noticing. Invariant I-7 and the LLM
+        metering vocabulary are named here explicitly and separately."""
+        must_keep = (
+            "public_key",  # I-7, also pinned in tests/test_fsm_llm_regression/
+            "max_tokens",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "token_count",
+            "tokenizer",
+            "cache_key",
+            "primary_key",
+            "foreign_key",
+            "idempotency_key",
+        )
+        must_strip = (
+            "ssh_key",
+            "sshkey",
+            "privkey",
+            "private_key",
+            "key_pair",
+            "keyfile",
+            "key_material",
+            "kek",
+            "dek",
+            "id_rsa",
+            "id_ed25519",
+            "license_key",
+            "csrf_token",
+            "csrftoken",
+            "session_token",
+            "jwt_token",
+            "id_token",
+        )
+        assert [k for k in must_keep if not self._kept(k)] == []
+        assert [k for k in must_strip if self._kept(k)] == []
+
+    def test_the_crypto_key_over_strip_set_is_pinned_exactly(self):
+        """Two-sided, mirroring `test_the_known_over_strip_set_is_pinned_exactly`.
+        A name joining this set is an undisclosed usability regression; a name
+        leaving it is an improvement that must be recorded, not absorbed."""
+        actual = frozenset(k for k in CRYPTO_KEY_SAFE_KEYS if not self._kept(k))
+        assert actual == CRYPTO_KEY_KNOWN_OVER_STRIPPED, (
+            "the crypto-key over-strip class drifted.\n"
+            f"  newly stripped (regression): "
+            f"{sorted(actual - CRYPTO_KEY_KNOWN_OVER_STRIPPED)}\n"
+            f"  newly kept (update the pin): "
+            f"{sorted(CRYPTO_KEY_KNOWN_OVER_STRIPPED - actual)}"
+        )
+
+    def test_the_token_over_strip_set_is_pinned_exactly(self):
+        """Two-sided, same rule."""
+        actual = frozenset(k for k in TOKEN_SAFE_KEYS if not self._kept(k))
+        assert actual == TOKEN_KNOWN_OVER_STRIPPED, (
+            "the token over-strip class drifted.\n"
+            f"  newly stripped (regression): "
+            f"{sorted(actual - TOKEN_KNOWN_OVER_STRIPPED)}\n"
+            f"  newly kept (update the pin): "
+            f"{sorted(TOKEN_KNOWN_OVER_STRIPPED - actual)}"
+        )
+
+    # -- (b) anti-vacuity -------------------------------------------------
+    def test_every_negative_lookahead_changes_the_result_set(self):
+        """SC-6, second clause. A guard whose removal changes nothing is not a
+        guard -- it is decoration that a future reader will delete, correctly
+        observing that no test covers it. Each of the five allowlists is
+        removed on its own and shown to matter on its own."""
+        from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
+
+        base = self._result_set(FORBIDDEN_CONTEXT_PATTERNS)
+        vacuous = {}
+        for label, fragment in self._lookaheads().items():
+            index = self._locate(fragment)
+            got = self._result_set(self._mutated(index, fragment, ""))
+            delta = got ^ base
+            if not delta:
+                vacuous[label] = "no change"
+            else:
+                assert delta <= got, (
+                    f"{label}: removing a KEEP-list made keys KEPT, which means "
+                    "its polarity is inverted somewhere"
+                )
+        assert vacuous == {}, (
+            f"vacuous guards (removing them changes nothing): {vacuous}. "
+            "This is the G-14 shape -- reject the pattern, do not ship it."
+        )
+
+    def test_the_qualifier_is_one_or_more_not_zero_or_more(self):
+        """SC-6/G-14, stated twice because it is the single defect this seam has
+        actually shipped. Structurally: `[a-z0-9]*` must not appear. Behaviourally:
+        relaxing it must visibly destroy the allowlists, which proves the `+` is
+        load-bearing rather than incidental."""
+        from fsm_llm.constants import FORBIDDEN_CONTEXT_PATTERNS
+
+        base = self._result_set(FORBIDDEN_CONTEXT_PATTERNS)
+        for label, fragment in (
+            ("key", self._lookaheads()["key/qualifier-allowlist"]),
+            ("token", self._lookaheads()["token/qualifier-allowlist"]),
+        ):
+            index = self._locate(fragment)
+            shipped = FORBIDDEN_CONTEXT_PATTERNS[index]
+            assert "[a-z0-9]*" not in shipped, (
+                f"{label}: a zero-or-more qualifier lets `.*[\\W_]` consume the "
+                "safe qualifier and re-match a bare trigger, silently defeating "
+                "the negative lookahead for EVERY allowlisted word (G-14)"
+            )
+            assert "[a-z0-9]+" in shipped
+            got = self._result_set(
+                self._mutated(index, "[a-z0-9]+[-_.]?", "[a-z0-9]*[-_.]?")
+            )
+            newly_stripped = got - base
+            assert len(newly_stripped) >= 10, (
+                f"{label}: relaxing the qualifier to zero-or-more changed only "
+                f"{sorted(newly_stripped)}. The `+` is supposed to be what keeps "
+                "the whole allowlist alive; if it is not, the pattern is vacuous."
+            )
+
+    # -- (c) ReDoS --------------------------------------------------------
+    def test_the_patterns_are_linear_on_adversarial_input(self):
+        """SC-6/I-9. These patterns run inside `_is_forbidden_context_key` on the
+        prompt path, while the per-conversation lock is held, over context keys
+        that are arbitrary consumer input -- so catastrophic backtracking here is
+        a denial of service, not a slow test.
+
+        Linearity is asserted on time-per-character rather than on the raw
+        per-doubling ratio: for a linear pattern that quantity is flat, while
+        for a quadratic one it doubles at every step (a 128x spread over this
+        sweep). Using the spread rather than one adjacent pair keeps a single
+        noisy sample from failing the run."""
+        import re
+        import time
+
+        from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+
+        assert all(
+            isinstance(p, re.Pattern) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+        )
+
+        adversarial = {
+            'near-miss repeat "cach"*n+"_key"': lambda n: "cach" * n + "_key",
+            'separator flood "a_"*n': lambda n: "a_" * n,
+            'near-miss repeat "tok"*n+"_token"': lambda n: "tok" * n + "_token",
+            'allowlisted repeat "cache_key_"*n': lambda n: "cache_key_" * n,
+            'allowlisted repeat "max_tokens_"*n': lambda n: "max_tokens_" * n,
+        }
+
+        def measure(text):
+            inner = max(1, 120_000 // len(text))
+            best = None
+            for _ in range(3):
+                start = time.perf_counter()
+                for _ in range(inner):
+                    any(p.match(text) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+                best = min(best or 1e9, (time.perf_counter() - start) / inner)
+            return best
+
+        for label, generate in adversarial.items():
+            per_char = []
+            for step in range(7):  # >= 6 doublings
+                text = generate(64 << step)
+                per_char.append(measure(text) / len(text))
+            spread = max(per_char) / min(per_char)
+            assert spread <= 2.5, (
+                f"{label}: time per character varied {spread:.2f}x over 7 "
+                f"doublings, which is not linear. ns/char by size: "
+                f"{[round(t * 1e9, 1) for t in per_char]}"
+            )

@@ -217,3 +217,367 @@ KNOWN_OVER_STRIPPED: frozenset[str] = frozenset(
         "password_status_code",
     }
 )
+
+
+# ==========================================================================
+# CRYPTO-KEY TRIGGER (`key`) -- added for plan-2026-07-20T040150-876e7164 D-014
+#
+# Same construction rule as everything above, restated because this is where
+# it has failed three times: these names were written from REAL TOOLING before
+# `constants.py` was opened in this session. Sources, per group, named inline:
+# OpenSSH / GitHub deploy keys, OpenSSL & PKI tooling, GnuPG, AWS KMS + GCP KMS
+# + Azure Key Vault envelope-encryption vocabulary, JOSE/JWK, Rails & Django
+# config files, and (for the SAFE half) PostgreSQL/MySQL/DynamoDB/Cassandra
+# documentation, Redis/S3 key idioms, Stripe's idempotency header, the GNU
+# gettext / Rails-i18n translation-key idiom, and this framework's own
+# generic-reference `*_key` convention.
+#
+# NOT sourced from `_CRYPTO_KEY_QUALIFIERS`, not from FORBIDDEN_CONTEXT_PATTERNS,
+# not by importing anything.
+# ==========================================================================
+
+# --------------------------------------------------------------------------
+# MUST STRIP. Every one of these names either IS private key material or is the
+# handle/container from which private key material is read. Deliberately avoids
+# the substrings `password`, `secret`, `credential` and `api_key`, so that a
+# green result here is attributable to the `key` control itself and cannot be
+# borrowed from a sibling pattern.
+# --------------------------------------------------------------------------
+CRYPTO_KEY_SECRET_KEYS: tuple[str, ...] = (
+    # the bare article
+    "key",
+    "keys",
+    # OpenSSH / git forge deploy keys
+    "ssh_key",
+    "ssh_keys",
+    "sshkey",
+    "ssh-key",
+    "ssh.key",
+    "ssh_host_key",
+    "ssh_private_key",
+    "deploy_key",
+    "deployment_key",
+    "authorized_key",
+    "authorized_keys",
+    "host_key",
+    "private_key",
+    "privatekey",
+    "private-key",
+    "privkey",
+    "priv_key",
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+    "id_dsa",
+    # key-FIRST shapes: no `*_key` suffix pattern can structurally reach these
+    "keypair",
+    "key_pair",
+    "keypairs",
+    "keyfile",
+    "key_file",
+    "key_material",
+    "key_seed",
+    "key_blob",
+    "key_bytes",
+    "key_data",
+    "keystore",
+    "keyring",
+    "keychain",
+    # algorithm names (OpenSSL / libsodium vocabulary)
+    "rsa_key",
+    "rsakey",
+    "dsa_key",
+    "ecdsa_key",
+    "ed25519_key",
+    "aes_key",
+    "cipher_key",
+    "hmac_key",
+    "mac_key",
+    # role names
+    "signing_key",
+    "signing_keys",
+    "encryption_key",
+    "decryption_key",
+    "master_key",
+    "session_key",
+    "symmetric_key",
+    "shared_key",
+    "derived_key",
+    "derivation_key",
+    "wrapping_key",
+    "unwrap_key",
+    # cloud KMS envelope encryption (AWS KMS, GCP KMS, Azure Key Vault)
+    "data_encryption_key",
+    "key_encryption_key",
+    "kek",
+    "dek",
+    "kms_key",
+    "customer_managed_key",
+    "envelope_key",
+    # TLS / PKI
+    "tls_key",
+    "ssl_key",
+    "server_key",
+    "client_key",
+    "cert_key",
+    "certificate_key",
+    "pem_key",
+    "pkcs8_key",
+    # GnuPG / OpenPGP
+    "gpg_key",
+    "gpgkey",
+    "pgp_key",
+    # JOSE / framework config
+    "jwt_signing_key",
+    "jwk_private_key",
+    "rails_master_key",
+    "django_signing_key",
+    "vault_unseal_key",
+    # account-recovery and licensing material (credential-adjacent -- D-014
+    # decides `license_key` STRIPS rather than being allowlisted)
+    "recovery_key",
+    "unlock_key",
+    "license_key",
+    "activation_key",
+    "product_key",
+    "serial_key",
+    # case variants -- the control is case-insensitive and must stay so
+    "SSH_KEY",
+    "PrivateKey",
+    "Signing_Key",
+)
+
+# --------------------------------------------------------------------------
+# SHOULD REACH THE PROMPT. Ordinary application vocabulary. The `key` trigger
+# has by far the largest legitimate surface of any word in this control, which
+# is why the collateral half is bigger than the secret half.
+#
+# The last group is the adversarial one: ordinary English words that merely
+# CONTAIN the letters k-e-y. A fail-closed pattern that matches concatenated
+# shapes (needed for `sshkey`/`privkey`) will eat `monkey` and `keyboard`
+# unless it is written carefully, and a safe set without them would validate
+# whatever the implementation happens to do (LESSONS [I:5]).
+# --------------------------------------------------------------------------
+CRYPTO_KEY_SAFE_KEYS: tuple[str, ...] = (
+    # relational / NoSQL database vocabulary
+    "primary_key",
+    "primary_keys",
+    "foreign_key",
+    "foreign_keys",
+    "composite_key",
+    "natural_key",
+    "surrogate_key",
+    "unique_key",
+    "index_key",
+    "partition_key",
+    "sort_key",
+    "shard_key",
+    "row_key",
+    # caching, object storage and HTTP idioms
+    "cache_key",
+    "cache_keys",
+    "lookup_key",
+    "search_key",
+    "hash_key",
+    "bucket_key",
+    "object_key",
+    "group_key",
+    "idempotency_key",
+    # language / data-structure vocabulary
+    "dict_key",
+    "dict_keys",
+    "map_key",
+    # the PUBLIC half of an asymmetric pair -- pinned by an existing regression
+    # test (tests/test_fsm_llm_regression/test_regression_iter2.py), invariant I-7
+    "public_key",
+    "public_keys",
+    # this framework's own generic-reference `*_key` idiom
+    "agent_key",
+    "workflow_key",
+    "conversation_key",
+    "conv_key",
+    "wf_key",
+    "result_key",
+    "timer_key",
+    "evidence_key",
+    "payload_key",
+    "stream_key",
+    "ref_key",
+    # i18n / localisation (gettext, Rails i18n, Django)
+    "translation_key",
+    "i18n_key",
+    "locale_key",
+    # ADVERSARIAL: ordinary English words that merely contain "key"
+    "keyword",
+    "keywords",
+    "keyword_list",
+    "search_keywords",
+    "keyboard_layout",
+    "keyboard_shortcut",
+    "keynote_speaker",
+    "keystone_species",
+    "keyspace_name",
+    "keypad_enabled",
+    "keyframe_index",
+    "monkey_species",
+    "donkey_count",
+    "turkey_quantity",
+    "hockey_team",
+    "whiskey_brand",
+    "jockey_name",
+)
+
+# --------------------------------------------------------------------------
+# PINNED KNOWN OVER-STRIP for the `key` trigger. Two-sided pin: a name leaving
+# this set and a name joining it BOTH fail the test, so the measured cost of
+# the fail-closed default cannot drift silently in either direction.
+# Populated from the measurement, not from intent -- see D-014.
+# --------------------------------------------------------------------------
+CRYPTO_KEY_KNOWN_OVER_STRIPPED: frozenset[str] = frozenset()
+
+
+# ==========================================================================
+# AUTH-TOKEN TRIGGER (`token`) -- added for the same decision, D-014.
+#
+# Sources: RFC 6749/6750 (OAuth 2.0), OpenID Connect Core, the Django and
+# Rails/Devise CSRF and account-confirmation flows, Slack/GitHub/Discord bot
+# credentials, Azure SAS, and SAML/SSO vocabulary for the SECRET half; the
+# OpenAI/Anthropic usage-object field names, HuggingFace tokenizer API, and the
+# GCP `nextPageToken` / AWS `NextToken` / Azure `continuationToken` list-API
+# conventions for the SAFE half.
+#
+# This trigger is where the collateral risk is sharpest: this is an LLM
+# framework, so `*_tokens` metering vocabulary is pervasive, ordinary and
+# non-secret.
+# ==========================================================================
+
+# --------------------------------------------------------------------------
+# MUST STRIP. Bearer-style artefacts: possession of the VALUE is sufficient to
+# act as somebody.
+# --------------------------------------------------------------------------
+TOKEN_SECRET_KEYS: tuple[str, ...] = (
+    "token",
+    "tokens",
+    # CSRF / XSRF (Django's cookie is literally `csrftoken`)
+    "csrf_token",
+    "csrftoken",
+    "csrf-token",
+    "x_csrf_token",
+    "xsrf_token",
+    "anti_forgery_token",
+    "form_token",
+    # session and identity
+    "session_token",
+    "sessiontoken",
+    "jwt_token",
+    "id_token",
+    "idtoken",
+    "user_token",
+    "admin_token",
+    "service_token",
+    # device / client registration
+    "device_token",
+    "push_token",
+    "client_token",
+    "registration_token",
+    # passwordless / MFA / recovery flows
+    "magic_link_token",
+    "login_token",
+    "signin_token",
+    "captcha_token",
+    "recaptcha_token",
+    "otp_token",
+    "totp_token",
+    "mfa_token",
+    "two_factor_token",
+    "recovery_token",
+    "unlock_token",
+    "remember_token",
+    "remember_me_token",
+    # account lifecycle (Devise / allauth)
+    "signup_token",
+    "verification_token",
+    "confirmation_token",
+    "invite_token",
+    "invitation_token",
+    "activation_token",
+    # integrations and delegation
+    "webhook_token",
+    "impersonation_token",
+    "sso_token",
+    "saml_token",
+    "delegation_token",
+    "bot_token",
+    "slack_token",
+    "github_token",
+    "sas_token",
+    "security_token",
+    "personal_access_token",
+    "upload_token",
+    "download_token",
+    "share_token",
+    # case variants
+    "AUTH_TOKEN",
+    "SessionToken",
+)
+
+# --------------------------------------------------------------------------
+# SHOULD REACH THE PROMPT. Metering counts, tokenizer word-forms and pagination
+# cursors. None of these is a bearer credential; all of them are things an LLM
+# genuinely benefits from seeing.
+# --------------------------------------------------------------------------
+TOKEN_SAFE_KEYS: tuple[str, ...] = (
+    # LLM metering -- the tightest collateral constraint in the whole plan
+    "max_tokens",
+    "max_token",
+    "min_tokens",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+    "token_count",
+    "token_counts",
+    "token_usage",
+    "token_limit",
+    "token_budget",
+    "tokens_used",
+    "tokens_remaining",
+    "used_tokens",
+    "remaining_tokens",
+    "prompt_token_count",
+    "completion_token_count",
+    "total_token_usage",
+    "output_token_limit",
+    "average_tokens",
+    "estimated_tokens",
+    # OpenAI / Anthropic usage-object dimensions
+    "cached_tokens",
+    "reasoning_tokens",
+    "audio_tokens",
+    "text_tokens",
+    "image_tokens",
+    # tokenizer word-forms -- "token" is a morpheme here, not an artefact
+    "tokenizer",
+    "tokenizers",
+    "tokenize",
+    "tokenized",
+    "tokenization",
+    "tokenizer_config",
+    "tokenizer_name",
+    "tokenized_input",
+    # list-API pagination cursors (GCP nextPageToken, AWS NextToken,
+    # Azure continuationToken, Google Calendar syncToken)
+    "next_page_token",
+    "page_token",
+    "next_token",
+    "continuation_token",
+    "pagination_token",
+    "sync_token",
+)
+
+# --------------------------------------------------------------------------
+# PINNED KNOWN OVER-STRIP for the `token` trigger. Two-sided, same rule as
+# above. Populated from the measurement -- see D-014.
+# --------------------------------------------------------------------------
+TOKEN_KNOWN_OVER_STRIPPED: frozenset[str] = frozenset()
