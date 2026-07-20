@@ -33,6 +33,7 @@ Example::
 
 import json
 import os
+import tempfile
 import threading
 from collections.abc import Callable
 from typing import Annotated, Any
@@ -283,10 +284,34 @@ class SemanticMemoryStore:
         target = os.path.expanduser(path) if path else self._persist_path
         if not target:
             raise ValueError("no path provided and persist_path is unset")
-        tmp = f"{target}.tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(self.to_dict(), fh, ensure_ascii=False, indent=2)
-        os.replace(tmp, target)
+        # DECISION plan-2026-07-20T040150-876e7164/D-004
+        # Do NOT revert this to a fixed `f"{target}.tmp"` name. `self._lock` is
+        # PER-INSTANCE, so two stores sharing one persist_path (two processes,
+        # or two stores loaded from one file) have zero mutual exclusion: both
+        # open the same temp path and the first os.replace consumes it out from
+        # under the second. Measured at 1190/1200 (99.2%) FileNotFoundError in
+        # the finding's probe, 196/400 (49%) in the pinned test below.
+        # `fsm_llm.session.FileSessionStore.save` is the REFERENCE
+        # implementation (D-011); `memory_persistence.save_working_memory` is
+        # the second transplant (D-008). Do NOT "DRY this up" into a shared
+        # cross-package helper without a maintainer decision -- D-001 declined
+        # that explicitly; it is a public-surface call, not a refactor.
+        # The `finally`-with-exists-check (NOT `except OSError`) is what cleans
+        # up on ANY failure, including a TypeError out of json.dump.
+        # `parent or "."`: the temp file MUST land on the target's own
+        # filesystem or os.replace raises EXDEV. A bare filename means the cwd.
+        parent = os.path.dirname(target)
+        fd, tmp = tempfile.mkstemp(dir=parent or ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(self.to_dict(), fh, ensure_ascii=False, indent=2)
+            os.replace(tmp, target)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     @classmethod
     def load(

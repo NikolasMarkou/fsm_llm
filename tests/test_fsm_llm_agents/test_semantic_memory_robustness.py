@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from fsm_llm.logging import logger
 from fsm_llm_agents import SemanticMemoryStore
 
@@ -110,3 +112,93 @@ class TestMaxEntriesCap:
         for i in range(5):
             store.add(f"entry-{i}")
         assert len(store) == 5
+
+
+class TestCrossInstanceAtomicSave:
+    """SC-8 / F-06: two INDEPENDENT stores persisting to ONE path.
+
+    ``SemanticMemoryStore._lock`` is *per-instance*, so two instances sharing a
+    ``persist_path`` (two processes, or two stores built from one file) have
+    zero mutual exclusion. With the old fixed ``f"{target}.tmp"`` temp name both
+    writers open the SAME temp path and whichever ``os.replace`` lands first
+    consumes it out from under the other -- measured at 1190/1200 (99.2%)
+    ``FileNotFoundError``. A single-instance probe cannot reproduce this, which
+    is why both clauses below run across two stores.
+    """
+
+    @staticmethod
+    def _run_trials(tmp_path, trials: int) -> tuple[list[BaseException], list[str]]:
+        """Run ``trials`` rounds of two stores saving to one path simultaneously.
+
+        Returns ``(exceptions_raised, leftover_tmp_filenames)``.
+        """
+        target = str(tmp_path / "mem.json")
+        stores = []
+        for tag in ("a", "b"):
+            store = SemanticMemoryStore(persist_path=target, embed_fn=_fake_embed)
+            # Enough entries that json.dump holds the temp file open long
+            # enough for the two writers to actually overlap.
+            for i in range(30):
+                store.add(f"{tag} fact number {i}")
+            stores.append(store)
+
+        errors: list[BaseException] = []
+        errors_lock = threading.Lock()
+
+        def worker(store: SemanticMemoryStore, barrier: threading.Barrier) -> None:
+            barrier.wait()
+            try:
+                store.save()
+            except Exception as e:  # the failure rate IS the measurement
+                with errors_lock:
+                    errors.append(e)
+
+        for _ in range(trials):
+            barrier = threading.Barrier(len(stores))
+            threads = [
+                threading.Thread(target=worker, args=(s, barrier)) for s in stores
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        residue = sorted(p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp"))
+        return errors, residue
+
+    def test_concurrent_cross_instance_save_is_atomic(self, tmp_path):
+        """SC-8, both clauses: 0 errors AND 0 ``.tmp`` residue over 200 trials.
+
+        The residue clause is not decoration -- a "fix" that gives each write a
+        unique temp name but forgets the ``finally``-unlink would satisfy the
+        no-error clause while littering the directory on every failed write.
+        """
+        errors, residue = self._run_trials(tmp_path, trials=200)
+
+        assert errors == [], (
+            f"{len(errors)}/400 concurrent saves failed; "
+            f"first: {type(errors[0]).__name__}: {errors[0]}"
+        )
+        assert residue == [], f"temp files left behind: {residue}"
+
+    def test_save_leaves_no_temp_file_when_serialization_fails(self, tmp_path):
+        """The ``finally``-unlink runs on non-OSError failures too.
+
+        Pins the reason ``session.py``'s D-011 rejected ``except OSError``: a
+        ``TypeError`` out of ``json.dump`` must not leak the temp file either.
+        """
+        target = str(tmp_path / "mem.json")
+        store = SemanticMemoryStore(persist_path=target, embed_fn=_fake_embed)
+        store.add("a fact")
+
+        class _Unserializable:
+            def __repr__(self) -> str:
+                return "<unserializable>"
+
+        store._entries[0].metadata = {"bad": _Unserializable()}
+
+        with pytest.raises(TypeError):
+            store.save()
+
+        residue = [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+        assert residue == [], f"temp files left behind after a failed save: {residue}"
