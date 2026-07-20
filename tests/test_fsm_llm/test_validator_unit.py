@@ -8,17 +8,20 @@ Tests cover:
 - Complex FSM with multiple issues
 """
 
+import copy
 import importlib
 import inspect
 import io
 import json
 import sys
+import typing
 from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
+from annotated_types import Ge, Le, MaxLen, MinLen
 from loguru import logger
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 import fsm_llm.logging as fsm_llm_logging
 from fsm_llm.api import API
@@ -468,6 +471,59 @@ def _fsm_with_n_intents(n):
     return data
 
 
+def _fsm_violating(path, value):
+    """`_pydantic_clean_fsm_data()` with exactly ONE field overwritten.
+
+    Interface contract:
+      - `path`: a tuple of dict keys / list indices addressing a field inside the
+        FSM dict, e.g. `("states", "start", "transitions", 0, "priority")`.
+      - `value`: the constraint-violating value to write there.
+      - Returns: a fresh dict. The base is never mutated.
+      - Failure mode: `KeyError`/`IndexError` if `path` does not exist in the
+        base fixture -- deliberately loud, since a silently-misaddressed path
+        would produce a fixture that violates nothing and passes vacuously.
+
+    ADVERSARIALLY PAIRED with the base by construction: the base is pydantic-clean,
+    so any verdict change is attributable to this single field and nothing else.
+    """
+    import copy
+
+    data = copy.deepcopy(_pydantic_clean_fsm_data())
+    node = data
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
+    return data
+
+
+def _unknown_type_validation_error(type_name="some_future_pydantic_error_type"):
+    """A real `ValidationError` carrying a type name pydantic itself never emits.
+
+    Interface contract:
+      - `type_name`: any string. Callers should pass a name that is NOT a real
+        pydantic error type, which is the whole point of the helper.
+      - Returns: a `pydantic.ValidationError` whose single entry reports
+        `type_name`. Raising it from a patched `FSMDefinition` drives
+        `_validate_pydantic_schema` down its `else: add_warning` fail-safe branch.
+      - Failure mode: none -- `PydanticCustomError` accepts arbitrary type names,
+        unlike `ValidationError.from_exception_data`, which raises
+        `KeyError: Invalid error type` for anything outside pydantic's own table.
+        That restriction is exactly why this helper exists.
+    """
+    from pydantic_core import InitErrorDetails, PydanticCustomError
+
+    return ValidationError.from_exception_data(
+        "FSMDefinition",
+        [
+            InitErrorDetails(
+                type=PydanticCustomError(type_name, "synthetic future error"),
+                loc=("name",),
+                input="x",
+            )
+        ],
+    )
+
+
 class TestValidatorAgreesWithFSMDefinition:
     """The validator must not report is_valid=True for an FSM that the load
     path (API.from_file -> FSMDefinition(**data)) hard-rejects on a semantic
@@ -531,6 +587,36 @@ class TestValidatorAgreesWithFSMDefinition:
             ("intents_too_short", _fsm_with_n_intents(1)),
             ("intents_in_range", _fsm_with_n_intents(15)),
             ("intents_too_long", _fsm_with_n_intents(16)),
+            # DECISION plan-2026-07-20T040150-876e7164/D-001 -- VACUITY REPAIR.
+            # The 7 fixtures above touch only `value_error`, `missing` and the
+            # LIST-length classes: i.e. exactly the classes that were ALREADY
+            # promoted. They therefore could not fail no matter how large the
+            # false-green surface got, and in fact all 7 passed while 40 of 51
+            # measured constraint violations were false greens. Every fixture
+            # below exercises a class that WAS false-green. Do not delete these
+            # to "simplify" the case list -- that restores the vacuity.
+            ("state_id_pattern", _fsm_violating(("states", "start", "id"), "café")),
+            ("state_id_too_long", _fsm_violating(("states", "start", "id"), "s" * 101)),
+            ("name_too_short", _fsm_violating(("name",), "")),
+            ("name_too_long", _fsm_violating(("name",), "n" * 101)),
+            (
+                "description_too_long",
+                _fsm_violating(("states", "start", "description"), "d" * 301),
+            ),
+            (
+                "priority_below_ge",
+                _fsm_violating(("states", "start", "transitions", 0, "priority"), -1),
+            ),
+            (
+                "priority_above_le",
+                _fsm_violating(("states", "start", "transitions", 0, "priority"), 1001),
+            ),
+            (
+                "priority_int_parsing",
+                _fsm_violating(
+                    ("states", "start", "transitions", 0, "priority"), "not-an-int"
+                ),
+            ),
         ]
         loader_rejects = {}
         for name, data in cases:
@@ -559,23 +645,76 @@ class TestValidatorAgreesWithFSMDefinition:
         assert any(loader_rejects.values()), "no case exercises the reject branch"
         assert not all(loader_rejects.values()), "no case exercises the accept branch"
 
-    def test_simplified_dict_leniency_preserved(self):
-        """Type-coercion leniency is NOT part of the `missing` widening.
+        # DECISION plan-2026-07-20T040150-876e7164/D-001 -- second vacuity guard.
+        # "Both branches were taken" is too weak: the original 7 fixtures
+        # satisfied it while covering only already-promoted classes. Assert the
+        # case list actually SPANS the classes that were false-green, so deleting
+        # a fixture above fails HERE rather than silently shrinking coverage.
+        covered = set()
+        for _name, data in cases:
+            try:
+                FSMDefinition(**data)
+            except ValidationError as exc:
+                covered.update(e["type"] for e in exc.errors())
+        for required in (
+            "string_pattern_mismatch",
+            "string_too_short",
+            "string_too_long",
+            "greater_than_equal",
+            "less_than_equal",
+            "int_parsing",
+            "value_error",
+            "missing",
+            "too_short",
+            "too_long",
+        ):
+            assert required in covered, (
+                f"no fixture in this case list produces a {required!r} error, so "
+                f"the test is vacuous over that class"
+            )
 
-        A wrong scalar type (`priority: "not-an-int"`) raises `int_parsing`,
-        which is outside the promotion allow-list and must stay a warning. The
-        FSM is otherwise pydantic-clean, so the verdict is attributable to the
-        coercion failure alone.
+    def test_type_coercion_failure_agrees_with_the_loader(self):
+        """DELIBERATELY INVERTED. Was `test_simplified_dict_leniency_preserved`.
+
+        # DECISION plan-2026-07-20T040150-876e7164/D-001
+        This test previously asserted the OPPOSITE: that `priority: "not-an-int"`
+        (an `int_parsing` error) must stay a WARNING and leave `is_valid=True`,
+        under the rationale "type-coercion leniency is NOT part of the `missing`
+        widening". That rationale was FALSIFIED BY MEASUREMENT, not by taste:
+
+            API.from_file(<fsm with priority="not-an-int">)
+            -> ValueError: Input should be a valid integer ... [type=int_parsing]
+
+        `API.from_file` hard-refuses this file exactly as it refuses `id: "café"`.
+        Under the standing invariant "api from_file is the truth always", a
+        validator that returns is_valid=True here is emitting a FALSE GREEN --
+        `fsm-llm-validate` exits 0 on a file the loader crashes on. The old
+        assertion was therefore pinning a live defect in place.
+
+        Do NOT re-invert this test to "restore" coercion leniency. Doing so
+        reintroduces the false green AND puts the suite back in contradiction
+        with `test_constraint_sweep_validator_agrees_with_loader`, which derives
+        the same conclusion mechanically from `definitions.py`. If deliberate
+        coercion leniency is ever genuinely wanted, it has to be implemented in
+        the LOADER first -- the validator only ever mirrors the loader.
         """
         data = _valid_fsm_data()
-        data["states"]["start"]["priority"] = "not-an-int"
-        data["states"]["start"]["transitions"][0]["priority"] = "also-not-an-int"
+        data["states"]["start"]["transitions"][0]["priority"] = "not-an-int"
+
+        # Precondition: the loader really does refuse this, and ONLY on the
+        # coercion class -- so the verdict below is attributable to `int_parsing`
+        # alone and not to some other contamination in the fixture.
+        with pytest.raises(ValidationError) as exc_info:
+            FSMDefinition(**data)
+        assert {e["type"] for e in exc_info.value.errors()} == {"int_parsing"}
+
         result = FSMValidator(data).validate()
         schema_errors = [e for e in result.errors if e.startswith("Schema:")]
-        assert schema_errors == [], (
-            f"structural/type mismatch was promoted to an error: {schema_errors}"
+        assert schema_errors, (
+            "int_parsing stayed a warning: fsm-llm-validate would exit 0 on a "
+            "file API.from_file hard-refuses (false green)"
         )
-        assert result.is_valid is True
+        assert result.is_valid is False
 
     def test_unknown_error_type_falls_through_to_warning(self):
         """Fail-safe: an unrecognized/future pydantic error type must warn, not error.
@@ -584,33 +723,49 @@ class TestValidatorAgreesWithFSMDefinition:
         make the validator accidentally stricter than the loader. Widening it to
         cover `missing` must NOT have flipped it into a deny-list -- if it had,
         this synthetic unknown type would be promoted to an error.
+
+        # DECISION plan-2026-07-20T040150-876e7164/D-001
+        The synthetic stand-in used to be `string_too_short`. That name is now a
+        RECOGNIZED, promoted member of the allow-list (it is loader-raising and
+        was a measured false green), so it can no longer stand in for "a type
+        name this validator has never heard of" -- it would test the promotion
+        branch, not the fail-safe branch. Only the stand-in changed; every
+        assertion below is the original.
+
+        The stand-in MUST be a name pydantic does not emit. Do NOT swap in a real
+        pydantic type name to "fix" a failure here: that silently converts this
+        test into a duplicate of the promotion tests and leaves the fail-safe
+        branch -- the HARD invariant that the validator can never become stricter
+        than the loader -- with no coverage at all.
         """
         validator = FSMValidator(_valid_fsm_data())
-        fake = ValidationError.from_exception_data(
-            "FSMDefinition",
-            [
-                {
-                    "type": "string_too_short",
-                    "loc": ("name",),
-                    "input": "",
-                    "ctx": {"min_length": 1},
-                }
-            ],
-        )
+        fake = _unknown_type_validation_error()
         with patch("fsm_llm.validator.FSMDefinition", side_effect=fake):
             validator._validate_pydantic_schema()
         assert validator.result.errors == []
         assert validator.result.is_valid is True
         assert any("Schema:" in w for w in validator.result.warnings)
 
-    def test_list_length_promotion_did_not_widen_to_string_lengths(self):
-        """D-013 over-correction guard.
+    def test_promotion_matches_exact_names_not_prefixes(self):
+        """DELIBERATELY INVERTED. Was
+        `test_list_length_promotion_did_not_widen_to_string_lengths`.
 
-        `too_short`/`too_long` (LIST bounds) were promoted. The distinct
-        `string_too_short`/`string_too_long` type names were NOT, and must keep
-        falling through to WARNING. Without this the promotion could be
-        "simplified" to a `startswith("too_")` match, which would silently
-        capture the string classes too.
+        # DECISION plan-2026-07-20T040150-876e7164/D-001
+        The original asserted that `string_too_short`/`string_too_long` must NOT
+        be promoted -- the D-013 "the string classes are deliberately excluded"
+        carve-out. The constraint sweep measured that carve-out as a live false
+        green in both directions (`FSMDefinition.name`, `State.description`,
+        `State.purpose`, `Transition.description`, and 8 more all raise
+        `string_too_*` and the loader hard-refuses every one), so the carve-out
+        is gone and both names are now promoted.
+
+        The original's REAL purpose survives and is what this test now pins:
+        membership must be by EXACT name, never by prefix. A `startswith("too_")`
+        or `"too_" in name` "simplification" would look equivalent and would
+        silently swallow any future `too_*` name pydantic invents -- turning the
+        allow-list into a partial deny-list and defeating the fail-safe branch.
+        So: the two real names are promoted, and a synthetic name sharing their
+        prefixes still WARNS.
         """
         for type_name, ctx in (
             ("string_too_short", {"min_length": 1}),
@@ -623,11 +778,461 @@ class TestValidatorAgreesWithFSMDefinition:
             )
             with patch("fsm_llm.validator.FSMDefinition", side_effect=fake):
                 validator._validate_pydantic_schema()
+            assert validator.result.errors, (
+                f"{type_name} stayed a warning; the loader hard-refuses this "
+                f"class, so leaving it unpromoted is a false green"
+            )
+
+        # Vacuity/over-correction guard: prefix-shaped impostors must NOT be
+        # promoted. Without this the block above is satisfied by a substring match.
+        for impostor in ("too_short_for_comfort", "string_too_wide", "not_missing"):
+            validator = FSMValidator(_valid_fsm_data())
+            with patch(
+                "fsm_llm.validator.FSMDefinition",
+                side_effect=_unknown_type_validation_error(impostor),
+            ):
+                validator._validate_pydantic_schema()
             assert validator.result.errors == [], (
-                f"{type_name} was promoted to an error; only the LIST-length "
-                f"classes are in the allow-list"
+                f"{impostor!r} was promoted: membership is matching on a prefix "
+                f"or substring instead of the exact type name"
             )
             assert any("Schema:" in w for w in validator.result.warnings)
+
+
+# ------------------------------------------------------------------
+# Mechanical validator/loader agreement sweep.
+#
+# DECISION plan-2026-07-20T040150-876e7164/D-001
+# THE LIST IN validator.py IS NOT THE CONTROL. THIS IS.
+#
+# Three consecutive plans "fixed" the validator/loader disagreement by adding
+# the type names they happened to have looked at, and each time the remaining
+# false greens survived because no test constructed the exact input shape that
+# would expose them. The 7-fixture `test_agreement_property_across_fixtures`
+# passed throughout while 40 of the 51 constraint violations below were live
+# false greens.
+#
+# So this sweep does NOT enumerate type names or fields by hand. It walks
+# `definitions.py` reflectively from `FSMDefinition`, derives one violating
+# fixture per declared constraint, and asserts agreement as an IFF. A future
+# `Field(...)` constraint that introduces an unlisted pydantic type name fails
+# HERE, loudly, on the commit that adds it.
+#
+# Do NOT "simplify" this into a hardcoded list of cases. A hardcoded list can
+# only ever see the vocabulary its author already knew about, which is the
+# exact failure mode this file has now hit four times.
+# ------------------------------------------------------------------
+
+
+def _definitions_namespace():
+    import fsm_llm.definitions as definitions_module
+
+    return vars(definitions_module)
+
+
+def _resolve_annotation(annotation):
+    """Resolve str / `ForwardRef` annotations against `fsm_llm.definitions`.
+
+    Load-bearing, not defensive: `ClassificationExtractionConfig.intents` is
+    stored by pydantic as an UNRESOLVED `ForwardRef('list[IntentDefinition]')`.
+    Skipping resolution silently hides `IntentDefinition` from the model walk AND
+    misclassifies `intents` as a scalar, which fabricates a bogus `list_type`
+    disagreement instead of the real `too_short`/`too_long` one. Both mistakes
+    were observed while building this sweep.
+    """
+    namespace = _definitions_namespace()
+    if isinstance(annotation, str):
+        return eval(annotation, namespace)
+    if isinstance(annotation, typing.ForwardRef):
+        return eval(annotation.__forward_arg__, namespace)
+    return annotation
+
+
+def _nested_models(annotation):
+    """Every `BaseModel` subclass appearing anywhere inside an annotation."""
+    found, stack = [], [annotation]
+    while stack:
+        current = _resolve_annotation(stack.pop())
+        if isinstance(current, type) and issubclass(current, BaseModel):
+            found.append(current)
+            continue
+        stack.extend(typing.get_args(current))
+    return found
+
+
+def _reachable_models(model=None, seen=None):
+    """Every pydantic model reachable from `FSMDefinition` by field traversal."""
+    model = FSMDefinition if model is None else model
+    seen = {} if seen is None else seen
+    if model.__name__ in seen:
+        return seen
+    seen[model.__name__] = model
+    for field in model.model_fields.values():
+        for nested in _nested_models(field.annotation):
+            _reachable_models(nested, seen)
+    return seen
+
+
+def _container_kind(annotation):
+    """`list`, `dict`, or None -- the container origin inside an annotation."""
+    resolved = _resolve_annotation(annotation)
+    origin = typing.get_origin(resolved)
+    if origin in (list, dict):
+        return origin
+    for arg in typing.get_args(resolved):
+        kind = _container_kind(arg)
+        if kind is not None:
+            return kind
+    return None
+
+
+def _literal_values(annotation):
+    values, stack = [], [_resolve_annotation(annotation)]
+    while stack:
+        current = stack.pop()
+        if typing.get_origin(current) is typing.Literal:
+            values.extend(typing.get_args(current))
+        else:
+            stack.extend(typing.get_args(current))
+    return values
+
+
+def _maximal_fsm_data():
+    """A VALID FSM that instantiates every model reachable from `FSMDefinition`.
+
+    Every model in `_MODEL_ANCHORS` must have a live instance in here, otherwise
+    the sweep has nowhere to inject that model's constraint violations. Pinned by
+    `test_maximal_fixture_is_accepted_by_both_layers`.
+    """
+    return {
+        "name": "SweepFSM",
+        "description": "A maximal FSM exercising every reachable nested model.",
+        "version": "4.1",
+        "persona": "A neutral test persona.",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "The start state.",
+                "purpose": "Begin the conversation.",
+                "extraction_instructions": "Extract the user name.",
+                "response_instructions": "Greet the user.",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "Move on once the name is known.",
+                        "priority": 100,
+                        "conditions": [
+                            {
+                                "description": "The name is present.",
+                                "requires_context_keys": ["name"],
+                                "evaluation_priority": 100,
+                            }
+                        ],
+                    }
+                ],
+                "field_extractions": [
+                    {
+                        "field_name": "name",
+                        "field_type": "str",
+                        "extraction_instructions": "Extract the user's name.",
+                    }
+                ],
+                "classification_extractions": [
+                    {
+                        "field_name": "user_intent",
+                        "intents": [
+                            {"name": "buy", "description": "Wants to purchase."},
+                            {"name": "browse", "description": "Just looking."},
+                        ],
+                        "fallback_intent": "browse",
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "The terminal state.",
+                "purpose": "Close the conversation.",
+                "extraction_instructions": "Nothing to extract.",
+                "response_instructions": "Say goodbye.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+# Where an instance of each reachable model lives inside `_maximal_fsm_data()`.
+# Coverage is asserted against the reflective walk, so a NEW model added to
+# definitions.py fails the suite until it is anchored here.
+_MODEL_ANCHORS = {
+    "FSMDefinition": (),
+    "State": ("states", "start"),
+    "Transition": ("states", "start", "transitions", 0),
+    "TransitionCondition": ("states", "start", "transitions", 0, "conditions", 0),
+    "FieldExtractionConfig": ("states", "start", "field_extractions", 0),
+    "ClassificationExtractionConfig": (
+        "states",
+        "start",
+        "classification_extractions",
+        0,
+    ),
+    "IntentDefinition": (
+        "states",
+        "start",
+        "classification_extractions",
+        0,
+        "intents",
+        0,
+    ),
+}
+
+# One violating mutation per `model_validator`/`field_validator`. These cannot be
+# derived reflectively -- the rule lives in the function body -- so they are
+# hand-authored, and `test_every_validator_has_a_violating_fixture` fails the
+# moment definitions.py grows a validator with no entry here.
+_VALIDATOR_VIOLATIONS = {
+    ("FSMDefinition", "validate_fsm_structure"): (
+        ("initial_state",),
+        "a_state_that_does_not_exist",
+    ),
+    ("FieldExtractionConfig", "validate_validation_rule_keys"): (
+        ("states", "start", "field_extractions", 0, "validation_rules"),
+        {"totally_bogus_rule_key": 1},
+    ),
+    ("ClassificationExtractionConfig", "validate_fallback_in_intents"): (
+        ("states", "start", "classification_extractions", 0, "fallback_intent"),
+        "not_a_declared_intent",
+    ),
+    ("IntentDefinition", "validate_name_format"): (
+        ("states", "start", "classification_extractions", 0, "intents", 0, "name"),
+        "café",
+    ),
+}
+
+
+def _node_at(data, path):
+    node = data
+    for key in path:
+        node = node[key]
+    return node
+
+
+def _with_violation(path, value):
+    data = copy.deepcopy(_maximal_fsm_data())
+    _node_at(data, path[:-1])[path[-1]] = value
+    return data
+
+
+def _constraint_cases():
+    """(label, fsm_dict) for every declared constraint, derived reflectively."""
+    cases = []
+    for model_name, model in _reachable_models().items():
+        anchor = _MODEL_ANCHORS[model_name]
+        for field_name, field in model.model_fields.items():
+            path = (*anchor, field_name)
+            container = _container_kind(field.annotation)
+            current = _node_at(_maximal_fsm_data(), anchor).get(field_name)
+
+            for constraint in field.metadata:
+                label = f"{model_name}.{field_name}"
+                if isinstance(constraint, MinLen):
+                    if container is list:
+                        bad = (current or [])[: max(0, constraint.min_length - 1)]
+                    elif container is dict:
+                        bad = {}
+                    else:
+                        bad = ""
+                    cases.append((f"{label} MinLen", _with_violation(path, bad)))
+                elif isinstance(constraint, MaxLen):
+                    if container is dict:
+                        continue  # no declared dict upper bound to violate
+                    if container is list:
+                        template = (current or [{}])[0]
+                        bad = [
+                            copy.deepcopy(template)
+                            for _ in range(constraint.max_length + 1)
+                        ]
+                        for index, element in enumerate(bad):
+                            if isinstance(element, dict) and "name" in element:
+                                element["name"] = f"element_{index}"
+                        data = _with_violation(path, bad)
+                        # Keep the ONLY violation the length bound: a cloned
+                        # intent list would otherwise also break the
+                        # fallback-in-intents rule and contaminate the case.
+                        if model_name == "ClassificationExtractionConfig":
+                            _node_at(data, anchor)["fallback_intent"] = "element_0"
+                        cases.append((f"{label} MaxLen", data))
+                        continue
+                    bad = "x" * (constraint.max_length + 1)
+                    cases.append((f"{label} MaxLen", _with_violation(path, bad)))
+                elif isinstance(constraint, Ge):
+                    cases.append(
+                        (f"{label} Ge", _with_violation(path, constraint.ge - 1))
+                    )
+                elif isinstance(constraint, Le):
+                    cases.append(
+                        (f"{label} Le", _with_violation(path, constraint.le + 1))
+                    )
+                elif getattr(constraint, "pattern", None):
+                    cases.append((f"{label} pattern", _with_violation(path, "café")))
+
+            if _literal_values(field.annotation):
+                cases.append(
+                    (
+                        f"{model_name}.{field_name} Literal",
+                        _with_violation(path, "definitely_not_a_valid_literal"),
+                    )
+                )
+    return cases
+
+
+def _validator_cases():
+    return [
+        (f"{model_name}.{validator_name} validator", _with_violation(path, value))
+        for (model_name, validator_name), (path, value) in _VALIDATOR_VIOLATIONS.items()
+    ]
+
+
+def _all_agreement_cases():
+    return _constraint_cases() + _validator_cases()
+
+
+class TestConstraintSweepAgreement:
+    """SC-1: `fsm-llm-validate` agrees with `API.from_file` on EVERY constraint
+    mechanically enumerated from `definitions.py`, in BOTH directions."""
+
+    def test_maximal_fixture_is_accepted_by_both_layers(self):
+        """Precondition. If the base fixture were already invalid, every case
+        below would 'agree' trivially (both reject) and prove nothing."""
+        FSMDefinition(**_maximal_fsm_data())  # must not raise
+        assert FSMValidator(_maximal_fsm_data()).validate().is_valid is True
+
+    def test_every_reachable_model_is_anchored(self):
+        """A new model in definitions.py must fail HERE, not slip through.
+
+        Without this, a model added to `definitions.py` and wired into
+        `FSMDefinition` would simply never be swept -- its constraints would be
+        silently unmeasured, which is precisely how the previous false-green
+        surface stayed invisible across three plans.
+        """
+        discovered = set(_reachable_models())
+        assert discovered == set(_MODEL_ANCHORS), (
+            f"model set changed: unanchored={sorted(discovered - set(_MODEL_ANCHORS))}, "
+            f"stale={sorted(set(_MODEL_ANCHORS) - discovered)}. Add an anchor path "
+            f"into _maximal_fsm_data() for each unanchored model."
+        )
+
+    def test_every_validator_has_a_violating_fixture(self):
+        """Same guard for `model_validator`/`field_validator` rules, which cannot
+        be derived reflectively and so must be hand-authored."""
+        declared = set()
+        for model_name, model in _reachable_models().items():
+            decorators = model.__pydantic_decorators__
+            for validator_name in decorators.model_validators:
+                declared.add((model_name, validator_name))
+            for validator_name in decorators.field_validators:
+                declared.add((model_name, validator_name))
+        assert declared == set(_VALIDATOR_VIOLATIONS), (
+            f"validator set changed: uncovered="
+            f"{sorted(declared - set(_VALIDATOR_VIOLATIONS))}, stale="
+            f"{sorted(set(_VALIDATOR_VIOLATIONS) - declared)}"
+        )
+
+    def test_sweep_is_not_vacuous(self):
+        """The sweep must actually construct a meaningful number of cases and
+        every one must genuinely break the loader. A generator bug that produced
+        zero cases -- or cases the loader happily accepts -- would make the
+        agreement assertion below pass while testing nothing."""
+        cases = _all_agreement_cases()
+        assert len(cases) >= 45, f"sweep collapsed to {len(cases)} cases"
+        inert = []
+        for label, data in cases:
+            try:
+                FSMDefinition(**data)
+            except ValidationError:
+                continue
+            inert.append(label)
+        assert not inert, (
+            f"{len(inert)} generated fixture(s) do not actually violate anything, "
+            f"so their agreement assertion is vacuous: {inert}"
+        )
+
+    def test_constraint_sweep_validator_agrees_with_loader(self):
+        """SC-1, the IFF. Validator `is_valid is False` <=> loader raises.
+
+        Measured 40 disagreements out of 51 cases before the allow-list widening;
+        this must stay at 0. Both directions are asserted, so it is NOT
+        satisfiable by "promote everything and reject valid files" -- the false-RED
+        direction is covered by
+        `TestValidatorIsNeverStricterThanTheLoader` below.
+        """
+        disagreements = []
+        for label, data in _all_agreement_cases():
+            try:
+                FSMDefinition(**data)
+                loader_raises = False
+                raised_types = []
+            except ValidationError as exc:
+                loader_raises = True
+                raised_types = sorted({e["type"] for e in exc.errors()})
+
+            validator_rejects = FSMValidator(data).validate().is_valid is False
+            if loader_raises != validator_rejects:
+                disagreements.append(
+                    f"{label}: loader_raises={loader_raises} "
+                    f"validator_rejects={validator_rejects} types={raised_types}"
+                )
+
+        assert not disagreements, (
+            f"{len(disagreements)} validator/loader disagreement(s). Each is a "
+            f"file fsm-llm-validate green-lights and API.from_file crashes on "
+            f"(or the reverse). If the type name is new, add it to the allow-list "
+            f"in validator.py::_validate_pydantic_schema:\n" + "\n".join(disagreements)
+        )
+
+
+class TestValidatorIsNeverStricterThanTheLoader:
+    """I-2 / SC-2: zero false REDs. The validator must never reject an FSM the
+    loader accepts -- widening the allow-list must not have over-corrected."""
+
+    def test_loader_accepted_fixtures_stay_valid(self):
+        accepted = [
+            ("valid_fsm", _valid_fsm_data()),
+            ("pydantic_clean", _pydantic_clean_fsm_data()),
+            ("maximal", _maximal_fsm_data()),
+            ("intents_in_range", _fsm_with_n_intents(15)),
+            ("intents_at_lower_bound", _fsm_with_n_intents(2)),
+        ]
+        for name, data in accepted:
+            FSMDefinition(**data)  # precondition: the loader really accepts it
+            assert FSMValidator(data).validate().is_valid is True, (
+                f"{name}: FALSE RED -- the loader accepts this FSM but "
+                f"fsm-llm-validate rejects it"
+            )
+
+    def test_boundary_values_are_accepted_on_the_legal_side(self):
+        """Off-by-one guard. Every bound the sweep violates by +1/-1 must still
+        be ACCEPTED exactly at the limit, in both layers. Without this, an
+        allow-list widening paired with an off-by-one bound would look green in
+        the sweep while rejecting legal files."""
+        at_the_limit = [
+            ("name at max_length", ("name",), "n" * 100),
+            ("state id at max_length", ("states", "start", "id"), "s" * 100),
+            ("priority at ge", ("states", "start", "transitions", 0, "priority"), 0),
+            ("priority at le", ("states", "start", "transitions", 0, "priority"), 1000),
+        ]
+        for label, path, value in at_the_limit:
+            data = _with_violation(path, value)
+            if path == ("states", "start", "id"):
+                # `id` is also the states-dict key; keep the FSM self-consistent
+                # so the verdict is attributable to the length bound alone.
+                data["states"][value] = data["states"].pop("start")
+                data["initial_state"] = value
+                data["states"][value]["transitions"][0]["target_state"] = "done"
+            FSMDefinition(**data)  # precondition: legal at the boundary
+            assert FSMValidator(data).validate().is_valid is True, (
+                f"{label}: FALSE RED at the legal boundary"
+            )
 
 
 # ------------------------------------------------------------------

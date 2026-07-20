@@ -202,11 +202,15 @@ class FSMValidator:
         """Validate FSM data against the Pydantic FSMDefinition model.
 
         Anything that makes `FSMDefinition(**data)` -- and therefore
-        `API.from_file` -- hard-fail on a known error class is reported as an
-        ERROR: framework-authored semantic rules (`value_error`,
-        `assertion_error`) and absent required fields (`missing`). Type-coercion
-        and other/unknown pydantic error classes stay WARNINGS, so the validator
-        can never become accidentally stricter than the loader.
+        `API.from_file` -- hard-fail on a KNOWN error class is reported as an
+        ERROR: framework-authored semantic rules, absent required fields,
+        container and string length bounds, `pattern=` mismatches, numeric
+        bounds, `Literal` mismatches, and type/coercion failures.
+
+        Only pydantic error classes that are NOT on that enumerated allow-list
+        stay WARNINGS. That fail-safe branch is deliberate and load-bearing: an
+        unknown/future pydantic type string must never make this validator
+        stricter than the loader.
         """
         try:
             FSMDefinition(**self.fsm_data)
@@ -229,52 +233,75 @@ class FSMValidator:
             #
             # Do NOT "tidy" `missing` back out — that reopens the lie, and the
             # inverted test_agreement_property_across_fixtures will fail.
-            # Do NOT invert this into a deny-list (i.e. "promote everything except
-            # known-lenient types"): unknown/future pydantic type strings MUST keep
-            # falling through to the warning branch, so a new pydantic version can
-            # never make us accidentally stricter. Only the loader/validator
-            # DISAGREEMENT was authorized for repair, not forward-compatibility.
-            # Type-coercion leniency is likewise untouched: `priority: "not-an-int"`
-            # is an `int_parsing` error and still only warns.
             #
-            # DECISION plan-2026-07-19T191147-4b664252/D-013: `too_short`/`too_long`
-            # joined the list for the same reason `missing` did. They are the
-            # LIST-length classes (`Field(min_length=/max_length=)` on a
-            # `list[...]`), which are framework-authored schema rules, not
-            # coercion. `ClassificationExtractionConfig.intents` now carries BOTH
-            # bounds, so without these two entries an out-of-range intent list is
-            # a false green: the loader raises and `fsm-llm-validate` still says
-            # is_valid=True. Measured, not assumed -- a 1-intent FSM already
-            # false-greened this way BEFORE F-09 added the upper bound.
-            # These are STRING type names, enumerated: this stays an ALLOW-list.
-            # `string_too_short`/`string_too_long`/`string_pattern_mismatch` are
-            # DISTINCT type names and are deliberately NOT promoted here (see
-            # decisions.md D-013 twin sweep).
+            # DECISION plan-2026-07-20T040150-876e7164/D-001: the ALLOW-list below
+            # was widened from 5 names to the full MEASURED loader-raising class.
+            # A mechanical sweep of every `Field(pattern=/min_length=/max_length=/
+            # ge=/le=)` and every model_validator reachable from `FSMDefinition`
+            # measured 40 of 51 constraint violations as LIVE FALSE GREENS at the
+            # previous 5-name list: `fsm-llm-validate` exited 0 on files
+            # `API.from_file` hard-refuses. This supersedes D-013's "string bounds
+            # are deliberately NOT promoted" carve-out and D-029's disclosed-but-
+            # unfixed `string_pattern_mismatch` gap, both of which are now DELETED
+            # rather than left standing as falsified comments.
             #
-            # KNOWN OPEN DEFECT -- disclosed, not fixed (D-029).
-            # Leaving `string_pattern_mismatch` unpromoted keeps a LIVE false
-            # green of exactly the class the maintainer directive quoted above
-            # was issued to eliminate. Reproduced, not theorised:
-            #     {"states": {"b": {"id": "café", "description": ..., "purpose": ...}}}
-            #     fsm-llm-validate -> is_valid: True, errors: []
-            #     FSMDefinition(**d) -> ['string_pattern_mismatch']
-            # The non-ASCII id is reported only as a WARNING, so the CLI exits 0
-            # on a file `API.from_file` hard-refuses. Promoting these three type
-            # names is the likely correct fix -- they are framework-authored
-            # schema rules (`ASCII_IDENTIFIER_PATTERN`), not type coercion, so the
-            # rationale above supports promoting them exactly as it supported
-            # `missing`/`too_short`/`too_long`. It was NOT done here because
-            # changing this ALLOW-list is a HARD-invariant decision that was
-            # outside the authorised scope of the step that found it.
-            # See decisions.md D-029.
+            # It also supersedes the "type-coercion leniency is untouched" framing
+            # that carved out `int_parsing`. That framing was falsified by
+            # measurement, not by opinion: `API.from_file` hard-refuses
+            # `priority: "not-an-int"` exactly as it refuses `id: "café"`. Under
+            # "api from_file is the truth always" the carve-out was a false green,
+            # so `int_parsing` is promoted and the test that asserted the old
+            # behavior (`test_simplified_dict_leniency_preserved`) was INVERTED.
+            #
+            # Do NOT blanket-promote by deleting the membership test and erroring
+            # on every `e.errors()` entry. That is a real and tempting simplification
+            # — every error seen at THIS site is by construction one the loader also
+            # raised — but it destroys the `else: add_warning` fail-safe below, which
+            # is the HARD invariant (plans/SYSTEM.md): an unknown/future pydantic type
+            # string must keep falling through to WARNING so a new pydantic release
+            # can never silently make this validator STRICTER than the loader.
+            # Do NOT delete the `else` branch, and do NOT invert this into a
+            # deny-list ("promote everything except known-lenient types") for the
+            # same reason.
+            #
+            # The list is NOT the control. `test_constraint_sweep_validator_agrees_
+            # with_loader` in tests/test_fsm_llm/test_validator_unit.py enumerates
+            # the constraints mechanically from `definitions.py` and asserts
+            # agreement as an IFF, so a future constraint that introduces an
+            # unlisted type name fails loudly there instead of rotting silently.
             for error in e.errors():
                 loc = " → ".join(str(x) for x in error["loc"])
                 if error["type"] in (
+                    # Framework-authored semantic rules (model_validator /
+                    # field_validator raising ValueError or asserting).
                     "value_error",
                     "assertion_error",
+                    # Absent required field.
                     "missing",
+                    # Container (list/dict) length bounds — D-013.
                     "too_short",
                     "too_long",
+                    # String length bounds and `pattern=` — the D-029 gap.
+                    "string_too_short",
+                    "string_too_long",
+                    "string_pattern_mismatch",
+                    # Numeric bounds: every `Field(ge=/le=)`.
+                    "greater_than_equal",
+                    "less_than_equal",
+                    # `Literal[...]` enum mismatch.
+                    "literal_error",
+                    # Type/coercion failures. Each name below was probed against
+                    # `FSMDefinition(**data)` and confirmed reachable; none is a
+                    # speculative entry.
+                    "int_parsing",
+                    "int_type",
+                    "float_parsing",
+                    "float_type",
+                    "bool_parsing",
+                    "bool_type",
+                    "string_type",
+                    "dict_type",
+                    "list_type",
                 ):
                     self.result.add_error(f"Schema: {loc}: {error['msg']}")
                 else:

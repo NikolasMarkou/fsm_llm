@@ -806,12 +806,21 @@ class TestIntentNameCharsetMatchesSiblingIdentifiers:
     def test_rejection_is_a_value_error_so_the_validator_reports_it_as_an_error(self):
         """The enforcement MECHANISM is load-bearing, not incidental.
 
-        `Field(pattern=)` would emit `string_pattern_mismatch`, which validator.py's
-        ALLOW-list (D-013) deliberately excludes -- `fsm-llm-validate` would then say
-        is_valid=True for an FSM that `API.from_file` refuses to load. Keeping a
-        `model_validator` raising ValueError yields `value_error`, which IS promoted
-        to ERROR tier. This test fails if someone "simplifies" the validator to
-        `pattern=`.
+        A `model_validator` raising ValueError yields `value_error`, which
+        validator.py's ALLOW-list promotes to ERROR tier, so `fsm-llm-validate`
+        and `API.from_file` agree on a non-conformant intent name. This test
+        fails if someone "simplifies" the rule into a `Field(pattern=)`.
+
+        # DECISION plan-2026-07-20T040150-876e7164/D-001
+        The original rationale here was that `Field(pattern=)` emits
+        `string_pattern_mismatch`, "which validator.py's ALLOW-list (D-013)
+        deliberately excludes". That is NO LONGER TRUE: the D-013 carve-out was
+        measured to be a live false green and `string_pattern_mismatch` is now
+        promoted, so a `pattern=` rewrite would no longer break agreement. The
+        `model_validator` shape is still preferred -- it produces the specific,
+        actionable message this test asserts, rather than a raw regex dump -- but
+        the agreement argument no longer applies and has been removed rather than
+        left standing as a falsified comment.
         """
         import pydantic
 
