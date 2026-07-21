@@ -428,6 +428,7 @@ class LiteLLMInterface(LLMInterface):
             response = completion(**call_params)
 
             accumulated: list[str] = []
+            reasoning_parts: list[str] = []
             last_delta = None
             for chunk in response:
                 if not (hasattr(chunk, "choices") and chunk.choices):
@@ -436,6 +437,14 @@ class LiteLLMInterface(LLMInterface):
                 if delta is None:
                     continue
                 last_delta = delta
+                # Accumulate reasoning the same way content is accumulated: a
+                # provider may stream `reasoning_content` as one fragment per
+                # chunk. Reuse the shared resolver so a Delta is read via the
+                # same field precedence as a Message — never hand-roll the
+                # `getattr(..., "thinking")` lookup here. See decisions.md D-002.
+                frag = _resolve_reasoning_trace(delta)
+                if frag:
+                    reasoning_parts.append(frag)
                 content = getattr(delta, "content", None)
                 if content is not None:
                     accumulated.append(content)
@@ -443,14 +452,23 @@ class LiteLLMInterface(LLMInterface):
 
             # Same two tail guards _make_llm_call applies: a stream whose every
             # delta.content is "" is a FAILURE, not a silent empty reply. Recover
-            # the answer from the model's `thinking` field when it carries one,
-            # otherwise surface an error instead of returning nothing.
+            # the answer from the reasoning trace ACCUMULATED across all chunks
+            # (matching the non-streaming path, which sees the full assembled
+            # message) — not just the final delta; otherwise a provider that
+            # streams reasoning incrementally leaves only the last fragment
+            # available and recovery fails where the non-streaming path succeeds.
             if not "".join(accumulated):
-                recovered = (
-                    self._extract_content_from_thinking(last_delta)
-                    if last_delta is not None
-                    else None
-                )
+                full_trace = "".join(reasoning_parts)
+                if full_trace:
+                    recovered = self._recover_content_from_trace(full_trace)
+                else:
+                    # Defensive: a provider that puts the whole trace only on the
+                    # final delta object (not in per-chunk reasoning_content).
+                    recovered = (
+                        self._extract_content_from_thinking(last_delta)
+                        if last_delta is not None
+                        else None
+                    )
                 if not recovered:
                     raise LLMResponseError("LLM returned empty content")
                 yield recovered
@@ -652,6 +670,25 @@ class LiteLLMInterface(LLMInterface):
         logger.debug(
             "Content empty but reasoning trace present, extracting from it"
         )
+        return LiteLLMInterface._recover_content_from_trace(trace)
+
+    @staticmethod
+    def _recover_content_from_trace(trace: str) -> str | None:
+        """Recover the answer string from an already-resolved reasoning trace.
+
+        Shared JSON-scan body of ``_extract_content_from_thinking``. Kept as a
+        separate static helper so BOTH the non-streaming reader (which resolves a
+        full ``Message``) and the streaming tail guard (which joins per-chunk
+        ``reasoning_content`` fragments accumulated across the stream) recover
+        content through one identical code path.
+
+        Contract:
+            - Parameter: ``trace`` — the raw reasoning-trace string (already
+              resolved via ``_resolve_reasoning_trace``; a non-empty ``str``).
+            - Returns the last balanced JSON object found in ``trace`` (preferred,
+              as the final answer), else the last non-empty line, else ``None``.
+            - Never raises; JSON parse failures are swallowed per candidate.
+        """
         thinking = trace
         # Find JSON objects using proper parsing — supports multi-line JSON
         json_candidates: list[str] = []

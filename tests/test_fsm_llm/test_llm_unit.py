@@ -538,6 +538,96 @@ class TestStreamEmptyContentGuard:
         assert out == ["Hel", "lo"]
 
 
+def _real_delta_chunk(content, reasoning_content=None):
+    """One streaming chunk wrapping a REAL litellm ``Delta``.
+
+    The load-bearing part is the ``Delta`` object's own field resolution
+    (``reasoning_content`` vs the deleted legacy ``thinking``) — the chunk /
+    choice wrapper is only read as ``chunk.choices[0].delta`` and may be a
+    plain namespace.
+    """
+    from litellm.types.utils import Delta
+
+    delta = Delta(content=content, reasoning_content=reasoning_content)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+
+class TestStreamReasoningFragmentAccumulation:
+    """G3: reasoning streamed as fragments across chunks must be reassembled.
+
+    A provider may stream ``reasoning_content`` incrementally — one fragment per
+    chunk, exactly like it streams ``content`` — while ``content`` stays empty in
+    every chunk. The empty-content tail guard must recover the answer from the
+    reasoning trace ACCUMULATED across all chunks (matching the non-streaming
+    path, which sees the full assembled message), not merely the final delta.
+
+    Driven by REAL ``litellm.types.utils.Delta`` objects (per plans/LESSONS.md):
+    a hand-stubbed ``.thinking`` object would mask the field-resolution seam and
+    the ``last_delta``-only bug both.
+    """
+
+    @staticmethod
+    def _request():
+        return ResponseGenerationRequest(
+            system_prompt="You are a helpful assistant",
+            user_message="hi",
+            extracted_data={},
+            context={},
+            transition_occurred=False,
+        )
+
+    def _stream(self, chunks):
+        return patch("fsm_llm.llm.completion", return_value=iter(chunks)), patch(
+            "fsm_llm.llm.get_supported_openai_params", return_value=[]
+        )
+
+    def test_stream_recovers_reasoning_split_across_multiple_fragments(self):
+        """The JSON answer is split as reasoning fragments; content empty in each.
+
+        Every chunk's ``delta.content`` is empty/None and the JSON object
+        ``{"message": "Hi"}`` arrives as ``reasoning_content`` FRAGMENTS across
+        three chunks. Pre-fix code inspects only ``last_delta`` (fragment
+        ``'"Hi"}'``) and cannot recover the whole object; the accumulation fix
+        joins all fragments and recovers the full message.
+        """
+        chunks = [
+            _real_delta_chunk(content="", reasoning_content='{"mess'),
+            _real_delta_chunk(content=None, reasoning_content='age": '),
+            _real_delta_chunk(content="", reasoning_content='"Hi"}'),
+        ]
+        completion_patch, params_patch = self._stream(chunks)
+        llm = LiteLLMInterface(model="test-model")
+
+        with completion_patch, params_patch:
+            out = list(llm.generate_response_stream(self._request()))
+
+        assert "".join(out) == '{"message": "Hi"}', (
+            f"accumulated reasoning not recovered from fragments: {out}"
+        )
+
+    def test_stream_recovers_when_whole_trace_is_on_final_delta_only(self):
+        """Defensive fallback: a provider that lumps the whole trace on the last
+        delta (no per-chunk fragments) still recovers — accumulation of a single
+        fragment equals that fragment, and the ``last_delta`` fallback covers a
+        trace that never appears in per-chunk ``reasoning_content``.
+        """
+        chunks = [
+            _real_delta_chunk(content="", reasoning_content=None),
+            _real_delta_chunk(
+                content="", reasoning_content='{"message": "Whole"}'
+            ),
+        ]
+        completion_patch, params_patch = self._stream(chunks)
+        llm = LiteLLMInterface(model="test-model")
+
+        with completion_patch, params_patch:
+            out = list(llm.generate_response_stream(self._request()))
+
+        assert "".join(out) == '{"message": "Whole"}', (
+            f"single-lump reasoning not recovered: {out}"
+        )
+
+
 class TestReasoningContentRecovery:
     """Regression for C2 + H3: recover the answer from the reasoning field.
 
