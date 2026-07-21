@@ -95,6 +95,13 @@ __all__ = [
 #: allowlist, so ``coerce_worker_output`` drops it before context.
 _SUMMARY_FIELD = "summary"
 
+#: The prose field EVERY role's schema carries, for core's own rescue path.
+#:
+#: Not a protocol key and never writable -- it exists so a reply that IS a bare
+#: JSON envelope survives ``fsm_llm/llm.py``'s response-generation parser.  See
+#: the D-004 block on :func:`_build_output_schema`.
+_MESSAGE_FIELD = "message"
+
 #: Short, imperative field descriptions rendered into the JSON schema.
 #:
 #: These are the FIELD-level prose; the protocol rules stay in ``rules.py``.
@@ -118,6 +125,7 @@ _FIELD_DESCRIPTIONS: Mapping[str, str] = MappingProxyType(
         ContextKeys.PIVOT_REASON: "One sentence naming what failed and why.",
         ContextKeys.HALT_REASON: "One sentence recording why the run ended.",
         _SUMMARY_FIELD: "One sentence describing what this step actually did.",
+        _MESSAGE_FIELD: "One short sentence stating the result, in plain prose.",
     }
 )
 
@@ -165,15 +173,34 @@ def _build_output_schema(state: str, fields: Mapping[str, type]) -> type[BaseMod
 
     Every field is REQUIRED: a reply missing one fails validation, leaves
     ``structured_output`` as ``None``, and falls back to text parsing which then
-    reports ``missing-keys`` (invariant I8, fail closed).
+    reports ``missing-keys`` (invariant I8, fail closed).  ``message`` is added
+    to every role's schema; it is prose for core, never a protocol key.
     """
     definitions: dict[str, Any] = {
         name: (
             annotation,
             Field(..., description=_FIELD_DESCRIPTIONS.get(name, name)),
         )
-        for name, annotation in fields.items()
+        for name, annotation in (*fields.items(), (_MESSAGE_FIELD, str))
     }
+    # DECISION plan-2026-07-21-bf7ffe24/D-004
+    # `message` is appended to EVERY role schema, and it is a [REUSE] of a core
+    # path -- NOT a weakening of the apology guard. `llm.py`'s
+    # `_parse_response_generation_response` reads `data.get("message")` on its
+    # FIRST rung; with no such key a brace-wrapped role reply falls two rungs
+    # through to the terminal guard, which substitutes
+    # `_GENERIC_FALLBACK_MESSAGE` ("I'm sorry, I couldn't generate a proper
+    # response.") -- MEASURED at step 7f of the predecessor plan, where a
+    # perfectly valid `{"findings_count": 3, "needs_explore": false}` still
+    # parsed as `unparseable`. D-022 of plan-2026-07-18T162030-a02151fe decided
+    # PERMANENTLY not to loosen that guard (no text-shape discriminator can
+    # separate a mistaken envelope from prose that quotes JSON), so the harness
+    # supplies the key the guard looks for instead of asking core to look away.
+    # Do NOT add `message` to `_WORKER_WRITABLE`: it follows `summary`'s rule
+    # (D-035) -- schema-visible, dropped by `coerce_worker_output`, and absent
+    # from `expected_keys` so `parse_role_output` never requires it. Making it
+    # writable would let a worker smuggle prose into a gate key.
+    # See decisions.md D-004.
     model: type[BaseModel] = create_model(
         f"{state.capitalize()}Output",
         __doc__=f"Structured reply required from the {state} role.",
@@ -444,9 +471,12 @@ def _writes_line(request: RoleRequest, spec: RoleSpec) -> str:
 
 def _output_line(spec: RoleSpec) -> str:
     """Render the one-object output instruction for *spec*."""
+    # Read off the BUILT schema, not `_schema_fields`, so the shape the prompt
+    # asks for and the shape constrained decoding enforces are one fact --
+    # including the `message` field D-004 appends.
     shape = ", ".join(
-        f'"{name}": <{_TYPE_WORDS.get(annotation, "value")}>'
-        for name, annotation in _schema_fields(spec.state).items()
+        f'"{name}": <{_TYPE_WORDS.get(info.annotation or str, "value")}>'
+        for name, info in spec.output_schema.model_fields.items()
     )
     # The two sentences after the shape are the ONLY available mitigation for
     # the draft-then-correction fail-open path (decisions.md D-031): constrained

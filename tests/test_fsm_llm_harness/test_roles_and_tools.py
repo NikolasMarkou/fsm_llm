@@ -28,13 +28,18 @@ the one subprocess test executes ``cat`` on a file it just wrote.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
+from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface
 from fsm_llm_harness.constants import ArtifactNames, ContextKeys, HarnessStates, Role
 from fsm_llm_harness.exceptions import HarnessConfinementError, HarnessOwnershipError
-from fsm_llm_harness.harness import RoleRequest
+from fsm_llm_harness.hardening import coerce_worker_output, parse_role_output
+from fsm_llm_harness.harness import _WORKER_WRITABLE, RoleRequest
 from fsm_llm_harness.roles import (
     ROLE_SPECS,
     build_role_prompt,
@@ -120,6 +125,38 @@ _OWNING_STATES = tuple(
 _NON_OWNING_STATES = tuple(
     state for state in HarnessStates.ALL if not ROLE_SPECS[state].owned_artifacts
 )
+
+
+#: One schema-valid payload per state, DERIVED from the state's own schema so a
+#: new writable key cannot leave these samples silently stale.  ``message`` is
+#: excluded on purpose -- the tests below add it (or not) themselves.
+_TYPE_SAMPLE: dict[type, Any] = {int: 3, bool: True, str: "sample"}
+_SCHEMA_SAMPLE: dict[str, dict[str, Any]] = {
+    state: {
+        name: _TYPE_SAMPLE[info.annotation]
+        for name, info in ROLE_SPECS[state].output_schema.model_fields.items()
+        if name != "message"
+    }
+    for state in HarnessStates.ALL
+}
+
+
+def _parse_as_core_would(content: str) -> Any:
+    """Run *content* through core's REAL response-generation parser.
+
+    Interface contract (2 call sites, both in
+    ``TestEveryRoleSchemaCarriesMessage``):
+        - Parameter: the exact text a role would return.
+        - Returns core's ``ResponseGenerationResponse``.
+        - Calls the real private method on an uninitialised interface (no
+          network, no config): a reimplementation here would assert against a
+          copy of the guard rather than against the guard.
+    """
+    llm = LiteLLMInterface.__new__(LiteLLMInterface)
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+    )
+    return llm._parse_response_generation_response(response)
 
 
 def _role_request(
@@ -680,6 +717,90 @@ class TestRolePromptNamesHeldTools:
         )
 
         assert set(registry.tool_names) == set(held_tools(request, spec))
+
+
+# ---------------------------------------------------------------------------
+# Every role schema carries `message` (D-004 of plan-2026-07-21-bf7ffe24)
+# ---------------------------------------------------------------------------
+
+
+class TestEveryRoleSchemaCarriesMessage:
+    """``message`` is prose for core's rescue rung, never a protocol key.
+
+    The pairing below is the whole point: the field must be visible to the
+    model (schema + prompt) and invisible to the gate (not writable, not
+    required).  ``summary`` established that rule at D-035; this asserts
+    ``message`` obeys it for all six roles rather than for the one that was
+    spot-checked.
+    """
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_schema_requires_a_string_message(self, state: str) -> None:
+        info = get_role_spec(state).output_schema.model_fields["message"]
+
+        assert info.annotation is str
+        assert info.is_required()
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_message_is_not_writable_into_context(self, state: str) -> None:
+        assert "message" not in _WORKER_WRITABLE[state]
+        assert "message" not in get_role_spec(state).writable_keys
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_coerce_drops_message_even_when_the_worker_sends_it(
+        self, state: str
+    ) -> None:
+        spec = get_role_spec(state)
+        payload = {"message": "smuggled prose", **_SCHEMA_SAMPLE[state]}
+
+        accepted = coerce_worker_output(payload, spec.writable_keys, where=spec.role)
+
+        assert "message" not in accepted
+        assert set(accepted) == set(spec.writable_keys)
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_parse_role_output_does_not_require_message(self, state: str) -> None:
+        spec = get_role_spec(state)
+
+        output = parse_role_output(
+            dict(_SCHEMA_SAMPLE[state]), expected_keys=spec.expected_keys
+        )
+
+        assert "message" not in spec.expected_keys
+        assert output.success is True
+        assert output.failure_reason is None
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_prompt_asks_for_the_message_field(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        """The prompt shape is read off the built schema, so it cannot drift."""
+        spec = get_role_spec(state)
+
+        prompt = build_role_prompt(_role_request(state, plan_dir=plan_dir), spec)
+
+        assert '"message": <string>' in prompt
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_a_bare_envelope_carrying_message_survives_cores_parser(
+        self, state: str
+    ) -> None:
+        """The RESCUE path, asserted -- not the guard D-022 keeps permanent."""
+        payload = {**_SCHEMA_SAMPLE[state], "message": "Indexed three findings."}
+
+        parsed = _parse_as_core_would(json.dumps(payload))
+
+        assert parsed.message == "Indexed three findings."
+        assert parsed.message != _GENERIC_FALLBACK_MESSAGE
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_same_envelope_without_message_is_still_destroyed(
+        self, state: str
+    ) -> None:
+        """The control: core's guard is untouched, so the field is what saves it."""
+        parsed = _parse_as_core_would(json.dumps(_SCHEMA_SAMPLE[state]))
+
+        assert parsed.message == _GENERIC_FALLBACK_MESSAGE
 
 
 # ---------------------------------------------------------------------------
