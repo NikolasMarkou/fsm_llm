@@ -73,7 +73,7 @@ from .constants import (
     HandlerPriorities,
     HarnessStates,
 )
-from .exceptions import HarnessReentrancyError
+from .exceptions import HarnessError, HarnessReentrancyError
 from .fsm_definition import build_harness_fsm
 from .rules import ROLE_BY_STATE, get_rules
 
@@ -191,6 +191,23 @@ _REFLECT_ROUTING_FLAGS: tuple[str, ...] = (
     ContextKeys.COMPLETION_FIX,
     ContextKeys.NEEDS_PIVOT,
     ContextKeys.NEEDS_EXPLORE,
+)
+
+# DECISION plan-2026-07-21T125237-191b2eb2/D-052
+# The two per-step leash counters reset TOGETHER, as one fact, at the three
+# places a genuinely NEW step begins (a re-planned iteration, the step cursor
+# advancing, a PIVOT). Do NOT split them back into two literal `0`s at three
+# call sites: `fix_attempts` alone is exactly the escape review C3(b)
+# reproduced -- `_after_reflect_dispatch` reset it on every granted
+# `harness.continue_after_leash`, so an approving callback bought unbounded
+# retries. `leash_grants` is the half that a leash grant must NOT reset, and a
+# reader who sees `fix_attempts: 0` written on its own will assume the same is
+# true here. See decisions.md D-052.
+_LEASH_RESET: Mapping[str, Any] = MappingProxyType(
+    {
+        ContextKeys.FIX_ATTEMPTS: 0,
+        ContextKeys.LEASH_GRANTS: 0,
+    }
 )
 
 
@@ -381,6 +398,7 @@ class HarnessAgent(BaseAgent):
         config: AgentConfig | None = None,
         findings_threshold: int = Defaults.FINDINGS_THRESHOLD,
         max_fix_attempts: int = Defaults.MAX_FIX_ATTEMPTS,
+        max_leash_grants: int = Defaults.MAX_LEASH_GRANTS,
         iteration_hard_cap: int = Defaults.ITERATION_HARD_CAP,
         max_stall_turns: int = _DEFAULT_MAX_STALL_TURNS,
         **api_kwargs: Any,
@@ -400,7 +418,13 @@ class HarnessAgent(BaseAgent):
                 own plan or close itself.
             config: Agent configuration; defaults to the harness profile.
             findings_threshold: EXPLORE -> PLAN findings gate.
-            max_fix_attempts: The autonomy leash.
+            max_fix_attempts: The autonomy leash -- unattended fix attempts per
+                plan step.
+            max_leash_grants: Human leash-continues honoured per plan step.
+                Together with *max_fix_attempts* this bounds the executor
+                dispatches one step can consume at
+                ``max_fix_attempts * (1 + max_leash_grants)``, for ANY sequence
+                of approvals.  The approval callback cannot raise it.
             iteration_hard_cap: PLAN -> EXECUTE iteration gate.
             max_stall_turns: Consecutive no-progress turns before halting.
             api_kwargs: Forwarded to ``fsm_llm.API``.
@@ -410,6 +434,7 @@ class HarnessAgent(BaseAgent):
         self.worker_factory = worker_factory
         self.findings_threshold = findings_threshold
         self.max_fix_attempts = max_fix_attempts
+        self.max_leash_grants = max_leash_grants
         self.iteration_hard_cap = iteration_hard_cap
         self.max_stall_turns = max_stall_turns
 
@@ -430,6 +455,19 @@ class HarnessAgent(BaseAgent):
         self._conversation_id: str | None = None
         self._stall_turns = 0
         self._stall_signature: tuple[Any, ...] | None = None
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-055
+        # ONE run per instance at a time, enforced -- not documented and hoped
+        # for. `_api`, `_conversation_id`, `_stall_turns`, `_stall_signature`
+        # and `_driver_owned` above are plain instance attributes rewritten by
+        # every run, so two concurrent `run()` calls on ONE instance silently
+        # corrupt each other's stall detector and driver-owned table (review
+        # W7). D-014's independence claim covers the module-level
+        # `threading.local` re-entrancy FLAG, not this run state. Do NOT
+        # "simplify" this away as belt-and-braces on top of D-014's guard: that
+        # guard is thread-scoped and would not see a second run on a second
+        # thread at all, which is precisely the corrupting case. Two harness
+        # runs at once need two HarnessAgent instances.
+        self._run_lock = threading.Lock()
         #: The driver's authoritative value for every driver-owned context key
         #: (``constants.DRIVER_OWNED_SEEDS`` + ``DRIVER_OWNED_UNSET``).  ``None``
         #: means "this key should be ABSENT from context".  Written only by
@@ -503,9 +541,29 @@ class HarnessAgent(BaseAgent):
 
         Raises:
             HarnessReentrancyError: If called from inside a dispatched worker.
+            HarnessError: If a run is already in flight on this instance.
         """
         _reject_reentry("run")
+        if not self._run_lock.acquire(blocking=False):
+            raise HarnessError(
+                "A HarnessAgent run is already in flight on this instance. "
+                "The stall detector, the live API handle and the driver-owned "
+                "context table are per-instance run state, so a second "
+                "concurrent run would corrupt both. Construct a second "
+                "HarnessAgent instead.",
+                {"agent_type": _AGENT_TYPE},
+            )
+        try:
+            return self._run_once(task, initial_context)
+        finally:
+            self._run_lock.release()
 
+    def _run_once(
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None,
+    ) -> AgentResult:
+        """One protocol run, with the single-run lock already held."""
         self._stall_turns = 0
         self._stall_signature = None
 
@@ -858,9 +916,10 @@ class HarnessAgent(BaseAgent):
 
         if state == HarnessStates.PIVOT:
             # The leash never carries across a pivot: the next EXECUTE is a
-            # different approach, not a third attempt at the same one.
+            # different approach, not a third attempt at the same one -- so
+            # BOTH halves of the per-step leash budget reset here (D-052).
             return {
-                ContextKeys.FIX_ATTEMPTS: 0,
+                **_LEASH_RESET,
                 ContextKeys.COMPLETION_FIX: False,
                 ContextKeys.NEEDS_PIVOT: False,
             }
@@ -895,7 +954,7 @@ class HarnessAgent(BaseAgent):
                 _as_int(context.get(ContextKeys.ITERATION), 0) + 1
             )
             updates[ContextKeys.STEP_NUMBER] = 1
-            updates[ContextKeys.FIX_ATTEMPTS] = 0
+            updates.update(_LEASH_RESET)
             updates[ContextKeys.LAST_GATE_SLUG] = None
             updates[ContextKeys.HALT_REASON] = None
 
@@ -952,7 +1011,9 @@ class HarnessAgent(BaseAgent):
                 working,
                 self._enforce_routing_exclusivity(role_delta, working),
             )
-        self._apply(updates, working, self._post_dispatch(state, result, working))
+        self._apply(
+            updates, working, self._post_dispatch(state, result, error, working)
+        )
         return updates
 
     def _run_worker(
@@ -1124,11 +1185,21 @@ class HarnessAgent(BaseAgent):
         return {key: False for key in _REFLECT_ROUTING_FLAGS if key != winner}
 
     def _post_dispatch(
-        self, state: str, result: AgentResult | None, context: Mapping[str, Any]
+        self,
+        state: str,
+        result: AgentResult | None,
+        error: Exception | None,
+        context: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Driver-owned bookkeeping that runs after every dispatch."""
+        """Driver-owned bookkeeping that runs after every dispatch.
+
+        *result* and *error* are :meth:`_run_worker`'s pair, and both are
+        needed: ``result is None`` alone cannot tell a worker that RAISED
+        (a spent attempt) from no worker being configured at all (nothing
+        attempted).  See :meth:`_after_execute_dispatch`.
+        """
         if state == HarnessStates.EXECUTE:
-            return self._after_execute_dispatch(result, context)
+            return self._after_execute_dispatch(result, error, context)
         if state == HarnessStates.PLAN:
             return self._after_plan_dispatch(result, context)
         if state == HarnessStates.REFLECT:
@@ -1140,7 +1211,10 @@ class HarnessAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     def _after_execute_dispatch(
-        self, result: AgentResult | None, context: Mapping[str, Any]
+        self,
+        result: AgentResult | None,
+        error: Exception | None,
+        context: Mapping[str, Any],
     ) -> dict[str, Any]:
         """Advance the step cursor, or spend a fix attempt.
 
@@ -1149,25 +1223,39 @@ class HarnessAgent(BaseAgent):
         the way to make that impossible is for the driver to derive the count
         from ``AgentResult.success`` rather than to read it back.
         """
-        if result is None:
-            # No worker configured, or the worker raised. Neither advances the
-            # step nor spends an attempt, so EXECUTE holds until the stall halt.
-            # This branch collapsing "raised" into "absent" is review C3(a) and
-            # is step 7c's to fix; do not repair it here. The old comment here
-            # claimed the FSM's own extraction would move the protocol on the
-            # next turn -- that was the D-044 fabrication path and is gone.
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-051
+        # "The worker RAISED" and "there is no worker" are DIFFERENT events and
+        # must not be collapsed into `result is None`. Do NOT re-simplify this
+        # to a single `if result is None: return {}`: measured 2026-07-21
+        # (findings/review-iter-1.md C3a) an executor that raised on every
+        # dispatch spent ZERO attempts -- `fix_attempts` stayed 0, no
+        # `leash-cap` slug was ever emitted, and EXECUTE held until the stall
+        # halt, i.e. the autonomy leash did not engage AT ALL on the loudest
+        # possible failure. `_record_role_result` had always recorded the same
+        # event as `success=False` (as do plan.md's Failure Modes table and
+        # Edge Cases), so the two writers read one condition in opposite
+        # directions. A raising worker is a genuine failed attempt and spends
+        # leash budget; `worker_factory=None` is the D-045 diagnostic mode and
+        # must advance nothing. `_run_worker` already returns exactly one of
+        # the two as non-None -- that is the discriminator.
+        # See decisions.md D-051.
+        if result is None and error is None:
+            # No worker configured (D-045). Nothing was attempted, so nothing
+            # is spent: every gate stays shut and EXECUTE holds until the stall
+            # halt names the gate it is sitting behind.
             return {}
 
         step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
         total = max(1, _as_int(context.get(ContextKeys.TOTAL_STEPS), 1))
 
-        if result.success:
+        if result is not None and result.success:
             if step < total:
                 # More steps remain: hold EXECUTE and let the loop-iteration
-                # dispatch pick up the new (state, iteration, step) key.
+                # dispatch pick up the new (state, iteration, step) key.  A new
+                # step is a new leash budget, both halves of it (D-052).
                 return {
                     ContextKeys.STEP_NUMBER: step + 1,
-                    ContextKeys.FIX_ATTEMPTS: 0,
+                    **_LEASH_RESET,
                 }
             return {ContextKeys.EXECUTE_COMPLETE: True}
 
@@ -1208,24 +1296,7 @@ class HarnessAgent(BaseAgent):
     def _after_reflect_dispatch(self, context: Mapping[str, Any]) -> dict[str, Any]:
         """Ask the human to confirm a close, or to continue past the leash."""
         if context.get(ContextKeys.LAST_GATE_SLUG) == GateSlug.LEASH_CAP:
-            granted = self._request_approval(
-                _APPROVAL_LEASH,
-                context,
-                reasoning=(
-                    "The 2-attempt autonomy leash is exhausted. Continue with "
-                    "user direction, or stop here?"
-                ),
-            )
-            if not granted:
-                return {}
-            # Explicit user direction resets the leash; it is not a third
-            # unattended attempt.
-            return {
-                ContextKeys.FIX_ATTEMPTS: 0,
-                ContextKeys.LAST_GATE_SLUG: None,
-                ContextKeys.HALT_REASON: None,
-                ContextKeys.COMPLETION_FIX: True,
-            }
+            return self._offer_leash_continue(context)
 
         if context.get(ContextKeys.ALL_CRITERIA_PASS) is not True:
             return {}
@@ -1236,6 +1307,67 @@ class HarnessAgent(BaseAgent):
             reasoning="Every success criterion is verified PASS. Close the plan?",
         )
         return {ContextKeys.CLOSE_CONFIRMED: confirmed}
+
+    def _offer_leash_continue(self, context: Mapping[str, Any]) -> dict[str, Any]:
+        """Ask the human to continue past an exhausted leash, at most N times.
+
+        Returns:
+            A delta granting one more pair of attempts, or one recording that
+            the grant budget is spent, or ``{}`` on a denial.
+        """
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-052
+        # `leash_grants` is what makes the leash a LEASH. Do NOT restore the
+        # unconditional `fix_attempts: 0` reset that used to live here: measured
+        # 2026-07-21 (findings/review-iter-1.md C3b), with an always-approving
+        # callback -- which is the test suite's own default -- and an
+        # always-failing executor, resetting the attempt counter on every grant
+        # cycled EXECUTE <-> REFLECT until `BudgetExhaustedError: iterations
+        # limit (60)`. The cap the callback saw was infinite. The counter lives
+        # in DRIVER-OWNED context, so the callback (which is handed a COPY of
+        # the context and returns a bool) cannot reach it, and the FSM's own
+        # extraction cannot invent it either (D-044). It resets only where a
+        # genuinely NEW step begins (_LEASH_RESET's three sites), never on a
+        # grant. Property: executor dispatches on ONE plan step are bounded by
+        # max_fix_attempts * (1 + max_leash_grants) for ANY approval sequence.
+        # Once the budget is spent the driver stops ASKING -- an approval whose
+        # answer would be discarded is theatre. See decisions.md D-052.
+        grants = _as_int(context.get(ContextKeys.LEASH_GRANTS), 0)
+        step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        if grants >= self.max_leash_grants:
+            logger.warning(
+                f"Leash grant budget spent on step {step}: {grants} "
+                f"continuation(s) already granted (cap {self.max_leash_grants}); "
+                "not asking again."
+            )
+            return {
+                ContextKeys.HALT_REASON: (
+                    f"Autonomy leash: step {step} has already been continued "
+                    f"{grants} time(s) by hand (cap {self.max_leash_grants}) and "
+                    f"still fails. Re-plan or re-scope the step."
+                )
+            }
+
+        granted = self._request_approval(
+            _APPROVAL_LEASH,
+            context,
+            reasoning=(
+                f"The {self.max_fix_attempts}-attempt autonomy leash is "
+                f"exhausted ({grants}/{self.max_leash_grants} continuations "
+                "used). Continue with user direction, or stop here?"
+            ),
+        )
+        if not granted:
+            return {}
+        # Explicit user direction buys one more pair of attempts; it is not a
+        # third unattended attempt.  `leash_grants` is NOT reset here -- that
+        # is the whole point.
+        return {
+            ContextKeys.FIX_ATTEMPTS: 0,
+            ContextKeys.LEASH_GRANTS: grants + 1,
+            ContextKeys.LAST_GATE_SLUG: None,
+            ContextKeys.HALT_REASON: None,
+            ContextKeys.COMPLETION_FIX: True,
+        }
 
     # ------------------------------------------------------------------
     # Approvals (invariant I6)
@@ -1321,7 +1453,7 @@ class HarnessAgent(BaseAgent):
 
         updates = self._dispatch_if_needed(state, context)
         if updates:
-            api.update_context(conv_id, _drop_deletions(updates))
+            api.update_context(conv_id, self._writable_updates(updates))
             context = api.get_data(conv_id)
 
         self._check_stall(state, context, bool(updates))
@@ -1394,6 +1526,52 @@ class HarnessAgent(BaseAgent):
     # ------------------------------------------------------------------
     # Small helpers
     # ------------------------------------------------------------------
+
+    # DECISION plan-2026-07-21T125237-191b2eb2/D-053
+    # ONE deletion convention, realised the same way by both call sites of
+    # `_dispatch_if_needed`. A `None` in a driver delta means "this key returns
+    # to its DRIVER-OWNED DEFAULT", never "write a literal None" and never
+    # "silently do nothing":
+    #   * for a `DRIVER_OWNED_SEEDS` key, `_apply` coerces it to the seed
+    #     BEFORE it reaches either call site, so no `None` for a seeded key
+    #     ever gets here (D-044);
+    #   * for a `DRIVER_OWNED_UNSET` key (`halt_reason`, `last_gate_slug`,
+    #     `pivot_reason`, the two roots), absent IS the default. `_apply`
+    #     records it as absent in `_driver_owned`, so the entry-handler path
+    #     deletes it immediately (a handler delta's `None` means delete) and
+    #     this path -- `API.update_context`, which has no delete -- has the
+    #     PRE_PROCESSING half of `_reassert_driver_owned` delete it before the
+    #     next extraction, i.e. strictly before any transition can read it.
+    # Do NOT "restore" the old bare `_drop_deletions` filter: it discarded a
+    # `None` for ANY key with no record that it had done so, which made a
+    # "clear this flag" instruction a silent no-op on the loop path only
+    # (review W3) -- and the only reason that was latent rather than live is
+    # that D-044 had just converted every gate-flag clear to `False`.
+    def _writable_updates(self, updates: Mapping[str, Any]) -> dict[str, Any]:
+        """Project a driver delta onto what ``API.update_context`` can express.
+
+        ``update_context`` merges; it cannot delete, and it writes ``None``
+        verbatim -- and a key present with value ``None`` still satisfies
+        ``TransitionCondition.requires_context_keys``, so passing one through
+        would turn a cleared flag into a present-but-null one and change what
+        the gate sees.
+
+        Args:
+            updates: A delta that has already been through :meth:`_apply`.
+
+        Returns:
+            The same delta without its deletions.
+        """
+        writable: dict[str, Any] = {}
+        for key, value in updates.items():
+            if value is not None:
+                writable[key] = value
+            elif key not in self._driver_owned:
+                logger.warning(
+                    f"Delta clears non-driver-owned key '{key}', which this "
+                    "path cannot delete; leaving the stale value in place."
+                )
+        return writable
 
     def _apply(
         self,
@@ -1494,15 +1672,3 @@ def _type_matches(value: Any, expected: type) -> bool:
     if expected is int:
         return isinstance(value, int) and not isinstance(value, bool)
     return isinstance(value, expected)
-
-
-def _drop_deletions(updates: Mapping[str, Any]) -> dict[str, Any]:
-    """Strip ``None`` values before an ``API.update_context`` call.
-
-    ``None`` means "delete" only in a HANDLER delta.  ``API.update_context``
-    writes it verbatim, and a key present with value ``None`` still satisfies
-    ``TransitionCondition.requires_context_keys`` -- so passing one through
-    would turn a cleared flag into a present-but-null one and change what the
-    gate sees.
-    """
-    return {key: value for key, value in updates.items() if value is not None}

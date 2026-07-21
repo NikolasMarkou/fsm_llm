@@ -104,6 +104,10 @@ class ContextKeys:
     ALL_CRITERIA_PASS = "all_criteria_pass"
     # EXECUTE continue edge
     FIX_ATTEMPTS = "fix_attempts"
+    #: Human leash-continues already granted on the CURRENT plan step.  Not a
+    #: gate variable -- it bounds how many times the human may be asked, which
+    #: is what stops an approving callback from making the leash unbounded.
+    LEASH_GRANTS = "leash_grants"
 
     # --- Non-gated edge selectors --------------------------------------
     NEEDS_EXPLORE = "needs_explore"
@@ -202,6 +206,7 @@ DRIVER_OWNED_SEEDS: Mapping[str, Any] = MappingProxyType(
         ContextKeys.STEP_NUMBER: 0,
         ContextKeys.TOTAL_STEPS: 1,
         ContextKeys.FIX_ATTEMPTS: 0,
+        ContextKeys.LEASH_GRANTS: 0,
         ContextKeys.CRITERIA_PASS_COUNT: 0,
         ContextKeys.CRITERIA_TOTAL: 0,
     }
@@ -427,6 +432,18 @@ class Defaults:
     FINDINGS_THRESHOLD = 3
     #: The autonomy leash: the 3rd fix attempt is HARD-blocked.
     MAX_FIX_ATTEMPTS = 2
+    # DECISION plan-2026-07-21T125237-191b2eb2/D-052
+    #: Human leash-continues granted on ONE plan step before the driver stops
+    #: asking.  Do NOT raise this to "let the user decide when to stop": the
+    #: approval callback is the thing being bounded.  Measured 2026-07-21
+    #: (findings/review-iter-1.md C3b): with an always-approving callback and an
+    #: always-failing executor, `_after_reflect_dispatch` reset `fix_attempts`
+    #: to 0 on EVERY grant, so the run cycled EXECUTE <-> REFLECT until
+    #: `BudgetExhaustedError` -- the leash was decorative. With this cap the
+    #: executor dispatches on one plan step are bounded by
+    #: MAX_FIX_ATTEMPTS * (1 + MAX_LEASH_GRANTS) = 6 for ANY sequence of
+    #: approvals.  See decisions.md D-052.
+    MAX_LEASH_GRANTS = 2
     #: PLAN -> EXECUTE is blocked at or above this iteration count.
     ITERATION_HARD_CAP = 6
     #: Iteration at which a decomposition analysis is advised.

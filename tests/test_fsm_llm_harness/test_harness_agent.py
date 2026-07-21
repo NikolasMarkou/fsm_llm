@@ -905,6 +905,15 @@ class TestContextCaps:
     #: Leash-continues granted before the run is allowed to stop.  Each grant
     #: buys two more EXECUTE <-> REFLECT cycles, i.e. ~4 dispatches and ~8
     #: ledger entries -- comfortably past the 64-entry and 20-result caps.
+    #:
+    #: CHANGED at step 7c (D-052).  This used to be the approval callback's
+    #: verdict schedule ALONE, and it worked because an approving callback made
+    #: the leash unbounded (review C3b): 30 grants were honoured because ANY
+    #: number would have been.  ``max_leash_grants`` is now a per-step cap the
+    #: callback cannot raise, so a run that wants 30 continuations has to be
+    #: CONFIGURED for them.  A default-configured run reaches 6 executor
+    #: dispatches and stops -- which is the point of the fix, and is why this
+    #: test now says the number twice.
     GRANTS = 30
 
     def test_ledger_role_results_and_answers_are_capped(self, make_harness) -> None:
@@ -920,6 +929,7 @@ class TestContextCaps:
             approvals=ApprovalRecorder(
                 {APPROVAL_LEASH: lambda index: index <= self.GRANTS}
             ),
+            max_leash_grants=self.GRANTS,
         )
         result = harness.run()
 
