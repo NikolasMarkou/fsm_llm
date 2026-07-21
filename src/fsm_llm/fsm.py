@@ -440,78 +440,79 @@ class FSMManager:
 
         This is a thin NON-generator wrapper: it runs the EAGER, lock-free
         existence check at CALL time (so a created-but-not-yet-iterated stream
-        cannot skip validation) and returns the lazy inner generator that does
-        the actual Pass-1/Pass-2 work.  Because this is a plain function (no
+        cannot skip validation) and returns a lazy nested-closure generator that
+        does the actual Pass-1/Pass-2 work.  Because this is a plain function (no
         ``yield`` in its body), ``@with_conversation_context`` runs the prologue
         eagerly, which is exactly what call-time validation requires.
+        """
+        with self._lock:
+            if conversation_id not in self.instances:
+                raise FSMError(f"Conversation {conversation_id} not found")
 
-        # DECISION plan-2026-07-21-4c63deac/D-002
-        # The eager prologue here is LOCK-FREE by design: it touches only
+        # DECISION plan-2026-07-21T082818-4c63deac/D-002
+        # The eager prologue above is LOCK-FREE by design: it touches only
         # ``self._lock``/``self.instances`` for the existence check and NEVER
-        # ``conv_lock``.  conv_lock acquisition stays inside
-        # ``_process_message_stream_inner`` so an abandoned (never-iterated)
-        # generator cannot leak a lock, and the ``_lock -> conv_lock`` order is
-        # preserved.  Do NOT hoist ``conv_lock.acquire`` into this wrapper.
-        """
-        with self._lock:
-            if conversation_id not in self.instances:
-                raise FSMError(f"Conversation {conversation_id} not found")
-        return self._process_message_stream_inner(conversation_id, message, log)
-
-    def _process_message_stream_inner(
-        self, conversation_id: str, message: str, log: Any = None
-    ) -> Iterator[str]:
-        """Lazy inner generator for :meth:`process_message_stream`.
-
-        Everything after the eager existence check lives here.  conv_lock is
-        acquired non-blocking at the FIRST ``next()`` (lazy), preserving the
-        no-leak-on-abandonment property.  The existence check runs again
-        implicitly when this grabs ``self._conversation_locks[conversation_id]``
-        under ``self._lock`` — cheap, and it correctly handles a conversation
-        that vanished between call and first iteration.
-        """
-        with self._lock:
-            if conversation_id not in self.instances:
-                raise FSMError(f"Conversation {conversation_id} not found")
-            conv_lock = self._conversation_locks[conversation_id]
-            if not conv_lock.acquire(blocking=False):
-                raise FSMError(
-                    f"Conversation {conversation_id} is already being processed by another thread"
-                )
-        try:
-            instance = self.instances[conversation_id]
-            current_state = self.get_current_state(instance, conversation_id)
-            if not current_state.transitions:
-                raise FSMError(
-                    f"Conversation has ended - current state '{instance.current_state}' is terminal"
-                )
-            instance.context.conversation.add_user_message(message)
+        # ``conv_lock``.  conv_lock acquisition stays inside this NESTED-CLOSURE
+        # generator so an abandoned (never-iterated) generator cannot leak a
+        # lock, and the ``_lock -> conv_lock`` order is preserved.  The generator
+        # is a nested closure (capturing ``self``/args from scope) and
+        # deliberately NOT a ``self._..._inner`` method: a bound-method
+        # self-dispatch resolves to a Mock under ``Mock(spec=FSMManager)``
+        # unbound-self tests (D-003/CF1).  Do NOT hoist ``conv_lock.acquire``
+        # into the wrapper and do NOT reintroduce a ``self.``-attribute inner
+        # generator.
+        def _stream() -> Iterator[str]:
+            # conv_lock is acquired non-blocking at the FIRST ``next()`` (lazy),
+            # preserving the no-leak-on-abandonment property.  The existence
+            # check runs again implicitly when this grabs
+            # ``self._conversation_locks[conversation_id]`` under ``self._lock`` —
+            # cheap, and it correctly handles a conversation that vanished
+            # between call and first iteration.
+            with self._lock:
+                if conversation_id not in self.instances:
+                    raise FSMError(f"Conversation {conversation_id} not found")
+                conv_lock = self._conversation_locks[conversation_id]
+                if not conv_lock.acquire(blocking=False):
+                    raise FSMError(
+                        f"Conversation {conversation_id} is already being processed by another thread"
+                    )
             try:
-                yield from self._pipeline.process_stream(
-                    instance, message, conversation_id
-                )
-            except FSMError:
-                self._rollback_user_message(instance, message, log)
-                raise
-            except GeneratorExit:
-                # Consumer abandoned the iterator before Pass 2 finished (e.g. a
-                # client timeout before the first token). GeneratorExit is a
-                # BaseException, so it bypasses the handlers below; roll back the
-                # just-added user message so history is not left with an orphaned
-                # user turn (CA3-002). _rollback_user_message only pops when the
-                # last exchange is a user message, so a partial reply already
-                # added by the pipeline is preserved.
-                self._rollback_user_message(instance, message, log)
-                raise
-            except (KeyboardInterrupt, SystemExit):
-                # DECISION plan-2026-07-18T162030-a02151fe/D-014
-                self._rollback_user_message(instance, message, log)
-                raise
-            except Exception as e:
-                self._rollback_user_message(instance, message, log)
-                raise FSMError(f"Failed to process message: {e!s}") from e
-        finally:
-            conv_lock.release()
+                instance = self.instances[conversation_id]
+                current_state = self.get_current_state(instance, conversation_id)
+                if not current_state.transitions:
+                    raise FSMError(
+                        f"Conversation has ended - current state '{instance.current_state}' is terminal"
+                    )
+                instance.context.conversation.add_user_message(message)
+                try:
+                    yield from self._pipeline.process_stream(
+                        instance, message, conversation_id
+                    )
+                except FSMError:
+                    self._rollback_user_message(instance, message, log)
+                    raise
+                except GeneratorExit:
+                    # Consumer abandoned the iterator before Pass 2 finished
+                    # (e.g. a client timeout before the first token).
+                    # GeneratorExit is a BaseException, so it bypasses the
+                    # handlers below; roll back the just-added user message so
+                    # history is not left with an orphaned user turn (CA3-002).
+                    # _rollback_user_message only pops when the last exchange is
+                    # a user message, so a partial reply already added by the
+                    # pipeline is preserved.
+                    self._rollback_user_message(instance, message, log)
+                    raise
+                except (KeyboardInterrupt, SystemExit):
+                    # DECISION plan-2026-07-18T162030-a02151fe/D-014
+                    self._rollback_user_message(instance, message, log)
+                    raise
+                except Exception as e:
+                    self._rollback_user_message(instance, message, log)
+                    raise FSMError(f"Failed to process message: {e!s}") from e
+            finally:
+                conv_lock.release()
+
+        return _stream()
 
     def _process_message_locked(
         self, conversation_id: str, message: str, log: Any

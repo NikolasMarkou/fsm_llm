@@ -199,6 +199,59 @@ class TestExtractJsonFromText:
         assert result.get("message") == "Hello there"
         assert result.get("reasoning") == "greeting detected"
 
+    def test_strategy4_scientific_notation_confidence_not_truncated(self):
+        """CF2: `1e-3` must read as 0.001, not truncate at `e` to 1 -> 1.0.
+
+        The old `[0-9.]+` pattern captured only the leading `1`, silently
+        producing max-certainty (the G6-class silent-1.0 defect the plan set
+        out to kill). The full numeric token must survive the exponent.
+        """
+        text = (
+            'label "intent": "buy" with "confidence": 1e-3 '
+            "and the object never closes {"
+        )
+        result = extract_json_from_text(text)
+        assert result is not None
+        assert result.get("intent") == "buy"
+        assert result.get("confidence") == pytest.approx(0.001)
+        assert result["confidence"] != 1.0
+
+    def test_strategy4_lone_stray_confidence_returns_none(self):
+        """CF5: a LONE stray `"confidence"` (no primary/classification key) must
+        NOT flip a previously-None result to a dict.
+
+        G4 loosened the SHARED parser so garbled free text mentioning only a
+        confidence key produced `{'confidence': N}`, which a lenient
+        all-optional structured-output schema in a non-classification caller
+        would then build a partial model from. The pre-G4 None contract is
+        restored for the lone-auxiliary case.
+        """
+        text = 'I am fairly sure — "confidence": 0.8 — but the object never closes {'
+        assert extract_json_from_text(text) is None
+
+    def test_strategy4_lone_stray_intent_returns_none(self):
+        """CF5: a LONE stray `"intent"` (no primary/confidence key) returns None."""
+        text = 'the label here is "intent": "buy" but nothing else parses {'
+        assert extract_json_from_text(text) is None
+
+    def test_strategy4_classification_pair_still_recovered(self):
+        """CF5 boundary: intent + confidence TOGETHER is a genuine classification
+        payload and must still be recovered (the pair reinforces each other)."""
+        text = 'best guess "intent": "buy", "confidence": 0.9 with tail {'
+        result = extract_json_from_text(text)
+        assert result is not None
+        assert result.get("intent") == "buy"
+        assert result.get("confidence") == pytest.approx(0.9)
+
+    def test_strategy4_auxiliary_survives_with_primary_key(self):
+        """CF5 boundary: a lone auxiliary key is kept when a PRIMARY payload key
+        (here `message`) co-occurs, so response-generation recovery is intact."""
+        text = '"message": "hi there", "confidence": 0.7 and an unbalanced tail {'
+        result = extract_json_from_text(text)
+        assert result is not None
+        assert result.get("message") == "hi there"
+        assert result.get("confidence") == pytest.approx(0.7)
+
 
 # ==================================================================
 # load_fsm_from_file

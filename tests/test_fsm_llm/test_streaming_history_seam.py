@@ -396,21 +396,40 @@ class TestEagerPrologueOnCall:
     def test_uniterated_generator_does_not_hold_conv_lock(self):
         """Invariant (STOP-IF guard): the eager prologue must be LOCK-FREE.
         conv_lock acquisition stays LAZY inside the inner generator, so a stream
-        that is created and abandoned WITHOUT iteration never leaks the lock."""
+        that is created and abandoned WITHOUT iteration never leaks the lock.
+
+        conv_lock is a ``threading.RLock``: a SAME-thread ``acquire`` re-enters
+        and returns True even if the wrapper HAD eagerly acquired it, so a
+        same-thread probe is hollow (it stays GREEN on the rejected eager-lock
+        design).  The probe therefore runs on a SEPARATE thread — if the wrapper
+        eagerly acquired conv_lock on the calling thread, the background
+        non-blocking acquire returns False and this test FAILS, which is exactly
+        the teeth it needs (mirrors
+        ``test_already_being_processed_guard_trips_lazily_on_iteration``)."""
         api, conv_id = _make_api(_ScriptedStreamLLM(["Hel", "lo"]))
         fsm_conv_id = api._get_current_fsm_conversation_id(conv_id)
         conv_lock = api.fsm_manager._conversation_locks[fsm_conv_id]
 
         gen = api.converse_stream("hello", conv_id)
         try:
-            # Another thread must be able to take the lock: a never-iterated
-            # generator has NOT acquired conv_lock.
-            acquired = conv_lock.acquire(blocking=False)
-            assert acquired, (
+            probe_result: list[bool] = []
+
+            def _probe() -> None:
+                # A DIFFERENT thread than the one that created the generator:
+                # RLock reentrancy cannot mask an eager acquire here.
+                acquired = conv_lock.acquire(blocking=False)
+                probe_result.append(acquired)
+                if acquired:
+                    conv_lock.release()
+
+            probe = threading.Thread(target=_probe)
+            probe.start()
+            probe.join(timeout=5.0)
+
+            assert probe_result == [True], (
                 "an un-iterated stream generator is holding conv_lock — the "
                 "eager wrapper must not acquire it (lock-leak on abandonment)"
             )
-            conv_lock.release()
         finally:
             gen.close()
 

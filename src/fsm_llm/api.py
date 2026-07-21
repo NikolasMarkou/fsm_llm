@@ -467,18 +467,10 @@ class API:
 
         This is a thin NON-generator wrapper: it resolves the current FSM
         conversation id at CALL time — which validates existence AND refreshes
-        ``_last_accessed`` — then returns the lazy inner generator that streams
-        the reply.  Resolving eagerly means a created-but-not-yet-iterated
+        ``_last_accessed`` — then returns a lazy nested-closure generator that
+        streams the reply.  Resolving eagerly means a created-but-not-yet-iterated
         stream cannot skip validation or be reaped as stale mid-flight by
         ``cleanup_stale_conversations``.
-
-        # DECISION plan-2026-07-21-4c63deac/D-002
-        # The eager prologue here is LOCK-FREE by design: it only resolves the
-        # current fsm id / refreshes staleness bookkeeping and NEVER touches
-        # conv_lock.  conv_lock acquisition stays inside the inner generator
-        # (via ``process_message_stream``'s own inner generator) so an abandoned
-        # (never-iterated) stream cannot leak a lock and the ``_lock -> conv_lock``
-        # order is preserved.  Do NOT hoist conv_lock into this wrapper.
 
         Args:
             user_message: User's message.
@@ -496,37 +488,39 @@ class API:
         except Exception as e:
             logger.error(f"Error streaming message: {e!s}")
             raise FSMError(f"Failed to stream message: {e!s}") from e
-        return self._converse_stream_inner(
-            current_fsm_id, conversation_id, user_message
-        )
 
-    def _converse_stream_inner(
-        self, current_fsm_id: str, conversation_id: str, user_message: str
-    ) -> Iterator[str]:
-        """Lazy inner generator for :meth:`converse_stream`.
-
-        The id was already resolved (existence + staleness refresh) by the
-        wrapper at call time; this generator does the streaming ``yield from``,
-        the auto-save ``finally``, and preserves the exact exception semantics
-        of the original method around the streaming phase.
-        """
-        try:
+        # DECISION plan-2026-07-21T082818-4c63deac/D-002
+        # conv_lock acquisition stays LAZY inside this nested-closure generator
+        # (via ``process_message_stream``'s own inner generator), so an abandoned
+        # (never-iterated) stream cannot leak a lock and the ``_lock -> conv_lock``
+        # order is preserved.  The generator is a NESTED CLOSURE (capturing
+        # ``self``/args from scope) and deliberately NOT a ``self._..._inner``
+        # method: a bound-method self-dispatch resolves to a Mock under
+        # ``Mock(spec=API)`` unbound-self tests and regressed the agents
+        # auto-save suite (D-003/CF1).  Do NOT hoist conv_lock into the eager
+        # prologue and do NOT reintroduce a ``self.``-attribute inner generator.
+        def _stream() -> Iterator[str]:
             try:
-                yield from self.fsm_manager.process_message_stream(
-                    current_fsm_id, user_message
-                )
-            finally:
-                # Auto-save session after stream completes or is abandoned
-                if self._session_store is not None:
-                    try:
-                        self.save_session(conversation_id)
-                    except Exception as save_err:
-                        logger.warning(f"Auto-save session failed: {save_err!s}")
-        except (ValueError, FSMError):
-            raise
-        except Exception as e:
-            logger.error(f"Error streaming message: {e!s}")
-            raise FSMError(f"Failed to stream message: {e!s}") from e
+                try:
+                    yield from self.fsm_manager.process_message_stream(
+                        current_fsm_id, user_message
+                    )
+                finally:
+                    # Auto-save session after stream completes or is abandoned
+                    if self._session_store is not None:
+                        try:
+                            self.save_session(conversation_id)
+                        except Exception as save_err:
+                            logger.warning(
+                                f"Auto-save session failed: {save_err!s}"
+                            )
+            except (ValueError, FSMError):
+                raise
+            except Exception as e:
+                logger.error(f"Error streaming message: {e!s}")
+                raise FSMError(f"Failed to stream message: {e!s}") from e
+
+        return _stream()
 
     # ==========================================
     # FSM STACKING METHODS (Enhanced)

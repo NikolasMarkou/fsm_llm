@@ -319,10 +319,18 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
 
         # `confidence` is an UNQUOTED number, so the quoted-string loop above
         # cannot capture it. Extract it separately, same last-match-wins
-        # rationale. Guard the float parse: a stray multi-dot token like
-        # "1.2.3" raises ValueError — skip it rather than hard-fail, so a
-        # recoverable intent still survives. See findings G4.
-        confidence_matches = re.findall(r'"confidence"\s*:\s*([0-9.]+)', text)
+        # rationale. The pattern consumes a FULL numeric token — optional sign,
+        # fraction, AND scientific-notation exponent — so `1e-3` is read as
+        # 0.001, not silently truncated to "1" -> 1.0 (the G6-class silent
+        # max-certainty defect; see findings CF2). The trailing negative
+        # lookahead `(?![0-9.eE])` rejects malformed multi-dot / dangling-`e`
+        # tokens (e.g. "1.2.3", "1e") outright rather than capturing a partial
+        # prefix. The float() guard stays as a belt-and-suspenders skip. See
+        # findings G4/CF2.
+        confidence_matches = re.findall(
+            r'"confidence"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![0-9.eE])',
+            text,
+        )
         if confidence_matches:
             try:
                 extracted["confidence"] = float(confidence_matches[-1])
@@ -360,6 +368,32 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                             except json.JSONDecodeError:
                                 extracted["extracted_data"] = {}
                             break
+
+        # CF5: `intent`/`confidence` are AUXILIARY classification keys. G4 added
+        # their capture here, which flipped a previously-None result into a dict
+        # for garbled free text that merely mentions one of them — a real
+        # cross-package hazard for non-classification callers (e.g. a lenient
+        # all-optional structured-output schema in fsm_llm_agents/base.py would
+        # then build a partial model from a stray `"confidence": 0.8` substring).
+        # Keep a lone auxiliary key ONLY when a co-occurring PRIMARY payload key
+        # is present IN THE TEXT — message/selected_transition/value/
+        # extracted_data, or the OTHER member of the intent/confidence pair
+        # (mutual reinforcement: a genuine classification payload carries both).
+        # A malformed-but-present counterpart key (e.g. `"confidence": 1.2.3`
+        # that fails to parse) still counts as co-occurring, so a recoverable
+        # intent survives. See findings CF5.
+        def _key_present_in_text(key: str) -> bool:
+            return re.search(rf'"{key}"\s*:', text) is not None
+
+        _primary_present = any(
+            _key_present_in_text(k)
+            for k in ("message", "selected_transition", "value", "extracted_data")
+        )
+        if not _primary_present:
+            if "intent" in extracted and not _key_present_in_text("confidence"):
+                extracted.pop("intent", None)
+            if "confidence" in extracted and not _key_present_in_text("intent"):
+                extracted.pop("confidence", None)
 
         # Only return if we have structurally meaningful keys, not just auxiliary ones.
         # Includes keys used by classification (intent, confidence) and response
