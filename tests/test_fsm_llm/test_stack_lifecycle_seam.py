@@ -287,6 +287,105 @@ class TestPushedFsmSurvivesLruEviction:
 
 
 # ==========================================================================================
+# H1 (race) — a concurrent cleanup during a push's register->append window must NOT
+# evict the in-flight pushed def.
+#
+# `push_fsm` registers the temp def under `_stack_lock`, RELEASES the lock to run
+# `start_conversation` (which may do a greeting LLM call), then re-acquires the lock
+# to append the referencing frame. In that window the def is registered but NO frame
+# references it, so a concurrent `pop_fsm`/`end_conversation` on ANOTHER conversation
+# runs `_release_unreferenced_temp_definitions`, sees the id as unreferenced, and
+# evicts it -> the in-flight sub-conversation bricks with `ValueError: Unknown FSM ID`.
+# The `_pending_push_ids` guard treats in-flight pushes as referenced. See D-011 / D-013.
+# ==========================================================================================
+
+
+class TestPushRegisterAppendRace:
+    def test_cleanup_during_push_start_does_not_evict_pending_def(self, api):
+        """Deterministically drive a concurrent cleanup INTO the register->append
+        window by hooking `start_conversation` (called by push after the temp def
+        is registered but before the frame is appended). Without the pending guard
+        the def is evicted mid-push and the sub-conversation bricks."""
+        # Squeeze the LRU cache so an eviction of the temp entry is unrecoverable:
+        # once dropped from `_temp_fsm_definitions`, the loader falls through to
+        # `load_fsm_definition`, which raises for a content-hash id.
+        api.fsm_manager._max_fsm_cache_size = 1
+
+        conv_id, _ = api.start_conversation()
+
+        original_start = api.fsm_manager.start_conversation
+        armed = {"on": False}
+
+        def start_with_concurrent_cleanup(*args, **kwargs):
+            # This runs INSIDE push_fsm, after the temp def is registered and the
+            # `_stack_lock` has been released, and before the frame is appended —
+            # exactly the race window. Simulate another conversation's cleanup.
+            if armed["on"]:
+                armed["on"] = False
+                api._release_unreferenced_temp_definitions()
+            return original_start(*args, **kwargs)
+
+        api.fsm_manager.start_conversation = start_with_concurrent_cleanup
+        try:
+            armed["on"] = True
+            api.push_fsm(conv_id, _make_fsm("sub_raced"))
+        finally:
+            api.fsm_manager.start_conversation = original_start
+
+        # The pushed sub def must have survived the mid-push cleanup. The top
+        # (pushed) frame carries the content-hash id registered in
+        # `_temp_fsm_definitions`; the root frame's id is the main FSM id and is
+        # resolved directly, never a temp entry.
+        with api._stack_lock:
+            sub_fsm_id = api.conversation_stacks[conv_id][-1].fsm_id
+            assert sub_fsm_id is not None, "sub frame lost its fsm_id"
+            assert sub_fsm_id in api._temp_fsm_definitions, (
+                "in-flight pushed def was evicted by the concurrent cleanup"
+            )
+
+        # And the sub-conversation must still resolve/operate (loader can find it).
+        assert isinstance(api.get_current_state(conv_id), str)
+        assert isinstance(api.converse("hello there", conv_id), str)
+
+    def test_pending_push_id_survives_direct_cleanup(self, api):
+        """Unit-level: an id marked in-flight in `_pending_push_ids` must NOT be
+        dropped by `_release_unreferenced_temp_definitions`, even with no frame
+        referencing it yet."""
+        pending_id = "pending-hash-xyz"
+        with api._stack_lock:
+            api._temp_fsm_definitions[pending_id] = _make_fsm("pending")
+            api._pending_push_ids.add(pending_id)
+
+        api._release_unreferenced_temp_definitions()
+
+        with api._stack_lock:
+            assert pending_id in api._temp_fsm_definitions, (
+                "pending in-flight def was evicted by cleanup"
+            )
+
+        # Once no longer pending and unreferenced, it IS releasable.
+        with api._stack_lock:
+            api._pending_push_ids.discard(pending_id)
+        api._release_unreferenced_temp_definitions()
+        with api._stack_lock:
+            assert pending_id not in api._temp_fsm_definitions
+
+    def test_pending_guard_is_cleared_after_push_completes(self, api):
+        """No leak: a completed push must leave `_pending_push_ids` empty so the
+        def stays releasable by ordinary reference counting afterwards."""
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        with api._stack_lock:
+            assert api._pending_push_ids == set(), (
+                "push left a leaked pending-id entry"
+            )
+        api.end_conversation(conv_id)
+        with api._stack_lock:
+            assert api._temp_fsm_definitions == {}
+            assert api._pending_push_ids == set()
+
+
+# ==========================================================================================
 # T2 — cleanup_stale_conversations must not evict actively-driven conversations
 # ==========================================================================================
 

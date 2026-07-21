@@ -275,11 +275,21 @@ class MessagePipeline:
             # for a shallow copy: Pass 1 mutates context.data values in place.
             # The deepcopy mirrors the per-transition snapshot already taken at
             # _execute_state_transition (search `old_context_snapshot`), so it
-            # is not a new cost class. Boundary (same as D-005): already-run
-            # handler EXTERNAL side effects cannot be undone; only in-memory
-            # current_state + context.data are restored. See D-012.
+            # is not a new cost class. Snapshot ALL mutable instance state that
+            # a handler (CONTEXT_UPDATE/POST_TRANSITION/POST_PROCESSING) can
+            # touch — current_state, context.data, context.working_memory AND
+            # context.metadata — not just state+data: the latter two are
+            # separate fields, so restoring only data leaves the turn NON-atomic.
+            # working_memory may be None; deepcopy handles that (its
+            # __getstate__/__setstate__ drop the lock, so a WorkingMemory copies
+            # safely). Boundary (same as D-005): already-run handler EXTERNAL
+            # side effects (I/O) cannot be undone — only in-memory instance
+            # state (current_state, context.data, working_memory, metadata) is
+            # restored on Pass-2 failure. See D-012.
             pre_turn_state = instance.current_state
             pre_turn_data = copy.deepcopy(instance.context.data)
+            pre_turn_wm = copy.deepcopy(instance.context.working_memory)
+            pre_turn_metadata = copy.deepcopy(instance.context.metadata)
 
             # Execute pre-processing handlers
             self.execute_handlers(
@@ -316,9 +326,13 @@ class MessagePipeline:
                 )
             except Exception:
                 # Restore the pre-turn in-memory state so the turn is atomic.
+                # Covers all handler-mutable fields, not just state+data (D-012).
                 instance.current_state = pre_turn_state
                 instance.context.data.clear()
                 instance.context.data.update(pre_turn_data)
+                instance.context.working_memory = pre_turn_wm
+                instance.context.metadata.clear()
+                instance.context.metadata.update(pre_turn_metadata)
                 raise
 
     def process_stream(

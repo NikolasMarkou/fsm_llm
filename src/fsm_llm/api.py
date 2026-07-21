@@ -259,6 +259,17 @@ class API:
 
         # FSM stacking support (initialized before FSMManager so closure can access it)
         self._temp_fsm_definitions: dict[str, FSMDefinition] = {}
+        # DECISION plan-2026-07-21T045419-9925aa3a/D-011
+        # In-flight-push guard: ids registered in `_temp_fsm_definitions` but not
+        # yet referenced by a live FSMStackFrame. `push_fsm` releases `_stack_lock`
+        # between registering the temp def and appending the frame (to run
+        # `start_conversation`, which may make a greeting LLM call). Without this
+        # set, a concurrent `pop_fsm`/`end_conversation` on ANOTHER conversation
+        # calls `_release_unreferenced_temp_definitions` in that window, sees the
+        # id as unreferenced (no frame yet), and evicts it — bricking the in-flight
+        # sub-conversation with `ValueError: Unknown FSM ID`. Cleanup treats
+        # pending ids as referenced. See D-011.
+        self._pending_push_ids: set[str] = set()
 
         # Create custom FSM loader
         def custom_fsm_loader(fsm_id: str) -> FSMDefinition:
@@ -510,6 +521,12 @@ class API:
             )
             with self._stack_lock:
                 self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
+                # DECISION plan-2026-07-21T045419-9925aa3a/D-011
+                # Mark this id in-flight BEFORE releasing the lock for
+                # start_conversation. Cleared atomically with frame append below;
+                # this closes the register→append window where a concurrent
+                # cleanup would otherwise evict the still-unreferenced def.
+                self._pending_push_ids.add(processed_fsm_id)
 
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             initial_context = self._build_push_context(
@@ -542,6 +559,9 @@ class API:
                     fsm_id=processed_fsm_id,
                 )
                 self.conversation_stacks[conversation_id].append(new_frame)
+                # Frame now references the def; clear the in-flight guard
+                # atomically with the append (same _stack_lock hold). See D-011.
+                self._pending_push_ids.discard(processed_fsm_id)
                 push_succeeded = True
 
             with self._stack_lock:
@@ -622,6 +642,12 @@ class API:
                 logger.debug(
                     f"Failed to clean up orphaned conversation {new_conversation_id}: {cleanup_err}"
                 )
+        # A failed push never appended a frame, so clear its in-flight guard so
+        # the id can be released below (otherwise it leaks as permanently
+        # "pending" and its temp def is never freed). See D-011.
+        if processed_fsm_id is not None:
+            with self._stack_lock:
+                self._pending_push_ids.discard(processed_fsm_id)
         self._release_unreferenced_temp_definitions()
 
     def _release_unreferenced_temp_definitions(self) -> None:
@@ -641,12 +667,17 @@ class API:
         returns None; never raises.
         """
         with self._stack_lock:
+            # DECISION plan-2026-07-21T045419-9925aa3a/D-011
+            # Treat in-flight pushes (registered temp def, frame not yet
+            # appended) as referenced. Without `| self._pending_push_ids` a
+            # cleanup racing a concurrent push evicts a def that push is about
+            # to reference — the exact register→append window H1 must survive.
             used = {
                 frame.fsm_id
                 for stack in self.conversation_stacks.values()
                 for frame in stack
                 if frame.fsm_id is not None
-            }
+            } | self._pending_push_ids
             stale = [
                 fsm_id
                 for fsm_id in self._temp_fsm_definitions

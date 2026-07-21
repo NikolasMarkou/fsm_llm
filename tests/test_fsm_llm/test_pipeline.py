@@ -717,6 +717,60 @@ class TestProcessPass2FailureIsAtomic:
         assert instance.current_state == "end"
         assert instance.context.data.get("original") == "data"
 
+    def test_pass2_failure_reverts_working_memory_and_metadata(self):
+        """H2 completeness (D-013): `context.working_memory` and `context.metadata`
+        are separate handler-mutable fields; a Pass-2 failure must revert them too,
+        not just current_state + context.data. A handler that writes a working-memory
+        buffer value and a metadata key during the turn must see both rolled back
+        when Pass 2 raises."""
+        from fsm_llm.memory import WorkingMemory
+
+        instance = _make_instance()
+        instance.context.working_memory = WorkingMemory()
+        # Pre-turn baselines: neither the buffer value nor the metadata key exist.
+        assert instance.context.working_memory.get("scratch", "turn_key") is None
+        assert "turn_meta" not in instance.context.metadata
+
+        captured = instance  # closure ref for the mutating handler
+
+        class _WmMetaMutatingHandler(BaseHandler):
+            """Writes the two separate FSMContext fields directly (the delta
+            mechanism only reaches context.data)."""
+
+            def __init__(self):
+                super().__init__(name="wm_meta_mutator", priority=100)
+
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
+                return True
+
+            def execute(self, context):
+                captured.context.working_memory.set(
+                    "scratch", "turn_key", "turn_value"
+                )
+                captured.context.metadata["turn_meta"] = "turn_value"
+                return {}
+
+        hs = HandlerSystem(error_mode="continue")
+        hs.register_handler(_WmMetaMutatingHandler())
+
+        llm = _make_mock_llm()
+        llm.generate_response.side_effect = RuntimeError("pass-2 boom")
+        pipeline = _make_pipeline(llm=llm, handler_system=hs)
+
+        with pytest.raises(RuntimeError, match="pass-2 boom"):
+            pipeline.process(instance, "Hello", "conv-1")
+
+        # The handler ran (mutated the live fields), but the Pass-2 failure must
+        # have restored the pre-turn snapshot of BOTH fields.
+        assert instance.context.working_memory.get("scratch", "turn_key") is None, (
+            "Pass-2 failure left the working_memory mutation committed"
+        )
+        assert "turn_meta" not in instance.context.metadata, (
+            "Pass-2 failure left the metadata mutation committed"
+        )
+
 
 # ══════════════════════════════════════════════════════════════
 # 6. _clean_empty_context_keys()
