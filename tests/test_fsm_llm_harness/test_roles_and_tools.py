@@ -1,0 +1,619 @@
+"""Falsifying tests for ``fsm_llm_harness.roles`` and ``fsm_llm_harness.tools``.
+
+These two modules had **zero** test references before step 7d: a ``grep`` over
+``tests/`` for ``tool_scope`` / ``READ_ONLY_TOOLS`` / ``WRITE_TOOLS`` /
+``build_role_prompt`` / ``COMMAND_ALLOWLIST`` returned nothing at all.  That is
+why review C2 -- five of the six roles ordered by their operative rules to write
+artifacts they held no write tool for -- survived 139 green tests: nothing
+tested the surface it lived on.  ``run_command`` had never been executed either,
+live or in test.
+
+===============================  ==========================================
+Class                            Decision / defect it pins
+===============================  ==========================================
+``TestToolScopeMatchesOwnership``  D-047, review C2 (scope DERIVED from
+                                   ownership, checked over all six roles)
+``TestPlanMemoryOwnership``        D-048, invariant I7 (the refusal itself)
+``TestRootsCannotCross``           D-032, D-047 (two roots, one chokepoint)
+``TestRolePromptNamesHeldTools``   review C2's other direction
+``TestShellAllowlist``             D-050, review W5
+===============================  ==========================================
+
+Deterministic and offline: every filesystem test runs under ``tmp_path``, and
+the one subprocess test executes ``cat`` on a file it just wrote.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from fsm_llm_harness.constants import ArtifactNames, ContextKeys, HarnessStates, Role
+from fsm_llm_harness.exceptions import HarnessConfinementError, HarnessOwnershipError
+from fsm_llm_harness.harness import RoleRequest
+from fsm_llm_harness.roles import (
+    ROLE_SPECS,
+    build_role_prompt,
+    get_role_spec,
+    held_tools,
+)
+from fsm_llm_harness.rules import OWNERSHIP, ROLE_BY_STATE, artifacts_writable_by
+from fsm_llm_harness.tools import (
+    COMMAND_ALLOWLIST,
+    PLAN_READ_TOOLS,
+    PLAN_WRITE_TOOLS,
+    READ_ONLY_TOOLS,
+    SHELL_TOOLS,
+    VERIFICATION_COMMANDS,
+    WRITE_TOOLS,
+    PlanMemory,
+    Workspace,
+    build_plan_tools,
+    build_workspace_tools,
+)
+
+# DECISION plan-2026-07-21T125237-191b2eb2/D-057
+# THIS FILE IS THE ANSWER TO "why did 139 green tests coexist with review C2".
+# They did not test `roles.py` or `tools.py` AT ALL: a grep over `tests/` for
+# `tool_scope` / `READ_ONLY_TOOLS` / `WRITE_TOOLS` / `build_role_prompt` /
+# `COMMAND_ALLOWLIST` returned zero hits, and line coverage was 43% / 28%.
+# Do NOT fold these classes back into `test_harness_agent.py`: the defect class
+# is per-MODULE (an untested module, not a degenerate fixture), and keeping the
+# file named after the modules is what makes the next such gap visible from the
+# directory listing. Do NOT drop the parametrisation over `HarnessStates.ALL` /
+# `Role.WORKERS` in favour of spot-checking one role either -- C2 was five of
+# six roles wrong and one right, so a spot check would have passed.
+# See decisions.md D-057.
+#: Executables that run code the EXECUTE role can author inside the workspace.
+#:
+#: ``tools.py``'s own comment claims the default allowlist "executes nothing
+#: that lives inside the workspace"; review W5 showed the claim was false while
+#: ``make`` / ``pytest`` / ``git`` were on it.  This set is the claim, written
+#: as an assertion.  A ``Makefile``, a ``conftest.py`` and ``.git/hooks/*`` are
+#: all workspace files, and an interpreter needs no file at all.
+_CODE_EXECUTING = frozenset(
+    {
+        "awk",
+        "bash",
+        "cargo",
+        "dash",
+        "env",
+        "find",
+        "git",
+        "go",
+        "gradle",
+        "java",
+        "make",
+        "mypy",
+        "node",
+        "npm",
+        "npx",
+        "perl",
+        "php",
+        "pytest",
+        "python",
+        "python3",
+        "ruby",
+        "ruff",
+        "sed",
+        "sh",
+        "tox",
+        "xargs",
+        "zsh",
+    }
+)
+
+
+#: The states whose role owns at least one artifact, and its complement.
+#:
+#: Computed rather than skipped-over inside the tests: a ``pytest.skip`` here
+#: would make "no state owns anything" and "every state owns something" both
+#: look like a clean run.  ``test_the_two_scope_families_partition_the_states``
+#: below asserts the partition is real.
+_OWNING_STATES = tuple(
+    state for state in HarnessStates.ALL if ROLE_SPECS[state].owned_artifacts
+)
+_NON_OWNING_STATES = tuple(
+    state for state in HarnessStates.ALL if not ROLE_SPECS[state].owned_artifacts
+)
+
+
+def _role_request(
+    state: str,
+    *,
+    plan_dir: Path | None,
+    workspace_root: Path | None = None,
+) -> RoleRequest:
+    """Build the ``RoleRequest`` the driver would hand this state's worker.
+
+    Interface contract (several call sites below):
+        - Uses the REAL frozen rules for *state*, not placeholder prose, so a
+          prompt assertion is made against the string a live dispatch renders.
+        - ``plan_dir=None`` reproduces the production degrade shape: no plan
+          directory means the role holds no plan-file tool at all.
+    """
+    from fsm_llm_harness.rules import get_rules
+
+    rules = get_rules(state)
+    return RoleRequest(
+        role=ROLE_BY_STATE[state],
+        state=state,
+        goal="exercise the harness protocol",
+        operative_rules=rules.operative_rules,
+        gate_summary=rules.gate_summary,
+        iteration=1,
+        step_number=1,
+        total_steps=1,
+        fix_attempts=0,
+        context={ContextKeys.GOAL: "exercise the harness protocol"},
+        plan_dir=None if plan_dir is None else str(plan_dir),
+        workspace_root=None if workspace_root is None else str(workspace_root),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tool scope vs the ownership table (review C2, D-047)
+# ---------------------------------------------------------------------------
+
+
+class TestToolScopeMatchesOwnership:
+    """Every role's tool scope is a superset of what ``OWNERSHIP`` requires.
+
+    This is the check whose ABSENCE let C2 through.  It is asserted
+    programmatically over all six roles rather than by inspecting a table,
+    because the defect was a hand-maintained scope table drifting from the
+    ownership table it was supposed to encode.
+    """
+
+    def test_every_worker_role_has_exactly_one_spec(self) -> None:
+        """The six specs and the six dispatchable roles are the same set."""
+        assert len(ROLE_SPECS) == len(HarnessStates.ALL)
+        assert {spec.role for spec in ROLE_SPECS.values()} == set(Role.WORKERS)
+
+    def test_the_two_scope_families_partition_the_states(self) -> None:
+        """Both parametrised families below are non-empty and cover all 6 states.
+
+        Without this, deleting every ``OWNERSHIP`` entry would empty one
+        family, silently collect zero tests from it, and still report green.
+        """
+        assert _OWNING_STATES and _NON_OWNING_STATES
+        assert set(_OWNING_STATES) | set(_NON_OWNING_STATES) == set(HarnessStates.ALL)
+        assert not set(_OWNING_STATES) & set(_NON_OWNING_STATES)
+
+    @pytest.mark.parametrize("state", _OWNING_STATES)
+    def test_a_role_that_owns_an_artifact_holds_a_plan_write_tool(
+        self, state: str
+    ) -> None:
+        """C2 in one assertion: ordered to write, and able to.
+
+        ``rules.py`` orders the explorer to write ``findings/<topic>.md``, the
+        plan-writer to seed ``verification.md`` and the archivist to rewrite six
+        cross-plan files.  Before D-047 only EXECUTE held any write tool, so
+        five of those instructions were unexecutable -- which is a mechanical
+        explanation for the live spike's "workspace byte-identical" result that
+        D-036/D-037 attributed to model capability.
+        """
+        spec = get_role_spec(state)
+        assert set(PLAN_WRITE_TOOLS) <= set(spec.plan_tool_scope), (
+            f"{spec.role} is granted {spec.owned_artifacts} by OWNERSHIP and "
+            f"holds no tool that can write them"
+        )
+
+    @pytest.mark.parametrize("state", _NON_OWNING_STATES)
+    def test_a_role_that_owns_nothing_holds_no_plan_write_tool(
+        self, state: str
+    ) -> None:
+        """The other direction: scope is a SUBSET of what ownership permits."""
+        spec = get_role_spec(state)
+        assert not set(PLAN_WRITE_TOOLS) & set(spec.plan_tool_scope)
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_owned_artifacts_are_exactly_the_ownership_projection(
+        self, state: str
+    ) -> None:
+        """``owned_artifacts`` is read from ``OWNERSHIP``, never restated."""
+        spec = get_role_spec(state)
+        assert spec.owned_artifacts == artifacts_writable_by(spec.role)
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_every_role_can_read_protocol_memory(self, state: str) -> None:
+        """ "Read the artifacts before acting" is the first rule almost everywhere."""
+        spec = get_role_spec(state)
+        assert set(PLAN_READ_TOOLS) <= set(spec.plan_tool_scope)
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_plan_tool_scope_names_only_registrable_tools(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        """A misspelt tool name is a silently missing capability, not an error."""
+        spec = get_role_spec(state)
+        assert set(spec.plan_tool_scope) <= set(PLAN_READ_TOOLS + PLAN_WRITE_TOOLS)
+        # Registration is the proof: `build_plan_tools` raises on an unknown name.
+        registry = build_plan_tools(
+            PlanMemory(plan_dir, role=spec.role), allowed=spec.plan_tool_scope
+        )
+        assert set(registry.tool_names) == set(spec.plan_tool_scope)
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_every_role_holds_the_read_only_workspace_tools(self, state: str) -> None:
+        """A role that can read nothing cannot do its job."""
+        assert set(READ_ONLY_TOOLS) <= set(get_role_spec(state).tool_scope)
+
+    def test_only_execute_holds_workspace_write_tools(self) -> None:
+        """Invariant I7 at the workspace root: mutation belongs to EXECUTE."""
+        holders = {
+            state
+            for state, spec in ROLE_SPECS.items()
+            if set(spec.tool_scope) & set(WRITE_TOOLS)
+        }
+        assert holders == {HarnessStates.EXECUTE}
+
+    def test_only_reflect_holds_the_shell_tool(self) -> None:
+        """Verification is the only job that needs to run a command."""
+        holders = {
+            state
+            for state, spec in ROLE_SPECS.items()
+            if set(spec.tool_scope) & set(SHELL_TOOLS)
+        }
+        assert holders == {HarnessStates.REFLECT}
+
+    @pytest.mark.parametrize("role", Role.WORKERS)
+    def test_every_owned_artifact_is_authorised_by_that_roles_plan_memory(
+        self, tmp_path: Path, role: str
+    ) -> None:
+        """The tool-layer grant and the ownership check agree, per role.
+
+        A coarse ``PLAN_WRITE_TOOLS`` grant that ``PlanMemory.authorise`` then
+        refuses would be C2 again in a subtler form: the role holds a tool it
+        can never successfully call.
+        """
+        memory = PlanMemory(tmp_path / "plans" / "plan-under-test", role=role)
+        for artifact in artifacts_writable_by(role):
+            path = (
+                f"{artifact}/probe.md"
+                if artifact
+                in (ArtifactNames.FINDINGS_DIR, ArtifactNames.CHECKPOINTS_DIR)
+                else artifact
+            )
+            assert memory.authorise(path)
+
+    @pytest.mark.parametrize("role", Role.WORKERS)
+    def test_every_unowned_artifact_is_refused_by_that_roles_plan_memory(
+        self, tmp_path: Path, role: str
+    ) -> None:
+        """And the complement: nothing outside the grant is writable."""
+        memory = PlanMemory(tmp_path / "plans" / "plan-under-test", role=role)
+        owned = set(artifacts_writable_by(role))
+        for artifact in OWNERSHIP:
+            if artifact in owned:
+                continue
+            path = (
+                f"{artifact}/probe.md"
+                if artifact
+                in (ArtifactNames.FINDINGS_DIR, ArtifactNames.CHECKPOINTS_DIR)
+                else artifact
+            )
+            with pytest.raises(HarnessOwnershipError):
+                memory.authorise(path)
+
+
+# ---------------------------------------------------------------------------
+# The ownership refusal itself (invariant I7)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanMemoryOwnership:
+    """``HarnessOwnershipError`` was raised nowhere in the codebase before 7b."""
+
+    def test_an_explorer_writes_a_finding(self, tmp_path: Path) -> None:
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.EXPLORER)
+        written = memory.write_text("findings/tool-scope.md", "evidence\n")
+
+        assert (memory.plan_dir / "findings" / "tool-scope.md").read_text() == (
+            "evidence\n"
+        )
+        assert written.endswith("findings/tool-scope.md")
+
+    def test_an_explorer_cannot_write_the_plan(self, tmp_path: Path) -> None:
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.EXPLORER)
+
+        with pytest.raises(HarnessOwnershipError) as excinfo:
+            memory.write_text(ArtifactNames.PLAN, "a plan the explorer invented")
+
+        assert ArtifactNames.PLAN in str(excinfo.value)
+        assert not (memory.plan_dir / ArtifactNames.PLAN).exists()
+
+    def test_a_refused_write_touches_nothing(self, tmp_path: Path) -> None:
+        """Authorisation happens BEFORE any I/O, so a refusal cannot truncate."""
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.PLAN_WRITER)
+        memory.write_text(ArtifactNames.PLAN, "the real plan\n")
+
+        archivist = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.ARCHIVIST)
+        with pytest.raises(HarnessOwnershipError):
+            archivist.write_text(ArtifactNames.PLAN, "")
+
+        assert (memory.plan_dir / ArtifactNames.PLAN).read_text() == "the real plan\n"
+
+    def test_a_path_that_is_not_a_protocol_artifact_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The ownership table is the WHOLE of what may be written."""
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.ARCHIVIST)
+        with pytest.raises(HarnessOwnershipError):
+            memory.write_text("notes/scratch.md", "not an artifact")
+
+    # DECISION plan-2026-07-21T125237-191b2eb2/D-058
+    # These two tests pin `PlanMemory.locate`'s addressing rule AS IT BEHAVES,
+    # not as `_classify`'s "Another plan's directory" comment reads. A bare
+    # `plan-old/summary.md` is namespaced under THIS plan, so the sibling tier
+    # is reachable only through `<my-plan-id>/../plan-old/...`. Do NOT "fix"
+    # `locate` to special-case sibling plan ids to make the first test go away:
+    # the cross-plan sliding window that would consume it has no implementation
+    # yet (step 9/11), so a friendlier rule now is designed against no caller --
+    # and this file is a test-only step. The half that IS load-bearing today,
+    # asserted below, is that the WRITE is refused however the path is spelled.
+    # See decisions.md D-058.
+    def test_a_bare_relative_path_is_namespaced_under_this_plan(
+        self, tmp_path: Path
+    ) -> None:
+        """``locate`` prefixes anything that is not this plan or a cross-plan file.
+
+        So ``plan-old/summary.md`` addresses ``<my-plan>/plan-old/summary.md``,
+        NOT the sibling plan directory -- a role cannot reach another plan by
+        guessing its name.
+        """
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.ARCHIVIST)
+        assert memory.locate(f"plan-old/{ArtifactNames.SUMMARY}") == (
+            f"plan-x/plan-old/{ArtifactNames.SUMMARY}"
+        )
+
+    def test_another_plans_directory_is_readable_but_never_writable(
+        self, tmp_path: Path
+    ) -> None:
+        """The cross-plan sliding window needs the read; nothing needs the write.
+
+        Reaching a sibling plan takes an explicit ``<my-plan-id>/../<other>``
+        path, because ``locate`` namespaces every bare relative path under this
+        plan (see the test above).  FOUND at step 7d and deliberately NOT
+        "fixed" here: the sliding window that would consume this has no
+        implementation yet (step 9/11), so a friendlier addressing rule now
+        would be designed against no caller.  What matters today is the half
+        that is load-bearing -- the write is refused however the path is
+        spelled.
+        """
+        (tmp_path / "plans" / "plan-old").mkdir(parents=True)
+        (tmp_path / "plans" / "plan-old" / ArtifactNames.SUMMARY).write_text("old\n")
+
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.ARCHIVIST)
+        sibling = f"plan-x/../plan-old/{ArtifactNames.SUMMARY}"
+
+        assert memory.read_text(sibling) == "old\n"
+        with pytest.raises(HarnessOwnershipError):
+            memory.write_text(sibling, "rewritten")
+        assert (
+            tmp_path / "plans" / "plan-old" / ArtifactNames.SUMMARY
+        ).read_text() == "old\n"
+
+    def test_the_archivist_reaches_the_cross_plan_tier(self, tmp_path: Path) -> None:
+        """Those files live BESIDE the plan directories, not inside one (D-047)."""
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.ARCHIVIST)
+        memory.write_text(ArtifactNames.LESSONS, "- a lesson [I:5]\n")
+
+        assert (tmp_path / "plans" / ArtifactNames.LESSONS).exists()
+
+
+# ---------------------------------------------------------------------------
+# Two roots, one confinement chokepoint (D-032, D-047)
+# ---------------------------------------------------------------------------
+
+
+class TestRootsCannotCross:
+    """A role must never reach one root through the other's tool."""
+
+    def test_the_two_tool_name_sets_are_disjoint(self) -> None:
+        """A shared name would make the two roots reachable interchangeably."""
+        assert not set(READ_ONLY_TOOLS + SHELL_TOOLS) & set(
+            PLAN_READ_TOOLS + PLAN_WRITE_TOOLS
+        )
+
+    def test_a_workspace_path_cannot_reach_the_plan_directory(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "plans" / "plan-x").mkdir(parents=True)
+        (tmp_path / "plans" / "plan-x" / ArtifactNames.PLAN).write_text("secret\n")
+        ws = Workspace(tmp_path / "workspace")
+
+        with pytest.raises(HarnessConfinementError):
+            ws.read_text(f"../plans/plan-x/{ArtifactNames.PLAN}")
+
+    def test_a_plan_path_cannot_reach_the_workspace(self, tmp_path: Path) -> None:
+        (tmp_path / "workspace").mkdir()
+        (tmp_path / "workspace" / "app.py").write_text("print('hi')\n")
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.EXECUTOR)
+
+        with pytest.raises(HarnessConfinementError):
+            memory.read_text("../../workspace/app.py")
+
+    @pytest.mark.parametrize(
+        "escape",
+        ["/etc/passwd", "../outside.txt", "a/../../outside.txt", "bad\x00name", "  "],
+    )
+    def test_workspace_confinement_rejects_every_escape_shape(
+        self, tmp_path: Path, escape: str
+    ) -> None:
+        ws = Workspace(tmp_path / "workspace")
+        with pytest.raises(HarnessConfinementError):
+            ws.resolve(escape)
+
+    def test_a_symlink_out_of_the_workspace_is_rejected(self, tmp_path: Path) -> None:
+        """Resolve FIRST, compare SECOND -- a lexical check passes this (D-032)."""
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("secret\n")
+        ws = Workspace(tmp_path / "workspace")
+        (ws.root / "link").symlink_to(outside)
+
+        with pytest.raises(HarnessConfinementError):
+            ws.read_text("link/secret.txt")
+
+    def test_a_sibling_root_with_a_shared_prefix_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """``/tmp/ws-evil`` startswith ``/tmp/ws``; the check is on components."""
+        (tmp_path / "ws-evil").mkdir()
+        (tmp_path / "ws-evil" / "loot.txt").write_text("loot\n")
+        ws = Workspace(tmp_path / "ws")
+
+        with pytest.raises(HarnessConfinementError):
+            ws.read_text("../ws-evil/loot.txt")
+
+
+# ---------------------------------------------------------------------------
+# The prompt names exactly the tools the dispatch holds (review C2, other way)
+# ---------------------------------------------------------------------------
+
+
+class TestRolePromptNamesHeldTools:
+    """A prompt naming a tool the role does not hold is just as unexecutable."""
+
+    @staticmethod
+    def _named_tools(prompt: str) -> tuple[str, ...]:
+        """Parse the prompt's ``TOOLS:`` line back into tool names.
+
+        Split on the rendered separator rather than substring-searching for
+        each name: ``path_exists`` is a substring of ``plan_path_exists``, so a
+        containment check would pass for a role that holds neither.
+        """
+        line = next(line for line in prompt.splitlines() if line.startswith("TOOLS: "))
+        return tuple(line[len("TOOLS: ") :].split(".")[0].split(", "))
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_prompt_names_exactly_the_held_tools(
+        self, state: str, plan_dir: Path, workspace: Path
+    ) -> None:
+        spec = get_role_spec(state)
+        request = _role_request(state, plan_dir=plan_dir, workspace_root=workspace)
+
+        prompt = build_role_prompt(request, spec)
+
+        assert self._named_tools(prompt) == held_tools(request, spec)
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_a_dispatch_without_a_plan_directory_names_no_plan_tool(
+        self, state: str
+    ) -> None:
+        spec = get_role_spec(state)
+        request = _role_request(state, plan_dir=None)
+
+        prompt = build_role_prompt(request, spec)
+
+        assert self._named_tools(prompt) == tuple(spec.tool_scope)
+        assert not set(self._named_tools(prompt)) & set(
+            PLAN_READ_TOOLS + PLAN_WRITE_TOOLS
+        )
+        assert "YOU MAY WRITE no protocol file" in prompt
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_verb_is_derived_from_the_tools_actually_registered(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        """Hardcoding "inspect and change" is what told five roles to write."""
+        spec = get_role_spec(state)
+        request = _role_request(state, plan_dir=plan_dir)
+        names = held_tools(request, spec)
+        can_write = bool(set(names) & set(PLAN_WRITE_TOOLS + WRITE_TOOLS))
+
+        prompt = build_role_prompt(request, spec)
+
+        assert ("inspect and change real files" in prompt) is can_write
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_prompt_lists_every_artifact_the_role_may_write(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        spec = get_role_spec(state)
+        prompt = build_role_prompt(_role_request(state, plan_dir=plan_dir), spec)
+
+        for artifact in spec.owned_artifacts:
+            assert artifact in prompt
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_registry_a_dispatch_gets_holds_exactly_those_tools(
+        self, state: str, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The prompt and the registry are one function's output (``held_tools``)."""
+        spec = get_role_spec(state)
+        request = _role_request(state, plan_dir=plan_dir, workspace_root=workspace)
+
+        registry = build_workspace_tools(Workspace(workspace), allowed=spec.tool_scope)
+        build_plan_tools(
+            PlanMemory(plan_dir, role=spec.role),
+            allowed=spec.plan_tool_scope,
+            registry=registry,
+        )
+
+        assert set(registry.tool_names) == set(held_tools(request, spec))
+
+
+# ---------------------------------------------------------------------------
+# The shell allowlist (D-050, review W5)
+# ---------------------------------------------------------------------------
+
+
+class TestShellAllowlist:
+    """``run_command`` had never been executed, live or in test, before 7d."""
+
+    def test_no_default_command_executes_workspace_authored_code(self) -> None:
+        """The allowlist's own comment, asserted rather than believed.
+
+        ``make`` runs a ``Makefile``, ``pytest`` imports ``conftest.py``,
+        ``git`` honours ``.git/hooks/*`` and a repo-local ``core.pager`` -- all
+        of them files the EXECUTE role can write.
+        """
+        assert not set(COMMAND_ALLOWLIST) & _CODE_EXECUTING
+
+    def test_the_verification_commands_are_opt_in_by_name(self) -> None:
+        assert not set(COMMAND_ALLOWLIST) & set(VERIFICATION_COMMANDS)
+        assert set(VERIFICATION_COMMANDS) <= _CODE_EXECUTING
+
+    def test_shell_access_is_off_by_default(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "workspace")
+        assert ws.allow_shell is False
+        with pytest.raises(Exception, match="disabled"):
+            ws.run_command(["cat", "anything"])
+
+    def test_an_allowlisted_command_runs_inside_the_root(self, tmp_path: Path) -> None:
+        """The control case: the allowlist is not simply refusing everything."""
+        ws = Workspace(tmp_path / "workspace", allow_shell=True)
+        ws.write_text("notes.txt", "hello from the workspace\n")
+
+        result = ws.run_command(["cat", "notes.txt"])
+
+        assert result.success is True
+        assert "hello from the workspace" in result.result
+
+    def test_a_non_allowlisted_executable_is_refused_even_with_shell_on(
+        self, tmp_path: Path
+    ) -> None:
+        ws = Workspace(tmp_path / "workspace", allow_shell=True)
+        with pytest.raises(Exception, match="not allowlisted"):
+            ws.run_command(["python", "-c", "print(1)"])
+
+    def test_a_path_qualified_executable_is_refused(self, tmp_path: Path) -> None:
+        """``/bin/sh`` must not slip past a basename allowlist."""
+        ws = Workspace(tmp_path / "workspace", allow_shell=True)
+        with pytest.raises(Exception, match="bare executable name"):
+            ws.run_command(["/bin/cat", "notes.txt"])
+
+    def test_the_subprocess_environment_carries_no_parent_secrets(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """An API key in the parent process is not the workspace's to hand on."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-should-never-cross")
+        ws = Workspace(tmp_path / "workspace", allow_shell=True)
+
+        env = ws._command_env()
+
+        assert "OPENAI_API_KEY" not in env
+        assert set(env) == {"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"}

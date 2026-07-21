@@ -16,24 +16,44 @@ Class                            Decision it pins
 ``TestFailureSurvival``          worker-raises / degrade paths
 ``TestFailClosed``               invariant I8 at the driver allowlist
 ``TestContextCaps``              D-020 (prompt-size caps)
+``TestExtractionCannotOpenAGate``  D-044, criterion 18 (writer provenance)
+``TestDriverOwnedTable``         D-044, D-053 (the seed/revert mechanisms)
+``TestEntryBookkeeping``         D-044 / review W4 (flags cleared on entry)
+``TestRoutingExclusivity``       D-044 (the two-layer ranking)
+``TestLeashIsBounded``           D-051, D-052 (review C3, both escapes)
+``TestSingleRunPerInstance``     D-055 (review W7)
 ===============================  ==========================================
 
 Everything runs against ``MockLLM2Interface``: no network, no sleeps, no
-ollama.  The mock extracts nothing (every field comes back ``None``), so the
-protocol advances only through worker replies and driver bookkeeping -- which
-is precisely the surface under test.
+ollama.  By DEFAULT the mock extracts nothing, so the protocol advances only
+through worker replies and driver bookkeeping.  That default is a deliberate
+choice, not an accident (decisions.md D-056): the fabricating LLM -- the second
+writer into gate context, and the one review C4 found the whole suite had
+mocked into silence -- is a first-class fixture axis instead, exercised by
+``TestExtractionCannotOpenAGate`` over EVERY driver-owned key.
 """
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
 
+from fsm_llm.handlers import HandlerTiming
 from fsm_llm_agents.definitions import AgentResult
 from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_harness.constants import ContextKeys, GateSlug, HarnessStates, Role
-from fsm_llm_harness.exceptions import HarnessReentrancyError
+from fsm_llm_harness import harness as harness_module
+from fsm_llm_harness.constants import (
+    DRIVER_OWNED_SEEDS,
+    DRIVER_OWNED_UNSET,
+    ContextKeys,
+    GateSlug,
+    HandlerNames,
+    HarnessStates,
+    Role,
+)
+from fsm_llm_harness.exceptions import HarnessError, HarnessReentrancyError
 from fsm_llm_harness.harness import HarnessAgent, RoleRequest
 from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm_harness.conftest import (
@@ -41,6 +61,7 @@ from tests.test_fsm_llm_harness.conftest import (
     APPROVAL_GATES,
     APPROVAL_LEASH,
     APPROVAL_PLAN,
+    FABRICATED_DRIVER_OWNED,
     ApprovalRecorder,
     RecordingWorker,
 )
@@ -73,6 +94,27 @@ def _failing_execute_script(*, total_steps: int = 1) -> dict[str, Any]:
     #: between a completion fix and a leash halt, which is what is under test.
     script[HarnessStates.REFLECT] = {"ctx": {}}
     return script
+
+
+def _all_failing_script() -> dict[str, Any]:
+    """Every dispatch fails -- the live spike's measured 6/6 shape.
+
+    With no successful worker anywhere, the driver's own value for every
+    driver-owned key is exactly its seed, which is what makes
+    ``TestExtractionCannotOpenAGate``'s assertions exact rather than
+    approximate.
+    """
+    return {state: {"success": False, "ctx": {}} for state in HarnessStates.ALL}
+
+
+def _is_exactly(value: Any, expected: Any) -> bool:
+    """Same runtime type AND equal -- ``False == 0`` must not pass for an int.
+
+    Mirrors the driver's own ``_exactly``; stated here rather than imported so
+    a regression that loosens the driver's comparison cannot loosen the test's
+    at the same time.
+    """
+    return type(value) is type(expected) and bool(value == expected)
 
 
 def _occupancies(calls: list[Call]) -> list[list[Call]]:
@@ -477,7 +519,16 @@ class TestIterationAccounting:
 
 
 class TestApprovals:
-    """The callback is consulted at every gate, and the default denies."""
+    """The callback is consulted at every gate, and the default denies.
+
+    TIGHTENED at step 7d.  Five assertions here read
+    ``final_context.get(key) is not True``, which is satisfied by an ABSENT key
+    -- and an absent gate flag is precisely the pre-7a state in which the FSM's
+    own Pass-1 extraction was asked to invent one (review C1).  Since D-044
+    every driver-owned flag is present-and-falsy from turn 1, so the assertions
+    are now ``final_context[key] is False``: a regression that deletes a flag
+    instead of clearing it fails here rather than passing quietly.
+    """
 
     def test_approval_gate_names_are_stable(self) -> None:
         """Consumer callbacks branch on these strings; a rename breaks them."""
@@ -493,7 +544,7 @@ class TestApprovals:
         result = agent.run("unattended goal")
 
         assert worker.count_for(HarnessStates.EXECUTE) == 0
-        assert result.final_context.get(ContextKeys.PLAN_APPROVED) is not True
+        assert result.final_context[ContextKeys.PLAN_APPROVED] is False
         assert result.success is False
 
     def test_plan_gate_consults_the_callback(self, make_harness) -> None:
@@ -539,7 +590,7 @@ class TestApprovals:
 
         assert harness.approvals.count(APPROVAL_CLOSE) >= 1
         assert harness.worker.count_for(HarnessStates.CLOSE) == 0
-        assert result.final_context.get(ContextKeys.CLOSE_CONFIRMED) is not True
+        assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is False
 
     def test_the_three_gates_are_distinguishable_by_tool_name(
         self, make_harness
@@ -564,7 +615,7 @@ class TestApprovals:
 
         assert approvals.count(APPROVAL_PLAN) >= 1
         assert harness.worker.count_for(HarnessStates.EXECUTE) == 0
-        assert result.final_context.get(ContextKeys.PLAN_APPROVED) is not True
+        assert result.final_context[ContextKeys.PLAN_APPROVED] is False
 
     @pytest.mark.parametrize(
         "key", [ContextKeys.PLAN_APPROVED, ContextKeys.CLOSE_CONFIRMED]
@@ -585,7 +636,7 @@ class TestApprovals:
         harness = make_harness(script, approvals=ApprovalRecorder(default=False))
         result = harness.run()
 
-        assert result.final_context.get(key) is not True
+        assert result.final_context[key] is False
         assert harness.worker.count_for(HarnessStates.EXECUTE) == 0
 
 
@@ -791,6 +842,10 @@ class TestFailClosed:
     would satisfy ``>= 3`` if it ever reached context (see
     ``test_fsm_definition.py::TestGateTypeGuardBoundary``).  It never does:
     ``_WORKER_WRITABLE`` drops a value whose runtime type is not exactly right.
+
+    TIGHTENED at step 7d for the same reason as :class:`TestApprovals`: an
+    ``is not True`` assertion is satisfied by an absent key, which is the one
+    state the driver must never be in.
     """
 
     @pytest.mark.parametrize(
@@ -836,7 +891,7 @@ class TestFailClosed:
         result = harness.run()
 
         assert harness.worker.count_for(HarnessStates.CLOSE) == 0
-        assert result.final_context.get(ContextKeys.ALL_CRITERIA_PASS) is not True
+        assert result.final_context[ContextKeys.ALL_CRITERIA_PASS] is False
 
     def test_reflect_routing_flags_stay_mutually_exclusive(self, make_harness) -> None:
         """A greedy verifier setting every routing flag must pick exactly one.
@@ -984,3 +1039,666 @@ class TestFilesystemRootsInContext:
         for request in harness.worker.requests:
             assert request.context[ContextKeys.PLAN_DIR] == str(plan_dir)
             assert request.context[ContextKeys.WORKSPACE_ROOT] == str(workspace)
+
+
+# ---------------------------------------------------------------------------
+# Writer provenance (success criterion 18, D-044) -- review C1 and C4
+# ---------------------------------------------------------------------------
+
+
+class TestExtractionCannotOpenAGate:
+    """The FSM's own Pass-1 extraction may not write ANY driver-owned key.
+
+    This class exists because 139 green tests coexisted with a run that
+    traversed EXPLORE -> PLAN -> EXECUTE -> REFLECT -> CLOSE on hallucinated
+    gate flags while every worker failed and a DENYING approval callback was
+    never consulted once (findings/review-iter-1.md C1).  The suite could not
+    see it: every fixture built ``MockLLM2Interface()`` with no extraction data,
+    so the second writer into gate context was inert in 100% of the suite (C4).
+
+    Parametrisation is over the driver-owned TABLES, not over a list of key
+    names typed out here.  Review C1 enumerated nine writable flags; step 7a's
+    fix covers twenty-one keys; a hand-written list would have gone stale
+    between those two sentences.
+    """
+
+    @pytest.mark.parametrize("key", sorted(DRIVER_OWNED_SEEDS))
+    def test_a_seeded_key_keeps_its_seed(self, make_harness, key: str) -> None:
+        """A fabricated value for a seeded key never reaches ``final_context``.
+
+        The mechanism is PRESENCE: a key that is already non-``None`` in
+        context is skipped by ``_execute_data_extraction`` entirely, so it
+        never enters ``extracted_data`` and therefore never reaches the
+        transition evaluator through the payload copy no handler can clean.
+        """
+        harness = make_harness(
+            _all_failing_script(),
+            extraction_data={key: FABRICATED_DRIVER_OWNED[key]},
+            approvals=ApprovalRecorder(default=False),
+        )
+        result = harness.run()
+
+        assert _is_exactly(result.final_context.get(key), DRIVER_OWNED_SEEDS[key]), (
+            f"the LLM moved driver-owned '{key}' off its seed: "
+            f"{result.final_context.get(key)!r}"
+        )
+
+    @pytest.mark.parametrize("key", sorted(DRIVER_OWNED_UNSET))
+    def test_an_unset_key_never_takes_the_fabricated_value(
+        self, make_harness, key: str
+    ) -> None:
+        """A key whose default is ABSENCE cannot be conjured out of prose.
+
+        ``halt_reason`` is the one the user is shown as the run's outcome
+        (review N4), and ``plan_dir`` selects the directory a role's write
+        tools are confined to -- a fabricated one re-points the protocol's own
+        memory.
+        """
+        harness = make_harness(
+            _all_failing_script(),
+            extraction_data={key: FABRICATED_DRIVER_OWNED[key]},
+            approvals=ApprovalRecorder(default=False),
+        )
+        result = harness.run()
+
+        assert result.final_context.get(key) != FABRICATED_DRIVER_OWNED[key]
+
+    def test_every_driver_owned_key_at_once_leaves_the_run_in_explore(
+        self, make_harness
+    ) -> None:
+        """Success criterion 18, verbatim, as one end-to-end run.
+
+        A fabricating LLM + a worker that fails every dispatch + a callback
+        that denies everything: the run must not leave EXPLORE, the two human
+        gate flags must stay falsy, and the callback must be consulted ZERO
+        times -- because a denied gate and an un-asked gate are the two shapes
+        review C1 found indistinguishable in the shipped driver.
+        """
+        harness = make_harness(
+            _all_failing_script(),
+            extraction_data=FABRICATED_DRIVER_OWNED,
+            approvals=ApprovalRecorder(default=False),
+        )
+        result = harness.run()
+
+        assert harness.worker.states == [HarnessStates.EXPLORE]
+        assert result.final_context[ContextKeys.PLAN_APPROVED] is False
+        assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is False
+        assert result.final_context[ContextKeys.ITERATION] == 0
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
+        assert harness.approvals.requests == []
+        assert result.success is False
+
+    # DECISION plan-2026-07-21T125237-191b2eb2/D-056
+    # A MUTATION test, and it is what keeps the class above from being vacuous.
+    # Do NOT delete it as "a test that asserts broken behaviour": every other
+    # test here passes just as well against the DEGENERATE fixture review C4
+    # found (`MockLLM2Interface()` with no extraction data, where the second
+    # writer is silent), and the only way to tell the two apart is to remove
+    # the mechanism and watch the gate open. Do NOT weaken it to monkeypatch
+    # the CONTEXT_UPDATE guard instead: step 7a measured that the guard alone
+    # does not hold at all, so patching it out changes nothing and the test
+    # would silently stop proving anything. See decisions.md D-056.
+    def test_seeding_is_what_holds_the_gate(self, make_harness, monkeypatch) -> None:
+        """Anti-vacuity: with seeding removed, the SAME fixture opens the gate.
+
+        This is the RED half of the test above, committed rather than run once
+        by hand, because C4's whole lesson is that a green assertion proves
+        nothing until you have seen it fail.  It also pins WHICH mechanism
+        holds: step 7a measured that the review's proposed ``CONTEXT_UPDATE``
+        guard does not hold on its own (``MessagePipeline`` hands the
+        transition evaluator a second copy of the extraction payload that no
+        handler at any timing can reach), so the guard stays registered here
+        and the gate opens anyway.
+        """
+        monkeypatch.setattr(harness_module, "DRIVER_OWNED_SEEDS", {})
+
+        harness = make_harness(
+            _all_failing_script(),
+            extraction_data=FABRICATED_DRIVER_OWNED,
+            approvals=ApprovalRecorder(default=False),
+        )
+        result = harness.run()
+
+        assert HarnessStates.PLAN in harness.worker.states, (
+            "unseeded, a fabricated findings_count should still open "
+            "EXPLORE -> PLAN; if it no longer does, this test is asserting "
+            "the wrong mechanism and the one above may be vacuous"
+        )
+        assert (
+            result.final_context[ContextKeys.FINDINGS_COUNT]
+            == (FABRICATED_DRIVER_OWNED[ContextKeys.FINDINGS_COUNT])
+        )
+
+    def test_the_filesystem_roots_stay_the_callers(self, make_harness, roots) -> None:
+        """A fabricated root cannot re-point the protocol's own memory."""
+        harness = make_harness(
+            _all_failing_script(),
+            extraction_data=FABRICATED_DRIVER_OWNED,
+            approvals=ApprovalRecorder(default=False),
+            roots=roots,
+        )
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.PLAN_DIR] == roots[ContextKeys.PLAN_DIR]
+        assert (
+            result.final_context[ContextKeys.WORKSPACE_ROOT]
+            == roots[ContextKeys.WORKSPACE_ROOT]
+        )
+        assert harness.worker.requests
+        for request in harness.worker.requests:
+            assert request.plan_dir == roots[ContextKeys.PLAN_DIR]
+            assert request.workspace_root == roots[ContextKeys.WORKSPACE_ROOT]
+
+    def test_a_fabricated_root_does_not_appear_when_none_was_supplied(
+        self, make_harness
+    ) -> None:
+        """No plan directory means NO plan directory, not one the model chose.
+
+        ``RoleRequest.plan_dir is None`` is what tells a worker factory to hand
+        the role no plan-file tools at all; a fabricated string there would
+        confine those tools to a path the caller never authorised.
+        """
+        harness = make_harness(
+            _all_failing_script(),
+            extraction_data=FABRICATED_DRIVER_OWNED,
+            approvals=ApprovalRecorder(default=False),
+        )
+        result = harness.run()
+
+        assert ContextKeys.PLAN_DIR not in result.final_context
+        assert ContextKeys.WORKSPACE_ROOT not in result.final_context
+        assert all(request.plan_dir is None for request in harness.worker.requests)
+
+    def test_a_worker_written_halt_reason_still_survives(self, make_harness) -> None:
+        """The control case for review N4: the DRIVER's writer is not blocked.
+
+        ``halt_reason`` is driver-owned, but CLOSE's worker allowlist grants it
+        -- so a value that arrives through the allowlist must reach the answer,
+        while the identical value arriving from prose must not.  Without this
+        control, the test above would pass just as well if the guard deleted
+        ``halt_reason`` unconditionally.
+        """
+        script = _traverse_script()
+        script[HarnessStates.CLOSE] = {
+            "ctx": {ContextKeys.HALT_REASON: "archivist closed the plan"}
+        }
+
+        harness = make_harness(script, extraction_data=FABRICATED_DRIVER_OWNED)
+        result = harness.run()
+
+        assert (
+            result.final_context[ContextKeys.HALT_REASON] == "archivist closed the plan"
+        )
+        assert result.answer == "archivist closed the plan"
+
+
+class TestDriverOwnedTable:
+    """The three mechanisms that keep a driver-owned key present and correct.
+
+    Seeding is enforcement; these are what keep the seeds in place
+    (decisions.md D-044) and what makes the two dispatch call sites agree about
+    deletion (D-053, review W3).
+    """
+
+    @pytest.fixture
+    def halted(self, make_harness) -> Any:
+        """A driver whose run halted in EXPLORE, so every key is at its seed."""
+        harness = make_harness(
+            _all_failing_script(), approvals=ApprovalRecorder(default=False)
+        )
+        harness.run()
+        return harness
+
+    def test_the_guard_is_registered_at_both_timings(self, halted) -> None:
+        """PRE_PROCESSING is the enforcement; CONTEXT_UPDATE is the cleanup.
+
+        Dropping the PRE_PROCESSING half as "redundant" is exactly the fix the
+        review proposed and step 7a measured to be insufficient.
+        """
+        handlers = halted.agent.api.handler_system.handlers
+        guard = next(h for h in handlers if h.name == HandlerNames.EXTRACTION_GUARD)
+
+        assert guard.timings == {
+            HandlerTiming.PRE_PROCESSING,
+            HandlerTiming.CONTEXT_UPDATE,
+        }
+        assert guard.priority < min(
+            h.priority for h in handlers if h.name != HandlerNames.EXTRACTION_GUARD
+        )
+
+    @pytest.mark.parametrize("key", sorted(DRIVER_OWNED_SEEDS))
+    def test_the_guard_restores_a_seeded_key(self, halted, key: str) -> None:
+        """Whatever the LLM wrote, the driver's value wins."""
+        delta = halted.agent._reassert_driver_owned({key: FABRICATED_DRIVER_OWNED[key]})
+        assert _is_exactly(delta[key], DRIVER_OWNED_SEEDS[key])
+
+    @pytest.mark.parametrize("key", sorted(DRIVER_OWNED_UNSET))
+    def test_the_guard_deletes_an_unset_key(self, halted, key: str) -> None:
+        """``None`` in a handler delta means DELETE; absence is the default."""
+        delta = halted.agent._reassert_driver_owned({key: FABRICATED_DRIVER_OWNED[key]})
+        assert delta[key] is None
+
+    def test_the_guard_is_silent_when_the_llm_wrote_nothing(self, halted) -> None:
+        """The normal path costs nothing: no delta, no log, no churn."""
+        context = {
+            key: value
+            for key, value in halted.agent._driver_owned.items()
+            if value is not None
+        }
+        assert halted.agent._reassert_driver_owned(context) == {}
+
+    @pytest.mark.parametrize("key", sorted(DRIVER_OWNED_SEEDS))
+    def test_apply_coerces_a_none_delta_on_a_seeded_key_to_its_seed(
+        self, halted, key: str
+    ) -> None:
+        """A seeded key can be RESET, never deleted -- deleted means extractable.
+
+        Reproduced at step 7a: with the pre-7a ``plan_approved: None`` clear on
+        PLAN entry restored, a fabricating LLM opened PLAN -> EXECUTE even with
+        the guard handler registered.
+        """
+        updates: dict[str, Any] = {}
+        working: dict[str, Any] = {key: FABRICATED_DRIVER_OWNED[key]}
+
+        halted.agent._apply(updates, working, {key: None})
+
+        assert _is_exactly(updates[key], DRIVER_OWNED_SEEDS[key])
+        assert _is_exactly(working[key], DRIVER_OWNED_SEEDS[key])
+
+    @pytest.mark.parametrize("key", sorted(DRIVER_OWNED_UNSET))
+    def test_apply_records_an_unset_key_as_absent(self, halted, key: str) -> None:
+        """The other half of the one deletion convention (D-053)."""
+        updates: dict[str, Any] = {}
+        working: dict[str, Any] = {key: "something"}
+
+        halted.agent._apply(updates, working, {key: None})
+
+        assert updates[key] is None
+        assert key not in working
+        assert halted.agent._driver_owned[key] is None
+
+    @pytest.mark.parametrize(
+        ("key", "expected_writable"),
+        [
+            (ContextKeys.PLAN_APPROVED, True),  # seeded: coerced, so writable
+            (ContextKeys.HALT_REASON, False),  # unset: dropped, deleted by the guard
+        ],
+    )
+    def test_both_dispatch_call_sites_agree_about_a_cleared_key(
+        self, halted, key: str, expected_writable: bool
+    ) -> None:
+        """W3: the entry path and the loop path clear a flag the same way.
+
+        The entry path returns its delta as a handler result, where ``None``
+        deletes.  The loop path goes through ``API.update_context``, which
+        cannot delete -- so the two agree only because ``_apply`` coerces a
+        seeded key first and records an unset one as absent for the
+        PRE_PROCESSING guard to remove.
+        """
+        updates: dict[str, Any] = {}
+        halted.agent._apply(updates, {}, {key: None})
+        writable = halted.agent._writable_updates(updates)
+
+        assert (key in writable) is expected_writable
+        assert halted.agent._driver_owned[key] == updates[key]
+
+    def test_writable_updates_warns_about_a_foreign_key_it_cannot_clear(
+        self, halted, captured_logs
+    ) -> None:
+        """A non-driver-owned deletion is dropped LOUDLY, not silently.
+
+        Silently dropping a ``None`` for ANY key with no record that it had
+        done so is exactly the review W3 defect; the warning is what makes a
+        future producer of such a delta notice.
+        """
+        writable = halted.agent._writable_updates({"some_foreign_key": None})
+
+        assert writable == {}
+        assert any(
+            "some_foreign_key" in line and "cannot delete" in line
+            for line in captured_logs
+        ), captured_logs
+
+
+class TestEntryBookkeeping:
+    """A routing flag is cleared where it is CONSUMED (D-044, review W4).
+
+    Without this, one hallucinated ``needs_explore=True`` survived for the rest
+    of the run and silently won REFLECT routing at priority 600 on every later
+    visit.  Every clear writes ``False``, never ``None``: an absent flag is an
+    extractable flag.
+    """
+
+    @pytest.mark.parametrize(
+        ("state", "cleared"),
+        [
+            (HarnessStates.EXPLORE, (ContextKeys.NEEDS_EXPLORE,)),
+            (
+                HarnessStates.PLAN,
+                (ContextKeys.PLAN_APPROVED, ContextKeys.PIVOT_RESOLVED),
+            ),
+            (
+                HarnessStates.EXECUTE,
+                (ContextKeys.EXECUTE_COMPLETE, ContextKeys.COMPLETION_FIX),
+            ),
+            (HarnessStates.REFLECT, (ContextKeys.EXECUTE_COMPLETE,)),
+            (
+                HarnessStates.PIVOT,
+                (
+                    ContextKeys.COMPLETION_FIX,
+                    ContextKeys.NEEDS_PIVOT,
+                    ContextKeys.FIX_ATTEMPTS,
+                    ContextKeys.LEASH_GRANTS,
+                ),
+            ),
+        ],
+    )
+    def test_entry_clears_the_flags_that_state_consumes(
+        self, make_harness, state: str, cleared: tuple[str, ...]
+    ) -> None:
+        harness = make_harness()
+        poisoned = dict.fromkeys(cleared, True)
+
+        updates = harness.agent._entry_bookkeeping(state, poisoned)
+
+        for key in cleared:
+            assert key in updates, f"entering {state} must clear {key}"
+            assert updates[key] in (False, 0)
+            assert updates[key] is not None, (
+                f"{key} cleared with None on {state} entry -- an absent flag "
+                "is an extractable flag (D-044)"
+            )
+
+    def test_both_leash_counters_reset_together_on_pivot(self, make_harness) -> None:
+        """D-052: ``fix_attempts`` alone is the escape review C3(b) reproduced."""
+        harness = make_harness()
+        updates = harness.agent._entry_bookkeeping(
+            HarnessStates.PIVOT,
+            {ContextKeys.FIX_ATTEMPTS: 2, ContextKeys.LEASH_GRANTS: 2},
+        )
+        assert updates[ContextKeys.FIX_ATTEMPTS] == 0
+        assert updates[ContextKeys.LEASH_GRANTS] == 0
+
+
+class TestRoutingExclusivity:
+    """Two precedence layers, both load-bearing (D-044)."""
+
+    @staticmethod
+    def _rank(written: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        return HarnessAgent._enforce_routing_exclusivity(written, context)
+
+    def test_nothing_true_anywhere_is_a_no_op(self) -> None:
+        assert self._rank({}, {}) == {}
+
+    def test_a_fresh_verdict_outranks_a_flag_lying_in_context(self) -> None:
+        """The trap step 7a hit: ``completion_fix`` outranks ``needs_pivot``.
+
+        The executor sets ``completion_fix`` on its way OUT of a failed step,
+        so at every REFLECT entry after a failure it is ALREADY true.  A merged
+        scan ranked by flag order therefore makes a verifier's explicit PIVOT
+        verdict unreachable -- which is the exact swallowing this function
+        exists to prevent.
+        """
+        delta = self._rank(
+            {ContextKeys.NEEDS_PIVOT: True},
+            {ContextKeys.COMPLETION_FIX: True, ContextKeys.NEEDS_PIVOT: True},
+        )
+        assert delta[ContextKeys.COMPLETION_FIX] is False
+        assert ContextKeys.NEEDS_PIVOT not in delta
+
+    def test_a_stale_flag_still_loses_to_flag_order_within_its_layer(self) -> None:
+        delta = self._rank(
+            {},
+            {ContextKeys.NEEDS_PIVOT: True, ContextKeys.COMPLETION_FIX: True},
+        )
+        assert delta[ContextKeys.NEEDS_PIVOT] is False
+        assert ContextKeys.COMPLETION_FIX not in delta
+
+    def test_a_stale_flag_is_ranked_at_all_when_the_worker_sets_none(self) -> None:
+        """W4: exclusivity runs over the MERGED view, not the worker delta.
+
+        Before step 7a this ran only inside ``_apply_role_result``, i.e. only
+        for worker-written flags, so a stale flag was never even examined.
+        """
+        delta = self._rank({}, {ContextKeys.NEEDS_EXPLORE: True})
+        assert delta[ContextKeys.COMPLETION_FIX] is False
+        assert delta[ContextKeys.NEEDS_PIVOT] is False
+
+    def test_losers_are_cleared_to_false_never_to_none(self) -> None:
+        delta = self._rank({ContextKeys.COMPLETION_FIX: True}, {})
+        assert delta
+        assert all(value is False for value in delta.values())
+
+    def test_it_runs_on_a_failed_reflect_dispatch_too(self, make_harness) -> None:
+        """End-to-end: a stale flag is ranked even when the verifier fails."""
+        script = _traverse_script()
+        script[HarnessStates.EXECUTE] = {"success": False, "ctx": {}}
+        script[HarnessStates.REFLECT] = {"success": False, "ctx": {}}
+
+        harness = make_harness(
+            script, approvals=ApprovalRecorder({APPROVAL_LEASH: False})
+        )
+        result = harness.run()
+
+        live = [
+            key
+            for key in (
+                ContextKeys.COMPLETION_FIX,
+                ContextKeys.NEEDS_PIVOT,
+                ContextKeys.NEEDS_EXPLORE,
+            )
+            if result.final_context.get(key) is True
+        ]
+        assert len(live) <= 1, f"multiple routing flags survived: {live}"
+
+
+# ---------------------------------------------------------------------------
+# The leash is bounded in both directions (D-051 / D-052, review C3)
+# ---------------------------------------------------------------------------
+
+
+class TestLeashIsBounded:
+    """Neither a raising worker nor an approving human can escape the leash."""
+
+    @staticmethod
+    def _script(*, raises: bool) -> dict[str, Any]:
+        """A traverse whose executor fails the same way twice over."""
+        script = _traverse_script()
+        script[HarnessStates.EXECUTE] = (
+            {"raises": RuntimeError("executor exploded")}
+            if raises
+            else {"success": False, "ctx": {}}
+        )
+        script[HarnessStates.REFLECT] = {"ctx": {}}
+        return script
+
+    def test_a_raising_executor_spends_attempts_exactly_like_a_failing_one(
+        self, make_harness
+    ) -> None:
+        """C3(a): ``result is None`` collapsed two DIFFERENT events into one.
+
+        Measured before the fix: an executor that raised on every dispatch
+        spent ZERO attempts, emitted no ``leash-cap`` slug and held EXECUTE
+        until the stall halt -- the leash did not engage at all on the loudest
+        possible failure.  ``_record_role_result`` had always recorded the same
+        event as ``success=False``, so two writers read one condition in
+        opposite directions.
+        """
+        outcomes = {}
+        for label in ("raises", "returns-false"):
+            harness = make_harness(
+                self._script(raises=label == "raises"),
+                approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            )
+            result = harness.run()
+            outcomes[label] = (
+                harness.worker.count_for(HarnessStates.EXECUTE),
+                result.final_context[ContextKeys.FIX_ATTEMPTS],
+                result.final_context[ContextKeys.LAST_GATE_SLUG],
+            )
+
+        assert outcomes["raises"] == outcomes["returns-false"]
+        assert outcomes["raises"] == (2, 2, GateSlug.LEASH_CAP)
+
+    def test_no_worker_configured_spends_nothing(self, make_harness) -> None:
+        """The other side of D-051: nothing attempted, nothing spent.
+
+        A raising worker is a genuine failed attempt; ``worker_factory=None``
+        is the D-045 diagnostic mode and must advance nothing.
+        """
+        harness = make_harness(worker=None)
+        result = harness.run()
+        assert result.final_context[ContextKeys.FIX_ATTEMPTS] == 0
+
+    @pytest.mark.parametrize(
+        ("max_fix_attempts", "max_leash_grants"),
+        [(2, 0), (2, 2), (2, 3), (1, 1), (3, 1)],
+    )
+    def test_an_always_approving_callback_still_terminates_on_the_bound(
+        self, make_harness, max_fix_attempts: int, max_leash_grants: int
+    ) -> None:
+        """C3(b): the property the counter buys, over several configurations.
+
+        With an always-approving callback -- which is this suite's OWN default
+        -- and an always-failing executor, resetting ``fix_attempts`` on every
+        grant cycled EXECUTE <-> REFLECT until ``BudgetExhaustedError``: the
+        cap the callback saw was infinite.  Executor dispatches on ONE plan
+        step are now bounded by ``max_fix_attempts * (1 + max_leash_grants)``
+        for ANY sequence of approvals.
+        """
+        harness = make_harness(
+            self._script(raises=False),
+            approvals=ApprovalRecorder(default=True),
+            max_fix_attempts=max_fix_attempts,
+            max_leash_grants=max_leash_grants,
+        )
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXECUTE) == (
+            max_fix_attempts * (1 + max_leash_grants)
+        )
+        assert harness.approvals.count(APPROVAL_LEASH) == max_leash_grants
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
+        assert result.success is False
+
+    def test_a_grant_resets_fix_attempts_but_never_leash_grants(
+        self, make_harness
+    ) -> None:
+        """The two halves of the per-step budget are NOT one fact here.
+
+        ``fix_attempts`` must reset (explicit user direction buys another pair
+        of attempts); ``leash_grants`` must not (it is what bounds the asking).
+        """
+        harness = make_harness(
+            self._script(raises=False), approvals=ApprovalRecorder(default=True)
+        )
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.LEASH_GRANTS] == (
+            harness.agent.max_leash_grants
+        )
+        assert result.final_context[ContextKeys.FIX_ATTEMPTS] == (
+            harness.agent.max_fix_attempts
+        )
+
+    def test_the_driver_stops_asking_once_the_grant_budget_is_spent(
+        self, make_harness
+    ) -> None:
+        """An approval whose answer would be discarded is theatre."""
+        harness = make_harness(
+            self._script(raises=False),
+            approvals=ApprovalRecorder(default=True),
+            max_leash_grants=1,
+        )
+        result = harness.run()
+
+        assert harness.approvals.count(APPROVAL_LEASH) == 1
+        assert "already been continued" in result.answer
+
+    def test_the_callback_cannot_reach_the_grant_counter(self, make_harness) -> None:
+        """The callback gets a SUMMARY of the context and returns a bool.
+
+        A callback that mutates everything it is handed must not be able to buy
+        itself more grants -- the counter is driver-owned, and the FSM's own
+        extraction cannot invent it either (pinned separately by
+        ``TestExtractionCannotOpenAGate``).  ``ApprovalRequest`` carries
+        ``parameters`` and ``context_summary``, both of which are built
+        per-gate and never merged back, so this asserts a structural property
+        rather than a promise.
+        """
+
+        class Saboteur(ApprovalRecorder):
+            def __call__(self, request: Any) -> bool:
+                for target in (request.parameters, request.context_summary):
+                    target[ContextKeys.LEASH_GRANTS] = 0
+                    target[ContextKeys.FIX_ATTEMPTS] = 0
+                return super().__call__(request)
+
+        harness = make_harness(
+            self._script(raises=False), approvals=Saboteur(default=True)
+        )
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXECUTE) == (
+            harness.agent.max_fix_attempts * (1 + harness.agent.max_leash_grants)
+        )
+        assert result.final_context[ContextKeys.LEASH_GRANTS] == (
+            harness.agent.max_leash_grants
+        )
+
+
+# ---------------------------------------------------------------------------
+# One run per instance (D-055, review W7)
+# ---------------------------------------------------------------------------
+
+
+class TestSingleRunPerInstance:
+    """Concurrent runs on ONE instance corrupt each other, so they are refused.
+
+    ``_api``, ``_conversation_id``, ``_stall_turns``, ``_stall_signature`` and
+    ``_driver_owned`` are plain instance attributes rewritten by every run.
+    D-014's ``threading.local`` covers the re-entrancy FLAG, not this state --
+    and being thread-scoped it cannot see the corrupting case at all, which is
+    why the second run below is started on a SECOND thread.
+    """
+
+    def test_a_second_concurrent_run_raises(self, make_harness) -> None:
+        first_dispatch = threading.Event()
+        second_finished = threading.Event()
+        failures: list[BaseException] = []
+
+        def blocking_worker(request: RoleRequest) -> AgentResult:
+            first_dispatch.set()
+            second_finished.wait(timeout=10)
+            return AgentResult(answer="ok", success=False, final_context={})
+
+        harness = make_harness(worker=blocking_worker)
+
+        def second_run() -> None:
+            try:
+                first_dispatch.wait(timeout=10)
+                harness.agent.run("concurrent goal")
+            except BaseException as exc:
+                failures.append(exc)
+            finally:
+                second_finished.set()
+
+        thread = threading.Thread(target=second_run, daemon=True)
+        thread.start()
+        result = harness.run()
+        thread.join(timeout=10)
+
+        assert not thread.is_alive()
+        assert len(failures) == 1
+        assert isinstance(failures[0], HarnessError)
+        assert "already in flight" in str(failures[0])
+        assert result.success is False
+
+    def test_the_lock_is_released_so_the_instance_is_reusable(
+        self, make_harness
+    ) -> None:
+        """Sequential reuse must still work; the lock is per-run, not per-life."""
+        harness = make_harness(_traverse_script())
+        assert harness.run().success is True
+        assert harness.run("second goal").success is True

@@ -18,21 +18,34 @@ Design notes that matter for the tests that use these fixtures:
 * Nothing here pre-satisfies a gate.  The default script is empty, so a state
   whose worker writes no gate flag BLOCKS -- the interesting case stays
   interesting.
+* The FSM's own Pass-1 extraction is a **first-class, selectable axis**
+  (``make_harness(..., extraction_data=...)``), because it is the SECOND writer
+  into gate context and the one review C4 found the suite had mocked into
+  silence.  :data:`FABRICATED_DRIVER_OWNED` is derived from the driver-owned
+  tables rather than hand-listed, so a driver-owned key added later is covered
+  by ``TestExtractionCannotOpenAGate`` without anyone remembering to add it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import pytest
 
 from fsm_llm.definitions import FSMDefinition
+from fsm_llm.logging import logger
 from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm_agents.definitions import AgentResult, ApprovalRequest
 from fsm_llm_harness import build_harness_fsm
+from fsm_llm_harness.constants import (
+    DRIVER_OWNED_SEEDS,
+    DRIVER_OWNED_UNSET,
+    ContextKeys,
+)
 from fsm_llm_harness.harness import (
     _APPROVAL_CLOSE,
     _APPROVAL_LEASH,
@@ -57,6 +70,64 @@ APPROVAL_GATES = (APPROVAL_PLAN, APPROVAL_CLOSE, APPROVAL_LEASH)
 #: One entry of a worker script: either a literal reply spec or a callable
 #: taking the ``RoleRequest`` and returning one.
 ScriptEntry = Mapping[str, Any] | Callable[[RoleRequest], Mapping[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# The fabricating-LLM axis (review C1 / C4, success criterion 18)
+# ---------------------------------------------------------------------------
+
+#: A fabricated counter large enough to satisfy every ``>=`` gate the protocol
+#: has (``findings_count >= 3``) and to corrupt every ``<`` one.
+_FABRICATED_INT = 99
+
+#: A fabricated string for the driver-owned keys that carry free prose or a
+#: filesystem root.  Absolute and outside any test root on purpose: if it ever
+#: reaches ``plan_dir`` the protocol's own memory has been re-pointed.
+_FABRICATED_STR = "/fabricated/by/the/model"
+
+
+def _fabricated_value(key: str) -> Any:
+    """Return a value for *key* that an LLM could plausibly hallucinate.
+
+    Interface contract (one call site, the comprehension below; kept as a
+    function so the type mapping is stated once and readably):
+        - Parameter: a driver-owned context key.
+        - Returns ``True`` for a boolean-seeded key, :data:`_FABRICATED_INT` for
+          an integer-seeded one, and :data:`_FABRICATED_STR` for a key whose
+          default is absence (``DRIVER_OWNED_UNSET``).
+        - Never raises; the value is always DIFFERENT from the driver's own.
+    """
+    seed = DRIVER_OWNED_SEEDS.get(key)
+    if isinstance(seed, bool):
+        return True
+    if isinstance(seed, int):
+        return _FABRICATED_INT
+    return _FABRICATED_STR
+
+
+# DECISION plan-2026-07-21T125237-191b2eb2/D-056
+# DERIVED from the driver-owned tables, and the fixture default stays SILENT.
+# Two things here look wrong and are deliberate:
+#   1. Do NOT replace this comprehension with a literal dict of the nine gate
+#      flags review C1 enumerated. The point of deriving it is that a
+#      driver-owned key added by a later step gets a writer-provenance test
+#      without anyone remembering to write one -- a hand-listed copy is exactly
+#      the drift that let C1 (nine keys, diagnosed as one) and C2 (a hand-kept
+#      tool-scope table) through.
+#   2. Do NOT flip `make_harness`'s `extraction_data` default to this table "so
+#      the hostile case is always on". That would make all 139 pre-existing
+#      tests simultaneously guard tests: one guard regression would fail ~139
+#      of them at once with no diagnostic value, and a genuine worker-seam
+#      regression would arrive buried in the noise. What review C4 punished was
+#      the hostile case being UNREACHABLE, not the default being gentle -- and
+#      it is reachable, parametrised over every key, and pinned against vacuity
+#      by `test_seeding_is_what_holds_the_gate`.
+# See decisions.md D-056.
+#: Every driver-owned context key mapped to a value the driver must never let
+#: the FSM's own Pass-1 extraction write.
+FABRICATED_DRIVER_OWNED: Mapping[str, Any] = MappingProxyType(
+    {key: _fabricated_value(key) for key in (*DRIVER_OWNED_SEEDS, *DRIVER_OWNED_UNSET)}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +191,39 @@ def workspace(tmp_path: Path) -> Path:
     directory = tmp_path / "workspace"
     directory.mkdir()
     return directory
+
+
+# DECISION plan-2026-07-21T125237-191b2eb2/D-057
+# Do NOT "simplify" any log assertion in this package to pytest's `caplog`.
+# The harness logs through loguru (`fsm_llm.logging`), which does not propagate
+# to the stdlib `logging` tree at all, so a `caplog`-based assertion passes
+# whether the message was emitted or not -- a test that cannot fail, which is
+# the same class of false green as review C4. A loguru sink is the only way to
+# observe these messages. See decisions.md D-057.
+@pytest.fixture
+def captured_logs() -> Any:
+    """Every loguru message emitted during the test, as plain strings."""
+    lines: list[str] = []
+    sink_id = logger.add(lines.append, level="DEBUG", format="{level}|{message}")
+    try:
+        yield lines
+    finally:
+        logger.remove(sink_id)
+
+
+@pytest.fixture
+def roots(plan_dir: Path, workspace: Path) -> dict[str, str]:
+    """The two filesystem-as-memory roots, shaped for ``run(initial_context=)``.
+
+    Hand this to ``make_harness(..., roots=roots)`` for any test that cares
+    about the plan directory.  Without it a dispatch has ``plan_dir=None``,
+    which is a real production shape (the driver degrades to "no plan-file
+    tools") but makes every plan-directory assertion vacuous.
+    """
+    return {
+        ContextKeys.PLAN_DIR: str(plan_dir),
+        ContextKeys.WORKSPACE_ROOT: str(workspace),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +361,18 @@ class HarnessUnderTest:
     agent: HarnessAgent
     worker: RecordingWorker | None
     approvals: ApprovalRecorder
+    llm: MockLLM2Interface
+    default_context: dict[str, Any] = field(default_factory=dict)
 
     def run(self, goal: str = "test goal", **kwargs: Any) -> AgentResult:
-        """Run the driver and return its result."""
+        """Run the driver and return its result.
+
+        ``make_harness(roots=...)`` is merged UNDER any explicit
+        ``initial_context``, so a test can still override a root it was given.
+        """
+        if self.default_context:
+            supplied = kwargs.pop("initial_context", None) or {}
+            kwargs["initial_context"] = {**self.default_context, **supplied}
         return self.agent.run(goal, **kwargs)
 
 
@@ -281,6 +394,13 @@ def make_harness() -> Callable[..., HarnessUnderTest]:
       all (the degrade path); omit it to get a scripted recorder.
     * ``approvals`` -- an :class:`ApprovalRecorder`; the default approves every
       gate, so a test that cares about denial must say so.
+    * ``extraction_data`` -- what the FSM's own Pass-1 extraction "finds" in
+      the user's prose.  The DEFAULT IS ``None`` (a silent LLM); pass
+      :data:`FABRICATED_DRIVER_OWNED` (or a one-key slice of it) to select the
+      hostile axis.  See ``decisions.md`` D-056 for why the default is silent
+      rather than fabricating.
+    * ``roots`` -- ``{plan_dir, workspace_root}`` merged into every ``run()``'s
+      ``initial_context``; use the ``roots`` fixture.
     * remaining keyword arguments go to ``HarnessAgent.__init__`` (thresholds,
       ``config``, ...).  The mocked LLM is wired through ``**api_kwargs``.
     """
@@ -290,6 +410,8 @@ def make_harness() -> Callable[..., HarnessUnderTest]:
         *,
         worker: Any = _UNSET,
         approvals: ApprovalRecorder | None = None,
+        extraction_data: Mapping[str, Any] | None = None,
+        roots: Mapping[str, str] | None = None,
         **agent_kwargs: Any,
     ) -> HarnessUnderTest:
         recorder: RecordingWorker | None
@@ -298,12 +420,21 @@ def make_harness() -> Callable[..., HarnessUnderTest]:
         else:
             recorder = worker
         callback = approvals if approvals is not None else ApprovalRecorder()
+        llm = MockLLM2Interface(
+            extraction_data=dict(extraction_data) if extraction_data else None
+        )
         agent = HarnessAgent(
             worker_factory=recorder,
             approval_callback=callback,
-            llm_interface=MockLLM2Interface(),
+            llm_interface=llm,
             **agent_kwargs,
         )
-        return HarnessUnderTest(agent=agent, worker=recorder, approvals=callback)
+        return HarnessUnderTest(
+            agent=agent,
+            worker=recorder,
+            approvals=callback,
+            llm=llm,
+            default_context=dict(roots or {}),
+        )
 
     return _make
