@@ -534,3 +534,78 @@ class TestStreamEmptyContentGuard:
             out = list(llm.generate_response_stream(self._request()))
 
         assert out == ["Hel", "lo"]
+
+
+class TestReasoningContentRecovery:
+    """Regression for C2 + H3: recover the answer from the reasoning field.
+
+    These tests are driven by REAL ``litellm.types.utils.Message``/``Delta``
+    objects — NOT a hand-stubbed ``.thinking`` attribute. That distinction is
+    load-bearing: installed litellm renames the raw ``thinking`` field to
+    ``reasoning_content`` and DELETES ``thinking`` before building the object
+    (``litellm/types/utils.py``). A ``.thinking``-only stub is therefore GREEN
+    on the broken pre-fix code — it never probed the gap, which is exactly how
+    C2 shipped. See plan D-001/D-002.
+    """
+
+    def test_message_reasoning_content_is_recovered(self):
+        """SC-1: real Message(content="", reasoning_content=json) → recovered."""
+        from litellm.types.utils import Message
+
+        msg = Message(content="", reasoning_content='{"message": "recovered"}')
+        # Contract precondition: real litellm Message has no `.thinking` attr,
+        # so the pre-fix `hasattr(message, "thinking")` gate returns None here.
+        assert not hasattr(msg, "thinking"), (
+            "real litellm Message must not expose a `.thinking` attr — if this "
+            "fails the negative control no longer documents the C2 gap"
+        )
+
+        recovered = LiteLLMInterface._extract_content_from_thinking(msg)
+        assert recovered == '{"message": "recovered"}'
+
+    def test_make_llm_call_recovers_from_none_content(self):
+        """SC-2: content=None + reasoning_content, driven through _make_llm_call.
+
+        Covers H3 (guard must fire on None, not only "") and C2 (helper must
+        read reasoning_content) together at the real seam.
+        """
+        from litellm.types.utils import Message
+
+        msg = Message(content=None, reasoning_content='{"message": "from-reasoning"}')
+        choice = MagicMock()
+        choice.message = msg
+        response = MagicMock()
+        response.choices = [choice]
+
+        with (
+            patch("fsm_llm.llm.completion", return_value=response),
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        ):
+            llm = LiteLLMInterface(model="test-model")
+            out = llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
+
+        assert out.choices[0].message.content == '{"message": "from-reasoning"}'
+
+    def test_delta_reasoning_content_is_recovered(self):
+        """SC-3: real streaming Delta(reasoning_content=json) → recovered."""
+        from litellm.types.utils import Delta
+
+        delta = Delta(reasoning_content='{"message": "x"}')
+        assert not hasattr(delta, "thinking")
+
+        recovered = LiteLLMInterface._extract_content_from_thinking(delta)
+        assert recovered == '{"message": "x"}'
+
+    def test_thinking_stub_masks_the_bug_negative_control(self):
+        """SC (negative control): document WHY a .thinking stub is worthless here.
+
+        A hand-stubbed object that carries `.thinking` is recovered even by the
+        BROKEN pre-fix helper — so a `.thinking`-only test can never go RED on
+        the C2 bug. A real Message carries `reasoning_content`, not `thinking`;
+        that is the difference these regression tests exist to pin.
+        """
+        from litellm.types.utils import Message
+
+        real = Message(content="", reasoning_content='{"message": "real"}')
+        assert not hasattr(real, "thinking")
+        assert getattr(real, "reasoning_content", None) == '{"message": "real"}'

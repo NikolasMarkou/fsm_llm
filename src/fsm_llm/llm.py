@@ -595,7 +595,10 @@ class LiteLLMInterface(LLMInterface):
             raise LLMResponseError("Response missing message content")
 
         content = choice.message.content
-        if content is not None and content == "":
+        if not content:
+            # H3: `content` is falsy — empty string OR None. Ollama reasoning-
+            # only replies arrive as content=None (not ""), so this must fire
+            # on None too, else C2 recovery never runs in production.
             content = self._extract_content_from_thinking(choice.message)
             if content is not None:
                 choice.message.content = content
@@ -618,22 +621,45 @@ class LiteLLMInterface(LLMInterface):
 
     @staticmethod
     def _extract_content_from_thinking(message) -> str | None:
-        """Extract structured content from a model's ``thinking`` field.
+        """Extract structured content from a model's reasoning/thinking trace.
 
-        Some models (e.g. Qwen 3.5 via Ollama) place the actual answer in
-        a ``thinking`` attribute and leave ``content`` as an empty string.
-        This helper tries to recover the last JSON object from the thinking
-        trace, falling back to the last non-empty line.
+        Some models (e.g. Qwen 3.5 via Ollama) place the actual answer in a
+        reasoning field and leave ``content`` empty or ``None``. This helper
+        tries to recover the last JSON object from that trace, falling back to
+        the last non-empty line.
 
-        Returns the extracted content string, or ``None`` if no thinking
-        field is present.
+        Returns the extracted content string, or ``None`` if no reasoning
+        trace is present.
         """
-        if not hasattr(message, "thinking") or not message.thinking:
+        # DECISION plan-2026-07-21T045419-9925aa3a/D-002
+        # Resolve the reasoning trace via `getattr(..., None)` across the
+        # pinned litellm range — do NOT revert this to `hasattr(message,
+        # "thinking")`. Installed litellm RENAMES the raw `thinking` field to
+        # `reasoning_content` and DELETES `thinking` before building the
+        # Message/Delta object (litellm/types/utils.py:1124-1135,1244-1248),
+        # so gating on `.thinking` made this recovery dead code for the
+        # project's own DEFAULT_LLM_MODEL. `reasoning_content` is read FIRST;
+        # the legacy `thinking` string is kept so the D-023 divergence tests
+        # (TestMultiJsonTieBreakDivergence) stay green; `thinking_blocks` is a
+        # last-resort join of the provider's typed reasoning segments. See
+        # decisions.md D-001/D-002.
+        trace = getattr(message, "reasoning_content", None) or getattr(
+            message, "thinking", None
+        )
+        if not trace:
+            blocks = getattr(message, "thinking_blocks", None)
+            if blocks:
+                trace = "\n".join(
+                    (b.get("thinking") or b.get("text") or "")
+                    for b in blocks
+                    if isinstance(b, dict)
+                )
+        if not trace:
             return None
         logger.debug(
-            "Content empty but thinking field present, extracting from thinking"
+            "Content empty but reasoning trace present, extracting from it"
         )
-        thinking = message.thinking
+        thinking = trace
         # Find JSON objects using proper parsing — supports multi-line JSON
         json_candidates: list[str] = []
         # First try line-by-line for single-line JSON
