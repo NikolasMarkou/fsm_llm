@@ -48,6 +48,7 @@ from fsm_llm_harness.roles import (
 )
 from fsm_llm_harness.rules import OWNERSHIP, ROLE_BY_STATE, artifacts_writable_by
 from fsm_llm_harness.tools import (
+    _PER_PLAN_DIRS,
     COMMAND_ALLOWLIST,
     PLAN_READ_TOOLS,
     PLAN_WRITE_TOOLS,
@@ -801,6 +802,113 @@ class TestEveryRoleSchemaCarriesMessage:
         parsed = _parse_as_core_would(json.dumps(_SCHEMA_SAMPLE[state]))
 
         assert parsed.message == _GENERIC_FALLBACK_MESSAGE
+
+
+# ---------------------------------------------------------------------------
+# Turn budget + stopping condition (D-013 of plan-2026-07-21-bf7ffe24)
+# ---------------------------------------------------------------------------
+
+#: The EXPLORE budget that was MEASURED to be unusable: 5/5 live dispatches on
+#: ``ollama_chat/qwen3.5:4b`` spent all 8 turns on read tools and wrote zero
+#: bytes.  Named here so a future "tightening" back to it fails a test instead
+#: of quietly re-creating the run that could not have succeeded.
+_MEASURED_INSUFFICIENT_TURNS = 8
+
+#: The floor every role budget must clear: a few reads, a write per owned
+#: artifact, and one turn left to stop and answer.
+_MIN_TURNS_PER_ROLE = 10
+
+
+class TestTurnBudgetAndStoppingCondition:
+    """A role that cannot fit "read, write, stop" cannot write -- structurally."""
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_every_role_budget_clears_the_floor(self, state: str) -> None:
+        assert get_role_spec(state).max_iterations >= _MIN_TURNS_PER_ROLE
+
+    def test_the_explore_budget_is_above_the_measured_insufficient_one(self) -> None:
+        explore = get_role_spec(HarnessStates.EXPLORE)
+
+        assert explore.max_iterations > _MEASURED_INSUFFICIENT_TURNS
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_prompt_states_the_turn_budget_and_the_stop_rule(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        spec = get_role_spec(state)
+
+        prompt = build_role_prompt(_role_request(state, plan_dir=plan_dir), spec)
+
+        assert f"HOW TO FINISH: you have at most {spec.max_iterations} turns" in prompt
+        assert "stop calling tools and answer" in prompt
+
+    @pytest.mark.parametrize("state", _OWNING_STATES)
+    def test_a_writing_role_is_told_the_write_is_the_deliverable(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        """The measured failure was reading until the budget ran out."""
+        spec = get_role_spec(state)
+
+        prompt = build_role_prompt(_role_request(state, plan_dir=plan_dir), spec)
+
+        assert "WRITE -- the write is the deliverable" in prompt
+        assert "Never state that you wrote a file unless a write tool" in prompt
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_write_obligation_is_derived_from_the_tools_held(
+        self, state: str
+    ) -> None:
+        """Ordering a role to write with no write tool is the review-C2 defect.
+
+        Without a plan directory only EXECUTE keeps a write tool (the workspace
+        one), so the obligation must survive for exactly that state and vanish
+        for the other five.
+        """
+        spec = get_role_spec(state)
+        request = _role_request(state, plan_dir=None)
+        can_write = bool(
+            set(held_tools(request, spec)) & set(WRITE_TOOLS + PLAN_WRITE_TOOLS)
+        )
+
+        prompt = build_role_prompt(request, spec)
+
+        assert ("the write is the deliverable" in prompt) is can_write
+        assert "stop calling tools and answer" in prompt
+
+    @pytest.mark.parametrize("state", _OWNING_STATES)
+    def test_the_prompt_names_the_write_tool_it_holds(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        spec = get_role_spec(state)
+        request = _role_request(state, plan_dir=plan_dir)
+
+        prompt = build_role_prompt(request, spec)
+
+        assert "write_plan_file" in prompt
+        assert "write_plan_file" in held_tools(request, spec)
+
+    @pytest.mark.parametrize("state", _OWNING_STATES)
+    def test_every_path_shape_the_prompt_offers_is_one_the_tool_accepts(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        """The prompt's promise, executed against the REAL ownership check.
+
+        Measured: told it could write ``findings``, ``:4b`` checked whether that
+        folder existed and gave up.  ``findings/<topic>.md`` is the shape
+        ``PlanMemory`` actually authorises, so the prompt must offer that one --
+        and this asserts the offer by making the write.
+        """
+        spec = get_role_spec(state)
+        memory = PlanMemory(plan_dir, role=spec.role)
+
+        prompt = build_role_prompt(_role_request(state, plan_dir=plan_dir), spec)
+
+        for artifact in spec.owned_artifacts:
+            is_dir = artifact in _PER_PLAN_DIRS
+            offered = f"{artifact}/<topic>.md" if is_dir else artifact
+            assert offered in prompt
+            written = memory.write_text(offered.replace("<topic>", "sample"), "x\n")
+            assert Path(written).name
 
 
 # ---------------------------------------------------------------------------

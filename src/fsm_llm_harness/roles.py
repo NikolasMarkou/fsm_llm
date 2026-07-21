@@ -57,12 +57,14 @@ from .hardening import coerce_worker_output, parse_role_output, retry
 from .harness import _WORKER_WRITABLE, RoleRequest, WorkerFactory
 from .rules import ROLE_BY_STATE, artifacts_writable_by
 from .tools import (
+    _PER_PLAN_DIRS,
     PLAN_READ_TOOLS,
     PLAN_WRITE_TOOLS,
     READ_ONLY_TOOLS,
     SHELL_TOOLS,
     WRITE_TOOLS,
     PlanMemory,
+    PlanTools,
     Workspace,
     build_plan_tools,
     build_workspace_tools,
@@ -259,17 +261,34 @@ def _plan_scope(role: str) -> tuple[str, ...]:
 
 #: state -> the agent loop budget for one dispatch.
 #:
-#: Small on purpose.  A 4B model that has not produced its answer in this many
-#: turns is looping, not thinking, and every extra turn is tens of seconds of
-#: wall clock plus a longer prompt on the next one.
+#: Sized so a role can read a few files, WRITE the artifacts it owns, and still
+#: have a turn left to stop with a final answer.  Still small: a 4B model that
+#: has not answered by then is looping, not thinking, and every extra turn is
+#: seconds of wall clock plus a longer prompt on the next one.
+# DECISION plan-2026-07-21-bf7ffe24/D-013
+# These numbers were RAISED from 8/6/10/8/6/6 on measurement, and the old row
+# must not come back as a "tightening". Live n=5 on `ollama_chat/qwen3.5:4b`
+# with the real EXPLORE spec: 5/5 dispatches EXHAUSTED the 8-turn budget on
+# READ tools (11-20 calls/run, only list_dir/read_file/read_plan_file), wrote
+# ZERO bytes to the plan directory, and 5/5 still returned findings_count: 3 --
+# one reply even named the three findings files it had not written. `concluded`
+# and therefore D-005's `success` were False 5/5 despite a schema-valid payload.
+# A budget that cannot fit "read, write, stop" makes the write structurally
+# unreachable, which is the same defect class as review C2's missing write tool.
+# The budget is only HALF the repair -- `_finish_line` below is the other half,
+# and neither works alone: raising turns without a stopping condition just buys
+# more reading. Do NOT tune these down for wall clock without re-running the
+# EXPLORE bench; the per-dispatch guard against a runaway loop is
+# `AgentConfig.timeout_seconds`, not this table.
+# See decisions.md D-013.
 _MAX_ITERATIONS_BY_STATE: Mapping[str, int] = MappingProxyType(
     {
-        HarnessStates.EXPLORE: 8,
-        HarnessStates.PLAN: 6,
-        HarnessStates.EXECUTE: 10,
-        HarnessStates.REFLECT: 8,
-        HarnessStates.PIVOT: 6,
-        HarnessStates.CLOSE: 6,
+        HarnessStates.EXPLORE: 14,
+        HarnessStates.PLAN: 10,
+        HarnessStates.EXECUTE: 14,
+        HarnessStates.REFLECT: 12,
+        HarnessStates.PIVOT: 10,
+        HarnessStates.CLOSE: 10,
     }
 )
 
@@ -457,15 +476,60 @@ def held_tools(request: RoleRequest, spec: RoleSpec) -> tuple[str, ...]:
 def _writes_line(request: RoleRequest, spec: RoleSpec) -> str:
     """Render what this dispatch may write, or that it may write nothing."""
     if request.plan_dir is not None and spec.owned_artifacts:
+        # DECISION plan-2026-07-21-bf7ffe24/D-013
+        # A directory artifact must be rendered as a writable PATH, not as its
+        # bare name. Measured, step 4b attempt 1: told it may write `findings`,
+        # `:4b` called the WORKSPACE `path_exists("findings")`, got "no", and
+        # answered "cannot write findings without the directory existing" --
+        # while `PlanMemory.write_text` creates parents and would have accepted
+        # `findings/<topic>.md` on the first try. Naming the tool and the root
+        # closes the other half of the same confusion (the model reached for a
+        # workspace tool for a plan-directory path). The dir/file split is READ
+        # from `tools._PER_PLAN_DIRS`, the same set `PlanMemory._classify`
+        # authorises against, so this text cannot claim a shape the tool
+        # refuses -- do NOT re-derive it here from a `.md` suffix test.
+        # See decisions.md D-013.
+        targets = ", ".join(
+            f"{name}/<topic>.md" if name in _PER_PLAN_DIRS else name
+            for name in spec.owned_artifacts
+        )
         return (
-            "YOU MAY WRITE these protocol files, and no others: "
-            f"{', '.join(spec.owned_artifacts)}. "
-            "Plan-file paths are relative to the plan directory; a write to "
+            f"YOU MAY WRITE these protocol files with "
+            f"{PlanTools.WRITE_PLAN_FILE}, and no others: {targets}. "
+            "These paths are relative to the plan directory, NOT the "
+            "workspace, and any missing folder is created for you. A write to "
             "anything else is refused."
         )
     return (
         "YOU MAY WRITE no protocol file. Report your result in the JSON "
         "object below; the driver records it."
+    )
+
+
+def _finish_line(spec: RoleSpec, can_write: bool) -> str:
+    """Render the terminal instruction: what to do, and when to stop doing it."""
+    # DECISION plan-2026-07-21-bf7ffe24/D-013
+    # This section exists because a live n=5 EXPLORE bench measured the model
+    # reading until its budget ran out and never writing: 11-20 read-tool calls
+    # per run, zero bytes on disk, and a final payload claiming three findings
+    # were indexed. Nothing in the prompt had ever told it WHEN to stop reading
+    # or that the write was the deliverable -- the operative rules say what to
+    # write, never that reading more is not a substitute. The last sentence
+    # (do not claim a write a tool did not confirm) targets the exact fail-open
+    # reply that was measured, not a hypothetical one. Do NOT delete this as
+    # prompt bloat: `rules.py` caps operative rules at 8 bullets precisely so
+    # the driver can add the few lines a dispatch needs, and this is one of
+    # them. See decisions.md D-013.
+    budget = (
+        f"HOW TO FINISH: you have at most {spec.max_iterations} turns, and "
+        "reading more is not a substitute for finishing."
+    )
+    if not can_write:
+        return f"{budget} Read only what you need, then stop calling tools and answer."
+    return (
+        f"{budget} Read only what you need, then WRITE -- the write is the "
+        "deliverable. As soon as it is written, stop calling tools and answer. "
+        "Never state that you wrote a file unless a write tool reported success."
     )
 
 
@@ -572,6 +636,7 @@ def build_role_prompt(request: RoleRequest, spec: RoleSpec) -> str:
         f"TOOLS: {tools}. Use them to {verb} real files; do not guess file contents."
     )
     sections.append(_writes_line(request, spec))
+    sections.append(_finish_line(spec, can_write))
     sections.append(_output_line(spec))
     return "\n\n".join(sections)
 
