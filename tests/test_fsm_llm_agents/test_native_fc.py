@@ -7,6 +7,7 @@ responses, so the loop is exercised with no live provider.
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel
 
 from fsm_llm.ollama import apply_ollama_params, prepare_ollama_messages
 from fsm_llm_agents import (
@@ -15,6 +16,7 @@ from fsm_llm_agents import (
     ToolRegistry,
     tool,
 )
+from fsm_llm_agents.base import _output_response_format
 from fsm_llm_agents.exceptions import AgentError
 
 
@@ -441,3 +443,237 @@ class TestSuccessSignal:
         result = agent.run("q")
         assert result.answer == "It is sunny."
         assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# Terminal-turn constrained decoding (D-002)
+# ---------------------------------------------------------------------------
+
+
+class _Answer(BaseModel):
+    findings_count: int
+    needs_explore: bool
+
+
+_VALID_PAYLOAD = '{"findings_count": 3, "needs_explore": false}'
+
+
+class _Counter:
+    """A complete_fn that yields scripted responses and counts invocations."""
+
+    def __init__(self, *responses):
+        self._it = iter(responses)
+        self.calls: list[list[dict]] = []
+
+    def __call__(self, model, messages, schemas):
+        self.calls.append(list(messages))
+        return next(self._it)
+
+
+class TestOutputResponseFormatHelper:
+    """``base._output_response_format`` is the single envelope builder shared by
+    ``_init_context`` and ``native_fc``'s repair turn. Extraction must be a PURE
+    refactor of the inline block it replaced.
+    """
+
+    def test_none_schema_returns_none(self):
+        assert _output_response_format(None) is None
+
+    def test_non_pydantic_object_returns_none(self):
+        assert _output_response_format(object()) is None
+
+    def test_envelope_matches_the_pre_extraction_shape(self):
+        # Byte-for-byte the dict `_init_context` built inline before the
+        # extraction (base.py:175-184).
+        assert _output_response_format(_Answer) == {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "_Answer",
+                "schema": _Answer.model_json_schema(),
+            },
+        }
+
+    def test_init_context_still_stores_the_same_envelope(self):
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model", output_schema=_Answer),
+        )
+        context = agent._init_context("task")
+        assert context["_output_response_format"] == _output_response_format(_Answer)
+
+    def test_init_context_omits_the_key_without_a_schema(self):
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(), config=AgentConfig(model="mock/model")
+        )
+        assert "_output_response_format" not in agent._init_context("task")
+
+
+class TestTerminalConstrainedDecoding:
+    """DECISION plan-2026-07-21-bf7ffe24/D-002 — after the loop, when a schema
+    is configured and the free-text answer does not validate, make EXACTLY ONE
+    extra completion carrying ``response_format=`` and NO ``tools=``.
+    """
+
+    @staticmethod
+    def _agent(counter, schema=_Answer):
+        return NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model", output_schema=schema),
+            complete_fn=counter,
+        )
+
+    def test_does_not_fire_without_an_output_schema(self):
+        counter = _Counter({"content": "just prose", "tool_calls": []})
+        result = self._agent(counter, schema=None).run("q")
+        assert len(counter.calls) == 1
+        assert result.answer == "just prose"
+
+    def test_does_not_fire_when_the_answer_already_parses(self):
+        counter = _Counter({"content": _VALID_PAYLOAD, "tool_calls": []})
+        result = self._agent(counter).run("q")
+        assert len(counter.calls) == 1
+        assert result.structured_output.findings_count == 3
+
+    def test_fires_once_when_the_answer_does_not_parse(self):
+        counter = _Counter(
+            {"content": "I looked at three files.", "tool_calls": []},
+            {"content": _VALID_PAYLOAD, "tool_calls": []},
+        )
+        result = self._agent(counter).run("q")
+        # EXACTLY one repair attempt — no retry loop.
+        assert len(counter.calls) == 2
+        assert result.structured_output.findings_count == 3
+        assert result.answer == _VALID_PAYLOAD
+        # The repair turn appends its own user message so the Ollama schema echo
+        # lands on the LAST message, not on the buried original task.
+        assert counter.calls[1][-1]["role"] == "user"
+        assert "single JSON object" in counter.calls[1][-1]["content"]
+
+    def test_repair_reuses_the_tool_result_history(self):
+        counter = _Counter(
+            {
+                "content": None,
+                "tool_calls": [
+                    {"id": "c1", "name": "weather", "arguments": {"city": "Oslo"}}
+                ],
+            },
+            {"content": "It was sunny.", "tool_calls": []},
+            {"content": _VALID_PAYLOAD, "tool_calls": []},
+        )
+        result = self._agent(counter).run("q")
+        assert len(counter.calls) == 3
+        roles = [m["role"] for m in counter.calls[2]]
+        assert "tool" in roles
+        assert result.structured_output.needs_explore is False
+
+    def test_unparseable_repair_leaves_the_original_answer_intact(self):
+        counter = _Counter(
+            {"content": "a perfectly usable prose answer", "tool_calls": []},
+            {"content": "still not JSON", "tool_calls": []},
+        )
+        result = self._agent(counter).run("q")
+        assert len(counter.calls) == 2
+        assert result.answer == "a perfectly usable prose answer"
+        assert result.structured_output is None
+        assert result.success is True
+
+    def test_repair_can_rescue_an_empty_final_answer(self):
+        """The measured live failure: Ollama returns empty content on the final
+        turn. `success` is computed AFTER the repair, so the rescue counts."""
+        counter = _Counter(
+            {"content": "", "tool_calls": []},
+            {"content": _VALID_PAYLOAD, "tool_calls": []},
+        )
+        result = self._agent(counter).run("q")
+        assert result.answer == _VALID_PAYLOAD
+        assert result.success is True
+
+    def test_exhausted_loop_is_not_relabelled_success_by_a_repair(self):
+        """D-005 stays intact: a loop that never concluded did not finish its
+        work, so a payload extracted afterwards must not report success."""
+
+        def always_tool(model, messages, schemas):
+            if any(m["role"] == "user" and "single JSON" in m["content"] for m in messages):
+                return {"content": _VALID_PAYLOAD, "tool_calls": []}
+            return {
+                "content": None,
+                "tool_calls": [
+                    {"id": "x", "name": "weather", "arguments": {"city": "X"}}
+                ],
+            }
+
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(
+                model="mock/model", output_schema=_Answer, max_iterations=2
+            ),
+            complete_fn=always_tool,
+        )
+        result = agent.run("loop")
+        assert result.structured_output.findings_count == 3
+        assert result.success is False
+
+
+class TestRepairCallEnvelope:
+    """The A1 guard. ``tools=`` and ``response_format=`` in ONE completion was
+    never measured against the default 4B model; the repair call must carry the
+    schema and NO tool surface at all.
+    """
+
+    @staticmethod
+    def _agent(model="mock/model"):
+        return NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model=model, output_schema=_Answer),
+        )
+
+    @staticmethod
+    def _stub_sequence(monkeypatch, messages_seq):
+        captured: list[dict] = []
+        it = iter(messages_seq)
+
+        def fake(**kwargs):
+            captured.append(kwargs)
+            return _FakeResponse(next(it))
+
+        monkeypatch.setattr("litellm.completion", fake)
+        return captured
+
+    def test_repair_call_carries_response_format_and_no_tools(self, monkeypatch):
+        captured = self._stub_sequence(
+            monkeypatch,
+            [_FakeMessage(content="prose"), _FakeMessage(content=_VALID_PAYLOAD)],
+        )
+
+        result = self._agent().run("q")
+
+        assert len(captured) == 2
+        # Tool turn: tools present, response_format absent.
+        assert captured[0]["tools"]
+        assert "response_format" not in captured[0]
+        # Repair turn: response_format present, `tools` key absent ENTIRELY —
+        # not merely None. The two are never stacked in one call.
+        assert "tools" not in captured[1]
+        assert "tool_choice" not in captured[1]
+        assert captured[1]["response_format"] == _output_response_format(_Answer)
+        assert result.structured_output.findings_count == 3
+
+    def test_ollama_repair_turn_is_schema_enforced_and_echoed(self, monkeypatch):
+        seen = TestOllamaHelperGating._spy_helpers(monkeypatch)
+        captured = self._stub_sequence(
+            monkeypatch,
+            [_FakeMessage(content="prose"), _FakeMessage(content=_VALID_PAYLOAD)],
+        )
+
+        self._agent("ollama_chat/qwen3.5:4b").run("q")
+
+        # Tool turn: structured=False, no schema echoed.
+        assert seen["params"][0][2] is False
+        assert seen["messages"][0][2] is None
+        # Repair turn: structured=True (temperature pinned to 0) and the schema
+        # handed to prepare_ollama_messages so it is echoed into the prompt —
+        # that echo is what made the payload land 5/5 live.
+        assert seen["params"][1][2] is True
+        assert seen["messages"][1][2] == _output_response_format(_Answer)
+        assert captured[1]["temperature"] == 0
+        assert captured[1]["messages"][-1]["content"].startswith("/nothink")

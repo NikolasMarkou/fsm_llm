@@ -31,6 +31,33 @@ from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
 
 
+def _output_response_format(schema: Any) -> dict[str, Any] | None:
+    """Build the ``response_format`` envelope for a Pydantic *schema*.
+
+    Interface contract (two call sites: ``_init_context`` here, and
+    ``native_fc``'s post-loop repair turn):
+
+    Args:
+        schema: ``AgentConfig.output_schema`` — a Pydantic ``BaseModel``
+            subclass, ``None``, or any object (duck-typed on
+            ``model_json_schema``).
+
+    Returns:
+        The ``{"type": "json_schema", ...}`` dict litellm/OpenAI accept as
+        ``response_format``, or ``None`` when *schema* is ``None`` or does not
+        expose ``model_json_schema``.  Never raises.
+    """
+    if schema is None or not hasattr(schema, "model_json_schema"):
+        return None
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": schema.__name__,
+            "schema": schema.model_json_schema(),
+        },
+    }
+
+
 class BaseAgent(ABC):
     """Abstract base class for FSM-LLM agents.
 
@@ -172,16 +199,9 @@ class BaseAgent(ABC):
         # Schema-enforced output: when output_schema is set, store the
         # JSON schema as response_format so the pipeline can pass it to
         # the LLM for constrained decoding on the conclude state.
-        if self.config.output_schema is not None and hasattr(
-            self.config.output_schema, "model_json_schema"
-        ):
-            context["_output_response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": self.config.output_schema.__name__,
-                    "schema": self.config.output_schema.model_json_schema(),
-                },
-            }
+        response_format = _output_response_format(self.config.output_schema)
+        if response_format is not None:
+            context["_output_response_format"] = response_format
 
         if extra:
             context.update(extra)

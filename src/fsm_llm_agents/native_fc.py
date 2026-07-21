@@ -46,7 +46,7 @@ from fsm_llm.ollama import (
 )
 from fsm_llm.utilities import _resolve_reasoning_trace
 
-from .base import BaseAgent
+from .base import BaseAgent, _output_response_format
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError
 from .tools import ToolRegistry
@@ -58,6 +58,17 @@ _SYSTEM_PROMPT = (
     "and complete the task. Call tools when you need external data; when you "
     "have enough information, reply with the final answer and no further tool "
     "calls."
+)
+
+#: The user turn appended for the post-loop constrained-decoding repair (D-002).
+#:
+#: It is appended so the schema echo `prepare_ollama_messages` performs lands on
+#: the LAST message rather than on the original task, which by then is buried
+#: under the assistant/tool round-trips.
+_REPAIR_PROMPT = (
+    "Stop calling tools now. Using everything established above, give the "
+    "final answer as a single JSON object matching the required schema, and "
+    "nothing else."
 )
 
 
@@ -90,25 +101,45 @@ class NativeFunctionCallingReactAgent(BaseAgent):
 
     # --- LLM completion -------------------------------------------------
     def _complete(
-        self, messages: list[dict[str, Any]], schemas: list[dict[str, Any]]
+        self,
+        messages: list[dict[str, Any]],
+        schemas: list[dict[str, Any]],
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self._complete_fn is not None:
             return self._complete_fn(self.config.model, messages, schemas)
-        return self._litellm_complete(messages, schemas)
+        return self._litellm_complete(messages, schemas, response_format)
 
     def _litellm_complete(
-        self, messages: list[dict[str, Any]], schemas: list[dict[str, Any]]
+        self,
+        messages: list[dict[str, Any]],
+        schemas: list[dict[str, Any]],
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         import litellm
 
         call_params: dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
-            "tools": schemas or None,
-            "tool_choice": "auto" if schemas else None,
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
         }
+        # DECISION plan-2026-07-21-bf7ffe24/D-002
+        # The two keys are MUTUALLY EXCLUSIVE and the omission is structural,
+        # not cosmetic: `tools=` and `response_format=` in one completion was
+        # NEVER measured against `qwen3.5:4b` and is the plan's biggest
+        # unquantified risk (assumption A1). What WAS measured is one native
+        # tool call per turn (5/5 at 1, 4 and 9 tools) OR one
+        # response_format-constrained payload (5/5 including an array-of-3).
+        # Do NOT "simplify" this back to always setting `tools`/`tool_choice`
+        # to `schemas or None` — a present-but-None `tools` key is what a
+        # provider sees, and this branch is the assertable proof the repair
+        # turn ships no tool surface at all.
+        if schemas:
+            call_params["tools"] = schemas
+            call_params["tool_choice"] = "auto"
+        elif response_format is not None:
+            call_params["response_format"] = response_format
 
         # DECISION plan-2026-07-21-bf7ffe24/D-003
         # Ollama prep runs HERE, before the call, in llm.py's own order (params
@@ -118,13 +149,19 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         # machinery at all, so that means building a tool-calling surface into
         # core. Do NOT drop the explicit gate: the helpers self-gate, but the
         # gate is the tested proof off-Ollama calls are untouched.
-        # `structured=False` mirrors llm.py:642 (free-text reply — keep the
-        # user's temperature); response_format is None BY DESIGN (D-002): a turn
-        # carries native tools OR one constrained payload, never both.
+        # `structured` tracks whether THIS call is schema-enforced: False on a
+        # tool turn mirrors llm.py:642 (free-text reply — keep the user's
+        # temperature), True on the repair turn pins temperature=0. The
+        # `response_format` handed to `prepare_ollama_messages` is what echoes
+        # the schema into the prompt text — that echo is what moved an
+        # array-of-3 shape from 0/5 to 5/5 in EXPLORE.
+        sent_format = call_params.get("response_format")
         if is_ollama_model(self.config.model):
-            apply_ollama_params(call_params, self.config.model, structured=False)
+            apply_ollama_params(
+                call_params, self.config.model, structured=sent_format is not None
+            )
             call_params["messages"] = prepare_ollama_messages(
-                messages, self.config.model, None
+                messages, self.config.model, sent_format
             )
 
         # DECISION plan-2026-07-20T040150-876e7164/D-006: wrap the litellm
@@ -226,18 +263,44 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                 tool_calls=trace_calls,
                 total_iterations=len(trace_calls) or 1,
             )
+            structured = self._try_parse_structured_output(answer)
+            # DECISION plan-2026-07-21-bf7ffe24/D-002
+            # Terminal-turn constrained decoding. EXACTLY ONE extra completion,
+            # carrying `response_format=` and NO `tools=` — never both in one
+            # call (see `_litellm_complete`; that pairing is unmeasured
+            # assumption A1). Trigger is deliberately narrow: a schema is
+            # configured AND the free-text answer failed to validate. So this
+            # costs nothing whenever the model already complied, which is the
+            # common case off Ollama — near-zero blast radius on capable
+            # providers. Do NOT turn this into a retry loop: one attempt, and
+            # a repair whose content does not parse is DISCARDED so a run that
+            # already had a usable answer can never be regressed.
+            repair_format = _output_response_format(self.config.output_schema)
+            if repair_format is not None and structured is None:
+                repaired = self._complete(
+                    [*messages, {"role": "user", "content": _REPAIR_PROMPT}],
+                    [],
+                    response_format=repair_format,
+                )
+                repaired_answer = repaired.get("content") or ""
+                repaired_structured = self._try_parse_structured_output(repaired_answer)
+                if repaired_structured is not None:
+                    answer = repaired_answer
+                    structured = repaired_structured
+
             # DECISION plan-2026-07-21-bf7ffe24/D-005
             # Success = the loop reached a final TOOL-CALL-FREE turn AND that
             # turn carried a non-empty answer. Do NOT restore
             # `bool(answer) or bool(trace_calls)`: it reported success=True on
             # three live runs that wrote zero bytes and answered nothing, so no
-            # caller could tell a working role from a doomed one. `concluded` is
-            # kept although a non-empty `answer` implies it today — it is the
-            # term that stays honest once a post-loop repair turn can also set
-            # `answer`. For "did it do anything at all?", read
-            # `trace.tool_calls`, which is unchanged.
+            # caller could tell a working role from a doomed one. Computed AFTER
+            # the repair turn ON PURPOSE: a repair that fills a previously-empty
+            # answer earns success. `concluded` is the term that keeps this
+            # honest — a loop that EXHAUSTED max_iterations never signalled it
+            # was done, so a payload extracted from it afterwards summarises
+            # unfinished work and must NOT be relabelled a success. For "did it
+            # do anything at all?", read `trace.tool_calls`, unchanged.
             success = concluded and bool(answer)
-            structured = self._try_parse_structured_output(answer)
             return AgentResult(
                 answer=answer,
                 success=success,
