@@ -1383,7 +1383,19 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                     sort_keys=self.config.deterministic_output,
                     default=str,
                 )
-                sections.append(f"Already extracted: {ctx_json}")
+                # DECISION plan-2026-07-21T045419-9925aa3a/D-010
+                # Sanitize the dumped JSON before emitting. These values were
+                # extracted on a PRIOR turn -- the LLM wrote them -- so a value
+                # like `<extraction_focus>x</extraction_focus>` or `</task>`
+                # arrives here as an unescaped structural token on THIS turn's
+                # per-field prompt. Do NOT drop this call back to a bare
+                # `json.dumps` "because it's just our own extracted data": the
+                # sibling context sites already sanitize, and `_TAG_PATTERN`
+                # only touches `<tag>`-like substrings, never JSON `{`/`[`/`"`
+                # structure, so extraction quality is unaffected. See D-010.
+                sections.append(
+                    f"Already extracted: {self._sanitize_text_for_prompt(ctx_json)}"
+                )
 
         # Conversation history (compact)
         # DECISION plan-2026-07-19T191147-4b664252/D-012

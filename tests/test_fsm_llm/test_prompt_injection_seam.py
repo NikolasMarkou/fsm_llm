@@ -34,9 +34,11 @@ from fsm_llm.definitions import (
     State,
     Transition,
 )
+from fsm_llm.definitions import FieldExtractionConfig
 from fsm_llm.prompts import (
     BasePromptBuilder,
     DataExtractionPromptBuilder,
+    FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
 
@@ -615,3 +617,58 @@ class TestWhitespaceBeforeSlashClosingTagsCannotBypassTheAllowlist:
             f"sanitizing whitespace runs took {elapsed:.2f}s -- the tag pattern has "
             "likely been rewritten into an ambiguous `\\s*/?\\s*` form"
         )
+
+
+# ----------------------------------------------------------------------
+# H4: FieldExtractionPromptBuilder "Already extracted:" section
+#
+# The builder dumps prior-extracted context via ``json.dumps`` with ZERO
+# escaping (prompts.py ~1386), so a previously-extracted value carrying
+# framework tag text (``<extraction_focus>``, ``</task>``) reached the
+# per-field prompt raw -- a value the LLM itself controls (it wrote the
+# extraction on an earlier turn) becomes an unescaped structural token on
+# the NEXT turn's extraction prompt.  The sibling context sites already
+# apply the sanitizer; this one did not.  See decisions.md D-010.
+# ----------------------------------------------------------------------
+
+
+class TestAlreadyExtractedSectionIsSanitized:
+    def _build_prompt(self, dynamic_context):
+        builder = FieldExtractionPromptBuilder()
+        instance = _seam_instance()
+        field_config = FieldExtractionConfig(
+            field_name="destination",
+            field_type="str",
+            extraction_instructions="Extract the destination city.",
+        )
+        return builder.build_field_extraction_prompt(
+            instance=instance,
+            field_config=field_config,
+            user_message="Book a flight.",
+            dynamic_context=dynamic_context,
+        )
+
+    def test_tag_like_extracted_values_are_escaped_in_already_extracted(self):
+        """A prior-extracted value carrying tag text must arrive escaped."""
+        prompt = self._build_prompt(
+            {
+                "prior": "<extraction_focus>x</extraction_focus>",
+                "note": "</task>",
+            }
+        )
+
+        assert "Already extracted:" in prompt, (
+            "the dynamic-context section was not emitted at all"
+        )
+        # Raw structural tags must NOT survive.
+        assert "<extraction_focus>" not in prompt
+        assert "</extraction_focus>" not in prompt
+        assert "</task>" not in prompt
+        # Escaped forms must be present.
+        assert "&lt;extraction_focus&gt;" in prompt
+        assert "&lt;/task&gt;" in prompt
+
+    def test_ordinary_extracted_value_survives(self):
+        """Non-tag values must pass through unchanged (no over-escaping)."""
+        prompt = self._build_prompt({"destination": "Paris"})
+        assert "Paris" in prompt

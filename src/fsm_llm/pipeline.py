@@ -264,6 +264,23 @@ class MessagePipeline:
         # Contextualize propagates conversation_id to all downstream logger
         # calls on this thread (llm.py, transition_evaluator.py, etc.)
         with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
+            # DECISION plan-2026-07-21T045419-9925aa3a/D-012
+            # Turn-level atomicity snapshot, taken BEFORE Pass 1. A Pass-2
+            # failure must not leave a committed Pass-1 transition + extraction
+            # visible to the caller: a retry would then evaluate against a state
+            # the LLM never responded from. This guard wraps AROUND the Pass-1
+            # partial-commit contracts (D-005 scoped rollback, D-006 handler
+            # re-raise, _execute_state_transition's POST_TRANSITION rollback) —
+            # do NOT push it INTO those helpers, and do NOT drop the deepcopy
+            # for a shallow copy: Pass 1 mutates context.data values in place.
+            # The deepcopy mirrors the per-transition snapshot already taken at
+            # _execute_state_transition (search `old_context_snapshot`), so it
+            # is not a new cost class. Boundary (same as D-005): already-run
+            # handler EXTERNAL side effects cannot be undone; only in-memory
+            # current_state + context.data are restored. See D-012.
+            pre_turn_state = instance.current_state
+            pre_turn_data = copy.deepcopy(instance.context.data)
+
             # Execute pre-processing handlers
             self.execute_handlers(
                 instance,
@@ -288,14 +305,21 @@ class MessagePipeline:
             )
 
             # Pass 2: Response generation based on final state
-            return self._execute_response_generation_pass(
-                instance,
-                message,
-                extraction_response,
-                transition_occurred,
-                previous_state,
-                conversation_id,
-            )
+            try:
+                return self._execute_response_generation_pass(
+                    instance,
+                    message,
+                    extraction_response,
+                    transition_occurred,
+                    previous_state,
+                    conversation_id,
+                )
+            except Exception:
+                # Restore the pre-turn in-memory state so the turn is atomic.
+                instance.current_state = pre_turn_state
+                instance.context.data.clear()
+                instance.context.data.update(pre_turn_data)
+                raise
 
     def process_stream(
         self, instance: FSMInstance, message: str, conversation_id: str

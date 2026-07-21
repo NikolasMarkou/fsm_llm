@@ -134,6 +134,14 @@ class FSMStackFrame(BaseModel):
     return_context: dict[str, Any] = Field(default_factory=dict)
     shared_context_keys: list[str] = Field(default_factory=list)
     preserve_history: bool = False
+    # DECISION plan-2026-07-21T045419-9925aa3a/D-011
+    # The content-hash id of this frame's FSM definition. OPTIONAL with a safe
+    # default so serialized frames / restore_session predating this field still
+    # load. `_release_unreferenced_temp_definitions` counts refs across all live
+    # frames by this id: a frame that leaves it None UNDER-COUNTS and can let
+    # cleanup evict a def another frame still needs. If you add a THIRD
+    # FSMStackFrame construction site, you MUST set fsm_id there too. See D-011.
+    fsm_id: str | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -397,6 +405,7 @@ class API:
                     FSMStackFrame(
                         fsm_definition=self.fsm_definition,
                         conversation_id=conversation_id,
+                        fsm_id=self.fsm_id,
                     )
                 ]
                 self._last_accessed[conversation_id] = time.monotonic()
@@ -511,7 +520,16 @@ class API:
                 processed_fsm_id, initial_context=initial_context
             )
             with self._stack_lock:
-                self._temp_fsm_definitions.pop(processed_fsm_id, None)
+                # DECISION plan-2026-07-21T045419-9925aa3a/D-011
+                # Do NOT re-add `_temp_fsm_definitions.pop(processed_fsm_id, None)`
+                # here. The pushed def used to survive only in the LRU `fsm_cache`;
+                # once ~65 distinct FSM ids loaded it was evicted and the loader
+                # fell through to `load_fsm_definition`, which raises
+                # `ValueError: Unknown FSM ID` for a content-hash id — bricking the
+                # sub-conversation. The def must stay registered for the frame's
+                # LIFETIME; `_release_unreferenced_temp_definitions` (called on
+                # pop_fsm / end_conversation / _rollback_push) drops it once the
+                # last referencing frame is gone. See D-011.
                 # Re-validate depth atomically with frame addition
                 self._validate_stack_depth(conversation_id)
 
@@ -521,6 +539,7 @@ class API:
                     return_context=return_context or {},
                     shared_context_keys=shared_context_keys or [],
                     preserve_history=preserve_history,
+                    fsm_id=processed_fsm_id,
                 )
                 self.conversation_stacks[conversation_id].append(new_frame)
                 push_succeeded = True
@@ -590,8 +609,12 @@ class API:
         self, processed_fsm_id: str | None, new_conversation_id: str | None
     ) -> None:
         """Clean up resources after a failed push_fsm attempt."""
-        if processed_fsm_id:
-            self._temp_fsm_definitions.pop(processed_fsm_id, None)
+        # DECISION plan-2026-07-21T045419-9925aa3a/D-011
+        # Do NOT unconditionally pop `processed_fsm_id` here. A failed push can
+        # share its content-hash id with a live frame in ANOTHER conversation
+        # (two conversations pushing the same sub-FSM); an unconditional pop
+        # would evict a def that conversation still needs. Release by reference
+        # instead — the helper drops the id iff no live frame references it.
         if new_conversation_id:
             try:
                 self.fsm_manager.end_conversation(new_conversation_id)
@@ -599,6 +622,38 @@ class API:
                 logger.debug(
                     f"Failed to clean up orphaned conversation {new_conversation_id}: {cleanup_err}"
                 )
+        self._release_unreferenced_temp_definitions()
+
+    def _release_unreferenced_temp_definitions(self) -> None:
+        """Drop temp FSM definitions no live stack frame still references.
+
+        DECISION plan-2026-07-21T045419-9925aa3a/D-011
+        Reference-aware cleanup: a content-hash FSM id is SHARED across
+        conversations on one API instance, so a single temp def may back
+        several live frames. Compute the set of ``fsm_id``s used by every frame
+        in every live stack under ``_stack_lock``, then drop only temp entries
+        absent from that set. Do NOT drop a temp entry merely because one
+        referencing conversation ended — that reintroduces
+        ``ValueError: Unknown FSM ID`` for the conversations still using it.
+
+        Contract: takes no args; acquires ``_stack_lock`` internally (callers
+        must NOT already hold it); mutates ``_temp_fsm_definitions`` in place;
+        returns None; never raises.
+        """
+        with self._stack_lock:
+            used = {
+                frame.fsm_id
+                for stack in self.conversation_stacks.values()
+                for frame in stack
+                if frame.fsm_id is not None
+            }
+            stale = [
+                fsm_id
+                for fsm_id in self._temp_fsm_definitions
+                if fsm_id not in used
+            ]
+            for fsm_id in stale:
+                self._temp_fsm_definitions.pop(fsm_id, None)
 
     def pop_fsm(
         self,
@@ -682,6 +737,11 @@ class API:
                             f"pop_fsm: frame {current_frame.conversation_id} already "
                             f"absent from stack {conversation_id}; nothing to remove"
                         )
+
+            # The popped frame is gone; release any temp def it was the last
+            # frame to reference (D-011). Reference-aware, so a sub-FSM shared
+            # with another live conversation survives this pop.
+            self._release_unreferenced_temp_definitions()
 
             response = self._generate_resume_message(previous_frame, context_to_merge)
             with self._stack_lock:
@@ -1046,7 +1106,11 @@ class API:
         else:
             self.fsm_manager.end_conversation(conversation_id)
 
-        # No need to clear _temp_fsm_definitions — entries are removed after caching in push_fsm
+        # D-011: pushed sub-FSM defs now live in _temp_fsm_definitions for the
+        # frame's lifetime (the post-push pop was removed). This conversation's
+        # frames are already out of conversation_stacks, so release any temp def
+        # no OTHER live conversation still references.
+        self._release_unreferenced_temp_definitions()
 
     def list_active_conversations(self) -> list[str]:
         """List all active conversation IDs."""

@@ -645,6 +645,79 @@ class TestProcess:
         assert any("system" in e for e in exchanges)
 
 
+class TestProcessPass2FailureIsAtomic:
+    """H2: a Pass-2 (response-generation) failure must not leave a half-applied
+    turn. Pass 1 may commit a transition + extracted data; if Pass 2 raises,
+    the caller-visible state must be restored to pre-turn so a retry evaluates
+    against the state the user was actually responded from. See decisions.md D-012.
+    """
+
+    def _transition_fsm(self):
+        from fsm_llm.definitions import TransitionCondition
+
+        return _make_fsm_definition(
+            {
+                "start": State(
+                    id="start",
+                    description="start description",
+                    purpose="Collect the name",
+                    required_context_keys=["user_name"],
+                    transitions=[
+                        Transition(
+                            target_state="end",
+                            description="name captured",
+                            priority=100,
+                            conditions=[
+                                TransitionCondition(
+                                    description="user_name present",
+                                    requires_context_keys=["user_name"],
+                                )
+                            ],
+                        )
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
+        )
+
+    def test_pass2_failure_reverts_transition_and_extraction(self):
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Alice"})
+        # Pass 2 blows up AFTER Pass 1 has committed the transition + extraction.
+        llm.generate_response.side_effect = RuntimeError("pass-2 boom")
+
+        pipeline = _make_pipeline(llm=llm, fsm_def=self._transition_fsm())
+        instance = _make_instance()
+
+        # The exception must propagate to the caller.
+        with pytest.raises(RuntimeError, match="pass-2 boom"):
+            pipeline.process(instance, "My name is Alice", "conv-1")
+
+        # ...but the turn must be atomic: state and context reverted to pre-turn.
+        assert instance.current_state == "start", (
+            "Pass-2 failure left the Pass-1 transition committed"
+        )
+        assert "user_name" not in instance.context.data, (
+            "Pass-2 failure left the Pass-1 extraction committed"
+        )
+
+    def test_pass2_failure_with_no_transition_leaves_state_intact(self):
+        """No-transition / no-extraction turn: the restore is a correct no-op."""
+        llm = _make_mock_llm()
+        llm.generate_response.side_effect = RuntimeError("pass-2 boom")
+
+        pipeline = _make_pipeline(llm=llm)  # no required_context_keys, no extraction
+        instance = _make_instance(
+            current_state="end", context_data={"original": "data"}
+        )
+
+        with pytest.raises(RuntimeError, match="pass-2 boom"):
+            pipeline.process(instance, "Hello", "conv-1")
+
+        assert instance.current_state == "end"
+        assert instance.context.data.get("original") == "data"
+
+
 # ══════════════════════════════════════════════════════════════
 # 6. _clean_empty_context_keys()
 # ══════════════════════════════════════════════════════════════

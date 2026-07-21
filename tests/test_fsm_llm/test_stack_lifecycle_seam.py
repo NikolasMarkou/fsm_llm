@@ -210,6 +210,83 @@ class TestSingleThreadedStackNonRegression:
 
 
 # ==========================================================================================
+# H1 — a pushed sub-FSM definition must survive LRU eviction of the FSM cache
+#
+# `push_fsm` used to pop `_temp_fsm_definitions[processed_fsm_id]` right after
+# starting the sub-conversation, so the sub-FSM survived ONLY in the 64-entry LRU
+# `fsm_cache`. Once ~65 distinct FSM ids were loaded, the pushed def was evicted
+# and `custom_fsm_loader` fell through to `load_fsm_definition`, which raises
+# `ValueError: Unknown FSM ID` for a non-path content-hash id — permanently
+# bricking every stacked sub-conversation. See decisions.md D-011.
+# ==========================================================================================
+
+
+class TestPushedFsmSurvivesLruEviction:
+    def test_sub_conversation_survives_cache_eviction(self, api):
+        """A pushed sub-FSM must stay operable after its cache entry is evicted."""
+        # Squeeze the LRU cache so a single unrelated load evicts the sub-FSM.
+        api.fsm_manager._max_fsm_cache_size = 1
+
+        conv_a, _ = api.start_conversation()
+        api.push_fsm(conv_a, _make_fsm("sub1"))
+        assert api.get_stack_depth(conv_a) == 2
+
+        # Loading a *different* FSM id (the root, for a second conversation) into
+        # the 1-entry cache evicts the pushed sub-FSM definition.
+        api.start_conversation()
+
+        # Operating on the sub-conversation must NOT raise
+        # `ValueError: Unknown FSM ID` — the def has to be re-resolvable.
+        assert isinstance(api.get_current_state(conv_a), str)
+        assert isinstance(api.converse("hello there", conv_a), str)
+
+    def test_temp_definitions_empty_after_full_teardown(self, api):
+        """No leak: every pushed def is released once its frames are gone."""
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        api.push_fsm(conv_id, _make_fsm("sub2"))
+        with api._stack_lock:
+            assert api._temp_fsm_definitions, "pushed defs should be registered"
+
+        # Pop one frame: its def is released, the other pushed def stays.
+        api.pop_fsm(conv_id)
+        with api._stack_lock:
+            assert len(api._temp_fsm_definitions) == 1
+
+        # Ending the conversation releases everything.
+        api.end_conversation(conv_id)
+        with api._stack_lock:
+            assert api._temp_fsm_definitions == {}
+
+    def test_shared_sub_fsm_survives_one_conversations_pop(self, api):
+        """A sub-FSM SHARED by two conversations (same content hash) must
+        survive one conversation's pop_fsm and remain operable for the other."""
+        api.fsm_manager._max_fsm_cache_size = 1
+        shared = _make_fsm("shared_sub")
+
+        conv_a, _ = api.start_conversation()
+        conv_b, _ = api.start_conversation()
+        api.push_fsm(conv_a, shared)
+        api.push_fsm(conv_b, shared)  # identical content hash -> same fsm_id
+
+        # Exactly one shared temp entry backs both frames.
+        with api._stack_lock:
+            assert len(api._temp_fsm_definitions) == 1
+
+        # conv_a pops its frame; the shared def must NOT be released — conv_b
+        # still references it.
+        api.pop_fsm(conv_a)
+        with api._stack_lock:
+            assert len(api._temp_fsm_definitions) == 1, (
+                "shared sub-FSM def evicted while conv_b still references it"
+            )
+
+        # Force cache eviction, then drive conv_b's still-live sub-conversation.
+        api.start_conversation()
+        assert isinstance(api.converse("hello there", conv_b), str)
+
+
+# ==========================================================================================
 # T2 — cleanup_stale_conversations must not evict actively-driven conversations
 # ==========================================================================================
 
