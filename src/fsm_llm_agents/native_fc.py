@@ -71,6 +71,46 @@ _REPAIR_PROMPT = (
     "nothing else."
 )
 
+#: Provider messages that mean "this turn's TOOL CALL did not render", as
+#: opposed to "the provider is unreachable".
+#:
+#: The first two are the measured shape (1 dispatch in 35 on
+#: ``ollama_chat/qwen3.5:4b``): Ollama's tool-call template emitted invalid XML
+#: and litellm surfaced it as an ``APIConnectionError``, so the class of the
+#: exception carries no information and the message is all there is.  Kept
+#: deliberately NARROW -- a broad marker such as "tool" would swallow real
+#: outages, which is the thing this classification exists to keep separate.
+_MALFORMED_TOOL_CALL_MARKERS: tuple[str, ...] = (
+    "xml syntax error",
+    "element <function>",
+    "invalid tool call",
+)
+
+
+def _is_malformed_tool_call(exc: BaseException, tools_declared: bool) -> bool:
+    """Whether *exc* is a garbled TOOL CALL rather than a provider failure.
+
+    Interface contract (2 call sites: the ``_litellm_complete`` boundary, which
+    labels the error, and :meth:`NativeFunctionCallingReactAgent.run`, which
+    reads the label back off ``AgentError.details``):
+        - ``tools_declared``: whether THIS completion carried a tool surface at
+          all.  A completion with no ``tools=`` cannot garble a tool call, so it
+          is never classified as one however its message reads.
+        - Returns ``False`` for everything not positively identified.  Fail
+          closed: an unrecognised failure stays a failure.
+        - Never raises.
+    """
+    if not tools_declared:
+        return False
+    text = str(exc).lower()
+    return any(marker in text for marker in _MALFORMED_TOOL_CALL_MARKERS)
+
+
+def _degrades_turn(exc: BaseException) -> bool:
+    """Whether *exc* may be absorbed as one failed turn instead of the run."""
+    details = getattr(exc, "details", None)
+    return bool(isinstance(details, dict) and details.get("malformed_tool_call"))
+
 
 class NativeFunctionCallingReactAgent(BaseAgent):
     """ReAct loop driven by provider-native function calling.
@@ -175,10 +215,29 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         # the subtype is earned then, not now. Only the network call belongs
         # inside the try — the tool_call parsing below must keep raising its
         # own programming errors unwrapped. See decisions.md D-006.
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-016
+        # The `try` still wraps ONLY the network call (D-006's rule is
+        # untouched); what is added is a LABEL. Measured 1 dispatch in 35 on
+        # `ollama_chat/qwen3.5:4b`: Ollama's tool-call template emitted
+        # `element <function> closed by </parameter>`, litellm raised
+        # `APIConnectionError`, and `run()`'s `except AgentError: raise` ended a
+        # dispatch that had ALREADY written real bytes. Classify HERE, not in
+        # `run()`: this is the only frame that knows whether the failed call
+        # even carried a tool surface, and that is half the discriminator.
+        # Do NOT widen this into "swallow every AgentError from the loop" -- a
+        # provider outage is not a model behaviour and must still end the run.
+        # See decisions.md D-016.
         try:
             response = litellm.completion(**call_params)
         except Exception as e:
-            raise AgentError(f"Native function-calling LLM call failed: {e!s}") from e
+            raise AgentError(
+                f"Native function-calling LLM call failed: {e!s}",
+                details={
+                    "malformed_tool_call": _is_malformed_tool_call(
+                        e, bool(call_params.get("tools"))
+                    )
+                },
+            ) from e
         msg = response.choices[0].message
         tool_calls: list[dict[str, Any]] = []
         for tc in getattr(msg, "tool_calls", None) or []:
@@ -224,7 +283,31 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         try:
             for iteration in range(1, max_iters + 1):
                 self._check_budgets(start_time, iteration, max_iters)
-                result = self._complete(messages, schemas)
+                # DECISION plan-2026-07-21T191807-bf7ffe24/D-016
+                # A garbled tool-call turn ends the LOOP, not the dispatch. The
+                # `break` is deliberate and is not a silent retry: everything
+                # already established -- `trace_calls`, the bytes those calls
+                # wrote, any `answer` -- survives into the result, and the
+                # post-loop D-002 repair turn then runs with NO tool surface at
+                # all, which is precisely the shape that cannot reproduce the
+                # failure. `concluded` stays False, so D-005's honest `success`
+                # still reports that this run did not finish on its own.
+                # Do NOT turn this into `continue`: the next turn would declare
+                # the same tools against the same history and, on the one
+                # measured occurrence, garble again -- burning the budget to
+                # reach the same place with less context.
+                # See decisions.md D-016.
+                try:
+                    result = self._complete(messages, schemas)
+                except AgentError as exc:
+                    if not _degrades_turn(exc):
+                        raise
+                    logger.warning(
+                        f"Native function-calling tool turn {iteration} was "
+                        f"malformed by the provider ({exc}); ending the loop "
+                        "with the trace and answer gathered so far."
+                    )
+                    break
                 tool_calls = result.get("tool_calls") or []
                 content = result.get("content")
 
@@ -277,11 +360,20 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             # already had a usable answer can never be regressed.
             repair_format = _output_response_format(self.config.output_schema)
             if repair_format is not None and structured is None:
-                repaired = self._complete(
-                    [*messages, {"role": "user", "content": _REPAIR_PROMPT}],
-                    [],
-                    response_format=repair_format,
-                )
+                try:
+                    repaired = self._complete(
+                        [*messages, {"role": "user", "content": _REPAIR_PROMPT}],
+                        [],
+                        response_format=repair_format,
+                    )
+                except AgentError as exc:
+                    # Symmetric with the loop above (D-016): a degradable
+                    # failure on the OPTIONAL repair must not delete a run that
+                    # already has an answer and a trace.
+                    if not _degrades_turn(exc):
+                        raise
+                    logger.warning(f"Repair turn was malformed ({exc}); keeping it.")
+                    repaired = {}
                 repaired_answer = repaired.get("content") or ""
                 repaired_structured = self._try_parse_structured_output(repaired_answer)
                 if repaired_structured is not None:

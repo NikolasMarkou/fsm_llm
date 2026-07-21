@@ -1702,3 +1702,102 @@ class TestSingleRunPerInstance:
         harness = make_harness(_traverse_script())
         assert harness.run().success is True
         assert harness.run("second goal").success is True
+
+
+# ---------------------------------------------------------------------------
+# The two gate-flag channels (review C1's blind spot, D-015)
+# ---------------------------------------------------------------------------
+
+
+class TestBothGateChannelsAreRead:
+    """``_apply_role_result`` reads ``structured_output`` AND ``final_context``.
+
+    Review C1 found the fail-open here and the reviewer named the blind spot
+    exactly: no test drove a ``concluded=False`` dispatch carrying a VALID
+    ``structured_output`` through ``_dispatch_if_needed``.  Step 2's repair turn
+    made that shape routine -- the loop exhausts its budget, writes nothing, and
+    a schema-valid payload is still extracted afterwards.
+
+    These tests pin the merge so ``roles.py``'s filesystem-derived correction
+    cannot be undone by an ordering change, and prove the driver is not simply
+    ignoring one channel.
+    """
+
+    @staticmethod
+    def _explore_delta(
+        make_harness, *, structured: Any, final_context: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Drive ONE EXPLORE dispatch and return the context delta it produced."""
+
+        class _Payload:
+            """A stand-in for the role's pydantic payload (duck-typed dump)."""
+
+            def __init__(self, data: dict[str, Any]) -> None:
+                self._data = data
+
+            def model_dump(self) -> dict[str, Any]:
+                return dict(self._data)
+
+        def worker(request: RoleRequest) -> AgentResult:
+            return AgentResult(
+                # `success=True` is the shape `roles.py` returns for a parseable
+                # payload; the AGENT's own `concluded` was False.
+                answer="I reviewed three areas.",
+                success=True,
+                final_context=dict(final_context),
+                structured_output=_Payload(structured) if structured else None,
+            )
+
+        harness = make_harness(worker=worker)
+        return harness.agent._dispatch_if_needed(
+            HarnessStates.EXPLORE,
+            {ContextKeys.GOAL: "g", ContextKeys.ITERATION: 1},
+        )
+
+    def test_a_structured_only_claim_is_read(self, make_harness) -> None:
+        """Not a recommendation -- the fact that makes the next test matter.
+
+        This is review C1 in one line: with nothing in ``final_context``, a
+        payload claiming three findings reaches the EXPLORE gate.  The default
+        worker factory is what stops it, by correcting BOTH channels before the
+        driver ever sees them (``roles.py``, D-015).
+        """
+        delta = self._explore_delta(
+            make_harness,
+            structured={ContextKeys.FINDINGS_COUNT: 3},
+            final_context={},
+        )
+
+        assert delta[ContextKeys.FINDINGS_COUNT] == 3
+
+    def test_final_context_overrides_a_contradicting_structured_claim(
+        self, make_harness
+    ) -> None:
+        """The shape the corrected factory returns: claim 3, disk 0."""
+        delta = self._explore_delta(
+            make_harness,
+            structured={ContextKeys.FINDINGS_COUNT: 3},
+            final_context={ContextKeys.FINDINGS_COUNT: 0},
+        )
+
+        assert delta[ContextKeys.FINDINGS_COUNT] == 0
+
+    def test_the_control_a_verified_count_still_opens_the_gate(
+        self, make_harness
+    ) -> None:
+        """Otherwise the test above would pass on a driver that dropped the key."""
+        delta = self._explore_delta(
+            make_harness,
+            structured={ContextKeys.FINDINGS_COUNT: 0},
+            final_context={ContextKeys.FINDINGS_COUNT: 3},
+        )
+
+        assert delta[ContextKeys.FINDINGS_COUNT] == 3
+
+    def test_a_dropped_key_leaves_the_gate_shut(self, make_harness) -> None:
+        """No plan directory means nothing to count: the key must not appear."""
+        delta = self._explore_delta(
+            make_harness, structured=None, final_context={}
+        )
+
+        assert ContextKeys.FINDINGS_COUNT not in delta

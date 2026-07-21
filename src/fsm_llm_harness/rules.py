@@ -234,14 +234,26 @@ _EXPLORE = StateRules(
         "On re-entry from REFLECT, append corrections marked "
         "[CORRECTED iter-N]; never overwrite an earlier finding.",
     ),
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-015
+    # This block used to define `findings_count` as "how many findings are
+    # indexed in findings.md" -- the ONE file the operative rule three lines
+    # above forbids the explorer to touch, and which `OWNERSHIP` grants to
+    # `Role.ORCHESTRATOR` (never dispatched). Review C3: a rule-compliant
+    # explorer had to report 0 forever, so the only way the gate ever opened was
+    # a model reporting a number it could not know. Do NOT "restore" the index
+    # wording for consistency with the count's name: the count is now DERIVED
+    # from the `findings/<topic>.md` files on disk -- the files this role DOES
+    # own -- and the number asked for here is advisory, kept only so the driver
+    # can log claim-versus-disk. See decisions.md D-015.
     extraction_instructions=(
         "Report exploration progress as JSON with exactly these fields:\n"
-        f"- {ContextKeys.FINDINGS_COUNT} (integer): how many findings are "
-        f"indexed in {ArtifactNames.FINDINGS_INDEX} right now.\n"
+        f"- {ContextKeys.FINDINGS_COUNT} (integer): how many "
+        f"{ArtifactNames.FINDINGS_DIR}/<topic>.md files you have written so "
+        "far.\n"
         f"- {ContextKeys.NEEDS_EXPLORE} (boolean): true if more research is "
         "still required.\n"
-        "Count only findings already written to disk. The exit gate is "
-        "mechanical: an absent or non-numeric count keeps it closed."
+        "The driver counts those files itself, so your number is advisory: "
+        "only files that really exist can open the gate."
     ),
     response_instructions=(
         "State the current findings count, the topics covered so far, and the "
@@ -250,7 +262,8 @@ _EXPLORE = StateRules(
     owned_artifacts=artifacts_writable_by(ROLE_BY_STATE[HarnessStates.EXPLORE]),
     gate_summary=(
         f"HARD: leave for PLAN only when {ContextKeys.FINDINGS_COUNT} >= "
-        f"{Defaults.FINDINGS_THRESHOLD}."
+        f"{Defaults.FINDINGS_THRESHOLD}, counted from the "
+        f"{ArtifactNames.FINDINGS_DIR}/ files actually on disk."
     ),
 )
 

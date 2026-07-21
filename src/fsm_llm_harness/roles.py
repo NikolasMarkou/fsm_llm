@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
@@ -52,7 +52,7 @@ from fsm_llm_agents.definitions import AgentConfig, AgentResult
 from fsm_llm_agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm_agents.tools import ToolRegistry
 
-from .constants import ContextKeys, Defaults, HarnessStates
+from .constants import ArtifactNames, ContextKeys, Defaults, HarnessStates
 from .hardening import coerce_worker_output, parse_role_output, retry
 from .harness import _WORKER_WRITABLE, RoleRequest, WorkerFactory
 from .rules import ROLE_BY_STATE, artifacts_writable_by
@@ -66,6 +66,7 @@ from .tools import (
     PlanMemory,
     PlanTools,
     Workspace,
+    WorkspaceTools,
     build_plan_tools,
     build_workspace_tools,
 )
@@ -111,7 +112,10 @@ _MESSAGE_FIELD = "message"
 #: identically in both.
 _FIELD_DESCRIPTIONS: Mapping[str, str] = MappingProxyType(
     {
-        ContextKeys.FINDINGS_COUNT: "How many findings are indexed on disk now.",
+        ContextKeys.FINDINGS_COUNT: (
+            "Advisory only: how many findings/<topic>.md files you have "
+            "written. The driver counts them on disk."
+        ),
         ContextKeys.NEEDS_EXPLORE: "True if more research is required first.",
         ContextKeys.TOTAL_STEPS: "How many steps the plan contains.",
         ContextKeys.ALL_CRITERIA_PASS: (
@@ -473,6 +477,26 @@ def held_tools(request: RoleRequest, spec: RoleSpec) -> tuple[str, ...]:
     return (*spec.tool_scope, *spec.plan_tool_scope)
 
 
+def _holds_write_tool(names: Iterable[str]) -> bool:
+    """Whether this dispatch holds a tool that can put bytes anywhere.
+
+    Interface contract (shared predicate, 2 call sites: :func:`build_role_prompt`
+    decides the prompt's verb and write obligation from it, and the default
+    worker factory decides whether a completion claim needs write EVIDENCE from
+    it):
+        - Parameter: the tool names the dispatch actually holds
+          (:func:`held_tools`).
+        - Returns ``True`` when any workspace or plan-directory write tool is
+          among them.
+        - Never raises; performs no I/O.
+
+    One predicate so the prompt's promise and the mechanical check are the same
+    fact: a role is asked to write exactly when it will be held to having done
+    so.
+    """
+    return any(name in WRITE_TOOLS or name in PLAN_WRITE_TOOLS for name in names)
+
+
 def _writes_line(request: RoleRequest, spec: RoleSpec) -> str:
     """Render what this dispatch may write, or that it may write nothing."""
     if request.plan_dir is not None and spec.owned_artifacts:
@@ -546,29 +570,27 @@ def _output_line(spec: RoleSpec) -> str:
     # the draft-then-correction fail-open path (decisions.md D-031): constrained
     # decoding plus an explicit "one object, no drafts" instruction. They are
     # load-bearing prompt text, not politeness.
-    # DECISION plan-2026-07-21T125237-191b2eb2/D-061
-    # The leading sentence is MANDATORY and must not be "tidied away" as noise.
-    # A role reply whose whole text is a bare JSON object is DESTROYED by core
-    # before the harness ever sees it: `LiteLLMInterface.
-    # _parse_response_generation_response`'s envelope guard fires on any Pass-2
-    # text that both starts and ends with a brace, recovers `message` from it,
-    # and -- when there is no `message` key, which a role payload never has --
-    # substitutes `_GENERIC_FALLBACK_MESSAGE` ("I'm sorry, I couldn't generate a
-    # proper response."). MEASURED at step 7f: `:4b` complied with the OLD
-    # wording exactly, emitting {"findings_count": 3, "needs_explore": false},
-    # and `parse_role_output` still reported `unparseable` because the apology
-    # string was all that survived. Core's guard is deliberate and permanent
-    # (fsm_llm/llm.py, D-022 of plan-2026-07-18T162030-a02151fe: no text-shape
-    # discriminator can separate a mistaken envelope from prose that legitimately
-    # quotes JSON), so the harness must not ask for the one shape it deletes.
-    # Prose-PREFIXED JSON is named there as a shape that passes through
-    # verbatim, and that is what this asks for. Do NOT revert to "return exactly
-    # ONE JSON object". See decisions.md D-061.
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-004
+    # This asks for a BARE object, and the "one short sentence first" wording
+    # that stood here until step 20 must not come back. It was correct when it
+    # was written (D-061 of plan-2026-07-21T125237-191b2eb2): a reply that was
+    # nothing but a JSON object was destroyed by core's response-generation
+    # envelope guard, which substitutes `_GENERIC_FALLBACK_MESSAGE` for any
+    # brace-wrapped text carrying no `message` key. Step 4 removed that
+    # precondition -- `_build_output_schema` now appends `message: str` to EVERY
+    # role schema (see the D-004 block there), so core's FIRST rung recovers the
+    # sentence from inside the object and the bare shape survives verbatim.
+    # The old text therefore made two false statements to every dispatch, and
+    # the `response_format` repair turn (D-002) structurally cannot obey it --
+    # a constrained-decoding turn emits the object and nothing else.
+    # Do NOT re-add the prose prefix without ALSO removing `message` from the
+    # schema; the two are one fact, and the control for it is the "no-`message`
+    # reply still gets the apology" test in `test_roles_and_tools.py`.
+    # See decisions.md D-004.
     return (
-        "Finish with one short sentence, then exactly ONE JSON object on its "
-        f"own line: {{{shape}}}\n"
-        "The sentence is required: a reply that is nothing but a JSON object "
-        "is discarded before this protocol sees it.\n"
+        f"Finish by returning exactly ONE JSON object and nothing else: "
+        f"{{{shape}}}\n"
+        "Put your sentence in the object's message field, not around it. "
         "Do not show drafts, corrections or alternatives. "
         "Do not repeat the object."
     )
@@ -611,7 +633,7 @@ def build_role_prompt(request: RoleRequest, spec: RoleSpec) -> str:
     snapshot = _context_snapshot(request.context)
     names = held_tools(request, spec)
     tools = ", ".join(names) or "none"
-    can_write = any(name in WRITE_TOOLS or name in PLAN_WRITE_TOOLS for name in names)
+    can_write = _holds_write_tool(names)
 
     sections = [
         f"You are the {request.role} for the {request.state.upper()} phase "
@@ -639,6 +661,130 @@ def build_role_prompt(request: RoleRequest, spec: RoleSpec) -> str:
     sections.append(_finish_line(spec, can_write))
     sections.append(_output_line(spec))
     return "\n\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# Mechanical verification: the filesystem answers, the worker only claims
+# ---------------------------------------------------------------------------
+
+#: The two confined roots, as labels for :func:`_verified_writes`' report.
+_WORKSPACE_ROOT = "workspace"
+_PLAN_ROOT = "plan"
+
+#: Write tool -> the root a successful call leaves bytes under.
+#:
+#: ``delete_file`` is deliberately ABSENT: a delete is a write tool but it
+#: removes bytes, so counting it as evidence of work would let "I deleted a
+#: file" stand in for "I implemented the step".
+_BYTE_WRITING_TOOLS: Mapping[str, str] = MappingProxyType(
+    {
+        WorkspaceTools.WRITE_FILE: _WORKSPACE_ROOT,
+        WorkspaceTools.APPEND_FILE: _WORKSPACE_ROOT,
+        PlanTools.WRITE_PLAN_FILE: _PLAN_ROOT,
+        PlanTools.APPEND_PLAN_FILE: _PLAN_ROOT,
+    }
+)
+
+#: Gate keys the driver DERIVES from the filesystem instead of believing.
+#:
+#: Read as data: key -> the plan-directory subdirectory whose non-empty ``.md``
+#: files are counted.  A key listed here is stripped from every worker payload
+#: before the derived value replaces it, so a dispatch that cannot be verified
+#: (no plan directory) carries no value at all rather than the worker's.
+_DISK_DERIVED_COUNTS: Mapping[str, str] = MappingProxyType(
+    {ContextKeys.FINDINGS_COUNT: ArtifactNames.FINDINGS_DIR}
+)
+
+
+def _has_bytes(reader: Callable[[str], str], path: str) -> bool:
+    """Whether *path* carries non-whitespace content, read through its own root.
+
+    Interface contract (shared predicate, 2 call sites: :func:`_count_on_disk`
+    and :func:`_verified_writes`):
+        - ``reader``: a CONFINED reader -- ``Workspace.read_text`` or
+          ``PlanMemory.read_text``.  Passing ``Path.read_text`` would bypass the
+          chokepoint, which is why the parameter is the bound method and not a
+          root.
+        - Returns ``False`` for a missing file, a refused path, an unreadable
+          file and an empty one.  Every failure means "not verified"; none of
+          them means "assume it worked".
+        - Never raises.
+    """
+    try:
+        return bool(reader(path).strip())
+    except Exception:  # missing / refused / undecodable -- all fail closed
+        return False
+
+
+def _count_on_disk(memory: PlanMemory, directory: str) -> int:
+    """Count the non-empty ``.md`` files in one plan-directory subdirectory."""
+    try:
+        entries = memory.list_dir(directory)
+    except Exception:  # the directory does not exist yet: zero, not unknown
+        return 0
+    return sum(
+        1
+        for name in entries
+        if name.endswith(".md") and _has_bytes(memory.read_text, f"{directory}/{name}")
+    )
+
+
+def _verified_writes(
+    result: AgentResult,
+    *,
+    workspace: Workspace,
+    memory: PlanMemory | None,
+) -> tuple[str, ...]:
+    """Return the writes this dispatch both CALLED and left bytes for.
+
+    Interface contract (1 call site today, the default worker factory; exported
+    shape kept narrow on purpose):
+        - Reads ``result.trace.tool_calls`` -- the agent loop's own record of
+          what it dispatched -- and re-reads each target through the confined
+          root that tool writes to.
+        - Returns ``"<root>:<path>"`` labels, one per VERIFIED write.  A call
+          whose target is missing, empty or refused is not in the result.
+        - Never raises, whatever shape the trace has.
+    """
+    calls = getattr(getattr(result, "trace", None), "tool_calls", None) or []
+    verified: list[str] = []
+    for call in calls:
+        root = _BYTE_WRITING_TOOLS.get(getattr(call, "tool_name", ""))
+        if root is None:
+            continue
+        path = (getattr(call, "parameters", None) or {}).get("path")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        reader = workspace.read_text if root == _WORKSPACE_ROOT else None
+        if reader is None and memory is not None:
+            reader = memory.read_text
+        if reader is not None and _has_bytes(reader, path):
+            verified.append(f"{root}:{path}")
+    return tuple(verified)
+
+
+def _reconcile_structured(structured: Any, derived: Mapping[str, Any]) -> Any:
+    """Rebuild a worker's structured payload with the DERIVED values in it.
+
+    Correcting ``final_context`` alone would leave the fix depending on
+    ``harness._apply_role_result`` merging ``structured_output`` FIRST -- a real
+    ordering, but an accident rather than a guarantee.  Both channels are
+    corrected so neither can carry the claim.  A payload that cannot be rebuilt
+    is dropped entirely (``None``), never returned uncorrected.
+    """
+    if not derived or not isinstance(structured, BaseModel):
+        return structured
+    dumped = structured.model_dump()
+    if not any(key in dumped for key in derived):
+        return structured
+    try:
+        return type(structured)(**{**dumped, **derived})
+    except Exception:  # unrebuildable: fail closed rather than pass the claim on
+        logger.warning(
+            f"Could not reconcile {type(structured).__name__} with the "
+            f"filesystem-derived values {dict(derived)!r}; dropping the payload."
+        )
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -774,6 +920,7 @@ def build_default_worker_factory(
     def worker(request: RoleRequest) -> AgentResult:
         spec = get_role_spec(request.state)
         registry = build_workspace_tools(workspace, allowed=spec.tool_scope)
+        memory: PlanMemory | None = None
         if request.plan_dir is None:
             logger.warning(
                 f"{spec.role} dispatched without a plan directory; it holds no "
@@ -783,9 +930,13 @@ def build_default_worker_factory(
         else:
             # One PlanMemory per dispatch: it is scoped to exactly this role,
             # so the ownership refusal is a property of the tool the role
-            # holds, not a check the role could route around.
+            # holds, not a check the role could route around.  It is kept
+            # because the post-dispatch verification below re-reads the plan
+            # directory through the same confined, role-scoped object the tools
+            # wrote through -- not through a second raw filesystem path.
+            memory = PlanMemory(request.plan_dir, role=spec.role)
             build_plan_tools(
-                PlanMemory(request.plan_dir, role=spec.role),
+                memory,
                 allowed=spec.plan_tool_scope,
                 registry=registry,
             )
@@ -820,6 +971,13 @@ def build_default_worker_factory(
                     "agent_success": False,
                     "answer_chars": 0,
                     "elapsed_s": time.monotonic() - started,
+                    # Same keys as the success path: an observer that reads the
+                    # verification fields must not have to branch on which
+                    # record it got.
+                    "write_evidence": 0,
+                    "write_required": False,
+                    "claimed_findings_count": None,
+                    "derived_findings_count": None,
                 }
             )
             raise
@@ -832,23 +990,87 @@ def build_default_worker_factory(
         accepted = coerce_worker_output(
             output.payload, spec.writable_keys, where=spec.role
         )
+
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-015
+        # A gate key listed in `_DISK_DERIVED_COUNTS` is REMOVED from the
+        # worker's payload and replaced by a count of the files that really
+        # exist. Do NOT "optimise" this into "trust the worker unless the
+        # filesystem disagrees", and do NOT skip the pop when there is no plan
+        # directory: review C1 reproduced the fail-open with the repo's own
+        # objects -- an EXPLORE dispatch that made one read call, answered in
+        # prose and wrote ZERO bytes returned `findings_count: 3`, which
+        # SATISFIED the EXPLORE->PLAN hard gate. The worker's integer is kept
+        # only as `claimed_findings_count` in the observation, so a fabricated
+        # claim is COUNTABLE rather than merely blocked. Review C3 is the other
+        # half: the explorer is forbidden to touch the `findings.md` index the
+        # count used to be defined against, so a rule-compliant role could
+        # never report it truthfully at all. See decisions.md D-015.
+        derived: dict[str, Any] = {}
+        for key, directory in _DISK_DERIVED_COUNTS.items():
+            if key not in spec.writable_keys:
+                continue
+            accepted.pop(key, None)
+            if memory is not None:
+                derived[key] = _count_on_disk(memory, directory)
+        accepted.update(derived)
+
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-016
+        # A role that HOLDS a write tool must show a verified write, or its
+        # reply is not a success. This is mechanical on purpose and must not be
+        # replaced by (or reduced back to) prompt wording: the instruction
+        # "Never state that you wrote a file unless a write tool reported
+        # success" is already in `_finish_line` (D-013), it was in the prompt on
+        # all 5 runs of the RCA bench that claimed "implemented retry-with-
+        # backoff in uploader.py" having called `write_file` 0/5 times, and it
+        # had already been strengthened once. A third strengthening would be the
+        # third strike on the same mechanism.
+        # Two properties are load-bearing:
+        #   1. The trigger is `_holds_write_tool`, the SAME predicate that puts
+        #      the write obligation in the prompt. A role is held to exactly
+        #      what it was asked for -- REFLECT's verifier owns no artifact, so
+        #      it is never asked and never checked.
+        #   2. Evidence is BYTES, not the tool name. A `write_plan_file` call
+        #      the ownership layer refused appears in the trace and leaves
+        #      nothing on disk, so the name alone would re-open the same hole
+        #      one layer down.
+        # Do NOT parse the answer text for write claims instead: prose is the
+        # thing that lies here. See decisions.md D-016.
+        write_required = _holds_write_tool(held_tools(request, spec))
+        verified = _verified_writes(result, workspace=workspace, memory=memory)
+        unverified_claim = write_required and not verified
+        success = output.success and not unverified_claim
+        failure_reason = output.failure_reason
+        if unverified_claim:
+            failure_reason = failure_reason or "unverified-write"
+            logger.warning(
+                f"{spec.role} reported a result but no write tool left bytes on "
+                f"disk, though it held {', '.join(WRITE_TOOLS + PLAN_WRITE_TOOLS)}"
+                "-class tools. Recording the dispatch as FAILED: a completion "
+                "claim with no verified write is not evidence of work."
+            )
+
+        claimed = output.payload.get(ContextKeys.FINDINGS_COUNT)
         _observe(
             {
                 "role": spec.role,
                 "state": spec.state,
-                "success": output.success,
-                "failure_reason": output.failure_reason,
+                "success": success,
+                "failure_reason": failure_reason,
                 "missing_keys": output.missing_keys,
                 "top_level_objects": count_top_level_json_objects(answer),
                 "agent_success": result.success,
                 "answer_chars": len(answer),
                 "elapsed_s": elapsed,
+                "write_evidence": len(verified),
+                "write_required": write_required,
+                "claimed_findings_count": claimed,
+                "derived_findings_count": derived.get(ContextKeys.FINDINGS_COUNT),
             }
         )
 
         return AgentResult(
             answer=answer,
-            success=output.success,
+            success=success,
             trace=result.trace,
             # ONLY the state's writable keys, already exact-type filtered.
             # Anything else the agent left in its own final_context -- task
@@ -856,7 +1078,7 @@ def build_default_worker_factory(
             # rather than at the driver, so a worker cannot smuggle a gate key
             # from a state that does not own it.
             final_context=accepted,
-            structured_output=result.structured_output,
+            structured_output=_reconcile_structured(result.structured_output, derived),
         )
 
     return worker

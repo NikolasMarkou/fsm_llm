@@ -47,6 +47,21 @@ def _output_response_format(schema: Any) -> dict[str, Any] | None:
         ``response_format``, or ``None`` when *schema* is ``None`` or does not
         expose ``model_json_schema``.  Never raises.
     """
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-002
+    # This helper is the ONE new abstraction that plan's Complexity Budget
+    # allows inside the five existing packages (1/1), and it is earned by
+    # EXACTLY two call sites: `_init_context` below, and `native_fc.run`'s
+    # post-loop repair turn. It was extracted rather than copied because the
+    # alternative -- native_fc building its own `{"type": "json_schema", ...}`
+    # envelope -- is a second builder of the same provider contract, kept in
+    # lockstep by hand, which is the drift `hardening.py`'s D-059 block already
+    # records this repo paying for once.
+    # Do NOT add a third caller by reflex: a call site that can set
+    # `AgentConfig.output_schema` and go through `BaseAgent` gets this for free
+    # and should. Do NOT make it raise on a bad schema either -- both callers
+    # treat `None` as "no constrained decoding available", and an exception here
+    # would turn a missing capability into a failed run.
+    # See decisions.md D-002.
     if schema is None or not hasattr(schema, "model_json_schema"):
         return None
     return {

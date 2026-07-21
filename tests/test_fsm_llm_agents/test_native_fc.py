@@ -677,3 +677,159 @@ class TestRepairCallEnvelope:
         assert seen["messages"][1][2] == _output_response_format(_Answer)
         assert captured[1]["temperature"] == 0
         assert captured[1]["messages"][-1]["content"].startswith("/nothink")
+
+
+# ---------------------------------------------------------------------------
+# A malformed tool-call turn must not cost the whole dispatch (D-016)
+# ---------------------------------------------------------------------------
+
+#: The exact provider message observed 1/35 on `ollama_chat/qwen3.5:4b`: the
+#: tool-call template failed to render, litellm surfaced it as an
+#: APIConnectionError, and the run -- which had ALREADY written real bytes --
+#: was lost.
+_MALFORMED_TOOL_CALL_ERROR = (
+    'litellm.APIConnectionError: Ollama_chatException - "XML syntax error on '
+    'line 5: element <function> closed by </parameter>"'
+)
+
+
+class TestMalformedToolCallDegrades:
+    """DECISION plan-2026-07-21T191807-bf7ffe24/D-016 -- a provider that garbles ONE
+    tool-call turn must not delete the dispatch's trace, its written bytes and
+    its answer.  A genuine outage still propagates: the two are distinguished,
+    not merged.
+    """
+
+    @staticmethod
+    def _agent(complete_fn, *, schema=_Answer, max_iterations=6):
+        return NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(
+                model="mock/model",
+                output_schema=schema,
+                max_iterations=max_iterations,
+            ),
+            complete_fn=complete_fn,
+        )
+
+    @staticmethod
+    def _malformed() -> AgentError:
+        return AgentError(
+            f"Native function-calling LLM call failed: {_MALFORMED_TOOL_CALL_ERROR}",
+            details={"malformed_tool_call": True},
+        )
+
+    def test_the_litellm_boundary_labels_the_measured_error(self, monkeypatch):
+        """The classification is made where the tool surface is known."""
+
+        def explode(**kwargs):
+            raise RuntimeError(_MALFORMED_TOOL_CALL_ERROR)
+
+        monkeypatch.setattr("litellm.completion", explode)
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(), config=AgentConfig(model="mock/model")
+        )
+
+        with pytest.raises(AgentError) as excinfo:
+            agent._litellm_complete(
+                [{"role": "user", "content": "q"}], _registry().get_json_schemas()
+            )
+
+        assert excinfo.value.details.get("malformed_tool_call") is True
+
+    def test_a_genuine_outage_is_not_labelled_malformed(self, monkeypatch):
+        """Otherwise a provider being down would be silently degraded away."""
+
+        def explode(**kwargs):
+            raise RuntimeError("Connection refused: ollama not running")
+
+        monkeypatch.setattr("litellm.completion", explode)
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(), config=AgentConfig(model="mock/model")
+        )
+
+        with pytest.raises(AgentError) as excinfo:
+            agent._litellm_complete(
+                [{"role": "user", "content": "q"}], _registry().get_json_schemas()
+            )
+
+        assert not excinfo.value.details.get("malformed_tool_call")
+
+    def test_a_toolless_turn_is_never_labelled_a_malformed_tool_call(
+        self, monkeypatch
+    ):
+        """The repair turn declares no tools, so it cannot garble one."""
+
+        def explode(**kwargs):
+            raise RuntimeError(_MALFORMED_TOOL_CALL_ERROR)
+
+        monkeypatch.setattr("litellm.completion", explode)
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(), config=AgentConfig(model="mock/model")
+        )
+
+        with pytest.raises(AgentError) as excinfo:
+            agent._litellm_complete([{"role": "user", "content": "q"}], [])
+
+        assert not excinfo.value.details.get("malformed_tool_call")
+
+    def test_the_already_populated_trace_and_answer_survive(self):
+        """The measured loss: a run that had already written real bytes."""
+        state = {"turn": 0}
+
+        def complete_fn(model, messages, schemas):
+            state["turn"] += 1
+            if state["turn"] == 1:
+                return {
+                    "content": "checking the weather",
+                    "tool_calls": [
+                        {"id": "c1", "name": "weather", "arguments": {"city": "Oslo"}}
+                    ],
+                }
+            raise TestMalformedToolCallDegrades._malformed()
+
+        result = self._agent(complete_fn, schema=None).run("q")
+
+        assert [c.tool_name for c in result.trace.tool_calls] == ["weather"]
+        assert result.success is False
+
+    def test_the_repair_turn_still_runs_after_a_malformed_tool_turn(self):
+        """The degraded turn drops the TOOL surface, which is exactly the shape
+        the D-002 repair call already uses -- so a payload is still reachable."""
+        state = {"turn": 0}
+
+        def complete_fn(model, messages, schemas):
+            state["turn"] += 1
+            if state["turn"] == 1:
+                raise TestMalformedToolCallDegrades._malformed()
+            return {"content": _VALID_PAYLOAD, "tool_calls": []}
+
+        result = self._agent(complete_fn).run("q")
+
+        assert result.structured_output.findings_count == 3
+        assert result.success is False  # the loop never concluded (D-005)
+
+    def test_a_genuine_outage_still_ends_the_run(self):
+        """Do NOT swallow provider outages: they are not a model behaviour."""
+
+        def complete_fn(model, messages, schemas):
+            raise AgentError("Native function-calling LLM call failed: 503")
+
+        with pytest.raises(AgentError):
+            self._agent(complete_fn).run("q")
+
+    def test_a_malformed_repair_turn_keeps_the_original_answer(self):
+        """The degradation is symmetric: neither call site loses the run."""
+        state = {"turn": 0}
+
+        def complete_fn(model, messages, schemas):
+            state["turn"] += 1
+            if state["turn"] == 1:
+                return {"content": "a usable prose answer", "tool_calls": []}
+            raise TestMalformedToolCallDegrades._malformed()
+
+        result = self._agent(complete_fn).run("q")
+
+        assert result.answer == "a usable prose answer"
+        assert result.structured_output is None
+        assert result.success is True

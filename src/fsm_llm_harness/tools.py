@@ -178,9 +178,17 @@ VERIFICATION_COMMANDS: tuple[str, ...] = (
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 #: Leading components a small model prepends when it emits a filesystem-absolute
-#: path where a root-relative one was asked for (``/workspace/uploader.py``).
-#: Each root adds its own basename, and :class:`PlanMemory` adds the plan id.
-_ROOT_SENTINELS: frozenset[str] = frozenset({"workspace", "plan"})
+#: path where a WORKSPACE-relative one was asked for (``/workspace/uploader.py``).
+#: The root's own basename is added per instance by :meth:`Workspace.resolve`.
+_WORKSPACE_SENTINELS: frozenset[str] = frozenset({"workspace"})
+
+#: The same, for the PLAN directory (``/plan/state.md``).  ``workspace`` is
+#: here as well because a model that reaches for the plan tool with a workspace
+#: path still lands on an ownership refusal, which is the legible failure; the
+#: reverse is NOT true, which is why the two sets are not one (see the D-006
+#: block in :meth:`Workspace.resolve`).  :meth:`PlanMemory.locate` adds the
+#: plan id and the memory root's basename per instance.
+_PLAN_SENTINELS: frozenset[str] = frozenset({"plan", "workspace"})
 
 
 class WorkspaceTools:
@@ -443,11 +451,21 @@ class Workspace:
             # An absolute path that ALREADY lands inside the root needs no
             # repair: `root / <absolute>` is that absolute path, so it reaches
             # the same compare unchanged.
+            #   3. `plan` is NOT a sentinel HERE, and must not be "restored for
+            #      symmetry" with `PlanMemory.locate`. It was, for one commit,
+            #      and review W4 measured the consequence: `/plan/findings/x.md`
+            #      resolved to `<workspace>/findings/x.md`, so a role emitting a
+            #      protocol path into a workspace tool wrote a protocol artifact
+            #      into the USER'S SOURCE TREE -- confined, but into the wrong
+            #      root and past every ownership check, where before the repair
+            #      it simply raised. The two roots are two vocabularies: `plan`
+            #      means the plan directory and nothing in this class can
+            #      address it, so refusing is the only honest answer.
             # See decisions.md D-006.
             absolute = Path(candidate).resolve()
             if absolute != self._root and self._root not in absolute.parents:
                 repaired = _strip_root_sentinel(
-                    candidate, (self._root.name, *_ROOT_SENTINELS)
+                    candidate, (self._root.name, *_WORKSPACE_SENTINELS)
                 )
                 if repaired is None:
                     raise HarnessConfinementError(relative_path, str(self._root))
@@ -827,7 +845,7 @@ class PlanMemory:
             # refusal. See decisions.md D-006.
             repaired = _strip_root_sentinel(
                 candidate,
-                (self._plan_id, self._workspace.root.name, *_ROOT_SENTINELS),
+                (self._plan_id, self._workspace.root.name, *_PLAN_SENTINELS),
             )
             if repaired is None:
                 return candidate

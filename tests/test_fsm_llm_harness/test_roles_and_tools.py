@@ -36,17 +36,24 @@ from typing import Any
 import pytest
 
 from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface
+from fsm_llm_agents.definitions import AgentResult, AgentTrace, ToolCall
 from fsm_llm_harness.constants import ArtifactNames, ContextKeys, HarnessStates, Role
 from fsm_llm_harness.exceptions import HarnessConfinementError, HarnessOwnershipError
 from fsm_llm_harness.hardening import coerce_worker_output, parse_role_output
 from fsm_llm_harness.harness import _WORKER_WRITABLE, RoleRequest
 from fsm_llm_harness.roles import (
     ROLE_SPECS,
+    build_default_worker_factory,
     build_role_prompt,
     get_role_spec,
     held_tools,
 )
-from fsm_llm_harness.rules import OWNERSHIP, ROLE_BY_STATE, artifacts_writable_by
+from fsm_llm_harness.rules import (
+    OWNERSHIP,
+    ROLE_BY_STATE,
+    artifacts_writable_by,
+    get_rules,
+)
 from fsm_llm_harness.tools import (
     _PER_PLAN_DIRS,
     COMMAND_ALLOWLIST,
@@ -972,3 +979,459 @@ class TestShellAllowlist:
 
         assert "OPENAI_API_KEY" not in env
         assert set(env) == {"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"}
+
+
+# ---------------------------------------------------------------------------
+# Mechanical verification: disk beats the claim (D-015, D-016)
+# ---------------------------------------------------------------------------
+
+#: The exact EXECUTE reply the write-tool RCA measured 5/5: a confident,
+#: well-formed completion claim from a run that called NO write tool at all.
+_FABRICATED_EXECUTE_ANSWER = (
+    "Implemented retry-with-backoff in uploader.py using exponential backoff. "
+    '{"summary": "added retry with backoff to uploader.py", '
+    '"message": "The uploader now retries failed requests with exponential backoff."}'
+)
+
+
+class _ScriptedAgent:
+    """An agent that runs a SCRIPT of tool calls through the REAL registry.
+
+    Interface contract (test double; several call sites below):
+        - ``registry``: the registry the factory built for this dispatch, so a
+          scripted ``write_plan_file`` really writes bytes and a scripted write
+          the role does not own is really REFUSED.  A double that fabricated
+          both the trace and the bytes would make every assertion below
+          vacuous, which is exactly the fixture defect ``plans/LESSONS.md``
+          [I:5] records.
+        - ``calls``: ``(tool_name, parameters)`` pairs, executed in order.
+        - Returns an ``AgentResult`` whose ``trace`` holds those calls and whose
+          ``structured_output`` is the scripted payload.
+    """
+
+    def __init__(
+        self,
+        registry: Any,
+        calls: tuple[tuple[str, dict[str, Any]], ...],
+        answer: str,
+        structured: Any,
+    ) -> None:
+        self._registry = registry
+        self._calls = calls
+        self._answer = answer
+        self._structured = structured
+
+    def run(self, task: str) -> AgentResult:
+        made: list[ToolCall] = []
+        for name, params in self._calls:
+            call = ToolCall(tool_name=name, parameters=dict(params))
+            self._registry.execute(call)  # real tool: real bytes, or a real refusal
+            made.append(call)
+        return AgentResult(
+            answer=self._answer,
+            success=True,
+            trace=AgentTrace(tool_calls=made, total_iterations=len(made) or 1),
+            final_context={},
+            structured_output=self._structured,
+        )
+
+
+def _dispatch(
+    state: str,
+    *,
+    workspace_root: Path,
+    plan_dir: Path | None,
+    payload: dict[str, Any],
+    calls: tuple[tuple[str, dict[str, Any]], ...] = (),
+    answer: str | None = None,
+) -> AgentResult:
+    """Run one dispatch through the REAL default worker factory.
+
+    The factory builds the real tool registry, the real ``PlanMemory`` and the
+    real prompt; only the LLM is replaced, by :class:`_ScriptedAgent`.
+    """
+    spec = get_role_spec(state)
+    structured = spec.output_schema(**payload)
+    factory = build_default_worker_factory(
+        Workspace(workspace_root),
+        agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+            registry, calls, answer if answer is not None else json.dumps(payload),
+            structured,
+        ),
+    )
+    return factory(
+        _role_request(state, plan_dir=plan_dir, workspace_root=workspace_root)
+    )
+
+
+def _explore_payload(**overrides: Any) -> dict[str, Any]:
+    payload = {
+        ContextKeys.FINDINGS_COUNT: 3,
+        ContextKeys.NEEDS_EXPLORE: False,
+        "message": "three findings indexed",
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestFindingsCountComesFromDisk:
+    """The EXPLORE gate reads the filesystem, never the worker's integer.
+
+    Review C1 reproduced the fail-open: a dispatch that made one read call,
+    answered in prose and wrote **0 bytes** returned
+    ``structured_output.findings_count == 3``, which satisfied the EXPLORE ->
+    PLAN hard gate.  Review C3 showed the number is not even reportable -- the
+    explorer is forbidden to touch the ``findings.md`` index its own extraction
+    instructions defined the count against.
+    """
+
+    def test_a_claimed_count_cannot_open_the_gate_over_an_empty_findings_dir(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        result = _dispatch(
+            HarnessStates.EXPLORE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload=_explore_payload(),
+            calls=(("read_plan_file", {"path": "state.md"}),),
+        )
+
+        assert result.final_context.get(ContextKeys.FINDINGS_COUNT, 0) == 0
+        assert result.success is False
+
+    def test_the_gate_opens_on_three_real_findings_files(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """The control: with the files really on disk, the count is really 3."""
+        (plan_dir / ArtifactNames.FINDINGS_DIR).mkdir(parents=True, exist_ok=True)
+        for topic in ("a", "b"):
+            (plan_dir / ArtifactNames.FINDINGS_DIR / f"{topic}.md").write_text("x\n")
+
+        result = _dispatch(
+            HarnessStates.EXPLORE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload=_explore_payload(),
+            calls=(
+                (
+                    "write_plan_file",
+                    {"path": f"{ArtifactNames.FINDINGS_DIR}/c.md", "content": "found\n"},
+                ),
+            ),
+        )
+
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 3
+        assert result.success is True
+
+    def test_a_claim_that_contradicts_disk_loses_in_both_directions(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """Over-claim and under-claim both resolve to what the filesystem says."""
+        (plan_dir / ArtifactNames.FINDINGS_DIR).mkdir(parents=True, exist_ok=True)
+        (plan_dir / ArtifactNames.FINDINGS_DIR / "a.md").write_text("x\n")
+        write = (
+            "write_plan_file",
+            {"path": f"{ArtifactNames.FINDINGS_DIR}/b.md", "content": "found\n"},
+        )
+
+        over = _dispatch(
+            HarnessStates.EXPLORE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload=_explore_payload(**{ContextKeys.FINDINGS_COUNT: 99}),
+            calls=(write,),
+        )
+        under = _dispatch(
+            HarnessStates.EXPLORE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload=_explore_payload(**{ContextKeys.FINDINGS_COUNT: 0}),
+            calls=(write,),
+        )
+
+        assert over.final_context[ContextKeys.FINDINGS_COUNT] == 2
+        assert under.final_context[ContextKeys.FINDINGS_COUNT] == 2
+
+    def test_the_structured_payload_is_reconciled_too_not_just_final_context(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """``harness._apply_role_result`` reads BOTH channels; both must agree.
+
+        Relying on ``final_context`` winning the dict merge would make the fix
+        an ordering accident.
+        """
+        result = _dispatch(
+            HarnessStates.EXPLORE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload=_explore_payload(),
+            calls=(
+                (
+                    "write_plan_file",
+                    {"path": f"{ArtifactNames.FINDINGS_DIR}/a.md", "content": "f\n"},
+                ),
+            ),
+        )
+
+        assert getattr(result.structured_output, ContextKeys.FINDINGS_COUNT) == 1
+
+    def test_an_empty_findings_file_is_not_a_finding(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """Otherwise ``touch findings/{a,b,c}.md`` opens a HARD gate."""
+        (plan_dir / ArtifactNames.FINDINGS_DIR).mkdir(parents=True, exist_ok=True)
+        for topic in ("a", "b", "c"):
+            (plan_dir / ArtifactNames.FINDINGS_DIR / f"{topic}.md").write_text("")
+
+        result = _dispatch(
+            HarnessStates.EXPLORE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload=_explore_payload(),
+            calls=(("list_plan_dir", {"path": ArtifactNames.FINDINGS_DIR}),),
+        )
+
+        assert result.final_context.get(ContextKeys.FINDINGS_COUNT, 0) == 0
+
+    def test_without_a_plan_directory_the_claim_is_dropped_not_believed(
+        self, tmp_path: Path
+    ) -> None:
+        """Nothing to count against means "not verified", never "assume 3"."""
+        result = _dispatch(
+            HarnessStates.EXPLORE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=None,
+            payload=_explore_payload(),
+        )
+
+        assert ContextKeys.FINDINGS_COUNT not in result.final_context
+
+    def test_the_rules_define_the_count_against_files_the_explorer_may_write(
+        self,
+    ) -> None:
+        """Review C3: the old text defined it against the index it may not touch."""
+        explore = get_rules(HarnessStates.EXPLORE)
+        explorer = ROLE_BY_STATE[HarnessStates.EXPLORE]
+
+        assert ArtifactNames.FINDINGS_INDEX not in explore.extraction_instructions
+        assert f"{ArtifactNames.FINDINGS_DIR}/" in explore.extraction_instructions
+        assert ArtifactNames.FINDINGS_DIR in artifacts_writable_by(explorer)
+
+
+class TestWriteClaimsNeedToolEvidence:
+    """A completion claim with no verified write is not a success (D-016).
+
+    The harness has carried the instruction "never state that you wrote a file
+    unless a write tool reported success" since D-013.  It was in the prompt on
+    all 5 fabricating runs.  Wording does not carry this; the trace does.
+    """
+
+    def test_the_measured_fabricated_execute_reply_is_rejected(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        result = _dispatch(
+            HarnessStates.EXECUTE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload={"summary": "added retry with backoff", "message": "done"},
+            calls=(("read_file", {"path": "uploader.py"}),),
+            answer=_FABRICATED_EXECUTE_ANSWER,
+        )
+
+        assert result.success is False
+
+    def test_the_same_payload_with_a_real_write_is_accepted(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """The control: only the trace differs between this and the case above."""
+        (tmp_path / "ws").mkdir(parents=True, exist_ok=True)
+
+        result = _dispatch(
+            HarnessStates.EXECUTE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload={"summary": "added retry with backoff", "message": "done"},
+            calls=(
+                ("read_file", {"path": "uploader.py"}),
+                ("write_file", {"path": "uploader.py", "content": "retry\n"}),
+            ),
+            answer=_FABRICATED_EXECUTE_ANSWER,
+        )
+
+        assert result.success is True
+        assert (tmp_path / "ws" / "uploader.py").read_text() == "retry\n"
+
+    def test_a_write_call_that_left_no_bytes_is_not_evidence(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """Tool-name presence is the MINIMUM bar; bytes are the real one.
+
+        ``changelog.md`` is an EXECUTOR-owned artifact, but ``plan.md`` is not,
+        so the real ``PlanMemory`` refuses this call and nothing lands.
+        """
+        result = _dispatch(
+            HarnessStates.EXECUTE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload={"summary": "wrote the plan", "message": "done"},
+            calls=(
+                ("write_plan_file", {"path": ArtifactNames.PLAN, "content": "# plan\n"}),
+            ),
+        )
+
+        assert result.success is False
+        assert not (plan_dir / ArtifactNames.PLAN).exists()
+
+    def test_deleting_a_file_is_not_write_evidence(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        (tmp_path / "ws").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "ws" / "stale.py").write_text("gone\n")
+
+        result = _dispatch(
+            HarnessStates.EXECUTE,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload={"summary": "removed the stale module", "message": "done"},
+            calls=(("delete_file", {"path": "stale.py"}),),
+        )
+
+        assert result.success is False
+
+    def test_a_role_holding_no_write_tool_is_not_asked_for_write_evidence(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """REFLECT's verifier writes nothing by design -- the driver merges its
+        reply.  A check that failed it would be measuring the wrong thing."""
+        spec = get_role_spec(HarnessStates.REFLECT)
+        request = _role_request(HarnessStates.REFLECT, plan_dir=plan_dir)
+        assert not set(held_tools(request, spec)) & set(WRITE_TOOLS + PLAN_WRITE_TOOLS)
+
+        result = _dispatch(
+            HarnessStates.REFLECT,
+            workspace_root=tmp_path / "ws",
+            plan_dir=plan_dir,
+            payload={
+                ContextKeys.ALL_CRITERIA_PASS: True,
+                ContextKeys.NEEDS_PIVOT: False,
+                ContextKeys.COMPLETION_FIX: False,
+                ContextKeys.NEEDS_EXPLORE: False,
+                ContextKeys.CRITERIA_PASS_COUNT: 2,
+                ContextKeys.CRITERIA_TOTAL: 2,
+                "message": "all criteria pass",
+            },
+            calls=(("read_plan_file", {"path": "plan.md"}),),
+        )
+
+        assert result.success is True
+
+    def test_the_observation_records_what_the_check_caught(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """The live bench reads these; an unrecorded catch cannot be counted."""
+        seen: list[dict[str, Any]] = []
+        spec = get_role_spec(HarnessStates.EXPLORE)
+        payload = _explore_payload()
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+                registry, (), "no tools called", spec.output_schema(**payload)
+            ),
+        )
+
+        factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        assert seen[-1]["write_evidence"] == 0
+        assert seen[-1]["claimed_findings_count"] == 3
+        assert seen[-1]["derived_findings_count"] == 0
+        assert seen[-1]["failure_reason"] == "unverified-write"
+
+
+# ---------------------------------------------------------------------------
+# `/plan/*` is not a workspace path (review W4)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceRefusesPlanPaths:
+    """The ``plan`` sentinel belongs to ``PlanMemory``, not to ``Workspace``.
+
+    With ``plan`` in the workspace's own sentinel set, an EXECUTE role emitting
+    ``/plan/findings/x.md`` silently wrote a protocol artifact into the user's
+    SOURCE TREE -- confined, but into the wrong root, and past every ownership
+    check.  Before the D-006 repair that shape raised.
+    """
+
+    @pytest.mark.parametrize(
+        "path", ["/plan/x.py", "/plan/findings/x.md", "/plan/state.md"]
+    )
+    def test_a_plan_path_handed_to_the_workspace_is_refused(
+        self, tmp_path: Path, path: str
+    ) -> None:
+        ws = Workspace(tmp_path / "ws")
+
+        with pytest.raises(HarnessConfinementError):
+            ws.resolve(path)
+        assert not (ws.root / "x.py").exists()
+
+    def test_the_workspace_sentinel_still_repairs(self, tmp_path: Path) -> None:
+        """The control: narrowing the set did not disable the measured repair."""
+        ws = Workspace(tmp_path / "ws")
+
+        assert ws.resolve("/workspace/uploader.py") == ws.root / "uploader.py"
+
+    @pytest.mark.parametrize(
+        "path", ["/plan/x.md", "/plan/findings/x.md"]
+    )
+    def test_plan_memory_still_repairs_the_same_shape(
+        self, tmp_path: Path, path: str
+    ) -> None:
+        """The other direction of the same pin: the sentinel moved, not vanished."""
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.EXPLORER)
+
+        assert memory.locate(path).startswith("plan-x/")
+
+
+# ---------------------------------------------------------------------------
+# The output line asks for the shape core actually delivers (review W6/W9)
+# ---------------------------------------------------------------------------
+
+
+class TestOutputLineAsksForABareObject:
+    """D-004 supplied the ``message`` key, which made the old warning FALSE.
+
+    ``_output_line`` still told every role that "a reply that is nothing but a
+    JSON object is discarded before this protocol sees it".  Since step 4 that
+    is not true, and the ``response_format`` repair turn structurally cannot
+    emit prose first.
+    """
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_false_discard_claim_is_gone(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        prompt = build_role_prompt(_role_request(state, plan_dir=plan_dir), spec=get_role_spec(state))
+
+        assert "is discarded before this protocol sees it" not in prompt
+        assert "The sentence is required" not in prompt
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_prompt_asks_for_exactly_one_json_object(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        prompt = build_role_prompt(_role_request(state, plan_dir=plan_dir), spec=get_role_spec(state))
+
+        assert "exactly ONE JSON object" in prompt
+        assert "Do not show drafts" in prompt
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_a_bare_object_reply_survives_cores_real_parser(self, state: str) -> None:
+        """Why the claim is false, asserted against core rather than believed."""
+        spec = get_role_spec(state)
+        payload = {name: "x" for name in spec.output_schema.model_fields}
+        payload["message"] = "the role's own sentence"
+
+        parsed = _parse_as_core_would(json.dumps(payload))
+
+        assert parsed.message == "the role's own sentence"
+        assert parsed.message != _GENERIC_FALLBACK_MESSAGE
