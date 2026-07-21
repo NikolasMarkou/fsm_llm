@@ -452,8 +452,29 @@ def _output_line(spec: RoleSpec) -> str:
     # the draft-then-correction fail-open path (decisions.md D-031): constrained
     # decoding plus an explicit "one object, no drafts" instruction. They are
     # load-bearing prompt text, not politeness.
+    # DECISION plan-2026-07-21T125237-191b2eb2/D-061
+    # The leading sentence is MANDATORY and must not be "tidied away" as noise.
+    # A role reply whose whole text is a bare JSON object is DESTROYED by core
+    # before the harness ever sees it: `LiteLLMInterface.
+    # _parse_response_generation_response`'s envelope guard fires on any Pass-2
+    # text that both starts and ends with a brace, recovers `message` from it,
+    # and -- when there is no `message` key, which a role payload never has --
+    # substitutes `_GENERIC_FALLBACK_MESSAGE` ("I'm sorry, I couldn't generate a
+    # proper response."). MEASURED at step 7f: `:4b` complied with the OLD
+    # wording exactly, emitting {"findings_count": 3, "needs_explore": false},
+    # and `parse_role_output` still reported `unparseable` because the apology
+    # string was all that survived. Core's guard is deliberate and permanent
+    # (fsm_llm/llm.py, D-022 of plan-2026-07-18T162030-a02151fe: no text-shape
+    # discriminator can separate a mistaken envelope from prose that legitimately
+    # quotes JSON), so the harness must not ask for the one shape it deletes.
+    # Prose-PREFIXED JSON is named there as a shape that passes through
+    # verbatim, and that is what this asks for. Do NOT revert to "return exactly
+    # ONE JSON object". See decisions.md D-061.
     return (
-        f"Finish by returning exactly ONE JSON object: {{{shape}}}\n"
+        "Finish with one short sentence, then exactly ONE JSON object on its "
+        f"own line: {{{shape}}}\n"
+        "The sentence is required: a reply that is nothing but a JSON object "
+        "is discarded before this protocol sees it.\n"
         "Do not show drafts, corrections or alternatives. "
         "Do not repeat the object."
     )
