@@ -12,7 +12,7 @@ FSM-LLM (v0.4.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (3,047 tests)
+make test           # pytest -v (3,305 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 5 packages
@@ -142,16 +142,16 @@ Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, a
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (3,047)
-pytest tests/test_fsm_llm/            # Core package tests (1,087 tests)
+pytest                                 # Run all tests (3,305)
+pytest tests/test_fsm_llm/            # Core package tests (1,305 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
-pytest tests/test_fsm_llm_workflows/  # Workflows tests (136 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (899 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (268 tests)
-pytest tests/test_fsm_llm_meta/       # Meta tests (208 tests)
+pytest tests/test_fsm_llm_workflows/  # Workflows tests (137 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (931 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (270 tests)
+pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 8 suites above sum to 3,035; the remaining 12 are tests/test_integration_ollama.py
+# The 8 suites above sum to 3,293; the remaining 12 are tests/test_integration_ollama.py
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
