@@ -772,6 +772,113 @@ class TestProcessPass2FailureIsAtomic:
         )
 
 
+class TestProcessStreamPass2FailureIsAtomic:
+    """NC2: the H2 turn-atomicity contract must hold for the STREAMING path too.
+    `process_stream` runs Pass 1 fully (may commit a transition + extracted data),
+    then streams Pass 2. A mid-stream Pass-2 failure must restore the pre-turn
+    in-memory instance state (current_state / context.data / working_memory /
+    metadata) so a retry evaluates against the state the user was actually
+    responded from — byte-for-byte the same guarantee `process()` gives. See
+    decisions.md D-004 (mirrors H2/D-012/D-013).
+    """
+
+    def _transition_fsm(self):
+        from fsm_llm.definitions import TransitionCondition
+
+        return _make_fsm_definition(
+            {
+                "start": State(
+                    id="start",
+                    description="start description",
+                    purpose="Collect the name",
+                    required_context_keys=["user_name"],
+                    transitions=[
+                        Transition(
+                            target_state="end",
+                            description="name captured",
+                            priority=100,
+                            conditions=[
+                                TransitionCondition(
+                                    description="user_name present",
+                                    requires_context_keys=["user_name"],
+                                )
+                            ],
+                        )
+                    ],
+                ),
+                "end": _make_state("end"),
+            }
+        )
+
+    def test_stream_pass2_failure_reverts_transition_and_extraction(self):
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Alice"})
+        # Streaming Pass 2 blows up mid-stream, AFTER Pass 1 committed the
+        # deterministic start -> end transition and the user_name extraction.
+        llm.generate_response_stream.side_effect = RuntimeError("stream boom")
+
+        pipeline = _make_pipeline(llm=llm, fsm_def=self._transition_fsm())
+        instance = _make_instance()
+
+        # Consuming the generator must surface the mid-stream exception.
+        with pytest.raises(RuntimeError, match="stream boom"):
+            list(pipeline.process_stream(instance, "My name is Alice", "conv-1"))
+
+        # ...and the turn must be atomic: state + context reverted to pre-turn.
+        assert instance.current_state == "start", (
+            "Streaming Pass-2 failure left the Pass-1 transition committed"
+        )
+        assert "user_name" not in instance.context.data, (
+            "Streaming Pass-2 failure left the Pass-1 extraction committed"
+        )
+
+    def test_stream_pass2_failure_reverts_working_memory_and_metadata(self):
+        """NC2 completeness (mirrors D-013): a mid-stream Pass-2 failure must also
+        revert the two separate handler-mutable FSMContext fields — working_memory
+        and metadata — not just current_state + context.data."""
+        from fsm_llm.memory import WorkingMemory
+
+        instance = _make_instance()
+        instance.context.working_memory = WorkingMemory()
+        assert instance.context.working_memory.get("scratch", "turn_key") is None
+        assert "turn_meta" not in instance.context.metadata
+
+        captured = instance
+
+        class _WmMetaMutatingHandler(BaseHandler):
+            def __init__(self):
+                super().__init__(name="wm_meta_mutator", priority=100)
+
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
+                return True
+
+            def execute(self, context):
+                captured.context.working_memory.set(
+                    "scratch", "turn_key", "turn_value"
+                )
+                captured.context.metadata["turn_meta"] = "turn_value"
+                return {}
+
+        hs = HandlerSystem(error_mode="continue")
+        hs.register_handler(_WmMetaMutatingHandler())
+
+        llm = _make_mock_llm()
+        llm.generate_response_stream.side_effect = RuntimeError("stream boom")
+        pipeline = _make_pipeline(llm=llm, handler_system=hs)
+
+        with pytest.raises(RuntimeError, match="stream boom"):
+            list(pipeline.process_stream(instance, "Hello", "conv-1"))
+
+        assert instance.context.working_memory.get("scratch", "turn_key") is None, (
+            "Streaming Pass-2 failure left the working_memory mutation committed"
+        )
+        assert "turn_meta" not in instance.context.metadata, (
+            "Streaming Pass-2 failure left the metadata mutation committed"
+        )
+
+
 # ══════════════════════════════════════════════════════════════
 # 6. _clean_empty_context_keys()
 # ══════════════════════════════════════════════════════════════

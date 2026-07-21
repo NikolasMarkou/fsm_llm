@@ -352,6 +352,38 @@ class MessagePipeline:
             String chunks of the response as they arrive.
         """
         with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
+            # DECISION plan-2026-07-21T072826-e3131cc2/D-004
+            # Turn-level atomicity snapshot for the STREAMING path — the exact
+            # mirror of process()'s H2 guard (plan-2026-07-21T045419-9925aa3a/
+            # D-012/D-013). process_stream is a SEPARATE entry point; a Pass-2
+            # failure here must not leave a committed Pass-1 transition +
+            # extraction visible to a retry any more than it may in process().
+            # Snapshot ALL four handler-mutable fields before Pass 1 (deepcopy:
+            # Pass 1 mutates context.data values in place; working_memory may be
+            # None and deepcopy handles that).
+            #
+            # Why this generator try/except is NOT redundant:
+            #  (a) NOT redundant with process(): that guard lives in a different
+            #      method and never runs for the streaming caller. Do NOT delete
+            #      this as "already covered by process()".
+            #  (b) NOT redundant with _stream_response_generation_pass's
+            #      `persist=False` path: that flag ONLY suppresses appending the
+            #      accumulated assistant message to conversation history — it
+            #      never restores current_state / context.data / working_memory /
+            #      metadata. Those four survive a mid-stream failure uncorrupted
+            #      without this block.
+            #  (c) `except Exception` (NOT BaseException) is deliberate, matching
+            #      process() and the D-015 streaming-abandonment contract:
+            #      GeneratorExit / KeyboardInterrupt from a consumer that stopped
+            #      iterating must NOT trigger rollback — the partial reply the
+            #      user already saw is kept (documented boundary; a yielded chunk
+            #      cannot be un-yielded, same as H2's "external side effects not
+            #      undone").
+            pre_turn_state = instance.current_state
+            pre_turn_data = copy.deepcopy(instance.context.data)
+            pre_turn_wm = copy.deepcopy(instance.context.working_memory)
+            pre_turn_metadata = copy.deepcopy(instance.context.metadata)
+
             # Execute pre-processing handlers
             self.execute_handlers(
                 instance,
@@ -376,14 +408,26 @@ class MessagePipeline:
             )
 
             # Pass 2: Stream response generation
-            yield from self._stream_response_generation_pass(
-                instance,
-                message,
-                extraction_response,
-                transition_occurred,
-                previous_state,
-                conversation_id,
-            )
+            try:
+                yield from self._stream_response_generation_pass(
+                    instance,
+                    message,
+                    extraction_response,
+                    transition_occurred,
+                    previous_state,
+                    conversation_id,
+                )
+            except Exception:
+                # Restore the pre-turn in-memory state so the streaming turn is
+                # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
+                # D-013). GeneratorExit deliberately does NOT reach here.
+                instance.current_state = pre_turn_state
+                instance.context.data.clear()
+                instance.context.data.update(pre_turn_data)
+                instance.context.working_memory = pre_turn_wm
+                instance.context.metadata.clear()
+                instance.context.metadata.update(pre_turn_metadata)
+                raise
 
     def _stream_response_generation_pass(
         self,
