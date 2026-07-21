@@ -261,7 +261,7 @@ class TestLitellmBoundaryWrap:
 
 
 class TestOllamaHelperGating:
-    """DECISION plan-2026-07-21-bf7ffe24/D-003 — the Ollama call-shape helpers
+    """DECISION plan-2026-07-21T191807-bf7ffe24/D-003 — the Ollama call-shape helpers
     run inside ``_litellm_complete``, gated by ``is_ollama_model``. Off Ollama
     the blast radius must be exactly zero: the helpers are never even called.
     """
@@ -336,7 +336,7 @@ class TestOllamaHelperGating:
 
 
 class TestReasoningTraceRecovery:
-    """DECISION plan-2026-07-21-bf7ffe24/D-003 — an empty ``content`` with no
+    """DECISION plan-2026-07-21T191807-bf7ffe24/D-003 — an empty ``content`` with no
     tool calls is a reasoning-only reply; recover it through the SHARED
     resolver. With tool calls present, ``content=None`` is the normal shape and
     no recovery may be attempted.
@@ -384,7 +384,7 @@ class TestReasoningTraceRecovery:
 
 
 class TestSuccessSignal:
-    """DECISION plan-2026-07-21-bf7ffe24/D-005 — ``success`` must distinguish a
+    """DECISION plan-2026-07-21T191807-bf7ffe24/D-005 — ``success`` must distinguish a
     working run from a doomed one. The old ``bool(answer) or bool(trace_calls)``
     reported True on three live runs that wrote nothing and answered nothing.
     """
@@ -509,7 +509,7 @@ class TestOutputResponseFormatHelper:
 
 
 class TestTerminalConstrainedDecoding:
-    """DECISION plan-2026-07-21-bf7ffe24/D-002 — after the loop, when a schema
+    """DECISION plan-2026-07-21T191807-bf7ffe24/D-002 — after the loop, when a schema
     is configured and the free-text answer does not validate, make EXACTLY ONE
     extra completion carrying ``response_format=`` and NO ``tools=``.
     """

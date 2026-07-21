@@ -185,7 +185,7 @@ def _build_output_schema(state: str, fields: Mapping[str, type]) -> type[BaseMod
         )
         for name, annotation in (*fields.items(), (_MESSAGE_FIELD, str))
     }
-    # DECISION plan-2026-07-21-bf7ffe24/D-004
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-004
     # `message` is appended to EVERY role schema, and it is a [REUSE] of a core
     # path -- NOT a weakening of the apology guard. `llm.py`'s
     # `_parse_response_generation_response` reads `data.get("message")` on its
@@ -265,7 +265,7 @@ def _plan_scope(role: str) -> tuple[str, ...]:
 #: have a turn left to stop with a final answer.  Still small: a 4B model that
 #: has not answered by then is looping, not thinking, and every extra turn is
 #: seconds of wall clock plus a longer prompt on the next one.
-# DECISION plan-2026-07-21-bf7ffe24/D-013
+# DECISION plan-2026-07-21T191807-bf7ffe24/D-013
 # These numbers were RAISED from 8/6/10/8/6/6 on measurement, and the old row
 # must not come back as a "tightening". Live n=5 on `ollama_chat/qwen3.5:4b`
 # with the real EXPLORE spec: 5/5 dispatches EXHAUSTED the 8-turn budget on
@@ -476,7 +476,7 @@ def held_tools(request: RoleRequest, spec: RoleSpec) -> tuple[str, ...]:
 def _writes_line(request: RoleRequest, spec: RoleSpec) -> str:
     """Render what this dispatch may write, or that it may write nothing."""
     if request.plan_dir is not None and spec.owned_artifacts:
-        # DECISION plan-2026-07-21-bf7ffe24/D-013
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-013
         # A directory artifact must be rendered as a writable PATH, not as its
         # bare name. Measured, step 4b attempt 1: told it may write `findings`,
         # `:4b` called the WORKSPACE `path_exists("findings")`, got "no", and
@@ -508,7 +508,7 @@ def _writes_line(request: RoleRequest, spec: RoleSpec) -> str:
 
 def _finish_line(spec: RoleSpec, can_write: bool) -> str:
     """Render the terminal instruction: what to do, and when to stop doing it."""
-    # DECISION plan-2026-07-21-bf7ffe24/D-013
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-013
     # This section exists because a live n=5 EXPLORE bench measured the model
     # reading until its budget ran out and never writing: 11-20 read-tool calls
     # per run, zero bytes on disk, and a final payload claiming three findings

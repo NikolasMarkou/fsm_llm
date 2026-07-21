@@ -425,7 +425,7 @@ class Workspace:
         if _CONTROL_CHARS_RE.search(candidate):
             raise HarnessConfinementError(relative_path, str(self._root))
         if Path(candidate).is_absolute():
-            # DECISION plan-2026-07-21-bf7ffe24/D-006
+            # DECISION plan-2026-07-21T191807-bf7ffe24/D-006
             # `:4b` emits `/workspace/uploader.py` when it means `uploader.py`,
             # and the flat refusal that used to stand here cost 2 of 3 measured
             # writes. Two properties of this repair must NOT be "simplified":
@@ -812,7 +812,7 @@ class PlanMemory:
         if not candidate:
             return candidate
         if Path(candidate).is_absolute():
-            # DECISION plan-2026-07-21-bf7ffe24/D-006
+            # DECISION plan-2026-07-21T191807-bf7ffe24/D-006
             # The plan-memory half of the same repair. `:4b` emits
             # `/plan/state.md`, and this method -- not `Workspace.resolve` --
             # is where that has to be caught, because the composed workspace is

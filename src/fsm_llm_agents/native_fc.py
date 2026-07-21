@@ -124,7 +124,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
         }
-        # DECISION plan-2026-07-21-bf7ffe24/D-002
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-002
         # The two keys are MUTUALLY EXCLUSIVE and the omission is structural,
         # not cosmetic: `tools=` and `response_format=` in one completion was
         # NEVER measured against `qwen3.5:4b` and is the plan's biggest
@@ -141,7 +141,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         elif response_format is not None:
             call_params["response_format"] = response_format
 
-        # DECISION plan-2026-07-21-bf7ffe24/D-003
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-003
         # Ollama prep runs HERE, before the call, in llm.py's own order (params
         # then messages): unprepared, a live `qwen3.5:4b` role dispatch issued
         # 0/3 tool calls; prepared, 3/3. Do NOT route this through
@@ -192,7 +192,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             )
 
         content = msg.content
-        # DECISION plan-2026-07-21-bf7ffe24/D-003
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-003
         # A reasoning-only reply (no `content`, answer in the reasoning field)
         # is recovered through the SHARED `_resolve_reasoning_trace`. Do NOT
         # hand-roll `getattr(msg, "thinking")`: installed litellm renames that
@@ -264,7 +264,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                 total_iterations=len(trace_calls) or 1,
             )
             structured = self._try_parse_structured_output(answer)
-            # DECISION plan-2026-07-21-bf7ffe24/D-002
+            # DECISION plan-2026-07-21T191807-bf7ffe24/D-002
             # Terminal-turn constrained decoding. EXACTLY ONE extra completion,
             # carrying `response_format=` and NO `tools=` — never both in one
             # call (see `_litellm_complete`; that pairing is unmeasured
@@ -288,7 +288,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                     answer = repaired_answer
                     structured = repaired_structured
 
-            # DECISION plan-2026-07-21-bf7ffe24/D-005
+            # DECISION plan-2026-07-21T191807-bf7ffe24/D-005
             # Success = the loop reached a final TOOL-CALL-FREE turn AND that
             # turn carried a non-empty answer. Do NOT restore
             # `bool(answer) or bool(trace_calls)`: it reported success=True on
