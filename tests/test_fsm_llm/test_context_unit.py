@@ -809,6 +809,7 @@ class TestInternalPrefixCaseInsensitivity:
 
     def test_site_2_fsm_get_conversation_data(self):
         """fsm.py -- FSMManager.get_conversation_data."""
+        import threading
         from unittest.mock import Mock
 
         from fsm_llm.definitions import FSMContext, FSMInstance
@@ -822,6 +823,9 @@ class TestInternalPrefixCaseInsensitivity:
         manager.instances["conv-1"] = FSMInstance(
             fsm_id="f", current_state="start", context=context
         )
+        # get_conversation_data snapshots under the per-conversation lock, which
+        # production creates alongside the instance (create-together invariant).
+        manager._conversation_locks["conv-1"] = threading.RLock()
 
         assert manager.get_conversation_data("conv-1") == {"name": "Alice"}
 

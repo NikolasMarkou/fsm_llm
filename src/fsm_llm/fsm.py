@@ -16,7 +16,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
@@ -113,6 +113,10 @@ def _strip_internal_mapping(source: dict[Any, Any], depth: int) -> dict[Any, Any
             continue
         result[key] = filtered
     return result
+
+
+# Return type of a read snapshot (see FSMManager._read_under_lock).
+_SnapshotT = TypeVar("_SnapshotT")
 
 
 # --------------------------------------------------------------
@@ -577,13 +581,60 @@ class FSMManager:
     # Conversation query methods
     # ----------------------------------------------------------
 
+    def _read_under_lock(
+        self,
+        conversation_id: str,
+        snapshot_fn: Callable[[FSMInstance], _SnapshotT],
+    ) -> _SnapshotT:
+        """Run ``snapshot_fn`` against a conversation under its ``conv_lock``.
+
+        Interface contract:
+          - Parameters: ``conversation_id`` (must be an active conversation) and
+            ``snapshot_fn``, a callable taking the ``FSMInstance`` and returning
+            a point-in-time in-memory snapshot.
+          - Returns: whatever ``snapshot_fn`` returns.
+          - Failure: raises ``FSMError`` if the conversation is unknown, or if
+            its instance is present but its per-conversation lock is missing
+            (a broken create-together / remove-together invariant — L11).
+
+        HARD RULE: ``snapshot_fn`` runs while holding ``conv_lock`` and MUST do
+        only fast in-memory work. It MUST NOT call ``get_current_state`` /
+        ``get_fsm_definition`` (nor anything else that re-enters ``self._lock``):
+        that would nest ``_lock`` under ``conv_lock`` and risk the lock-order
+        inversion the write path is careful to avoid. Resolve state OUTSIDE this
+        call, after it returns. See decisions.md D-005.
+        """
+        # DECISION plan-2026-07-21T045419-9925aa3a/D-005
+        # State resolution (get_current_state -> get_fsm_definition) re-enters the
+        # plain, NON-reentrant self._lock. Running it inside snapshot_fn (under
+        # conv_lock) would hold conv_lock and then block on _lock. The write path
+        # acquires conv_lock while holding _lock (non-blocking), so the reverse
+        # order here would close a circular wait -> deadlock. Therefore: take
+        # _lock ONLY for the dict lookup, RELEASE it, THEN acquire conv_lock
+        # (blocking) for the snapshot. Do NOT move any get_current_state /
+        # get_fsm_definition call into snapshot_fn. See decisions.md D-005.
+        with self._lock:
+            if conversation_id not in self.instances:
+                raise FSMError(f"Conversation {conversation_id} not found")
+            instance = self.instances[conversation_id]
+            conv_lock = self._conversation_locks.get(conversation_id)
+
+        if conv_lock is None:
+            raise FSMError(
+                f"Conversation {conversation_id} has an instance but no "
+                "per-conversation lock (broken invariant)"
+            )
+
+        with conv_lock:
+            return snapshot_fn(instance)
+
     @with_conversation_context
     def has_conversation_ended(self, conversation_id: str, log: Any = None) -> bool:
         """Check if conversation has reached terminal state."""
-        if conversation_id not in self.instances:
-            raise FSMError(f"Conversation {conversation_id} not found")
+        instance = self._read_under_lock(conversation_id, lambda inst: inst)
 
-        instance = self.instances[conversation_id]
+        # State resolution re-enters _lock, so it happens OUTSIDE conv_lock (the
+        # _read_under_lock snapshot has already returned). See D-005.
         current_state = self.get_current_state(instance, conversation_id)
 
         is_ended = not current_state.transitions
@@ -605,19 +656,20 @@ class FSMManager:
         bounded at ``MAX_CONTEXT_FILTER_DEPTH``; a container deeper than that is
         dropped rather than returned unfiltered. See D-010.
         """
-        if conversation_id not in self.instances:
-            raise FSMError(f"Conversation {conversation_id} not found")
-
-        instance = self.instances[conversation_id]
-        return _strip_internal_mapping(instance.context.data, 0)
+        # Run the filter UNDER conv_lock: it rebuilds the whole structure, so a
+        # single pass yields an independent, fully-filtered snapshot that a
+        # concurrent turn can neither tear nor resize mid-iteration (C1).
+        return self._read_under_lock(
+            conversation_id,
+            lambda inst: _strip_internal_mapping(inst.context.data, 0),
+        )
 
     @with_conversation_context
     def get_conversation_state(self, conversation_id: str, log: Any = None) -> str:
         """Get current state of conversation."""
-        if conversation_id not in self.instances:
-            raise FSMError(f"Conversation {conversation_id} not found")
-
-        return self.instances[conversation_id].current_state
+        return self._read_under_lock(
+            conversation_id, lambda inst: inst.current_state
+        )
 
     def set_conversation_state(self, conversation_id: str, state_name: str) -> None:
         """Set an existing conversation's current state to a validated FSM state.
@@ -668,11 +720,12 @@ class FSMManager:
         self, conversation_id: str, log: Any = None
     ) -> list[dict[str, str]]:
         """Get conversation history."""
-        if conversation_id not in self.instances:
-            raise FSMError(f"Conversation {conversation_id} not found")
-
-        instance = self.instances[conversation_id]
-        return instance.context.conversation.get_recent()
+        # get_recent() returns a NEW list; taking it under conv_lock keeps it
+        # consistent with a concurrent turn's exchanges mutation (C1).
+        return self._read_under_lock(
+            conversation_id,
+            lambda inst: inst.context.conversation.get_recent(),
+        )
 
     @with_conversation_context
     def update_conversation_context(
@@ -688,9 +741,19 @@ class FSMManager:
             conv_lock = self._conversation_locks.get(conversation_id)
             instance = self.instances[conversation_id]
 
+            # L11: an instance present with no per-conversation lock is a broken
+            # create-together / remove-together invariant. Fail loud instead of
+            # silently proceeding with an UNLOCKED write (which would race the
+            # 2-pass write path). Mirrors the same guard in _read_under_lock.
+            if conv_lock is None:
+                raise FSMError(
+                    f"Conversation {conversation_id} has an instance but no "
+                    "per-conversation lock (broken invariant)"
+                )
+
             # Acquire per-conversation lock while still holding _lock to prevent
             # the conversation from being cleaned up between lookup and acquire.
-            if conv_lock is not None and not conv_lock.acquire(blocking=False):
+            if not conv_lock.acquire(blocking=False):
                 raise FSMError(
                     f"Conversation {conversation_id} is already being processed "
                     "by another thread"
@@ -810,32 +873,61 @@ class FSMManager:
         self, conversation_id: str, log: Any = None
     ) -> dict[str, Any]:
         """Get complete conversation data for analysis."""
-        if conversation_id not in self.instances:
-            raise FSMError(f"Conversation {conversation_id} not found")
+        # Snapshot every mutable container (+ the instance and debug-model refs)
+        # in ONE pass under conv_lock, so collected_data / history / metadata are
+        # internally consistent and cannot be torn by a concurrent turn (C1). The
+        # last_* refs are replaced by assignment on the write path (never mutated
+        # in place), so calling model_dump() on them OUTSIDE the lock is safe and
+        # keeps the lock-hold short.
+        # A positional tuple keeps each element's static type precise (a mixed
+        # dict would widen every value to a union).
+        (
+            instance,
+            state_id,
+            collected_data,
+            history,
+            metadata,
+            last_extraction,
+            last_transition,
+            last_response,
+        ) = self._read_under_lock(
+            conversation_id,
+            lambda inst: (
+                inst,
+                inst.current_state,
+                dict(inst.context.data),
+                inst.context.conversation.get_recent(),
+                dict(inst.context.metadata),
+                inst.last_extraction_response,
+                inst.last_transition_decision,
+                inst.last_response_generation,
+            ),
+        )
 
-        instance = self.instances[conversation_id]
+        # State resolution re-enters _lock, so it happens OUTSIDE conv_lock (the
+        # snapshot has already returned). See D-005.
         current_state = self.get_current_state(instance, conversation_id)
 
         return {
             "id": conversation_id,
             "fsm_id": instance.fsm_id,
             "current_state": {
-                "id": instance.current_state,
+                "id": state_id,
                 "description": current_state.description,
                 "purpose": current_state.purpose,
                 "is_terminal": not current_state.transitions,
             },
-            "collected_data": dict(instance.context.data),
-            "conversation_history": instance.context.conversation.get_recent(),
-            "metadata": dict(instance.context.metadata),
-            "last_extraction_response": instance.last_extraction_response.model_dump()
-            if instance.last_extraction_response
+            "collected_data": collected_data,
+            "conversation_history": history,
+            "metadata": metadata,
+            "last_extraction_response": last_extraction.model_dump()
+            if last_extraction
             else None,
-            "last_transition_decision": instance.last_transition_decision.model_dump()
-            if instance.last_transition_decision
+            "last_transition_decision": last_transition.model_dump()
+            if last_transition
             else None,
-            "last_response_generation": instance.last_response_generation.model_dump()
-            if instance.last_response_generation
+            "last_response_generation": last_response.model_dump()
+            if last_response
             else None,
         }
 

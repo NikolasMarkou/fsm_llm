@@ -5,16 +5,20 @@ fix landed. They exercise public seams (``FileSessionStore.save``,
 ``setup_logging``) rather than private helpers.
 """
 
+import concurrent.futures
 import os
 import re
 import subprocess
 import sys
+import threading
+import time
+import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fsm_llm.api import API
-from fsm_llm.definitions import FieldExtractionConfig, LLMResponseError
+from fsm_llm.definitions import FieldExtractionConfig, FSMError, LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
 from fsm_llm.prompts import (
@@ -728,3 +732,223 @@ class TestCriticalEndHandlerDuringFailedStart:
         )
         assert manager.instances == {}
         assert manager._conversation_locks == {}
+
+
+# ══════════════════════════════════════════════════════════════
+# C1 — read accessors must snapshot under conv_lock, not race the
+#      locked write path's in-place mutation of context.data
+# ══════════════════════════════════════════════════════════════
+
+
+class _SlowMockLLM2(MockLLM2Interface):
+    """Mock that sleeps mid-call to widen the in-flight write window.
+
+    A converse turn holds the conversation's ``conv_lock`` for its whole
+    duration; sleeping inside the LLM calls keeps that window open ~10ms so a
+    concurrent reader (pre-fix: unlocked) has a wide window to iterate
+    ``instance.context.data`` WHILE the write path resizes it.
+    """
+
+    def __init__(self, *args, delay: float = 0.01, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._delay = delay
+
+    def generate_response(self, request):
+        time.sleep(self._delay)
+        return super().generate_response(request)
+
+    def extract_field(self, request):
+        time.sleep(self._delay)
+        return super().extract_field(request)
+
+
+def _self_loop_fsm() -> dict:
+    """A self-looping state that never terminates in practice.
+
+    The writer can call ``converse`` indefinitely because ``loop`` always takes
+    its unconditional self-transition (so ``has_conversation_ended`` stays
+    False and no turn is rejected for being terminal). The ``done`` terminal
+    state exists only to satisfy the FSMDefinition validator ("must have at
+    least one terminal state"); its transition is gated on a ``finished`` key
+    the test never sets, so it is unreachable here.
+    """
+    return {
+        "name": "read_concurrency_fsm",
+        "description": "self-looping state; unreachable terminal for the validator",
+        "version": "4.1",
+        "initial_state": "loop",
+        "states": {
+            "loop": {
+                "id": "loop",
+                "description": "Self-looping state",
+                "purpose": "Stay so the writer can converse indefinitely",
+                "response_instructions": "Reply politely",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "Never fires — 'finished' key is never set",
+                        "priority": 200,
+                        "conditions": [
+                            {
+                                "description": "finished flag present",
+                                "requires_context_keys": ["finished"],
+                            }
+                        ],
+                    },
+                    {
+                        "target_state": "loop",
+                        "description": "Always stay in loop",
+                        "priority": 100,
+                    },
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "Unreachable terminal state (validator only)",
+                "purpose": "Never entered",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestReadConcurrency:
+    """C1 — read accessors must snapshot under ``conv_lock``.
+
+    Pre-fix, ``get_data`` / ``get_conversation_history`` read
+    ``instance.context.data`` / ``.exchanges`` with NO per-conversation lock
+    while an in-flight ``process_message`` on the SAME conversation resizes
+    ``context.data`` (a PRE_PROCESSING handler delta merged key-by-key via
+    ``merge_delta`` + the extraction commit). A reader iterating the dict then
+    raises ``RuntimeError: dictionary changed size during iteration``.
+
+    This test was authored RED-first: run against the unfixed ``fsm.py`` it
+    reliably surfaces that ``RuntimeError`` in the reader threads. Against the
+    fixed code (reads snapshot under ``conv_lock``) it must pass with zero
+    ``RuntimeError`` and structurally intact reads.
+    """
+
+    _READERS = 8
+    _WRITER_TURNS = 60
+    _SEED_KEYS = 300
+    _GROWTH_PER_TURN = 40
+
+    def _make_api(self):
+        api = API.from_definition(
+            _self_loop_fsm(),
+            llm_interface=_SlowMockLLM2(delay=0.01),
+        )
+        # PRE_PROCESSING handler that GROWS context.data every turn. Each unique
+        # key is merged one-by-one via merge_delta (pipeline.py), so a single
+        # turn resizes the dict _GROWTH_PER_TURN times, spread across its ~10ms
+        # window — maximizing the chance a resize lands while a reader is
+        # mid-iteration over the (already large, seeded) dict.
+        grow = (
+            create_handler("grow")
+            .at(HandlerTiming.PRE_PROCESSING)
+            .do(
+                lambda ctx: {
+                    f"g_{uuid.uuid4().hex}": "v" for _ in range(self._GROWTH_PER_TURN)
+                }
+            )
+        )
+        api.register_handler(grow)
+        seed = {f"seed_{i:04d}": f"value_{i:04d}" for i in range(self._SEED_KEYS)}
+        conv_id, _ = api.start_conversation(seed)
+        return api, conv_id
+
+    def test_concurrent_reads_never_tear_or_crash(self):
+        api, conv_id = self._make_api()
+        errors: list[tuple[str, BaseException]] = []
+        errors_lock = threading.Lock()
+        stop = threading.Event()
+
+        def _record(who: str, exc: BaseException) -> None:
+            with errors_lock:
+                errors.append((who, exc))
+
+        def writer() -> int:
+            turns = 0
+            try:
+                while turns < self._WRITER_TURNS:
+                    try:
+                        api.converse("hello", conv_id)
+                        turns += 1
+                    except FSMError as exc:
+                        # Documented, bounded trade-off (plan Failure Modes): a
+                        # writer's non-blocking conv_lock acquire can collide
+                        # with a reader's sub-ms snapshot window and be rejected.
+                        # This is a retryable spurious rejection, NOT a defect.
+                        if "already being processed" in str(exc):
+                            continue
+                        raise
+            except BaseException as exc:  # a writer crash is its own signal
+                _record("writer", exc)
+            finally:
+                stop.set()
+            return 0
+
+        def reader() -> int:
+            local = 0
+            while not stop.is_set():
+                try:
+                    data = api.get_data(conv_id)
+                    # Structural validity: a real mapping whose never-mutated
+                    # seed keys survived intact (a torn dict rebuild would raise
+                    # RuntimeError rather than silently corrupt — assert anyway).
+                    assert isinstance(data, dict)
+                    assert data.get("seed_0000") == "value_0000"
+                    hist = api.get_conversation_history(conv_id)
+                    assert isinstance(hist, list)
+                    local += 1
+                except BaseException as exc:
+                    _record("reader", exc)
+                    break
+            return local
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self._READERS + 1
+            ) as pool:
+                reader_futures = [
+                    pool.submit(reader) for _ in range(self._READERS)
+                ]
+                writer_future = pool.submit(writer)
+                concurrent.futures.wait([*reader_futures, writer_future])
+
+            reads_done = sum(f.result() for f in reader_futures)
+
+            # RED signal first: the torn-read `RuntimeError: dictionary changed
+            # size during iteration` is the defect this test pins. The accessor
+            # decorator re-wraps it into an FSMError, so detect it through the
+            # message / cause chain, not just isinstance. Assert on it BEFORE the
+            # coverage check so an unfixed run reports the race, not a "window
+            # too narrow" red herring.
+            def _is_torn_read(exc: BaseException) -> bool:
+                cur: BaseException | None = exc
+                while cur is not None:
+                    if isinstance(cur, RuntimeError):
+                        return True
+                    if "changed size during iteration" in str(cur):
+                        return True
+                    cur = cur.__cause__ or cur.__context__
+                return False
+
+            torn = [exc for _, exc in errors if _is_torn_read(exc)]
+            assert not torn, (
+                f"{len(torn)} torn-read error(s) under concurrent read/write "
+                f"(C1 race): {torn[0]!r}"
+            )
+            assert not errors, (
+                "unexpected error(s) during concurrent read/write: "
+                f"{[(who, repr(exc)) for who, exc in errors][:5]}"
+            )
+            # Beat the non-determinism: the readers must actually have cycled
+            # many times against in-flight writes, not exited early.
+            assert reads_done >= 500, (
+                f"readers only completed {reads_done} cycles — the window was "
+                "too narrow to prove anything; widen READERS/WRITER_TURNS"
+            )
+        finally:
+            api.close()
+

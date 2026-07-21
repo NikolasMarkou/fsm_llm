@@ -666,6 +666,7 @@ class TestGetConversationDataNestedFiltering:
 
     @staticmethod
     def _manager_with(data):
+        import threading
         from unittest.mock import Mock
 
         from fsm_llm.definitions import FSMContext, FSMInstance
@@ -676,6 +677,11 @@ class TestGetConversationDataNestedFiltering:
         manager.instances["conv-1"] = FSMInstance(
             fsm_id="f", current_state="start", context=context
         )
+        # get_conversation_data now snapshots under the per-conversation lock,
+        # which production always creates alongside the instance. Register it so
+        # this fixture reflects the create-together / remove-together invariant
+        # the read path (and L11) now enforce.
+        manager._conversation_locks["conv-1"] = threading.RLock()
         return manager
 
     def test_nested_internal_key_stripped_and_sibling_kept(self):
