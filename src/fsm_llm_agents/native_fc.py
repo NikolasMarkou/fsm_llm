@@ -39,6 +39,12 @@ from typing import Any
 
 from fsm_llm import API
 from fsm_llm.logging import logger
+from fsm_llm.ollama import (
+    apply_ollama_params,
+    is_ollama_model,
+    prepare_ollama_messages,
+)
+from fsm_llm.utilities import _resolve_reasoning_trace
 
 from .base import BaseAgent
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
@@ -95,6 +101,32 @@ class NativeFunctionCallingReactAgent(BaseAgent):
     ) -> dict[str, Any]:
         import litellm
 
+        call_params: dict[str, Any] = {
+            "model": self.config.model,
+            "messages": messages,
+            "tools": schemas or None,
+            "tool_choice": "auto" if schemas else None,
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
+        }
+
+        # DECISION plan-2026-07-21-bf7ffe24/D-003
+        # Ollama prep runs HERE, before the call, in llm.py's own order (params
+        # then messages): unprepared, a live `qwen3.5:4b` role dispatch issued
+        # 0/3 tool calls; prepared, 3/3. Do NOT route this through
+        # `LiteLLMInterface` instead — llm.py has no `tools=`/`tool_calls`
+        # machinery at all, so that means building a tool-calling surface into
+        # core. Do NOT drop the explicit gate: the helpers self-gate, but the
+        # gate is the tested proof off-Ollama calls are untouched.
+        # `structured=False` mirrors llm.py:642 (free-text reply — keep the
+        # user's temperature); response_format is None BY DESIGN (D-002): a turn
+        # carries native tools OR one constrained payload, never both.
+        if is_ollama_model(self.config.model):
+            apply_ollama_params(call_params, self.config.model, structured=False)
+            call_params["messages"] = prepare_ollama_messages(
+                messages, self.config.model, None
+            )
+
         # DECISION plan-2026-07-20T040150-876e7164/D-006: wrap the litellm
         # boundary so a provider outage reaches this agent's caller as an
         # AgentError, not as a raw openai.APIError that no `except AgentError`
@@ -107,14 +139,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         # inside the try — the tool_call parsing below must keep raising its
         # own programming errors unwrapped. See decisions.md D-006.
         try:
-            response = litellm.completion(
-                model=self.config.model,
-                messages=messages,
-                tools=schemas or None,
-                tool_choice="auto" if schemas else None,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-            )
+            response = litellm.completion(**call_params)
         except Exception as e:
             raise AgentError(f"Native function-calling LLM call failed: {e!s}") from e
         msg = response.choices[0].message
@@ -128,7 +153,19 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             tool_calls.append(
                 {"id": tc.id, "name": tc.function.name, "arguments": args or {}}
             )
-        return {"content": msg.content, "tool_calls": tool_calls}
+
+        content = msg.content
+        # DECISION plan-2026-07-21-bf7ffe24/D-003
+        # A reasoning-only reply (no `content`, answer in the reasoning field)
+        # is recovered through the SHARED `_resolve_reasoning_trace`. Do NOT
+        # hand-roll `getattr(msg, "thinking")`: installed litellm renames that
+        # field to `reasoning_content`, so a `.thinking`-only read is dead code
+        # for this project's default model. The `not tool_calls` guard is
+        # DELIBERATE — with tool calls present, `content=None` is the normal
+        # shape (measured 4/4 live), so recovering there is pure noise.
+        if not content and not tool_calls:
+            content = _resolve_reasoning_trace(msg)
+        return {"content": content, "tool_calls": tool_calls}
 
     # --- run ------------------------------------------------------------
     def run(
@@ -145,6 +182,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         trace_calls: list[ToolCall] = []
         max_iters = self.config.max_iterations
         answer = ""
+        concluded = False
 
         try:
             for iteration in range(1, max_iters + 1):
@@ -155,6 +193,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
 
                 if not tool_calls:
                     answer = content or ""
+                    concluded = True
                     break
 
                 messages.append(self._assistant_message(content, tool_calls))
@@ -187,7 +226,17 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                 tool_calls=trace_calls,
                 total_iterations=len(trace_calls) or 1,
             )
-            success = bool(answer) or bool(trace_calls)
+            # DECISION plan-2026-07-21-bf7ffe24/D-005
+            # Success = the loop reached a final TOOL-CALL-FREE turn AND that
+            # turn carried a non-empty answer. Do NOT restore
+            # `bool(answer) or bool(trace_calls)`: it reported success=True on
+            # three live runs that wrote zero bytes and answered nothing, so no
+            # caller could tell a working role from a doomed one. `concluded` is
+            # kept although a non-empty `answer` implies it today — it is the
+            # term that stays honest once a post-loop repair turn can also set
+            # `answer`. For "did it do anything at all?", read
+            # `trace.tool_calls`, which is unchanged.
+            success = concluded and bool(answer)
             structured = self._try_parse_structured_output(answer)
             return AgentResult(
                 answer=answer,
