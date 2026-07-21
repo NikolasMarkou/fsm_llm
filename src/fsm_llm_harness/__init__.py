@@ -40,6 +40,8 @@ from .exceptions import (
     HarnessOwnershipError,
     HarnessReentrancyError,
 )
+from .fsm_definition import DEFAULT_PERSONA, build_harness_fsm
+from .rules import OWNERSHIP, ROLE_BY_STATE, RULES, StateRules, get_rules
 
 __all__ = [
     # Version
@@ -63,4 +65,13 @@ __all__ = [
     "HarnessLeashError",
     "HarnessOwnershipError",
     "HarnessReentrancyError",
+    # FSM definition
+    "DEFAULT_PERSONA",
+    "build_harness_fsm",
+    # Per-state rules
+    "OWNERSHIP",
+    "ROLE_BY_STATE",
+    "RULES",
+    "StateRules",
+    "get_rules",
 ]
