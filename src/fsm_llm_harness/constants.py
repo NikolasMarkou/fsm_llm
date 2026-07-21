@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
 
@@ -137,6 +137,91 @@ class ContextKeys:
 
 
 # ---------------------------------------------------------------------------
+# Driver-owned context (invariant I6 / I8 -- writer provenance)
+# ---------------------------------------------------------------------------
+
+# DECISION plan-2026-07-21T125237-191b2eb2/D-044
+# These two tables are the ENTIRE writer-provenance boundary. Every key named
+# here is written by the DRIVER (or, where `harness._WORKER_WRITABLE` allows it,
+# by a worker through the driver's exact-type allowlist) and by NOTHING ELSE.
+# In particular the FSM's own Pass-1 field extraction must never write one.
+#
+# Do NOT "simplify" this by deleting a key because "the LLM would never say
+# that". Measured 2026-07-21 (findings/review-iter-1.md C1): with the harness
+# FSM as shipped before this table existed, an LLM that emitted
+# {"plan_approved": true, "close_confirmed": true, ...} drove a full
+# EXPLORE -> PLAN -> EXECUTE -> REFLECT -> CLOSE traverse while EVERY worker
+# dispatch failed and a DENYING approval callback was never consulted once.
+# The mechanism is core's, not ours: `_build_field_configs_from_state`
+# (pipeline.py:837-890) mints a required FieldExtractionConfig for every key
+# named in a transition condition's `requires_context_keys`, and
+# `_execute_data_extraction` skips only fields already non-None
+# (pipeline.py:953-956). A key missing from SEEDS below is therefore a key the
+# LLM is asked to invent on every turn.
+#
+# Enforcement is THREE mechanisms, all in harness.py. PRESENCE is what enforces;
+# the other two exist to keep these keys present:
+#   1. SEEDS is written into context before turn 1, so extraction skips every one
+#      of these fields and they never enter `extracted_data` at all. This is the
+#      enforcement, and it is also free: it removes ~9 extraction calls per turn.
+#   2. `HarnessAgent._apply` coerces a `None` (delete) delta on a SEEDED key back
+#      to its seed. A deleted key is an extractable key.
+#   3. `HarnessAgent._reassert_driver_owned` runs at PRE_PROCESSING (before
+#      extraction -- restores a key some foreign writer removed) and at
+#      CONTEXT_UPDATE (after the commit -- keeps a fabricated value out of later
+#      turns' prompts and out of `final_context`).
+# Do NOT reduce this to "just the CONTEXT_UPDATE handler", which is what the
+# review proposed as an equal-coverage alternative to seeding. MEASURED
+# 2026-07-21: `MessagePipeline` hands the transition evaluator a SECOND copy of
+# the extraction payload (`evaluate_transitions(state, context,
+# extraction_response.extracted_data)`, pipeline.py:1388) and
+# `_prepare_working_context` merges that dict OVER the live context
+# (transition_evaluator.py:146). A handler cleans `instance.context` only, so a
+# value extracted on the SAME turn still opens the gate -- reproduced: the guard
+# deleted `plan_approved` and PLAN -> EXECUTE fired regardless. No handler at any
+# timing can reach that dict; the only defence is never being asked.
+# See decisions.md D-044.
+
+#: Driver-owned key -> the falsy value seeded before turn 1.
+#:
+#: The first nine are the gate FLAGS of review C1; the rest are the counters
+#: and rollups. Every value is falsy, so seeding cannot open a gate: the
+#: JsonLogic terms all test `== True` or a `>=` / `<` bound.
+DRIVER_OWNED_SEEDS: Mapping[str, Any] = MappingProxyType(
+    {
+        ContextKeys.FINDINGS_COUNT: 0,
+        ContextKeys.PLAN_APPROVED: False,
+        ContextKeys.CLOSE_CONFIRMED: False,
+        ContextKeys.ALL_CRITERIA_PASS: False,
+        ContextKeys.EXECUTE_COMPLETE: False,
+        ContextKeys.COMPLETION_FIX: False,
+        ContextKeys.NEEDS_PIVOT: False,
+        ContextKeys.NEEDS_EXPLORE: False,
+        ContextKeys.PIVOT_RESOLVED: False,
+        ContextKeys.ITERATION: 0,
+        ContextKeys.STEP_NUMBER: 0,
+        ContextKeys.TOTAL_STEPS: 1,
+        ContextKeys.FIX_ATTEMPTS: 0,
+        ContextKeys.CRITERIA_PASS_COUNT: 0,
+        ContextKeys.CRITERIA_TOTAL: 0,
+    }
+)
+
+#: Driver-owned keys whose default is ABSENT rather than falsy.
+#:
+#: These three are free prose the run REPORTS (``halt_reason`` is the string the
+#: user is shown as the outcome), not gate variables, and "no halt reason yet"
+#: is meaningfully different from an empty one. They are guarded anyway: CLOSE
+#: has no transitions, so its extraction takes the bulk-fallback branch and an
+#: unguarded ``halt_reason`` would be LLM-authored in production (review N4).
+DRIVER_OWNED_UNSET: tuple[str, ...] = (
+    ContextKeys.PIVOT_REASON,
+    ContextKeys.HALT_REASON,
+    ContextKeys.LAST_GATE_SLUG,
+)
+
+
+# ---------------------------------------------------------------------------
 # Gate slugs and issue severities
 # ---------------------------------------------------------------------------
 
@@ -182,6 +267,7 @@ class HandlerPriorities:
     hook, priority determines their order.
     """
 
+    EXTRACTION_GUARD = 5  # Revert driver-owned keys the LLM's extraction wrote
     START_DISPATCH = 10  # Dispatch into the initial state before anything else
     PRE_STEP_GATE = 50  # Cheap HARD gate, runs before an EXECUTE dispatch
     STATE_DISPATCH = 100  # One worker dispatch per state entry
@@ -192,6 +278,7 @@ class HandlerPriorities:
 class HandlerNames:
     """Handler names for registration."""
 
+    EXTRACTION_GUARD = "HarnessExtractionGuard"
     START_DISPATCH = "HarnessStartDispatch"
     EXPLORE_DISPATCH = "HarnessExploreDispatch"
     PLAN_DISPATCH = "HarnessPlanDispatch"

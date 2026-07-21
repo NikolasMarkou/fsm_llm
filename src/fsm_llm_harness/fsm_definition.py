@@ -92,11 +92,29 @@ _PRIORITY_4TH = 600
 #: humans reading a dumped FSM, not a data channel.
 _GOAL_PREVIEW_CHARS = 200
 
-#: Multi-pass extraction refinement is disabled on every state.  The gate flags
-#: below are set by the driver's handlers from worker results, not extracted
-#: from user prose, so a refinement pass triggered by "required key missing"
-#: would spend an extra LLM call per turn to re-ask a question the model was
-#: never the source of.  On a 4B model that cost is the whole turn budget.
+# DECISION plan-2026-07-21T125237-191b2eb2/D-044
+# THIS COMMENT USED TO STATE THE OPPOSITE OF THE TRUTH, at exactly the spot a
+# reader checks (review W2). It claimed "the gate flags below are set by the
+# driver's handlers from worker results, not extracted from user prose" -- while
+# `_build_field_configs_from_state` (pipeline.py:837-890) was minting a REQUIRED
+# extraction config for every key in the `requires_context_keys` lists below,
+# and D-016 was deliberately leaving all nine of them unseeded so that
+# extraction could write them. A reviewer trusting the old sentence concluded
+# the fabrication hole was impossible; it was in fact wide open, and a
+# fabricating LLM traversed the whole protocol to CLOSE on it.
+# The sentence is true NOW, and only because `constants.DRIVER_OWNED_SEEDS`
+# seeds all nine before turn 1 so the configs below are skipped
+# (pipeline.py:953-956), `HarnessAgent._apply` will not let a seeded key be
+# deleted back into extractability, and `HarnessAgent._reassert_driver_owned`
+# restores anything that slips through. Do not restate this claim anywhere
+# without naming that mechanism -- an unmechanised assertion here is what hid
+# the defect.
+# See decisions.md D-044.
+
+#: Multi-pass extraction refinement is disabled on every state.  A refinement
+#: pass triggered by "required key missing" would spend an extra LLM call per
+#: turn re-asking for a driver-owned value the model is not permitted to
+#: supply.  On a 4B model that cost is the whole turn budget.
 _EXTRACTION_RETRIES = 0
 
 #: Terse operator persona. Deliberately mechanical: the harness reports

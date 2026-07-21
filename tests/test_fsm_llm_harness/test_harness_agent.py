@@ -731,7 +731,18 @@ class TestFailureSurvival:
         assert "str" in results[0]["answer"]
 
     def test_worker_factory_none_degrades_without_crashing(self) -> None:
-        """No worker at all: the FSM's own extraction gets the turns."""
+        """No worker at all: the run BLOCKS legibly instead of crashing.
+
+        CHANGED at step 7a (D-045).  This test used to assert
+        ``findings_count is None`` and call the degrade path "the FSM's own
+        extraction gets the turns" -- which was true, and was the defect: with
+        the gate flags unseeded, the FSM's Pass-1 extraction was a second,
+        unguarded writer that could invent every gate flag from prose.  The
+        degrade path and invariants I6/I8 are mutually exclusive; I6 won.  A
+        worker-less run now has no evidence source at all, so every gate stays
+        shut and the run halts on the stall detector.  ``success=False`` with a
+        named gate is the honest outcome, not a regression.
+        """
         agent = HarnessAgent(
             worker_factory=None,
             approval_callback=ApprovalRecorder(),
@@ -740,12 +751,21 @@ class TestFailureSurvival:
         result = agent.run("degrade goal")
 
         assert isinstance(result, AgentResult)
-        assert result.final_context.get(ContextKeys.FINDINGS_COUNT) is None
+        assert result.success is False
+        assert "EXPLORE" in result.answer
+        assert result.final_context.get(ContextKeys.FINDINGS_COUNT) == 0
+        assert result.final_context.get(ContextKeys.ITERATION) == 0
 
     def test_a_failed_dispatch_does_not_advance_the_protocol(
         self, make_harness
     ) -> None:
-        """An unsuccessful worker writes no gate flag (invariant I8)."""
+        """An unsuccessful worker writes no gate flag (invariant I8).
+
+        The seeded ``0`` is the assertion, not ``None``: every driver-owned gate
+        flag is seeded falsy before turn 1 so the FSM's own extraction can never
+        be asked for it (D-044).  A failed dispatch must leave that seed
+        untouched -- the worker's ``9`` never reaches context.
+        """
         script = _traverse_script()
         script[HarnessStates.EXPLORE] = {
             "success": False,
@@ -756,7 +776,7 @@ class TestFailureSurvival:
         result = harness.run()
 
         assert harness.worker.count_for(HarnessStates.PLAN) == 0
-        assert result.final_context.get(ContextKeys.FINDINGS_COUNT) is None
+        assert result.final_context.get(ContextKeys.FINDINGS_COUNT) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -796,7 +816,8 @@ class TestFailClosed:
         assert harness.worker.count_for(HarnessStates.PLAN) == 0, (
             f"a {label} findings_count advanced the protocol"
         )
-        assert result.final_context.get(ContextKeys.FINDINGS_COUNT) is None
+        # The seeded 0 (D-044), not None: the dropped value never landed.
+        assert result.final_context.get(ContextKeys.FINDINGS_COUNT) == 0
 
     def test_a_well_typed_counter_does_advance(self, make_harness) -> None:
         """The control case: the allowlist is not simply dropping everything."""

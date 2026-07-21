@@ -64,6 +64,8 @@ from fsm_llm_agents.exceptions import AgentError
 from fsm_llm_agents.hitl import ApprovalCallback, HumanInTheLoop
 
 from .constants import (
+    DRIVER_OWNED_SEEDS,
+    DRIVER_OWNED_UNSET,
     ContextKeys,
     Defaults,
     GateSlug,
@@ -95,9 +97,10 @@ _AGENT_TYPE = "harness"
 #: no state change, no counter change -- before the driver halts.  Without it a
 #: permanently BLOCKED gate spins until ``BaseAgent._check_budgets`` raises,
 #: which on a live model is minutes of LLM calls that cannot change anything.
-#: Small on purpose: every held turn still runs Pass-1 extraction, so the FSM's
-#: own LLM gets a few chances to satisfy the gate (that is the whole degrade
-#: path when ``worker_factory`` is None) -- but only a few.
+#: Since D-045 this is also the NORMAL termination of a ``worker_factory=None``
+#: run: no worker means no evidence, every gate stays shut, and the run reports
+#: which gate it is sitting behind instead of letting the FSM's own extraction
+#: invent the evidence for it.
 _DEFAULT_MAX_STALL_TURNS = 3
 
 #: ``tool_name`` values for the three human approval points.  They are not tool
@@ -375,9 +378,13 @@ class HarnessAgent(BaseAgent):
         """Initialize the protocol driver.
 
         Args:
-            worker_factory: Role dispatch seam.  ``None`` degrades to the FSM's
-                own Pass-1/Pass-2 LLM calls -- the protocol still advances or
-                BLOCKS, it never crashes (mirrors ``OrchestratorAgent``).
+            worker_factory: Role dispatch seam.  ``None`` degrades to a
+                conversation-only run: the FSM still turns, Pass-2 still
+                answers, nothing crashes -- but no gate ever opens, because a
+                gate flag records worker or human evidence and there is no
+                worker to produce any (D-045).  Expect a stall halt naming the
+                first shut gate.  ``None`` is a diagnostic mode, not a way to
+                run the protocol.
             approval_callback: Consulted at every human gate.  Defaults to a
                 callback that DENIES, so an unattended run cannot approve its
                 own plan or close itself.
@@ -413,6 +420,12 @@ class HarnessAgent(BaseAgent):
         self._conversation_id: str | None = None
         self._stall_turns = 0
         self._stall_signature: tuple[Any, ...] | None = None
+        #: The driver's authoritative value for every driver-owned context key
+        #: (``constants.DRIVER_OWNED_SEEDS`` + ``DRIVER_OWNED_UNSET``).  ``None``
+        #: means "this key should be ABSENT from context".  Written only by
+        #: :meth:`run` and :meth:`_apply`; read only by
+        #: :meth:`_reassert_driver_owned`.  See decisions.md D-044.
+        self._driver_owned: dict[str, Any] = {}
 
         logger.info(
             f"HarnessAgent started with model={self.config.model}, "
@@ -493,7 +506,7 @@ class HarnessAgent(BaseAgent):
             iteration_hard_cap=self.iteration_hard_cap,
         )
 
-        # DECISION plan-2026-07-21T125237-191b2eb2/D-016
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-016 (REVERSED IN PART by D-044)
         # Every counter below is seeded EAGERLY, before turn 1. Do NOT make them
         # lazy ("set it when the state first needs it"): `iteration` is a
         # `requires_context_keys` term on the PLAN -> EXECUTE gate, and
@@ -502,21 +515,32 @@ class HarnessAgent(BaseAgent):
         # (transition_evaluator.py:351-362). An absent `iteration` therefore
         # BLOCKS PLAN -> EXECUTE permanently, no matter what the plan-writer
         # returns.
-        # The mirror image also holds: do NOT extend this list with the gate
-        # FLAGS (findings_count, plan_approved, ...). Pass-1 extraction SKIPS
-        # any field already non-None in context (pipeline.py:953-956), so
-        # seeding a flag permanently disables the FSM's own extraction of it --
-        # which is the entire degrade path when `worker_factory` is None.
-        # See decisions.md D-016.
+        #
+        # D-016 originally seeded ONLY the counters and deliberately left every
+        # gate FLAG absent, so the FSM's own Pass-1 extraction could still write
+        # them -- "the entire degrade path when `worker_factory` is None".
+        # MEASURED CONSEQUENCE (review C1): that degrade path IS the fabrication
+        # engine. An LLM emitting {"plan_approved": true, "close_confirmed":
+        # true} reached the terminal state with every worker dispatch failing and
+        # a DENYING approval callback never consulted once. The degrade path and
+        # invariants I6/I8 are mutually exclusive; I6 wins. Do NOT re-narrow this
+        # seed set to "just the counters" to bring the degrade path back -- a
+        # worker-less run is now expected to BLOCK at the first gate and halt
+        # legibly via `_check_stall`, which is the honest outcome when no
+        # evidence-producing worker exists. See decisions.md D-044 and D-045.
+        seeds: dict[str, Any] = {
+            ContextKeys.GOAL: task,
+            **DRIVER_OWNED_SEEDS,
+        }
+        self._driver_owned = {
+            **dict.fromkeys(DRIVER_OWNED_UNSET),
+            **seeds,
+        }
         context = self._init_context(
             task,
             initial_context,
             extra={
-                ContextKeys.GOAL: task,
-                ContextKeys.ITERATION: 0,
-                ContextKeys.STEP_NUMBER: 0,
-                ContextKeys.TOTAL_STEPS: 1,
-                ContextKeys.FIX_ATTEMPTS: 0,
+                **seeds,
                 ContextKeys.DISPATCH_LEDGER: [],
                 ContextKeys.ROLE_RESULTS: [],
             },
@@ -565,8 +589,36 @@ class HarnessAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     def _register_handlers(self, api: API) -> None:
-        """Register the initial-state and per-state dispatch handlers."""
+        """Register the extraction guard, plus the per-state dispatch handlers."""
         self._api = api
+
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-044
+        # BOTH timings are required, and the PRE_PROCESSING one is the
+        # load-bearing half. Do NOT drop it as "redundant with CONTEXT_UPDATE":
+        # MEASURED 2026-07-21 -- `MessagePipeline` hands the transition evaluator
+        # a SECOND copy of the extraction payload
+        # (`evaluate_transitions(state, context, extraction_response.extracted_data)`,
+        # pipeline.py:1388), and `_prepare_working_context` merges that dict OVER
+        # the live context (transition_evaluator.py:146,163). A CONTEXT_UPDATE
+        # handler cleans `instance.context` only, so a value extracted on THIS
+        # turn still reaches the gate through the payload copy -- reproduced: the
+        # guard deleted `plan_approved` and PLAN -> EXECUTE fired anyway. The only
+        # place to stop that is BEFORE extraction runs: PRE_PROCESSING fires at
+        # pipeline.py:297, immediately before the extraction pass, and a
+        # driver-owned key that is present and non-None there is SKIPPED by
+        # extraction entirely (pipeline.py:953-956) -- so it never enters the
+        # payload in the first place.
+        # CONTEXT_UPDATE (pipeline.py:661-668, after the commit, before Step 3's
+        # transition evaluation) is still registered: it keeps a fabricated value
+        # from persisting into later turns, later prompts and `final_context`.
+        # Priority 5 puts the guard ahead of every other harness handler.
+        # See decisions.md D-044.
+        api.register_handler(
+            api.create_handler(HandlerNames.EXTRACTION_GUARD)
+            .with_priority(HandlerPriorities.EXTRACTION_GUARD)
+            .at(HandlerTiming.PRE_PROCESSING, HandlerTiming.CONTEXT_UPDATE)
+            .do(self._reassert_driver_owned)
+        )
 
         api.register_handler(
             api.create_handler(HandlerNames.START_DISPATCH)
@@ -582,6 +634,49 @@ class HarnessAgent(BaseAgent):
                 .on_state_entry(state)
                 .do(self._make_entry_handler(state))
             )
+
+    def _reassert_driver_owned(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Restore the driver's own value for every driver-owned context key.
+
+        Registered at two timings (see :meth:`_register_handlers`):
+
+        * ``PRE_PROCESSING`` -- before Pass-1 extraction runs.  Re-seeding a key
+          here means extraction skips it (``pipeline.py:953-956``), so it never
+          enters ``DataExtractionResponse.extracted_data`` and therefore never
+          reaches the transition evaluator.  This is the enforcement.
+        * ``CONTEXT_UPDATE`` -- after Pass-1's data is committed.  This is the
+          cleanup: it keeps a fabricated value out of later turns' prompts and
+          out of ``final_context``.
+
+        The driver never writes context through either path -- its own writes
+        are POST_TRANSITION handler deltas and ``API.update_context`` calls,
+        both of which update :attr:`_driver_owned` through :meth:`_apply` first.
+        So any disagreement between context and :attr:`_driver_owned` seen here
+        was authored by the LLM, and the driver's value wins.
+
+        Args:
+            context: The current context snapshot.
+
+        Returns:
+            A handler delta restoring the driver's values.  Empty on the normal
+            path, where the LLM wrote nothing the driver owns.
+        """
+        delta: dict[str, Any] = {}
+        for key, owned in self._driver_owned.items():
+            if owned is None:
+                if key in context:
+                    delta[key] = None
+            elif not _exactly(context.get(key), owned):
+                delta[key] = owned
+
+        if delta:
+            logger.warning(
+                f"Restoring {len(delta)} driver-owned key(s) {sorted(delta)} "
+                "the FSM's own extraction wrote over. A gate flag records "
+                "driver or worker evidence and is never read out of model "
+                "prose (invariant I6)."
+            )
+        return delta
 
     def _make_entry_handler(
         self, state: str
@@ -702,25 +797,49 @@ class HarnessAgent(BaseAgent):
         """
         previous = context.get("_previous_state")
 
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-044
+        # Every clear below writes `False`, never `None`. Do NOT "restore" the
+        # `None` (= delete) form: an ABSENT gate flag is exactly what makes it
+        # extractable again (Pass-1 skips only fields already non-None,
+        # pipeline.py:953-956), so deleting `plan_approved` on PLAN entry --
+        # which this method used to do -- handed the next turn's LLM a second
+        # chance to grant its own approval. `False` blocks the gate identically
+        # (`TransitionCondition.logic` tests `== True` on all of these) while
+        # keeping the key present and therefore unextractable.
+        # ROUTING FLAGS ARE CLEARED WHERE THEY ARE CONSUMED (review W4): the
+        # flag that routed us into a state is spent on arrival, so entering
+        # EXPLORE clears `needs_explore` and entering PLAN clears
+        # `pivot_resolved`. Without that, one `needs_explore=True` survived for
+        # the rest of the run and silently won REFLECT routing at priority 600
+        # on every later visit.
+        # See decisions.md D-044.
         if state == HarnessStates.EXECUTE:
             return self._enter_execute(previous, context)
 
+        if state == HarnessStates.EXPLORE:
+            # The exploration request is honoured by being here.
+            return {ContextKeys.NEEDS_EXPLORE: False}
+
         if state == HarnessStates.PLAN:
             # A plan must be approved again after any revision; the approval
-            # records a human decision and never survives a re-entry.
-            return {ContextKeys.PLAN_APPROVED: None}
+            # records a human decision and never survives a re-entry.  The
+            # pivot that sent us here (if any) is likewise spent.
+            return {
+                ContextKeys.PLAN_APPROVED: False,
+                ContextKeys.PIVOT_RESOLVED: False,
+            }
 
         if state == HarnessStates.PIVOT:
             # The leash never carries across a pivot: the next EXECUTE is a
             # different approach, not a third attempt at the same one.
             return {
                 ContextKeys.FIX_ATTEMPTS: 0,
-                ContextKeys.COMPLETION_FIX: None,
-                ContextKeys.NEEDS_PIVOT: None,
+                ContextKeys.COMPLETION_FIX: False,
+                ContextKeys.NEEDS_PIVOT: False,
             }
 
         if state == HarnessStates.REFLECT:
-            return {ContextKeys.EXECUTE_COMPLETE: None}
+            return {ContextKeys.EXECUTE_COMPLETE: False}
 
         return {}
 
@@ -730,8 +849,9 @@ class HarnessAgent(BaseAgent):
         """Counter updates owed on entry to EXECUTE."""
         updates: dict[str, Any] = {
             # Cleared so the EXECUTE -> REFLECT edge cannot fire on a stale flag.
-            ContextKeys.EXECUTE_COMPLETE: None,
-            ContextKeys.COMPLETION_FIX: None,
+            # `False`, not `None` -- see `_entry_bookkeeping`'s D-044 note.
+            ContextKeys.EXECUTE_COMPLETE: False,
+            ContextKeys.COMPLETION_FIX: False,
         }
 
         # DECISION plan-2026-07-21T125237-191b2eb2/D-018
@@ -794,9 +914,16 @@ class HarnessAgent(BaseAgent):
             working,
             self._record_role_result(role, state, working, result, error),
         )
+        role_delta: dict[str, Any] = {}
         if result is not None and result.success:
+            role_delta = self._apply_role_result(state, result)
+            self._apply(updates, working, role_delta)
+        if state == HarnessStates.REFLECT:
+            # Runs on EVERY reflect dispatch, over the MERGED view -- see D-044.
             self._apply(
-                updates, working, self._apply_role_result(state, result, working)
+                updates,
+                working,
+                self._enforce_routing_exclusivity(role_delta, working),
             )
         self._apply(updates, working, self._post_dispatch(state, result, working))
         return updates
@@ -886,9 +1013,7 @@ class HarnessAgent(BaseAgent):
             ContextKeys.CURRENT_ROLE_RESULT: entry,
         }
 
-    def _apply_role_result(
-        self, state: str, result: AgentResult, context: Mapping[str, Any]
-    ) -> dict[str, Any]:
+    def _apply_role_result(self, state: str, result: AgentResult) -> dict[str, Any]:
         """Read gate flags out of a successful worker result.
 
         Only keys in :data:`_WORKER_WRITABLE` for *state* are read, and only
@@ -922,31 +1047,52 @@ class HarnessAgent(BaseAgent):
                 continue
             updates[key] = value
 
-        if state == HarnessStates.REFLECT:
-            updates = self._enforce_routing_exclusivity(updates, context)
-
         return updates
 
     @staticmethod
     def _enforce_routing_exclusivity(
-        updates: dict[str, Any], context: Mapping[str, Any]
+        written: Mapping[str, Any], context: Mapping[str, Any]
     ) -> dict[str, Any]:
         """Keep at most one REFLECT routing flag true.
 
         The flags gate three different outbound edges at three priorities, so
         two true flags would silently resolve by priority -- a completion fix
         would swallow a pivot the reviewer explicitly asked for.
+
+        Args:
+            written: The routing flags THIS dispatch's worker set (its filtered
+                delta).  A fresh verdict outranks anything already in context.
+            context: The merged view -- context plus every delta applied so far
+                this turn.
+
+        Returns:
+            A delta clearing every loser; empty when no flag is true anywhere.
         """
-        chosen = [key for key in _REFLECT_ROUTING_FLAGS if updates.get(key) is True]
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-044
+        # TWO precedence layers, and both are load-bearing:
+        #   1. A flag this dispatch's verifier wrote beats a flag that was
+        #      merely lying in context. Do NOT collapse this to a single
+        #      merged-view scan ranked by _REFLECT_ROUTING_FLAGS order: the
+        #      executor sets `completion_fix` on its way OUT of a failed step,
+        #      so at every REFLECT entry after a failure `completion_fix` is
+        #      already true -- and completion_fix outranks needs_pivot. A merged
+        #      scan therefore makes a verifier's explicit PIVOT verdict
+        #      unreachable, which is the exact swallowing this function exists
+        #      to prevent (pinned by test_reset_on_pivot).
+        #   2. Within one layer, _REFLECT_ROUTING_FLAGS order decides.
+        # The function also runs on EVERY reflect dispatch now, not only on a
+        # SUCCESSFUL worker reply, and it reads `context` rather than only the
+        # worker delta -- that is what stops a stale flag (review W4) from
+        # silently winning REFLECT routing when the current worker sets none.
+        # Losers are cleared to False, never to None: an absent flag is an
+        # extractable flag (see `_entry_bookkeeping`). See decisions.md D-044.
+        fresh = [key for key in _REFLECT_ROUTING_FLAGS if written.get(key) is True]
+        stale = [key for key in _REFLECT_ROUTING_FLAGS if context.get(key) is True]
+        chosen = fresh or stale
         if not chosen:
-            return updates
+            return {}
         winner = chosen[0]
-        for key in _REFLECT_ROUTING_FLAGS:
-            if key == winner:
-                continue
-            if updates.get(key) is not None or context.get(key) is not None:
-                updates[key] = None
-        return updates
+        return {key: False for key in _REFLECT_ROUTING_FLAGS if key != winner}
 
     def _post_dispatch(
         self, state: str, result: AgentResult | None, context: Mapping[str, Any]
@@ -975,9 +1121,12 @@ class HarnessAgent(BaseAgent):
         from ``AgentResult.success`` rather than to read it back.
         """
         if result is None:
-            # No worker configured, or the worker failed hard. Neither advances
-            # the step nor spends an attempt -- the FSM's own extraction pass
-            # gets the next turn to move the protocol (the degrade path).
+            # No worker configured, or the worker raised. Neither advances the
+            # step nor spends an attempt, so EXECUTE holds until the stall halt.
+            # This branch collapsing "raised" into "absent" is review C3(a) and
+            # is step 7c's to fix; do not repair it here. The old comment here
+            # claimed the FSM's own extraction would move the protocol on the
+            # next turn -- that was the D-044 fabrication path and is gone.
             return {}
 
         step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
@@ -1217,8 +1366,8 @@ class HarnessAgent(BaseAgent):
     # Small helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
     def _apply(
+        self,
         updates: dict[str, Any],
         working: dict[str, Any],
         delta: Mapping[str, Any],
@@ -1228,9 +1377,37 @@ class HarnessAgent(BaseAgent):
         A ``None`` value means "delete this key" in a handler delta
         (``pipeline.execute_handlers``'s merge contract), so the working view
         drops it rather than storing a literal ``None``.
+
+        This is also the single choke point where the driver records what it
+        believes a driver-owned key holds (:attr:`_driver_owned`), which is what
+        lets :meth:`_reassert_driver_owned` tell a driver write from an LLM one.
+        Every delta the driver produces -- entry bookkeeping, the worker
+        allowlist, post-dispatch bookkeeping, the pre-step gate -- passes
+        through here.  A new delta site that bypasses ``_apply`` would have its
+        gate-flag writes silently reverted on the next extraction turn.
         """
-        for key, value in delta.items():
+        for key, raw in delta.items():
+            # DECISION plan-2026-07-21T125237-191b2eb2/D-044
+            # A seeded driver-owned key can never be DELETED, only reset to its
+            # falsy seed. Do NOT remove this coercion as "defensive": a `None`
+            # delta means "delete" to the pipeline's merge contract, an ABSENT
+            # key is one the FSM's Pass-1 extraction is asked to invent, and an
+            # invented value reaches the transition evaluator through
+            # `extraction_response.extracted_data` -- a channel no handler at any
+            # timing can clean (transition_evaluator.py:146). Reproduced: with
+            # the pre-7a `plan_approved: None` clear on PLAN entry restored, a
+            # fabricating LLM opened PLAN -> EXECUTE even with the guard handler
+            # registered. This turns "never clear a gate flag with None" from a
+            # rule a future edit can forget into a mechanism.
+            # See decisions.md D-044.
+            value = (
+                DRIVER_OWNED_SEEDS[key]
+                if raw is None and key in DRIVER_OWNED_SEEDS
+                else raw
+            )
             updates[key] = value
+            if key in self._driver_owned:
+                self._driver_owned[key] = value
             if value is None:
                 working.pop(key, None)
             else:
@@ -1256,6 +1433,17 @@ def _as_int(value: Any, default: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return default
     return value
+
+
+def _exactly(current: Any, owned: Any) -> bool:
+    """True when *current* is *owned*'s exact type AND equal to it.
+
+    ``type(...) is type(...)`` rather than ``==`` alone because Python's numeric
+    tower makes ``False == 0`` and ``True == 1``: a fabricated
+    ``findings_count = True`` would compare equal to the driver's seeded ``0``
+    and slip past the revert.
+    """
+    return type(current) is type(owned) and bool(current == owned)
 
 
 def _type_matches(value: Any, expected: type) -> bool:

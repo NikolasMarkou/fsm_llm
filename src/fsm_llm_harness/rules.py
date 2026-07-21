@@ -130,6 +130,25 @@ def _artifacts_writable_by(role: str) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 
 
+# DECISION plan-2026-07-21T125237-191b2eb2/D-046
+# READ BEFORE TRUSTING ANY `extraction_instructions` STRING BELOW. Several of
+# them ask the model for a DRIVER-OWNED gate flag (`plan_approved`,
+# `close_confirmed`, `execute_complete`, the routing flags, `findings_count`).
+# Those requests are INERT by construction, not by the model's goodwill:
+# `constants.DRIVER_OWNED_SEEDS` seeds every one of those keys before turn 1 so
+# Pass-1 skips them, and `HarnessAgent._reassert_driver_owned` reverts any value
+# that reaches context anyway (D-044). A reply that sets `plan_approved: true`
+# changes nothing.
+# Do NOT read these strings as the contract for how a gate opens -- the contract
+# is `harness._WORKER_WRITABLE` plus the human approval callback. And do NOT
+# "helpfully" add a new gate flag to an instruction block expecting it to work:
+# unless the driver writes that key, it cannot be set at all.
+# These blocks are kept (rather than deleted) because they are also the Pass-1
+# prompt's only description of what the state is doing, and because deleting
+# them empties `extraction_instructions`, which silently switches core's
+# extraction onto a different branch (`pipeline.py:917-947`) whose effect on a
+# live 4B run has not been measured. Step 7f's re-run is the place to decide
+# whether harness states should extract at all. See decisions.md D-046.
 @dataclass(frozen=True)
 class StateRules:
     """The frozen protocol rules for one harness state.
