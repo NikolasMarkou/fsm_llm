@@ -30,6 +30,13 @@ Example::
 ``complete_fn`` may be injected to test the loop without a live provider; it
 takes ``(model, messages, tool_schemas)`` and returns a normalized dict
 ``{"content": str | None, "tool_calls": [{"id", "name", "arguments": dict}]}``.
+
+``system_policy`` appends caller-owned STANDING instructions (rules, gates,
+output shape — anything true for every turn of the dispatch) to the system
+message, leaving the user turn to carry only that turn's task. It is read at
+``run()`` time, so a caller that obtains the agent from a factory may set the
+attribute afterwards. Default ``None`` reproduces the previous system message
+byte for byte.
 """
 
 import json
@@ -120,6 +127,8 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         config: AgentConfig (model, max_iterations, timeout, temperature, ...).
         complete_fn: Optional override ``(model, messages, tool_schemas) -> dict``
             for tests / custom backends. Defaults to a litellm completion.
+        system_policy: Standing instructions appended to the system message.
+            ``None`` (the default) leaves the system message exactly as it was.
     """
 
     def __init__(
@@ -127,6 +136,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         tools: ToolRegistry,
         config: AgentConfig | None = None,
         complete_fn: CompleteFn | None = None,
+        system_policy: str | None = None,
         **api_kwargs: Any,
     ) -> None:
         if len(tools) == 0:
@@ -134,6 +144,41 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         super().__init__(config, **api_kwargs)
         self.tools = tools
         self._complete_fn = complete_fn
+        #: Public and mutable on purpose -- see :meth:`_system_message`.
+        self.system_policy = system_policy
+
+    def _system_message(self) -> str:
+        """Return this run's system message: the base prompt plus any policy.
+
+        Interface contract (1 call site, :meth:`run`; the attribute it reads is
+        public because callers set it post-construction):
+            - Reads ``self.system_policy`` at CALL time, not at construction, so
+              a caller that receives the agent from a factory can still supply
+              standing instructions.
+            - Returns ``_SYSTEM_PROMPT`` unchanged when the policy is unset or
+              blank -- the no-policy path is byte-identical to before.
+            - Never raises.
+        """
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-021
+        # Standing instructions belong in the SYSTEM message, and this seam
+        # exists because that placement was MEASURED to be the difference
+        # between a 4B model doing the work and only talking about it. Live
+        # `ollama_chat/qwen3.5:4b`, harness EXECUTE role, n=5 per arm, bytes
+        # stat'd on disk: the whole role prompt in the USER turn wrote 0/5;
+        # the SAME text, unchanged and complete, with everything standing moved
+        # into the system message wrote 4/5. Content ablations in between
+        # (fixing the writes line: 0/5; deleting the rules block: 2/5) did not
+        # reproduce it, so this is placement, not wording.
+        # Do NOT "simplify" this into a `system_prompt` REPLACEMENT parameter:
+        # the measured arm kept `_SYSTEM_PROMPT` and appended to it, and the
+        # base prompt is what tells the model it may call tools at all.
+        # Do NOT make it constructor-only either -- `roles.py` obtains this
+        # agent through an injectable builder that cannot see the dispatch, so
+        # a construction-time-only parameter would be unreachable exactly where
+        # it was measured to matter. See decisions.md D-021.
+        if not self.system_policy:
+            return _SYSTEM_PROMPT
+        return f"{_SYSTEM_PROMPT}\n\n{self.system_policy}"
 
     # BaseAgent abstract hook — this agent does not use the FSM pipeline.
     def _register_handlers(self, api: API) -> None:  # pragma: no cover - unused
@@ -272,7 +317,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         start_time = time.monotonic()
         schemas = self.tools.get_json_schemas()
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": self._system_message()},
             {"role": "user", "content": task},
         ]
         trace_calls: list[ToolCall] = []

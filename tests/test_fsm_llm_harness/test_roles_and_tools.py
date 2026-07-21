@@ -45,6 +45,8 @@ from fsm_llm_harness.roles import (
     ROLE_SPECS,
     build_default_worker_factory,
     build_role_prompt,
+    build_role_system_prompt,
+    build_role_task_prompt,
     get_role_spec,
     held_tools,
 )
@@ -172,6 +174,7 @@ def _role_request(
     *,
     plan_dir: Path | None,
     workspace_root: Path | None = None,
+    context: dict[str, Any] | None = None,
 ) -> RoleRequest:
     """Build the ``RoleRequest`` the driver would hand this state's worker.
 
@@ -194,7 +197,11 @@ def _role_request(
         step_number=1,
         total_steps=1,
         fix_attempts=0,
-        context={ContextKeys.GOAL: "exercise the harness protocol"},
+        context=(
+            {ContextKeys.GOAL: "exercise the harness protocol"}
+            if context is None
+            else context
+        ),
         plan_dir=None if plan_dir is None else str(plan_dir),
         workspace_root=None if workspace_root is None else str(workspace_root),
     )
@@ -1055,7 +1062,9 @@ def _dispatch(
     factory = build_default_worker_factory(
         Workspace(workspace_root),
         agent_builder=lambda spec_, registry, config: _ScriptedAgent(
-            registry, calls, answer if answer is not None else json.dumps(payload),
+            registry,
+            calls,
+            answer if answer is not None else json.dumps(payload),
             structured,
         ),
     )
@@ -1115,7 +1124,10 @@ class TestFindingsCountComesFromDisk:
             calls=(
                 (
                     "write_plan_file",
-                    {"path": f"{ArtifactNames.FINDINGS_DIR}/c.md", "content": "found\n"},
+                    {
+                        "path": f"{ArtifactNames.FINDINGS_DIR}/c.md",
+                        "content": "found\n",
+                    },
                 ),
             ),
         )
@@ -1275,7 +1287,10 @@ class TestWriteClaimsNeedToolEvidence:
             plan_dir=plan_dir,
             payload={"summary": "wrote the plan", "message": "done"},
             calls=(
-                ("write_plan_file", {"path": ArtifactNames.PLAN, "content": "# plan\n"}),
+                (
+                    "write_plan_file",
+                    {"path": ArtifactNames.PLAN, "content": "# plan\n"},
+                ),
             ),
         )
 
@@ -1380,9 +1395,7 @@ class TestWorkspaceRefusesPlanPaths:
 
         assert ws.resolve("/workspace/uploader.py") == ws.root / "uploader.py"
 
-    @pytest.mark.parametrize(
-        "path", ["/plan/x.md", "/plan/findings/x.md"]
-    )
+    @pytest.mark.parametrize("path", ["/plan/x.md", "/plan/findings/x.md"])
     def test_plan_memory_still_repairs_the_same_shape(
         self, tmp_path: Path, path: str
     ) -> None:
@@ -1407,10 +1420,10 @@ class TestOutputLineAsksForABareObject:
     """
 
     @pytest.mark.parametrize("state", HarnessStates.ALL)
-    def test_the_false_discard_claim_is_gone(
-        self, state: str, plan_dir: Path
-    ) -> None:
-        prompt = build_role_prompt(_role_request(state, plan_dir=plan_dir), spec=get_role_spec(state))
+    def test_the_false_discard_claim_is_gone(self, state: str, plan_dir: Path) -> None:
+        prompt = build_role_prompt(
+            _role_request(state, plan_dir=plan_dir), spec=get_role_spec(state)
+        )
 
         assert "is discarded before this protocol sees it" not in prompt
         assert "The sentence is required" not in prompt
@@ -1419,7 +1432,9 @@ class TestOutputLineAsksForABareObject:
     def test_the_prompt_asks_for_exactly_one_json_object(
         self, state: str, plan_dir: Path
     ) -> None:
-        prompt = build_role_prompt(_role_request(state, plan_dir=plan_dir), spec=get_role_spec(state))
+        prompt = build_role_prompt(
+            _role_request(state, plan_dir=plan_dir), spec=get_role_spec(state)
+        )
 
         assert "exactly ONE JSON object" in prompt
         assert "Do not show drafts" in prompt
@@ -1435,3 +1450,171 @@ class TestOutputLineAsksForABareObject:
 
         assert parsed.message == "the role's own sentence"
         assert parsed.message != _GENERIC_FALLBACK_MESSAGE
+
+
+# ---------------------------------------------------------------------------
+# Standing policy vs this dispatch's task (decisions.md D-021)
+# ---------------------------------------------------------------------------
+
+
+class _PolicyAgent(_ScriptedAgent):
+    """A scripted agent that CAN hold a system policy, as ``native_fc`` can.
+
+    Interface contract (test double, 2 call sites below):
+        - Declares ``system_policy`` so the factory's duck-typed check finds it,
+          exactly as :class:`NativeFunctionCallingReactAgent` does.
+        - Records every task string it is run with, so a test can assert WHICH
+          half of the prompt reached the user turn.
+        - Everything else -- the real registry, the real tool calls, the real
+          bytes -- is inherited unchanged from :class:`_ScriptedAgent`.
+    """
+
+    system_policy: str | None = None
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.tasks: list[str] = []
+
+    def run(self, task: str) -> AgentResult:
+        self.tasks.append(task)
+        return super().run(task)
+
+
+class TestStandingPolicyIsSplitFromTheTask:
+    """WHERE the standing half is delivered was measured to decide behaviour.
+
+    Live ``ollama_chat/qwen3.5:4b``, EXECUTE role, n=5 per arm, bytes stat'd on
+    disk: the whole prompt in the user turn wrote 0/5; the identical text with
+    every standing block moved into the system message wrote 4/5 (workspace) and
+    4/5 (plan directory).  These tests pin the SPLIT -- that it loses nothing,
+    that each half carries what it should, and that an agent which cannot hold a
+    policy still receives the complete prompt.
+    """
+
+    @staticmethod
+    def _blocks(text: str) -> list[str]:
+        return [block for block in text.split("\n\n") if block]
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_two_halves_partition_the_whole_prompt(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        """Nothing is dropped and nothing is said twice."""
+        spec = get_role_spec(state)
+        request = _role_request(
+            state, plan_dir=plan_dir, context={ContextKeys.TOTAL_STEPS: 4}
+        )
+
+        whole = self._blocks(build_role_prompt(request, spec))
+        standing = self._blocks(build_role_system_prompt(request, spec))
+        task = self._blocks(build_role_task_prompt(request, spec))
+
+        assert sorted(standing + task) == sorted(whole)
+        assert not set(standing) & set(task)
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_system_half_carries_every_standing_instruction(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        spec = get_role_spec(state)
+        system = build_role_system_prompt(_role_request(state, plan_dir=plan_dir), spec)
+
+        assert system.startswith(f"You are the {ROLE_BY_STATE[state]}")
+        for marker in (
+            "EXIT GATE:",
+            "RULES:",
+            "TOOLS:",
+            "HOW TO FINISH:",
+            "exactly ONE JSON object",
+            "YOU MAY WRITE",
+        ):
+            assert marker in system
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_task_half_carries_only_what_differs_per_dispatch(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        spec = get_role_spec(state)
+        task = build_role_task_prompt(_role_request(state, plan_dir=plan_dir), spec)
+
+        assert task.startswith("GOAL: ")
+        assert "POSITION: iteration 1" in task
+        for marker in ("RULES:", "TOOLS:", "HOW TO FINISH:", "YOU MAY WRITE"):
+            assert marker not in task
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_context_snapshot_travels_with_the_task(
+        self, state: str, plan_dir: Path
+    ) -> None:
+        """The snapshot is this dispatch's state, so it is not standing policy."""
+        request = _role_request(
+            state, plan_dir=plan_dir, context={ContextKeys.TOTAL_STEPS: 4}
+        )
+        spec = get_role_spec(state)
+
+        assert "CURRENT STATE:" in build_role_task_prompt(request, spec)
+        assert "CURRENT STATE:" not in build_role_system_prompt(request, spec)
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_the_system_half_still_names_exactly_the_held_tools(
+        self, state: str, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Review C2's invariant moved with the block; it did not stay behind."""
+        spec = get_role_spec(state)
+        request = _role_request(state, plan_dir=plan_dir, workspace_root=workspace)
+
+        system = build_role_system_prompt(request, spec)
+
+        assert TestRolePromptNamesHeldTools._named_tools(system) == held_tools(
+            request, spec
+        )
+
+    def test_an_agent_that_can_hold_a_policy_gets_the_split_prompt(
+        self, tmp_path: Path, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Through the REAL factory: the standing half never reaches the task."""
+        state = HarnessStates.EXECUTE
+        spec = get_role_spec(state)
+        built: list[_PolicyAgent] = []
+
+        def builder(spec_: Any, registry: Any, config: Any) -> _PolicyAgent:
+            agent = _PolicyAgent(
+                registry, (), "done", spec.output_schema(summary="s", message="m")
+            )
+            built.append(agent)
+            return agent
+
+        factory = build_default_worker_factory(
+            Workspace(workspace), agent_builder=builder
+        )
+        request = _role_request(state, plan_dir=plan_dir, workspace_root=workspace)
+        factory(request)
+
+        agent = built[0]
+        assert agent.system_policy == build_role_system_prompt(request, spec)
+        assert agent.tasks == [build_role_task_prompt(request, spec)]
+
+    def test_an_agent_that_cannot_hold_a_policy_still_gets_everything(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The fallback is no-loss: `create_agent("react")` is unchanged by this."""
+        state = HarnessStates.EXECUTE
+        spec = get_role_spec(state)
+        seen: list[str] = []
+
+        class _NoPolicyAgent(_ScriptedAgent):
+            def run(self_inner, task: str) -> AgentResult:
+                seen.append(task)
+                return super().run(task)
+
+        factory = build_default_worker_factory(
+            Workspace(workspace),
+            agent_builder=lambda spec_, registry, config: _NoPolicyAgent(
+                registry, (), "done", spec.output_schema(summary="s", message="m")
+            ),
+        )
+        request = _role_request(state, plan_dir=plan_dir, workspace_root=workspace)
+        factory(request)
+
+        assert seen == [build_role_prompt(request, spec)]
+        assert "RULES:" in seen[0]

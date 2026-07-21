@@ -18,6 +18,7 @@ from fsm_llm_agents import (
 )
 from fsm_llm_agents.base import _output_response_format
 from fsm_llm_agents.exceptions import AgentError
+from fsm_llm_agents.native_fc import _SYSTEM_PROMPT
 
 
 @tool
@@ -593,7 +594,9 @@ class TestTerminalConstrainedDecoding:
         work, so a payload extracted afterwards must not report success."""
 
         def always_tool(model, messages, schemas):
-            if any(m["role"] == "user" and "single JSON" in m["content"] for m in messages):
+            if any(
+                m["role"] == "user" and "single JSON" in m["content"] for m in messages
+            ):
                 return {"content": _VALID_PAYLOAD, "tool_calls": []}
             return {
                 "content": None,
@@ -755,9 +758,7 @@ class TestMalformedToolCallDegrades:
 
         assert not excinfo.value.details.get("malformed_tool_call")
 
-    def test_a_toolless_turn_is_never_labelled_a_malformed_tool_call(
-        self, monkeypatch
-    ):
+    def test_a_toolless_turn_is_never_labelled_a_malformed_tool_call(self, monkeypatch):
         """The repair turn declares no tools, so it cannot garble one."""
 
         def explode(**kwargs):
@@ -833,3 +834,77 @@ class TestMalformedToolCallDegrades:
         assert result.answer == "a usable prose answer"
         assert result.structured_output is None
         assert result.success is True
+
+
+class TestSystemPolicy:
+    """Standing instructions go in the SYSTEM message, not the user turn.
+
+    Measured on `ollama_chat/qwen3.5:4b` (see decisions.md D-021): the harness's
+    role prompt delivered entirely in the user turn produced ZERO writes in 5/5
+    dispatches; the same text with its standing half moved here produced 4/5.
+    These tests pin the seam, not the model behaviour -- what they guarantee is
+    that the no-policy path is byte-identical to before and that the policy,
+    when set, lands in the system message and nowhere else.
+    """
+
+    @staticmethod
+    def _capture_messages(agent, task="q"):
+        """Run *agent* against a stub and return the messages of the first call."""
+        seen: list[list[dict]] = []
+
+        def complete_fn(model, messages, schemas):
+            seen.append([dict(m) for m in messages])
+            return {"content": "done", "tool_calls": []}
+
+        agent._complete_fn = complete_fn
+        agent.run(task)
+        return seen[0]
+
+    def _agent(self, **kwargs):
+        return NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model"),
+            complete_fn=_scripted({"content": "done", "tool_calls": []}),
+            **kwargs,
+        )
+
+    def test_no_policy_leaves_the_system_message_exactly_as_it_was(self):
+        messages = self._capture_messages(self._agent())
+
+        assert messages[0] == {"role": "system", "content": _SYSTEM_PROMPT}
+        assert messages[1] == {"role": "user", "content": "q"}
+
+    def test_a_constructor_policy_is_appended_to_the_base_prompt(self):
+        """Appended, never substituted: the base prompt is what offers tools."""
+        agent = self._agent(system_policy="RULES:\n- write the file")
+
+        messages = self._capture_messages(agent)
+
+        assert messages[0]["content"] == (
+            f"{_SYSTEM_PROMPT}\n\nRULES:\n- write the file"
+        )
+        assert messages[1] == {"role": "user", "content": "q"}
+
+    def test_the_policy_is_read_at_run_time_not_at_construction(self):
+        """`roles.py` sets this on an agent it received from a factory."""
+        agent = self._agent()
+        agent.system_policy = "EXIT GATE: stop when done"
+
+        messages = self._capture_messages(agent)
+
+        assert messages[0]["content"].endswith("EXIT GATE: stop when done")
+
+    def test_a_blank_policy_is_treated_as_no_policy(self):
+        """An empty string must not append a trailing separator to the prompt."""
+        agent = self._agent(system_policy="")
+
+        assert agent._system_message() == _SYSTEM_PROMPT
+
+    def test_the_policy_does_not_leak_into_the_user_turn(self):
+        """The whole point is that the standing half is NOT in the task."""
+        agent = self._agent(system_policy="RULES:\n- write the file")
+
+        messages = self._capture_messages(agent, task="GOAL: ship it")
+
+        assert messages[1]["content"] == "GOAL: ship it"
+        assert "RULES:" not in messages[1]["content"]

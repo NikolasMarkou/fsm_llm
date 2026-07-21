@@ -77,6 +77,8 @@ __all__ = [
     "RoleSpec",
     "build_default_worker_factory",
     "build_role_prompt",
+    "build_role_system_prompt",
+    "build_role_task_prompt",
     "count_top_level_json_objects",
     "get_role_spec",
     "held_tools",
@@ -613,11 +615,104 @@ def _context_snapshot(context: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def build_role_prompt(request: RoleRequest, spec: RoleSpec) -> str:
-    """Build the task prompt for one role dispatch.
+def _prompt_blocks(request: RoleRequest, spec: RoleSpec) -> list[tuple[bool, str]]:
+    """Return every prompt block as ``(standing, text)``, in prompt order.
 
-    Interface contract (2+ call sites: the default worker factory, and any
-    caller writing its own factory against the same specs):
+    Interface contract (3 call sites: :func:`build_role_system_prompt`,
+    :func:`build_role_task_prompt` and :func:`build_role_prompt`, which are
+    three FILTERS over this one list):
+        - ``standing`` is ``True`` for text that is true on EVERY turn of the
+          dispatch -- who the role is, its gate, its rules, the tools it holds,
+          what it may write, when to stop, the reply shape.  It is ``False``
+          for what this dispatch in particular is about: the goal, the position
+          and the context snapshot.
+        - The order is the prompt's order, so joining every block reproduces
+          the single-string prompt exactly.
+        - Never raises.
+
+    One list, three readers, so the system message and the task message cannot
+    between them drop or duplicate a block.
+    """
+    rules = "\n".join(f"- {rule}" for rule in request.operative_rules)
+    snapshot = _context_snapshot(request.context)
+    names = held_tools(request, spec)
+    tools = ", ".join(names) or "none"
+    can_write = _holds_write_tool(names)
+    # The verb is DERIVED from the tools actually registered for this dispatch.
+    # Hardcoding "inspect and change" is what told five read-only roles to write
+    # files they had no tool for (review C2); a prompt that describes capability
+    # the role does not have is an unexecutable instruction, not encouragement.
+    verb = "inspect and change" if can_write else "inspect"
+
+    blocks: list[tuple[bool, str]] = [
+        (
+            True,
+            f"You are the {request.role} for the {request.state.upper()} phase "
+            "of an iterative planning protocol.",
+        ),
+        (False, f"GOAL: {request.goal}"),
+        (
+            False,
+            f"POSITION: iteration {request.iteration}, step {request.step_number} "
+            f"of {request.total_steps}, fix attempts used {request.fix_attempts} "
+            f"of {Defaults.MAX_FIX_ATTEMPTS}.",
+        ),
+        (True, f"EXIT GATE: {request.gate_summary}"),
+        (True, f"RULES:\n{rules}"),
+    ]
+    if snapshot:
+        blocks.append((False, f"CURRENT STATE:\n{snapshot}"))
+    blocks.append(
+        (
+            True,
+            f"TOOLS: {tools}. Use them to {verb} real files; "
+            "do not guess file contents.",
+        )
+    )
+    blocks.append((True, _writes_line(request, spec)))
+    blocks.append((True, _finish_line(spec, can_write)))
+    blocks.append((True, _output_line(spec)))
+    return blocks
+
+
+def build_role_system_prompt(request: RoleRequest, spec: RoleSpec) -> str:
+    """Build the STANDING half of a role dispatch: policy, not task.
+
+    Interface contract (2 call sites: the default worker factory, for agents
+    that can hold a system policy, and the live bench):
+        - Parameters: the driver's ``RoleRequest`` and the matching
+          :class:`RoleSpec`.
+        - Returns the blocks that are true on every turn -- identity, exit gate,
+          operative rules, held tools, write scope, stop rule, reply shape.
+        - Never raises.  Together with :func:`build_role_task_prompt` it
+          partitions :func:`build_role_prompt`; neither drops a block.
+    """
+    return "\n\n".join(
+        text for standing, text in _prompt_blocks(request, spec) if standing
+    )
+
+
+def build_role_task_prompt(request: RoleRequest, spec: RoleSpec) -> str:
+    """Build the per-dispatch half of a role dispatch: task, not policy.
+
+    Interface contract (2 call sites: the default worker factory, for agents
+    that can hold a system policy, and the live bench):
+        - Parameters: as :func:`build_role_system_prompt`.
+        - Returns the goal, the position and the bounded context snapshot -- the
+          things that differ between two dispatches of the SAME role.
+        - Never raises.
+    """
+    return "\n\n".join(
+        text for standing, text in _prompt_blocks(request, spec) if not standing
+    )
+
+
+def build_role_prompt(request: RoleRequest, spec: RoleSpec) -> str:
+    """Build the whole prompt for one role dispatch as a single string.
+
+    Interface contract (2+ call sites: the default worker factory, for agents
+    that cannot hold a system policy, and any caller writing its own factory
+    against the same specs):
         - Parameters: the driver's ``RoleRequest`` and the matching
           :class:`RoleSpec`.
         - Returns a single prompt string: role, goal, position, gate, rules,
@@ -629,38 +724,7 @@ def build_role_prompt(request: RoleRequest, spec: RoleSpec) -> str:
     Short and imperative on purpose.  Every line here is read by a 4B model on
     every turn; prose costs accuracy, not just tokens.
     """
-    rules = "\n".join(f"- {rule}" for rule in request.operative_rules)
-    snapshot = _context_snapshot(request.context)
-    names = held_tools(request, spec)
-    tools = ", ".join(names) or "none"
-    can_write = _holds_write_tool(names)
-
-    sections = [
-        f"You are the {request.role} for the {request.state.upper()} phase "
-        "of an iterative planning protocol.",
-        f"GOAL: {request.goal}",
-        (
-            f"POSITION: iteration {request.iteration}, step {request.step_number} "
-            f"of {request.total_steps}, fix attempts used {request.fix_attempts} "
-            f"of {Defaults.MAX_FIX_ATTEMPTS}."
-        ),
-        f"EXIT GATE: {request.gate_summary}",
-        f"RULES:\n{rules}",
-    ]
-    if snapshot:
-        sections.append(f"CURRENT STATE:\n{snapshot}")
-    # The verb is DERIVED from the tools actually registered for this dispatch.
-    # Hardcoding "inspect and change" is what told five read-only roles to write
-    # files they had no tool for (review C2); a prompt that describes capability
-    # the role does not have is an unexecutable instruction, not encouragement.
-    verb = "inspect and change" if can_write else "inspect"
-    sections.append(
-        f"TOOLS: {tools}. Use them to {verb} real files; do not guess file contents."
-    )
-    sections.append(_writes_line(request, spec))
-    sections.append(_finish_line(spec, can_write))
-    sections.append(_output_line(spec))
-    return "\n\n".join(sections)
+    return "\n\n".join(text for _, text in _prompt_blocks(request, spec))
 
 
 # ---------------------------------------------------------------------------
@@ -832,6 +896,42 @@ def _default_agent_builder(*, native_function_calling: bool) -> AgentBuilder:
     return build
 
 
+def _address(agent: Any, request: RoleRequest, spec: RoleSpec) -> str:
+    """Hand *agent* its standing policy where it can hold one; return the task.
+
+    Interface contract (1 call site, the worker below; a function rather than
+    four inline lines so the fallback is testable on its own):
+        - Sets ``agent.system_policy`` and returns ONLY the task text when the
+          agent exposes that attribute.
+        - Returns the whole single-string prompt otherwise, leaving the agent
+          untouched.  An agent that cannot hold a system policy must still be
+          told everything, so this fallback is the no-loss path, not a
+          degradation.
+        - Never raises.
+    """
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-021
+    # WHERE the standing policy is delivered is the whole of this change, and
+    # it is measured, not stylistic. Live `ollama_chat/qwen3.5:4b`, EXECUTE
+    # role, n=5 per arm, bytes stat'd on disk before/after: the entire prompt
+    # in the user turn wrote 0/5 (5/5 of those runs still CLAIMED the edit);
+    # the identical text with every standing block moved to the system message
+    # wrote 4/5 to the workspace and 4/5 to the plan directory. Two content
+    # ablations refute the obvious alternative explanations -- repairing the
+    # writes line so it stops reading as "you may not touch the code" left it
+    # at 0/5, and deleting the 730-char rules block outright reached only 2/5.
+    # Do NOT re-merge the two halves "for simplicity": the merged form IS
+    # `build_role_prompt`, it is still here, and it is the measured 0/5 arm.
+    # Do NOT switch the duck-typed check to `isinstance(...)`: the fallback is
+    # what keeps `create_agent("react")` (the D-034 default) and every injected
+    # `agent_builder` receiving the complete prompt they receive today, so this
+    # change is inert for them by construction rather than by promise.
+    # See decisions.md D-021.
+    if not hasattr(agent, "system_policy"):
+        return build_role_prompt(request, spec)
+    agent.system_policy = build_role_system_prompt(request, spec)
+    return build_role_task_prompt(request, spec)
+
+
 def _payload_from(result: AgentResult) -> Any:
     """Prefer a validated structured output; fall back to the raw answer."""
     structured = result.structured_output
@@ -949,7 +1049,7 @@ def build_default_worker_factory(
             output_schema=spec.output_schema,
         )
         agent = build_agent(spec, registry, config)
-        prompt = build_role_prompt(request, spec)
+        prompt = _address(agent, request, spec)
 
         started = time.monotonic()
         try:
