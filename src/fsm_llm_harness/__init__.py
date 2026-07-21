@@ -57,7 +57,25 @@ from .hardening import (
     type_matches,
 )
 from .harness import HarnessAgent, RoleRequest, WorkerFactory
+from .roles import (
+    ROLE_SPECS,
+    AgentBuilder,
+    RoleSpec,
+    build_default_worker_factory,
+    build_role_prompt,
+    count_top_level_json_objects,
+    get_role_spec,
+)
 from .rules import OWNERSHIP, ROLE_BY_STATE, RULES, StateRules, get_rules
+from .tools import (
+    COMMAND_ALLOWLIST,
+    READ_ONLY_TOOLS,
+    SHELL_TOOLS,
+    WRITE_TOOLS,
+    Workspace,
+    WorkspaceTools,
+    build_workspace_tools,
+)
 
 __all__ = [
     # Version
@@ -108,4 +126,20 @@ __all__ = [
     "RULES",
     "StateRules",
     "get_rules",
+    # Roles and the default worker factory
+    "ROLE_SPECS",
+    "AgentBuilder",
+    "RoleSpec",
+    "build_default_worker_factory",
+    "build_role_prompt",
+    "count_top_level_json_objects",
+    "get_role_spec",
+    # Confined workspace tools
+    "COMMAND_ALLOWLIST",
+    "READ_ONLY_TOOLS",
+    "SHELL_TOOLS",
+    "WRITE_TOOLS",
+    "Workspace",
+    "WorkspaceTools",
+    "build_workspace_tools",
 ]
