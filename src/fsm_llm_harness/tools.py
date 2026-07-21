@@ -177,6 +177,11 @@ VERIFICATION_COMMANDS: tuple[str, ...] = (
 #: rejected together with every other C0 control byte and DEL.
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
+#: Leading components a small model prepends when it emits a filesystem-absolute
+#: path where a root-relative one was asked for (``/workspace/uploader.py``).
+#: Each root adds its own basename, and :class:`PlanMemory` adds the plan id.
+_ROOT_SENTINELS: frozenset[str] = frozenset({"workspace", "plan"})
+
 
 class WorkspaceTools:
     """Tool names registered by :func:`build_workspace_tools`.
@@ -271,6 +276,29 @@ def _truncate(text: str, limit: int, unit: str = "characters") -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + TRUNCATION_MARKER.format(omitted=len(text) - limit, unit=unit)
+
+
+def _strip_root_sentinel(candidate: str, sentinels: Iterable[str]) -> str | None:
+    """Rewrite an absolute *candidate* as root-relative, or refuse it.
+
+    Interface contract (2 call sites: :meth:`Workspace.resolve` and
+    :meth:`PlanMemory.locate`):
+        - Parameters: a filesystem-absolute path, and the leading component
+          names that stand for "the root" in a model's output.
+        - Returns the remainder with the anchor **and exactly one** leading
+          sentinel component removed.  The rewrite is purely LEXICAL: the
+          caller still has to resolve and compare the result.
+        - Returns ``None`` -- meaning refuse, never guess -- when the first
+          component is not a sentinel or nothing is left after dropping it.
+        - Performs no I/O and never raises.
+    """
+    parts = Path(candidate).parts[1:]
+    if not parts or parts[0] not in sentinels:
+        return None
+    rest = parts[1:]
+    if not rest:
+        return None
+    return str(Path(*rest))
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +425,33 @@ class Workspace:
         if _CONTROL_CHARS_RE.search(candidate):
             raise HarnessConfinementError(relative_path, str(self._root))
         if Path(candidate).is_absolute():
-            raise HarnessConfinementError(relative_path, str(self._root))
+            # DECISION plan-2026-07-21-bf7ffe24/D-006
+            # `:4b` emits `/workspace/uploader.py` when it means `uploader.py`,
+            # and the flat refusal that used to stand here cost 2 of 3 measured
+            # writes. Two properties of this repair must NOT be "simplified":
+            #   1. Do NOT just drop the leading `/` and resolve what is left.
+            #      That reinterprets `/etc/passwd` as `<root>/etc/passwd` --
+            #      confined, but a confinement layer that INVENTS a target is a
+            #      path-rewriter. Only a leading SENTINEL component is dropped;
+            #      every other absolute path is refused exactly as before, which
+            #      is what keeps the escape parametrisation green.
+            #   2. Strip the sentinel and THEN fall through to D-032's
+            #      resolve-and-compare -- never resolve a repaired path here and
+            #      trust it. `/workspace/../../etc/passwd` strips to
+            #      `../../etc/passwd`, and only the untouched compare below sees
+            #      that it climbs out.
+            # An absolute path that ALREADY lands inside the root needs no
+            # repair: `root / <absolute>` is that absolute path, so it reaches
+            # the same compare unchanged.
+            # See decisions.md D-006.
+            absolute = Path(candidate).resolve()
+            if absolute != self._root and self._root not in absolute.parents:
+                repaired = _strip_root_sentinel(
+                    candidate, (self._root.name, *_ROOT_SENTINELS)
+                )
+                if repaired is None:
+                    raise HarnessConfinementError(relative_path, str(self._root))
+                candidate = repaired
 
         resolved = (self._root / candidate).resolve()
         if resolved != self._root and self._root not in resolved.parents:
@@ -755,8 +809,29 @@ class PlanMemory:
         # attempt earned. Found by the step-7b probe; do not "tidy" the branch
         # away.
         candidate = path.strip()
-        if not candidate or Path(candidate).is_absolute():
+        if not candidate:
             return candidate
+        if Path(candidate).is_absolute():
+            # DECISION plan-2026-07-21-bf7ffe24/D-006
+            # The plan-memory half of the same repair. `:4b` emits
+            # `/plan/state.md`, and this method -- not `Workspace.resolve` --
+            # is where that has to be caught, because the composed workspace is
+            # rooted at the plan directory's PARENT: a sentinel stripped down
+            # there lands `state.md` at the MEMORY ROOT, where it is not a
+            # protocol artifact and dies as an ownership error instead. Strip
+            # here and the path re-enters the normal relative branch below,
+            # which prefixes the plan id.
+            # Do NOT widen this to every absolute path -- when the sentinel does
+            # not match we return the candidate UNCHANGED, on purpose, so the
+            # comment above still holds and `Workspace.resolve` issues the
+            # refusal. See decisions.md D-006.
+            repaired = _strip_root_sentinel(
+                candidate,
+                (self._plan_id, self._workspace.root.name, *_ROOT_SENTINELS),
+            )
+            if repaired is None:
+                return candidate
+            candidate = repaired
         parts = Path(candidate).parts
         head = parts[0] if parts else ""
         if head in _CROSS_PLAN_FILES or head == self._plan_id:

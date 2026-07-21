@@ -15,6 +15,9 @@ Class                            Decision / defect it pins
                                    ownership, checked over all six roles)
 ``TestPlanMemoryOwnership``        D-048, invariant I7 (the refusal itself)
 ``TestRootsCannotCross``           D-032, D-047 (two roots, one chokepoint)
+``TestAbsolutePathRepair``         D-006 of plan-2026-07-21-bf7ffe24 (the
+                                   ``/workspace/x.py`` shape lands; every
+                                   escape shape still refuses)
 ``TestRolePromptNamesHeldTools``   review C2's other direction
 ``TestShellAllowlist``             D-050, review W5
 ===============================  ==========================================
@@ -467,6 +470,129 @@ class TestRootsCannotCross:
 
         with pytest.raises(HarnessConfinementError):
             ws.read_text("../ws-evil/loot.txt")
+
+
+# ---------------------------------------------------------------------------
+# The absolute-path repair, and what it still refuses (D-006)
+# ---------------------------------------------------------------------------
+
+
+class TestAbsolutePathRepair:
+    """``:4b`` emits ``/workspace/uploader.py``; that shape now lands.
+
+    Nothing else does.  The repair drops **one** leading sentinel component and
+    then hands the remainder to D-032's untouched resolve-and-compare, so every
+    escape shape that was refused before this class existed is still refused --
+    including the ones that try to ride the sentinel out (``..``-chaining, a
+    symlink, a sibling root with a shared prefix).
+    """
+
+    def test_the_measured_failure_shape_now_writes_bytes(self, tmp_path: Path) -> None:
+        """The exact string ``:4b`` emitted, end to end through write_text."""
+        ws = Workspace(tmp_path / "ws")
+
+        ws.write_text("/workspace/uploader.py", "print('up')\n")
+
+        assert (ws.root / "uploader.py").read_text() == "print('up')\n"
+
+    def test_the_roots_own_basename_is_a_sentinel(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws")
+
+        assert ws.resolve("/ws/x.py") == ws.root / "x.py"
+
+    def test_an_absolute_path_already_inside_the_root_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        """Branch (a): no repair needed, and the same compare still decides."""
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "pkg").mkdir()
+
+        assert ws.resolve(str(ws.root / "pkg" / "mod.py")) == ws.root / "pkg" / "mod.py"
+
+    @pytest.mark.parametrize(
+        "escape",
+        [
+            "/workspace/../../etc/passwd",
+            "/ws/../../etc/passwd",
+            "/etc/workspace/passwd",
+            "/etc/passwd",
+            "/workspace",
+            "/",
+        ],
+    )
+    def test_the_repair_cannot_be_ridden_out_of_the_root(
+        self, tmp_path: Path, escape: str
+    ) -> None:
+        """Sentinel-then-resolve: ``..`` after a sentinel still climbs into a
+        refusal, and a sentinel that is not the FIRST component is not one."""
+        ws = Workspace(tmp_path / "ws")
+
+        with pytest.raises(HarnessConfinementError):
+            ws.resolve(escape)
+
+    def test_a_symlink_reached_through_the_sentinel_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """The repair is lexical; only the unchanged resolve sees the link."""
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("secret\n")
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "link").symlink_to(outside)
+
+        with pytest.raises(HarnessConfinementError):
+            ws.read_text("/workspace/link/secret.txt")
+
+    def test_a_shared_prefix_sibling_reached_through_the_sentinel_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "ws-evil").mkdir()
+        (tmp_path / "ws-evil" / "loot.txt").write_text("loot\n")
+        ws = Workspace(tmp_path / "ws")
+
+        with pytest.raises(HarnessConfinementError):
+            ws.read_text("/ws/../ws-evil/loot.txt")
+
+    @pytest.mark.parametrize("prefix", ["/plan", "/plan-x", "/plans/plan-x"])
+    def test_plan_memory_repairs_into_the_plan_directory(
+        self, tmp_path: Path, prefix: str
+    ) -> None:
+        """Not into the memory root -- the composed workspace is rooted one
+        level above the plan directory, so the strip must happen in locate."""
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.PLAN_WRITER)
+
+        memory.write_text(f"{prefix}/{ArtifactNames.PLAN}", "# plan\n")
+
+        assert (
+            tmp_path / "plans" / "plan-x" / ArtifactNames.PLAN
+        ).read_text() == "# plan\n"
+
+    @pytest.mark.parametrize(
+        "escape",
+        ["/etc/passwd", "/plan/../../../etc/passwd", "/etc/plan/passwd"],
+    )
+    def test_plan_memory_still_refuses_every_escape(
+        self, tmp_path: Path, escape: str
+    ) -> None:
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.PLAN_WRITER)
+
+        with pytest.raises(HarnessConfinementError):
+            memory.read_text(escape)
+
+    def test_a_repaired_path_gains_no_write_into_another_plan(
+        self, tmp_path: Path
+    ) -> None:
+        """``/plan/../plan-y/plan.md`` stays inside the memory root, so it is
+        confinement-legal and ownership-illegal -- exactly as the unrepaired
+        ``../plan-y/plan.md`` already was.  The repair reaches the ownership
+        layer; it must not slip past it."""
+        (tmp_path / "plans" / "plan-y").mkdir(parents=True)
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.PLAN_WRITER)
+
+        with pytest.raises(HarnessOwnershipError):
+            memory.write_text(f"/plan/../plan-y/{ArtifactNames.PLAN}", "stolen\n")
+
+        assert not (tmp_path / "plans" / "plan-y" / ArtifactNames.PLAN).exists()
 
 
 # ---------------------------------------------------------------------------
