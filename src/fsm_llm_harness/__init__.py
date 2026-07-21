@@ -41,6 +41,21 @@ from .exceptions import (
     HarnessReentrancyError,
 )
 from .fsm_definition import DEFAULT_PERSONA, build_harness_fsm
+from .hardening import (
+    RETRYABLE_EXCEPTIONS,
+    RoleOutput,
+    as_int,
+    build_response_format,
+    coerce_bool,
+    coerce_int,
+    coerce_str,
+    coerce_worker_output,
+    parse_json_payload,
+    parse_role_output,
+    retry,
+    strip_model_noise,
+    type_matches,
+)
 from .harness import HarnessAgent, RoleRequest, WorkerFactory
 from .rules import OWNERSHIP, ROLE_BY_STATE, RULES, StateRules, get_rules
 
@@ -73,6 +88,20 @@ __all__ = [
     "HarnessAgent",
     "RoleRequest",
     "WorkerFactory",
+    # Small-model hardening
+    "RETRYABLE_EXCEPTIONS",
+    "RoleOutput",
+    "as_int",
+    "build_response_format",
+    "coerce_bool",
+    "coerce_int",
+    "coerce_str",
+    "coerce_worker_output",
+    "parse_json_payload",
+    "parse_role_output",
+    "retry",
+    "strip_model_noise",
+    "type_matches",
     # Per-state rules
     "OWNERSHIP",
     "ROLE_BY_STATE",
