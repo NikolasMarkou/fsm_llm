@@ -30,6 +30,7 @@ from .definitions import (
     FSMError,
     FSMInstance,
     State,
+    StateNotFoundError,
 )
 from .handlers import HandlerSystem, HandlerTiming
 
@@ -873,16 +874,17 @@ class FSMManager:
         self, conversation_id: str, log: Any = None
     ) -> dict[str, Any]:
         """Get complete conversation data for analysis."""
-        # Snapshot every mutable container (+ the instance and debug-model refs)
-        # in ONE pass under conv_lock, so collected_data / history / metadata are
-        # internally consistent and cannot be torn by a concurrent turn (C1). The
+        # Snapshot every mutable container (+ fsm_id/state_id and the debug-model
+        # refs) in ONE pass under conv_lock, so collected_data / history / metadata
+        # AND the current_state sub-dict are internally consistent and cannot be
+        # torn by a concurrent turn (C1). The
         # last_* refs are replaced by assignment on the write path (never mutated
         # in place), so calling model_dump() on them OUTSIDE the lock is safe and
         # keeps the lock-hold short.
         # A positional tuple keeps each element's static type precise (a mixed
         # dict would widen every value to a union).
         (
-            instance,
+            fsm_id,
             state_id,
             collected_data,
             history,
@@ -893,7 +895,7 @@ class FSMManager:
         ) = self._read_under_lock(
             conversation_id,
             lambda inst: (
-                inst,
+                inst.fsm_id,
                 inst.current_state,
                 dict(inst.context.data),
                 inst.context.conversation.get_recent(),
@@ -905,12 +907,23 @@ class FSMManager:
         )
 
         # State resolution re-enters _lock, so it happens OUTSIDE conv_lock (the
-        # snapshot has already returned). See D-005.
-        current_state = self.get_current_state(instance, conversation_id)
+        # snapshot has already returned). See D-005. Resolve the State from the
+        # fsm_id + state_id CAPTURED in the snapshot -- NOT via
+        # get_current_state(instance), which re-reads inst.current_state fresh: a
+        # concurrent transition between the snapshot and that re-read would yield a
+        # torn current_state sub-dict (id from the snapshot, description/purpose/
+        # is_terminal from a newer state). Keying off the captured id keeps the
+        # whole sub-dict internally consistent with the snapshot.
+        fsm_def = self.get_fsm_definition(fsm_id)
+        if state_id not in fsm_def.states:
+            raise StateNotFoundError(
+                f"State '{state_id}' not found in FSM '{fsm_id}'"
+            )
+        current_state = fsm_def.states[state_id]
 
         return {
             "id": conversation_id,
-            "fsm_id": instance.fsm_id,
+            "fsm_id": fsm_id,
             "current_state": {
                 "id": state_id,
                 "description": current_state.description,

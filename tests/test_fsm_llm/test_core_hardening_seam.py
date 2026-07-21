@@ -952,3 +952,59 @@ class TestReadConcurrency:
         finally:
             api.close()
 
+
+# ══════════════════════════════════════════════════════════════
+# L11 — an instance present with NO per-conversation lock is a
+#       broken create-together/remove-together invariant. Both the
+#       read path (_read_under_lock) and update_conversation_context
+#       must FAIL LOUD rather than silently proceed unlocked.
+# ══════════════════════════════════════════════════════════════
+
+
+class TestBrokenLockInvariantFailsLoud:
+    """L11 — verify the fail-loud guard on the missing per-conversation lock.
+
+    Both accessors look up ``_conversation_locks.get(cid)``; if an instance is
+    present but its lock is ``None`` the create-together/remove-together
+    invariant is broken and proceeding would do an UNLOCKED read/write that
+    races the 2-pass write path. The guard raises ``FSMError`` instead. This
+    test drives that artificial state directly: inject a live conversation,
+    then delete its lock entry.
+    """
+
+    def _make_api_with_conv(self):
+        api = API.from_definition(
+            _self_loop_fsm(),
+            llm_interface=MockLLM2Interface(),
+        )
+        conv_id, _ = api.start_conversation()
+        return api, conv_id
+
+    def test_read_accessor_raises_when_lock_missing(self):
+        api, conv_id = self._make_api_with_conv()
+        try:
+            manager = api.fsm_manager
+            # Instance stays; its lock is removed — the broken invariant.
+            assert conv_id in manager.instances
+            manager._conversation_locks.pop(conv_id, None)
+
+            with pytest.raises(FSMError, match="broken invariant"):
+                manager.get_conversation_data(conv_id)
+        finally:
+            # Restore a lock so end_conversation/close does not re-trip the guard.
+            manager._conversation_locks[conv_id] = threading.RLock()
+            api.close()
+
+    def test_update_context_raises_when_lock_missing(self):
+        api, conv_id = self._make_api_with_conv()
+        try:
+            manager = api.fsm_manager
+            assert conv_id in manager.instances
+            manager._conversation_locks.pop(conv_id, None)
+
+            with pytest.raises(FSMError, match="broken invariant"):
+                manager.update_conversation_context(conv_id, {"k": "v"})
+        finally:
+            manager._conversation_locks[conv_id] = threading.RLock()
+            api.close()
+
