@@ -1,0 +1,1279 @@
+"""
+``HarnessAgent`` -- the iterative-planner protocol driver.
+
+The driver is a :class:`~fsm_llm_agents.base.BaseAgent` subclass.  It owns no
+conversation loop, no budget enforcement, no trace building and no API
+construction: all of that is ``BaseAgent``'s.  What it adds is the *protocol*:
+
+* one worker dispatch per ``(state, iteration, step_number)`` key (invariant I4),
+* the ``iteration`` / ``step_number`` / ``fix_attempts`` counters and their
+  reset rules,
+* the three human approval points, routed through ``HumanInTheLoop`` (I6),
+* a re-entrancy guard so a dispatched worker cannot become a second
+  coordinator (I5),
+* the autonomy-leash and iteration-cap halt paths,
+* fail-closed handling of every worker reply (I8).
+
+**No artifact I/O.**  This module keeps all protocol memory in the FSM context.
+``storage.py`` / ``plan_validator.py`` are wired in by a later step; nothing
+here reads or writes a plan directory.
+
+Dispatch mechanism
+------------------
+Three call sites share ONE ledger-guarded entry point,
+:meth:`HarnessAgent._dispatch_if_needed`:
+
+1. a ``START_CONVERSATION`` handler, for the initial state;
+2. one ``on_state_entry(S)`` handler per state, for every real entry into ``S``;
+3. ``BaseAgent._on_loop_iteration``, for a state the FSM is *holding*.
+
+Measured firing semantics of the core handler system (verified against
+``fsm_llm.API`` with a mocked LLM, 2026-07-21), which is why all three are
+needed:
+
+======================================  =====================================
+Event                                   ``on_state_entry(S)`` fires?
+======================================  =====================================
+conversation start, initial state == S  **no** (START_CONVERSATION only)
+transition into S                       yes, exactly once
+BLOCKED turn while holding S            **no**
+re-entry into S later                   yes, exactly once
+======================================  =====================================
+
+A ``START_CONVERSATION`` handler additionally cannot read ``_current_state``:
+the pipeline seeds that key during the first transition, so at start it is
+absent.  The initial-state handler therefore names
+``HarnessStates.INITIAL`` directly.
+"""
+
+from __future__ import annotations
+
+import threading
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any, TypeVar
+
+from fsm_llm import API
+from fsm_llm.handlers import HandlerTiming
+from fsm_llm.logging import logger
+from fsm_llm_agents.base import BaseAgent
+from fsm_llm_agents.definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
+from fsm_llm_agents.exceptions import AgentError
+from fsm_llm_agents.hitl import ApprovalCallback, HumanInTheLoop
+
+from .constants import (
+    ContextKeys,
+    Defaults,
+    GateSlug,
+    HandlerNames,
+    HandlerPriorities,
+    HarnessStates,
+)
+from .exceptions import HarnessReentrancyError
+from .fsm_definition import build_harness_fsm
+from .rules import ROLE_BY_STATE, get_rules
+
+__all__ = [
+    "HarnessAgent",
+    "RoleRequest",
+    "WorkerFactory",
+]
+
+_ExcT = TypeVar("_ExcT", bound=BaseException)
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+#: ``agent_type`` tag handed to ``BaseAgent._standard_run`` (logs, lifecycle
+#: handler names, the ``_agent_type`` context marker).
+_AGENT_TYPE = "harness"
+
+#: Consecutive turns the protocol may make no progress at all -- no dispatch,
+#: no state change, no counter change -- before the driver halts.  Without it a
+#: permanently BLOCKED gate spins until ``BaseAgent._check_budgets`` raises,
+#: which on a live model is minutes of LLM calls that cannot change anything.
+#: Small on purpose: every held turn still runs Pass-1 extraction, so the FSM's
+#: own LLM gets a few chances to satisfy the gate (that is the whole degrade
+#: path when ``worker_factory`` is None) -- but only a few.
+_DEFAULT_MAX_STALL_TURNS = 3
+
+#: ``tool_name`` values for the three human approval points.  They are not tool
+#: calls; ``HumanInTheLoop.request_approval`` takes a ``ToolCall`` as its
+#: request envelope, so these name the *gate* being approved.
+_APPROVAL_PLAN = "harness.approve_plan"
+_APPROVAL_CLOSE = "harness.confirm_close"
+_APPROVAL_LEASH = "harness.continue_after_leash"
+
+#: Ledger entry prefixes.  Both live in the single ``dispatch_ledger`` list:
+#: a ``dispatch:`` entry records "this key has been dispatched", an ``entry:``
+#: entry records "this state-entry handler fire has been processed".
+_LEDGER_DISPATCH = "dispatch"
+_LEDGER_ENTRY = "entry"
+
+# DECISION plan-2026-07-21T125237-191b2eb2/D-020
+# The three caps below are NOT cosmetic tidiness -- they are what keeps the
+# protocol runnable at all. `dispatch_ledger`, `role_results` and each recorded
+# answer are ordinary (non-internal-prefixed) context keys, so every one of them
+# is rendered into BOTH LLM prompts on EVERY turn. Uncapped, a measured
+# EXECUTE <-> REFLECT remediation cycle grew the response-generation system
+# prompt by ~145 chars per turn and CRASHED the run at turn ~150 on
+# `ResponseGenerationRequest`'s 30,000-character pydantic bound -- a hard
+# failure with no protocol meaning. Do NOT raise these caps to "keep more
+# history": the plan directory is where protocol history belongs (a later step
+# writes it); context is the working set. The ledger window is >> the reuse
+# window of any single key (a key is only ever re-checked while its state is
+# occupied), so eviction cannot resurrect a suppressed dispatch.
+# See decisions.md D-020.
+
+#: Most recent ledger entries retained; older ones are evicted.
+_MAX_LEDGER_ENTRIES = 64
+
+#: Most recent role results retained in ``role_results``.
+_MAX_ROLE_RESULTS = 20
+
+#: Longest worker answer recorded in a role result.
+_MAX_ANSWER_CHARS = 400
+
+#: Gate keys each state's worker is allowed to write, and the exact type each
+#: must have.  A value of any other type is dropped, which leaves the gate
+#: BLOCKED (invariant I8).
+#:
+#: ``plan_approved`` and ``close_confirmed`` appear nowhere: they record a
+#: HUMAN decision and are written only by the approval path below.  A worker
+#: that returns them is ignored.
+_WORKER_WRITABLE: Mapping[str, Mapping[str, type]] = MappingProxyType(
+    {
+        HarnessStates.EXPLORE: MappingProxyType(
+            {
+                ContextKeys.FINDINGS_COUNT: int,
+                ContextKeys.NEEDS_EXPLORE: bool,
+            }
+        ),
+        HarnessStates.PLAN: MappingProxyType(
+            {
+                ContextKeys.NEEDS_EXPLORE: bool,
+                ContextKeys.TOTAL_STEPS: int,
+            }
+        ),
+        # EXECUTE writes no gate flag directly: the driver derives
+        # execute_complete / step_number / fix_attempts from the worker's
+        # success flag, so a worker cannot understate its own attempt count.
+        HarnessStates.EXECUTE: MappingProxyType({}),
+        HarnessStates.REFLECT: MappingProxyType(
+            {
+                ContextKeys.ALL_CRITERIA_PASS: bool,
+                ContextKeys.NEEDS_PIVOT: bool,
+                ContextKeys.COMPLETION_FIX: bool,
+                ContextKeys.NEEDS_EXPLORE: bool,
+                ContextKeys.CRITERIA_PASS_COUNT: int,
+                ContextKeys.CRITERIA_TOTAL: int,
+            }
+        ),
+        HarnessStates.PIVOT: MappingProxyType(
+            {
+                ContextKeys.PIVOT_RESOLVED: bool,
+                ContextKeys.PIVOT_REASON: str,
+            }
+        ),
+        HarnessStates.CLOSE: MappingProxyType({ContextKeys.HALT_REASON: str}),
+    }
+)
+
+#: REFLECT's mutually exclusive routing flags.  ``rules.py`` tells the worker
+#: to set exactly one; this makes it mechanical -- setting one clears the rest.
+_REFLECT_ROUTING_FLAGS: tuple[str, ...] = (
+    ContextKeys.COMPLETION_FIX,
+    ContextKeys.NEEDS_PIVOT,
+    ContextKeys.NEEDS_EXPLORE,
+)
+
+
+# ---------------------------------------------------------------------------
+# Worker seam
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RoleRequest:
+    """Everything a role worker needs to do one state's job.
+
+    Interface contract for :data:`WorkerFactory` implementations:
+
+    * the factory is called with exactly one ``RoleRequest`` and must return an
+      :class:`~fsm_llm_agents.definitions.AgentResult`;
+    * anything it raises is caught, recorded as a ``success=False`` role result
+      and the protocol turn continues (the one exception is
+      :class:`~fsm_llm_harness.exceptions.HarnessReentrancyError`, which is
+      always re-raised);
+    * gate flags are read back from ``AgentResult.final_context`` and, when
+      present, ``AgentResult.structured_output``, filtered by
+      :data:`_WORKER_WRITABLE`;
+    * the worker must not call back into the driver (invariant I5).
+
+    Attributes:
+        role: The worker role being dispatched (a ``Role.WORKERS`` member).
+        state: The protocol state this dispatch belongs to.
+        goal: The run's goal, verbatim.
+        operative_rules: The state's protocol rules, from ``rules.py``.
+        gate_summary: One line describing the state's exit gate.
+        iteration: Current plan iteration.
+        step_number: Current EXECUTE step cursor.
+        total_steps: Number of steps in the current plan.
+        fix_attempts: Fix attempts already spent on ``step_number``.
+        context: Read-only snapshot of the FSM context at dispatch time.
+    """
+
+    role: str
+    state: str
+    goal: str
+    operative_rules: tuple[str, ...]
+    gate_summary: str
+    iteration: int
+    step_number: int
+    total_steps: int
+    fix_attempts: int
+    context: Mapping[str, Any] = field(default_factory=dict)
+
+
+#: A role worker: one :class:`RoleRequest` in, one ``AgentResult`` out.
+#:
+#: Deliberately WIDER than ``OrchestratorAgent``'s ``Callable[[str],
+#: AgentResult]`` (``orchestrator.py:54``): that seam dispatches homogeneous
+#: subtasks, while every harness dispatch is role- and state-specific and needs
+#: the protocol counters to do its job at all (an executor cannot know which
+#: step to run, or that it is on its second attempt, from a string).
+WorkerFactory = Callable[[RoleRequest], AgentResult]
+
+
+# ---------------------------------------------------------------------------
+# Re-entrancy guard (invariant I5)
+# ---------------------------------------------------------------------------
+
+# DECISION plan-2026-07-21T125237-191b2eb2/D-014
+# The guard state is MODULE-level, not instance-level. Do NOT "tidy" it into
+# `self._local`: the re-entry this defends against is a worker constructing a
+# SECOND HarnessAgent and calling run() on it, which an instance-scoped flag
+# cannot see. threading.local (not a plain global) keeps concurrent runs on
+# different threads independent -- a process-wide lock would serialise them.
+# See decisions.md D-014.
+_DISPATCH_LOCAL = threading.local()
+
+
+def _dispatch_in_flight() -> str | None:
+    """Return the role currently being dispatched on this thread, if any."""
+    role: str | None = getattr(_DISPATCH_LOCAL, "role", None)
+    return role
+
+
+def _reject_reentry(what: str) -> None:
+    """Raise if a worker dispatched on this thread is re-entering the driver.
+
+    Args:
+        what: The driver surface being re-entered, for the error message.
+
+    Raises:
+        HarnessReentrancyError: If a dispatch is in flight on this thread.
+    """
+    role = _dispatch_in_flight()
+    if role is not None:
+        raise HarnessReentrancyError(role, details={"reentered": what})
+
+
+@contextmanager
+def _dispatch_in_progress(role: str) -> Iterator[None]:
+    """Mark a dispatch as in flight on this thread for the duration."""
+    _reject_reentry("dispatch")
+    _DISPATCH_LOCAL.role = role
+    try:
+        yield
+    finally:
+        _DISPATCH_LOCAL.role = None
+
+
+# ---------------------------------------------------------------------------
+# Controlled halt
+# ---------------------------------------------------------------------------
+
+
+class _HarnessHalt(Exception):
+    """Internal signal: stop the run now and report why.
+
+    ``BaseAgent._run_conversation_loop`` exits only when the FSM reaches a
+    terminal state, so a permanently BLOCKED gate has no other way out than
+    burning the whole iteration budget.  Raising this from
+    ``_on_loop_iteration`` unwinds the loop through its own
+    ``finally: api.end_conversation(...)``; ``_standard_run`` re-raises it
+    wrapped in an ``AgentError``, and :meth:`HarnessAgent.run` converts it back
+    into a normal ``AgentResult``.  Private on purpose -- it is control flow,
+    not an error a caller should ever see.
+    """
+
+    def __init__(self, reason: str, slug: str | None, context: dict[str, Any]) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.slug = slug
+        self.context = context
+
+
+def _find_cause(error: BaseException, wanted: type[_ExcT]) -> _ExcT | None:
+    """Return the first *wanted* exception in *error*'s cause chain.
+
+    ``BaseAgent._standard_run`` wraps everything that is not a timeout or a
+    budget failure in an ``AgentError``, so the driver's own control-flow and
+    invariant signals only reach ``run()`` as a ``__cause__``.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, wanted):
+            return current
+        seen.add(id(current))
+        current = current.__cause__
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+
+
+class HarnessAgent(BaseAgent):
+    """Drives the 6-state iterative-planner protocol over a real FSM.
+
+    Usage::
+
+        def worker(request: RoleRequest) -> AgentResult:
+            ...  # do the role's job
+            return AgentResult(answer="done", success=True, final_context={})
+
+        agent = HarnessAgent(
+            worker_factory=worker,
+            approval_callback=lambda req: input(f"{req.tool_name}? ") == "y",
+        )
+        result = agent.run("Add retry logic to the uploader")
+
+    The goal is the ``run(task)`` argument, not a constructor field, so the
+    signature matches every other agent in the repo and one configured driver
+    can serve several goals.
+    """
+
+    def __init__(
+        self,
+        *,
+        worker_factory: WorkerFactory | None = None,
+        approval_callback: ApprovalCallback | None = None,
+        config: AgentConfig | None = None,
+        findings_threshold: int = Defaults.FINDINGS_THRESHOLD,
+        max_fix_attempts: int = Defaults.MAX_FIX_ATTEMPTS,
+        iteration_hard_cap: int = Defaults.ITERATION_HARD_CAP,
+        max_stall_turns: int = _DEFAULT_MAX_STALL_TURNS,
+        **api_kwargs: Any,
+    ) -> None:
+        """Initialize the protocol driver.
+
+        Args:
+            worker_factory: Role dispatch seam.  ``None`` degrades to the FSM's
+                own Pass-1/Pass-2 LLM calls -- the protocol still advances or
+                BLOCKS, it never crashes (mirrors ``OrchestratorAgent``).
+            approval_callback: Consulted at every human gate.  Defaults to a
+                callback that DENIES, so an unattended run cannot approve its
+                own plan or close itself.
+            config: Agent configuration; defaults to the harness profile.
+            findings_threshold: EXPLORE -> PLAN findings gate.
+            max_fix_attempts: The autonomy leash.
+            iteration_hard_cap: PLAN -> EXECUTE iteration gate.
+            max_stall_turns: Consecutive no-progress turns before halting.
+            api_kwargs: Forwarded to ``fsm_llm.API``.
+        """
+        super().__init__(config or self._default_config(), **api_kwargs)
+
+        self.worker_factory = worker_factory
+        self.findings_threshold = findings_threshold
+        self.max_fix_attempts = max_fix_attempts
+        self.iteration_hard_cap = iteration_hard_cap
+        self.max_stall_turns = max_stall_turns
+
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-015
+        # A callback is ALWAYS supplied, and the default DENIES. Do NOT "simplify"
+        # this to `approval_callback=None`: `HumanInTheLoop.request_approval`
+        # RAISES ApprovalDeniedError when no callback is configured (hitl.py:95-98
+        # -- its docstring's "defaults to auto-approve" is stale), which would turn
+        # every unattended approval gate into a crashed turn instead of a denied
+        # gate. Measured 2026-07-21: request_approval has NO confidence branch at
+        # all and `ApprovalRequest` has no `confidence` field, so the callback is
+        # consulted unconditionally and `confidence_threshold` is irrelevant here.
+        # See decisions.md D-015.
+        self._approval_callback: ApprovalCallback = approval_callback or _deny_approval
+        self.hitl = HumanInTheLoop(approval_callback=self._approval_callback)
+
+        self._api: API | None = None
+        self._conversation_id: str | None = None
+        self._stall_turns = 0
+        self._stall_signature: tuple[Any, ...] | None = None
+
+        logger.info(
+            f"HarnessAgent started with model={self.config.model}, "
+            f"worker_factory={'set' if worker_factory else 'none'}, "
+            f"findings_threshold={findings_threshold}, "
+            f"max_fix_attempts={max_fix_attempts}, "
+            f"iteration_hard_cap={iteration_hard_cap}"
+        )
+
+    @staticmethod
+    def _default_config() -> AgentConfig:
+        """Build the harness's ``AgentConfig`` profile from ``Defaults``."""
+        return AgentConfig(
+            model=Defaults.MODEL,
+            temperature=Defaults.TEMPERATURE,
+            max_tokens=Defaults.MAX_TOKENS,
+            max_iterations=Defaults.MAX_TURNS,
+            timeout_seconds=Defaults.TIMEOUT_SECONDS,
+        )
+
+    # ------------------------------------------------------------------
+    # Guarded accessors (invariant I5)
+    # ------------------------------------------------------------------
+
+    @property
+    def api(self) -> API | None:
+        """The live ``API``, or ``None`` outside a run.
+
+        Raises:
+            HarnessReentrancyError: If read from inside a dispatched worker.
+        """
+        _reject_reentry("api")
+        return self._api
+
+    @property
+    def conversation_id(self) -> str | None:
+        """The live conversation id, or ``None`` outside a run.
+
+        Raises:
+            HarnessReentrancyError: If read from inside a dispatched worker.
+        """
+        _reject_reentry("conversation_id")
+        return self._conversation_id
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def run(
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None = None,
+    ) -> AgentResult:
+        """Drive the protocol until CLOSE, a halt, or a budget limit.
+
+        Args:
+            task: The run's goal.
+            initial_context: Optional seed context.  Protocol counters set
+                below always win.
+
+        Returns:
+            An ``AgentResult``.  A halted run reports ``success=False`` with
+            the halt reason as the answer and the halt slug in
+            ``final_context[ContextKeys.LAST_GATE_SLUG]``.
+
+        Raises:
+            HarnessReentrancyError: If called from inside a dispatched worker.
+        """
+        _reject_reentry("run")
+
+        self._stall_turns = 0
+        self._stall_signature = None
+
+        fsm_def = build_harness_fsm(
+            task,
+            findings_threshold=self.findings_threshold,
+            max_fix_attempts=self.max_fix_attempts,
+            iteration_hard_cap=self.iteration_hard_cap,
+        )
+
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-016
+        # Every counter below is seeded EAGERLY, before turn 1. Do NOT make them
+        # lazy ("set it when the state first needs it"): `iteration` is a
+        # `requires_context_keys` term on the PLAN -> EXECUTE gate, and
+        # `TransitionEvaluator._evaluate_condition` fails a condition whose
+        # required key is ABSENT before it ever evaluates the logic
+        # (transition_evaluator.py:351-362). An absent `iteration` therefore
+        # BLOCKS PLAN -> EXECUTE permanently, no matter what the plan-writer
+        # returns.
+        # The mirror image also holds: do NOT extend this list with the gate
+        # FLAGS (findings_count, plan_approved, ...). Pass-1 extraction SKIPS
+        # any field already non-None in context (pipeline.py:953-956), so
+        # seeding a flag permanently disables the FSM's own extraction of it --
+        # which is the entire degrade path when `worker_factory` is None.
+        # See decisions.md D-016.
+        context = self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.GOAL: task,
+                ContextKeys.ITERATION: 0,
+                ContextKeys.STEP_NUMBER: 0,
+                ContextKeys.TOTAL_STEPS: 1,
+                ContextKeys.FIX_ATTEMPTS: 0,
+                ContextKeys.DISPATCH_LEDGER: [],
+                ContextKeys.ROLE_RESULTS: [],
+            },
+        )
+
+        try:
+            return self._standard_run(
+                task,
+                fsm_def,
+                context,
+                _AGENT_TYPE,
+                extra_answer_keys=[ContextKeys.HALT_REASON],
+                execution_evidence_keys=[ContextKeys.ROLE_RESULTS],
+            )
+        except AgentError as exc:
+            # A broken I5 invariant must reach the caller as itself, not as a
+            # generic "Harness execution failed"; a halt is normal control flow
+            # and becomes an ordinary reported result.
+            reentry = _find_cause(exc, HarnessReentrancyError)
+            if reentry is not None:
+                # `from None`, never `from exc`: `reentry` is ALREADY inside
+                # `exc.__cause__`'s chain, so `from exc` would close that chain
+                # into a cycle and hang any naive `while e.__cause__` walker.
+                raise reentry from None
+            halt = _find_cause(exc, _HarnessHalt)
+            if halt is None:
+                raise
+            return self._halt_result(halt)
+
+    def _halt_result(self, halt: _HarnessHalt) -> AgentResult:
+        """Turn a controlled halt into a reported ``AgentResult``."""
+        logger.warning(f"Harness halted: {halt.reason} (slug={halt.slug})")
+        final_context = dict(halt.context)
+        final_context[ContextKeys.HALT_REASON] = halt.reason
+        if halt.slug is not None:
+            final_context[ContextKeys.LAST_GATE_SLUG] = halt.slug
+        return AgentResult(
+            answer=halt.reason,
+            success=False,
+            trace=AgentTrace(tool_calls=[], total_iterations=0),
+            final_context=self._filter_context(final_context),
+        )
+
+    # ------------------------------------------------------------------
+    # Handler registration
+    # ------------------------------------------------------------------
+
+    def _register_handlers(self, api: API) -> None:
+        """Register the initial-state and per-state dispatch handlers."""
+        self._api = api
+
+        api.register_handler(
+            api.create_handler(HandlerNames.START_DISPATCH)
+            .with_priority(HandlerPriorities.START_DISPATCH)
+            .at(HandlerTiming.START_CONVERSATION)
+            .do(self._make_entry_handler(HarnessStates.INITIAL))
+        )
+
+        for state, handler_name in HandlerNames.BY_STATE.items():
+            api.register_handler(
+                api.create_handler(handler_name)
+                .with_priority(HandlerPriorities.STATE_DISPATCH)
+                .on_state_entry(state)
+                .do(self._make_entry_handler(state))
+            )
+
+    def _make_entry_handler(
+        self, state: str
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Build the state-entry handler for *state*."""
+
+        def handler(context: dict[str, Any]) -> dict[str, Any]:
+            return self._on_state_entry(state, context)
+
+        return handler
+
+    # ------------------------------------------------------------------
+    # Ledger (invariant I4)
+    # ------------------------------------------------------------------
+
+    # DECISION plan-2026-07-21T125237-191b2eb2/D-017
+    # The ledger holds TWO entry kinds in one list, and the dispatch key is a
+    # 3-tuple `(state, iteration, step_number)` exactly as invariant I4 states.
+    # Do NOT "fix" the re-dispatch of a failed step by widening the key with
+    # `fix_attempts` (or by relaxing the guard to `count < N`): the key is what
+    # the on-disk protocol will be audited against in a later step, and a wider
+    # key silently authorises an unbounded number of attempts. A second attempt
+    # is authorised EXPLICITLY, by the state-entry handler removing the key --
+    # and that removal is itself made idempotent by the `entry:` marker, which
+    # carries the pipeline's per-transition `_transition_timestamp`. Together:
+    # a duplicate handler fire is a no-op, a genuine re-entry re-dispatches
+    # exactly once. See decisions.md D-017.
+    @staticmethod
+    def _read_ledger(context: Mapping[str, Any]) -> list[str]:
+        """Return the dispatch ledger, or an empty one if it is unusable."""
+        ledger = context.get(ContextKeys.DISPATCH_LEDGER)
+        if not isinstance(ledger, list):
+            return []
+        return [entry for entry in ledger if isinstance(entry, str)]
+
+    @staticmethod
+    def _ledger_delta(entries: list[str]) -> dict[str, Any]:
+        """Context delta writing *entries* back, evicting oldest past the cap."""
+        return {ContextKeys.DISPATCH_LEDGER: entries[-_MAX_LEDGER_ENTRIES:]}
+
+    @staticmethod
+    def _dispatch_key(context: Mapping[str, Any], state: str) -> str:
+        """Ledger key for dispatching *state* at the context's counters."""
+        iteration = _as_int(context.get(ContextKeys.ITERATION), 0)
+        step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        return f"{_LEDGER_DISPATCH}:{state}:{iteration}:{step}"
+
+    @staticmethod
+    def _entry_marker(context: Mapping[str, Any], state: str) -> str:
+        """Ledger marker identifying one state-entry handler fire.
+
+        Keyed on ``_transition_timestamp``, which the pipeline rewrites on
+        every transition (``pipeline.py:1723-1729``), so two fires for the same
+        transition share a marker and the second is a no-op.  At conversation
+        start there is no transition yet, hence the ``start`` literal.
+        """
+        token = context.get("_transition_timestamp", "start")
+        return f"{_LEDGER_ENTRY}:{state}:{token!r}"
+
+    # ------------------------------------------------------------------
+    # State entry
+    # ------------------------------------------------------------------
+
+    # DECISION plan-2026-07-21T125237-191b2eb2/D-021
+    # Dispatch-once is per state OCCUPANCY, not per run. A completion-fix run
+    # legitimately dispatches BOTH `execute:1:1` and `reflect:1:1` twice, and
+    # both of those second dispatches are required by the protocol (the leash
+    # explicitly permits the retry; the second REFLECT verifies it). Do NOT
+    # "restore" a literal once-per-run reading by bumping `step_number` or
+    # `iteration` to make the key differ: that corrupts the EXECUTE plan-step
+    # cursor and the iteration budget (D-018) purely to satisfy bookkeeping.
+    # See decisions.md D-021.
+    def _on_state_entry(self, state: str, context: dict[str, Any]) -> dict[str, Any]:
+        """Handle one entry into *state*: bookkeeping, then dispatch.
+
+        Args:
+            state: The state just entered.
+            context: FSM context snapshot handed to the handler.
+
+        Returns:
+            A context delta.  Empty when this is a duplicate fire.
+        """
+        ledger = self._read_ledger(context)
+        marker = self._entry_marker(context, state)
+        if marker in ledger:
+            logger.debug(f"Duplicate state-entry fire for '{state}'; no-op")
+            return {}
+
+        working = dict(context)
+        updates: dict[str, Any] = {}
+        self._apply(updates, working, self._ledger_delta([*ledger, marker]))
+        self._apply(updates, working, self._entry_bookkeeping(state, context))
+
+        # A genuine entry authorises exactly one dispatch for this state's key,
+        # even when the counters did not move (a completion-fix retry of the
+        # same step, or a loop-back into an already-visited state).
+        key = self._dispatch_key(working, state)
+        self._apply(
+            updates,
+            working,
+            self._ledger_delta(
+                [entry for entry in self._read_ledger(working) if entry != key]
+            ),
+        )
+
+        self._apply(updates, working, self._dispatch_if_needed(state, working))
+        return updates
+
+    def _entry_bookkeeping(
+        self, state: str, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Counter updates owed on entry to *state*.
+
+        ``_previous_state`` is seeded by the pipeline immediately before the
+        POST_TRANSITION handlers run, which is what lets a single EXECUTE entry
+        handler tell a fresh iteration (PLAN -> EXECUTE) from a same-iteration
+        completion fix (REFLECT -> EXECUTE).
+        """
+        previous = context.get("_previous_state")
+
+        if state == HarnessStates.EXECUTE:
+            return self._enter_execute(previous, context)
+
+        if state == HarnessStates.PLAN:
+            # A plan must be approved again after any revision; the approval
+            # records a human decision and never survives a re-entry.
+            return {ContextKeys.PLAN_APPROVED: None}
+
+        if state == HarnessStates.PIVOT:
+            # The leash never carries across a pivot: the next EXECUTE is a
+            # different approach, not a third attempt at the same one.
+            return {
+                ContextKeys.FIX_ATTEMPTS: 0,
+                ContextKeys.COMPLETION_FIX: None,
+                ContextKeys.NEEDS_PIVOT: None,
+            }
+
+        if state == HarnessStates.REFLECT:
+            return {ContextKeys.EXECUTE_COMPLETE: None}
+
+        return {}
+
+    def _enter_execute(
+        self, previous: Any, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Counter updates owed on entry to EXECUTE."""
+        updates: dict[str, Any] = {
+            # Cleared so the EXECUTE -> REFLECT edge cannot fire on a stale flag.
+            ContextKeys.EXECUTE_COMPLETE: None,
+            ContextKeys.COMPLETION_FIX: None,
+        }
+
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-018
+        # `iteration` increments HERE and ONLY here -- on a PLAN -> EXECUTE entry.
+        # Do NOT move it to "every EXECUTE entry" or "every REFLECT exit": a
+        # REFLECT -> EXECUTE completion fix is the SAME iteration by definition
+        # (plan.md's edge-case list), and counting it would burn the iteration
+        # budget on remediation and make `iteration-cap` fire on a run that never
+        # re-planned. `fix_attempts` resets on the same edge because a re-planned
+        # iteration is user direction, not a third attempt at the old step.
+        # See decisions.md D-018.
+        if previous == HarnessStates.PLAN:
+            updates[ContextKeys.ITERATION] = (
+                _as_int(context.get(ContextKeys.ITERATION), 0) + 1
+            )
+            updates[ContextKeys.STEP_NUMBER] = 1
+            updates[ContextKeys.FIX_ATTEMPTS] = 0
+            updates[ContextKeys.LAST_GATE_SLUG] = None
+            updates[ContextKeys.HALT_REASON] = None
+
+        return updates
+
+    # ------------------------------------------------------------------
+    # Dispatch
+    # ------------------------------------------------------------------
+
+    def _dispatch_if_needed(
+        self, state: str, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Dispatch *state*'s worker unless its key is already in the ledger.
+
+        Args:
+            state: The state whose worker should run.
+            context: Context including any updates applied so far this turn.
+
+        Returns:
+            A context delta; empty when the key was already dispatched.
+        """
+        ledger = self._read_ledger(context)
+        key = self._dispatch_key(context, state)
+        if key in ledger:
+            return {}
+
+        working = dict(context)
+        updates: dict[str, Any] = {}
+        self._apply(updates, working, self._ledger_delta([*ledger, key]))
+
+        if state == HarnessStates.EXECUTE:
+            blocked = self._pre_step_gate(working)
+            if blocked is not None:
+                self._apply(updates, working, blocked)
+                return updates
+
+        role = ROLE_BY_STATE[state]
+        self._apply(updates, working, {ContextKeys.CURRENT_ROLE: role})
+
+        result, error = self._run_worker(role, state, working)
+        self._apply(
+            updates,
+            working,
+            self._record_role_result(role, state, working, result, error),
+        )
+        if result is not None and result.success:
+            self._apply(
+                updates, working, self._apply_role_result(state, result, working)
+            )
+        self._apply(updates, working, self._post_dispatch(state, result, working))
+        return updates
+
+    def _run_worker(
+        self, role: str, state: str, context: Mapping[str, Any]
+    ) -> tuple[AgentResult | None, Exception | None]:
+        """Run one worker under the re-entrancy guard.
+
+        Mirrors ``OrchestratorAgent._delegate_to_workers``
+        (``orchestrator.py:155-182``): a raising worker is caught and reported,
+        and a missing factory degrades instead of failing.  The single
+        exception is ``HarnessReentrancyError`` -- swallowing it would hide the
+        very invariant the guard exists to enforce.
+
+        Returns:
+            ``(result, error)``; exactly one of the two is not ``None``.
+        """
+        if self.worker_factory is None:
+            return None, None
+
+        request = RoleRequest(
+            role=role,
+            state=state,
+            goal=str(context.get(ContextKeys.GOAL, "")),
+            operative_rules=get_rules(state).operative_rules,
+            gate_summary=get_rules(state).gate_summary,
+            iteration=_as_int(context.get(ContextKeys.ITERATION), 0),
+            step_number=_as_int(context.get(ContextKeys.STEP_NUMBER), 0),
+            total_steps=_as_int(context.get(ContextKeys.TOTAL_STEPS), 1),
+            fix_attempts=_as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0),
+            context=MappingProxyType(dict(context)),
+        )
+
+        try:
+            with _dispatch_in_progress(role):
+                result = self.worker_factory(request)
+        except HarnessReentrancyError:
+            raise
+        except Exception as exc:  # deliberate: the turn must survive
+            logger.warning(f"Worker for role '{role}' failed: {exc}", exc_info=True)
+            return None, exc
+
+        if not isinstance(result, AgentResult):
+            logger.warning(
+                f"Worker for role '{role}' returned {type(result).__name__}, "
+                "expected AgentResult; recording as a failed dispatch"
+            )
+            return None, TypeError(f"worker returned {type(result).__name__}")
+
+        return result, None
+
+    def _record_role_result(
+        self,
+        role: str,
+        state: str,
+        context: Mapping[str, Any],
+        result: AgentResult | None,
+        error: Exception | None,
+    ) -> dict[str, Any]:
+        """Append this dispatch to ``role_results`` and set ``current_role_result``."""
+        if result is not None:
+            answer = result.answer
+            success = result.success
+        elif error is not None:
+            answer = f"Worker error: {error}"
+            success = False
+        else:
+            answer = f"[No worker configured for role '{role}']"
+            success = False
+
+        entry = {
+            "role": role,
+            "state": state,
+            "iteration": _as_int(context.get(ContextKeys.ITERATION), 0),
+            "step_number": _as_int(context.get(ContextKeys.STEP_NUMBER), 0),
+            "answer": answer[:_MAX_ANSWER_CHARS],
+            "success": success,
+        }
+
+        history = context.get(ContextKeys.ROLE_RESULTS)
+        if not isinstance(history, list):
+            history = []
+
+        return {
+            ContextKeys.ROLE_RESULTS: [*history, entry][-_MAX_ROLE_RESULTS:],
+            ContextKeys.CURRENT_ROLE_RESULT: entry,
+        }
+
+    def _apply_role_result(
+        self, state: str, result: AgentResult, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Read gate flags out of a successful worker result.
+
+        Only keys in :data:`_WORKER_WRITABLE` for *state* are read, and only
+        when their runtime type matches exactly.  Anything else is dropped,
+        which leaves the gate BLOCKED (invariant I8).
+        """
+        allowed = _WORKER_WRITABLE[state]
+        if not allowed:
+            return {}
+
+        payload: dict[str, Any] = {}
+        structured = getattr(result, "structured_output", None)
+        if structured is not None and hasattr(structured, "model_dump"):
+            dumped = structured.model_dump()
+            if isinstance(dumped, dict):
+                payload.update(dumped)
+        if isinstance(result.final_context, dict):
+            payload.update(result.final_context)
+
+        updates: dict[str, Any] = {}
+        for key, expected in allowed.items():
+            if key not in payload:
+                continue
+            value = payload[key]
+            if not _type_matches(value, expected):
+                logger.warning(
+                    f"Worker for state '{state}' returned {key}="
+                    f"{value!r} ({type(value).__name__}); expected "
+                    f"{expected.__name__}. Dropping it -- the gate stays closed."
+                )
+                continue
+            updates[key] = value
+
+        if state == HarnessStates.REFLECT:
+            updates = self._enforce_routing_exclusivity(updates, context)
+
+        return updates
+
+    @staticmethod
+    def _enforce_routing_exclusivity(
+        updates: dict[str, Any], context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Keep at most one REFLECT routing flag true.
+
+        The flags gate three different outbound edges at three priorities, so
+        two true flags would silently resolve by priority -- a completion fix
+        would swallow a pivot the reviewer explicitly asked for.
+        """
+        chosen = [key for key in _REFLECT_ROUTING_FLAGS if updates.get(key) is True]
+        if not chosen:
+            return updates
+        winner = chosen[0]
+        for key in _REFLECT_ROUTING_FLAGS:
+            if key == winner:
+                continue
+            if updates.get(key) is not None or context.get(key) is not None:
+                updates[key] = None
+        return updates
+
+    def _post_dispatch(
+        self, state: str, result: AgentResult | None, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Driver-owned bookkeeping that runs after every dispatch."""
+        if state == HarnessStates.EXECUTE:
+            return self._after_execute_dispatch(result, context)
+        if state == HarnessStates.PLAN:
+            return self._after_plan_dispatch(result, context)
+        if state == HarnessStates.REFLECT:
+            return self._after_reflect_dispatch(context)
+        return {}
+
+    # ------------------------------------------------------------------
+    # Per-state post-dispatch
+    # ------------------------------------------------------------------
+
+    def _after_execute_dispatch(
+        self, result: AgentResult | None, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Advance the step cursor, or spend a fix attempt.
+
+        The worker never writes these counters itself: ``rules.py`` warns the
+        executor that understating its attempt count bypasses the leash, and
+        the way to make that impossible is for the driver to derive the count
+        from ``AgentResult.success`` rather than to read it back.
+        """
+        if result is None:
+            # No worker configured, or the worker failed hard. Neither advances
+            # the step nor spends an attempt -- the FSM's own extraction pass
+            # gets the next turn to move the protocol (the degrade path).
+            return {}
+
+        step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        total = max(1, _as_int(context.get(ContextKeys.TOTAL_STEPS), 1))
+
+        if result.success:
+            if step < total:
+                # More steps remain: hold EXECUTE and let the loop-iteration
+                # dispatch pick up the new (state, iteration, step) key.
+                return {
+                    ContextKeys.STEP_NUMBER: step + 1,
+                    ContextKeys.FIX_ATTEMPTS: 0,
+                }
+            return {ContextKeys.EXECUTE_COMPLETE: True}
+
+        attempts = _as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0) + 1
+        updates: dict[str, Any] = {
+            ContextKeys.FIX_ATTEMPTS: attempts,
+            ContextKeys.EXECUTE_COMPLETE: True,
+        }
+        if attempts >= self.max_fix_attempts:
+            updates[ContextKeys.LAST_GATE_SLUG] = GateSlug.LEASH_CAP
+            updates[ContextKeys.HALT_REASON] = (
+                f"Autonomy leash: step {step} failed {attempts} times "
+                f"(cap {self.max_fix_attempts}); reporting instead of retrying."
+            )
+        else:
+            updates[ContextKeys.COMPLETION_FIX] = True
+        return updates
+
+    def _after_plan_dispatch(
+        self, result: AgentResult | None, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Ask the human to approve the plan."""
+        if result is None or not result.success:
+            return {}
+        if context.get(ContextKeys.NEEDS_EXPLORE) is True:
+            # The plan-writer bounced back to EXPLORE; there is no plan to approve.
+            return {}
+        approved = self._request_approval(
+            _APPROVAL_PLAN,
+            context,
+            reasoning=(
+                f"Approve the plan for iteration "
+                f"{_as_int(context.get(ContextKeys.ITERATION), 0) + 1}?"
+            ),
+        )
+        return {ContextKeys.PLAN_APPROVED: approved}
+
+    def _after_reflect_dispatch(self, context: Mapping[str, Any]) -> dict[str, Any]:
+        """Ask the human to confirm a close, or to continue past the leash."""
+        if context.get(ContextKeys.LAST_GATE_SLUG) == GateSlug.LEASH_CAP:
+            granted = self._request_approval(
+                _APPROVAL_LEASH,
+                context,
+                reasoning=(
+                    "The 2-attempt autonomy leash is exhausted. Continue with "
+                    "user direction, or stop here?"
+                ),
+            )
+            if not granted:
+                return {}
+            # Explicit user direction resets the leash; it is not a third
+            # unattended attempt.
+            return {
+                ContextKeys.FIX_ATTEMPTS: 0,
+                ContextKeys.LAST_GATE_SLUG: None,
+                ContextKeys.HALT_REASON: None,
+                ContextKeys.COMPLETION_FIX: True,
+            }
+
+        if context.get(ContextKeys.ALL_CRITERIA_PASS) is not True:
+            return {}
+
+        confirmed = self._request_approval(
+            _APPROVAL_CLOSE,
+            context,
+            reasoning="Every success criterion is verified PASS. Close the plan?",
+        )
+        return {ContextKeys.CLOSE_CONFIRMED: confirmed}
+
+    # ------------------------------------------------------------------
+    # Approvals (invariant I6)
+    # ------------------------------------------------------------------
+
+    def _request_approval(
+        self, gate: str, context: Mapping[str, Any], *, reasoning: str
+    ) -> bool:
+        """Consult the human callback for one protocol gate.
+
+        Returns ``False`` -- never ``True`` -- when the callback itself fails,
+        so a broken approval path denies rather than opens the gate.
+        """
+        call = ToolCall(
+            tool_name=gate,
+            parameters={
+                ContextKeys.ITERATION: _as_int(context.get(ContextKeys.ITERATION), 0),
+                ContextKeys.STEP_NUMBER: _as_int(
+                    context.get(ContextKeys.STEP_NUMBER), 0
+                ),
+                ContextKeys.FIX_ATTEMPTS: _as_int(
+                    context.get(ContextKeys.FIX_ATTEMPTS), 0
+                ),
+            },
+            reasoning=reasoning,
+        )
+        try:
+            return bool(self.hitl.request_approval(call, dict(context)))
+        except Exception as exc:  # fail closed, never open
+            logger.warning(
+                f"Approval gate '{gate}' errored ({exc}); treating as DENIED"
+            )
+            return False
+
+    # ------------------------------------------------------------------
+    # Gates and halts
+    # ------------------------------------------------------------------
+
+    def _pre_step_gate(self, context: Mapping[str, Any]) -> dict[str, Any] | None:
+        """In-memory analogue of ``plan_validator.pre_step_gate()``.
+
+        Only the ``leash-cap`` slug is decidable without a plan directory; the
+        other three (``no-plan`` / ``wrong-state`` / ``iteration-cap``) need
+        on-disk state or belong to a different edge, and a later step adds
+        them.  Returning a delta rather than raising keeps the halt *inside*
+        the protocol: the run routes to REFLECT and reports, it does not crash.
+
+        Returns:
+            A context delta when the step must not be dispatched, else ``None``.
+        """
+        attempts = _as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0)
+        if attempts < self.max_fix_attempts:
+            return None
+        step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        logger.warning(
+            f"Pre-step gate [{GateSlug.LEASH_CAP}]: step {step} has {attempts} "
+            f"fix attempts (cap {self.max_fix_attempts}); refusing to dispatch."
+        )
+        return {
+            ContextKeys.EXECUTE_COMPLETE: True,
+            ContextKeys.LAST_GATE_SLUG: GateSlug.LEASH_CAP,
+            ContextKeys.HALT_REASON: (
+                f"Autonomy leash: step {step} already used {attempts} fix "
+                f"attempts (cap {self.max_fix_attempts})."
+            ),
+        }
+
+    def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
+        """Dispatch for a HELD state, and enforce the run-ending halts.
+
+        ``on_state_entry`` never fires while the FSM holds a state (measured;
+        see the module docstring), so without this hook a multi-step EXECUTE
+        would dispatch step 1 and then sit there.  It shares the ledger with
+        the entry handlers, so a state that was just entered is a no-op here.
+        """
+        self._api = api
+        self._conversation_id = conv_id
+
+        state = api.get_current_state(conv_id)
+        context = api.get_data(conv_id)
+
+        self._check_iteration_cap(state, context)
+
+        updates = self._dispatch_if_needed(state, context)
+        if updates:
+            api.update_context(conv_id, _drop_deletions(updates))
+            context = api.get_data(conv_id)
+
+        self._check_stall(state, context, bool(updates))
+
+    def _check_iteration_cap(self, state: str, context: Mapping[str, Any]) -> None:
+        """Halt when PLAN can no longer reach EXECUTE.
+
+        Raises:
+            _HarnessHalt: With the ``iteration-cap`` slug.
+        """
+        if state != HarnessStates.PLAN:
+            return
+        iteration = _as_int(context.get(ContextKeys.ITERATION), 0)
+        if iteration < self.iteration_hard_cap:
+            return
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-019
+        # An iteration-cap halt emits NO leash presentation and NO leash slug.
+        # Do NOT merge this path with the leash halt "because both stop the run":
+        # a run can hit the iteration cap with ZERO fix attempts, and reporting a
+        # leash there would tell the user to look at a failing step that does not
+        # exist. The two halts differ in slug, in whether a leash block is shown,
+        # and in whether the run continues (leash routes to REFLECT; the iteration
+        # cap ends the run). See decisions.md D-019.
+        raise _HarnessHalt(
+            reason=(
+                f"Iteration cap: {iteration} iterations used (cap "
+                f"{self.iteration_hard_cap}); PLAN cannot re-enter EXECUTE. "
+                "Decompose the goal into a fresh plan."
+            ),
+            slug=GateSlug.ITERATION_CAP,
+            context=dict(context),
+        )
+
+    def _check_stall(
+        self, state: str, context: Mapping[str, Any], dispatched: bool
+    ) -> None:
+        """Halt when the protocol has made no progress for too many turns.
+
+        Raises:
+            _HarnessHalt: With no slug -- a stall is not one of the four
+                pre-step-gate failures.
+        """
+        signature = (
+            state,
+            _as_int(context.get(ContextKeys.ITERATION), 0),
+            _as_int(context.get(ContextKeys.STEP_NUMBER), 0),
+            len(self._read_ledger(context)),
+        )
+        if dispatched or signature != self._stall_signature:
+            self._stall_signature = signature
+            self._stall_turns = 0
+            return
+
+        self._stall_turns += 1
+        if self._stall_turns < self.max_stall_turns:
+            return
+
+        stalled = (
+            f"Stalled in {state.upper()} for {self._stall_turns} turns with no "
+            f"progress. Gate: {get_rules(state).gate_summary}"
+        )
+        # A halt reason already in context is the REASON the gate is shut (most
+        # often the leash cap). Prepend it rather than overwrite: the stall is
+        # the symptom, the recorded reason is the diagnosis.
+        prior = context.get(ContextKeys.HALT_REASON)
+        reason = f"{prior} {stalled}" if isinstance(prior, str) and prior else stalled
+
+        raise _HarnessHalt(reason=reason, slug=None, context=dict(context))
+
+    # ------------------------------------------------------------------
+    # Small helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _apply(
+        updates: dict[str, Any],
+        working: dict[str, Any],
+        delta: Mapping[str, Any],
+    ) -> None:
+        """Record *delta* in the returned update set and in the working view.
+
+        A ``None`` value means "delete this key" in a handler delta
+        (``pipeline.execute_handlers``'s merge contract), so the working view
+        drops it rather than storing a literal ``None``.
+        """
+        for key, value in delta.items():
+            updates[key] = value
+            if value is None:
+                working.pop(key, None)
+            else:
+                working[key] = value
+
+
+def _deny_approval(request: Any) -> bool:
+    """Default approval callback: deny everything."""
+    logger.info(
+        f"No approval callback configured; DENYING "
+        f"{getattr(request, 'tool_name', 'approval')}"
+    )
+    return False
+
+
+def _as_int(value: Any, default: int) -> int:
+    """Return *value* when it is a real ``int``, else *default*.
+
+    ``bool`` is rejected on purpose: ``isinstance(True, int)`` is ``True`` in
+    Python, and letting a stray ``True`` read as the integer 1 would turn a
+    garbled worker reply into a plausible-looking counter.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    return value
+
+
+def _type_matches(value: Any, expected: type) -> bool:
+    """Exact runtime type check used by the worker-reply allowlist (I8)."""
+    if expected is bool:
+        return isinstance(value, bool)
+    if expected is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, expected)
+
+
+def _drop_deletions(updates: Mapping[str, Any]) -> dict[str, Any]:
+    """Strip ``None`` values before an ``API.update_context`` call.
+
+    ``None`` means "delete" only in a HANDLER delta.  ``API.update_context``
+    writes it verbatim, and a key present with value ``None`` still satisfies
+    ``TransitionCondition.requires_context_keys`` -- so passing one through
+    would turn a cleared flag into a present-but-null one and change what the
+    gate sees.
+    """
+    return {key: value for key, value in updates.items() if value is not None}

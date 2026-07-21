@@ -41,6 +41,7 @@ from .exceptions import (
     HarnessReentrancyError,
 )
 from .fsm_definition import DEFAULT_PERSONA, build_harness_fsm
+from .harness import HarnessAgent, RoleRequest, WorkerFactory
 from .rules import OWNERSHIP, ROLE_BY_STATE, RULES, StateRules, get_rules
 
 __all__ = [
@@ -68,6 +69,10 @@ __all__ = [
     # FSM definition
     "DEFAULT_PERSONA",
     "build_harness_fsm",
+    # Driver
+    "HarnessAgent",
+    "RoleRequest",
+    "WorkerFactory",
     # Per-state rules
     "OWNERSHIP",
     "ROLE_BY_STATE",
