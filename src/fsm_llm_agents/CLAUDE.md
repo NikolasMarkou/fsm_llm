@@ -2,7 +2,7 @@
 
 12+ agent patterns with tool use, human-in-the-loop, structured output, working memory, and a meta-builder. Each pattern is backed by an auto-generated FSM.
 
-- **Version**: 0.4.0 (synced from fsm_llm)
+- **Version**: 0.5.0 (synced from fsm_llm)
 - **Extra deps**: None beyond core fsm_llm
 - **Install**: `pip install fsm-llm[agents]`
 

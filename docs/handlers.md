@@ -1,6 +1,6 @@
 # Handler Development Guide
 
-> Covers FSM-LLM v0.4.0
+> Covers FSM-LLM v0.5.0
 
 Handlers extend FSM behavior with custom logic at 8 lifecycle points. They can validate data, call external APIs, log interactions, implement business rules, and trigger side effects.
 
