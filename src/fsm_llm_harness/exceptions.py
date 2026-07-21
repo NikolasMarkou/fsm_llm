@@ -39,8 +39,8 @@ class HarnessError(FSMError):
 class HarnessArtifactError(HarnessError):
     """An artifact could not be read, written, parsed or schema-validated.
 
-    **Not raised yet**: ``storage.py`` (plan step 9) is the module that raises
-    this, at its read/write/parse boundary.  It is kept ahead of that step --
+    Raised by ``artifacts.py`` at its parse/schema boundary and by
+    ``storage.py`` at its read/write boundary.  It was kept ahead of both --
     unlike the two exception types D-059 deleted -- because a filesystem or
     schema failure genuinely IS exceptional, where a blocked gate is not.
     """
