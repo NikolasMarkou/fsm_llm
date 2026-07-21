@@ -1,11 +1,23 @@
 """
-Root-confined filesystem and shell actions for the harness's EXECUTE role.
+Root-confined filesystem and shell actions for the harness's role workers.
 
 The harness drives real work with a 4B model.  Unconstrained, that is arbitrary
 filesystem and shell access driven by a small model's output, so every action a
 role worker can take goes through :class:`Workspace`, whose :meth:`Workspace.resolve`
 is the single confinement chokepoint (invariant I9): a path that does not
-resolve *under* the workspace root is rejected **before any I/O**.
+resolve *under* the root is rejected **before any I/O**.
+
+There are exactly **two roots**, and a path resolves under exactly one of them:
+
+* the **workspace** -- the code the protocol is changing.  Only the EXECUTE
+  role receives its write tools.
+* the **plan directory** -- the protocol's own filesystem-as-memory, reached
+  through :class:`PlanMemory`.  Reads are confined; writes are confined *and*
+  narrowed to the artifacts ``rules.OWNERSHIP`` grants the calling role, so a
+  role that must not write an artifact does not hold a tool that can
+  (invariant I7).  :class:`PlanMemory` **composes** :class:`Workspace` rather
+  than re-deriving containment -- a second confinement implementation is a
+  named Complexity-Budget BREACH.
 
 ``run_command`` exists but is **disabled by default** (decisions.md D-008).
 Enabling it is a deliberate act by the harness's caller -- never by the LLM --
@@ -39,15 +51,27 @@ from fsm_llm.logging import logger
 from fsm_llm_agents.definitions import ToolResult
 from fsm_llm_agents.tools import ToolRegistry, tool
 
-from .exceptions import HarnessConfinementError, HarnessError
+from .constants import ArtifactNames
+from .exceptions import (
+    HarnessConfinementError,
+    HarnessError,
+    HarnessOwnershipError,
+)
+from .rules import OWNERSHIP
 
 __all__ = [
     "COMMAND_ALLOWLIST",
+    "PLAN_READ_TOOLS",
+    "PLAN_WRITE_TOOLS",
     "READ_ONLY_TOOLS",
     "SHELL_TOOLS",
+    "VERIFICATION_COMMANDS",
     "WRITE_TOOLS",
+    "PlanMemory",
+    "PlanTools",
     "Workspace",
     "WorkspaceTools",
+    "build_plan_tools",
     "build_workspace_tools",
 ]
 
@@ -107,22 +131,43 @@ _GREP_SKIP_DIRS = frozenset(
 
 #: Executables ``run_command`` permits when shell access is explicitly enabled.
 #:
-#: Read-only inspection plus the two test/lint entry points a verifier needs.
-#: Deliberately excludes every general-purpose interpreter (``python``, ``sh``,
-#: ``bash``, ``node``, ``perl``) -- an interpreter on this list would make the
-#: allowlist decorative, because it can run anything.
+#: Every entry here READS bytes and executes nothing that lives inside the
+#: workspace.  General-purpose interpreters (``python``, ``sh``, ``bash``,
+#: ``node``, ``perl``) are excluded for the obvious reason -- one of them on
+#: this list runs anything -- and so is every tool that loads a *config or
+#: plugin file authored by the EXECUTE role*; those live in
+#: :data:`VERIFICATION_COMMANDS` and must be opted into by name.
 COMMAND_ALLOWLIST: tuple[str, ...] = (
     "cat",
-    "git",
     "grep",
     "head",
     "ls",
+    "tail",
+    "wc",
+)
+
+# DECISION plan-2026-07-21T125237-191b2eb2/D-050
+# These five are NOT in the default allowlist and must not be "restored" to it
+# for convenience. Each one executes code that the EXECUTE role can write into
+# the workspace, which is exactly the property the allowlist above claims to
+# have: `make` runs a Makefile, `pytest` imports `conftest.py`, `git` honours
+# `.git/hooks/*` and `[alias]`/`core.pager` in a repo-local config, `mypy`
+# imports whatever `plugins =` names in its config, and `ruff` is here only
+# because it travels with the other four in a verification profile. Handing
+# them to a 4B model by default makes the allowlist decorative (review W5).
+# A caller who wants a verifying REFLECT role opts in explicitly:
+#   Workspace(root, allow_shell=True,
+#             allowed_commands=COMMAND_ALLOWLIST + VERIFICATION_COMMANDS)
+# `run_command` stays disabled by default either way.
+# See decisions.md D-050.
+#: Verification entry points, excluded from the default allowlist because each
+#: one executes workspace-authored code.  Opt in by name.
+VERIFICATION_COMMANDS: tuple[str, ...] = (
+    "git",
     "make",
     "mypy",
     "pytest",
     "ruff",
-    "tail",
-    "wc",
 )
 
 #: Characters that may never appear in a workspace-relative path.
@@ -171,6 +216,54 @@ WRITE_TOOLS: tuple[str, ...] = (
 #: ``allow_shell=True``; the tool is still registered so the refusal is a
 #: legible failed ``ToolResult`` rather than an unknown-tool error.
 SHELL_TOOLS: tuple[str, ...] = (WorkspaceTools.RUN_COMMAND,)
+
+
+class PlanTools:
+    """Tool names registered by :func:`build_plan_tools`.
+
+    Deliberately distinct from every :class:`WorkspaceTools` name: the plan
+    directory and the workspace are two roots, and a role must never be able to
+    reach one through the other's tool.
+    """
+
+    READ_PLAN_FILE = "read_plan_file"
+    WRITE_PLAN_FILE = "write_plan_file"
+    APPEND_PLAN_FILE = "append_plan_file"
+    LIST_PLAN_DIR = "list_plan_dir"
+    PLAN_PATH_EXISTS = "plan_path_exists"
+
+
+#: Protocol-memory inspection.  Every role gets these: the protocol's first
+#: operative rule in almost every state is "read the artifacts before acting".
+PLAN_READ_TOOLS: tuple[str, ...] = (
+    PlanTools.READ_PLAN_FILE,
+    PlanTools.LIST_PLAN_DIR,
+    PlanTools.PLAN_PATH_EXISTS,
+)
+
+#: Protocol-memory mutation.  Handed only to roles that own at least one
+#: artifact in ``rules.OWNERSHIP``; the tools then refuse every artifact the
+#: calling role does not own (:class:`PlanMemory`).
+PLAN_WRITE_TOOLS: tuple[str, ...] = (
+    PlanTools.WRITE_PLAN_FILE,
+    PlanTools.APPEND_PLAN_FILE,
+)
+
+#: Cross-plan artifacts, which live one level ABOVE the plan directory.
+_CROSS_PLAN_FILES: frozenset[str] = frozenset(
+    (*ArtifactNames.CROSS_PLAN, ArtifactNames.LESSONS_ARCHIVE)
+)
+
+#: Per-plan files a role may be granted; the two subdirectories are matched by
+#: their first path component instead.
+_PER_PLAN_FILES: frozenset[str] = frozenset(
+    (*ArtifactNames.PER_PLAN, ArtifactNames.SUMMARY)
+)
+
+#: Per-plan subdirectories owned as a whole (``findings/``, ``checkpoints/``).
+_PER_PLAN_DIRS: frozenset[str] = frozenset(
+    (ArtifactNames.FINDINGS_DIR, ArtifactNames.CHECKPOINTS_DIR)
+)
 
 
 def _truncate(text: str, limit: int, unit: str = "characters") -> str:
@@ -568,6 +661,190 @@ class Workspace:
 
 
 # ---------------------------------------------------------------------------
+# Plan directory (filesystem-as-memory), ownership-scoped
+# ---------------------------------------------------------------------------
+
+
+class PlanMemory:
+    """The protocol's filesystem-as-memory tier, scoped to ONE role.
+
+    Reads are confined; writes are confined **and** checked against
+    ``rules.OWNERSHIP``, so a role that does not own an artifact is refused by
+    the tool rather than asked not to call it (invariant I7).
+
+    Args:
+        plan_dir: This run's plan directory.  Created if absent.
+        role: The calling role, a ``Role.WORKERS`` member.  Fixed for the
+            lifetime of the object -- one ``PlanMemory`` per dispatch.
+
+    Example::
+
+        memory = PlanMemory("plans/plan-2026-07-21T125237-191b2eb2",
+                            role=Role.EXPLORER)
+        memory.write_text("findings/tool-scope.md", "...")   # owned
+        memory.write_text("plan.md", "...")                  # HarnessOwnershipError
+    """
+
+    # DECISION plan-2026-07-21T125237-191b2eb2/D-047
+    # The confinement root is the plan directory's PARENT, not the plan
+    # directory. Do NOT "tighten" it to the plan dir itself: the protocol's
+    # cross-plan tier (LESSONS.md, SYSTEM.md, INDEX.md, FINDINGS.md,
+    # DECISIONS.md, LESSONS-archive.md) lives BESIDE the plan directories, and
+    # `rules.OWNERSHIP` grants all six to the archivist. Rooting at the plan dir
+    # would leave those writes reachable only through `../`, i.e. only by
+    # weakening confinement -- which is the named breach this design exists to
+    # avoid. The narrowing that replaces it is OWNERSHIP: the wider root buys
+    # nothing, because every write is classified to an artifact name first and
+    # an unclassifiable path is refused outright.
+    # And do NOT write a second confinement implementation here. This class
+    # COMPOSES `Workspace`; `Workspace.resolve` stays the single chokepoint, so
+    # the resolve-before-compare rule of D-032 protects the plan directory for
+    # free. See decisions.md D-047.
+
+    def __init__(self, plan_dir: str | os.PathLike[str], *, role: str) -> None:
+        path = Path(plan_dir).expanduser()
+        path.mkdir(parents=True, exist_ok=True)
+        resolved = path.resolve()
+        self._workspace = Workspace(resolved.parent)
+        self._plan_id = resolved.name
+        self._role = role
+
+    # -- properties -----------------------------------------------------
+
+    @property
+    def role(self) -> str:
+        """The role every write is authorised against."""
+        return self._role
+
+    @property
+    def plan_id(self) -> str:
+        """The plan directory's name, which is also its id."""
+        return self._plan_id
+
+    @property
+    def plan_dir(self) -> Path:
+        """The resolved plan directory."""
+        return self._workspace.root / self._plan_id
+
+    @property
+    def root(self) -> Path:
+        """The resolved memory root: the plan directory's parent."""
+        return self._workspace.root
+
+    def __repr__(self) -> str:
+        return f"PlanMemory(plan_dir={str(self.plan_dir)!r}, role={self._role!r})"
+
+    # -- addressing -----------------------------------------------------
+
+    def locate(self, path: str) -> str:
+        """Map a caller-supplied path to a memory-root-relative one.
+
+        Interface contract (2+ call sites: every read and write below):
+            - A bare cross-plan filename (``LESSONS.md``) addresses the
+              cross-plan tier at the memory root.
+            - A path already starting with this plan's id is taken as-is.
+            - Everything else is relative to the plan directory, which is what
+              the operative rules say (``findings/<topic>.md``).
+            - Returns a string; performs no I/O and never raises.
+        """
+        # An ABSOLUTE path is passed through UNCHANGED so that
+        # `Workspace.resolve` refuses it. Prefixing it with the plan id would
+        # turn "/etc/passwd" into the relative "<plan-id>/etc/passwd" -- still
+        # confined, but the caller gets a bewildering FileNotFoundError deep
+        # inside the plan directory instead of the confinement refusal the
+        # attempt earned. Found by the step-7b probe; do not "tidy" the branch
+        # away.
+        candidate = path.strip()
+        if not candidate or Path(candidate).is_absolute():
+            return candidate
+        parts = Path(candidate).parts
+        head = parts[0] if parts else ""
+        if head in _CROSS_PLAN_FILES or head == self._plan_id:
+            return candidate
+        return f"{self._plan_id}/{candidate}"
+
+    def artifact_for(self, path: str) -> str | None:
+        """Return the ``ArtifactNames`` id *path* addresses, or ``None``.
+
+        ``None`` means "not a protocol artifact", which is never writable --
+        the ownership table is the whole of what may be written.
+
+        Raises:
+            HarnessConfinementError: If the path escapes the memory root.
+        """
+        return self._classify(path)[1]
+
+    def _classify(self, path: str) -> tuple[Path, str | None]:
+        """Resolve *path* and name the artifact it addresses."""
+        target = self._workspace.resolve(self.locate(path))
+        parts = Path(self._workspace.relative(target)).parts
+        if not parts:
+            return target, None  # the memory root itself
+        if len(parts) == 1:
+            return target, parts[0] if parts[0] in _CROSS_PLAN_FILES else None
+        if parts[0] != self._plan_id:
+            # Another plan's directory. Readable (the sliding window needs it);
+            # never writable.
+            return target, None
+        rest = parts[1:]
+        if rest[0] in _PER_PLAN_DIRS:
+            return target, rest[0]
+        if len(rest) == 1 and rest[0] in _PER_PLAN_FILES:
+            return target, rest[0]
+        return target, None
+
+    def authorise(self, path: str) -> Path:
+        """Resolve *path* for writing, or refuse.
+
+        Interface contract (2 call sites: :meth:`write_text`,
+        :meth:`append_text`):
+            - Returns the resolved absolute path when ``OWNERSHIP`` lists this
+              memory's role as a writer of the addressed artifact.
+            - Performs no write.
+
+        Raises:
+            HarnessConfinementError: If the path escapes the memory root.
+            HarnessOwnershipError: If the role does not own the artifact, or
+                the path is not a protocol artifact at all.
+        """
+        target, artifact = self._classify(path)
+        owners = OWNERSHIP.get(artifact, ()) if artifact is not None else ()
+        if self._role not in owners:
+            raise HarnessOwnershipError(
+                artifact or self.locate(path),
+                self._role,
+                ", ".join(owners) or "none",
+            )
+        return target
+
+    # -- reads ----------------------------------------------------------
+
+    def read_text(self, path: str) -> str:
+        """Read a protocol artifact, bounded by the workspace's read cap."""
+        return self._workspace.read_text(self.locate(path))
+
+    def exists(self, path: str) -> bool:
+        """Whether a protocol path exists."""
+        return self._workspace.exists(self.locate(path))
+
+    def list_dir(self, path: str = ".") -> list[str]:
+        """List a plan-directory (or memory-root) directory's entries."""
+        return self._workspace.list_dir(self.locate(path))
+
+    # -- writes ---------------------------------------------------------
+
+    def write_text(self, path: str, content: str) -> str:
+        """Write an OWNED artifact, replacing it if it exists."""
+        self.authorise(path)
+        return self._workspace.write_text(self.locate(path), content)
+
+    def append_text(self, path: str, content: str) -> str:
+        """Append to an OWNED artifact, creating it if absent."""
+        self.authorise(path)
+        return self._workspace.append_text(self.locate(path), content)
+
+
+# ---------------------------------------------------------------------------
 # Tool registration
 # ---------------------------------------------------------------------------
 
@@ -663,3 +940,75 @@ def build_workspace_tools(
         fn = candidates[name]
         registry.register(fn._tool_definition)  # type: ignore[attr-defined]
     return registry
+
+
+def build_plan_tools(
+    memory: PlanMemory,
+    *,
+    allowed: Iterable[str] | None = None,
+    registry: ToolRegistry | None = None,
+) -> ToolRegistry:
+    """Register *memory*'s confined, ownership-scoped operations as agent tools.
+
+    Interface contract (shared helper, 2+ call sites: ``roles.py``'s default
+    worker factory, and any caller writing its own factory):
+        - ``memory``: the plan-directory tier, already scoped to one role.
+        - ``allowed``: tool names from :class:`PlanTools`.  ``None`` registers
+          every tool.  A role's ``plan_tool_scope`` is passed here.
+        - ``registry``: register into an EXISTING registry (the workspace one)
+          instead of a fresh one, so a dispatch holds exactly one registry
+          spanning both roots.
+        - Returns the registry written to.
+        - Raises ``ValueError`` for an unknown tool name.
+
+    An ownership refusal surfaces as a failed ``ToolResult`` through
+    ``ToolRegistry.execute``, exactly like a confinement refusal, so the agent
+    loop can read it and adapt.
+    """
+
+    @tool
+    def read_plan_file(path: str) -> str:
+        """Read a protocol artifact. Paths are relative to the plan directory."""
+        return memory.read_text(path)
+
+    @tool
+    def write_plan_file(path: str, content: str) -> str:
+        """Write a protocol artifact you own, replacing it if it exists."""
+        return f"wrote {memory.write_text(path, content)}"
+
+    @tool
+    def append_plan_file(path: str, content: str) -> str:
+        """Append to a protocol artifact you own, creating it if absent."""
+        return f"appended to {memory.append_text(path, content)}"
+
+    @tool
+    def list_plan_dir(path: str = ".") -> str:
+        """List a plan-directory listing. Directories end with /."""
+        return "\n".join(memory.list_dir(path)) or "(empty)"
+
+    @tool
+    def plan_path_exists(path: str) -> str:
+        """Report whether a plan-directory path exists."""
+        return "yes" if memory.exists(path) else "no"
+
+    candidates: Mapping[str, object] = {
+        PlanTools.READ_PLAN_FILE: read_plan_file,
+        PlanTools.WRITE_PLAN_FILE: write_plan_file,
+        PlanTools.APPEND_PLAN_FILE: append_plan_file,
+        PlanTools.LIST_PLAN_DIR: list_plan_dir,
+        PlanTools.PLAN_PATH_EXISTS: plan_path_exists,
+    }
+
+    names = tuple(candidates) if allowed is None else tuple(allowed)
+    unknown = [name for name in names if name not in candidates]
+    if unknown:
+        raise ValueError(
+            f"Unknown plan tool(s): {', '.join(unknown)}. "
+            f"Available: {', '.join(candidates)}"
+        )
+
+    target = ToolRegistry() if registry is None else registry
+    for name in names:
+        fn = candidates[name]
+        target.register(fn._tool_definition)  # type: ignore[attr-defined]
+    return target

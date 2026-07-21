@@ -227,6 +227,14 @@ class RoleRequest:
         total_steps: Number of steps in the current plan.
         fix_attempts: Fix attempts already spent on ``step_number``.
         context: Read-only snapshot of the FSM context at dispatch time.
+        plan_dir: This run's plan directory, or ``None`` when the caller did
+            not supply one.  Driver-owned (``DRIVER_OWNED_UNSET``): a worker
+            cannot redirect the protocol's own memory by inventing a path.
+            ``None`` means a factory MUST NOT hand the role plan-directory
+            tools -- there is no directory to confine them to.
+        workspace_root: The code root the run is changing, or ``None``.
+            Reported to the worker; the confinement itself lives in the
+            ``Workspace`` the factory was built with.
     """
 
     role: str
@@ -239,6 +247,8 @@ class RoleRequest:
     total_steps: int
     fix_attempts: int
     context: Mapping[str, Any] = field(default_factory=dict)
+    plan_dir: str | None = None
+    workspace_root: str | None = None
 
 
 #: A role worker: one :class:`RoleRequest` in, one ``AgentResult`` out.
@@ -528,9 +538,26 @@ class HarnessAgent(BaseAgent):
         # worker-less run is now expected to BLOCK at the first gate and halt
         # legibly via `_check_stall`, which is the honest outcome when no
         # evidence-producing worker exists. See decisions.md D-044 and D-045.
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-049
+        # The two filesystem roots are read from the CALLER's context here and
+        # then become driver-owned for the rest of the run. Do NOT let a role
+        # supply or amend them: `plan_dir` is the directory `PlanMemory`
+        # confines a role's write tools to, so an LLM-invented value re-points
+        # the protocol's own memory. They are in `DRIVER_OWNED_UNSET` rather
+        # than `DRIVER_OWNED_SEEDS` because a seed needs a fixed value and a
+        # path does not have one -- absent is the correct default, and it
+        # degrades to "no plan-directory tools", not to "any directory".
+        # See decisions.md D-049.
+        supplied = initial_context or {}
+        roots: dict[str, Any] = {
+            key: str(supplied[key])
+            for key in (ContextKeys.PLAN_DIR, ContextKeys.WORKSPACE_ROOT)
+            if _as_optional_str(supplied.get(key)) is not None
+        }
         seeds: dict[str, Any] = {
             ContextKeys.GOAL: task,
             **DRIVER_OWNED_SEEDS,
+            **roots,
         }
         self._driver_owned = {
             **dict.fromkeys(DRIVER_OWNED_UNSET),
@@ -956,6 +983,8 @@ class HarnessAgent(BaseAgent):
             total_steps=_as_int(context.get(ContextKeys.TOTAL_STEPS), 1),
             fix_attempts=_as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0),
             context=MappingProxyType(dict(context)),
+            plan_dir=_as_optional_str(context.get(ContextKeys.PLAN_DIR)),
+            workspace_root=_as_optional_str(context.get(ContextKeys.WORKSPACE_ROOT)),
         )
 
         try:
@@ -1432,6 +1461,18 @@ def _as_int(value: Any, default: int) -> int:
     """
     if isinstance(value, bool) or not isinstance(value, int):
         return default
+    return value
+
+
+def _as_optional_str(value: Any) -> str | None:
+    """Return a non-empty ``str`` for a filesystem root, else ``None``.
+
+    Only a real ``str`` is accepted.  A root is a path a role's write tools get
+    confined to, so "something that stringifies" is not good enough: ``None``
+    means "no plan-directory tools at all", which is the safe reading.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
     return value
 
 

@@ -11,9 +11,12 @@ callable the driver can use unchanged.
 Three properties matter more than feature breadth here, because the harness's
 default model is a 4B one:
 
-1. **Tool scope is structural, not advisory.**  A read-only role is handed a
-   registry that contains no write tool at all (invariant I7 / decisions.md
-   D-008).  Telling a small model not to write is not a control.
+1. **Tool scope is structural, not advisory, and DERIVED from ownership.**  A
+   role's plan-directory scope comes from ``rules.OWNERSHIP``
+   (:func:`_plan_scope`), and a role that owns no artifact is handed a registry
+   containing no write tool at all (invariant I7 / decisions.md D-008, D-047).
+   Telling a small model not to write is not a control -- and, as review C2
+   showed, telling it to write with no tool to do so is not an instruction.
 2. **Output schemas are DERIVED, never restated.**  Every role's schema is
    built from ``harness.py``'s ``_WORKER_WRITABLE`` table, which stays the one
    place the protocol's writable keys and their exact types are declared
@@ -52,12 +55,16 @@ from fsm_llm_agents.tools import ToolRegistry
 from .constants import ContextKeys, Defaults, HarnessStates
 from .hardening import coerce_worker_output, parse_role_output, retry
 from .harness import _WORKER_WRITABLE, RoleRequest, WorkerFactory
-from .rules import ROLE_BY_STATE
+from .rules import ROLE_BY_STATE, artifacts_writable_by
 from .tools import (
+    PLAN_READ_TOOLS,
+    PLAN_WRITE_TOOLS,
     READ_ONLY_TOOLS,
     SHELL_TOOLS,
     WRITE_TOOLS,
+    PlanMemory,
     Workspace,
+    build_plan_tools,
     build_workspace_tools,
 )
 
@@ -69,6 +76,7 @@ __all__ = [
     "build_role_prompt",
     "count_top_level_json_objects",
     "get_role_spec",
+    "held_tools",
 ]
 
 
@@ -178,13 +186,14 @@ def _build_output_schema(state: str, fields: Mapping[str, type]) -> type[BaseMod
 # Role specs
 # ---------------------------------------------------------------------------
 
-#: state -> the workspace tools that state's role may call.
+#: state -> the WORKSPACE tools that state's role may call.
 #:
-#: This table IS invariant I7 at the tool layer: EXECUTE is the only state whose
-#: role receives ``WRITE_TOOLS``, and REFLECT is the only one receiving
-#: ``SHELL_TOOLS`` (inert unless the caller enabled shell access) because
-#: verification is what needs to run a test command.  Every other role is
-#: strictly read-only.
+#: The workspace holds the code the protocol is changing, so EXECUTE is the only
+#: state whose role receives ``WRITE_TOOLS``, and REFLECT is the only one
+#: receiving ``SHELL_TOOLS`` (inert unless the caller enabled shell access)
+#: because verification is what needs to run a test command.  Every other role
+#: is strictly read-only *here* -- their writes go to the plan directory
+#: instead, through :data:`_PLAN_SCOPE_BY_STATE` below.
 _TOOL_SCOPE_BY_STATE: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         HarnessStates.EXPLORE: READ_ONLY_TOOLS,
@@ -195,6 +204,31 @@ _TOOL_SCOPE_BY_STATE: Mapping[str, tuple[str, ...]] = MappingProxyType(
         HarnessStates.CLOSE: READ_ONLY_TOOLS,
     }
 )
+
+
+def _plan_scope(role: str) -> tuple[str, ...]:
+    """Return the plan-directory tools *role* may call, DERIVED from ownership.
+
+    This function IS invariant I7 at the tool layer.  A role that owns at least
+    one artifact gets the write tools (which then refuse every artifact it does
+    not own); a role that owns nothing gets read tools only, so it cannot write
+    protocol memory at all.
+    """
+    # DECISION plan-2026-07-21T125237-191b2eb2/D-047
+    # DERIVED from `rules.OWNERSHIP`, never hand-listed. The defect this repairs
+    # (review C2) was precisely a hand-maintained scope table drifting from the
+    # ownership table it was supposed to encode: five of six roles were ORDERED
+    # by their operative rules to write artifacts `OWNERSHIP` grants them, while
+    # holding only read tools -- so the live spike's "workspace byte-identical"
+    # result was structural, not a model ceiling. Do NOT reintroduce a literal
+    # per-state plan-tool table "for clarity": clarity is what produced the bug.
+    # The ownership check itself lives in `PlanMemory.authorise`, so this
+    # coarse grant can never be more permissive than the table.
+    # See decisions.md D-047.
+    if artifacts_writable_by(role):
+        return PLAN_READ_TOOLS + PLAN_WRITE_TOOLS
+    return PLAN_READ_TOOLS
+
 
 #: state -> the agent loop budget for one dispatch.
 #:
@@ -227,6 +261,11 @@ class RoleSpec:
         pattern: The ``create_agent`` pattern name backing the role.
         tool_scope: Workspace tool names this role may call.  Enforced by
             construction -- the role's registry holds nothing else.
+        plan_tool_scope: Plan-directory tool names this role may call, derived
+            from ``rules.OWNERSHIP``.  Registered only when the dispatch knows
+            a plan directory (``RoleRequest.plan_dir``).
+        owned_artifacts: Every artifact ``OWNERSHIP`` lets this role write.
+            Empty means the role reports its result and writes nothing.
         output_schema: The pydantic model set as ``AgentConfig.output_schema``.
         expected_keys: Keys ``parse_role_output`` requires; identical to the
             schema's fields.
@@ -239,6 +278,8 @@ class RoleSpec:
     state: str
     pattern: str
     tool_scope: tuple[str, ...]
+    plan_tool_scope: tuple[str, ...]
+    owned_artifacts: tuple[str, ...]
     output_schema: type[BaseModel]
     expected_keys: tuple[str, ...]
     writable_keys: Mapping[str, type]
@@ -248,8 +289,9 @@ class RoleSpec:
 def _build_spec(state: str) -> RoleSpec:
     """Assemble the :class:`RoleSpec` for one state from the shared tables."""
     fields = _schema_fields(state)
+    role = ROLE_BY_STATE[state]
     return RoleSpec(
-        role=ROLE_BY_STATE[state],
+        role=role,
         state=state,
         # Every role uses the ReAct loop: it is the only pattern in
         # `create_agent`'s registry that both takes a tool registry and drives
@@ -258,6 +300,8 @@ def _build_spec(state: str) -> RoleSpec:
         # model that is minutes of wall clock for no protocol gain.
         pattern="react",
         tool_scope=_TOOL_SCOPE_BY_STATE[state],
+        plan_tool_scope=_plan_scope(role),
+        owned_artifacts=artifacts_writable_by(role),
         output_schema=_build_output_schema(state, fields),
         expected_keys=tuple(fields),
         writable_keys=MappingProxyType(dict(_WORKER_WRITABLE[state])),
@@ -363,6 +407,41 @@ def count_top_level_json_objects(text: Any) -> int:
 # ---------------------------------------------------------------------------
 
 
+def held_tools(request: RoleRequest, spec: RoleSpec) -> tuple[str, ...]:
+    """Return the exact tool names this dispatch will hold.
+
+    Interface contract (shared helper, 2 call sites: the default worker factory
+    registers exactly these, and :func:`build_role_prompt` names exactly these):
+        - Parameters: the driver's ``RoleRequest`` and the matching
+          :class:`RoleSpec`.
+        - Returns workspace tools plus -- only when ``request.plan_dir`` is set
+          -- the role's plan-directory tools.
+        - Never raises; performs no I/O.
+
+    One function so the registry and the prompt cannot disagree.  The prompt
+    naming a tool the role does not hold is the review-C2 defect in its other
+    direction, and it is just as unexecutable.
+    """
+    if request.plan_dir is None:
+        return tuple(spec.tool_scope)
+    return (*spec.tool_scope, *spec.plan_tool_scope)
+
+
+def _writes_line(request: RoleRequest, spec: RoleSpec) -> str:
+    """Render what this dispatch may write, or that it may write nothing."""
+    if request.plan_dir is not None and spec.owned_artifacts:
+        return (
+            "YOU MAY WRITE these protocol files, and no others: "
+            f"{', '.join(spec.owned_artifacts)}. "
+            "Plan-file paths are relative to the plan directory; a write to "
+            "anything else is refused."
+        )
+    return (
+        "YOU MAY WRITE no protocol file. Report your result in the JSON "
+        "object below; the driver records it."
+    )
+
+
 def _output_line(spec: RoleSpec) -> str:
     """Render the one-object output instruction for *spec*."""
     shape = ", ".join(
@@ -405,7 +484,9 @@ def build_role_prompt(request: RoleRequest, spec: RoleSpec) -> str:
         - Parameters: the driver's ``RoleRequest`` and the matching
           :class:`RoleSpec`.
         - Returns a single prompt string: role, goal, position, gate, rules,
-          bounded context, tools, and the one-JSON-object output instruction.
+          bounded context, the tools this dispatch actually holds
+          (:func:`held_tools`), the artifacts it may write, and the
+          one-JSON-object output instruction.
         - Never raises.
 
     Short and imperative on purpose.  Every line here is read by a 4B model on
@@ -413,7 +494,9 @@ def build_role_prompt(request: RoleRequest, spec: RoleSpec) -> str:
     """
     rules = "\n".join(f"- {rule}" for rule in request.operative_rules)
     snapshot = _context_snapshot(request.context)
-    tools = ", ".join(spec.tool_scope) or "none"
+    names = held_tools(request, spec)
+    tools = ", ".join(names) or "none"
+    can_write = any(name in WRITE_TOOLS or name in PLAN_WRITE_TOOLS for name in names)
 
     sections = [
         f"You are the {request.role} for the {request.state.upper()} phase "
@@ -429,10 +512,15 @@ def build_role_prompt(request: RoleRequest, spec: RoleSpec) -> str:
     ]
     if snapshot:
         sections.append(f"CURRENT STATE:\n{snapshot}")
+    # The verb is DERIVED from the tools actually registered for this dispatch.
+    # Hardcoding "inspect and change" is what told five read-only roles to write
+    # files they had no tool for (review C2); a prompt that describes capability
+    # the role does not have is an unexecutable instruction, not encouragement.
+    verb = "inspect and change" if can_write else "inspect"
     sections.append(
-        f"TOOLS: {tools}. Use them to inspect and change real files; "
-        "do not guess file contents."
+        f"TOOLS: {tools}. Use them to {verb} real files; do not guess file contents."
     )
+    sections.append(_writes_line(request, spec))
     sections.append(_output_line(spec))
     return "\n\n".join(sections)
 
@@ -508,7 +596,12 @@ def build_default_worker_factory(
     """Build the stock ``worker_factory`` for :class:`~fsm_llm_harness.HarnessAgent`.
 
     Interface contract:
-        - ``workspace``: the confined root every role's tools act on.
+        - ``workspace``: the confined root the CODE-editing tools act on.  The
+            protocol's own artifacts live under a second root, the plan
+            directory, which arrives per dispatch as ``RoleRequest.plan_dir``
+            (driver-owned) and is confined and ownership-scoped by
+            :class:`~fsm_llm_harness.tools.PlanMemory`.  A dispatch without a
+            plan directory holds no plan-file tool at all.
         - ``model`` / ``temperature`` / ``max_tokens`` / ``timeout_seconds``:
             the per-dispatch ``AgentConfig``.
         - ``retry_attempts``: total attempts per dispatch, retried only on
@@ -535,6 +628,13 @@ def build_default_worker_factory(
 
         ws = Workspace("/tmp/scratch")
         agent = HarnessAgent(worker_factory=build_default_worker_factory(ws))
+        agent.run(
+            "add a retry to the uploader",
+            initial_context={
+                ContextKeys.PLAN_DIR: "plans/plan-2026-07-21T125237-191b2eb2",
+                ContextKeys.WORKSPACE_ROOT: "/tmp/scratch",
+            },
+        )
     """
     build_agent = agent_builder or _default_agent_builder(
         native_function_calling=native_function_calling
@@ -558,6 +658,21 @@ def build_default_worker_factory(
     def worker(request: RoleRequest) -> AgentResult:
         spec = get_role_spec(request.state)
         registry = build_workspace_tools(workspace, allowed=spec.tool_scope)
+        if request.plan_dir is None:
+            logger.warning(
+                f"{spec.role} dispatched without a plan directory; it holds no "
+                "plan-file tools and can write no protocol artifact. Pass "
+                f"initial_context={{'{ContextKeys.PLAN_DIR}': ...}} to run()."
+            )
+        else:
+            # One PlanMemory per dispatch: it is scoped to exactly this role,
+            # so the ownership refusal is a property of the tool the role
+            # holds, not a check the role could route around.
+            build_plan_tools(
+                PlanMemory(request.plan_dir, role=spec.role),
+                allowed=spec.plan_tool_scope,
+                registry=registry,
+            )
         config = AgentConfig(
             model=model,
             max_iterations=spec.max_iterations,

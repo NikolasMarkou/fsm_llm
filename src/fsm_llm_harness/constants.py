@@ -209,15 +209,26 @@ DRIVER_OWNED_SEEDS: Mapping[str, Any] = MappingProxyType(
 
 #: Driver-owned keys whose default is ABSENT rather than falsy.
 #:
-#: These three are free prose the run REPORTS (``halt_reason`` is the string the
-#: user is shown as the outcome), not gate variables, and "no halt reason yet"
-#: is meaningfully different from an empty one. They are guarded anyway: CLOSE
-#: has no transitions, so its extraction takes the bulk-fallback branch and an
-#: unguarded ``halt_reason`` would be LLM-authored in production (review N4).
+#: The first three are free prose the run REPORTS (``halt_reason`` is the string
+#: the user is shown as the outcome), not gate variables, and "no halt reason
+#: yet" is meaningfully different from an empty one. They are guarded anyway:
+#: CLOSE has no transitions, so its extraction takes the bulk-fallback branch
+#: and an unguarded ``halt_reason`` would be LLM-authored in production
+#: (review N4).
+#:
+#: The last two are the filesystem-as-memory ROOTS.  They have no fixed falsy
+#: value (they are per-run paths supplied by the caller through
+#: ``run(initial_context=...)``), so they cannot live in ``DRIVER_OWNED_SEEDS``
+#: -- but they must be driver-owned all the same: ``plan_dir`` selects the
+#: directory a role's write tools are confined to, and an LLM-invented value
+#: would point the protocol's own memory somewhere else.  ``run()`` adopts the
+#: caller's values into the driver-owned table; absent means "no plan tools".
 DRIVER_OWNED_UNSET: tuple[str, ...] = (
     ContextKeys.PIVOT_REASON,
     ContextKeys.HALT_REASON,
     ContextKeys.LAST_GATE_SLUG,
+    ContextKeys.PLAN_DIR,
+    ContextKeys.WORKSPACE_ROOT,
 )
 
 

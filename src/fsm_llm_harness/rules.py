@@ -87,7 +87,25 @@ ROLE_BY_STATE: Mapping[str, str] = MappingProxyType(
 #:
 #: ``Role.VERIFIER`` appears nowhere on purpose: a verifier RETURNS results and
 #: never writes an artifact -- the driver merges them into ``verification.md``.
-#: Step 9 enforces this table; do not encode ownership anywhere else.
+#: Do not encode ownership anywhere else.
+#
+# DECISION plan-2026-07-21T125237-191b2eb2/D-048
+# THIS TABLE IS THE OWNERSHIP MODEL; plan.md's invariant I7 is a summary of it,
+# and where the two disagreed (review N5) the table won and the prose was
+# corrected -- not the other way round. Two entries look like transcription
+# slips and are not:
+#   1. FINDINGS_DIR is (EXPLORER, REVIEWER), not (EXPLORER,). Do NOT drop
+#      REVIEWER "to match I7's wording": PIVOT's own operative rules order the
+#      reviewer to correct stale findings in place with [CORRECTED iter-N].
+#      Removing it recreates exactly the review-C2 defect this table now closes
+#      -- a role ordered to write a file it holds no tool for.
+#   2. DECISIONS has FOUR owners. Do NOT reduce it to one: the writes are
+#      disjoint and sequenced by the driver (one appended entry per phase), and
+#      the strict `## D-NNN | PHASE | date` header records which phase wrote
+#      each one, so a single-writer rule here would silence three of the four
+#      phases that must log a trade-off.
+# `PlanMemory.authorise` reads this table directly, so an edit here changes what
+# a live role can write. See decisions.md D-048.
 OWNERSHIP: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         ArtifactNames.STATE: (Role.ORCHESTRATOR,),
@@ -115,12 +133,19 @@ OWNERSHIP: Mapping[str, tuple[str, ...]] = MappingProxyType(
 )
 
 
-def _artifacts_writable_by(role: str) -> tuple[str, ...]:
+def artifacts_writable_by(role: str) -> tuple[str, ...]:
     """Return every artifact ``role`` may write, in ``OWNERSHIP`` order.
 
-    Sole reader of :data:`OWNERSHIP` at import time, so a state's
-    ``owned_artifacts`` is always a projection of the ownership table rather
-    than a second hand-maintained copy of it.
+    Interface contract (shared helper, 3 call sites: each state's
+    ``owned_artifacts`` below, ``roles.py``'s plan tool-scope derivation, and
+    ``roles.py``'s prompt text):
+        - Parameter: a ``Role`` member.  An unknown role yields ``()``.
+        - Returns artifact names in :data:`OWNERSHIP` order.
+        - Never raises; performs no I/O.
+
+    Sole projection of :data:`OWNERSHIP`, so tool scope, prompt text and a
+    state's ``owned_artifacts`` are the same fact read three times rather than
+    three hand-maintained copies of it.
     """
     return tuple(name for name, owners in OWNERSHIP.items() if role in owners)
 
@@ -222,7 +247,7 @@ _EXPLORE = StateRules(
         "State the current findings count, the topics covered so far, and the "
         "single next question you will investigate. Be terse and factual."
     ),
-    owned_artifacts=_artifacts_writable_by(ROLE_BY_STATE[HarnessStates.EXPLORE]),
+    owned_artifacts=artifacts_writable_by(ROLE_BY_STATE[HarnessStates.EXPLORE]),
     gate_summary=(
         f"HARD: leave for PLAN only when {ContextKeys.FINDINGS_COUNT} >= "
         f"{Defaults.FINDINGS_THRESHOLD}."
@@ -271,7 +296,7 @@ _PLAN = StateRules(
         "verification strategy, the failure modes and the assumptions. End by "
         "asking for an explicit approve or revise decision."
     ),
-    owned_artifacts=_artifacts_writable_by(ROLE_BY_STATE[HarnessStates.PLAN]),
+    owned_artifacts=artifacts_writable_by(ROLE_BY_STATE[HarnessStates.PLAN]),
     gate_summary=(
         f"HARD: leave for EXECUTE only when {ContextKeys.PLAN_APPROVED} is "
         f"true AND {ContextKeys.ITERATION} < {Defaults.ITERATION_HARD_CAP}."
@@ -322,7 +347,7 @@ _EXECUTE = StateRules(
         "modified, the commit, any surprises, and the next step in one line "
         "each. No narrative."
     ),
-    owned_artifacts=_artifacts_writable_by(ROLE_BY_STATE[HarnessStates.EXECUTE]),
+    owned_artifacts=artifacts_writable_by(ROLE_BY_STATE[HarnessStates.EXECUTE]),
     gate_summary=(
         f"Leave for REFLECT when {ContextKeys.EXECUTE_COMPLETE} is true "
         "(step done, failed, surprising, or leash-capped)."
@@ -344,15 +369,16 @@ _REFLECT = StateRules(
         f"{ArtifactNames.VERIFICATION}, {ArtifactNames.FINDINGS_INDEX}, the "
         f"checkpoints, {ArtifactNames.DECISIONS} and "
         f"{ArtifactNames.CHANGELOG} before evaluating anything.",
-        "Run every check in the Verification Strategy and record PASS or FAIL "
-        "with the evidence that produced it.",
+        "Run every check in the Verification Strategy and REPORT PASS or FAIL "
+        f"with the evidence; you write nothing -- the driver merges your reply "
+        f"into {ArtifactNames.VERIFICATION}.",
         "Re-run tests that passed before this iteration; any regression "
         "blocks closing.",
         "Compare the files actually changed against the planned file list and "
         "justify or revert the drift.",
-        "Write down what you did not verify and why; absence of evidence is "
+        "Report what you did not verify and why; absence of evidence is "
         "not evidence of absence.",
-        "On failure, record the immediate cause, the contributing factor, the "
+        "On failure, report the immediate cause, the contributing factor, the "
         "defense that should have caught it, and the prevention.",
         "Run the simplification checks against the written criteria, not "
         "against memory.",
@@ -379,7 +405,7 @@ _REFLECT = StateRules(
         "verification results, the issues found, and one recommendation of "
         "close, pivot, explore or execute. Then wait for confirmation."
     ),
-    owned_artifacts=_artifacts_writable_by(ROLE_BY_STATE[HarnessStates.REFLECT]),
+    owned_artifacts=artifacts_writable_by(ROLE_BY_STATE[HarnessStates.REFLECT]),
     gate_summary=(
         f"HARD to CLOSE: {ContextKeys.CLOSE_CONFIRMED} AND "
         f"{ContextKeys.ALL_CRITERIA_PASS}. HARD back to EXECUTE: "
@@ -407,12 +433,12 @@ _PIVOT = StateRules(
         "latest one.",
         "Ask which constraint that forced the failed approach no longer "
         "holds, and log every ghost constraint found.",
-        "Correct stale findings in place with [CORRECTED iter-N]; append, "
-        "never delete.",
-        f"Log the pivot in {ArtifactNames.DECISIONS} with a complexity "
-        "assessment and an 'X at the cost of Y' trade-off.",
-        "Reset the fix-attempt counter so the leash does not carry into the "
-        "next EXECUTE.",
+        f"Correct stale {ArtifactNames.FINDINGS_DIR}/ files in place with "
+        "[CORRECTED iter-N]; append, never delete.",
+        f"REPORT the pivot for {ArtifactNames.DECISIONS} with a complexity "
+        "assessment and an 'X at the cost of Y' trade-off; the driver logs it.",
+        "Do not touch the fix-attempt counter; the driver resets it so the "
+        "leash does not carry into the next EXECUTE.",
         "Offer one to three candidate directions, each framed as a trade-off, "
         "and name the checkpoints available.",
         "Get an explicit direction from the user before returning to PLAN.",
@@ -430,7 +456,7 @@ _PIVOT = StateRules(
         "constraints surfaced, and one to three candidate directions framed "
         "as trade-offs. Ask which direction to take."
     ),
-    owned_artifacts=_artifacts_writable_by(ROLE_BY_STATE[HarnessStates.PIVOT]),
+    owned_artifacts=artifacts_writable_by(ROLE_BY_STATE[HarnessStates.PIVOT]),
     gate_summary=(
         f"Return to PLAN when {ContextKeys.PIVOT_RESOLVED} is true "
         "(direction chosen and decision logged)."
@@ -479,7 +505,7 @@ _CLOSE = StateRules(
         "Report the outcome, the iterations used, the key decisions, the "
         "files changed and the lessons recorded. One line each."
     ),
-    owned_artifacts=_artifacts_writable_by(ROLE_BY_STATE[HarnessStates.CLOSE]),
+    owned_artifacts=artifacts_writable_by(ROLE_BY_STATE[HarnessStates.CLOSE]),
     gate_summary="Terminal: CLOSE has no outbound transition.",
 )
 

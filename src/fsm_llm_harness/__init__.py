@@ -65,15 +65,29 @@ from .roles import (
     build_role_prompt,
     count_top_level_json_objects,
     get_role_spec,
+    held_tools,
 )
-from .rules import OWNERSHIP, ROLE_BY_STATE, RULES, StateRules, get_rules
+from .rules import (
+    OWNERSHIP,
+    ROLE_BY_STATE,
+    RULES,
+    StateRules,
+    artifacts_writable_by,
+    get_rules,
+)
 from .tools import (
     COMMAND_ALLOWLIST,
+    PLAN_READ_TOOLS,
+    PLAN_WRITE_TOOLS,
     READ_ONLY_TOOLS,
     SHELL_TOOLS,
+    VERIFICATION_COMMANDS,
     WRITE_TOOLS,
+    PlanMemory,
+    PlanTools,
     Workspace,
     WorkspaceTools,
+    build_plan_tools,
     build_workspace_tools,
 )
 
@@ -125,6 +139,7 @@ __all__ = [
     "ROLE_BY_STATE",
     "RULES",
     "StateRules",
+    "artifacts_writable_by",
     "get_rules",
     # Roles and the default worker factory
     "ROLE_SPECS",
@@ -134,12 +149,20 @@ __all__ = [
     "build_role_prompt",
     "count_top_level_json_objects",
     "get_role_spec",
+    "held_tools",
     # Confined workspace tools
     "COMMAND_ALLOWLIST",
     "READ_ONLY_TOOLS",
     "SHELL_TOOLS",
+    "VERIFICATION_COMMANDS",
     "WRITE_TOOLS",
     "Workspace",
     "WorkspaceTools",
     "build_workspace_tools",
+    # Confined, ownership-scoped plan directory
+    "PLAN_READ_TOOLS",
+    "PLAN_WRITE_TOOLS",
+    "PlanMemory",
+    "PlanTools",
+    "build_plan_tools",
 ]
