@@ -44,14 +44,16 @@ import re
 import shlex
 import shutil
 import subprocess
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
+from types import MappingProxyType
 
 from fsm_llm.logging import logger
 from fsm_llm_agents.definitions import ToolResult
 from fsm_llm_agents.tools import ToolRegistry, tool
 
-from .constants import ArtifactNames
+from .constants import ArtifactNames, ContextKeys, Defaults
 from .exceptions import (
     HarnessConfinementError,
     HarnessError,
@@ -61,6 +63,7 @@ from .rules import OWNERSHIP
 
 __all__ = [
     "COMMAND_ALLOWLIST",
+    "DISK_DERIVED_COUNTS",
     "PLAN_READ_TOOLS",
     "PLAN_WRITE_TOOLS",
     "READ_ONLY_TOOLS",
@@ -73,6 +76,9 @@ __all__ = [
     "WorkspaceTools",
     "build_plan_tools",
     "build_workspace_tools",
+    "count_gate_files",
+    "gate_files",
+    "has_bytes",
 ]
 
 
@@ -277,6 +283,57 @@ _PER_PLAN_FILES: frozenset[str] = frozenset(
 _PER_PLAN_DIRS: frozenset[str] = frozenset(
     (ArtifactNames.FINDINGS_DIR, ArtifactNames.CHECKPOINTS_DIR)
 )
+
+#: Gate keys the protocol DERIVES from the filesystem instead of believing:
+#: context key -> (the plan-directory subdirectory whose non-empty ``.md`` files
+#: are counted, the threshold that state's exit gate applies to the count).
+#:
+#: This table lives HERE, one import below the confinement chokepoint, because
+#: two very different callers must read the same fact: ``roles.py``'s worker
+#: factory, which replaces the worker's self-reported integer with the derived
+#: one (D-015), and :func:`build_plan_tools`, which reports the derived one back
+#: to the model in the write tool's own result (D-027).  A second table would be
+#: a gate and a progress report that can disagree.
+DISK_DERIVED_COUNTS: Mapping[str, tuple[str, int]] = MappingProxyType(
+    {
+        ContextKeys.FINDINGS_COUNT: (
+            ArtifactNames.FINDINGS_DIR,
+            Defaults.FINDINGS_THRESHOLD,
+        )
+    }
+)
+
+#: A tool -> the tool performing the SAME operation in the OTHER confined root.
+#:
+#: Used only to make a FAILED call's message corrective (D-027 part B); nothing
+#: is ever re-routed through it.  ``delete_file``, ``grep_files`` and
+#: ``run_command`` are absent because they have no counterpart: naming a tool
+#: that does not exist is worse than saying nothing.
+_COUNTERPART_TOOL: Mapping[str, str] = MappingProxyType(
+    {
+        WorkspaceTools.READ_FILE: PlanTools.READ_PLAN_FILE,
+        WorkspaceTools.WRITE_FILE: PlanTools.WRITE_PLAN_FILE,
+        WorkspaceTools.APPEND_FILE: PlanTools.APPEND_PLAN_FILE,
+        WorkspaceTools.LIST_DIR: PlanTools.LIST_PLAN_DIR,
+        WorkspaceTools.PATH_EXISTS: PlanTools.PLAN_PATH_EXISTS,
+        PlanTools.READ_PLAN_FILE: WorkspaceTools.READ_FILE,
+        PlanTools.WRITE_PLAN_FILE: WorkspaceTools.WRITE_FILE,
+        PlanTools.APPEND_PLAN_FILE: WorkspaceTools.APPEND_FILE,
+        PlanTools.LIST_PLAN_DIR: WorkspaceTools.LIST_DIR,
+        PlanTools.PLAN_PATH_EXISTS: WorkspaceTools.PATH_EXISTS,
+    }
+)
+
+#: What a write did to a target that ALREADY existed, per action.
+_REPEAT_PHRASE: Mapping[str, str] = MappingProxyType(
+    {
+        "wrote": "OVERWROTE an existing file",
+        "appended to": "extended an existing file",
+    }
+)
+
+#: A leading path component that is a plan directory's own id.
+_PLAN_ID_RE = re.compile(r"^plan[-_]\d{4}-\d{2}-\d{2}")
 
 
 def _truncate(text: str, limit: int, unit: str = "characters") -> str:
@@ -938,6 +995,250 @@ class PlanMemory:
 
 
 # ---------------------------------------------------------------------------
+# Feedback: what a write CHANGED, and what the gate now sees
+# ---------------------------------------------------------------------------
+
+
+def has_bytes(reader: Callable[[str], str], path: str) -> bool:
+    """Whether *path* carries non-whitespace content, read through its own root.
+
+    Interface contract (shared predicate, 2 call sites: :func:`gate_files` here
+    and ``roles.py``'s ``_verified_writes``):
+        - ``reader``: a CONFINED reader -- :meth:`Workspace.read_text` or
+          :meth:`PlanMemory.read_text`.  Passing ``Path.read_text`` would bypass
+          the chokepoint, which is why the parameter is the bound method and not
+          a root.
+        - Returns ``False`` for a missing file, a refused path, an unreadable
+          file and an empty one.  Every failure means "not verified"; none of
+          them means "assume it worked".
+        - Never raises.
+    """
+    try:
+        return bool(reader(path).strip())
+    except Exception:  # missing / refused / undecodable -- all fail closed
+        return False
+
+
+def gate_files(memory: PlanMemory, directory: str) -> tuple[str, ...]:
+    """The non-empty ``.md`` files in one plan-directory subdirectory.
+
+    Interface contract (the ONE derivation, 3 call sites: :func:`count_gate_files`
+    for the gate value ``roles.py`` puts into context, and :func:`_gate_clause`
+    for the two tool results that report it back):
+        - ``memory``: the ROLE-SCOPED plan memory the write tools wrote through,
+          so the set is read back over exactly the confined root that produced
+          it.
+        - Returns the file NAMES, sorted, for a directory that exists; an empty
+          tuple for one that does not -- "none", never "unknown".
+        - Never raises.
+
+    A caller that wants this set or its size must call this function: a second
+    count is a gate and a progress report that can disagree, which is the
+    fail-open defect D-015 closed.
+    """
+    try:
+        entries = memory.list_dir(directory)
+    except Exception:  # the directory does not exist yet: zero, not unknown
+        return ()
+    return tuple(
+        sorted(
+            name
+            for name in entries
+            if name.endswith(".md")
+            and has_bytes(memory.read_text, f"{directory}/{name}")
+        )
+    )
+
+
+def count_gate_files(memory: PlanMemory, directory: str) -> int:
+    """How many non-empty ``.md`` files one plan-directory subdirectory holds."""
+    return len(gate_files(memory, directory))
+
+
+def _gate_clause(memory: PlanMemory, artifact: str | None, *, verb: str) -> str:
+    """Render the derived, gate-relevant state of *artifact*, or ``""``.
+
+    ``verb`` is the whole of what differs between the callers: a write says
+    "now holds" or "still holds" (the repeat-vs-new signal), a listing just
+    says "holds".
+    """
+    for directory, threshold in DISK_DERIVED_COUNTS.values():
+        if artifact != directory:
+            continue
+        names = gate_files(memory, directory)
+        # The NAMES are part of the observation, not decoration: the measured
+        # failure is one topic written 3-11 times, and a bare count leaves the
+        # model to remember which topics it already covered.
+        listed = f": {', '.join(names)}" if names else ""
+        return (
+            f" {directory}/ {verb} {len(names)} of the {threshold} distinct "
+            f"non-empty files the exit gate requires{listed}."
+        )
+    return ""
+
+
+def _gate_state(memory: PlanMemory, path: str, *, existed: bool) -> str:
+    """Report the derived, gate-relevant count the WRITTEN *path* contributes to."""
+    try:
+        artifact = memory.artifact_for(path)
+    except Exception:  # a refused path reports its refusal, not a count
+        return ""
+    return _gate_clause(
+        memory, artifact, verb="still holds" if existed else "now holds"
+    )
+
+
+def _owned_empty_directory(memory: PlanMemory, path: str) -> bool:
+    """Whether *path* names a per-plan directory the protocol owns but that is
+    not on disk yet.
+
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-027
+    # `findings/` and `checkpoints/` are artifact names the OWNERSHIP table
+    # defines, so "the directory is not there" is a fact about the filesystem
+    # and not about the protocol: `gate_files` has always answered "none, not
+    # unknown" for exactly this case. Measured, step-22 attempt 1: the routing
+    # hint correctly moved the explorer off `list_dir("findings/")` and onto
+    # `list_plan_dir("findings/")` -- which then answered ENOENT six times in a
+    # row, and the run wrote nothing. That ENOENT is the same false belief
+    # D-013 recorded from the other side ("cannot write findings without the
+    # directory existing"), and `PlanMemory.write_text` creates parents, so it
+    # was never true.
+    # Do NOT widen this to every missing plan path: a missing `plan.md` really
+    # is missing, and answering "(empty)" for an arbitrary path would make the
+    # tool lie. Only a path whose LAST component is a per-plan directory
+    # artifact qualifies, and only `list_plan_dir` uses it -- reads and writes
+    # are untouched.
+    # See decisions.md D-027.
+    """
+    try:
+        if memory.artifact_for(path) not in _PER_PLAN_DIRS:
+            return False
+        return Path(memory.locate(path)).name == memory.artifact_for(path)
+    except Exception:
+        return False
+
+
+def _write_result(
+    action: str,
+    target: str,
+    content: str,
+    *,
+    existed: bool,
+    gate: str = "",
+) -> str:
+    """Render a write tool's result as an OBSERVATION of what changed.
+
+    Interface contract (shared renderer, 4 call sites: the two workspace write
+    tools and the two plan write tools):
+        - ``action``: a key of :data:`_REPEAT_PHRASE` -- the verb the result
+          opens with.
+        - ``target``: whatever the confined writer returned (the path it
+          actually wrote, which may differ from the path the model asked for).
+        - ``existed``: whether the target was there BEFORE this call.
+        - ``gate``: an already-rendered clause from :func:`_gate_state`, or
+          ``""``.
+        - Returns one short line.  Never raises.
+    """
+    novelty = _REPEAT_PHRASE[action] if existed else "NEW file"
+    return f"{action} {target} ({len(content)} chars); {novelty}.{gate}"
+
+
+def _addresses_plan_memory(path: str) -> bool:
+    """Whether *path* names something that lives in the PLAN directory."""
+    candidate = path.strip()
+    if not candidate:
+        return False
+    parts = [part for part in Path(candidate).parts if part not in ("/", "\\")]
+    if not parts:
+        return False
+    head = parts[0]
+    return (
+        head in _CROSS_PLAN_FILES
+        or head in _PER_PLAN_FILES
+        or head in _PER_PLAN_DIRS
+        or head == "plan"
+        or bool(_PLAN_ID_RE.match(head))
+    )
+
+
+def _routing_hint(path: str, *, tool_name: str, memory: PlanMemory | None) -> str:
+    """Name the tool that owns *path*'s root, when this call aimed at the other.
+
+    ``memory`` is the plan tier for a plan tool and ``None`` for a workspace
+    tool -- which is also what selects the direction of the test.
+    """
+    counterpart = _COUNTERPART_TOOL.get(tool_name)
+    if counterpart is None:
+        return ""
+    if path.strip() in ("", ".", "./"):
+        # "the current directory" is not a wrong-root guess in either root.
+        return ""
+    if memory is None:
+        if not _addresses_plan_memory(path):
+            return ""
+        return (
+            "That path belongs to the plan directory, not the workspace: "
+            f"use `{counterpart}`."
+        )
+    try:
+        if memory.artifact_for(path) is not None:
+            return ""
+    except Exception:  # unclassifiable: it is not a protocol artifact either
+        pass
+    return (
+        "That path is not a protocol artifact, so it belongs to the workspace, "
+        f"not the plan directory: use `{counterpart}`."
+    )
+
+
+@contextmanager
+def _corrective(
+    path: str,
+    *,
+    tool_name: str,
+    memory: PlanMemory | None = None,
+) -> Iterator[None]:
+    """Add the counterpart tool's name to a FAILED cross-root call's message.
+
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-027
+    # This ANNOTATES a failure; it must never repair one. The step-5 spike
+    # measured 54 of 298 tool calls (18%) aiming a workspace tool at a plan
+    # artifact or the reverse -- `read_file("state.md")`,
+    # `write_plan_file("uploader.py")` -- with ZERO hallucinated tool NAMES, so
+    # the model knows the tools and mis-picks the ROOT. Three things here are
+    # load-bearing and must not be "simplified":
+    #   1. Do NOT re-route the call to the counterpart tool. Confinement and
+    #      ownership are the two properties an adversarial review attacked at 43
+    #      shapes with zero escapes; a layer that silently retries the other
+    #      root turns "the EXPLORER may not write plan.md" into "the EXPLORER
+    #      may not write plan.md HERE".
+    #   2. Do NOT convert the failure into a successful ToolResult. A harness
+    #      refusal keeps its own CLASS and every attribute (`.path`, `.role`,
+    #      `.artifact`): its message is enriched IN PLACE, so every existing
+    #      assertion about the refusal survives untouched. `ToolRegistry.execute`
+    #      renders `str(exc)`, which is the only thing the model ever sees.
+    #      An `OSError` cannot be enriched that way -- its `__str__` is built
+    #      from errno/strerror/filename and ignores `args` -- and ENOENT from a
+    #      workspace read of `state.md` is the single most common shape of this
+    #      error, so that one branch re-raises as a `HarnessError` chained to
+    #      the original rather than dropping the hint.
+    #   3. Only a call that ALREADY failed is annotated. A pre-check would have
+    #      to refuse `plan.md` in a workspace that legitimately contains one.
+    # See decisions.md D-027.
+    """
+    try:
+        yield
+    except Exception as exc:
+        hint = _routing_hint(path, tool_name=tool_name, memory=memory)
+        if not hint:
+            raise
+        if not isinstance(exc, OSError) and exc.args and isinstance(exc.args[0], str):
+            exc.args = (f"{exc.args[0]}. {hint}", *exc.args[1:])
+            raise
+        raise HarnessError(f"{exc}. {hint}") from exc
+
+
+# ---------------------------------------------------------------------------
 # Tool registration
 # ---------------------------------------------------------------------------
 
@@ -969,17 +1270,24 @@ def build_workspace_tools(
     @tool
     def read_file(path: str) -> str:
         """Read a text file from the workspace. Path is relative to the root."""
-        return workspace.read_text(path)
+        with _corrective(path, tool_name=WorkspaceTools.READ_FILE):
+            return workspace.read_text(path)
 
     @tool
     def write_file(path: str, content: str) -> str:
         """Write a text file in the workspace, replacing it if it exists."""
-        return f"wrote {workspace.write_text(path, content)}"
+        with _corrective(path, tool_name=WorkspaceTools.WRITE_FILE):
+            existed = workspace.exists(path)
+            target = workspace.write_text(path, content)
+        return _write_result("wrote", target, content, existed=existed)
 
     @tool
     def append_file(path: str, content: str) -> str:
         """Append text to a file in the workspace, creating it if absent."""
-        return f"appended to {workspace.append_text(path, content)}"
+        with _corrective(path, tool_name=WorkspaceTools.APPEND_FILE):
+            existed = workspace.exists(path)
+            target = workspace.append_text(path, content)
+        return _write_result("appended to", target, content, existed=existed)
 
     @tool
     def delete_file(path: str) -> str:
@@ -989,12 +1297,14 @@ def build_workspace_tools(
     @tool
     def list_dir(path: str = ".") -> str:
         """List the entries of a workspace directory. Directories end with /."""
-        return "\n".join(workspace.list_dir(path)) or "(empty)"
+        with _corrective(path, tool_name=WorkspaceTools.LIST_DIR):
+            return "\n".join(workspace.list_dir(path)) or "(empty)"
 
     @tool
     def path_exists(path: str) -> str:
         """Report whether a workspace path exists."""
-        return "yes" if workspace.exists(path) else "no"
+        with _corrective(path, tool_name=WorkspaceTools.PATH_EXISTS):
+            return "yes" if workspace.exists(path) else "no"
 
     @tool
     def grep_files(pattern: str, path: str = ".") -> str:
@@ -1062,27 +1372,70 @@ def build_plan_tools(
     @tool
     def read_plan_file(path: str) -> str:
         """Read a protocol artifact. Paths are relative to the plan directory."""
-        return memory.read_text(path)
+        with _corrective(path, tool_name=PlanTools.READ_PLAN_FILE, memory=memory):
+            return memory.read_text(path)
 
     @tool
     def write_plan_file(path: str, content: str) -> str:
         """Write a protocol artifact you own, replacing it if it exists."""
-        return f"wrote {memory.write_text(path, content)}"
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-027
+        # The result reports what the write CHANGED and what the exit gate now
+        # sees, because from inside the agent loop a repeat write to the same
+        # path was indistinguishable from progress. Measured, step-5 spike: the
+        # explorer called this tool with the SAME path 3-11 times in one
+        # dispatch (`findings/uploader_state.md` x11), never named a second
+        # topic, and produced 3 distinct findings files in 0 of 10 runs -- while
+        # the tool answered every call with a bare "wrote <path>".
+        # Two things must not be "tidied":
+        #   1. The count comes from `count_gate_files`, the SAME derivation
+        #      `roles.py` puts into the gate key (D-015). Do NOT compute a
+        #      second count here, and do NOT cache one across calls: a progress
+        #      report that can disagree with the gate is the fail-open defect
+        #      this protocol already fixed once.
+        #   2. `existed` is read BEFORE the write and rendered explicitly. The
+        #      whole point is that a REPEAT is visibly different from a NEW
+        #      file; a result that only says "wrote" carries the same
+        #      information for both, which is the signal the model lacked.
+        # Do NOT answer this with prompt wording instead. The 3-file
+        # requirement is already stated twice in the system message, and
+        # wording has now failed three independent times (D-013's
+        # anti-fabrication clause, step 21's `writesfix` arm, the step-5 stop-
+        # rule ablation, which made writes WORSE).
+        # See decisions.md D-027.
+        with _corrective(path, tool_name=PlanTools.WRITE_PLAN_FILE, memory=memory):
+            existed = memory.exists(path)
+            target = memory.write_text(path, content)
+            gate = _gate_state(memory, path, existed=existed)
+        return _write_result("wrote", target, content, existed=existed, gate=gate)
 
     @tool
     def append_plan_file(path: str, content: str) -> str:
         """Append to a protocol artifact you own, creating it if absent."""
-        return f"appended to {memory.append_text(path, content)}"
+        with _corrective(path, tool_name=PlanTools.APPEND_PLAN_FILE, memory=memory):
+            existed = memory.exists(path)
+            target = memory.append_text(path, content)
+            gate = _gate_state(memory, path, existed=existed)
+        return _write_result("appended to", target, content, existed=existed, gate=gate)
 
     @tool
     def list_plan_dir(path: str = ".") -> str:
         """List a plan-directory listing. Directories end with /."""
-        return "\n".join(memory.list_dir(path)) or "(empty)"
+        with _corrective(path, tool_name=PlanTools.LIST_PLAN_DIR, memory=memory):
+            try:
+                entries = memory.list_dir(path)
+            except FileNotFoundError:
+                if not _owned_empty_directory(memory, path):
+                    raise
+                entries = []  # an owned directory nobody has written to yet
+            listing = "\n".join(entries) or "(empty)"
+            gate = _gate_clause(memory, memory.artifact_for(path), verb="holds")
+        return f"{listing}\n{gate.strip()}" if gate else listing
 
     @tool
     def plan_path_exists(path: str) -> str:
         """Report whether a plan-directory path exists."""
-        return "yes" if memory.exists(path) else "no"
+        with _corrective(path, tool_name=PlanTools.PLAN_PATH_EXISTS, memory=memory):
+            return "yes" if memory.exists(path) else "no"
 
     candidates: Mapping[str, object] = {
         PlanTools.READ_PLAN_FILE: read_plan_file,

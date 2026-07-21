@@ -52,12 +52,13 @@ from fsm_llm_agents.definitions import AgentConfig, AgentResult
 from fsm_llm_agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm_agents.tools import ToolRegistry
 
-from .constants import ArtifactNames, ContextKeys, Defaults, HarnessStates
+from .constants import ContextKeys, Defaults, HarnessStates
 from .hardening import coerce_worker_output, parse_role_output, retry
 from .harness import _WORKER_WRITABLE, RoleRequest, WorkerFactory
 from .rules import ROLE_BY_STATE, artifacts_writable_by
 from .tools import (
     _PER_PLAN_DIRS,
+    DISK_DERIVED_COUNTS,
     PLAN_READ_TOOLS,
     PLAN_WRITE_TOOLS,
     READ_ONLY_TOOLS,
@@ -69,6 +70,8 @@ from .tools import (
     WorkspaceTools,
     build_plan_tools,
     build_workspace_tools,
+    count_gate_files,
+    has_bytes,
 )
 
 __all__ = [
@@ -749,50 +752,6 @@ _BYTE_WRITING_TOOLS: Mapping[str, str] = MappingProxyType(
     }
 )
 
-#: Gate keys the driver DERIVES from the filesystem instead of believing.
-#:
-#: Read as data: key -> the plan-directory subdirectory whose non-empty ``.md``
-#: files are counted.  A key listed here is stripped from every worker payload
-#: before the derived value replaces it, so a dispatch that cannot be verified
-#: (no plan directory) carries no value at all rather than the worker's.
-_DISK_DERIVED_COUNTS: Mapping[str, str] = MappingProxyType(
-    {ContextKeys.FINDINGS_COUNT: ArtifactNames.FINDINGS_DIR}
-)
-
-
-def _has_bytes(reader: Callable[[str], str], path: str) -> bool:
-    """Whether *path* carries non-whitespace content, read through its own root.
-
-    Interface contract (shared predicate, 2 call sites: :func:`_count_on_disk`
-    and :func:`_verified_writes`):
-        - ``reader``: a CONFINED reader -- ``Workspace.read_text`` or
-          ``PlanMemory.read_text``.  Passing ``Path.read_text`` would bypass the
-          chokepoint, which is why the parameter is the bound method and not a
-          root.
-        - Returns ``False`` for a missing file, a refused path, an unreadable
-          file and an empty one.  Every failure means "not verified"; none of
-          them means "assume it worked".
-        - Never raises.
-    """
-    try:
-        return bool(reader(path).strip())
-    except Exception:  # missing / refused / undecodable -- all fail closed
-        return False
-
-
-def _count_on_disk(memory: PlanMemory, directory: str) -> int:
-    """Count the non-empty ``.md`` files in one plan-directory subdirectory."""
-    try:
-        entries = memory.list_dir(directory)
-    except Exception:  # the directory does not exist yet: zero, not unknown
-        return 0
-    return sum(
-        1
-        for name in entries
-        if name.endswith(".md") and _has_bytes(memory.read_text, f"{directory}/{name}")
-    )
-
-
 def _verified_writes(
     result: AgentResult,
     *,
@@ -822,7 +781,7 @@ def _verified_writes(
         reader = workspace.read_text if root == _WORKSPACE_ROOT else None
         if reader is None and memory is not None:
             reader = memory.read_text
-        if reader is not None and _has_bytes(reader, path):
+        if reader is not None and has_bytes(reader, path):
             verified.append(f"{root}:{path}")
     return tuple(verified)
 
@@ -1092,9 +1051,12 @@ def build_default_worker_factory(
         )
 
         # DECISION plan-2026-07-21T191807-bf7ffe24/D-015
-        # A gate key listed in `_DISK_DERIVED_COUNTS` is REMOVED from the
+        # A gate key listed in `tools.DISK_DERIVED_COUNTS` is REMOVED from the
         # worker's payload and replaced by a count of the files that really
-        # exist. Do NOT "optimise" this into "trust the worker unless the
+        # exist -- through `count_gate_files`, which is the ONE derivation the
+        # write tools also report back to the model (D-027); a second count
+        # here would be a gate and a progress report that can disagree.
+        # Do NOT "optimise" this into "trust the worker unless the
         # filesystem disagrees", and do NOT skip the pop when there is no plan
         # directory: review C1 reproduced the fail-open with the repo's own
         # objects -- an EXPLORE dispatch that made one read call, answered in
@@ -1106,12 +1068,12 @@ def build_default_worker_factory(
         # count used to be defined against, so a rule-compliant role could
         # never report it truthfully at all. See decisions.md D-015.
         derived: dict[str, Any] = {}
-        for key, directory in _DISK_DERIVED_COUNTS.items():
+        for key, (directory, _threshold) in DISK_DERIVED_COUNTS.items():
             if key not in spec.writable_keys:
                 continue
             accepted.pop(key, None)
             if memory is not None:
-                derived[key] = _count_on_disk(memory, directory)
+                derived[key] = count_gate_files(memory, directory)
         accepted.update(derived)
 
         # DECISION plan-2026-07-21T191807-bf7ffe24/D-016

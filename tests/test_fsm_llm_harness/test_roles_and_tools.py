@@ -37,7 +37,13 @@ import pytest
 
 from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface
 from fsm_llm_agents.definitions import AgentResult, AgentTrace, ToolCall
-from fsm_llm_harness.constants import ArtifactNames, ContextKeys, HarnessStates, Role
+from fsm_llm_harness.constants import (
+    ArtifactNames,
+    ContextKeys,
+    Defaults,
+    HarnessStates,
+    Role,
+)
 from fsm_llm_harness.exceptions import HarnessConfinementError, HarnessOwnershipError
 from fsm_llm_harness.hardening import coerce_worker_output, parse_role_output
 from fsm_llm_harness.harness import _WORKER_WRITABLE, RoleRequest
@@ -57,8 +63,10 @@ from fsm_llm_harness.rules import (
     get_rules,
 )
 from fsm_llm_harness.tools import (
+    _COUNTERPART_TOOL,
     _PER_PLAN_DIRS,
     COMMAND_ALLOWLIST,
+    DISK_DERIVED_COUNTS,
     PLAN_READ_TOOLS,
     PLAN_WRITE_TOOLS,
     READ_ONLY_TOOLS,
@@ -66,9 +74,13 @@ from fsm_llm_harness.tools import (
     VERIFICATION_COMMANDS,
     WRITE_TOOLS,
     PlanMemory,
+    PlanTools,
     Workspace,
+    WorkspaceTools,
     build_plan_tools,
     build_workspace_tools,
+    count_gate_files,
+    gate_files,
 )
 
 # DECISION plan-2026-07-21T125237-191b2eb2/D-057
@@ -1618,3 +1630,358 @@ class TestStandingPolicyIsSplitFromTheTask:
 
         assert seen == [build_role_prompt(request, spec)]
         assert "RULES:" in seen[0]
+
+
+# ---------------------------------------------------------------------------
+# The write tool's RESULT is the feedback channel (D-026)
+# ---------------------------------------------------------------------------
+
+
+def _plan_registry(plan_dir: Path, workspace_root: Path, role: str = Role.EXPLORER):
+    """A real registry spanning both roots, exactly as a dispatch builds one."""
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    memory = PlanMemory(plan_dir, role=role)
+    registry = build_workspace_tools(Workspace(workspace_root))
+    build_plan_tools(memory, registry=registry)
+    return registry, memory
+
+
+def _call(registry: Any, name: str, **params: Any) -> Any:
+    """Execute one tool the way the agent loop does, returning the ToolResult."""
+    return registry.execute(ToolCall(tool_name=name, parameters=params))
+
+
+class TestWriteResultsReportGateState:
+    """A repeat write must be visibly different from a new one (D-026 part A).
+
+    The step-5 spike measured the explorer calling ``write_plan_file`` with the
+    SAME path 3-11 times in one dispatch and never naming a second topic: 25
+    redundant repeat-writes across 10 runs, 3 distinct findings files in 0 of
+    them.  The tool answered every one of those calls with a bare
+    ``wrote <path>``, so from inside the loop a repeat was indistinguishable
+    from progress.  These tests pin the observation, not an instruction.
+    """
+
+    def test_a_repeat_write_reads_differently_from_a_new_one(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, _ = _plan_registry(plan_dir, workspace)
+        findings = ArtifactNames.FINDINGS_DIR
+
+        first = _call(
+            registry, "write_plan_file", path=f"{findings}/a.md", content="one\n"
+        )
+        repeat = _call(
+            registry, "write_plan_file", path=f"{findings}/a.md", content="one\n"
+        )
+
+        assert first.success and repeat.success
+        assert first.result != repeat.result
+        assert "NEW file" in first.result
+        assert "OVERWROTE an existing file" in repeat.result
+
+    def test_the_repeat_states_that_the_count_did_not_move(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The exact signal the model lacked: a rewrite is not a second topic."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+        findings = ArtifactNames.FINDINGS_DIR
+
+        _call(registry, "write_plan_file", path=f"{findings}/a.md", content="one\n")
+        repeat = _call(
+            registry, "write_plan_file", path=f"{findings}/a.md", content="again\n"
+        )
+        second = _call(
+            registry, "write_plan_file", path=f"{findings}/b.md", content="two\n"
+        )
+
+        assert f"{findings}/ still holds 1 of the" in repeat.result
+        assert f"{findings}/ now holds 2 of the" in second.result
+
+    def test_the_reported_count_is_the_count_the_gate_reads(
+        self, tmp_path: Path, plan_dir: Path, workspace: Path
+    ) -> None:
+        """One derivation, two readers.  A second count could disagree (D-015)."""
+        registry, memory = _plan_registry(plan_dir, workspace)
+        findings = ArtifactNames.FINDINGS_DIR
+        for topic in ("a", "b"):
+            _call(
+                registry, "write_plan_file", path=f"{findings}/{topic}.md", content="x\n"
+            )
+
+        told = _call(
+            registry, "write_plan_file", path=f"{findings}/c.md", content="x\n"
+        ).result
+        gate = _dispatch(
+            HarnessStates.EXPLORE,
+            workspace_root=workspace,
+            plan_dir=plan_dir,
+            payload=_explore_payload(),
+            calls=(("write_plan_file", {"path": f"{findings}/c.md", "content": "x\n"}),),
+        )
+
+        assert count_gate_files(memory, findings) == 3
+        assert f"holds 3 of the {Defaults.FINDINGS_THRESHOLD} " in told
+        assert gate.final_context[ContextKeys.FINDINGS_COUNT] == 3
+
+    def test_the_threshold_is_the_protocols_own_number(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """A literal 3 here would drift the moment the gate's threshold moved."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        told = _call(
+            registry,
+            "write_plan_file",
+            path=f"{ArtifactNames.FINDINGS_DIR}/a.md",
+            content="x\n",
+        ).result
+
+        assert (
+            ContextKeys.FINDINGS_COUNT,
+            (ArtifactNames.FINDINGS_DIR, Defaults.FINDINGS_THRESHOLD),
+        ) in DISK_DERIVED_COUNTS.items()
+        assert f"of the {Defaults.FINDINGS_THRESHOLD} distinct" in told
+
+    def test_an_empty_write_does_not_move_the_reported_count(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The message counts what the gate counts: NON-empty files only."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        told = _call(
+            registry,
+            "write_plan_file",
+            path=f"{ArtifactNames.FINDINGS_DIR}/a.md",
+            content="   \n",
+        ).result
+
+        assert "holds 0 of the" in told
+
+    def test_an_append_that_creates_the_file_counts_it(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, _ = _plan_registry(plan_dir, workspace)
+        findings = ArtifactNames.FINDINGS_DIR
+
+        created = _call(
+            registry, "append_plan_file", path=f"{findings}/a.md", content="x\n"
+        )
+        extended = _call(
+            registry, "append_plan_file", path=f"{findings}/a.md", content="y\n"
+        )
+
+        assert "NEW file" in created.result
+        assert f"{findings}/ now holds 1 of the" in created.result
+        assert "extended an existing file" in extended.result
+        assert f"{findings}/ still holds 1 of the" in extended.result
+
+    def test_a_non_counted_artifact_gets_no_gate_clause(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Only a key in ``DISK_DERIVED_COUNTS`` has a count worth reporting."""
+        registry, _ = _plan_registry(plan_dir, workspace, role=Role.PLAN_WRITER)
+
+        told = _call(
+            registry, "write_plan_file", path=ArtifactNames.PLAN, content="# Plan\n"
+        ).result
+
+        assert "NEW file" in told
+        assert "exit gate requires" not in told
+
+    def test_workspace_writes_report_novelty_and_no_gate_clause(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        first = _call(registry, "write_file", path="uploader.py", content="a = 1\n")
+        repeat = _call(registry, "write_file", path="uploader.py", content="a = 2\n")
+
+        assert "NEW file" in first.result
+        assert "OVERWROTE an existing file" in repeat.result
+        assert "exit gate requires" not in repeat.result
+
+
+class TestWrongRootFailuresNameTheRightTool:
+    """An 18% wrong-root call rate is a teachable failure (D-026 part B).
+
+    The step-5 spike recorded **zero** hallucinated tool NAMES in 298 calls and
+    54 calls (18%) aiming a workspace tool at a plan artifact or the reverse.
+    The model knows the tools; it mis-picks the ROOT.  The refusal stays a
+    refusal -- only the message becomes corrective.
+    """
+
+    def test_a_workspace_read_of_a_protocol_artifact_names_the_plan_tool(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(registry, "read_file", path=ArtifactNames.STATE)
+
+        assert failed.success is False
+        assert "plan directory" in failed.error
+        assert "`read_plan_file`" in failed.error
+
+    def test_a_plan_write_of_a_source_file_names_the_workspace_tool(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(registry, "write_plan_file", path="uploader.py", content="x\n")
+
+        assert failed.success is False
+        assert "not a protocol artifact" in failed.error
+        assert "`write_file`" in failed.error
+        assert not (plan_dir / "uploader.py").exists()
+        assert not (workspace / "uploader.py").exists()
+
+    def test_the_hint_never_re_routes_the_call(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Naming the tool is advice, not a retry: no bytes land anywhere."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(
+            registry, "write_file", path="/plan/findings/x.md", content="loot\n"
+        )
+
+        assert failed.success is False
+        assert "`write_plan_file`" in failed.error
+        assert list(workspace.rglob("*.md")) == []
+        assert not (plan_dir / ArtifactNames.FINDINGS_DIR / "x.md").exists()
+
+    def test_the_confinement_refusal_keeps_its_class_and_attributes(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Enriching a message must not downgrade the refusal it enriches."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+        write_file = registry.get(WorkspaceTools.WRITE_FILE).execute_fn
+
+        with pytest.raises(HarnessConfinementError) as caught:
+            write_file(path="/plan/findings/x.md", content="loot\n")
+
+        assert caught.value.path == "/plan/findings/x.md"
+        assert caught.value.root == str(Workspace(workspace).root)
+        assert "`write_plan_file`" in str(caught.value)
+
+    def test_the_ownership_refusal_keeps_its_class_and_attributes(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, _ = _plan_registry(plan_dir, workspace)
+        write_plan_file = registry.get(PlanTools.WRITE_PLAN_FILE).execute_fn
+
+        with pytest.raises(HarnessOwnershipError) as caught:
+            write_plan_file(path="uploader.py", content="x\n")
+
+        assert caught.value.role == Role.EXPLORER
+        assert "`write_file`" in str(caught.value)
+
+    def test_an_owned_artifact_the_role_may_not_write_is_refused_unchanged(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """``plan.md`` IS a protocol artifact: the answer is "not yours", full stop."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(registry, "write_plan_file", path=ArtifactNames.PLAN, content="x")
+
+        assert failed.success is False
+        assert "may not write" in failed.error
+        assert "`write_file`" not in failed.error
+        assert not (plan_dir / ArtifactNames.PLAN).exists()
+
+    def test_a_genuinely_missing_workspace_file_gets_no_hint(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The control: a hint on every ENOENT would be noise, not a signal."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(registry, "read_file", path="src/missing.py")
+
+        assert failed.success is False
+        assert "plan directory" not in failed.error
+
+    def test_a_missing_findings_file_in_the_right_root_gets_no_hint(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(
+            registry, "read_plan_file", path=f"{ArtifactNames.FINDINGS_DIR}/nope.md"
+        )
+
+        assert failed.success is False
+        assert "workspace" not in failed.error
+
+    def test_every_hinted_tool_names_a_tool_that_exists(self) -> None:
+        """A hint naming a non-existent tool would be worse than silence."""
+        ws_names = {v for k, v in vars(WorkspaceTools).items() if not k.startswith("_")}
+        plan_names = {v for k, v in vars(PlanTools).items() if not k.startswith("_")}
+
+        for source, counterpart in _COUNTERPART_TOOL.items():
+            assert source in ws_names | plan_names
+            assert counterpart in ws_names | plan_names
+            # The pair always crosses the root boundary -- that is the point.
+            assert (source in plan_names) != (counterpart in plan_names)
+
+
+class TestAnOwnedDirectoryReportsEmptyNotMissing:
+    """``findings/`` is an artifact name, so "not created yet" means EMPTY.
+
+    Step-22 attempt 1 measured the chain directly: the routing hint correctly
+    moved the explorer off ``list_dir("findings/")`` and onto
+    ``list_plan_dir("findings/")``, which then answered ENOENT six times in a
+    row, and that run wrote nothing at all.  ``gate_files`` has always answered
+    "none, not unknown" for the same directory; this makes the tool agree with
+    the derivation the gate reads.
+    """
+
+    def test_a_missing_owned_directory_lists_as_empty_with_its_count(
+        self, tmp_path: Path, workspace: Path
+    ) -> None:
+        bare = tmp_path / "plans" / "plan-2026-07-21T000000-bare"
+        registry, _ = _plan_registry(bare, workspace)
+
+        listed = _call(registry, "list_plan_dir", path=ArtifactNames.FINDINGS_DIR)
+
+        assert listed.success is True
+        assert "(empty)" in listed.result
+        assert f"{ArtifactNames.FINDINGS_DIR}/ holds 0 of the" in listed.result
+
+    def test_a_missing_path_that_is_not_an_artifact_still_fails(
+        self, tmp_path: Path, workspace: Path
+    ) -> None:
+        """The control: this is not "answer (empty) for anything missing"."""
+        bare = tmp_path / "plans" / "plan-2026-07-21T000000-bare"
+        registry, _ = _plan_registry(bare, workspace)
+
+        assert _call(registry, "list_plan_dir", path="src").success is False
+        assert _call(registry, "read_plan_file", path=ArtifactNames.PLAN).success is False
+
+    def test_a_listing_names_what_the_gate_counts(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, memory = _plan_registry(plan_dir, workspace)
+        findings = ArtifactNames.FINDINGS_DIR
+        (plan_dir / findings).mkdir(parents=True, exist_ok=True)
+        (plan_dir / findings / "a.md").write_text("x\n")
+        (plan_dir / findings / "empty.md").write_text("")
+
+        listed = _call(registry, "list_plan_dir", path=findings).result
+
+        assert gate_files(memory, findings) == ("a.md",)
+        assert f"{findings}/ holds 1 of the" in listed
+        assert listed.rstrip().endswith("requires: a.md.")
+
+    def test_the_write_result_names_the_topics_already_covered(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """A bare count leaves the model to remember which topics it wrote."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+        findings = ArtifactNames.FINDINGS_DIR
+        _call(registry, "write_plan_file", path=f"{findings}/a.md", content="x\n")
+
+        second = _call(
+            registry, "write_plan_file", path=f"{findings}/b.md", content="y\n"
+        ).result
+
+        assert second.rstrip().endswith("requires: a.md, b.md.")
