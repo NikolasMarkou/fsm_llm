@@ -827,3 +827,69 @@ class TestIntentNameCharsetMatchesSiblingIdentifiers:
         with pytest.raises(pydantic.ValidationError) as exc:
             IntentDefinition(name="café", description="d")
         assert [e["type"] for e in exc.value.errors()] == ["value_error"]
+
+
+# ----------------------------------------------------------
+# NL1: classification thinking-recovery must read reasoning_content
+# ----------------------------------------------------------
+
+
+class TestClassifierReasoningContentRecovery:
+    """RED-before regression for NL1 (plan-2026-07-21T072826-e3131cc2).
+
+    `Classifier._extract_response` recovered reasoning-only replies with
+    `getattr(msg, "thinking", None)` only. The installed litellm range RENAMES
+    the raw `thinking` field to `reasoning_content` and DELETES `thinking`
+    before building the Message (see llm.py D-002 / C2). So on the project's own
+    `DEFAULT_LLM_MODEL = ollama_chat/qwen3.5:4b`, a classification reply that
+    puts its JSON in `reasoning_content` with empty `content` used to raise
+    `ClassificationResponseError("LLM returned empty content")` instead of being
+    recovered — crashing AMBIGUOUS-transition resolution.
+
+    Driven by a REAL `litellm.types.utils.Message`, never a `.thinking` stub:
+    a stub is GREEN on the broken pre-fix code (it never probes the gap), which
+    is exactly how the original C2 bug shipped. See llm.py TestReasoningContentRecovery.
+    """
+
+    def test_classify_recovers_intent_from_reasoning_content(self):
+        """SC-1: real Message(content="", reasoning_content=intent-json) → recovered."""
+        from litellm.types.utils import Message
+
+        msg = Message(
+            content="",
+            reasoning_content='{"intent": "positive", "confidence": 0.9, "reasoning": "clearly happy"}',
+        )
+        # Contract precondition: a real litellm Message has no `.thinking` attr,
+        # so the pre-fix `getattr(msg, "thinking", None)` gate returns None here.
+        assert not hasattr(msg, "thinking"), (
+            "real litellm Message must not expose a `.thinking` attr — if this "
+            "fails the negative control no longer documents the NL1 gap"
+        )
+        choice = MagicMock()
+        choice.message = msg
+        response = MagicMock()
+        response.choices = [choice]
+
+        with patch(
+            "fsm_llm.classification.completion", return_value=response
+        ) as mock_completion:
+            result = _classifier().classify("I am thrilled")
+
+        assert mock_completion.called
+        assert isinstance(result, ClassificationResult)
+        assert result.intent == "positive"
+        assert result.confidence == pytest.approx(0.9)
+
+    def test_extract_response_recovers_from_reasoning_content(self):
+        """SC-1 (unit): drive `_extract_response` directly at the seam."""
+        from litellm.types.utils import Message
+
+        msg = Message(content="", reasoning_content='{"intent": "negative"}')
+        assert not hasattr(msg, "thinking")
+        choice = MagicMock()
+        choice.message = msg
+        response = MagicMock()
+        response.choices = [choice]
+
+        data = Classifier._extract_response("", response)
+        assert data == {"intent": "negative"}

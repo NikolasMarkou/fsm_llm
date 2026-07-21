@@ -76,7 +76,7 @@ from .ollama import (
     is_ollama_model,
     prepare_ollama_messages,
 )
-from .utilities import extract_json_from_text
+from .utilities import _resolve_reasoning_trace, extract_json_from_text
 
 # Mirrors ``ResponseGenerationResponse.message``'s ``max_length`` constraint
 # (definitions.py:154).  Duplicated deliberately rather than introspected out of
@@ -632,28 +632,17 @@ class LiteLLMInterface(LLMInterface):
         trace is present.
         """
         # DECISION plan-2026-07-21T045419-9925aa3a/D-002
-        # Resolve the reasoning trace via `getattr(..., None)` across the
-        # pinned litellm range — do NOT revert this to `hasattr(message,
-        # "thinking")`. Installed litellm RENAMES the raw `thinking` field to
-        # `reasoning_content` and DELETES `thinking` before building the
-        # Message/Delta object (litellm/types/utils.py:1124-1135,1244-1248),
-        # so gating on `.thinking` made this recovery dead code for the
-        # project's own DEFAULT_LLM_MODEL. `reasoning_content` is read FIRST;
-        # the legacy `thinking` string is kept so the D-023 divergence tests
-        # (TestMultiJsonTieBreakDivergence) stay green; `thinking_blocks` is a
-        # last-resort join of the provider's typed reasoning segments. See
-        # decisions.md D-001/D-002.
-        trace = getattr(message, "reasoning_content", None) or getattr(
-            message, "thinking", None
-        )
-        if not trace:
-            blocks = getattr(message, "thinking_blocks", None)
-            if blocks:
-                trace = "\n".join(
-                    (b.get("thinking") or b.get("text") or "")
-                    for b in blocks
-                    if isinstance(b, dict)
-                )
+        # The reasoning-trace field-name resolution (reasoning_content ->
+        # legacy thinking -> thinking_blocks) now lives in the SINGLE shared
+        # `_resolve_reasoning_trace` (utilities.py) so this reader and
+        # classification.py::_extract_response can never re-diverge. Do NOT
+        # revert to a `hasattr(message, "thinking")`/`.thinking`-only read:
+        # installed litellm RENAMES `thinking` to `reasoning_content` and
+        # DELETES `thinking` before building the Message/Delta object, making a
+        # `.thinking`-only read dead code for the project's own
+        # DEFAULT_LLM_MODEL. Rationale + anti-simplification note live at the
+        # resolver's D-002 anchor. See decisions.md D-001/D-002.
+        trace = _resolve_reasoning_trace(message)
         if not trace:
             return None
         logger.debug(

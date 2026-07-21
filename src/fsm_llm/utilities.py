@@ -25,6 +25,57 @@ from .definitions import FSMDefinition
 from .logging import logger
 
 # --------------------------------------------------------------
+# Reasoning-trace field resolution
+# --------------------------------------------------------------
+
+
+def _resolve_reasoning_trace(message: Any) -> str | None:
+    """Return the model's reasoning/thinking trace, whatever field carries it.
+
+    Some models (e.g. Qwen 3.5 via Ollama) leave ``content`` empty/``None`` and
+    put the actual answer in a reasoning field. litellm's field name for that
+    trace is version-dependent, so callers MUST NOT read a single hard-coded
+    attribute; resolve it here, in one place, for every content reader.
+
+    Contract:
+        - Parameter: any litellm ``Message``/``Delta`` (or duck-typed stand-in).
+        - Returns the first non-empty of ``reasoning_content``, legacy
+          ``thinking``, then a newline-joined string of any ``thinking_blocks``
+          (each block's ``thinking`` or ``text``); ``None`` when no trace exists.
+        - Never raises for any input (uses ``getattr(..., None)``, never
+          ``hasattr``/attribute access that could fail on a stripped object).
+    """
+    # DECISION plan-2026-07-21T072826-e3131cc2/D-002
+    # Do NOT revert this to `hasattr(message, "thinking")` or a `.thinking`-only
+    # read. The installed litellm range RENAMES the raw `thinking` field to
+    # `reasoning_content` and DELETES `thinking` before building the
+    # Message/Delta object, so a `.thinking`-only read is DEAD CODE for the
+    # project's own DEFAULT_LLM_MODEL (ollama_chat/qwen3.5:4b). `reasoning_content`
+    # is read FIRST; the legacy `thinking` string is kept so the D-023 divergence
+    # tests stay green; `thinking_blocks` is a last-resort join of the provider's
+    # typed reasoning segments. This is the SINGLE resolver shared by
+    # llm.py::_extract_content_from_thinking and
+    # classification.py::_extract_response so the two readers can never
+    # re-diverge (the NL1 bug was classification.py holding its own stale copy).
+    # Mirrors the original C2 anchor plan-2026-07-21T045419-9925aa3a/D-002.
+    # See decisions.md D-002.
+    trace = getattr(message, "reasoning_content", None) or getattr(
+        message, "thinking", None
+    )
+    if not trace:
+        blocks = getattr(message, "thinking_blocks", None)
+        if blocks:
+            trace = "\n".join(
+                (b.get("thinking") or b.get("text") or "")
+                for b in blocks
+                if isinstance(b, dict)
+            )
+    if not trace:
+        return None
+    return trace
+
+
+# --------------------------------------------------------------
 # JSON Processing Utilities
 # --------------------------------------------------------------
 

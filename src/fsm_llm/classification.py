@@ -33,7 +33,7 @@ from .prompts import (
     build_classification_json_schema,
     build_classification_system_prompt,
 )
-from .utilities import extract_json_from_text
+from .utilities import _resolve_reasoning_trace, extract_json_from_text
 
 # Type alias for intent handler functions
 # DECISION plan-2026-07-19T124525-9899fbac/D-001: the entity VALUE type is
@@ -252,9 +252,15 @@ class Classifier:
                 f"Failed to parse LLM JSON.\nResponse: {content[:200]}"
             )
 
-        # Thinking model fallback -- content is empty/None, check thinking field
+        # Thinking model fallback -- content is empty/None, recover the answer
+        # from the model's reasoning trace. Routes through the SINGLE shared
+        # `_resolve_reasoning_trace` (utilities.py) rather than a private
+        # `getattr(msg, "thinking", None)`: the installed litellm range renames
+        # `thinking` to `reasoning_content` and deletes `thinking`, so a
+        # `.thinking`-only read was dead code here for the default Ollama model
+        # (NL1). See utilities.py D-002.
         msg = response.choices[0].message
-        thinking = getattr(msg, "thinking", None)
+        thinking = _resolve_reasoning_trace(msg)
         if thinking:
             logger.warning(
                 "LLM returned empty content with non-empty thinking field; "
