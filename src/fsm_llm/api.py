@@ -465,6 +465,21 @@ class API:
         Pass 1 (extraction + transitions) runs fully.  Pass 2 yields
         response tokens as they arrive from the LLM.
 
+        This is a thin NON-generator wrapper: it resolves the current FSM
+        conversation id at CALL time — which validates existence AND refreshes
+        ``_last_accessed`` — then returns the lazy inner generator that streams
+        the reply.  Resolving eagerly means a created-but-not-yet-iterated
+        stream cannot skip validation or be reaped as stale mid-flight by
+        ``cleanup_stale_conversations``.
+
+        # DECISION plan-2026-07-21-4c63deac/D-002
+        # The eager prologue here is LOCK-FREE by design: it only resolves the
+        # current fsm id / refreshes staleness bookkeeping and NEVER touches
+        # conv_lock.  conv_lock acquisition stays inside the inner generator
+        # (via ``process_message_stream``'s own inner generator) so an abandoned
+        # (never-iterated) stream cannot leak a lock and the ``_lock -> conv_lock``
+        # order is preserved.  Do NOT hoist conv_lock into this wrapper.
+
         Args:
             user_message: User's message.
             conversation_id: Existing conversation ID.
@@ -474,7 +489,28 @@ class API:
         """
         try:
             # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
+            # Runs at CALL time (this is a plain function, not a generator).
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+        except (ValueError, FSMError):
+            raise
+        except Exception as e:
+            logger.error(f"Error streaming message: {e!s}")
+            raise FSMError(f"Failed to stream message: {e!s}") from e
+        return self._converse_stream_inner(
+            current_fsm_id, conversation_id, user_message
+        )
+
+    def _converse_stream_inner(
+        self, current_fsm_id: str, conversation_id: str, user_message: str
+    ) -> Iterator[str]:
+        """Lazy inner generator for :meth:`converse_stream`.
+
+        The id was already resolved (existence + staleness refresh) by the
+        wrapper at call time; this generator does the streaming ``yield from``,
+        the auto-save ``finally``, and preserves the exact exception semantics
+        of the original method around the streaming phase.
+        """
+        try:
             try:
                 yield from self.fsm_manager.process_message_stream(
                     current_fsm_id, user_message

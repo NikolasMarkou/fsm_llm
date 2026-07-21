@@ -437,6 +437,38 @@ class FSMManager:
 
         Pass 1 (extraction + transitions) runs fully.  Pass 2 yields
         response tokens as they arrive from the LLM.
+
+        This is a thin NON-generator wrapper: it runs the EAGER, lock-free
+        existence check at CALL time (so a created-but-not-yet-iterated stream
+        cannot skip validation) and returns the lazy inner generator that does
+        the actual Pass-1/Pass-2 work.  Because this is a plain function (no
+        ``yield`` in its body), ``@with_conversation_context`` runs the prologue
+        eagerly, which is exactly what call-time validation requires.
+
+        # DECISION plan-2026-07-21-4c63deac/D-002
+        # The eager prologue here is LOCK-FREE by design: it touches only
+        # ``self._lock``/``self.instances`` for the existence check and NEVER
+        # ``conv_lock``.  conv_lock acquisition stays inside
+        # ``_process_message_stream_inner`` so an abandoned (never-iterated)
+        # generator cannot leak a lock, and the ``_lock -> conv_lock`` order is
+        # preserved.  Do NOT hoist ``conv_lock.acquire`` into this wrapper.
+        """
+        with self._lock:
+            if conversation_id not in self.instances:
+                raise FSMError(f"Conversation {conversation_id} not found")
+        return self._process_message_stream_inner(conversation_id, message, log)
+
+    def _process_message_stream_inner(
+        self, conversation_id: str, message: str, log: Any = None
+    ) -> Iterator[str]:
+        """Lazy inner generator for :meth:`process_message_stream`.
+
+        Everything after the eager existence check lives here.  conv_lock is
+        acquired non-blocking at the FIRST ``next()`` (lazy), preserving the
+        no-leak-on-abandonment property.  The existence check runs again
+        implicitly when this grabs ``self._conversation_locks[conversation_id]``
+        under ``self._lock`` — cheap, and it correctly handles a conversation
+        that vanished between call and first iteration.
         """
         with self._lock:
             if conversation_id not in self.instances:

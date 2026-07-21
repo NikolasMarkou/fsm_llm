@@ -21,6 +21,8 @@ fails the test instead of hanging the gate.
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -335,3 +337,109 @@ class TestEmptyStreamIsNotPersisted:
 
         history = api.get_conversation_history(conv_id)
         assert {"system": "Hel"} in history, f"genuine partial lost: {history}"
+
+
+class TestEagerPrologueOnCall:
+    """G1: the streaming entry points must run their existence check and
+    ``_last_accessed`` staleness refresh at CALL time — before the returned
+    generator is ever iterated — so a created-but-deferred stream cannot skip
+    validation or be reaped as stale mid-flight.
+
+    Every assertion here is made on a generator that is created but NOT
+    iterated (no ``next()``/``for``/``list()``), which is exactly what these
+    tests defend: on the pre-split lazy-generator code the prologue only runs
+    at first ``next()``, so all of these are RED before the wrapper/inner split.
+    """
+
+    def test_fsm_manager_stream_not_found_raises_at_call_time(self):
+        """``FSMManager.process_message_stream`` on an unknown conversation must
+        raise ``FSMError`` at CALL time, not deferred to first iteration."""
+        api, _conv_id = _make_api(_ScriptedStreamLLM(["Hi"]))
+
+        # Bare call, no iteration: on the pre-split code this returns a generator
+        # and raises nothing until iterated (RED). After the split the eager
+        # existence check fires at call time.
+        with pytest.raises(FSMError):
+            api.fsm_manager.process_message_stream("no-such-conversation", "hi")
+
+    def test_api_converse_stream_unknown_conversation_raises_at_call_time(self):
+        """``API.converse_stream`` resolves the conversation id (which validates
+        existence) at CALL time — an unknown id raises before iteration."""
+        api, _conv_id = _make_api(_ScriptedStreamLLM(["Hi"]))
+
+        # ``_get_current_fsm_conversation_id`` raises ``ValueError`` for an
+        # unknown id; the wrapper re-raises it unwrapped. Pre-split this is
+        # deferred to first ``next()`` (RED).
+        with pytest.raises(ValueError):
+            api.converse_stream("hi", "no-such-conversation")
+
+    def test_api_converse_stream_refreshes_last_accessed_at_call_time(self):
+        """Creating (not iterating) the stream must refresh ``_last_accessed`` so
+        ``cleanup_stale_conversations`` cannot reap an in-flight stream."""
+        api, conv_id = _make_api(_ScriptedStreamLLM(["Hel", "lo"]))
+
+        # Force the conversation to look stale, then create the generator WITHOUT
+        # iterating it.  On the pre-split code the refresh is deferred to the
+        # first ``next()``, so the stale timestamp survives (RED).
+        stale = time.monotonic() - 10_000.0
+        api._last_accessed[conv_id] = stale
+
+        gen = api.converse_stream("hello", conv_id)
+        try:
+            assert api._last_accessed[conv_id] > stale, (
+                "staleness refresh was deferred to iteration — an un-iterated "
+                "stream can be reaped by cleanup_stale_conversations"
+            )
+        finally:
+            gen.close()
+
+    def test_uniterated_generator_does_not_hold_conv_lock(self):
+        """Invariant (STOP-IF guard): the eager prologue must be LOCK-FREE.
+        conv_lock acquisition stays LAZY inside the inner generator, so a stream
+        that is created and abandoned WITHOUT iteration never leaks the lock."""
+        api, conv_id = _make_api(_ScriptedStreamLLM(["Hel", "lo"]))
+        fsm_conv_id = api._get_current_fsm_conversation_id(conv_id)
+        conv_lock = api.fsm_manager._conversation_locks[fsm_conv_id]
+
+        gen = api.converse_stream("hello", conv_id)
+        try:
+            # Another thread must be able to take the lock: a never-iterated
+            # generator has NOT acquired conv_lock.
+            acquired = conv_lock.acquire(blocking=False)
+            assert acquired, (
+                "an un-iterated stream generator is holding conv_lock — the "
+                "eager wrapper must not acquire it (lock-leak on abandonment)"
+            )
+            conv_lock.release()
+        finally:
+            gen.close()
+
+    def test_already_being_processed_guard_trips_lazily_on_iteration(self):
+        """The 'already being processed' guard still fires — conv_lock is
+        acquired LAZILY on first iteration, and if another thread holds it the
+        first ``next()`` raises ``FSMError``."""
+        api, conv_id = _make_api(_ScriptedStreamLLM(["Hel", "lo"]))
+        fsm_conv_id = api._get_current_fsm_conversation_id(conv_id)
+        conv_lock = api.fsm_manager._conversation_locks[fsm_conv_id]
+
+        holding = threading.Event()
+        release = threading.Event()
+
+        def _hog():
+            conv_lock.acquire()
+            holding.set()
+            release.wait(timeout=5.0)
+            conv_lock.release()
+
+        t = threading.Thread(target=_hog)
+        t.start()
+        try:
+            assert holding.wait(timeout=5.0)
+            gen = api.fsm_manager.process_message_stream(fsm_conv_id, "hi")
+            # Call-time succeeded (existence check passed); the guard trips on
+            # first iteration when the lazy conv_lock acquire fails.
+            with pytest.raises(FSMError, match="already being processed"):
+                next(gen)
+        finally:
+            release.set()
+            t.join(timeout=5.0)
