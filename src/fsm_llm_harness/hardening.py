@@ -18,13 +18,14 @@ thinking-suppressor (all three are named Complexity-Budget BREACH conditions).
    string/escape-aware brace scanner (``_match_brace_partners``,
    ``utilities.py:119-183``).
 
-2. **Fail-closed exact-type coercion.**  :func:`coerce_int`,
-   :func:`coerce_bool`, :func:`coerce_str`, :func:`type_matches`,
-   :func:`as_int` and :func:`coerce_worker_output` are the *load-bearing* half
-   of invariant I8 (see decisions.md D-025).  The JsonLogic gate behind them
-   uses soft comparison -- ``"3" >= 3``, ``3.0 >= 3`` and even ``True >= 3``
-   all evaluate True in ``fsm_llm.expressions`` -- so a garbled worker reply
-   must be rejected *here*, before it ever reaches context.
+2. **Fail-closed exact-type coercion.**  :func:`type_matches`, :func:`as_int`
+   and :func:`coerce_worker_output` are the *load-bearing* half of invariant I8
+   (see decisions.md D-025 and D-059).  The JsonLogic gate behind them uses
+   soft comparison -- ``"3" >= 3``, ``3.0 >= 3`` and even ``True >= 3`` all
+   evaluate True in ``fsm_llm.expressions`` -- so a garbled worker reply must
+   be rejected *here*, before it ever reaches context.  These three are the
+   package's ONLY exact-type predicates: ``harness.py`` imports them rather
+   than keeping private twins (D-059 closed that duplication).
 
 3. **Harness-level retry.**  :func:`retry` exists because
    ``LiteLLMInterface(retries=N)`` is a **measured no-op** for ``ollama_chat/*``
@@ -55,10 +56,6 @@ __all__ = [
     "RETRYABLE_EXCEPTIONS",
     "RoleOutput",
     "as_int",
-    "build_response_format",
-    "coerce_bool",
-    "coerce_int",
-    "coerce_str",
     "coerce_worker_output",
     "parse_json_payload",
     "parse_role_output",
@@ -265,43 +262,25 @@ def parse_role_output(
 #   2. `int("3")` / `int(3.0)` succeed. Do NOT reach for `int(value)` in a
 #      try/except -- that is precisely the leniency this layer exists to deny.
 #
-# A miss returns None (or the caller's default). It never guesses.
-# See decisions.md D-028.
-
-
-def coerce_int(value: Any) -> int | None:
-    """Return *value* when it is exactly an ``int``, else ``None``.
-
-    ``bool`` is rejected, numeric strings are rejected, ``float`` is rejected
-    (even ``3.0``), ``None`` is rejected.  See the D-028 block above.
-    """
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    return value
-
-
-def coerce_bool(value: Any) -> bool | None:
-    """Return *value* when it is exactly a ``bool``, else ``None``.
-
-    ``"true"``, ``1`` and ``0`` are all rejected.
-    """
-    return value if isinstance(value, bool) else None
-
-
-def coerce_str(value: Any) -> str | None:
-    """Return *value* when it is exactly a ``str``, else ``None``.
-
-    Nothing is stringified: a worker that returns ``123`` for a text field has
-    not answered the question, and ``"123"`` would look like it had.
-    """
-    return value if isinstance(value, str) else None
+# A miss returns the caller's default, or drops the key. It never guesses.
+#
+# There is exactly ONE exact-type predicate in this package -- `type_matches`.
+# Do NOT add per-type wrappers back (`coerce_int`/`coerce_bool`/`coerce_str`
+# existed from step 5 to step 7e with zero call sites between them; deleted by
+# D-059). `type_matches(v, int)` already says everything they said, in one
+# call, and a second spelling of the same rule is exactly how the harness.py
+# twins that D-059 removed came to exist in the first place.
+# See decisions.md D-028 and D-059.
 
 
 def type_matches(value: Any, expected: type) -> bool:
     """Exact-runtime-type predicate used by the worker-reply allowlist (I8).
 
-    Interface contract (shared helper -- ``harness.py`` migrates onto it in
-    step 11, see decisions.md D-028):
+    Interface contract (shared helper; 2 call sites, both in this module:
+    :func:`as_int` and :func:`coerce_worker_output`.  It is exported because it
+    is the package's single spelling of "exactly this type" -- ``harness.py``
+    reaches it through :func:`coerce_worker_output` rather than keeping the
+    private twin it carried until step 7e, see decisions.md D-059):
         - Parameters: any ``value``, and the ``type`` the protocol expects.
         - Returns ``True`` only when ``value``'s runtime type is exactly
           right.  ``bool`` never satisfies ``int``; ``int`` never satisfies
@@ -319,11 +298,15 @@ def type_matches(value: Any, expected: type) -> bool:
 def as_int(value: Any, default: int) -> int:
     """Return *value* when it is exactly an ``int``, else *default*.
 
-    The total-function twin of :func:`coerce_int`, for the counter reads that
-    must always produce a number.  Same contract, same ``bool`` rejection.
+    Interface contract (shared helper; ~19 call sites in ``harness.py`` for
+    the protocol counters, which must always produce a number):
+        - ``bool`` is rejected, numeric strings are rejected, ``float`` is
+          rejected (even ``3.0``), ``None`` is rejected -- every one of them
+          yields *default*.  See the D-028 block above for why leniency here
+          would hand a garbled reply through a HARD gate.
+        - Never raises, for any input.
     """
-    coerced = coerce_int(value)
-    return default if coerced is None else coerced
+    return value if type_matches(value, int) else default
 
 
 def coerce_worker_output(
@@ -334,8 +317,9 @@ def coerce_worker_output(
 ) -> dict[str, Any]:
     """Filter a worker's payload down to allowed keys of the exact right type.
 
-    Interface contract (shared helper, 2+ call sites: ``harness.py``'s
-    ``_apply_role_result`` from step 11, and ``roles.py`` from step 6):
+    Interface contract (shared helper, 2 call sites: ``roles.py``'s default
+    worker factory and ``harness.py``'s ``_apply_role_result`` -- BOTH live,
+    verified by grep at step 7e; see decisions.md D-059):
         - ``payload``: whatever the worker returned, already parsed.
         - ``allowlist``: ``{context_key: expected_type}`` for the dispatching
           state.  The TABLE is owned by the caller (``harness.py``'s
@@ -454,42 +438,18 @@ def retry(
         raise
 
 
-# ---------------------------------------------------------------------------
-# Schema forcing
-# ---------------------------------------------------------------------------
-
-
-def build_response_format(schema: type) -> dict[str, Any]:
-    """Build the ``json_schema`` ``response_format`` dict for a pydantic model.
-
-    Interface contract (shared helper, 2+ call sites: ``roles.py`` from step 6
-    for non-``BaseAgent`` dispatch, and ``test_hardening.py`` from step 13):
-        - ``schema``: a pydantic ``BaseModel`` subclass (anything exposing
-          ``model_json_schema()``).
-        - Returns exactly the envelope
-          ``{"type": "json_schema", "json_schema": {"name": ..., "schema": ...}}``
-          that ``LiteLLMInterface._make_llm_call`` forwards to litellm
-          (``llm.py:584-597``) and that ``prepare_ollama_messages``
-          (``ollama.py:187-196``) recognises when it embeds the schema text
-          into the prompt for Ollama.
-        - Raises ``TypeError`` when *schema* cannot produce a JSON schema.
-
-    ``BaseAgent`` call sites do NOT need this: setting
-    ``AgentConfig.output_schema`` makes ``BaseAgent._init_context``
-    (``base.py:172-184``) build the identical envelope itself.  This function
-    is the adapter for the call sites that bypass ``BaseAgent`` -- a direct
-    ``API``/``LiteLLMInterface`` call.  The shape is deliberately byte-identical
-    to core's, so the two can be compared in a test rather than trusted.
-    """
-    builder = getattr(schema, "model_json_schema", None)
-    if not callable(builder):
-        raise TypeError(
-            f"{schema!r} is not a pydantic model: no model_json_schema() method"
-        )
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": getattr(schema, "__name__", "output"),
-            "schema": builder(),
-        },
-    }
+# DECISION plan-2026-07-21T125237-191b2eb2/D-059
+# There is deliberately NO `build_response_format` helper in this module, and
+# re-adding one would be duplication rather than hardening. It existed from
+# step 5 to step 7e with ZERO call sites while its own docstring asserted two
+# ("`roles.py` from step 6 ... and `test_hardening.py` from step 13") -- the
+# grep is unambiguous, `roles.py` never called it. The reason it has no callers
+# is structural, not "not wired yet": every worker this package dispatches goes
+# through `create_agent`/`BaseAgent` (roles.py:568,676-682), and setting
+# `AgentConfig.output_schema` makes `BaseAgent._init_context` (base.py:172-184)
+# build the identical `{"type": "json_schema", ...}` envelope itself. A second
+# builder here would be a shadow copy of core's, kept in lockstep by hand.
+# If a future step really does need a direct `API`/`LiteLLMInterface` call that
+# bypasses `BaseAgent`, pass `AgentConfig.output_schema` instead; only if that
+# is impossible should this come back, WITH its call site in the same commit.
+# See decisions.md D-059.

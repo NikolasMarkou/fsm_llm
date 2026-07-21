@@ -75,6 +75,7 @@ from .constants import (
 )
 from .exceptions import HarnessError, HarnessReentrancyError
 from .fsm_definition import build_harness_fsm
+from .hardening import as_int, coerce_worker_output
 from .rules import ROLE_BY_STATE, get_rules
 
 __all__ = [
@@ -805,8 +806,8 @@ class HarnessAgent(BaseAgent):
     @staticmethod
     def _dispatch_key(context: Mapping[str, Any], state: str) -> str:
         """Ledger key for dispatching *state* at the context's counters."""
-        iteration = _as_int(context.get(ContextKeys.ITERATION), 0)
-        step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        iteration = as_int(context.get(ContextKeys.ITERATION), 0)
+        step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
         return f"{_LEDGER_DISPATCH}:{state}:{iteration}:{step}"
 
     @staticmethod
@@ -951,7 +952,7 @@ class HarnessAgent(BaseAgent):
         # See decisions.md D-018.
         if previous == HarnessStates.PLAN:
             updates[ContextKeys.ITERATION] = (
-                _as_int(context.get(ContextKeys.ITERATION), 0) + 1
+                as_int(context.get(ContextKeys.ITERATION), 0) + 1
             )
             updates[ContextKeys.STEP_NUMBER] = 1
             updates.update(_LEASH_RESET)
@@ -1030,6 +1031,19 @@ class HarnessAgent(BaseAgent):
         Returns:
             ``(result, error)``; exactly one of the two is not ``None``.
         """
+        # DECISION plan-2026-07-21T125237-191b2eb2/D-045
+        # `(None, None)` here is the DIAGNOSTIC mode, and it must stay unable to
+        # advance anything. Do NOT "improve" a worker-less run by letting the
+        # FSM's own Pass-1/Pass-2 calls fill the gate flags in -- that was
+        # D-016's degrade path, and review-iter-1.md C1 measured what it
+        # actually does: a full EXPLORE -> CLOSE traverse on fabricated
+        # `plan_approved`/`close_confirmed` while a DENYING approval callback
+        # was never consulted once. The degrade path and invariants I6/I8 are
+        # mutually exclusive; this returns "nothing was attempted" so every gate
+        # stays shut and the stall halt reports which one. The discriminator
+        # matters downstream: `(None, None)` spends no leash attempt, whereas
+        # `(None, exc)` -- a worker that RAISED -- does (D-051).
+        # See decisions.md D-045.
         if self.worker_factory is None:
             return None, None
 
@@ -1039,10 +1053,10 @@ class HarnessAgent(BaseAgent):
             goal=str(context.get(ContextKeys.GOAL, "")),
             operative_rules=get_rules(state).operative_rules,
             gate_summary=get_rules(state).gate_summary,
-            iteration=_as_int(context.get(ContextKeys.ITERATION), 0),
-            step_number=_as_int(context.get(ContextKeys.STEP_NUMBER), 0),
-            total_steps=_as_int(context.get(ContextKeys.TOTAL_STEPS), 1),
-            fix_attempts=_as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0),
+            iteration=as_int(context.get(ContextKeys.ITERATION), 0),
+            step_number=as_int(context.get(ContextKeys.STEP_NUMBER), 0),
+            total_steps=as_int(context.get(ContextKeys.TOTAL_STEPS), 1),
+            fix_attempts=as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0),
             context=MappingProxyType(dict(context)),
             plan_dir=_as_optional_str(context.get(ContextKeys.PLAN_DIR)),
             workspace_root=_as_optional_str(context.get(ContextKeys.WORKSPACE_ROOT)),
@@ -1088,8 +1102,8 @@ class HarnessAgent(BaseAgent):
         entry = {
             "role": role,
             "state": state,
-            "iteration": _as_int(context.get(ContextKeys.ITERATION), 0),
-            "step_number": _as_int(context.get(ContextKeys.STEP_NUMBER), 0),
+            "iteration": as_int(context.get(ContextKeys.ITERATION), 0),
+            "step_number": as_int(context.get(ContextKeys.STEP_NUMBER), 0),
             "answer": answer[:_MAX_ANSWER_CHARS],
             "success": success,
         }
@@ -1109,6 +1123,11 @@ class HarnessAgent(BaseAgent):
         Only keys in :data:`_WORKER_WRITABLE` for *state* are read, and only
         when their runtime type matches exactly.  Anything else is dropped,
         which leaves the gate BLOCKED (invariant I8).
+
+        The TABLE (``_WORKER_WRITABLE``) is this module's; the ALGORITHM is
+        ``hardening.coerce_worker_output``'s, shared with ``roles.py``'s
+        worker factory.  That split is D-028's, and step 7e is where the
+        driver actually stopped keeping its own copy of it (D-059).
         """
         allowed = _WORKER_WRITABLE[state]
         if not allowed:
@@ -1123,21 +1142,9 @@ class HarnessAgent(BaseAgent):
         if isinstance(result.final_context, dict):
             payload.update(result.final_context)
 
-        updates: dict[str, Any] = {}
-        for key, expected in allowed.items():
-            if key not in payload:
-                continue
-            value = payload[key]
-            if not _type_matches(value, expected):
-                logger.warning(
-                    f"Worker for state '{state}' returned {key}="
-                    f"{value!r} ({type(value).__name__}); expected "
-                    f"{expected.__name__}. Dropping it -- the gate stays closed."
-                )
-                continue
-            updates[key] = value
-
-        return updates
+        return coerce_worker_output(
+            payload, allowed, where=f"Worker for state '{state}'"
+        )
 
     @staticmethod
     def _enforce_routing_exclusivity(
@@ -1245,8 +1252,8 @@ class HarnessAgent(BaseAgent):
             # halt names the gate it is sitting behind.
             return {}
 
-        step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
-        total = max(1, _as_int(context.get(ContextKeys.TOTAL_STEPS), 1))
+        step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        total = max(1, as_int(context.get(ContextKeys.TOTAL_STEPS), 1))
 
         if result is not None and result.success:
             if step < total:
@@ -1259,7 +1266,7 @@ class HarnessAgent(BaseAgent):
                 }
             return {ContextKeys.EXECUTE_COMPLETE: True}
 
-        attempts = _as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0) + 1
+        attempts = as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0) + 1
         updates: dict[str, Any] = {
             ContextKeys.FIX_ATTEMPTS: attempts,
             ContextKeys.EXECUTE_COMPLETE: True,
@@ -1288,7 +1295,7 @@ class HarnessAgent(BaseAgent):
             context,
             reasoning=(
                 f"Approve the plan for iteration "
-                f"{_as_int(context.get(ContextKeys.ITERATION), 0) + 1}?"
+                f"{as_int(context.get(ContextKeys.ITERATION), 0) + 1}?"
             ),
         )
         return {ContextKeys.PLAN_APPROVED: approved}
@@ -1331,8 +1338,8 @@ class HarnessAgent(BaseAgent):
         # max_fix_attempts * (1 + max_leash_grants) for ANY approval sequence.
         # Once the budget is spent the driver stops ASKING -- an approval whose
         # answer would be discarded is theatre. See decisions.md D-052.
-        grants = _as_int(context.get(ContextKeys.LEASH_GRANTS), 0)
-        step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        grants = as_int(context.get(ContextKeys.LEASH_GRANTS), 0)
+        step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
         if grants >= self.max_leash_grants:
             logger.warning(
                 f"Leash grant budget spent on step {step}: {grants} "
@@ -1384,11 +1391,11 @@ class HarnessAgent(BaseAgent):
         call = ToolCall(
             tool_name=gate,
             parameters={
-                ContextKeys.ITERATION: _as_int(context.get(ContextKeys.ITERATION), 0),
-                ContextKeys.STEP_NUMBER: _as_int(
+                ContextKeys.ITERATION: as_int(context.get(ContextKeys.ITERATION), 0),
+                ContextKeys.STEP_NUMBER: as_int(
                     context.get(ContextKeys.STEP_NUMBER), 0
                 ),
-                ContextKeys.FIX_ATTEMPTS: _as_int(
+                ContextKeys.FIX_ATTEMPTS: as_int(
                     context.get(ContextKeys.FIX_ATTEMPTS), 0
                 ),
             },
@@ -1418,10 +1425,10 @@ class HarnessAgent(BaseAgent):
         Returns:
             A context delta when the step must not be dispatched, else ``None``.
         """
-        attempts = _as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0)
+        attempts = as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0)
         if attempts < self.max_fix_attempts:
             return None
-        step = _as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
         logger.warning(
             f"Pre-step gate [{GateSlug.LEASH_CAP}]: step {step} has {attempts} "
             f"fix attempts (cap {self.max_fix_attempts}); refusing to dispatch."
@@ -1466,7 +1473,7 @@ class HarnessAgent(BaseAgent):
         """
         if state != HarnessStates.PLAN:
             return
-        iteration = _as_int(context.get(ContextKeys.ITERATION), 0)
+        iteration = as_int(context.get(ContextKeys.ITERATION), 0)
         if iteration < self.iteration_hard_cap:
             return
         # DECISION plan-2026-07-21T125237-191b2eb2/D-019
@@ -1498,8 +1505,8 @@ class HarnessAgent(BaseAgent):
         """
         signature = (
             state,
-            _as_int(context.get(ContextKeys.ITERATION), 0),
-            _as_int(context.get(ContextKeys.STEP_NUMBER), 0),
+            as_int(context.get(ContextKeys.ITERATION), 0),
+            as_int(context.get(ContextKeys.STEP_NUMBER), 0),
             len(self._read_ledger(context)),
         )
         if dispatched or signature != self._stall_signature:
@@ -1630,18 +1637,6 @@ def _deny_approval(request: Any) -> bool:
     return False
 
 
-def _as_int(value: Any, default: int) -> int:
-    """Return *value* when it is a real ``int``, else *default*.
-
-    ``bool`` is rejected on purpose: ``isinstance(True, int)`` is ``True`` in
-    Python, and letting a stray ``True`` read as the integer 1 would turn a
-    garbled worker reply into a plausible-looking counter.
-    """
-    if isinstance(value, bool) or not isinstance(value, int):
-        return default
-    return value
-
-
 def _as_optional_str(value: Any) -> str | None:
     """Return a non-empty ``str`` for a filesystem root, else ``None``.
 
@@ -1661,14 +1656,14 @@ def _exactly(current: Any, owned: Any) -> bool:
     tower makes ``False == 0`` and ``True == 1``: a fabricated
     ``findings_count = True`` would compare equal to the driver's seeded ``0``
     and slip past the revert.
+
+    Deliberately NOT moved to ``hardening.py`` alongside
+    :func:`~fsm_llm_harness.hardening.type_matches` (D-059): it is a
+    two-operand EQUALITY predicate for the driver-ownership revert, not a
+    one-operand type predicate for a worker reply, it has one call site, and
+    its ``type(x) is type(y)`` rule is deliberately stricter than
+    ``type_matches``'s ``isinstance`` (which accepts subclasses).  Expressing
+    it as ``type_matches(current, type(owned)) and current == owned`` would
+    silently loosen it for any subclass.
     """
     return type(current) is type(owned) and bool(current == owned)
-
-
-def _type_matches(value: Any, expected: type) -> bool:
-    """Exact runtime type check used by the worker-reply allowlist (I8)."""
-    if expected is bool:
-        return isinstance(value, bool)
-    if expected is int:
-        return isinstance(value, int) and not isinstance(value, bool)
-    return isinstance(value, expected)

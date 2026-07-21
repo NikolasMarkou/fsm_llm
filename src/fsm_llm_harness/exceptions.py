@@ -11,8 +11,6 @@ from typing import Any
 
 from fsm_llm.definitions import FSMError
 
-from .constants import Defaults
-
 
 class HarnessError(FSMError):
     """Base exception for all harness-related errors."""
@@ -21,53 +19,31 @@ class HarnessError(FSMError):
         super().__init__(message, details=details)
 
 
-class HarnessGateBlockedError(HarnessError):
-    """A HARD protocol gate refused to open.
-
-    Carries the pre-step-gate slug (one of ``GateSlug.ORDER``) so callers can
-    branch on the slug rather than parsing the message.
-    """
-
-    def __init__(self, slug: str, message: str, details: dict[str, Any] | None = None):
-        self.slug = slug
-
-        error_details = details or {}
-        error_details["slug"] = slug
-
-        super().__init__(f"Gate [{slug}]: {message}", error_details)
-
-
-class HarnessLeashError(HarnessError):
-    """The 2-attempt autonomy leash is exhausted.
-
-    Raised instead of dispatching a 3rd fix attempt for the same plan step.
-    """
-
-    def __init__(
-        self,
-        step: str,
-        attempts: int,
-        cap: int = Defaults.MAX_FIX_ATTEMPTS,
-        details: dict[str, Any] | None = None,
-    ):
-        self.step = step
-        self.attempts = attempts
-        self.cap = cap
-
-        error_details = details or {}
-        error_details["step"] = step
-        error_details["attempts"] = attempts
-        error_details["cap"] = cap
-
-        super().__init__(
-            f"Step '{step}': autonomy leash exhausted "
-            f"({attempts} fix attempts, cap {cap})",
-            error_details,
-        )
+# DECISION plan-2026-07-21T125237-191b2eb2/D-059
+# Do NOT re-add `HarnessGateBlockedError` or `HarnessLeashError`. They shipped
+# at step 1 as speculative types and were raised NOWHERE through step 7e -- but
+# the reason to delete them is not the empty grep, it is that the shipped
+# driver represents both conditions as CONTEXT, on purpose:
+#   - a blocked gate is the protocol's NORMAL turn outcome (`TransitionEvaluator`
+#     returns BLOCKED and the FSM holds state -- assumption A2), recorded as
+#     `last_gate_slug` + `halt_reason` (harness.py `_after_execute_dispatch`);
+#   - an exhausted leash halts the same way and then ASKS a human
+#     (`_offer_leash_continue`, D-052) -- it is a decision point, not a fault.
+# Raising through the FSM handler boundary would also lose the run: core's
+# handler system does not carry a harness exception back to `run()` as a
+# protocol outcome. If a later step needs "the gate refused" as a value, it
+# already has one -- `GateSlug` + `last_gate_slug`.
+# See decisions.md D-059.
 
 
 class HarnessArtifactError(HarnessError):
-    """An artifact could not be read, written, parsed or schema-validated."""
+    """An artifact could not be read, written, parsed or schema-validated.
+
+    **Not raised yet**: ``storage.py`` (plan step 9) is the module that raises
+    this, at its read/write/parse boundary.  It is kept ahead of that step --
+    unlike the two exception types D-059 deleted -- because a filesystem or
+    schema failure genuinely IS exceptional, where a blocked gate is not.
+    """
 
     def __init__(
         self,
