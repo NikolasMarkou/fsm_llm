@@ -48,6 +48,12 @@ class SessionState(BaseModel):
     context_data: dict[str, Any] = Field(default_factory=dict)
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     stack_depth: int = 1
+    # Optional carrier for a conversation's WorkingMemory. When populated the
+    # shape is {"buffers": {name: {k: v}}, "hidden_buffers": [name, ...]}. The
+    # flat context_data does NOT carry WorkingMemory, so it is persisted here.
+    # Default None keeps old session files (written before this field existed)
+    # loadable unchanged.
+    working_memory: dict[str, Any] | None = None
     saved_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

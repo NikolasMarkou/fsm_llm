@@ -363,13 +363,21 @@ class API:
         return cls(fsm_definition=fsm_definition, **kwargs)
 
     def start_conversation(
-        self, initial_context: dict[str, Any] | None = None
+        self,
+        initial_context: dict[str, Any] | None = None,
+        *,
+        _suppress_start: bool = False,
     ) -> tuple[str, str]:
         """
         Start new conversation with improved 2-pass architecture.
 
         Args:
             initial_context: Optional initial context data
+            _suppress_start: Internal resume flag forwarded to
+                ``FSMManager.start_conversation(suppress_start=...)``. When True
+                the START_CONVERSATION handlers and the Pass-2 greeting are
+                skipped (used by ``restore_session``). Not part of the public
+                API; default False preserves normal start behavior.
 
         Returns:
             Tuple of (conversation_id, initial_response)
@@ -377,7 +385,9 @@ class API:
         try:
             # Start conversation using enhanced FSM manager
             conversation_id, response = self.fsm_manager.start_conversation(
-                self.fsm_id, initial_context=initial_context
+                self.fsm_id,
+                initial_context=initial_context,
+                suppress_start=_suppress_start,
             )
 
             # Track conversation and initialize stack
@@ -1108,6 +1118,23 @@ class API:
             ),
             stack_depth=self.get_stack_depth(conversation_id),
         )
+
+        # H10: the flat context_data does not carry WorkingMemory, so persist it
+        # separately. Read the live instance's WorkingMemory reference under
+        # _lock (consistent with the _replay_history reach-in); to_dict() is
+        # itself internally lock-guarded. hidden_buffers are carried explicitly so
+        # a custom hidden-buffer set survives the round-trip (D-032 downgrade).
+        with self.fsm_manager._lock:
+            instance = self.fsm_manager.instances.get(current_fsm_id)
+            wm_obj = instance.context.working_memory if instance is not None else None
+        if wm_obj is not None and hasattr(wm_obj, "to_dict"):
+            state.working_memory = {
+                "buffers": wm_obj.to_dict(),
+                "hidden_buffers": sorted(
+                    getattr(wm_obj, "_hidden_buffers", frozenset())
+                ),
+            }
+
         self._session_store.save(conversation_id, state)
 
     def load_session(self, session_id: str) -> SessionState | None:
@@ -1154,10 +1181,15 @@ class API:
         if state is None:
             return None
 
-        # Start conversation with saved context
-        conv_id, _ = self.start_conversation(initial_context=state.context_data)
+        # Start conversation with saved context. H9: _suppress_start=True skips
+        # the START_CONVERSATION handlers and the Pass-2 greeting so a resume
+        # does not re-fire start-of-conversation side effects.
+        conv_id, _ = self.start_conversation(
+            initial_context=state.context_data, _suppress_start=True
+        )
 
-        # Restore conversation history under per-conversation lock.
+        # Restore conversation history (and H10: WorkingMemory) under the
+        # per-conversation lock.
         # NOTE (C-NEW-007): restore_session acquires conv_lock then
         # _replay_history briefly takes _lock (conv_lock → _lock), the reverse
         # of the codebase's canonical _lock → conv_lock order. This is a LATENT
@@ -1167,11 +1199,36 @@ class API:
         # _replay_history signature/guard without updating its regression test.
         current_fsm_id = self._get_current_fsm_conversation_id(conv_id)
         conv_lock = self.fsm_manager._conversation_locks.get(current_fsm_id)
+
+        def _replay_and_restore_wm() -> None:
+            self._replay_history(current_fsm_id, state.conversation_history)
+            if state.working_memory:
+                # Single definition (not duplicated across the if/else arms):
+                # duplicating the hidden_buffers carry risks fixing one arm and
+                # not the other, re-opening the D-032 hidden-buffer downgrade.
+                from .memory import WorkingMemory
+
+                with self.fsm_manager._lock:
+                    wm_instance = self.fsm_manager.instances.get(current_fsm_id)
+                if wm_instance is not None:
+                    wm = state.working_memory
+                    wm_instance.context.working_memory = WorkingMemory.from_dict(
+                        wm.get("buffers") or {},
+                        hidden_buffers=frozenset(wm.get("hidden_buffers") or []),
+                    )
+
         if conv_lock is not None:
             with conv_lock:
-                self._replay_history(current_fsm_id, state.conversation_history)
+                _replay_and_restore_wm()
         else:
-            self._replay_history(current_fsm_id, state.conversation_history)
+            _replay_and_restore_wm()
+
+        # C3: reinstate the saved current_state AFTER the conv_lock block.
+        # set_conversation_state takes _lock then conv_lock, so calling it OUTSIDE
+        # the conv_lock block here preserves the canonical _lock → conv_lock order
+        # and does not weaken C-NEW-007. It also validates the state against the
+        # FSM def, raising FSMError for a corrupted/foreign session.
+        self.fsm_manager.set_conversation_state(current_fsm_id, state.current_state)
 
         return conv_id, state
 

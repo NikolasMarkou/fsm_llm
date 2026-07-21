@@ -252,9 +252,24 @@ class FSMManager:
         return self._pipeline.get_state(instance, conversation_id)
 
     def start_conversation(
-        self, fsm_id: str, initial_context: dict[str, Any] | None = None
+        self,
+        fsm_id: str,
+        initial_context: dict[str, Any] | None = None,
+        *,
+        suppress_start: bool = False,
     ) -> tuple[str, str]:
         """Start new conversation.
+
+        Args:
+            fsm_id: FSM definition id to instantiate.
+            initial_context: Optional initial context data.
+            suppress_start: Resume path. When True the instance is created,
+                registered and internal-key-seeded exactly as normal, but the
+                START_CONVERSATION handler pass AND the Pass-2 greeting are
+                skipped, returning ``(conversation_id, "")``. Used by session
+                restore so resuming does not re-fire start-of-conversation side
+                effects or burn an LLM greeting. Default False keeps the normal
+                start path byte-for-byte unchanged.
 
         Returns:
             Tuple of (conversation_id, initial_response)
@@ -283,6 +298,17 @@ class FSMManager:
         with self._lock:
             self.instances[conversation_id] = instance
             self._conversation_locks[conversation_id] = threading.RLock()
+
+        if suppress_start:
+            # Resume path: skip the START_CONVERSATION handler pass and the
+            # Pass-2 greeting. Instance creation, lock registration and
+            # internal-key seeding above are unchanged. Returns before touching
+            # the default path below, so that path stays byte-for-byte the same.
+            log.info(
+                f"Started conversation [{conversation_id}] with FSM [{fsm_id}] "
+                "(suppress_start: resume)"
+            )
+            return conversation_id, ""
 
         # Execute start conversation handlers
         try:
@@ -592,6 +618,50 @@ class FSMManager:
             raise FSMError(f"Conversation {conversation_id} not found")
 
         return self.instances[conversation_id].current_state
+
+    def set_conversation_state(self, conversation_id: str, state_name: str) -> None:
+        """Set an existing conversation's current state to a validated FSM state.
+
+        Interface contract:
+          - Parameters: `conversation_id` (an existing conversation), `state_name`
+            (a state id that MUST exist in that conversation's FSM definition).
+          - Returns: None; mutates `instance.current_state` in place.
+          - Failure: raises `FSMError` if the conversation is unknown OR
+            `state_name` is not a state in its FSM definition (never silently
+            mis-sets).
+
+        Used by session restore to reinstate the saved `current_state` after the
+        conversation has been (re)created at `initial_state`.
+        """
+        # DECISION plan-2026-07-21T045419-9925aa3a/D-004
+        # A validated, locked setter belongs in the manager (which owns FSM-def
+        # access), NOT as a raw `instance.current_state = ...` poke in api.py:
+        # the FSM-def membership check is the invariant that turns a corrupted or
+        # foreign session naming a nonexistent state into a loud FSMError instead
+        # of silent corruption. Do NOT inline this back into restore_session, and
+        # do NOT invert the lock order: `_lock` is a plain (non-reentrant)
+        # threading.Lock and `get_fsm_definition` re-acquires it, so `_lock` MUST
+        # be released before resolving the def / acquiring `conv_lock`. Acquiring
+        # `conv_lock` only AFTER `_lock` is released preserves the canonical
+        # `_lock -> conv_lock` order and keeps the C-NEW-007 note intact. See
+        # decisions.md D-004.
+        with self._lock:
+            if conversation_id not in self.instances:
+                raise FSMError(f"Conversation {conversation_id} not found")
+            instance = self.instances[conversation_id]
+            conv_lock = self._conversation_locks.get(conversation_id)
+
+        fsm_def = self.get_fsm_definition(instance.fsm_id)
+        if state_name not in fsm_def.states:
+            raise FSMError(
+                f"'{state_name}' is not a state in FSM '{instance.fsm_id}'"
+            )
+
+        if conv_lock is not None:
+            with conv_lock:
+                instance.current_state = state_name
+        else:
+            instance.current_state = state_name
 
     @with_conversation_context
     def get_conversation_history(

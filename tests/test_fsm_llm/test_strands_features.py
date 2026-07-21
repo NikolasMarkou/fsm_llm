@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
 
-from fsm_llm import API, FileSessionStore, SessionState, WorkingMemory
+from fsm_llm import (
+    API,
+    FileSessionStore,
+    FSMError,
+    HandlerTiming,
+    SessionState,
+    WorkingMemory,
+)
 from fsm_llm.definitions import ResponseGenerationRequest, ResponseGenerationResponse
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.memory import BUFFER_METADATA, DEFAULT_HIDDEN_BUFFERS
@@ -551,3 +560,163 @@ class TestSessionPersistence:
         conv_id, _ = api.start_conversation()
         with pytest.raises(Exception, match="No session store"):
             api.save_session(conv_id)
+
+
+# ================================================================
+# Session restore round-trip: state (C3) + suppress side effects (H9)
+# + WorkingMemory persistence (H10)
+# ================================================================
+
+
+class TestSessionRestoreRoundTrip:
+    """restore_session must reinstate saved state, not re-fire start-of-
+    conversation side effects, and round-trip WorkingMemory buffers."""
+
+    def _advance_off_start(self, store):
+        """Build an API, move the FSM off `start` to `end`, return (api, conv_id)."""
+        api = API(
+            fsm_definition=_minimal_fsm_dict(),
+            llm_interface=MockLLM(),
+            session_store=store,
+        )
+        conv_id, _ = api.start_conversation()
+        api.converse("go", conv_id)
+        # The always-true start->end transition is rule-deterministic.
+        assert api.get_current_state(conv_id) == "end"
+        return api, conv_id
+
+    def test_restore_roundtrip(self):
+        """Restored current_state == saved state AND a WM buffer value survives.
+
+        RED before the fix: restore restarted the FSM at `initial_state`
+        ("start") and never persisted WorkingMemory.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            api, conv_id = self._advance_off_start(store)
+
+            wm = WorkingMemory()
+            wm.set("core", "resume_marker", "alive")
+            api.fsm_manager.instances[conv_id].context.working_memory = wm
+            api.save_session(conv_id)
+
+            api2 = API(
+                fsm_definition=_minimal_fsm_dict(),
+                llm_interface=MockLLM(),
+                session_store=store,
+            )
+            result = api2.restore_session(conv_id)
+            assert result is not None
+            rid, restored_state = result
+
+            assert restored_state.current_state == "end"
+            assert api2.get_current_state(rid) == "end"
+
+            restored_wm = api2.fsm_manager.instances[rid].context.working_memory
+            assert restored_wm is not None
+            assert restored_wm.get("core", "resume_marker") == "alive"
+
+    def test_restore_bad_state(self):
+        """A session naming a nonexistent state raises FSMError (guard)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            api = API(
+                fsm_definition=_minimal_fsm_dict(),
+                llm_interface=MockLLM(),
+                session_store=store,
+            )
+            store.save(
+                "conv-bad",
+                SessionState(
+                    conversation_id="conv-bad",
+                    fsm_id=api.fsm_id,
+                    current_state="does_not_exist",
+                ),
+            )
+            with pytest.raises(FSMError):
+                api.restore_session("conv-bad")
+
+    def test_restore_no_side_effects(self):
+        """restore_session fires NO START_CONVERSATION handler and burns NO
+        Pass-2 greeting."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            api, conv_id = self._advance_off_start(store)
+            api.save_session(conv_id)
+
+            start_calls: list[int] = []
+            restore_llm = MockLLM("GREETING")
+            api2 = API(
+                fsm_definition=_minimal_fsm_dict(),
+                llm_interface=restore_llm,
+                session_store=store,
+            )
+            handler = (
+                api2.create_handler("count_start")
+                .at(HandlerTiming.START_CONVERSATION)
+                .do(lambda ctx: start_calls.append(1) or {})
+            )
+            api2.register_handler(handler)
+
+            restore_llm.last_request = None  # greeting spy baseline
+            result = api2.restore_session(conv_id)
+
+            assert result is not None
+            assert start_calls == []  # H9: no START_CONVERSATION handler fired
+            assert restore_llm.last_request is None  # H9: no Pass-2 greeting call
+
+    def test_restore_legacy_file(self):
+        """An old-shape session dict (no working_memory key) still loads and
+        restores (backward compatibility)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            api = API(
+                fsm_definition=_minimal_fsm_dict(),
+                llm_interface=MockLLM(),
+                session_store=store,
+            )
+            legacy = {
+                "conversation_id": "legacy-1",
+                "fsm_id": api.fsm_id,
+                "current_state": "end",
+                "context_data": {"name": "Alice"},
+                "conversation_history": [],
+                "stack_depth": 1,
+            }
+            (Path(tmpdir) / "legacy-1.json").write_text(json.dumps(legacy))
+
+            result = api.restore_session("legacy-1")
+            assert result is not None
+            rid, _ = result
+            assert api.get_current_state(rid) == "end"
+            # Nothing to restore: WM stays at its default None.
+            assert api.fsm_manager.instances[rid].context.working_memory is None
+
+    def test_restore_hidden_buffer_stays_hidden(self):
+        """A custom hidden buffer survives save/restore AND stays hidden from
+        aggregate views (D-032 downgrade guard)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            api, conv_id = self._advance_off_start(store)
+
+            wm = WorkingMemory(
+                buffers=("core", "secret"),
+                hidden_buffers=frozenset({"secret"}),
+            )
+            wm.set("core", "name", "Alice")
+            wm.set("secret", "token", "sk-xyz")
+            api.fsm_manager.instances[conv_id].context.working_memory = wm
+            api.save_session(conv_id)
+
+            api2 = API(
+                fsm_definition=_minimal_fsm_dict(),
+                llm_interface=MockLLM(),
+                session_store=store,
+            )
+            rid, _ = api2.restore_session(conv_id)
+            restored_wm = api2.fsm_manager.instances[rid].context.working_memory
+
+            assert restored_wm.get("secret", "token") == "sk-xyz"
+            all_data = restored_wm.get_all_data()
+            assert "token" not in all_data
+            assert "name" in all_data
