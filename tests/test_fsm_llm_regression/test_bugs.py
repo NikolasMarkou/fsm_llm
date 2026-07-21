@@ -472,6 +472,9 @@ class TestConversationMemoryLeak:
         }
         api.fsm_manager = MagicMock()
         api._temp_fsm_definitions = {"temp_fsm_1": MagicMock()}
+        # _release_unreferenced_temp_definitions (reached via end_conversation)
+        # reads _pending_push_ids; __new__ bypasses __init__, so mirror it here.
+        api._pending_push_ids = set()
         api._stack_lock = __import__("threading").Lock()
         api._last_accessed = {"conv1": 0.0}
 
