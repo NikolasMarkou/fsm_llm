@@ -146,6 +146,59 @@ class TestExtractJsonFromText:
         """
         assert extract_json_from_text('x " {"a": 1} " y') == {"a": 1}
 
+    # --------------------------------------------------------------
+    # Strategy 4 (regex key-value fallback): intent/confidence capture.
+    # The `meaningful_keys` gate lists intent+confidence, but Strategy 4
+    # never CAPTURED them (finding G4). Recover them from garbled text
+    # when strategies 1-3 cannot parse a balanced top-level object.
+    # --------------------------------------------------------------
+
+    def test_strategy4_recovers_intent_and_confidence_from_garbled_text(self):
+        """A recoverable classification intent in un-parseable text (G4).
+
+        No balanced top-level object parses (the trailing `{` never
+        closes), so strategies 1-3 all fail. The `"intent"`/`"confidence"`
+        fragments in the reasoning prose must still populate the result so
+        the `meaningful_keys` gate fires — instead of degrading to
+        fallback_intent/0.0.
+        """
+        text = (
+            "<think>The user says they want to purchase a widget. "
+            'The best label is "intent": "buy" with "confidence": 0.8 '
+            "given the clear phrasing. Still deciding { the final answer"
+        )
+        result = extract_json_from_text(text)
+        assert result is not None
+        assert result.get("intent") == "buy"
+        assert result.get("confidence") == 0.8
+        assert isinstance(result["confidence"], float)
+
+    def test_strategy4_skips_malformed_multidot_confidence(self):
+        """A stray multi-dot token like "1.2.3" must not hard-fail (G4).
+
+        The float() parse is guarded: a non-parseable confidence is
+        skipped, but a well-formed intent is still recovered.
+        """
+        text = (
+            'reasoning: "intent": "buy", "confidence": 1.2.3 '
+            "and the object never closes {"
+        )
+        result = extract_json_from_text(text)
+        assert result is not None
+        assert result.get("intent") == "buy"
+        assert "confidence" not in result
+
+    def test_strategy4_message_reasoning_still_captured(self):
+        """Regression: existing string-pattern keys still captured (G4)."""
+        text = (
+            '"message": "Hello there", "reasoning": "greeting detected" '
+            "and an unbalanced tail {"
+        )
+        result = extract_json_from_text(text)
+        assert result is not None
+        assert result.get("message") == "Hello there"
+        assert result.get("reasoning") == "greeting detected"
+
 
 # ==================================================================
 # load_fsm_from_file

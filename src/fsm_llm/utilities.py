@@ -298,6 +298,12 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
             r'"message"\s*:\s*"([^"]*)"',
             r'"selected_transition"\s*:\s*"([^"]*)"',
             r'"reasoning"\s*:\s*"([^"]*)"',
+            # `intent` is a quoted string value, so it rides the same
+            # last-match-wins string loop below. Without it, a recoverable
+            # classification intent in garbled text silently degrades to
+            # `fallback_intent` even though `meaningful_keys` claims to
+            # cover it. See findings G4.
+            r'"intent"\s*:\s*"([^"]*)"',
         ]
 
         extracted = {}
@@ -310,6 +316,18 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
             if matches:
                 key = pattern.split('"')[1]
                 extracted[key] = matches[-1]
+
+        # `confidence` is an UNQUOTED number, so the quoted-string loop above
+        # cannot capture it. Extract it separately, same last-match-wins
+        # rationale. Guard the float parse: a stray multi-dot token like
+        # "1.2.3" raises ValueError — skip it rather than hard-fail, so a
+        # recoverable intent still survives. See findings G4.
+        confidence_matches = re.findall(r'"confidence"\s*:\s*([0-9.]+)', text)
+        if confidence_matches:
+            try:
+                extracted["confidence"] = float(confidence_matches[-1])
+            except ValueError:
+                pass
 
         # For extracted_data, find the key and then use balanced braces
         ed_match = re.search(r'"extracted_data"\s*:\s*\{', text)
