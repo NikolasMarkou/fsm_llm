@@ -722,6 +722,68 @@ _data_operators: dict[str, Any] = {
     "context_length": _op_context_length,
 }
 
+#: Operators that MUST evaluate their operands lazily (reference JsonLogic).
+_SHORT_CIRCUIT_OPERATORS: set[str] = {"and", "or", "if"}
+
+
+def _evaluate_short_circuit(
+    operator: str, values: list, data: dict[str, Any], _depth: int
+) -> Any:
+    """Lazily evaluate the short-circuiting operators ``and``/``or``/``if``.
+
+    # DECISION plan-2026-07-21T045419-9925aa3a/D-006
+    # Do NOT revert this to eager evaluation (the old `evaluated_values`
+    # list-comp evaluated EVERY operand before dispatch). Guard idioms such as
+    # `{"and": [{"!=": [{"var":"x"},0]}, {"<": [{"/":[100,{"var":"x"}]},5]}]}`
+    # rely on the untaken branch NEVER being evaluated: with `x=0` the div-by-
+    # zero operand must be skipped and the whole condition return a clean
+    # `False`, not raise. Eager evaluation silently turned every such guard into
+    # an error-swallowed `False`. See decisions.md D-006.
+    #
+    # Do NOT wrap the sub-evaluations in a swallow-all try/except either: the
+    # TAKEN branch keeps the D-012/D-023 total contract — a div/mod-by-zero on
+    # the path actually taken still raises `TransitionEvaluationError` exactly
+    # as before (Invariant 4). Only the UNTAKEN branch is skipped.
+
+    Contract:
+        operator: one of ``"and"``/``"or"``/``"if"`` (caller guarantees membership).
+        values: the RAW, un-evaluated operand list from the logic expression.
+        data / _depth: threaded unchanged into each operand's ``evaluate_logic``.
+    Returns the decisive operand value — first falsy (``and``) / first truthy
+    (``or``), else the last operand; ``and: [] -> True``, ``or: [] -> False`` —
+    or, for ``if``, the matched branch (else the trailing default, else ``None``).
+    Failure mode: propagates any error raised while evaluating a TAKEN operand.
+    """
+    if operator == "and":
+        if not values:
+            return True
+        result: Any = True
+        for val in values:
+            result = evaluate_logic(val, data, _depth + 1)
+            if not result:
+                return result
+        return result
+
+    if operator == "or":
+        if not values:
+            return False
+        result = False
+        for val in values:
+            result = evaluate_logic(val, data, _depth + 1)
+            if result:
+                return result
+        return result
+
+    # operator == "if": condition/result pairs, evaluated lazily left-to-right.
+    for i in range(0, len(values) - 1, 2):
+        condition = evaluate_logic(values[i], data, _depth + 1)
+        if condition:
+            return evaluate_logic(values[i + 1], data, _depth + 1)
+    # Odd arg count -> trailing default; even -> no default -> None.
+    if len(values) % 2:
+        return evaluate_logic(values[-1], data, _depth + 1)
+    return None
+
 
 def evaluate_logic(
     logic: JsonLogicExpression, data: dict[str, Any] | None = None, _depth: int = 0
@@ -828,6 +890,14 @@ def evaluate_logic(
     data_op = _data_operators.get(operator)
     if data_op is not None:
         return data_op(values, data, _depth)
+
+    # Short-circuit operators evaluate operands lazily (only the taken branch).
+    # Intercept BEFORE the eager list-comp below so an untaken branch that would
+    # raise (e.g. a div-by-zero guard) is never evaluated. See D-006 at
+    # `_evaluate_short_circuit`. The `operations` entries for and/or/if remain as
+    # harmless fallbacks and are intentionally not routed through here.
+    if operator in _SHORT_CIRCUIT_OPERATORS:
+        return _evaluate_short_circuit(operator, values, data, _depth)
 
     # For other operators, recursively evaluate values first
     evaluated_values = [evaluate_logic(val, data, _depth + 1) for val in values]

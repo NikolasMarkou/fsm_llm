@@ -1007,6 +1007,13 @@ _VALIDATOR_VIOLATIONS = {
         ("states", "start", "classification_extractions", 0, "intents", 0, "name"),
         "café",
     ),
+    # H8: an unknown JsonLogic operator in a condition's `logic` is rejected by
+    # `TransitionCondition._validate_logic` (ValueError -> value_error), so the
+    # loader raises and the validator promotes to ERROR -- both agree.
+    ("TransitionCondition", "_validate_logic"): (
+        ("states", "start", "transitions", 0, "conditions", 0, "logic"),
+        {"eqauls": [{"var": "name"}, 1]},
+    ),
 }
 
 
@@ -1191,6 +1198,55 @@ class TestConstraintSweepAgreement:
         )
 
 
+def _fsm_with_condition_logic(logic):
+    """`_valid_fsm_data()` where start's single transition carries one condition
+    with the given `logic` dict. Used to drive H8/H6 load-time rejection."""
+    data = copy.deepcopy(_valid_fsm_data())
+    data["states"]["start"]["transitions"][0]["conditions"] = [
+        {"description": "gate", "logic": logic}
+    ]
+    return data
+
+
+class TestLogicOperatorValidation:
+    """H8/H6: a `TransitionCondition.logic` with an unknown operator or an empty
+    (or nested-empty) dict is rejected at LOAD time by BOTH `FSMDefinition(**data)`
+    (raises) and `FSMValidator(...).validate()` (`is_valid is False`), preserving
+    the validator/loader agreement IFF. Valid nested logic still loads clean."""
+
+    def test_unknown_operator_rejected_by_loader_and_validator(self):
+        data = _fsm_with_condition_logic({"eqauls": [{"var": "email"}, 1]})
+        with pytest.raises(ValidationError):
+            FSMDefinition(**data)
+        assert FSMValidator(data).validate().is_valid is False
+
+    def test_empty_logic_dict_rejected_by_loader_and_validator(self):
+        data = _fsm_with_condition_logic({})
+        with pytest.raises(ValidationError):
+            FSMDefinition(**data)
+        assert FSMValidator(data).validate().is_valid is False
+
+    def test_nested_empty_logic_dict_rejected(self):
+        data = _fsm_with_condition_logic({"and": [{}]})
+        with pytest.raises(ValidationError):
+            FSMDefinition(**data)
+        assert FSMValidator(data).validate().is_valid is False
+
+    def test_valid_nested_logic_still_loads_and_validates(self):
+        # `["a", "b"]` are DATA args of `in`, not operators — the walk must not
+        # reject them. `and`/`==`/`in`/`var` are all allow-listed.
+        data = _fsm_with_condition_logic(
+            {
+                "and": [
+                    {"==": [{"var": "email"}, 1]},
+                    {"in": [{"var": "kind"}, ["a", "b"]]},
+                ]
+            }
+        )
+        FSMDefinition(**data)  # must not raise
+        assert FSMValidator(data).validate().is_valid is True
+
+
 class TestValidatorIsNeverStricterThanTheLoader:
     """I-2 / SC-2: zero false REDs. The validator must never reject an FSM the
     loader accepts -- widening the allow-list must not have over-corrected."""
@@ -1233,6 +1289,30 @@ class TestValidatorIsNeverStricterThanTheLoader:
             assert FSMValidator(data).validate().is_valid is True, (
                 f"{label}: FALSE RED at the legal boundary"
             )
+
+
+class TestUnknownKeyWarnings:
+    """H7: a misspelled OPTIONAL FSM-JSON key surfaces as a `fsm-llm-validate`
+    WARNING naming the key, WITHOUT flipping `is_valid` (the loader ignores
+    extras via pydantic `extra="ignore"`, so both layers still agree)."""
+
+    def test_state_typo_key_warns_and_stays_valid(self):
+        data = _valid_fsm_data()
+        data["states"]["start"]["requred_context_keys"] = ["email"]
+        result = FSMValidator(data).validate()
+        assert result.is_valid is True
+        assert any("requred_context_keys" in w for w in result.warnings), (
+            f"no unknown-key warning naming the typo: {result.warnings}"
+        )
+
+    def test_free_form_logic_keys_do_not_warn(self):
+        """Vacuity / false-positive guard (Pre-Mortem 3): operator keys inside a
+        condition's `logic` are DATA, not model field names -- they must NOT
+        produce unknown-key warnings."""
+        data = _fsm_with_condition_logic({"==": [{"var": "email"}, 1]})
+        result = FSMValidator(data).validate()
+        assert result.is_valid is True
+        assert not any("Unknown key" in w for w in result.warnings), result.warnings
 
 
 # ------------------------------------------------------------------

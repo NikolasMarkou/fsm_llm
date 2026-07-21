@@ -340,8 +340,15 @@ class TestEdgeCases:
     """Edge cases and error handling."""
 
     def test_evaluation_error_in_condition_continues(self):
-        """Malformed logic should not crash the evaluator."""
-        cond = _make_condition(logic={"invalid_op": "bad"})
+        """A condition that RAISES at evaluation time must not crash the evaluator.
+
+        H8 now rejects an unknown operator at LOAD time (a `TransitionCondition`
+        with `{"invalid_op": ...}` can no longer be constructed), so this
+        resilience contract is exercised with an allow-listed operator that still
+        raises at runtime: a taken-branch div-by-zero raises
+        `TransitionEvaluationError`, which the evaluator must catch gracefully.
+        """
+        cond = _make_condition(logic={"<": [{"/": [1, 0]}, 5]})
         t = _make_transition("next", conditions=[cond])
         evaluator = TransitionEvaluator()
         state = _make_state("start", [t])

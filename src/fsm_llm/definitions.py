@@ -15,12 +15,14 @@ Key Changes:
 
 import re
 from collections import deque
+from collections.abc import Iterator
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .constants import (
+    ALLOWED_JSONLOGIC_OPERATIONS,
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
     MESSAGE_TRUNCATION_SUFFIX,
@@ -461,6 +463,47 @@ class ClassificationExtractionConfig(BaseModel):
 # --------------------------------------------------------------
 
 
+def _walk_logic_operators(node: Any) -> Iterator[str]:
+    """Yield every operator (dict) key inside a JsonLogic `node`, recursively.
+
+    A JsonLogic object is a dict whose single key is an operator mapping to its
+    argument value(s); arguments may be nested logic objects, lists of them, or
+    plain data. This walk yields ONLY dict keys (operators), never data values,
+    so the allow-list check can be applied to the yielded operator names.
+
+    # DECISION plan-2026-07-21T045419-9925aa3a/D-007
+    # An EMPTY dict is malformed JsonLogic (an operator object with zero operator
+    # keys), so this RAISES ValueError — that is how H6 rejects both a top-level
+    # `logic: {}` and a nested `{"and": [{}]}`. Do NOT "soften" this to silently
+    # skip empty dicts: `logic: {}` previously meant "always fail" while
+    # `logic: null` means "always pass", a silent divergence this guard closes.
+    # Do NOT recurse into a dict's KEYS (they are operators, already yielded) —
+    # only into its VALUES and into list/tuple ELEMENTS. Primitives, including
+    # the literal strings in a data-list arg such as `{"in":[{"var":"x"},["a",
+    # "b"]]}`, are DATA not operators and are ignored (false-reject trap). This
+    # helper lives here, NOT in expressions.py, because expressions.py imports
+    # FROM definitions.py — the reverse edge would be a circular import.
+    # See decisions.md D-007.
+
+    Contract:
+        node: any fragment of a JsonLogic expression (dict / list / scalar).
+    Yields: each operator key (str) encountered, in traversal order.
+    Raises: ValueError if any dict node is empty (malformed operator object).
+    """
+    if isinstance(node, dict):
+        if not node:
+            raise ValueError(
+                "Empty JsonLogic object '{}' is not a valid condition"
+            )
+        for key, value in node.items():
+            yield key
+            yield from _walk_logic_operators(value)
+    elif isinstance(node, (list, tuple)):
+        for element in node:
+            yield from _walk_logic_operators(element)
+    # Primitives (str/int/float/bool/None) are data, not operators — ignored.
+
+
 class TransitionCondition(BaseModel):
     """
     Enhanced transition condition with evaluation capabilities.
@@ -489,6 +532,37 @@ class TransitionCondition(BaseModel):
         ge=0,
         le=1000,
     )
+
+    @model_validator(mode="after")
+    def _validate_logic(self) -> TransitionCondition:
+        """Reject an empty/nested-empty (H6) or non-allow-listed-operator (H8)
+        `logic` dict at LOAD time, so `API.from_file` and `fsm-llm-validate`
+        both fail on a malformed condition instead of blowing up mid-conversation.
+
+        # DECISION plan-2026-07-21T045419-9925aa3a/D-007
+        # Raise a plain ValueError (surfaces as pydantic error type `value_error`,
+        # already promoted to ERROR by validator.py's allow-list) so the
+        # validator/loader agreement IFF is preserved. Do NOT switch this to a
+        # different exception type or add `extra="forbid"` — either would break
+        # `test_constraint_sweep_validator_agrees_with_loader`. `logic is None`
+        # (absent) stays valid: it means "pass if required keys present".
+        # See decisions.md D-007.
+        """
+        if self.logic is None:
+            return self
+        unknown = sorted(
+            {
+                op
+                for op in _walk_logic_operators(self.logic)
+                if op not in ALLOWED_JSONLOGIC_OPERATIONS
+            }
+        )
+        if unknown:
+            raise ValueError(
+                f"Unsupported JsonLogic operator(s): {unknown}. "
+                f"Allowed: {sorted(ALLOWED_JSONLOGIC_OPERATIONS)}"
+            )
+        return self
 
 
 class Transition(BaseModel):

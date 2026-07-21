@@ -605,3 +605,46 @@ class TestVarArgumentArity:
 
         arity_errors = [r for r in records if "requires" in r and ", got " in r]
         assert len(arity_errors) == 4, records
+
+
+class TestShortCircuitEvaluation:
+    """H5: `and`/`or`/`if` evaluate ONLY the taken branch (reference JsonLogic).
+
+    A guard idiom whose UNTAKEN branch would raise (div-by-zero / missing var)
+    must return a clean verdict without ever evaluating that branch. The
+    TAKEN-branch total contract is unchanged: a div-by-zero on the taken path
+    still raises `TransitionEvaluationError` (see `test_error_handling`).
+    """
+
+    def test_and_short_circuits_before_div_by_zero_guard(self):
+        # x=0: the `!=` guard is False, so the second operand (100/x) is never
+        # evaluated. Before the fix this raised TransitionEvaluationError.
+        logic = {
+            "and": [
+                {"!=": [{"var": "x"}, 0]},
+                {"<": [{"/": [100, {"var": "x"}]}, 5]},
+            ]
+        }
+        assert evaluate_logic(logic, {"x": 0}) is False
+
+    def test_or_short_circuits_before_div_by_zero_guard(self):
+        # x=0: the first operand is True, so 100/x is never evaluated.
+        logic = {
+            "or": [
+                {"==": [{"var": "x"}, 0]},
+                {"<": [{"/": [100, {"var": "x"}]}, 5]},
+            ]
+        }
+        assert evaluate_logic(logic, {"x": 0}) is True
+
+    def test_if_does_not_evaluate_the_untaken_else_branch(self):
+        # mode="a": the condition matches, so the else branch (1/count with
+        # count=0) is never evaluated. Before the fix this raised.
+        logic = {
+            "if": [
+                {"==": [{"var": "mode"}, "a"]},
+                "OK",
+                {"/": [1, {"var": "count"}]},
+            ]
+        }
+        assert evaluate_logic(logic, {"mode": "a", "count": 0}) == "OK"

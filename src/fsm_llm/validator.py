@@ -4,12 +4,17 @@ import json
 from collections import deque
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from .definitions import FSMDefinition
+from .definitions import (
+    FSMDefinition,
+    State,
+    Transition,
+    TransitionCondition,
+)
 from .logging import logger
 
 # --------------------------------------------------------------
@@ -190,6 +195,7 @@ class FSMValidator:
         # Stage 2-3: Enhanced validation
         self._validate_terminal_states()
         self._validate_required_context_keys()
+        self._validate_unknown_keys()
 
         # Stage 4-6: Analysis (won't affect validity but provides insights)
         self._analyze_state_complexity()
@@ -433,6 +439,66 @@ class FSMValidator:
                     f"that no transition condition gates on "
                     f"(conditions require {sorted(gated_keys)})"
                 )
+
+    def _validate_unknown_keys(self):
+        """Warn (never error) on FSM-JSON keys that no model field declares.
+
+        Walks the FOUR fixed-schema levels only -- FSM -> states -> transitions
+        -> conditions -- comparing each raw dict's keys against the corresponding
+        Pydantic model's `model_fields`. A misspelled OPTIONAL key (e.g.
+        `requred_context_keys`) is silently dropped by the loader
+        (`extra="ignore"`), so surfacing it here as a WARNING is the only signal
+        an author gets that the key had no effect.
+
+        # DECISION plan-2026-07-21T045419-9925aa3a/D-008
+        # WARNING tier ONLY -- never `add_error`. The loader accepts extra keys,
+        # so promoting them to ERROR would make `fsm-llm-validate` stricter than
+        # `API.from_file` and break `test_constraint_sweep_validator_agrees_with_
+        # loader`. Do NOT descend into the free-form dict fields (`logic`,
+        # `metadata`, `schema`, `transition_classification`, `validation_rules`):
+        # their keys are DATA, not model field names, so warning on them floods
+        # the report with false positives (Pre-Mortem 3). This pass reads only
+        # the STRUCTURAL child fields (`transitions`, `conditions`), never the
+        # data fields. See decisions.md D-008.
+        """
+
+        def _warn_unknown(node: Any, model: type[BaseModel], where: str) -> None:
+            if not isinstance(node, dict):
+                return
+            allowed = set(model.model_fields.keys())
+            for key in node:
+                if key not in allowed:
+                    self.result.add_warning(
+                        f"Unknown key '{key}' in {where} (not a recognized "
+                        f"{model.__name__} field); it will be ignored on load"
+                    )
+
+        _warn_unknown(self.fsm_data, FSMDefinition, "FSM definition")
+
+        if not isinstance(self.states, dict):
+            return
+        for state_id, state in self.states.items():
+            _warn_unknown(state, State, f"state '{state_id}'")
+            if not isinstance(state, dict):
+                continue
+            transitions = state.get("transitions", [])
+            if not isinstance(transitions, list):
+                continue
+            for t_idx, transition in enumerate(transitions):
+                _warn_unknown(
+                    transition, Transition, f"state '{state_id}' transition #{t_idx}"
+                )
+                if not isinstance(transition, dict):
+                    continue
+                conditions = transition.get("conditions", [])
+                if not isinstance(conditions, list):
+                    continue
+                for c_idx, condition in enumerate(conditions):
+                    _warn_unknown(
+                        condition,
+                        TransitionCondition,
+                        f"state '{state_id}' transition #{t_idx} condition #{c_idx}",
+                    )
 
     def _analyze_state_complexity(self):
         """
