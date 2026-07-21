@@ -13,6 +13,7 @@ Key Features:
 """
 
 import json
+import math
 import os
 import re
 from typing import Any
@@ -73,6 +74,41 @@ def _resolve_reasoning_trace(message: Any) -> str | None:
     if not trace:
         return None
     return trace
+
+
+# --------------------------------------------------------------
+# Confidence coercion
+# --------------------------------------------------------------
+
+
+def coerce_confidence(raw: Any, default: float) -> float:
+    """Coerce a model-supplied confidence to a clamped ``[0, 1]`` float.
+
+    Contract:
+        - Parameters: ``raw`` is the model-supplied value (already parsed by
+          ``json.loads``); ``default`` is the fallback for non-finite input.
+        - ``float(raw)`` still raises ``TypeError``/``ValueError`` on ``{...}``/
+          ``null`` so the caller's parse-fallback ladder catches those exactly
+          as before — this helper deliberately does NOT swallow them.
+        - Only ``NaN``/``±inf`` (which ``float()`` accepts and ``min``/``max``
+          leave un-clamped) are mapped to ``default``; the result is then
+          clamped to ``[0, 1]``.
+        - Shared by llm.py (2 rungs) and classification.py (2 parsers) so the
+          four confidence-parse sites can never re-diverge.
+
+    # DECISION plan-2026-07-21T082818-4c63deac/D-001
+    # Do NOT remove the NaN/inf guard or fold this back into a bare
+    # `min(max(float(raw), 0.0), 1.0)` at each call site. `json.loads` accepts
+    # bare `NaN`/`Infinity`, and `min`/`max` leave NaN un-clamped: in llm.py that
+    # escaped as a pydantic ValidationError and failed the whole turn (G5); in
+    # classification.py `max(0.0, min(1.0, nan))` silently became 1.0 (max
+    # certainty), defeating `is_low_confidence` (G6). This guard is the fix.
+    # See decisions.md D-001.
+    """
+    value = float(raw)  # may raise TypeError/ValueError — intentional
+    if math.isnan(value) or math.isinf(value):
+        return default
+    return min(max(value, 0.0), 1.0)
 
 
 # --------------------------------------------------------------

@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
     LLMResponseError,
     ResponseGenerationRequest,
 )
@@ -609,3 +611,76 @@ class TestReasoningContentRecovery:
         real = Message(content="", reasoning_content='{"message": "real"}')
         assert not hasattr(real, "thinking")
         assert getattr(real, "reasoning_content", None) == '{"message": "real"}'
+
+
+def _field_request(field_name: str = "topic") -> FieldExtractionRequest:
+    return FieldExtractionRequest(
+        system_prompt="extract the field",
+        user_message="x",
+        field_name=field_name,
+    )
+
+
+class TestFieldExtractionNaNConfidence:
+    """G5: a bare ``NaN``/``Infinity`` confidence from ``json.loads`` must be
+    coerced to a clamped [0,1] default, never escape as a pydantic
+    ValidationError that fails the whole turn.
+
+    ``json.loads`` accepts bare ``NaN``/``Infinity`` tokens (no ``parse_constant``
+    override in this codebase), so the raw strings below produce a real
+    ``float('nan')``/``float('inf')`` inside the parser — the exact production
+    shape, not a hand-stubbed value.
+    """
+
+    def test_primary_rung_nan_confidence_yields_valid_response(self):
+        # Directly-parseable JSON hits the PRIMARY rung (~llm.py:867-878).
+        response = _mock_llm_response('{"value": "x", "confidence": NaN}')
+        llm = LiteLLMInterface(model="test-model")
+
+        result = llm._parse_field_extraction_response(response, _field_request())
+
+        assert isinstance(result, FieldExtractionResponse)
+        assert result.value == "x"
+        assert 0.0 <= result.confidence <= 1.0
+
+    def test_primary_rung_infinity_confidence_yields_valid_response(self):
+        response = _mock_llm_response('{"value": "x", "confidence": Infinity}')
+        llm = LiteLLMInterface(model="test-model")
+
+        result = llm._parse_field_extraction_response(response, _field_request())
+
+        assert isinstance(result, FieldExtractionResponse)
+        assert 0.0 <= result.confidence <= 1.0
+
+    def test_fallback_rung_nan_confidence_yields_valid_response(self):
+        # Prose-wrapped JSON skips the primary rung and is recovered by
+        # extract_json_from_text on the embedded-JSON fallback (~llm.py:899-914).
+        response = _mock_llm_response(
+            'Here is the result: {"value": "x", "confidence": NaN} thanks.'
+        )
+        llm = LiteLLMInterface(model="test-model")
+
+        result = llm._parse_field_extraction_response(response, _field_request())
+
+        assert isinstance(result, FieldExtractionResponse)
+        assert result.value == "x"
+        assert 0.0 <= result.confidence <= 1.0
+
+    def test_valid_confidence_preserved(self):
+        response = _mock_llm_response('{"value": "x", "confidence": 0.7}')
+        llm = LiteLLMInterface(model="test-model")
+
+        result = llm._parse_field_extraction_response(response, _field_request())
+
+        assert result.confidence == 0.7
+
+    def test_dict_confidence_still_degrades_via_ladder(self):
+        # A ``{...}`` confidence raises TypeError inside float() and must remain
+        # caught by the existing ladder — no new exception escapes.
+        response = _mock_llm_response('{"value": "x", "confidence": {"bad": 1}}')
+        llm = LiteLLMInterface(model="test-model")
+
+        result = llm._parse_field_extraction_response(response, _field_request())
+
+        # Falls through to the unstructured str-coercion rung; must not raise.
+        assert isinstance(result, FieldExtractionResponse)

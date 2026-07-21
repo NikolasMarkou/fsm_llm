@@ -33,7 +33,11 @@ from .prompts import (
     build_classification_json_schema,
     build_classification_system_prompt,
 )
-from .utilities import _resolve_reasoning_trace, extract_json_from_text
+from .utilities import (
+    _resolve_reasoning_trace,
+    coerce_confidence,
+    extract_json_from_text,
+)
 
 # Type alias for intent handler functions
 # DECISION plan-2026-07-19T124525-9899fbac/D-001: the entity VALUE type is
@@ -287,7 +291,10 @@ class Classifier:
 
         raw_confidence = data.get("confidence", 0.0)
         try:
-            confidence = float(raw_confidence)
+            # coerce_confidence maps NaN/±inf → 0.0 (so is_low_confidence fires,
+            # NOT 1.0) and clamps; a `{...}`/`null` still raises for the existing
+            # warn+default-0.0 rung below (D-001, utilities.py).
+            confidence = coerce_confidence(raw_confidence, 0.0)
         except (ValueError, TypeError):
             logger.warning(
                 f"Invalid confidence value {raw_confidence!r}, defaulting to 0.0"
@@ -296,7 +303,7 @@ class Classifier:
         return ClassificationResult(
             reasoning=data.get("reasoning", ""),
             intent=intent,
-            confidence=max(0.0, min(1.0, confidence)),
+            confidence=confidence,
             entities=data.get("entities", {})
             if isinstance(data.get("entities"), dict)
             else {},
@@ -326,7 +333,9 @@ class Classifier:
                 name = self.schema.fallback_intent
             raw_confidence = item.get("confidence", 0.0)
             try:
-                confidence = float(raw_confidence)
+                # NaN/±inf → 0.0 via the shared coercer; `{...}`/`null` still
+                # raises for the warn+default-0.0 rung (D-001, utilities.py).
+                confidence = coerce_confidence(raw_confidence, 0.0)
             except (ValueError, TypeError):
                 logger.warning(
                     f"Invalid confidence value {raw_confidence!r}, defaulting to 0.0"
@@ -335,7 +344,7 @@ class Classifier:
             scored.append(
                 IntentScore(
                     intent=name,
-                    confidence=max(0.0, min(1.0, confidence)),
+                    confidence=confidence,
                     entities=item.get("entities", {})
                     if isinstance(item.get("entities"), dict)
                     else {},

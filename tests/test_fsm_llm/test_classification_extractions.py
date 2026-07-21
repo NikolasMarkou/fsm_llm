@@ -893,3 +893,45 @@ class TestClassifierReasoningContentRecovery:
 
         data = Classifier._extract_response("", response)
         assert data == {"intent": "negative"}
+
+
+class TestClassificationNaNConfidence:
+    """G6: a ``NaN`` confidence must NOT be silently promoted to ``1.0`` (max
+    certainty), which would defeat ``is_low_confidence``. ``float('nan')`` is
+    what real ``json.loads('{"confidence": NaN}')`` yields, so it is passed to
+    the already-parsed ``data`` dict exactly as production would.
+    """
+
+    def test_parse_single_nan_confidence_is_low_confidence(self):
+        clf = _classifier()
+        result = clf._parse_single(
+            {"intent": "positive", "confidence": float("nan")}
+        )
+        assert result.confidence == 0.0
+        assert result.is_low_confidence
+
+    def test_parse_single_infinity_confidence_is_low_confidence(self):
+        clf = _classifier()
+        result = clf._parse_single(
+            {"intent": "positive", "confidence": float("inf")}
+        )
+        assert result.confidence == 0.0
+
+    def test_parse_multi_nan_confidence_is_low_confidence(self):
+        clf = _classifier()
+        result = clf._parse_multi(
+            {"intents": [{"intent": "positive", "confidence": float("nan")}]}
+        )
+        assert result.intents[0].confidence == 0.0
+
+    def test_parse_single_valid_confidence_preserved(self):
+        clf = _classifier()
+        result = clf._parse_single({"intent": "positive", "confidence": 0.7})
+        assert result.confidence == 0.7
+
+    def test_parse_single_non_numeric_confidence_still_defaults_zero(self):
+        clf = _classifier()
+        result = clf._parse_single(
+            {"intent": "positive", "confidence": {"bad": 1}}
+        )
+        assert result.confidence == 0.0

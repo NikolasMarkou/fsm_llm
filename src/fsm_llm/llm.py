@@ -76,7 +76,11 @@ from .ollama import (
     is_ollama_model,
     prepare_ollama_messages,
 )
-from .utilities import _resolve_reasoning_trace, extract_json_from_text
+from .utilities import (
+    _resolve_reasoning_trace,
+    coerce_confidence,
+    extract_json_from_text,
+)
 
 # Mirrors ``ResponseGenerationResponse.message``'s ``max_length`` constraint
 # (definitions.py:154).  Duplicated deliberately rather than introspected out of
@@ -864,7 +868,10 @@ class LiteLLMInterface(LLMInterface):
                     ed = data["extracted_data"]
                     if isinstance(ed, dict):
                         value = ed.get(request.field_name)
-                confidence = float(data.get("confidence", 1.0))
+                # coerce_confidence maps NaN/±inf → default (1.0) and clamps to
+                # [0,1]; a `{...}`/`null` still raises TypeError/ValueError for
+                # the ladder below (D-001, utilities.py).
+                confidence = coerce_confidence(data.get("confidence", 1.0), 1.0)
                 # D-020: `reasoning` carries max_length=5000 here too
                 # (definitions.py:347) — same trapdoor class as
                 # ResponseGenerationResponse.reasoning.
@@ -873,7 +880,7 @@ class LiteLLMInterface(LLMInterface):
                 return FieldExtractionResponse(
                     field_name=request.field_name,
                     value=value,
-                    confidence=min(max(confidence, 0.0), 1.0),
+                    confidence=confidence,
                     reasoning=reasoning,
                 )
             # D-016: TypeError added by the step-4 sweep, which found this PRIMARY
@@ -897,19 +904,20 @@ class LiteLLMInterface(LLMInterface):
                 if value is None:
                     value = self._find_nested_key(data, request.field_name, max_depth=3)
                 try:
-                    # `float(...)` is INSIDE the guard on purpose: a model-supplied
-                    # `"confidence": {...}` raises TypeError, and a non-str
-                    # `reasoning` (or one over max_length=5000) raises
+                    # `coerce_confidence(...)` is INSIDE the guard on purpose: a
+                    # model-supplied `"confidence": {...}` raises TypeError, and a
+                    # non-str `reasoning` (or one over max_length=5000) raises
                     # ValidationError — both would otherwise escape the ladder from
-                    # this rung just as the unguarded construction did.
-                    confidence = float(data.get("confidence", 0.95))
+                    # this rung just as the unguarded construction did. NaN/±inf
+                    # is now mapped to the 0.95 default first (D-001, utilities.py).
+                    confidence = coerce_confidence(data.get("confidence", 0.95), 0.95)
                     reasoning = _safe_str(data.get("reasoning"))  # D-020
                     if value is not None:
                         logger.debug("Extracted field JSON via fallback")
                         return FieldExtractionResponse(
                             field_name=request.field_name,
                             value=value,
-                            confidence=min(max(confidence, 0.0), 1.0),
+                            confidence=confidence,
                             reasoning=reasoning,
                         )
                 except (ValueError, TypeError) as e:
