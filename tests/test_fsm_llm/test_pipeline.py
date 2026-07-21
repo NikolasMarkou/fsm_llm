@@ -878,6 +878,86 @@ class TestProcessStreamPass2FailureIsAtomic:
             "Streaming Pass-2 failure left the metadata mutation committed"
         )
 
+    def test_process_stream_rollback_after_partial_yield(self):
+        """NC2 TRUE mid-stream case (reviewer C3): the streaming LLM YIELDS a few
+        chunks (already delivered to the consumer) and THEN raises. The rollback
+        must still fire — a chunk cannot be un-yielded, but current_state /
+        context.data / working_memory / metadata must all revert to pre-turn.
+
+        The sibling tests above force the failure with ``side_effect =
+        RuntimeError``, which raises when ``generate_response_stream`` is *called*
+        — i.e. BEFORE any chunk is produced. This one exercises the harder path
+        the plan's atomicity claim actually rests on: the exception surfaces from
+        INSIDE ``_stream_response_generation_pass``'s ``for chunk in ...: yield``
+        loop, after real chunks were emitted, and must propagate through
+        ``process_stream``'s ``except Exception`` guard.
+        """
+        from fsm_llm.memory import WorkingMemory
+
+        instance = _make_instance()
+        instance.context.working_memory = WorkingMemory()
+        captured = instance
+
+        class _WmMetaMutatingHandler(BaseHandler):
+            def __init__(self):
+                super().__init__(name="wm_meta_mutator", priority=100)
+
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
+                return True
+
+            def execute(self, context):
+                captured.context.working_memory.set(
+                    "scratch", "turn_key", "turn_value"
+                )
+                captured.context.metadata["turn_meta"] = "turn_value"
+                return {}
+
+        hs = HandlerSystem(error_mode="continue")
+        hs.register_handler(_WmMetaMutatingHandler())
+
+        def _yield_then_raise(_request):
+            # Deliver real chunks to the consumer, THEN drop the backend stream.
+            yield "Hel"
+            yield "lo, Al"
+            yield "ice"
+            raise RuntimeError("backend dropped mid-stream")
+
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Alice"})
+        llm.generate_response_stream.side_effect = _yield_then_raise
+
+        pipeline = _make_pipeline(
+            llm=llm, fsm_def=self._transition_fsm(), handler_system=hs
+        )
+
+        delivered: list[str] = []
+        with pytest.raises(RuntimeError, match="backend dropped mid-stream"):
+            for chunk in pipeline.process_stream(
+                instance, "My name is Alice", "conv-1"
+            ):
+                delivered.append(chunk)
+
+        # The consumer really did see the partial reply before the drop...
+        assert delivered == ["Hel", "lo, Al", "ice"], (
+            "Chunks were not delivered to the consumer before the mid-stream raise"
+        )
+
+        # ...yet the turn is atomic: all four handler-mutable fields reverted.
+        assert instance.current_state == "start", (
+            "Mid-stream Pass-2 failure left the Pass-1 transition committed"
+        )
+        assert "user_name" not in instance.context.data, (
+            "Mid-stream Pass-2 failure left the Pass-1 extraction committed"
+        )
+        assert instance.context.working_memory.get("scratch", "turn_key") is None, (
+            "Mid-stream Pass-2 failure left the working_memory mutation committed"
+        )
+        assert "turn_meta" not in instance.context.metadata, (
+            "Mid-stream Pass-2 failure left the metadata mutation committed"
+        )
+
 
 # ══════════════════════════════════════════════════════════════
 # 6. _clean_empty_context_keys()

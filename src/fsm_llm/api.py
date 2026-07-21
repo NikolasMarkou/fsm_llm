@@ -1327,6 +1327,11 @@ class API:
         # teardown is load-bearing (Pre-Mortem 3): end_conversation may itself
         # raise on a half-initialized conversation, and teardown must NEVER mask
         # the original error — swallow-and-log, then re-raise the original.
+        # NOTE (intentional): end_conversation fires END_CONVERSATION handlers on
+        # this teardown even though START was suppressed. This is DELIBERATE and
+        # consistent with fsm.py:_cleanup_after_failed_start (prior plan D-006):
+        # any failed conversation setup fires END on teardown. Do NOT suppress END
+        # handlers here — that would diverge from the failed-start precedent.
         try:
             if conv_lock is not None:
                 with conv_lock:

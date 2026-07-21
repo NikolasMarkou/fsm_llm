@@ -675,6 +675,52 @@ class TestSessionRestoreRoundTrip:
             assert len(api.conversation_stacks) == before_stacks
             assert len(api.fsm_manager.instances) == before_instances
 
+    def test_restore_failure_fires_end_conversation_once(self):
+        """Behavior pin (reviewer C2): the NC1 teardown fires END_CONVERSATION
+        handlers EXACTLY ONCE on a failed restore. This is intentional and
+        consistent with fsm.py:_cleanup_after_failed_start (prior plan D-006):
+        any failed conversation setup fires END on teardown. Pinning it here so a
+        future change that silently stops firing END handlers -- or double-fires
+        them -- on the restore-failure path is caught. Also re-asserts no leak and
+        that the original FSMError still propagates.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            api = API(
+                fsm_definition=_minimal_fsm_dict(),
+                llm_interface=MockLLM(),
+                session_store=store,
+            )
+            end_calls: list[int] = []
+            handler = (
+                api.create_handler("count_end")
+                .at(HandlerTiming.END_CONVERSATION)
+                .do(lambda ctx: end_calls.append(1) or {})
+            )
+            api.register_handler(handler)
+
+            store.save(
+                "conv-bad",
+                SessionState(
+                    conversation_id="conv-bad",
+                    fsm_id=api.fsm_id,
+                    current_state="does_not_exist",
+                ),
+            )
+
+            before_active = len(api.active_conversations)
+
+            with pytest.raises(FSMError):
+                api.restore_session("conv-bad")
+
+            # END_CONVERSATION handler fired exactly once during teardown...
+            assert end_calls == [1], (
+                "restore-failure teardown must fire END_CONVERSATION exactly once "
+                "(consistent with _cleanup_after_failed_start / D-006)"
+            )
+            # ...and no conversation leaked.
+            assert len(api.active_conversations) == before_active
+
     def test_restore_no_side_effects(self):
         """restore_session fires NO START_CONVERSATION handler and burns NO
         Pass-2 greeting."""
