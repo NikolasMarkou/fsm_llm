@@ -1312,18 +1312,50 @@ class API:
                         hidden_buffers=frozenset(wm.get("hidden_buffers") or []),
                     )
 
-        if conv_lock is not None:
-            with conv_lock:
+        # DECISION plan-2026-07-21T072826-e3131cc2/D-003: restore_session must
+        # NOT leak a half-registered conversation on partial-setup failure. Once
+        # start_conversation(_suppress_start=True) has registered conv_id in
+        # active_conversations / conversation_stacks / fsm_manager.instances,
+        # ANY exception in history replay, WorkingMemory restore, or the
+        # set_conversation_state validation below (which RAISES FSMError for a
+        # corrupted/foreign/redeployed FSM whose saved current_state no longer
+        # exists) leaves a fully-initialized conversation loaded with someone
+        # else's history — invisible to the caller (conv_id is never returned)
+        # and reclaimed only after the idle timeout. Do NOT drop this try/except
+        # "to simplify"; it mirrors push_fsm's _rollback_push teardown-on-partial-
+        # setup-failure (prior plan H1/D-011). The nested try/except around the
+        # teardown is load-bearing (Pre-Mortem 3): end_conversation may itself
+        # raise on a half-initialized conversation, and teardown must NEVER mask
+        # the original error — swallow-and-log, then re-raise the original.
+        try:
+            if conv_lock is not None:
+                with conv_lock:
+                    _replay_and_restore_wm()
+            else:
                 _replay_and_restore_wm()
-        else:
-            _replay_and_restore_wm()
 
-        # C3: reinstate the saved current_state AFTER the conv_lock block.
-        # set_conversation_state takes _lock then conv_lock, so calling it OUTSIDE
-        # the conv_lock block here preserves the canonical _lock → conv_lock order
-        # and does not weaken C-NEW-007. It also validates the state against the
-        # FSM def, raising FSMError for a corrupted/foreign session.
-        self.fsm_manager.set_conversation_state(current_fsm_id, state.current_state)
+            # C3: reinstate the saved current_state AFTER the conv_lock block.
+            # set_conversation_state takes _lock then conv_lock, so calling it
+            # OUTSIDE the conv_lock block here preserves the canonical
+            # _lock → conv_lock order and does not weaken C-NEW-007. It also
+            # validates the state against the FSM def, raising FSMError for a
+            # corrupted/foreign session.
+            self.fsm_manager.set_conversation_state(
+                current_fsm_id, state.current_state
+            )
+        except Exception:
+            # Best-effort teardown of the just-created conversation. end_conversation
+            # removes conv_id from active_conversations / conversation_stacks and
+            # ends the FSM instance (fsm_manager.instances). Swallow any teardown
+            # error so it never masks the original failure.
+            try:
+                self.end_conversation(conv_id)
+            except Exception as teardown_error:
+                logger.warning(
+                    "restore_session teardown of half-restored conversation "
+                    f"'{conv_id}' failed: {teardown_error!s}"
+                )
+            raise
 
         return conv_id, state
 

@@ -636,6 +636,45 @@ class TestSessionRestoreRoundTrip:
             with pytest.raises(FSMError):
                 api.restore_session("conv-bad")
 
+    def test_restore_bad_state_no_leak(self):
+        """A failed restore (nonexistent saved state) must NOT leak a
+        half-registered conversation.
+
+        RED before the NC1 fix: restore_session registers the conversation
+        via start_conversation(_suppress_start=True), replays history/WM,
+        then set_conversation_state raises FSMError -- but nothing tears the
+        just-created conversation down, so active_conversations /
+        conversation_stacks / fsm_manager.instances all grow by 1 and the
+        leaked conv_id is invisible to the caller (never returned).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            api = API(
+                fsm_definition=_minimal_fsm_dict(),
+                llm_interface=MockLLM(),
+                session_store=store,
+            )
+            store.save(
+                "conv-bad",
+                SessionState(
+                    conversation_id="conv-bad",
+                    fsm_id=api.fsm_id,
+                    current_state="does_not_exist",
+                ),
+            )
+
+            before_active = len(api.active_conversations)
+            before_stacks = len(api.conversation_stacks)
+            before_instances = len(api.fsm_manager.instances)
+
+            with pytest.raises(FSMError):
+                api.restore_session("conv-bad")
+
+            # No half-restored conversation may survive the failure.
+            assert len(api.active_conversations) == before_active
+            assert len(api.conversation_stacks) == before_stacks
+            assert len(api.fsm_manager.instances) == before_instances
+
     def test_restore_no_side_effects(self):
         """restore_session fires NO START_CONVERSATION handler and burns NO
         Pass-2 greeting."""
