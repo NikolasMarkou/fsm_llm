@@ -511,9 +511,7 @@ class API:
                         try:
                             self.save_session(conversation_id)
                         except Exception as save_err:
-                            logger.warning(
-                                f"Auto-save session failed: {save_err!s}"
-                            )
+                            logger.warning(f"Auto-save session failed: {save_err!s}")
             except (ValueError, FSMError):
                 raise
             except Exception as e:
@@ -709,9 +707,7 @@ class API:
                 if frame.fsm_id is not None
             } | self._pending_push_ids
             stale = [
-                fsm_id
-                for fsm_id in self._temp_fsm_definitions
-                if fsm_id not in used
+                fsm_id for fsm_id in self._temp_fsm_definitions if fsm_id not in used
             ]
             for fsm_id in stale:
                 self._temp_fsm_definitions.pop(fsm_id, None)
@@ -1375,9 +1371,7 @@ class API:
             # _lock → conv_lock order and does not weaken C-NEW-007. It also
             # validates the state against the FSM def, raising FSMError for a
             # corrupted/foreign session.
-            self.fsm_manager.set_conversation_state(
-                current_fsm_id, state.current_state
-            )
+            self.fsm_manager.set_conversation_state(current_fsm_id, state.current_state)
         except Exception:
             # Best-effort teardown of the just-created conversation. end_conversation
             # removes conv_id from active_conversations / conversation_stacks and

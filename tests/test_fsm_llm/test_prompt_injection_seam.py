@@ -28,13 +28,13 @@ import pytest
 
 from fsm_llm.api import API
 from fsm_llm.definitions import (
+    FieldExtractionConfig,
     FSMContext,
     FSMDefinition,
     FSMInstance,
     State,
     Transition,
 )
-from fsm_llm.definitions import FieldExtractionConfig
 from fsm_llm.prompts import (
     BasePromptBuilder,
     DataExtractionPromptBuilder,

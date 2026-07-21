@@ -910,9 +910,7 @@ class TestReadConcurrency:
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self._READERS + 1
             ) as pool:
-                reader_futures = [
-                    pool.submit(reader) for _ in range(self._READERS)
-                ]
+                reader_futures = [pool.submit(reader) for _ in range(self._READERS)]
                 writer_future = pool.submit(writer)
                 concurrent.futures.wait([*reader_futures, writer_future])
 
@@ -1007,4 +1005,3 @@ class TestBrokenLockInvariantFailsLoud:
         finally:
             manager._conversation_locks[conv_id] = threading.RLock()
             api.close()
-

@@ -904,17 +904,13 @@ class TestClassificationNaNConfidence:
 
     def test_parse_single_nan_confidence_is_low_confidence(self):
         clf = _classifier()
-        result = clf._parse_single(
-            {"intent": "positive", "confidence": float("nan")}
-        )
+        result = clf._parse_single({"intent": "positive", "confidence": float("nan")})
         assert result.confidence == 0.0
         assert result.is_low_confidence
 
     def test_parse_single_infinity_confidence_is_low_confidence(self):
         clf = _classifier()
-        result = clf._parse_single(
-            {"intent": "positive", "confidence": float("inf")}
-        )
+        result = clf._parse_single({"intent": "positive", "confidence": float("inf")})
         assert result.confidence == 0.0
 
     def test_parse_multi_nan_confidence_is_low_confidence(self):
@@ -931,7 +927,5 @@ class TestClassificationNaNConfidence:
 
     def test_parse_single_non_numeric_confidence_still_defaults_zero(self):
         clf = _classifier()
-        result = clf._parse_single(
-            {"intent": "positive", "confidence": {"bad": 1}}
-        )
+        result = clf._parse_single({"intent": "positive", "confidence": {"bad": 1}})
         assert result.confidence == 0.0

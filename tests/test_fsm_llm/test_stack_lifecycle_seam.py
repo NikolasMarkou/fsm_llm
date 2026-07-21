@@ -376,9 +376,7 @@ class TestPushRegisterAppendRace:
         conv_id, _ = api.start_conversation()
         api.push_fsm(conv_id, _make_fsm("sub1"))
         with api._stack_lock:
-            assert api._pending_push_ids == set(), (
-                "push left a leaked pending-id entry"
-            )
+            assert api._pending_push_ids == set(), "push left a leaked pending-id entry"
         api.end_conversation(conv_id)
         with api._stack_lock:
             assert api._temp_fsm_definitions == {}

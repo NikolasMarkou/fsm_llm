@@ -492,9 +492,7 @@ def _walk_logic_operators(node: Any) -> Iterator[str]:
     """
     if isinstance(node, dict):
         if not node:
-            raise ValueError(
-                "Empty JsonLogic object '{}' is not a valid condition"
-            )
+            raise ValueError("Empty JsonLogic object '{}' is not a valid condition")
         for key, value in node.items():
             yield key
             yield from _walk_logic_operators(value)

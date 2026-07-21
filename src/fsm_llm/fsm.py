@@ -701,9 +701,7 @@ class FSMManager:
     @with_conversation_context
     def get_conversation_state(self, conversation_id: str, log: Any = None) -> str:
         """Get current state of conversation."""
-        return self._read_under_lock(
-            conversation_id, lambda inst: inst.current_state
-        )
+        return self._read_under_lock(conversation_id, lambda inst: inst.current_state)
 
     def set_conversation_state(self, conversation_id: str, state_name: str) -> None:
         """Set an existing conversation's current state to a validated FSM state.
@@ -739,9 +737,7 @@ class FSMManager:
 
         fsm_def = self.get_fsm_definition(instance.fsm_id)
         if state_name not in fsm_def.states:
-            raise FSMError(
-                f"'{state_name}' is not a state in FSM '{instance.fsm_id}'"
-            )
+            raise FSMError(f"'{state_name}' is not a state in FSM '{instance.fsm_id}'")
 
         if conv_lock is not None:
             with conv_lock:
@@ -949,9 +945,7 @@ class FSMManager:
         # whole sub-dict internally consistent with the snapshot.
         fsm_def = self.get_fsm_definition(fsm_id)
         if state_id not in fsm_def.states:
-            raise StateNotFoundError(
-                f"State '{state_id}' not found in FSM '{fsm_id}'"
-            )
+            raise StateNotFoundError(f"State '{state_id}' not found in FSM '{fsm_id}'")
         current_state = fsm_def.states[state_id]
 
         return {

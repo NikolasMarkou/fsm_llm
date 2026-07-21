@@ -746,9 +746,7 @@ class TestProcessPass2FailureIsAtomic:
                 return True
 
             def execute(self, context):
-                captured.context.working_memory.set(
-                    "scratch", "turn_key", "turn_value"
-                )
+                captured.context.working_memory.set("scratch", "turn_key", "turn_value")
                 captured.context.metadata["turn_meta"] = "turn_value"
                 return {}
 
@@ -855,9 +853,7 @@ class TestProcessStreamPass2FailureIsAtomic:
                 return True
 
             def execute(self, context):
-                captured.context.working_memory.set(
-                    "scratch", "turn_key", "turn_value"
-                )
+                captured.context.working_memory.set("scratch", "turn_key", "turn_value")
                 captured.context.metadata["turn_meta"] = "turn_value"
                 return {}
 
@@ -908,9 +904,7 @@ class TestProcessStreamPass2FailureIsAtomic:
                 return True
 
             def execute(self, context):
-                captured.context.working_memory.set(
-                    "scratch", "turn_key", "turn_value"
-                )
+                captured.context.working_memory.set("scratch", "turn_key", "turn_value")
                 captured.context.metadata["turn_meta"] = "turn_value"
                 return {}
 

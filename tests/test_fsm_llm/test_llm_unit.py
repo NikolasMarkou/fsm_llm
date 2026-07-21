@@ -613,9 +613,7 @@ class TestStreamReasoningFragmentAccumulation:
         """
         chunks = [
             _real_delta_chunk(content="", reasoning_content=None),
-            _real_delta_chunk(
-                content="", reasoning_content='{"message": "Whole"}'
-            ),
+            _real_delta_chunk(content="", reasoning_content='{"message": "Whole"}'),
         ]
         completion_patch, params_patch = self._stream(chunks)
         llm = LiteLLMInterface(model="test-model")

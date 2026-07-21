@@ -667,9 +667,7 @@ class LiteLLMInterface(LLMInterface):
         trace = _resolve_reasoning_trace(message)
         if not trace:
             return None
-        logger.debug(
-            "Content empty but reasoning trace present, extracting from it"
-        )
+        logger.debug("Content empty but reasoning trace present, extracting from it")
         return LiteLLMInterface._recover_content_from_trace(trace)
 
     @staticmethod
