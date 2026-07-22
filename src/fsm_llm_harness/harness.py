@@ -331,6 +331,10 @@ class RoleRequest:
         assigned_write_target: The ONE workspace-relative file an EXECUTE
             step edits (:func:`derive_execute_target`, driver-owned); ``None``
             otherwise -- the prompt then falls back unchanged.
+        execute_target_reason: WHY ``assigned_write_target`` holds what it
+            holds, for an EXECUTE dispatch: one of the ``EXECUTE_TARGET_*``
+            literals below.  ``None`` for every other state.  DIAGNOSTIC only:
+            no prompt builder reads it (D-010 fail-open is proven by test).
     """
 
     role: str
@@ -347,10 +351,22 @@ class RoleRequest:
     workspace_root: str | None = None
     assigned_topic: str | None = None
     assigned_write_target: str | None = None
+    execute_target_reason: str | None = None
 
 
 _TICKED_RE = re.compile(r"`([^`\s]+)`")
 _TARGET_RE = re.compile(r"^(?!/)(?!.*\.\.)(?=.*[./])[\w./-]*\w$")
+
+#: Diagnostic reasons ``_assign_execute_target`` reports alongside its target.
+#: Purely observational (rubric rows, logs): the prompt half NEVER reads them,
+#: so an unassigned dispatch renders byte-identically whatever the reason
+#: (D-010 fail-open).  L6 B0 could not tell a run with no plan.md from one
+#: whose Files-To-Modify simply had no path-shaped token -- all three causes
+#: collapsed into one silent ``None``.
+EXECUTE_TARGET_ASSIGNED = "assigned"
+EXECUTE_TARGET_NO_PLAN_DIR = "no-plan-dir"
+EXECUTE_TARGET_NO_PLAN_DOC = "no-plan-doc"
+EXECUTE_TARGET_NO_TOKEN = "no-target-token"
 
 
 def derive_execute_target(plan: PlanDoc, step_number: int) -> str | None:
@@ -1418,6 +1434,11 @@ class HarnessAgent(BaseAgent):
         if self.worker_factory is None:
             return None, None
 
+        execute_target, execute_target_reason = (
+            self._assign_execute_target(context)
+            if state == HarnessStates.EXECUTE
+            else (None, None)
+        )
         request = RoleRequest(
             role=role,
             state=state,
@@ -1439,11 +1460,8 @@ class HarnessAgent(BaseAgent):
                 if state == HarnessStates.EXPLORE
                 else None
             ),
-            assigned_write_target=(
-                self._assign_execute_target(context)
-                if state == HarnessStates.EXECUTE
-                else None
-            ),
+            assigned_write_target=execute_target,
+            execute_target_reason=execute_target_reason,
         )
 
         try:
@@ -1872,17 +1890,33 @@ class HarnessAgent(BaseAgent):
         return chosen.slug
 
     @classmethod
-    def _assign_execute_target(cls, context: Mapping[str, Any]) -> str | None:
-        """Plan.md's target for this EXECUTE step; ``None`` -> the prompt
-        stays byte-identical (fail-open, never a guess -- D-010).  A READ."""
+    def _assign_execute_target(
+        cls, context: Mapping[str, Any]
+    ) -> tuple[str | None, str]:
+        """Plan.md's target for this EXECUTE step, and WHY: ``(target, reason)``.
+
+        A ``None`` target -> the prompt stays byte-identical (fail-open, never
+        a guess -- D-010).  The reason is one of the ``EXECUTE_TARGET_*``
+        literals, DIAGNOSTIC only.  A READ."""
+        # DECISION plan-2026-07-22T184813-6549c7cb/D-005
+        # Three distinct no-assignment causes used to collapse into one silent
+        # None, so a live run whose plan-writer DID write a Files-To-Modify
+        # table in a shape _TARGET_RE rejects was indistinguishable from a run
+        # with no plan.md at all (L6 B0, reviewer W2).  Do NOT merge these
+        # early returns back into a bare None, and do NOT let any prompt
+        # builder read the reason -- it is observability for the bench rubric,
+        # not dispatch content.  See decisions.md D-005.
         directory = cls._plan_directory(context)
         if directory is None:
-            return None
+            return None, EXECUTE_TARGET_NO_PLAN_DIR
         plan = cls._artifact(directory, ArtifactNames.PLAN, PlanDoc)
         if plan is None:
-            return None
+            return None, EXECUTE_TARGET_NO_PLAN_DOC
         step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
-        return derive_execute_target(plan, step)
+        target = derive_execute_target(plan, step)
+        if target is None:
+            return None, EXECUTE_TARGET_NO_TOKEN
+        return target, EXECUTE_TARGET_ASSIGNED
 
     @staticmethod
     def _enforce_routing_exclusivity(

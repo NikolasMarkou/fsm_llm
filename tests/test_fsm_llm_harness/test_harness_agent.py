@@ -64,9 +64,17 @@ from fsm_llm_harness.exceptions import (
     HarnessOwnershipError,
     HarnessReentrancyError,
 )
-from fsm_llm_harness.harness import HarnessAgent, RoleRequest, derive_execute_target
+from fsm_llm_harness.harness import (
+    EXECUTE_TARGET_ASSIGNED,
+    EXECUTE_TARGET_NO_PLAN_DIR,
+    EXECUTE_TARGET_NO_PLAN_DOC,
+    EXECUTE_TARGET_NO_TOKEN,
+    HarnessAgent,
+    RoleRequest,
+    derive_execute_target,
+)
 from fsm_llm_harness.plan_validator import Issue
-from fsm_llm_harness.rules import EXPLORE_TOPICS, ROLE_BY_STATE
+from fsm_llm_harness.rules import EXPLORE_TOPICS, ROLE_BY_STATE, get_rules
 from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm_harness.conftest import (
     APPROVAL_CLOSE,
@@ -3283,29 +3291,79 @@ class TestDriverAssignedExecuteTarget:
             "harness.py"
         )
 
-    # -- the driver wrapper fails closed ------------------------------------
+    # -- the driver wrapper fails closed, and says WHY (D-005) --------------
+    #
+    # Until D-005 the wrapper collapsed three distinct no-assignment causes
+    # (no plan dir / plan.md unusable / no _TARGET_RE token) into one silent
+    # None, so a live run whose plan-writer wrote a Files-To-Modify table in a
+    # rejected shape was indistinguishable from a run with no plan.md at all.
 
     def test_the_wrapper_reads_the_seeded_plan_directory(self, plan_dir: Path) -> None:
         (plan_dir / ArtifactNames.PLAN).write_text(_PLAN_MD)
         context = {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
 
-        assert HarnessAgent._assign_execute_target(context) == "harness.py"
+        assert HarnessAgent._assign_execute_target(context) == (
+            "harness.py",
+            EXECUTE_TARGET_ASSIGNED,
+        )
 
     def test_no_plan_md_assigns_nothing(self, plan_dir: Path) -> None:
         """An unreadable plan is a failed observation, not a licence to guess."""
         context = {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
 
-        assert HarnessAgent._assign_execute_target(context) is None
+        assert HarnessAgent._assign_execute_target(context) == (
+            None,
+            EXECUTE_TARGET_NO_PLAN_DOC,
+        )
+
+    def test_a_garbled_plan_md_is_a_no_plan_doc_not_a_no_token(
+        self, plan_dir: Path
+    ) -> None:
+        """A plan.md that fails ``PlanDoc`` parsing is the DOCUMENT's failure.
+
+        Distinguishing it from ``no-target-token`` is the point of the tag: a
+        garbled document and a valid document with an unparseable file table
+        are different defects with different fixes.
+        """
+        (plan_dir / ArtifactNames.PLAN).write_text("not a plan at all\n")
+        context = {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
+
+        assert HarnessAgent._assign_execute_target(context) == (
+            None,
+            EXECUTE_TARGET_NO_PLAN_DOC,
+        )
+
+    def test_a_valid_plan_with_no_path_token_is_a_no_token(
+        self, plan_dir: Path
+    ) -> None:
+        """The plan PARSED; only its Files-To-Modify had no path-shaped token."""
+        text = _PLAN_MD.replace(
+            "| `harness.py` | wire the seam | step 10 |",
+            "| nothing quoted here | x | y |",
+        )
+        (plan_dir / ArtifactNames.PLAN).write_text(text)
+        context = {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
+
+        assert HarnessAgent._assign_execute_target(context) == (
+            None,
+            EXECUTE_TARGET_NO_TOKEN,
+        )
 
     def test_no_plan_directory_key_assigns_nothing(self) -> None:
-        assert HarnessAgent._assign_execute_target({}) is None
+        assert HarnessAgent._assign_execute_target({}) == (
+            None,
+            EXECUTE_TARGET_NO_PLAN_DIR,
+        )
 
     def test_an_absent_plan_directory_is_not_created(self, tmp_path: Path) -> None:
         """Assignment is a READ (D-035 property 2): no mkdir side effect."""
         absent = tmp_path / "plans" / "never-created"
         context = {ContextKeys.PLAN_DIR: str(absent), ContextKeys.STEP_NUMBER: 1}
 
-        assert HarnessAgent._assign_execute_target(context) is None
+        assert HarnessAgent._assign_execute_target(context) == (
+            None,
+            EXECUTE_TARGET_NO_PLAN_DIR,
+        )
         assert not absent.exists()
 
     # -- the assigned value reaches the dispatch request --------------------
@@ -3340,6 +3398,72 @@ class TestDriverAssignedExecuteTarget:
         }
         assert assigned
         assert set(assigned.values()) == {None}
+
+    # -- the D-005 reason tag reaches the dispatch, and ONLY the dispatch ----
+
+    def test_the_execute_dispatch_carries_the_assigned_reason(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """A successful assignment is tagged, on the same ``RoleRequest``."""
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        reasons = [
+            request.execute_target_reason
+            for request in harness.worker.requests
+            if request.state == HarnessStates.EXECUTE
+        ]
+        assert reasons == [EXECUTE_TARGET_ASSIGNED]
+
+    def test_non_execute_dispatches_carry_no_reason(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The tag is EXECUTE diagnostics, not a new per-state channel."""
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        reasons = {
+            request.execute_target_reason
+            for request in harness.worker.requests
+            if request.state != HarnessStates.EXECUTE
+        }
+        assert reasons == {None}
+
+    def test_the_reason_never_changes_the_unassigned_prompt_bytes(self) -> None:
+        """D-010 fail-open under the new field: the prompt NEVER reads it.
+
+        An unassigned EXECUTE dispatch must render byte-identically whatever
+        diagnostic reason rides along -- the tag is for the bench rubric, not
+        for the model.
+        """
+        from dataclasses import replace
+
+        from fsm_llm_harness.roles import build_role_prompt, get_role_spec
+
+        rules = get_rules(HarnessStates.EXECUTE)
+        base = RoleRequest(
+            role=ROLE_BY_STATE[HarnessStates.EXECUTE],
+            state=HarnessStates.EXECUTE,
+            goal="exercise the harness protocol",
+            operative_rules=rules.operative_rules,
+            gate_summary=rules.gate_summary,
+            iteration=1,
+            step_number=1,
+            total_steps=1,
+            fix_attempts=0,
+        )
+        spec = get_role_spec(HarnessStates.EXECUTE)
+        baseline = build_role_prompt(base, spec)
+
+        for reason in (
+            EXECUTE_TARGET_NO_PLAN_DIR,
+            EXECUTE_TARGET_NO_PLAN_DOC,
+            EXECUTE_TARGET_NO_TOKEN,
+        ):
+            tagged = replace(base, execute_target_reason=reason)
+            assert build_role_prompt(tagged, spec) == baseline
 
 
 # ---------------------------------------------------------------------------

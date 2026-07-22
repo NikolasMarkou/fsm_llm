@@ -72,7 +72,12 @@ from fsm_llm_harness.constants import (
     Severity,
 )
 from fsm_llm_harness.exceptions import HarnessArtifactError
-from fsm_llm_harness.harness import HarnessAgent, RoleRequest, derive_execute_target
+from fsm_llm_harness.harness import (
+    EXECUTE_TARGET_ASSIGNED,
+    HarnessAgent,
+    RoleRequest,
+    derive_execute_target,
+)
 from fsm_llm_harness.plan_validator import Issue, audit
 from fsm_llm_harness.roles import (
     build_default_worker_factory,
@@ -982,12 +987,11 @@ def test_the_bench_request_carries_the_driver_assigned_target(
     plan_dir = _execute_plan_dir(tmp_path / "bench")
     workspace = tmp_path / "ws"
     assert _execute_request(plan_dir, workspace).assigned_write_target == expected
-    assert (
-        HarnessAgent._assign_execute_target(
-            {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
-        )
-        == expected
-    )
+    # The driver seam returns (target, reason) since D-005; the bench must
+    # agree on the target AND see the assignment tagged as such.
+    assert HarnessAgent._assign_execute_target(
+        {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
+    ) == (expected, EXECUTE_TARGET_ASSIGNED)
 
 
 @requires_live

@@ -3470,6 +3470,122 @@ class TestVerifiedWritesIgnoresUnusableCalls:
         assert ContextKeys.FINDINGS_COUNT not in result.final_context
 
 
+class TestWriteEvidenceRootSplit:
+    """The observation's root-attributed write split (D-005).
+
+    ``_verified_writes`` labels every verified write ``"<root>:<path>"``, but
+    the observation record used to collapse the labels to a bare ``len()``
+    (roles.py:1285 pre-D-005) -- the workspace-vs-plan attribution was
+    computed and then thrown away, so no observer could tell an EXECUTE-state
+    WORKSPACE edit from a plan-directory note.  The bare int stays: its
+    existing consumer (test_live_ollama.py) must read the same number.
+    """
+
+    def _observe_execute(
+        self,
+        tmp_path: Path,
+        plan_dir: Path | None,
+        calls: tuple[tuple[str, dict[str, Any]], ...],
+    ) -> dict[str, Any]:
+        """One EXECUTE dispatch through the REAL factory; its observation."""
+        ws = tmp_path / "ws"
+        ws.mkdir(exist_ok=True)
+        seen: list[dict[str, Any]] = []
+        factory = build_default_worker_factory(
+            Workspace(ws),
+            observer=seen.append,
+            agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+                registry,
+                calls,
+                '{"summary": "did the step", "message": "done"}',
+                None,
+            ),
+        )
+        factory(
+            _role_request(HarnessStates.EXECUTE, plan_dir=plan_dir, workspace_root=ws)
+        )
+        return seen[-1]
+
+    def test_a_workspace_only_trace_attributes_to_workspace(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        record = self._observe_execute(
+            tmp_path,
+            plan_dir,
+            (("write_file", {"path": "uploader.py", "content": "x = 1\n"}),),
+        )
+
+        assert record["write_evidence"] == 1
+        assert record["write_evidence_workspace"] == 1
+        assert record["write_evidence_plan"] == 0
+
+    def test_a_plan_only_trace_attributes_to_plan(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """An executor that only wrote protocol notes shows NO workspace write."""
+        record = self._observe_execute(
+            tmp_path,
+            plan_dir,
+            (("write_plan_file", {"path": "changelog.md", "content": "# log\n"}),),
+        )
+
+        assert record["write_evidence"] == 1
+        assert record["write_evidence_workspace"] == 0
+        assert record["write_evidence_plan"] == 1
+
+    def test_a_mixed_trace_splits_by_root(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        record = self._observe_execute(
+            tmp_path,
+            plan_dir,
+            (
+                ("write_file", {"path": "uploader.py", "content": "x = 1\n"}),
+                ("write_plan_file", {"path": "changelog.md", "content": "# log\n"}),
+            ),
+        )
+
+        assert record["write_evidence"] == 2
+        assert record["write_evidence_workspace"] == 1
+        assert record["write_evidence_plan"] == 1
+        assert (
+            record["write_evidence_workspace"] + record["write_evidence_plan"]
+            == record["write_evidence"]
+        )
+
+    def test_an_empty_trace_reports_zero_in_all_three(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        record = self._observe_execute(tmp_path, plan_dir, ())
+
+        assert record["write_evidence"] == 0
+        assert record["write_evidence_workspace"] == 0
+        assert record["write_evidence_plan"] == 0
+
+    def test_the_exception_record_carries_the_split_keys_too(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """Same keys on both paths: an observer must never branch on shape."""
+
+        class _RaisingAgent:
+            def run(self, task: str) -> AgentResult:
+                raise RuntimeError("boom")
+
+        seen: list[dict[str, Any]] = []
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            agent_builder=lambda spec_, registry, config: _RaisingAgent(),
+        )
+
+        with pytest.raises(RuntimeError):
+            factory(_role_request(HarnessStates.EXECUTE, plan_dir=plan_dir))
+
+        assert seen[-1]["write_evidence"] == 0
+        assert seen[-1]["write_evidence_workspace"] == 0
+        assert seen[-1]["write_evidence_plan"] == 0
+
+
 class TestDefaultAgentBuilder:
     """The one construction choice the factory makes when nobody overrides it."""
 

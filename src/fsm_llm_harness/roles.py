@@ -1225,6 +1225,8 @@ def build_default_worker_factory(
                     # verification fields must not have to branch on which
                     # record it got.
                     "write_evidence": 0,
+                    "write_evidence_workspace": 0,
+                    "write_evidence_plan": 0,
                     "write_required": False,
                     "claimed_findings_count": None,
                     "derived_findings_count": None,
@@ -1315,6 +1317,24 @@ def build_default_worker_factory(
                 "answer_chars": len(answer),
                 "elapsed_s": elapsed,
                 "write_evidence": len(verified),
+                # DECISION plan-2026-07-22T184813-6549c7cb/D-005
+                # _verified_writes already labels every verified write
+                # "<root>:<path>", and this record used to collapse that to a
+                # bare len() -- the root attribution was computed then thrown
+                # away, so no observer could tell an EXECUTE-state WORKSPACE
+                # edit from a plan-directory note (L6 floor, reviewer W3).  Do
+                # NOT remove the bare int (existing consumer:
+                # test_live_ollama.py) and do NOT re-derive the split from the
+                # trace anywhere else -- these two counts are the one
+                # derivation.  See decisions.md D-005.
+                "write_evidence_workspace": sum(
+                    1
+                    for label in verified
+                    if label.startswith(f"{_WORKSPACE_ROOT}:")
+                ),
+                "write_evidence_plan": sum(
+                    1 for label in verified if label.startswith(f"{_PLAN_ROOT}:")
+                ),
                 "write_required": write_required,
                 "claimed_findings_count": claimed,
                 "derived_findings_count": derived.get(ContextKeys.FINDINGS_COUNT),
