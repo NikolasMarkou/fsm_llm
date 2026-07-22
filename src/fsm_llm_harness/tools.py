@@ -354,8 +354,10 @@ def _strip_root_sentinel(candidate: str, sentinels: Iterable[str]) -> str | None
         - Returns the remainder with the anchor **and exactly one** leading
           sentinel component removed.  The rewrite is purely LEXICAL: the
           caller still has to resolve and compare the result.
+        - Returns ``"."`` -- the root itself, root-relative -- when the ONLY
+          component is a bare sentinel (``/workspace`` with nothing after it).
         - Returns ``None`` -- meaning refuse, never guess -- when the first
-          component is not a sentinel or nothing is left after dropping it.
+          component is not a sentinel.
         - Performs no I/O and never raises.
     """
     parts = Path(candidate).parts[1:]
@@ -363,7 +365,25 @@ def _strip_root_sentinel(candidate: str, sentinels: Iterable[str]) -> str | None
         return None
     rest = parts[1:]
     if not rest:
-        return None
+        # DECISION plan-2026-07-22T212329-16de43da/D-004
+        # A BARE sentinel (`/workspace`, `/plan`) maps to the root, not a
+        # refusal: `:4b` emits `list_dir("/workspace")` meaning the root, and
+        # the flat refusal cost a live dispatch (L6 B1 run 3). Returning "."
+        # hands the root-relative "." to the caller's UNTOUCHED
+        # resolve-and-compare -- `(root / ".").resolve() == root` -- the same
+        # path every non-bare repaired candidate already takes. What this does
+        # NOT do, and must not be "simplified" into:
+        #   1. This is NOT a second confinement decision (invariant I4). The
+        #      lexical repair only rewrites the string; the single chokepoint
+        #      (`Workspace.resolve`'s compare, D-032) still decides containment.
+        #      `"/"` alone -- no sentinel -- still returns None above and still
+        #      raises, because it never reaches this branch.
+        #   2. D-032's RESOLVE-FIRST/COMPARE-SECOND ordering is untouched: "."
+        #      is not resolved here, it is handed back for the caller to resolve.
+        #   3. D-027's no-auto-reroute prohibition is orthogonal -- a bare
+        #      same-root sentinel never raised the cross-root failure D-027
+        #      annotates. See decisions.md D-004.
+        return "."
     return str(Path(*rest))
 
 

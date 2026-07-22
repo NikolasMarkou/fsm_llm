@@ -594,6 +594,18 @@ class TestAbsolutePathRepair:
 
         assert ws.resolve("/ws/x.py") == ws.root / "x.py"
 
+    def test_a_bare_sentinel_maps_to_the_workspace_root(self, tmp_path: Path) -> None:
+        """`/workspace` with nothing after it is the root, not a refusal.
+
+        The live `list_dir("/workspace")` the model emits means the root; the
+        bare sentinel now takes the same resolve-and-compare as `/workspace/x`
+        (D-004).  `/` alone is still refused -- see the escape parametrize.
+        """
+        ws = Workspace(tmp_path / "ws")
+
+        assert ws.resolve("/workspace") == ws.root
+        assert ws.resolve("/ws") == ws.root
+
     def test_an_absolute_path_already_inside_the_root_is_accepted(
         self, tmp_path: Path
     ) -> None:
@@ -610,7 +622,6 @@ class TestAbsolutePathRepair:
             "/ws/../../etc/passwd",
             "/etc/workspace/passwd",
             "/etc/passwd",
-            "/workspace",
             "/",
         ],
     )
@@ -1450,6 +1461,22 @@ class TestWorkspaceRefusesPlanPaths:
         memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.EXPLORER)
 
         assert memory.locate(path).startswith("plan-x/")
+
+    @pytest.mark.parametrize("bare", ["/plan", "/workspace"])
+    def test_plan_memory_maps_a_bare_sentinel_to_the_plan_directory(
+        self, tmp_path: Path, bare: str
+    ) -> None:
+        """The bare-sentinel twin of Defect A on the plan-memory call site.
+
+        `_PLAN_SENTINELS` carries both `plan` and `workspace`, so the ONE
+        helper fix (D-004) closes bare `/plan` AND bare `/workspace` here just
+        as it closes bare `/workspace` in `Workspace.resolve`.  A bare sentinel
+        addresses the plan directory itself, not a refusal.
+        """
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.EXPLORER)
+
+        assert memory.locate(bare).startswith("plan-x")
+        assert memory.locate_path(bare) == memory.plan_dir
 
 
 # ---------------------------------------------------------------------------
