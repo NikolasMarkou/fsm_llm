@@ -428,7 +428,8 @@ driver-assigned EXECUTE target fix, bars and assertions byte-untouched
 | L4 write tool issued AND workspace bytes on disk | >= 4/5 | **5/5 issued, 5/5 bytes -- MET** |
 | L4 strict sha256 content-hash match of the requested edit | >= 4/5 | **4/5 -- MET** (react control 0/5) |
 | L5 >= 3 distinct non-empty `findings/*.md` on disk from dispatches | >= 4/5 | **5/5 -- met** |
-| L6 end-to-end REAL workers: 3/3 runs reach >= EXECUTE, >= 1 verified write, honest halt | 3/3 | **0/3 -- NOT MET** |
+| L6 B0 end-to-end REAL workers: 3/3 runs reach >= EXECUTE, >= 1 verified write, honest halt | 3/3 | **0/3 -- NOT MET** (2 explore-cap, 1 slugless PLAN stall) |
+| L6 B1, same >= EXECUTE / honest-halt clauses, verified-write TIGHTENED to EXECUTE-state workspace write | 3/3 | **0/3 -- NOT MET** (3/3 furthest=explore, slug=explore-cap, honest; zero slugless stalls) |
 
 This is the first time L4 has MET the standing bar. (The strict row's in-test
 assertion is existential -- >= 1 content-matched dispatch across both arms,
@@ -451,17 +452,44 @@ the task prose) -- treat a PASS as target-selection compliance, not proven
 code correctness; `content_matched_ast` (AST-structural, vocabulary-decoupled,
 additive) exists for future blocks.
 
-**L6 is the open one, and it is reported as it measured.**
+**L6 is the open one, and it is reported as it measured -- twice.**
 `TestL6EndToEndRealWorkers` is the package's first graded end-to-end criterion
-on REAL role workers (n=3, disk-derived rubric vectors, DENY-default
-disk-bound approval stub). Its floor -- all 3 runs reach >= EXECUTE with >= 1
-sha256-verified write and an honest halt -- measured **0/3, NOT MET**. Two
-runs halted honestly at the EXPLORE redispatch cap; one reached PLAN and
-stalled sluglessly after an empty plan-writer reply. The verified-write clause
-held 3/3 and nothing crashed. Two structural findings: EXPLORE over an EMPTY
-plan directory clears the 3-findings gate ~1/3 of the time (vs 5/5 on a seeded
-corpus), and PLAN has no redispatch budget, so one empty reply becomes a
-stall. That 0/3 is the package's honest end-to-end status.
+on REAL role workers (n=3 per block, disk-derived rubric vectors, DENY-default
+disk-bound approval stub). Block B0 (frozen under
+`scripts/bench_data/l6-e2e/B0/`) measured **0/3, NOT MET**: two honest
+explore-cap halts, and one run that reached PLAN and stalled SLUGLESSLY after
+an empty plan-writer reply -- B0's verified-write clause held 3/3, but it
+scored True off EXPLORE findings writes alone, so it was near-vacuous. Both
+defects were fixed structurally (PLAN redispatch budget with exhaustion
+halting on the honest `plan-cap` slug; driver-named `plan.md` deliverable
+line) and block B1 was pre-registered with the verified-write clause
+TIGHTENED to require an EXECUTE-state WORKSPACE write -- `>= EXECUTE` and
+honest-halt clauses byte-identical to B0's, n=3, same model digest. B1
+measured **0/3, NOT MET**, in a different and cleaner shape: every run
+`furthest_state=explore`, `halt_slug=explore-cap`, `honest_halt=true` (wall
+clocks 344.6/298.5/357.9 s vs the 1800 s ceiling; findings on disk 0/0/2).
+Zero slugless stalls -- the dishonest B0 shape is structurally gone. No B1
+run reached PLAN, so the redispatch budget and deliverable line are
+offline-verified (unit-proven) but live-unexercised, and the tightened
+verified-write clause measured false 3/3 because nothing reached EXECUTE.
+The measured blocker for the end-to-end claim is now EXPLORE cold-start over
+an EMPTY plan directory -- one state EARLIER than B0's mixed picture, and
+consistent with the known ~1/3 per-run clearance prior. That honest 0/3,
+with every row naming its blocking state and slug, is the package's
+end-to-end status.
+
+Known gaps, standing after B1 (live-surfaced or live-unexercised):
+- **EXPLORE cold-start is the blocker** (3/3 in B1): no measured harness-side
+  lever exists yet; the named successor is a dedicated EXPLORE-only
+  cold-start bench (n >= 10) to characterize the mechanism before fixing it.
+- **PLAN redispatch budget**: fixed (`MAX_PLAN_REDISPATCHES=3`, `plan-cap`
+  slug), offline-verified, live-unexercised (no B1 run reached PLAN).
+- **Bare `/workspace` sentinel is not repaired at confinement**: repair
+  handles `/workspace/<path>` but a live run's `list_dir("/workspace")` was
+  REJECTED instead of being repaired to the workspace root.
+- **Wrong-root reads**: a live explorer read a plan-dir findings path through
+  the workspace-rooted `read_file` and was rejected -- the tool surface
+  separates the two roots but the model conflated them.
 
 The test suite itself has been audited adversarially, by execution: 5/5
 load-bearing guard mutations (leash-cap boundary, writable-key allowlist,
@@ -472,10 +500,10 @@ exit-code 0/1/2 contract close-read verdict was CLEAN.
 Offline, the package is green: 1,850 tests, `ruff` clean, `mypy` 0 errors.
 
 **Not claimed**: that the harness is production-ready, or that a 4B model
-drives it unattended to a useful result -- the L6 0/3 REINFORCES this claim's
-absence, it does not soften it. What IS claimed is that the gates are
-mechanical -- they read the filesystem, and a confident sentence cannot open
-one.
+drives it unattended to a useful result -- the L6 0/3, measured twice (B0 and
+B1), REINFORCES this claim's absence, it does not soften it. What IS claimed
+is that the gates are mechanical -- they read the filesystem, and a confident
+sentence cannot open one.
 
 ## Exceptions
 

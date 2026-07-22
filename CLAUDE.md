@@ -99,9 +99,17 @@ content-match/content-hash metric shares vocabulary with the fix's own prompt
 text -- treat a PASS as target-selection compliance, not proven code
 correctness; `content_matched_ast` is the vocabulary-decoupled successor for
 future blocks) -- but the
-first graded end-to-end criterion on REAL workers (L6, n=3) measured **0/3 NOT
-MET** (two honest explore-cap halts, one slugless PLAN stall; verified writes
-3/3). The harness is not production-ready and a 4B model is not claimed to
+first graded end-to-end criterion on REAL workers (L6, n=3 per block) is NOT
+MET in either committed block: B0 **0/3** (two honest explore-cap halts, one
+slugless PLAN stall) and, after the structural fixes B0 motivated (PLAN
+redispatch budget with an honest `plan-cap` slug, driver-named `plan.md`
+deliverable line, verified-write floor TIGHTENED to an EXECUTE-state
+workspace write), B1 **0/3** -- all three runs honest explore-cap halts, zero
+slugless stalls, tightened verified-write clause false 3/3 because no run
+reached EXECUTE. The measured blocker is now EXPLORE cold-start over an empty
+plan directory (one state EARLIER than B0's mixed picture); the PLAN-and-later
+machinery is offline-verified but live-unexercised (no B1 run left EXPLORE).
+The harness is not production-ready and a 4B model is not claimed to
 drive it unattended to a useful result. See `src/fsm_llm_harness/CLAUDE.md` for
 the full reference, including what is measured and what is not.
 
