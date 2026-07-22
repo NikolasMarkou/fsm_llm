@@ -58,6 +58,10 @@ otel = [
     "opentelemetry-sdk>=1.20.0",
 ]
 a2a = ["httpx>=0.24.0"]
+# The harness ships no third-party deps of its own; it is listed as an extra so it
+# appears in the `all` set and in the dev/CI install lists. It imports
+# `fsm_llm_agents`, which is why that extra is named here rather than `[]`.
+harness = ["fsm-llm[agents]"]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -72,6 +76,7 @@ all = [
     "fsm-llm[reasoning]",
     "fsm-llm[agents]",
     "fsm-llm[monitor]",
+    "fsm-llm[harness]",
     "fsm-llm[mcp]",
     "fsm-llm[otel]",
     "fsm-llm[a2a]",
@@ -88,6 +93,7 @@ fsm-llm-visualize = "fsm_llm.visualizer:main_cli"
 fsm-llm-validate = "fsm_llm.validator:main_cli"
 fsm-llm-monitor = "fsm_llm_monitor.__main__:main_cli"
 fsm-llm-meta = "fsm_llm_agents.meta_cli:main_cli"
+fsm-llm-harness = "fsm_llm_harness.__main__:main_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -98,6 +104,7 @@ fsm_llm_reasoning = ["py.typed"]
 fsm_llm_workflows = ["py.typed"]
 fsm_llm_agents = ["py.typed"]
 fsm_llm_monitor = ["py.typed", "static/*", "templates/*"]
+fsm_llm_harness = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -151,7 +158,7 @@ ignore = [
 "src/fsm_llm_monitor/*" = ["RUF012"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["fsm_llm", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor"]
+known-first-party = ["fsm_llm", "fsm_llm_reasoning", "fsm_llm_workflows", "fsm_llm_agents", "fsm_llm_monitor", "fsm_llm_harness"]
 
 [tool.mypy]
 python_version = "3.10"
