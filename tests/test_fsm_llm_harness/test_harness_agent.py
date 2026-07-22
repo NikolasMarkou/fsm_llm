@@ -762,10 +762,15 @@ class TestFailureSurvival:
         result = harness.run()
 
         results = result.final_context[ContextKeys.ROLE_RESULTS]
-        assert len(results) == 1
-        assert results[0]["role"] == Role.EXPLORER
-        assert results[0]["success"] is False
-        assert "boom from explorer" in results[0]["answer"]
+        # CHANGED at step 23 (D-029): a raising EXPLORE worker is now
+        # re-dispatched while its gate is BLOCKED, so there is one record per
+        # dispatch rather than exactly one.  Every one of them must still be a
+        # recorded FAILURE carrying the exception text -- and the count must
+        # stay bounded, which is the property that replaced the literal 1.
+        assert 1 <= len(results) <= 1 + harness.agent.max_explore_redispatches
+        assert [entry["role"] for entry in results] == [Role.EXPLORER] * len(results)
+        assert all(entry["success"] is False for entry in results)
+        assert all("boom from explorer" in entry["answer"] for entry in results)
         assert isinstance(result, AgentResult)
 
     def test_worker_returning_a_non_agentresult_is_recorded_failed(
@@ -1121,7 +1126,13 @@ class TestExtractionCannotOpenAGate:
         )
         result = harness.run()
 
-        assert harness.worker.states == [HarnessStates.EXPLORE]
+        # CHANGED at step 23 (D-029): EXPLORE is re-dispatched while its gate is
+        # BLOCKED, so the sequence is one-or-more EXPLORE dispatches rather than
+        # exactly one.  The assertion this class exists for is unchanged and
+        # gains a bound: the run must never LEAVE explore, however many
+        # explorers it spends.
+        assert set(harness.worker.states) == {HarnessStates.EXPLORE}
+        assert len(harness.worker.states) <= 1 + harness.agent.max_explore_redispatches
         assert result.final_context[ContextKeys.PLAN_APPROVED] is False
         assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is False
         assert result.final_context[ContextKeys.ITERATION] == 0
@@ -1243,10 +1254,26 @@ class TestDriverOwnedTable:
 
     @pytest.fixture
     def halted(self, make_harness) -> Any:
-        """A driver whose run halted in EXPLORE, so every key is at its seed."""
+        """A driver whose run halted in EXPLORE, so every SEEDED key is at its seed."""
         harness = make_harness(
             _all_failing_script(), approvals=ApprovalRecorder(default=False)
         )
+        harness.run()
+        return harness
+
+    @pytest.fixture
+    def halted_owning_no_unset_key(self, make_harness) -> Any:
+        """A halted run in which the driver owns NO value for any UNSET key.
+
+        The D-045 diagnostic mode: with no worker, nothing is dispatched, so
+        nothing records a halt reason or a gate slug and every
+        ``DRIVER_OWNED_UNSET`` key keeps its default -- absence.  ``halted``
+        above stopped having that property at step 23: an all-failing EXPLORE
+        worker spends the D-029 re-dispatch bound and the driver then OWNS
+        ``halt_reason`` and ``last_gate_slug`` (the ``explore-cap`` halt), which
+        is the driver writing them, not the LLM inventing them.
+        """
+        harness = make_harness(worker=None)
         harness.run()
         return harness
 
@@ -1274,10 +1301,32 @@ class TestDriverOwnedTable:
         assert _is_exactly(delta[key], DRIVER_OWNED_SEEDS[key])
 
     @pytest.mark.parametrize("key", sorted(DRIVER_OWNED_UNSET))
-    def test_the_guard_deletes_an_unset_key(self, halted, key: str) -> None:
+    def test_the_guard_deletes_an_unset_key(
+        self, halted_owning_no_unset_key, key: str
+    ) -> None:
         """``None`` in a handler delta means DELETE; absence is the default."""
-        delta = halted.agent._reassert_driver_owned({key: FABRICATED_DRIVER_OWNED[key]})
+        agent = halted_owning_no_unset_key.agent
+        assert agent._driver_owned[key] is None, (
+            "precondition: the driver must own no value for this key, or the "
+            "guard is correctly RESTORING rather than deleting"
+        )
+        delta = agent._reassert_driver_owned({key: FABRICATED_DRIVER_OWNED[key]})
         assert delta[key] is None
+
+    @pytest.mark.parametrize("key", sorted(DRIVER_OWNED_UNSET))
+    def test_the_guard_restores_a_driver_written_unset_key(
+        self, halted, key: str
+    ) -> None:
+        """The other half: a value the DRIVER wrote wins over the LLM's.
+
+        The control for the test above.  Without it, the guard could satisfy
+        that assertion by deleting an unset key unconditionally -- which would
+        silently erase the ``explore-cap`` halt reason the run is reporting.
+        """
+        owned = halted.agent._driver_owned[key]
+        delta = halted.agent._reassert_driver_owned({key: FABRICATED_DRIVER_OWNED[key]})
+        assert delta[key] == owned
+        assert delta[key] != FABRICATED_DRIVER_OWNED[key]
 
     def test_the_guard_is_silent_when_the_llm_wrote_nothing(self, halted) -> None:
         """The normal path costs nothing: no delta, no log, no churn."""
@@ -1801,3 +1850,263 @@ class TestBothGateChannelsAreRead:
         )
 
         assert ContextKeys.FINDINGS_COUNT not in delta
+
+
+# ---------------------------------------------------------------------------
+# Bounded EXPLORE re-dispatch (D-028 / D-029)
+# ---------------------------------------------------------------------------
+
+
+def _explore_script(counts: list[int]) -> dict[str, Any]:
+    """A traverse script whose Nth EXPLORE dispatch reports ``counts[N-1]``.
+
+    The last value repeats forever, so a script can say "blocked from here on"
+    without knowing how many dispatches the bound allows.
+    """
+    script = _traverse_script()
+    seen: dict[str, int] = {"n": 0}
+
+    def explorer(request: RoleRequest) -> dict[str, Any]:
+        seen["n"] += 1
+        index = min(seen["n"], len(counts)) - 1
+        return {"ctx": {ContextKeys.FINDINGS_COUNT: counts[index]}}
+
+    script[HarnessStates.EXPLORE] = explorer
+    return script
+
+
+class TestBoundedExploreRedispatch:
+    """One explorer per topic, re-dispatched while the gate is BLOCKED (D-028).
+
+    Four mechanisms were measured against "make ONE dispatch produce three
+    findings" and all four failed at 0 runs in 10 (decisions.md D-022, D-027).
+    The source protocol never asks for that -- ``agents/ip-orchestrator.md``'s
+    EXPLORE step 7 is "if gate fails: spawn additional explorers for gaps" --
+    so the driver now re-dispatches instead.
+
+    The BOUND is the safety-critical half.  These tests pin it against the
+    escape shape ``plans/LESSONS.md`` [I:5] records: "a safety cap the caller
+    can reset from inside its own callback is not a cap."
+    """
+
+    def test_a_blocked_gate_redispatches_the_explorer(self, make_harness) -> None:
+        """The mechanism, at its simplest: 1 entry + N re-dispatches."""
+        harness = make_harness(_explore_script([0]), max_explore_redispatches=3)
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 4
+
+    def test_redispatch_stops_the_moment_the_gate_is_satisfied(
+        self, make_harness
+    ) -> None:
+        """The measured shape: one topic per dispatch until the gate opens.
+
+        The re-dispatch condition is the GATE's own variable, so the loop ends
+        on the dispatch that satisfies it -- not one later, and not at the cap.
+        """
+        harness = make_harness(_explore_script([1, 2, 3]), max_explore_redispatches=5)
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 3
+        assert harness.worker.count_for(HarnessStates.PLAN) == 1
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 3
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
+            GateSlug.EXPLORE_CAP
+        )
+
+    def test_a_satisfied_gate_never_redispatches(self, make_harness) -> None:
+        """The control: an explorer that clears the gate is dispatched once."""
+        harness = make_harness(_traverse_script(findings=3))
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 1
+        assert harness.agent._explore_redispatches == 0
+
+    @pytest.mark.parametrize("cap", [0, 1, 2, 5])
+    def test_the_bound_is_exact(self, make_harness, cap: int) -> None:
+        """``cap`` EXTRA dispatches, never ``cap + 1`` -- including ``cap = 0``."""
+        harness = make_harness(_explore_script([0]), max_explore_redispatches=cap)
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 1 + cap
+        assert harness.agent._explore_redispatches == cap
+
+    def test_spending_the_bound_halts_with_its_own_slug(self, make_harness) -> None:
+        """A distinct, honest reason -- and the gate stays exactly as shut."""
+        harness = make_harness(_explore_script([0]), max_explore_redispatches=2)
+        result = harness.run()
+
+        assert result.success is False
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
+        assert "Exploration cap" in result.answer
+        # ...and NOT by pretending the exploration succeeded.
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
+        assert harness.worker.count_for(HarnessStates.PLAN) == 0
+        assert harness.approvals.count(APPROVAL_PLAN) == 0
+
+    def test_the_halt_names_the_numbers_a_reader_needs(
+        self, make_harness, captured_logs
+    ) -> None:
+        """Spent, cap, reached and required -- an unactionable halt is a bug."""
+        harness = make_harness(_explore_script([1]), max_explore_redispatches=2)
+        result = harness.run()
+
+        reason = result.final_context[ContextKeys.HALT_REASON]
+        assert "2 extra explorer(s) dispatched (cap 2)" in reason
+        assert "holds 1 of the 3 findings" in reason
+        assert any(GateSlug.EXPLORE_CAP in line for line in captured_logs)
+
+    def test_a_worker_cannot_reset_the_bound(self, make_harness) -> None:
+        """Drive a worker that TRIES, through every channel it has.
+
+        A worker's reply reaches context through ``final_context`` and
+        ``structured_output``, both filtered by ``_WORKER_WRITABLE``; the FSM's
+        own Pass-1 extraction is the second writer.  The bound is reachable from
+        none of them, because it is not a context key at all.
+        """
+
+        class _Payload:
+            def __init__(self, data: dict[str, Any]) -> None:
+                self._data = data
+
+            def model_dump(self) -> dict[str, Any]:
+                return dict(self._data)
+
+        greedy = {
+            "explore_redispatches": 0,
+            "_explore_redispatches": 0,
+            "max_explore_redispatches": 99,
+            ContextKeys.FIX_ATTEMPTS: 0,
+            ContextKeys.LEASH_GRANTS: 0,
+            ContextKeys.NEEDS_EXPLORE: True,
+        }
+
+        def worker(request: RoleRequest) -> AgentResult:
+            return AgentResult(
+                answer="reset your counters",
+                success=True,
+                final_context={**greedy, ContextKeys.FINDINGS_COUNT: 0},
+                structured_output=_Payload(greedy),
+            )
+
+        harness = make_harness(
+            worker=worker, extraction_data=greedy, max_explore_redispatches=2
+        )
+        result = harness.run()
+
+        assert harness.agent._explore_redispatches == 2
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
+        assert harness.agent.max_explore_redispatches == 2
+
+    def test_a_worker_cannot_refill_the_bound_by_routing_back_into_explore(
+        self, make_harness
+    ) -> None:
+        """The [I:5] escape shape, aimed at THIS cap.
+
+        ``needs_explore`` IS in the verifier's writable set, so a worker can
+        route REFLECT -> EXPLORE as often as it likes.  If the bound reset on
+        EXPLORE entry, that would refill it every time -- the predecessor's 7c
+        defect with a different counter.  It is per RUN, so it does not.
+
+        Dispatch 1 blocks (spends 1), dispatch 2 opens the gate, the plan runs,
+        REFLECT routes back, and the second occupancy has ONE re-dispatch left,
+        not a fresh budget of two.
+        """
+        script = _explore_script([0, 3, 0])
+        script[HarnessStates.REFLECT] = {"ctx": {ContextKeys.NEEDS_EXPLORE: True}}
+
+        harness = make_harness(script, max_explore_redispatches=2)
+        result = harness.run()
+
+        # 2 (first occupancy) + 2 (second: its entry + the ONE remaining
+        # re-dispatch).  A per-entry reset would make the second occupancy 3.
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 4
+        assert harness.agent._explore_redispatches == 2
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
+
+    def test_the_bound_resets_between_runs_on_one_instance(self, make_harness) -> None:
+        """Per RUN, not per LIFETIME: a reused instance is not pre-exhausted."""
+        harness = make_harness(_explore_script([0]), max_explore_redispatches=2)
+        harness.run()
+        assert harness.agent._explore_redispatches == 2
+
+        harness.run("a second goal")
+
+        assert harness.agent._explore_redispatches == 2
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 6
+
+    def test_a_raising_worker_still_counts_against_the_bound(
+        self, make_harness
+    ) -> None:
+        """A dispatch that failed is a dispatch spent; it is not free."""
+        script = _traverse_script()
+        script[HarnessStates.EXPLORE] = {"raises": RuntimeError("boom")}
+
+        harness = make_harness(script, max_explore_redispatches=2)
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 3
+
+    def test_no_worker_at_all_does_not_redispatch(self, make_harness) -> None:
+        """D-045's diagnostic mode is untouched: nothing attempted, nothing spent.
+
+        Re-dispatching a factory that does not exist would burn turns and would
+        relabel the honest "no worker" stall as an exploration cap.
+        """
+        harness = make_harness(worker=None, max_explore_redispatches=3)
+        result = harness.run()
+
+        assert harness.agent._explore_redispatches == 0
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
+            GateSlug.EXPLORE_CAP
+        )
+        assert "EXPLORE" in result.answer
+
+    def test_redispatch_reopens_only_the_explore_key(self, make_harness) -> None:
+        """The ledger's other entries survive; the entry marker is untouched.
+
+        The re-authorisation is EXPLICIT and one key wide (D-017).  A delta that
+        cleared the ledger, or dropped the ``entry:`` marker, would re-open every
+        suppressed dispatch in the window and make a duplicate handler fire
+        dispatch again.
+        """
+        harness = make_harness(_explore_script([0]), max_explore_redispatches=1)
+        context = {
+            ContextKeys.GOAL: "g",
+            ContextKeys.ITERATION: 0,
+            ContextKeys.STEP_NUMBER: 0,
+            ContextKeys.DISPATCH_LEDGER: ["dispatch:execute:1:1", "entry:explore:'x'"],
+            ContextKeys.ROLE_RESULTS: [],
+        }
+
+        delta = harness.agent._dispatch_if_needed(HarnessStates.EXPLORE, context)
+
+        ledger = delta[ContextKeys.DISPATCH_LEDGER]
+        assert "dispatch:explore:0:0" not in ledger
+        assert "dispatch:execute:1:1" in ledger
+        assert "entry:explore:'x'" in ledger
+
+    def test_a_blocked_plan_still_dispatches_once(self, make_harness) -> None:
+        """No regression to the ledger's original purpose (invariant I4).
+
+        PLAN holds its gate BLOCKED for exactly the reason EXPLORE does above --
+        the gate flag it needs is not there -- and it must NOT re-dispatch.  Only
+        EXPLORE was given that authority.
+        """
+        harness = make_harness(
+            _traverse_script(), approvals=ApprovalRecorder(default=False)
+        )
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.PLAN) == 1
+        assert harness.agent._explore_redispatches == 0
+
+    def test_a_blocked_reflect_still_dispatches_once(self, make_harness) -> None:
+        """The same, one state further on: a held REFLECT dispatches once."""
+        script = _traverse_script()
+        script[HarnessStates.REFLECT] = {"ctx": {}}
+
+        harness = make_harness(script)
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 1

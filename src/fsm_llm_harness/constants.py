@@ -243,10 +243,13 @@ DRIVER_OWNED_UNSET: tuple[str, ...] = (
 
 
 class GateSlug:
-    """The 4 pre-step-gate HARD failure slugs.
+    """Slugs recorded in ``ContextKeys.LAST_GATE_SLUG``.
 
-    ``ORDER`` is the authoritative evaluation order -- ``pre_step_gate()``
-    checks each in turn and short-circuits on the first failure.
+    ``ORDER`` is the 4 PRE-STEP-GATE slugs, in their authoritative evaluation
+    order -- ``pre_step_gate()`` checks each in turn and short-circuits on the
+    first failure.  :data:`EXPLORE_CAP` is deliberately NOT in ``ORDER``: it is
+    a driver halt on the EXPLORE -> PLAN edge, not a pre-EXECUTE-step check, and
+    ``plan_validator`` iterates ``ORDER`` to decide what it may report.
     """
 
     NO_PLAN = "no-plan"
@@ -255,6 +258,10 @@ class GateSlug:
     ITERATION_CAP = "iteration-cap"
 
     ORDER: tuple[str, ...] = (NO_PLAN, WRONG_STATE, LEASH_CAP, ITERATION_CAP)
+
+    #: The bounded EXPLORE re-dispatch budget is spent and the findings gate is
+    #: still BLOCKED (D-029).  Never means "proceed anyway".
+    EXPLORE_CAP = "explore-cap"
 
 
 class Severity:
@@ -430,6 +437,19 @@ class Defaults:
     # --- Protocol gates ---------------------------------------------------
     #: EXPLORE -> PLAN requires at least this many indexed findings.
     FINDINGS_THRESHOLD = 3
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-029
+    #: EXTRA explorer dispatches the driver may spend, per RUN, while the
+    #: findings gate is still BLOCKED.  Total EXPLORE dispatches per run are
+    #: bounded by (genuine state entries) + this number.
+    #:
+    #: Do NOT raise this to "give the model more chances": measured on
+    #: `ollama_chat/qwen3.5:4b`, one explorer dispatch yields ~1 topic file, so
+    #: 5 extra dispatches is already ~2x the FINDINGS_THRESHOLD of 3, and a run
+    #: that has not reached 3 by then is failing for a reason more dispatches
+    #: cannot fix.  Do NOT set it to 0 either: that restores the shape four
+    #: steps of this plan measured at 0/10 on criterion (b) (decisions.md
+    #: D-022, D-027).  See decisions.md D-029.
+    MAX_EXPLORE_REDISPATCHES = 5
     #: The autonomy leash: the 3rd fix attempt is HARD-blocked.
     MAX_FIX_ATTEMPTS = 2
     # DECISION plan-2026-07-21T125237-191b2eb2/D-052

@@ -1985,3 +1985,200 @@ class TestAnOwnedDirectoryReportsEmptyNotMissing:
         ).result
 
         assert second.rstrip().endswith("requires: a.md, b.md.")
+
+
+# ---------------------------------------------------------------------------
+# What earlier dispatches already covered (D-028, the re-dispatch half)
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageLineTellsARedispatchWhatExists:
+    """Bounded re-dispatch sends N explorers; this stops them writing N copies.
+
+    The step-5 spike measured one dispatch writing ``findings/uploader.md`` up
+    to eleven times and never naming a second topic.  Re-dispatching alone would
+    reproduce that ACROSS dispatches -- each one starts with no memory of the
+    last -- so every dispatch after the first is told, by NAME, what is already
+    on disk.  The names come from ``gate_files``: the ONE derivation the gate
+    value and the write tools' own feedback also read (D-015, D-027).
+    """
+
+    @staticmethod
+    def _payload(spec: Any) -> Any:
+        """A schema-valid payload for ANY role, derived from its own schema.
+
+        Interface contract (4 call sites in this class): every field gets a
+        falsy value of its declared type, so a role whose schema gains a field
+        does not silently turn these tests into construction errors.
+        """
+        return spec.output_schema(
+            **{
+                name: (
+                    "s"
+                    if field.annotation is str
+                    else (False if field.annotation is bool else 0)
+                )
+                for name, field in spec.output_schema.model_fields.items()
+            }
+        )
+
+    def _task_prompt(
+        self, request: RoleRequest, plan_dir: Path, workspace: Path
+    ) -> str:
+        """The task text a REAL dispatch would send, through the real factory."""
+        built: list[_PolicyAgent] = []
+        spec = get_role_spec(request.state)
+
+        def builder(spec_: Any, registry: Any, config: Any) -> _PolicyAgent:
+            agent = _PolicyAgent(registry, (), "done", self._payload(spec))
+            built.append(agent)
+            return agent
+
+        factory = build_default_worker_factory(
+            Workspace(workspace), agent_builder=builder
+        )
+        factory(request)
+        return built[0].tasks[0]
+
+    def test_the_first_dispatch_is_told_nothing_extra(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """An empty ``findings/`` adds NOTHING: dispatch 1's prompt is unchanged.
+
+        This is the no-regression property -- criterion (a) and every first
+        dispatch receive byte-for-byte the prompt they received before D-028.
+        """
+        request = _role_request(
+            HarnessStates.EXPLORE, plan_dir=plan_dir, workspace_root=workspace
+        )
+        spec = get_role_spec(HarnessStates.EXPLORE)
+
+        assert self._task_prompt(request, plan_dir, workspace) == (
+            build_role_task_prompt(request, spec)
+        )
+
+    def test_a_later_dispatch_is_told_what_is_already_covered(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        findings = ArtifactNames.FINDINGS_DIR
+        (plan_dir / findings).mkdir(parents=True, exist_ok=True)
+        (plan_dir / findings / "uploader.md").write_text("notes\n")
+        (plan_dir / findings / "config.md").write_text("notes\n")
+        request = _role_request(
+            HarnessStates.EXPLORE, plan_dir=plan_dir, workspace_root=workspace
+        )
+
+        task = self._task_prompt(request, plan_dir, workspace)
+
+        assert "ALREADY ON DISK" in task
+        assert "config.md, uploader.md" in task
+        assert f"holds 2 of the {Defaults.FINDINGS_THRESHOLD} distinct" in task
+        assert "Write ONE file this list does not have" in task
+
+    def test_it_counts_exactly_what_the_gate_counts(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """An empty file is not a finding -- for the gate OR for this line.
+
+        A second count here would be a gate and a progress report that can
+        disagree, which is the fail-open defect D-015 closed.
+        """
+        findings = ArtifactNames.FINDINGS_DIR
+        (plan_dir / findings).mkdir(parents=True, exist_ok=True)
+        (plan_dir / findings / "real.md").write_text("notes\n")
+        (plan_dir / findings / "blank.md").write_text("   \n")
+        (plan_dir / findings / "notes.txt").write_text("not markdown\n")
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+        request = _role_request(
+            HarnessStates.EXPLORE, plan_dir=plan_dir, workspace_root=workspace
+        )
+
+        task = self._task_prompt(request, plan_dir, workspace)
+
+        assert gate_files(memory, findings) == ("real.md",)
+        assert "holds 1 of the" in task
+        assert "requires: real.md." in task
+        assert "blank.md" not in task
+        assert "notes.txt" not in task
+
+    def test_a_role_that_owns_no_gate_count_is_untouched(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """EXECUTE's deliverable is a code edit; its prompt gains nothing here."""
+        findings = ArtifactNames.FINDINGS_DIR
+        (plan_dir / findings).mkdir(parents=True, exist_ok=True)
+        (plan_dir / findings / "uploader.md").write_text("notes\n")
+        request = _role_request(
+            HarnessStates.EXECUTE, plan_dir=plan_dir, workspace_root=workspace
+        )
+        spec = get_role_spec(HarnessStates.EXECUTE)
+
+        assert self._task_prompt(request, plan_dir, workspace) == (
+            build_role_task_prompt(request, spec)
+        )
+
+    def test_no_plan_directory_means_no_coverage_line(self, workspace: Path) -> None:
+        """Nothing to read means nothing to say -- never an invented count."""
+        request = _role_request(
+            HarnessStates.EXPLORE, plan_dir=None, workspace_root=workspace
+        )
+        spec = get_role_spec(HarnessStates.EXPLORE)
+
+        assert self._task_prompt(request, Path("/nonexistent"), workspace) == (
+            build_role_task_prompt(request, spec)
+        )
+
+    def test_it_travels_with_the_task_not_the_standing_policy(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """What is already covered differs per dispatch, so it is not policy."""
+        findings = ArtifactNames.FINDINGS_DIR
+        (plan_dir / findings).mkdir(parents=True, exist_ok=True)
+        (plan_dir / findings / "uploader.md").write_text("notes\n")
+        built: list[_PolicyAgent] = []
+        spec = get_role_spec(HarnessStates.EXPLORE)
+
+        def builder(spec_: Any, registry: Any, config: Any) -> _PolicyAgent:
+            agent = _PolicyAgent(registry, (), "done", self._payload(spec))
+            built.append(agent)
+            return agent
+
+        request = _role_request(
+            HarnessStates.EXPLORE, plan_dir=plan_dir, workspace_root=workspace
+        )
+        build_default_worker_factory(Workspace(workspace), agent_builder=builder)(
+            request
+        )
+
+        assert "ALREADY ON DISK" in built[0].tasks[0]
+        assert "ALREADY ON DISK" not in (built[0].system_policy or "")
+        assert built[0].system_policy == build_role_system_prompt(request, spec)
+
+    def test_an_agent_without_a_policy_slot_gets_it_too(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The no-loss fallback keeps the whole prompt AND the coverage line."""
+        findings = ArtifactNames.FINDINGS_DIR
+        (plan_dir / findings).mkdir(parents=True, exist_ok=True)
+        (plan_dir / findings / "uploader.md").write_text("notes\n")
+        seen: list[str] = []
+        spec = get_role_spec(HarnessStates.EXPLORE)
+
+        class _NoPolicy(_ScriptedAgent):
+            def run(self_inner, task: str) -> AgentResult:
+                seen.append(task)
+                return super().run(task)
+
+        request = _role_request(
+            HarnessStates.EXPLORE, plan_dir=plan_dir, workspace_root=workspace
+        )
+        build_default_worker_factory(
+            Workspace(workspace),
+            agent_builder=lambda spec_, registry, config: _NoPolicy(
+                registry, (), "done", self._payload(spec)
+            ),
+        )(request)
+
+        assert seen[0].startswith(build_role_prompt(request, spec))
+        assert "ALREADY ON DISK" in seen[0]
+

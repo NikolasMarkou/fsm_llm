@@ -71,6 +71,7 @@ from .tools import (
     build_plan_tools,
     build_workspace_tools,
     count_gate_files,
+    gate_files,
     has_bytes,
 )
 
@@ -891,6 +892,50 @@ def _address(agent: Any, request: RoleRequest, spec: RoleSpec) -> str:
     return build_role_task_prompt(request, spec)
 
 
+def _coverage_line(memory: PlanMemory | None, spec: RoleSpec) -> str:
+    """What EARLIER dispatches already put on disk, for a gate-counted role.
+
+    Interface contract (1 call site, the worker below):
+        - ``memory``: this dispatch's role-scoped :class:`PlanMemory`, or
+          ``None`` when there is no plan directory.
+        - Returns ``""`` unless the role owns a disk-derived gate count AND that
+          directory already holds at least one file -- so the FIRST dispatch of
+          a run receives byte-for-byte the prompt it receives today, and every
+          role that owns no such count is untouched.
+        - Never raises.
+    """
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-028
+    # This is a PER-DISPATCH line, and it is the half of bounded re-dispatch
+    # that stops N explorers writing N copies of one topic. It states what is
+    # already covered, not how many findings the protocol wants -- the exit gate
+    # already says that, twice, in the system message, and step 22 measured that
+    # the model reads the count back accurately and stops at 1 anyway. Do NOT
+    # "strengthen" it into a fifth restatement of the 3-file requirement: that
+    # mechanism has now been refuted four separate times (decisions.md D-027).
+    # The NAMES are the payload; the count is context for them.
+    # Do NOT move it into `_prompt_blocks`: the names come from the filesystem
+    # through `gate_files`, and `_prompt_blocks` takes a `RoleRequest` -- which
+    # is a context snapshot, not a plan directory. Reading the directory in the
+    # factory, where the confined role-scoped `PlanMemory` already exists, is
+    # what keeps the ONE derivation (D-027) unduplicated.
+    if memory is None:
+        return ""
+    for key, (directory, threshold) in DISK_DERIVED_COUNTS.items():
+        if key not in spec.writable_keys:
+            continue
+        names = gate_files(memory, directory)
+        if not names:
+            return ""
+        return (
+            f"ALREADY ON DISK -- {directory}/ holds {len(names)} of the "
+            f"{threshold} distinct files the exit gate requires: "
+            f"{', '.join(names)}. Earlier dispatches wrote those. Write ONE "
+            f"file this list does not have; rewriting one of them leaves the "
+            f"count at {len(names)}."
+        )
+    return ""
+
+
 def _payload_from(result: AgentResult) -> Any:
     """Prefer a validated structured output; fall back to the raw answer."""
     structured = result.structured_output
@@ -1009,6 +1054,13 @@ def build_default_worker_factory(
         )
         agent = build_agent(spec, registry, config)
         prompt = _address(agent, request, spec)
+        coverage = _coverage_line(memory, spec)
+        if coverage:
+            # Appended to the TASK half deliberately: what is already covered is
+            # exactly what differs between two dispatches of the same role, so
+            # it belongs where the goal and the position are, not in the
+            # standing policy `_address` may have just installed (D-021).
+            prompt = f"{prompt}\n\n{coverage}"
 
         started = time.monotonic()
         try:

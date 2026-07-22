@@ -44,6 +44,16 @@ A ``START_CONVERSATION`` handler additionally cannot read ``_current_state``:
 the pipeline seeds that key during the first transition, so at start it is
 absent.  The initial-state handler therefore names
 ``HarnessStates.INITIAL`` directly.
+
+Bounded EXPLORE re-dispatch
+---------------------------
+One exception to "one dispatch per key" is authorised EXPLICITLY, by the driver,
+and bounded by a counter no worker can reach: while the EXPLORE -> PLAN findings
+gate is still BLOCKED, :meth:`HarnessAgent._after_explore_dispatch` removes the
+EXPLORE key from the ledger so the next loop turn dispatches another explorer.
+The source protocol asks for exactly this ("if gate fails: spawn additional
+explorers for gaps"); see :meth:`HarnessAgent._after_explore_dispatch` and
+decisions.md D-028 / D-029.
 """
 
 from __future__ import annotations
@@ -401,6 +411,7 @@ class HarnessAgent(BaseAgent):
         max_fix_attempts: int = Defaults.MAX_FIX_ATTEMPTS,
         max_leash_grants: int = Defaults.MAX_LEASH_GRANTS,
         iteration_hard_cap: int = Defaults.ITERATION_HARD_CAP,
+        max_explore_redispatches: int = Defaults.MAX_EXPLORE_REDISPATCHES,
         max_stall_turns: int = _DEFAULT_MAX_STALL_TURNS,
         **api_kwargs: Any,
     ) -> None:
@@ -427,6 +438,10 @@ class HarnessAgent(BaseAgent):
                 ``max_fix_attempts * (1 + max_leash_grants)``, for ANY sequence
                 of approvals.  The approval callback cannot raise it.
             iteration_hard_cap: PLAN -> EXECUTE iteration gate.
+            max_explore_redispatches: EXTRA explorer dispatches spent per RUN
+                while the findings gate is BLOCKED.  Bounds total EXPLORE
+                dispatches at ``(genuine entries) + max_explore_redispatches``.
+                Spending it without satisfying the gate is a HALT, never a pass.
             max_stall_turns: Consecutive no-progress turns before halting.
             api_kwargs: Forwarded to ``fsm_llm.API``.
         """
@@ -437,6 +452,7 @@ class HarnessAgent(BaseAgent):
         self.max_fix_attempts = max_fix_attempts
         self.max_leash_grants = max_leash_grants
         self.iteration_hard_cap = iteration_hard_cap
+        self.max_explore_redispatches = max_explore_redispatches
         self.max_stall_turns = max_stall_turns
 
         # DECISION plan-2026-07-21T125237-191b2eb2/D-015
@@ -456,6 +472,29 @@ class HarnessAgent(BaseAgent):
         self._conversation_id: str | None = None
         self._stall_turns = 0
         self._stall_signature: tuple[Any, ...] | None = None
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-029
+        # The re-dispatch bound lives HERE -- driver run state, beside
+        # `_stall_turns`, the other driver-only counter of exactly this shape --
+        # and NOT in the FSM context. Two properties are load-bearing:
+        #   1. UNREACHABLE. A worker receives a `RoleRequest` (a context
+        #      SNAPSHOT plus counters) and returns an `AgentResult`; it holds no
+        #      reference to the driver, and `run`/`api`/`conversation_id` all
+        #      raise `HarnessReentrancyError` from inside a dispatch. A context
+        #      key would instead sit on the exact surface `_WORKER_WRITABLE` and
+        #      `_reassert_driver_owned` exist to police, and would be rendered
+        #      into both LLM prompts every turn (D-020's cap). Nothing reads
+        #      this number but the bound, no transition condition names it, and
+        #      no worker writes it -- so it has no business in gate context.
+        #   2. NEVER RESET except by `_run_once`, per RUN, not per EXPLORE
+        #      entry. A per-entry reset would be refillable BY A WORKER: the
+        #      verifier may set `needs_explore` (it is in `_WORKER_WRITABLE`),
+        #      which routes REFLECT -> EXPLORE and would hand back a full budget
+        #      every time. `plans/LESSONS.md` [I:5] records that exact shape --
+        #      "a safety cap the caller can reset from inside its own callback
+        #      is not a cap" -- and the predecessor's 7c escape (90 dispatches
+        #      from an approving callback zeroing its own counter) is what it
+        #      was written about. See decisions.md D-029.
+        self._explore_redispatches = 0
         # DECISION plan-2026-07-21T125237-191b2eb2/D-055
         # ONE run per instance at a time, enforced -- not documented and hoped
         # for. `_api`, `_conversation_id`, `_stall_turns`, `_stall_signature`
@@ -567,6 +606,7 @@ class HarnessAgent(BaseAgent):
         """One protocol run, with the single-run lock already held."""
         self._stall_turns = 0
         self._stall_signature = None
+        self._explore_redispatches = 0
 
         fsm_def = build_harness_fsm(
             task,
@@ -1207,6 +1247,8 @@ class HarnessAgent(BaseAgent):
         """
         if state == HarnessStates.EXECUTE:
             return self._after_execute_dispatch(result, error, context)
+        if state == HarnessStates.EXPLORE:
+            return self._after_explore_dispatch(result, error, context)
         if state == HarnessStates.PLAN:
             return self._after_plan_dispatch(result, context)
         if state == HarnessStates.REFLECT:
@@ -1280,6 +1322,91 @@ class HarnessAgent(BaseAgent):
         else:
             updates[ContextKeys.COMPLETION_FIX] = True
         return updates
+
+    def _after_explore_dispatch(
+        self,
+        result: AgentResult | None,
+        error: Exception | None,
+        context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-authorise ONE more explorer while the findings gate is BLOCKED.
+
+        Returns:
+            A delta re-opening the EXPLORE dispatch key, or one recording the
+            ``explore-cap`` halt, or ``{}`` when the gate is satisfied (or when
+            there is no worker at all).
+        """
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-028
+        # The protocol asks ONE explorer for ONE topic and re-dispatches while
+        # its gate fails -- `agents/ip-orchestrator.md`'s EXPLORE step 7 is
+        # literally "If gate fails: spawn additional explorers for gaps". This
+        # harness used to ask ONE dispatch for THREE findings, which is a bar the
+        # source protocol never sets. Do NOT "simplify" this back to a single
+        # dispatch: four mechanisms were measured against that shape on
+        # `ollama_chat/qwen3.5:4b` and ALL FOUR failed at 0 runs in 10 reaching
+        # 3 distinct findings files -- tool count (falsified in the OPPOSITE
+        # direction: fewer tools wrote LESS), plan-directory seeding, prompt
+        # wording (three independent refutations), and observational feedback
+        # (step 22 proved the model READS the derived count back accurately and
+        # still stops at 1). See decisions.md D-022, D-027, D-028.
+        #
+        # Three properties keep this from being a livelock, and all three are
+        # load-bearing:
+        #   1. The condition is the GATE's OWN value -- `findings_count` against
+        #      `findings_threshold`, the same variable the EXPLORE -> PLAN
+        #      JsonLogic term reads, which since D-015 is derived from the
+        #      `findings/*.md` files really on disk. Do NOT re-count the
+        #      directory here: a second count is a gate and a loop condition
+        #      that can disagree, and this loop would then either spin past a
+        #      satisfied gate or stop short of one. It also means a worker
+        #      cannot stop the re-dispatch without ALSO opening the gate, so the
+        #      loop grants no authority the gate did not already grant.
+        #   2. The BOUND is `self._explore_redispatches`, which no worker can
+        #      reach and which only `_run_once` resets (see its D-029 block).
+        #   3. Spending the bound HALTS -- a distinct slug, an honest reason,
+        #      and the gate left exactly as shut as it was. Do NOT "finish the
+        #      job" here by writing `findings_count` or `needs_explore`: an
+        #      exploration that cannot reach its gate is a real failure and the
+        #      run must report it (invariant I8).
+        if result is None and error is None:
+            # No worker configured (D-045): nothing was attempted, so there is
+            # nothing to re-attempt. The diagnostic mode's stall halt is
+            # unchanged, and it must not be relabelled as an exploration cap.
+            return {}
+
+        found = as_int(context.get(ContextKeys.FINDINGS_COUNT), 0)
+        if found >= self.findings_threshold:
+            return {}
+
+        if self._explore_redispatches >= self.max_explore_redispatches:
+            logger.warning(
+                f"Exploration cap [{GateSlug.EXPLORE_CAP}]: "
+                f"{self._explore_redispatches} re-dispatch(es) spent (cap "
+                f"{self.max_explore_redispatches}) and findings_count is still "
+                f"{found} of {self.findings_threshold}; not dispatching again."
+            )
+            return {
+                ContextKeys.LAST_GATE_SLUG: GateSlug.EXPLORE_CAP,
+                ContextKeys.HALT_REASON: (
+                    f"Exploration cap: {self._explore_redispatches} extra "
+                    f"explorer(s) dispatched (cap "
+                    f"{self.max_explore_redispatches}) and findings/ still "
+                    f"holds {found} of the {self.findings_threshold} findings "
+                    "the EXPLORE -> PLAN gate requires. The gate is NOT "
+                    "satisfied; re-scope the exploration."
+                ),
+            }
+
+        self._explore_redispatches += 1
+        logger.info(
+            f"EXPLORE gate BLOCKED at findings_count={found} of "
+            f"{self.findings_threshold}; re-dispatching "
+            f"({self._explore_redispatches}/{self.max_explore_redispatches})."
+        )
+        key = self._dispatch_key(context, HarnessStates.EXPLORE)
+        return self._ledger_delta(
+            [entry for entry in self._read_ledger(context) if entry != key]
+        )
 
     def _after_plan_dispatch(
         self, result: AgentResult | None, context: Mapping[str, Any]
