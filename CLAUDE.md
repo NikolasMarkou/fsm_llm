@@ -184,8 +184,8 @@ pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
 
-Counts measured with `pytest --collect-only` at commit `e9e3907`; the full run is
-5,080 passed / 25 skipped / 2 xfailed in ~377s.
+Counts measured with `pytest --collect-only` at commit `89f3b9c`; the full run is
+5,164 passed / 26 skipped / 2 xfailed in ~247s.
 
 **Conventions**:
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios
