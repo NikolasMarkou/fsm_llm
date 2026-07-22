@@ -47,6 +47,7 @@ duplicate ``plans/LESSONS.md`` warns about.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import os
 import sys
@@ -181,6 +182,60 @@ WRITE_TOOLS = frozenset(
 #: Content, never ``stat``: two runs of the plan's step-5 bench "wrote" the file
 #: by echoing its original text back, which a size comparison scores as done.
 RETRY_TOKENS = ("retry", "retries", "backoff")
+
+
+# DECISION plan-2026-07-22T184813-6549c7cb/D-006
+# Do NOT "simplify" this to a regex/token scan over the raw text, and do NOT
+# execute the model-written file to test it.  RETRY_TOKENS above is
+# prompt-echo passable: GOAL and EXECUTE_PLAN_MD themselves contain
+# "retry"/"backoff", so a worker that edits ``uploader.py`` by pasting the
+# task's own prose into a comment scores ``content_matched=True`` without one
+# line of retry code (reviewer WARNING 1 of the predecessor's REFLECT).  A
+# regex is fakeable the same way (tokens inside strings/comments); executing
+# model-written code has no sandbox in this repo and was rejected as
+# disproportionate.  ``ast.parse`` builds a tree WITHOUT running anything, and
+# comments/string literals never become For/Try/Call nodes.  Additive for
+# FUTURE bench rows only -- frozen L4 B0/B1 and L6 B0 jsonl are never
+# re-scored.  See decisions.md D-006.
+def content_matched_ast(body: str) -> bool:
+    """Vocabulary-decoupled structural verdict: does *body* CONTAIN retry code?
+
+    The fixture's prose says "loop", "sleeping", "re-raise" -- never the code
+    tokens ``for``/``while``/``try``/``time.sleep(`` -- so this predicate
+    shares no vocabulary with the prompt (plan step 4, assumption A7): echoing
+    the prose back cannot satisfy it.  Three conjuncts, all required:
+
+    * a ``For`` or ``While`` node (the bounded-attempts loop),
+    * a ``Try`` node with at least one ``except`` handler,
+    * a ``Call`` whose func is ``time.sleep`` (attribute form) or bare
+      ``sleep`` (name form, covering ``from time import sleep``).
+
+    A ``Raise`` node ("re-raise the last error") is NOTED as part of the
+    asked-for shape but deliberately NOT required: the plan pins the
+    3-conjunct form, and a genuine variant may return a sentinel instead of
+    re-raising.  Parse failure -> ``False`` -- unparseable output lands in the
+    syntax-fail bucket, never in "possibly correct".
+    """
+    try:
+        tree = ast.parse(body)
+    except (SyntaxError, ValueError):  # ValueError: NUL bytes and kin
+        return False
+    has_loop = has_except = has_sleep = False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.For, ast.While)):
+            has_loop = True
+        elif isinstance(node, ast.Try) and node.handlers:
+            has_except = True
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "sleep"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "time"
+            ) or (isinstance(func, ast.Name) and func.id == "sleep"):
+                has_sleep = True
+    return has_loop and has_except and has_sleep
 
 #: The plan L4's executor is dispatched against.  The imported corpus is a plan
 #: for THIS repository, and an executor handed it is told to run a step that has
@@ -924,6 +979,9 @@ def _one_execute_dispatch(
             before.get("uploader.py") != after.get("uploader.py")
             and any(token in body.lower() for token in RETRY_TOKENS)
         ),
+        # The vocabulary-decoupled sibling (D-006): additive, future blocks
+        # only -- frozen B0/B1 rows lack the key and are never re-scored.
+        "content_matched_ast": content_matched_ast(body),
         "success": bool(result.success),
     }
 
@@ -1790,6 +1848,115 @@ class TestTheL6RubricPlumbingOffline:
         ], "the EXECUTE role holds no tools -- the surface pin is vacuous"
         # And it is NOT the L4 fixture hash: plan.md/state.md are OUTPUTS here.
         assert _l6_fixture_hash() != hb._fixture_hash(sys.modules[__name__])
+
+
+def _prose_as_comment(text: str) -> str:
+    """*text* re-emitted line by line as Python comments."""
+    return "".join(f"# {line}\n" for line in text.splitlines())
+
+
+#: A genuine retry body: loop + try/except + ``time.sleep`` + re-raise.  What
+#: an honest EXECUTE dispatch should leave in ``uploader.py``.
+_GENUINE_RETRY_BODY = (
+    "import time\n\n"
+    "import requests\n\n\n"
+    "def upload(path, url):\n"
+    "    last_error = None\n"
+    "    for attempt in range(3):\n"
+    "        try:\n"
+    "            with open(path, 'rb') as fh:\n"
+    "                return requests.post(url, data=fh.read())\n"
+    "        except Exception as exc:\n"
+    "            last_error = exc\n"
+    "            time.sleep(0.5 * (2**attempt))\n"
+    "    raise last_error\n"
+)
+
+#: The same shape via ``from time import sleep`` -- the bare-Name call form.
+_FROM_IMPORT_RETRY_BODY = _GENUINE_RETRY_BODY.replace(
+    "import time", "from time import sleep"
+).replace("time.sleep(", "sleep(")
+
+
+class TestContentMatchedAstIsVocabularyDecoupled:
+    """UNGATED: the D-006 structural metric, pinned against prompt-echo.
+
+    Defect named (reviewer WARNING 1): ``RETRY_TOKENS`` is prompt-echo
+    passable.  ``GOAL`` and ``EXECUTE_PLAN_MD`` themselves contain
+    "retry"/"backoff", so a worker that changes ``uploader.py`` by pasting the
+    task's own words back -- as a docstring, a comment block, or a string
+    literal -- scores ``content_matched=True`` without writing any retry
+    code.  ``content_matched_ast`` must refuse every echo shape and accept
+    genuine structure, including the ``from time import sleep`` spelling.
+    """
+
+    @pytest.mark.parametrize(
+        ("body", "expected"),
+        [
+            pytest.param(
+                SEED_FILES["uploader.py"] + '\n"""\n' + EXECUTE_PLAN_MD + '\n"""\n',
+                False,
+                id="prompt-echo-docstring",
+            ),
+            pytest.param(
+                SEED_FILES["uploader.py"] + "\n" + _prose_as_comment(EXECUTE_PLAN_MD),
+                False,
+                id="prompt-echo-comment-block",
+            ),
+            pytest.param(
+                SEED_FILES["uploader.py"] + "\n# retry with backoff\n",
+                False,
+                id="comment-echo",
+            ),
+            pytest.param(
+                SEED_FILES["uploader.py"] + '\nx = "retry with exponential backoff"\n',
+                False,
+                id="string-literal-echo",
+            ),
+            pytest.param(_GENUINE_RETRY_BODY, True, id="genuine-retry-body"),
+            pytest.param(_FROM_IMPORT_RETRY_BODY, True, id="from-time-import-sleep"),
+            pytest.param(
+                "def upload(:\n    retry backoff while", False, id="unparseable"
+            ),
+            pytest.param(SEED_FILES["uploader.py"], False, id="original-seed-unchanged"),
+        ],
+    )
+    def test_content_matched_ast_structural_verdicts(self, body: str, expected: bool) -> None:
+        """Echo shapes -> False; genuine loop+except+sleep -> True."""
+        assert content_matched_ast(body) is expected
+
+    def test_content_matched_ast_refuses_what_the_token_check_passes(
+        self,
+    ) -> None:
+        """The defect itself, pinned as executable fact: a comment-echo edit
+        changes the file's bytes AND carries a RETRY_TOKENS token -- so the
+        vocabulary metric scores it matched -- while containing zero retry
+        structure."""
+        echoed = SEED_FILES["uploader.py"] + "\n# retry with backoff\n"
+        assert echoed != SEED_FILES["uploader.py"]
+        assert any(token in echoed.lower() for token in RETRY_TOKENS)
+        assert content_matched_ast(echoed) is False
+        assert content_matched_ast(_GENUINE_RETRY_BODY) is True
+
+    def test_content_matched_ast_shares_no_vocabulary_with_the_prose(self) -> None:
+        """A7's decoupling claim, pinned offline: the prose says "loop",
+        "sleeping", "re-raise" -- never the code tokens the AST predicate
+        keys on.  If a fixture edit ever adds one, the decoupling claim dies
+        HERE instead of silently weakening a future block's metric."""
+        prose = (GOAL + "\n" + EXECUTE_PLAN_MD).lower()
+        for token in ("time.sleep(", "sleep(", "try:", "except", "while "):
+            assert token not in prose, f"fixture prose contains code token {token!r}"
+
+    def test_content_matched_ast_key_is_counted_for_future_blocks_only(self) -> None:
+        """``K_METRICS`` carries the key (Success Criterion 5) and the bench's
+        accessor tolerates frozen rows that predate it: counted as absent,
+        never a KeyError, never re-scored."""
+        hb = _bench_module()
+        assert "content_matched_ast" in hb.K_METRICS
+        frozen_row = {"write_tool_issued": True, "content_matched": True}
+        counts = hb.summarize_rows([frozen_row])
+        assert counts["content_matched_ast"] == 0
+        assert counts["content_matched"] == 1
 
 
 @requires_live

@@ -46,7 +46,13 @@ MANIFEST_FIELDS = tuple(_FIELDS.split())
 ARMS: dict[str, bool] = {"native": True, "react": False}
 
 #: The per-row booleans every summary counts and every report recounts.
-K_METRICS = ("write_tool_issued", "bytes_on_disk", "content_matched", "success")
+K_METRICS = (
+    "write_tool_issued",
+    "bytes_on_disk",
+    "content_matched",
+    "content_matched_ast",
+    "success",
+)
 
 #: Mirrors ``_one_execute_dispatch``'s kwargs (unimportable function literals).
 DISPATCH_TIMEOUT_SECONDS = 600
@@ -366,16 +372,20 @@ def report(bench_id: str, blocks: list[str] | None = None) -> int:
         d.name for d in bench_dir.iterdir() if d.is_dir() and d.name != "seed-probe"
     )
     ok = True
-    recomputed: dict[tuple[str, str], tuple[int, dict[str, int]]] = {}
+    recomputed: dict[tuple[str, str], tuple[int, dict[str, int], tuple[str, ...]]] = {}
     for block in names:
         bdir = bench_dir / block
         for rows_path in sorted(bdir.glob("rows_*.jsonl")):
             arm = rows_path.stem.split("_", 1)[1]
             rows = read_rows(rows_path)
             n, counts = len(rows), summarize_rows(rows)
-            recomputed[(block, arm)] = (n, counts)
+            # DECISION plan-2026-07-22T184813-6549c7cb/D-006
+            # Do NOT iterate K_METRICS below: frozen rows predate newer keys
+            # and are never re-scored; count only what they carry (D-006).
+            present = tuple(m for m in K_METRICS if any(m in r for r in rows))
+            recomputed[(block, arm)] = (n, counts, present)
             print(f"{bench_id} {block} [{arm}] n={n}")
-            for metric in K_METRICS:
+            for metric in present:
                 lo, hi = wilson_ci(counts[metric], n)
                 k = counts[metric]
                 print(f"  {metric}: {k}/{n} wilson95=[{lo:.3f}, {hi:.3f}]")
@@ -384,7 +394,7 @@ def report(bench_id: str, blocks: list[str] | None = None) -> int:
                 print("  (no committed summary to cross-check)")
                 continue
             committed = json.loads(summary_path.read_text(encoding="utf-8"))
-            for metric in K_METRICS:
+            for metric in present:
                 want = committed.get(f"k_{metric}")
                 if want != counts[metric]:
                     ok = False
@@ -399,10 +409,10 @@ def report(bench_id: str, blocks: list[str] | None = None) -> int:
             if not _digests_comparable(bench_dir, b0, b1, arm):
                 ok = False
                 continue
-            n0, c0 = recomputed[(b0, arm)]
-            n1, c1 = recomputed[(b1, arm)]
+            n0, c0, p0 = recomputed[(b0, arm)]
+            n1, c1, p1 = recomputed[(b1, arm)]
             print(f"Fisher two-sided, {b0} vs {b1} [{arm}]:")
-            for metric in K_METRICS:
+            for metric in (m for m in p0 if m in p1):
                 p = fisher_exact_two_sided(c0[metric], n0, c1[metric], n1)
                 print(f"  {metric}: {c0[metric]}/{n0} vs {c1[metric]}/{n1} p={p:.4f}")
     return 0 if ok else 1

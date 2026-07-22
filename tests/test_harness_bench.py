@@ -291,6 +291,26 @@ class TestReportRecompute:
         assert hb.report("synthetic") == 1
         assert "MISMATCH" in capsys.readouterr().out
 
+    def test_a_frozen_block_without_the_ast_metric_reports_clean(
+        self, tmp_path: Path, monkeypatch, capsys
+    ):
+        """Defect guarded: adding ``content_matched_ast`` to K_METRICS turning
+        ``report l4-execute-write`` red over FROZEN blocks -- their committed
+        summaries lack ``k_content_matched_ast`` and their rows never measured
+        it, so the report must skip the absent metric (no fabricated 0/n line,
+        no MISMATCH) rather than re-score frozen evidence (D-006)."""
+        monkeypatch.setattr(hb, "BENCH_DATA", tmp_path)
+        bdir = tmp_path / "synthetic" / "B0"
+        _make_block(bdir, "native", self.FLAGS_B0)
+        summary = hb.write_summary(bdir, "native", status="complete")
+        for key in ("k_content_matched_ast", "wilson_content_matched_ast"):
+            del summary[key]
+        (bdir / "summary_native.json").write_text(json.dumps(summary), encoding="utf-8")
+        assert hb.report("synthetic") == 0
+        out = capsys.readouterr().out
+        assert "content_matched_ast" not in out
+        assert "MISMATCH" not in out
+
     def test_two_blocks_get_a_fisher_p_matching_a_direct_call(
         self, tmp_path: Path, monkeypatch, capsys
     ):
