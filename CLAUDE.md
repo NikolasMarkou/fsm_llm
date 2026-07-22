@@ -94,7 +94,11 @@ callback. Measured on `ollama_chat/qwen3.5:4b`: the single-state model bars are
 MET for the first time after a bench-measured structural fix (driver-assigned
 EXECUTE write targets: B0 content-match 2/40 -> B1 **40/40**, Fisher p=1.6e-20,
 n=40/arm blocks committed under `scripts/bench_data/`; armed standing bar L4
-write tool 5/5, bytes 5/5, strict content-hash 4/5 vs >=4/5; L5 5/5) -- but the
+write tool 5/5, bytes 5/5, strict content-hash 4/5 vs >=4/5; L5 5/5; the
+content-match/content-hash metric shares vocabulary with the fix's own prompt
+text -- treat a PASS as target-selection compliance, not proven code
+correctness; `content_matched_ast` is the vocabulary-decoupled successor for
+future blocks) -- but the
 first graded end-to-end criterion on REAL workers (L6, n=3) measured **0/3 NOT
 MET** (two honest explore-cap halts, one slugless PLAN stall; verified writes
 3/3). The harness is not production-ready and a 4B model is not claimed to

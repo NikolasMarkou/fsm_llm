@@ -445,7 +445,11 @@ requested edit **2/40**. The fix extends the driver-assigned-target pattern to
 EXECUTE: the driver reads plan.md's Files To Modify and names the exact target
 path + tool in the dispatch. B1, same manifest: **40/40** (Fisher p=1.6e-20).
 The ReAct control arm measured 0/40 in both blocks -- its failure mode is
-upstream of target selection.
+upstream of target selection. Caveat: the content-match/content-hash metric
+shares vocabulary with the fix's own prompt text ("retry"/"backoff" appear in
+the task prose) -- treat a PASS as target-selection compliance, not proven
+code correctness; `content_matched_ast` (AST-structural, vocabulary-decoupled,
+additive) exists for future blocks.
 
 **L6 is the open one, and it is reported as it measured.**
 `TestL6EndToEndRealWorkers` is the package's first graded end-to-end criterion

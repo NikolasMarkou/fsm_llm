@@ -178,7 +178,11 @@ WRITE_TOOLS = frozenset(
     {"write_file", "append_file", "write_plan_file", "append_plan_file"}
 )
 
-#: Tokens that make an edit to ``uploader.py`` recognisably THE asked-for edit.
+#: Tokens that make an edit to ``uploader.py`` recognisably TARGET the
+#: asked-for edit -- target-selection evidence, not a correctness check: the
+#: tokens are vocabulary-coupled (they appear verbatim in GOAL and
+#: EXECUTE_PLAN_MD, so a prompt-echo passes; see ``content_matched_ast`` below
+#: for the vocabulary-decoupled form).
 #: Content, never ``stat``: two runs of the plan's step-5 bench "wrote" the file
 #: by echoing its original text back, which a size comparison scores as done.
 RETRY_TOKENS = ("retry", "retries", "backoff")
@@ -974,7 +978,9 @@ def _one_execute_dispatch(
             before.get(name) != digest for name, digest in after.items()
         ),
         # The strict form: the TARGET file's content hash moved AND the new
-        # text is recognisably the edit that was requested.
+        # text carries the asked-for vocabulary -- target-selection evidence
+        # (vocabulary-coupled, not proven code correctness; see
+        # content_matched_ast below for the decoupled form).
         "content_matched": (
             before.get("uploader.py") != after.get("uploader.py")
             and any(token in body.lower() for token in RETRY_TOKENS)
