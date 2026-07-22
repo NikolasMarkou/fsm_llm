@@ -841,10 +841,11 @@ class PlanDirectory:
         # worker may write (`roles.held_tools`, `PlanMemory.authorise`), and a
         # bootstrap need must never change a dispatched role's write scope.
         #
-        # DELIBERATELY UNWIRED: nothing in the product calls this yet. Wiring it
-        # into `_cmd_new` and `_sync_state_doc` is gated on the pre-registered
-        # L7 A/B decision rule (`l7-explore-coldstart/B0`, `bare` vs `seeded`).
-        # See decisions.md D-002.
+        # DELIBERATELY UNWIRED -- the L7 A/B (`l7-explore-coldstart/B0`, `bare`
+        # vs `seeded`) measured this lever NOT VALIDATED (bare 5/12, seeded
+        # 7/12, Fisher two-sided p=0.6843; D-003/D-006). The method is retained
+        # as the committed bench's reproducibility dependency, NOT wired into
+        # any plan-creation path. See decisions.md D-002/D-003/D-006.
         tiers = (
             (Role.ORCHESTRATOR, ArtifactNames.PER_PLAN),
             (Role.ARCHIVIST, ArtifactNames.CROSS_PLAN),

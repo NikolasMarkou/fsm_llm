@@ -109,9 +109,16 @@ work -- driver-named `plan.md` deliverable line, verified-write floor
 TIGHTENED to an EXECUTE-state workspace write whose own written path must be
 among the changed files), B1 **0/3** -- all three runs honest explore-cap
 halts, zero slugless stalls, tightened verified-write clause false 3/3
-because no run reached EXECUTE. The measured blocker is now EXPLORE cold-start over an empty
-plan directory (one state EARLIER than B0's mixed picture); the PLAN-and-later
-machinery is offline-verified but live-unexercised (no B1 run left EXPLORE).
+because no run reached EXECUTE. A dedicated L7 A/B (`l7-explore-coldstart/B0`)
+then REFUTED the first-dispatch-cold-start framing: a single cold-start EXPLORE
+dispatch over a bare `mkdir` scored bare **5/12** vs seeded **7/12** (Fisher
+two-sided p=0.6843 -- the zero-byte protocol-skeleton lever NOT VALIDATED), and
+5/12 far exceeds L6's e2e 0/3, so L6's blocker is the multi-dispatch
+redispatch-loop / structured-output-parse collapse, not first-dispatch cold
+start. Two named deferred defects were closed this iteration (bare
+`/workspace`-sentinel confinement repair; the `success=True`-but-empty-plan.md
+slugless PLAN stall). The PLAN-and-later machinery stays offline-verified but
+live-unexercised (no B1 run left EXPLORE).
 The harness is not production-ready and a 4B model is not claimed to
 drive it unattended to a useful result. See `src/fsm_llm_harness/CLAUDE.md` for
 the full reference, including what is measured and what is not.

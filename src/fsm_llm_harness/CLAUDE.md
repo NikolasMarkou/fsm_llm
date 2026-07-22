@@ -471,33 +471,49 @@ clocks 344.6/298.5/357.9 s vs the 1800 s ceiling; findings on disk 0/0/2).
 Zero slugless stalls in B1's rows. Scope that claim precisely: the
 redispatch budget covers worker-failure replies ONLY -- it retries when
 `result is None or not result.success` and halts on `plan-cap` when spent
--- so the B0 worker-failure stall shape is structurally closed. NOT closed:
-a plan-writer reply with `success=True` that leaves plan.md empty skips the
-budget, falls through to approval, and a denial (DENY is the unattended
-default, and an empty plan is denied) sets `plan_approved=False` with no
-slug -- the 3-turn stall detector then halts slug=None. That residual
-slugless PLAN stall is reachable, live-unexercised, and named successor
-work. No B1 run reached PLAN, so the redispatch budget and deliverable line
+-- so the B0 worker-failure stall shape is structurally closed. The residual
+`success=True`-but-empty-plan.md slugless PLAN stall (a reply that skipped the
+budget, fell through to approval, and stalled slug=None on the denial) is NOW
+closed too, this iteration (D-005): a disk-derived empty-`plan.md` check
+(`_plan_has_content`, `tools.has_bytes` over the driver's own uncapped reader)
+folded into the SAME budget condition consumes the budget for that shape, so
+exhaustion halts on the honest `plan-cap` slug rather than slug=None -- no
+generic `STALL` slug was minted (predecessor D-003 respected). Offline-verified,
+still live-unexercised. No B1 run reached PLAN, so the redispatch budget and deliverable line
 are offline-verified (unit-proven) but live-unexercised, and the tightened
 verified-write clause measured false 3/3 because nothing reached EXECUTE.
-The measured blocker for the end-to-end claim is now EXPLORE cold-start over
-an EMPTY plan directory -- one state EARLIER than B0's mixed picture, and
-consistent with the known ~1/3 per-run clearance prior. That honest 0/3,
-with every row naming its blocking state and slug, is the package's
-end-to-end status.
+The measured blocker for the end-to-end claim is NOT first-dispatch EXPLORE
+cold-start. A dedicated L7 A/B (`l7-explore-coldstart/B0`, committed under
+`scripts/bench_data/`) measured a SINGLE cold-start EXPLORE dispatch over a
+bare `mkdir` at **bare 5/12 vs seeded 7/12** (Fisher two-sided p=0.6843 -- the
+zero-byte protocol-skeleton cold-start lever is **NOT VALIDATED**; a
+positive-but-non-significant delta, and the seeded arm's `empty-reply` rate
+rose 1->3 rather than falling). Bare 5/12 is far above L6's e2e 0/3, so a
+single cold-start dispatch over a bare dir is NOT the flat blocker the e2e
+picture implied: L6's 0/3 is a multi-dispatch redispatch-loop /
+structured-output-parse (`objects=0`, `empty-reply`) collapse -- a TRAVERSE
+failure, not a first-dispatch impossibility. That honest 0/3, with every row
+naming its blocking state and slug, is the package's end-to-end status.
 
-Known gaps, standing after B1 (live-surfaced or live-unexercised):
-- **EXPLORE cold-start is the blocker** (3/3 in B1): no measured harness-side
-  lever exists yet; the named successor is a dedicated EXPLORE-only
-  cold-start bench (n >= 10) to characterize the mechanism before fixing it.
-- **PLAN redispatch budget covers worker-failure replies only**
-  (`MAX_PLAN_REDISPATCHES=3`, `plan-cap` slug; offline-verified,
-  live-unexercised -- no B1 run reached PLAN). Residual: a
-  `success=True`-but-empty plan.md reply bypasses the budget, and the
-  ensuing approval denial stalls sluglessly (successor work).
-- **Bare `/workspace` sentinel is not repaired at confinement**: repair
-  handles `/workspace/<path>` but a live run's `list_dir("/workspace")` was
-  REJECTED instead of being repaired to the workspace root.
+Known gaps, standing after B1 + the L7 characterization block:
+- **The blocker is the multi-dispatch traverse, not first-dispatch cold-start**:
+  the L7 bench (the named EXPLORE-only successor) has now been RUN and measured
+  the zero-byte protocol-skeleton lever NOT VALIDATED (bare 5/12, seeded 7/12,
+  Fisher p=0.6843; `scripts/bench_data/l7-explore-coldstart/B0/`). The refutation
+  localizes the next successor: a dedicated single-state redispatch-LOOP bench
+  (not single-dispatch) instrumented with per-tool-call traces to separate
+  never-calling-a-write-tool from wrong-root from unparseable-output
+  (`empty-reply` / `objects=0` dominates BOTH L7 arms).
+- **PLAN redispatch budget**: `MAX_PLAN_REDISPATCHES=3` is now GRADEABLE (Defect
+  C: an additive `plan_redispatches` L6 row field) but still has ZERO live
+  evidence -- no run has reached PLAN. The `success=True`-but-empty-plan.md
+  slugless-stall residual is CLOSED (D-005, above). Still unbudgeted:
+  REFLECT/PIVOT/CLOSE worker-failure stalls (no generic `STALL` slug is minted,
+  per predecessor D-003).
+- **Bare `/workspace` sentinel** -- CLOSED this iteration (D-004): a bare
+  `/workspace` (and bare `/plan`) sentinel now maps to the confinement root
+  inside the single `_strip_root_sentinel` chokepoint instead of being refused;
+  `/` alone still raises.
 - **Wrong-root reads**: a live explorer read a plan-dir findings path through
   the workspace-rooted `read_file` and was rejected -- the tool surface
   separates the two roots but the model conflated them.
