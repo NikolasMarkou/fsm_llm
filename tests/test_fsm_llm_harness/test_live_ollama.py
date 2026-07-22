@@ -1755,6 +1755,13 @@ def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
         "states_entered": states_entered,
         "dispatch_counts": dispatch_counts,
         "dispatches_total": len(worker.requests),
+        # Defect C: the driver's AUTHORITATIVE PLAN redispatch counter, read
+        # DIRECTLY off the agent (not re-derived from `dispatch_counts`), so a
+        # future PLAN-reaching row grades `MAX_PLAN_REDISPATCHES` without post
+        # hoc arithmetic.  Additive: no floor clause or `_bench_defect`
+        # predicate reads it.  Fallback if the counter ever moves off the
+        # agent: `max(0, dispatch_counts.get(HarnessStates.PLAN, 0) - 1)`.
+        "plan_redispatches": agent._plan_redispatches,
         "furthest_state": furthest,
         "state_md_final_state": final_disk_state,
         "state_md_transition_history": transition_history,
@@ -1817,6 +1824,29 @@ def test_the_L6_criterion_is_structurally_closed_to_scripted_workers() -> None:
     assert "ScriptedRoles" not in sources
     assert "build_default_worker_factory" in inspect.getsource(_one_e2e_run)
     assert "fix_attempts_for" not in sources
+
+
+def test_the_L6_row_carries_an_int_plan_redispatches() -> None:
+    """UNGATED: Defect C -- every L6 row exposes an int ``plan_redispatches``.
+
+    ``MAX_PLAN_REDISPATCHES=3`` has never been exercised live (no L6 run has
+    reached PLAN), so a future PLAN-reaching row must be gradeable DIRECTLY,
+    without re-deriving the count from ``dispatch_counts``.  Pinned two ways,
+    matching this file's offline style (``inspect.getsource(_one_e2e_run)``):
+    the row builder reads the AUTHORITATIVE driver counter
+    ``agent._plan_redispatches`` into the ``plan_redispatches`` key (SOURCE),
+    and that counter is an ``int`` on a fresh agent (BEHAVIOUR), so the row's
+    field is int-typed whatever a live run leaves it at.  Additive -- this
+    test asserts nothing about any floor clause.
+    """
+    import inspect
+
+    e2e_src = inspect.getsource(_one_e2e_run)
+    assert '"plan_redispatches": agent._plan_redispatches' in e2e_src
+
+    agent = _live_agent(lambda **_: None, approvals=lambda *_a, **_k: False)
+    assert isinstance(agent._plan_redispatches, int)
+    assert agent._plan_redispatches == 0
 
 
 class TestTheL6ApprovalStubIsDenyDefaultAndDiskBound:
