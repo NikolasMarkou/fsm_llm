@@ -214,6 +214,7 @@ def _role_request(
     workspace_root: Path | None = None,
     context: dict[str, Any] | None = None,
     assigned_topic: str | None = None,
+    assigned_write_target: str | None = None,
 ) -> RoleRequest:
     """Build the ``RoleRequest`` the driver would hand this state's worker.
 
@@ -244,6 +245,7 @@ def _role_request(
         plan_dir=None if plan_dir is None else str(plan_dir),
         workspace_root=None if workspace_root is None else str(workspace_root),
         assigned_topic=assigned_topic,
+        assigned_write_target=assigned_write_target,
     )
 
 
@@ -2520,6 +2522,132 @@ class TestTheAssignedTopicNamesOneTargetPath:
         assert "findings/affected-files.md" in built[0].tasks[0]
 
 
+class TestTheAssignedWriteTargetNamesPathToolAndRoot:
+    """One EXECUTE dispatch, one driver-assigned workspace edit target (D-010).
+
+    B0 (n=40, scripts/bench_data/l4-execute-write/B0) measured the defect this
+    line exists for: the native executor issued a write tool 15/40 and left
+    bytes 14/40, but only 2/40 landed the REQUESTED edit on the assigned
+    workspace file -- 13 of 15 issued writes missed the target, and the
+    measured miss shapes are wrong-ROOT (``write_file('<plan-id>/uploader.py')``,
+    ``read_plan_file('<plan-id>/uploader.py')``).  This extends the D-035
+    driver-assigned-target pattern (measured 10/10 on EXPLORE) to EXECUTE: the
+    prompt names the exact path, the exact tool and the exact root, so the
+    model's job shrinks to content.  The driver half (derivation from plan.md's
+    Files To Modify) is pinned in ``test_harness_agent.py``.
+    """
+
+    _TARGET = "uploader.py"
+
+    def _request(
+        self, plan_dir: Path, workspace: Path, target: str | None
+    ) -> RoleRequest:
+        return _role_request(
+            HarnessStates.EXECUTE,
+            plan_dir=plan_dir,
+            workspace_root=workspace,
+            assigned_write_target=target,
+        )
+
+    def _line(self) -> str:
+        return f"WRITE IT TO: {self._TARGET} USING {WorkspaceTools.WRITE_FILE}"
+
+    def test_the_task_prompt_renders_the_target_exactly_once(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Exactly one assignment line -- a repeated one is a new ambiguity."""
+        spec = get_role_spec(HarnessStates.EXECUTE)
+        task = build_role_task_prompt(
+            self._request(plan_dir, workspace, self._TARGET), spec
+        )
+
+        assert task.count(self._line()) == 1
+
+    def test_the_line_names_the_workspace_root_and_the_write_tool(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The root is stated, not inferred -- the B0 misses are ROOT misses.
+
+        ``_writes_line`` already tells EXECUTE its plan-artifact paths are
+        plan-directory-relative; without an explicit counter-label the model
+        prefixed the workspace file with the plan id 13/15 times.
+        """
+        spec = get_role_spec(HarnessStates.EXECUTE)
+        task = build_role_task_prompt(
+            self._request(plan_dir, workspace, self._TARGET), spec
+        )
+
+        assert WorkspaceTools.WRITE_FILE in self._line()
+        assert "workspace-relative" in task
+        assert "NOT plan-directory-relative" in task
+        assert "do not prefix it with the plan directory" in task
+
+    def test_the_assignment_is_in_the_task_half_not_the_standing_half(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The target changes per step, so it is TASK text (D-021, D-035).
+
+        Standing text is re-sent unchanged on the next dispatch -- installed
+        there, step 2 would be told to write step 1's file.
+        """
+        request = self._request(plan_dir, workspace, self._TARGET)
+        spec = get_role_spec(HarnessStates.EXECUTE)
+
+        assert self._line() in build_role_task_prompt(request, spec)
+        assert self._line() not in build_role_system_prompt(request, spec)
+
+    def test_the_single_string_prompt_carries_the_assignment_too(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """``build_role_prompt`` is what a no-system-policy agent receives."""
+        request = self._request(plan_dir, workspace, self._TARGET)
+
+        assert self._line() in build_role_prompt(
+            request, get_role_spec(HarnessStates.EXECUTE)
+        )
+
+    def test_no_assignment_leaves_the_prompt_byte_identical(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The fail-open-to-status-quo contract: ``None`` is a true no-op.
+
+        The driver assigns nothing when plan.md is missing or unparseable;
+        that dispatch must render byte-for-byte the pre-D-010 prompt (verified
+        against the pre-change rendering at implementation time) -- additive,
+        never a reflow of existing blocks.
+        """
+        spec = get_role_spec(HarnessStates.EXECUTE)
+        base = build_role_prompt(self._request(plan_dir, workspace, None), spec)
+        assigned = build_role_prompt(
+            self._request(plan_dir, workspace, self._TARGET), spec
+        )
+
+        assert "WRITE IT TO:" not in base
+        assert assigned != base
+        # Nothing was REPLACED: the assignment is additive.
+        for block in base.split("\n\n"):
+            assert block in assigned
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            HarnessStates.EXPLORE,
+            HarnessStates.PLAN,
+            HarnessStates.REFLECT,
+            HarnessStates.PIVOT,
+            HarnessStates.CLOSE,
+        ],
+    )
+    def test_a_state_the_driver_never_assigns_a_target_for_is_unchanged(
+        self, state: str, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Only EXECUTE dispatches carry a write target; no other state drifts."""
+        spec = get_role_spec(state)
+        request = _role_request(state, plan_dir=plan_dir, workspace_root=workspace)
+
+        assert "YOUR EDIT THIS STEP" not in build_role_prompt(request, spec)
+
+
 class TestAMissingPlanArtifactSaysSoAndSaysWhatToDo:
     """A read of a file nobody has written yet is a teachable failure (D-036).
 
@@ -2739,7 +2867,15 @@ class TestTopLevelObjectCount:
 
     @pytest.mark.parametrize("text", ["{" * 500, "}" * 500, '{"a": "' + "{" * 200])
     def test_never_raises_on_hostile_input(self, text: str) -> None:
-        assert count_top_level_json_objects(text) >= 0
+        """Surviving the call is the guard; the count itself is exact.
+
+        The old ``>= 0`` form was vacuous -- true of every int the function
+        could ever return (flagged by the W3 pre-audit, fixed under D-007).
+        None of these inputs contains one balanced top-level object, so the
+        exact answer is 0: unbalanced opens have no partner, and the third
+        case buries its braces in an unterminated string value.
+        """
+        assert count_top_level_json_objects(text) == 0
 
 
 class TestContextSnapshotIsBounded:
@@ -2878,7 +3014,9 @@ class TestWorkerFactoryFailurePaths:
         assert seen[0]["failure_reason"] == "exception:RuntimeError"
         assert seen[0]["success"] is False
         assert seen[0]["agent_success"] is False
-        assert seen[0]["elapsed_s"] >= 0.0
+        # Not `>= 0.0` (vacuous for a monotonic-clock delta -- W3 pre-audit,
+        # D-007): what an observer row consumer relies on is the TYPE contract.
+        assert isinstance(seen[0]["elapsed_s"], float)
 
     def test_the_failure_record_has_the_SAME_keys_as_a_success_record(
         self, tmp_path: Path, plan_dir: Path

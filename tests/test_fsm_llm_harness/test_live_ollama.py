@@ -60,6 +60,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.real_llm, pytest.mark.slow]
 
 from fsm_llm_agents.definitions import AgentResult, ApprovalRequest
 from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm_harness.artifacts import PlanDoc
 from fsm_llm_harness.constants import (
     ArtifactNames,
     ContextKeys,
@@ -68,7 +69,7 @@ from fsm_llm_harness.constants import (
     HarnessStates,
     Severity,
 )
-from fsm_llm_harness.harness import HarnessAgent, RoleRequest
+from fsm_llm_harness.harness import HarnessAgent, RoleRequest, derive_execute_target
 from fsm_llm_harness.plan_validator import Issue, audit
 from fsm_llm_harness.roles import build_default_worker_factory, get_role_spec
 from fsm_llm_harness.rules import get_rules
@@ -805,7 +806,16 @@ def _spy_on_tools(sink: list[dict[str, Any]]):
 
 
 def _execute_request(plan_dir: Path, workspace: Path) -> RoleRequest:
-    """One EXECUTE dispatch, shaped exactly as the driver shapes it."""
+    """One EXECUTE dispatch, shaped exactly as the driver shapes it.
+
+    ``assigned_write_target`` goes through the driver's OWN derivation
+    (D-010), fed the same ``EXECUTE_PLAN_MD`` the plan directory carries --
+    from the string, not the disk, so the bench's template render
+    (``harness_bench._execute_render``, placeholder paths) sees the same
+    request a real dispatch does and B1's prompt hash records the change.
+    ``test_the_bench_request_carries_the_driver_assigned_target`` pins the
+    two paths against each other offline.
+    """
     spec = get_role_spec(HarnessStates.EXECUTE)
     rules = get_rules(HarnessStates.EXECUTE)
     return RoleRequest(
@@ -821,6 +831,9 @@ def _execute_request(plan_dir: Path, workspace: Path) -> RoleRequest:
         context={},
         plan_dir=str(plan_dir),
         workspace_root=str(workspace),
+        assigned_write_target=derive_execute_target(
+            PlanDoc.from_markdown(EXECUTE_PLAN_MD), 1
+        ),
     )
 
 
@@ -936,6 +949,36 @@ def test_the_L4_bench_hands_the_executor_a_readable_plan_directory(
     # And the fresh-traverse fixture is deliberately the OTHER way round, which
     # is what makes the two benches distinguishable rather than a copy-paste.
     assert not (_fresh_plan_dir(tmp_path, 1) / ArtifactNames.STATE).exists()
+
+
+def test_the_bench_request_carries_the_driver_assigned_target(
+    tmp_path: Path,
+) -> None:
+    """UNGATED: the bench dispatch and the driver derive the SAME target.
+
+    Step 5's B1 block measures the D-010 fix; if ``_execute_request`` drifted
+    from what the driver hands a real EXECUTE dispatch, B1 would silently
+    measure the pre-fix prompt (B0's, 2/40 content-matched) and burn its live
+    budget on nothing.  The string-fed derivation in ``_execute_request`` and
+    the driver's disk-fed ``_assign_execute_target`` must agree on the plan
+    directory this bench really seeds.
+    """
+    expected = derive_execute_target(PlanDoc.from_markdown(EXECUTE_PLAN_MD), 1)
+    assert expected == "uploader.py", (
+        "EXECUTE_PLAN_MD's Files To Modify no longer parses to the file the "
+        "content_matched metric hashes -- the bench would aim the model at "
+        "one file and score it against another"
+    )
+
+    plan_dir = _execute_plan_dir(tmp_path / "bench")
+    workspace = tmp_path / "ws"
+    assert _execute_request(plan_dir, workspace).assigned_write_target == expected
+    assert (
+        HarnessAgent._assign_execute_target(
+            {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
+        )
+        == expected
+    )
 
 
 @requires_live

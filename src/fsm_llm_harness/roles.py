@@ -571,6 +571,34 @@ def _topic_line(request: RoleRequest) -> str:
     )
 
 
+def _execute_target_line(request: RoleRequest) -> str:
+    """The driver-assigned workspace edit target, or ``""`` (mirrors
+    :func:`_topic_line`: no assignment -> a byte-identical prompt)."""
+    # DECISION plan-2026-07-22T114536-879d04a0/D-010
+    # D-035's pattern (driver names the ONE file; measured 10/10 on EXPLORE)
+    # extended to EXECUTE's workspace edit, because B0 (n=40, committed at
+    # scripts/bench_data/l4-execute-write/B0) measured 13 of 15 issued writes
+    # MISSING the requested file -- wrong-ROOT shapes like
+    # `write_file('<plan-id>/uploader.py')`, never a wrong tool name (0/298).
+    # The driver picked the path from plan.md's Files To Modify
+    # (`derive_execute_target`, harness.py); the model's job is content only.
+    # Do NOT move this into the SYSTEM half (the target changes per step;
+    # D-021 measured that placement matters), do NOT let the role choose or
+    # negotiate the path, and do NOT soften the root sentence: naming the tool
+    # AND the root is the whole fix -- `_writes_line` already tells EXECUTE its
+    # plan artifacts are plan-directory-relative, so an unlabeled workspace
+    # path invites exactly the plan-id prefixing B0 measured.
+    # See decisions.md D-010.
+    if not request.assigned_write_target:
+        return ""
+    return (
+        f"YOUR EDIT THIS STEP -- WRITE IT TO: {request.assigned_write_target} "
+        f"USING {WorkspaceTools.WRITE_FILE} (this path is workspace-relative, "
+        "NOT plan-directory-relative). That exact path, nothing else; do not "
+        "prefix it with the plan directory or the plan id."
+    )
+
+
 def _finish_line(spec: RoleSpec, can_write: bool) -> str:
     """Render the terminal instruction: what to do, and when to stop doing it."""
     # DECISION plan-2026-07-21T191807-bf7ffe24/D-013
@@ -697,6 +725,9 @@ def _prompt_blocks(request: RoleRequest, spec: RoleSpec) -> list[tuple[bool, str
         # goal says what the run wants, this says which one slice of it this
         # dispatch owns and where that slice goes.
         blocks.append((False, topic))
+    target = _execute_target_line(request)
+    if target:
+        blocks.append((False, target))
     blocks.extend(
         [
             (

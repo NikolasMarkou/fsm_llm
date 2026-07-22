@@ -146,6 +146,7 @@ __all__ = [
     "RevertDirective",
     "RoleRequest",
     "WorkerFactory",
+    "derive_execute_target",
 ]
 
 _ExcT = TypeVar("_ExcT", bound=BaseException)
@@ -327,6 +328,9 @@ class RoleRequest:
             no slug left to assign.  Driver-owned and derived per dispatch from
             the files really on disk (:meth:`HarnessAgent._assign_explore_topic`);
             a factory renders it into the prompt and must not invent one.
+        assigned_write_target: The ONE workspace-relative file an EXECUTE
+            step edits (:func:`derive_execute_target`, driver-owned); ``None``
+            otherwise -- the prompt then falls back unchanged.
     """
 
     role: str
@@ -342,6 +346,47 @@ class RoleRequest:
     plan_dir: str | None = None
     workspace_root: str | None = None
     assigned_topic: str | None = None
+    assigned_write_target: str | None = None
+
+
+_TICKED_RE = re.compile(r"`([^`\s]+)`")
+_TARGET_RE = re.compile(r"^(?!/)(?!.*\.\.)(?=.*[./])[\w./-]*\w$")
+
+
+def derive_execute_target(plan: PlanDoc, step_number: int) -> str | None:
+    """The ONE workspace file plan step *step_number* should edit, or ``None``.
+
+    Interface contract (2 call sites: ``HarnessAgent._assign_execute_target``,
+    the live bench's ``_execute_request``): first path-shaped backticked token
+    per Files-To-Modify line -> the one named in the step's own text, else the
+    first, else ``None``.  Never raises; no I/O.
+    """
+    # DECISION plan-2026-07-22T114536-879d04a0/D-010
+    # NEVER guess a root, and fail OPEN to the status quo: an unparseable
+    # section returns None, which renders NO assignment line -- the dispatch
+    # prompt stays byte-identical to the pre-D-010 text.  A guessed assignment
+    # is WORSE than none (it points a live executor somewhere the plan never
+    # said), which is why _TARGET_RE refuses absolutes, `..`, globs and bare
+    # backticked words (`NEW`, `upload()`) rather than repairing them, and why
+    # only the FIRST path-shaped token per line counts -- the file column leads
+    # its row; prose cells must not compete.  Exactly ONE heuristic beyond
+    # "first target": prefer a candidate the current step's own text names
+    # (the per-step mapping, when the plan-writer provided one).  Do NOT add
+    # more heuristics -- if this rule cannot decide, the fix is the
+    # plan-writer's section, not cleverness here (plan.md Pre-Mortem #2).
+    # Section lookup is positional on purpose: PlanSchema.SECTIONS order is
+    # validator-enforced, so index 3 IS "Files To Modify".
+    # See decisions.md D-010.
+    targets: list[str] = [
+        target
+        for line in plan.body_of(PlanSchema.SECTIONS[3]).splitlines()
+        if (target := next(filter(_TARGET_RE.match, _TICKED_RE.findall(line)), None))
+    ]
+    if not targets:
+        return None
+    text = next((s.text for s in plan.steps() if s.number == str(step_number)), "")
+    named = [target for target in targets if target in text]
+    return (named or targets)[0]
 
 
 #: A role worker: one :class:`RoleRequest` in, one ``AgentResult`` out.
@@ -1378,6 +1423,11 @@ class HarnessAgent(BaseAgent):
                 if state == HarnessStates.EXPLORE
                 else None
             ),
+            assigned_write_target=(
+                self._assign_execute_target(context)
+                if state == HarnessStates.EXECUTE
+                else None
+            ),
         )
 
         try:
@@ -1804,6 +1854,19 @@ class HarnessAgent(BaseAgent):
             f"{len(on_disk)} of {self.findings_threshold} already on disk."
         )
         return chosen.slug
+
+    @classmethod
+    def _assign_execute_target(cls, context: Mapping[str, Any]) -> str | None:
+        """Plan.md's target for this EXECUTE step; ``None`` -> the prompt
+        stays byte-identical (fail-open, never a guess -- D-010).  A READ."""
+        directory = cls._plan_directory(context)
+        if directory is None:
+            return None
+        plan = cls._artifact(directory, ArtifactNames.PLAN, PlanDoc)
+        if plan is None:
+            return None
+        step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        return derive_execute_target(plan, step)
 
     @staticmethod
     def _enforce_routing_exclusivity(

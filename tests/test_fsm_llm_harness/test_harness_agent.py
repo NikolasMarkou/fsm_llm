@@ -46,7 +46,7 @@ from fsm_llm_agents.definitions import AgentResult
 from fsm_llm_agents.exceptions import AgentError
 from fsm_llm_harness import harness as harness_module
 from fsm_llm_harness import storage as storage_module
-from fsm_llm_harness.artifacts import PRESENTATION_CONTRACTS, StateDoc
+from fsm_llm_harness.artifacts import PRESENTATION_CONTRACTS, PlanDoc, StateDoc
 from fsm_llm_harness.constants import (
     DRIVER_OWNED_SEEDS,
     DRIVER_OWNED_UNSET,
@@ -64,7 +64,7 @@ from fsm_llm_harness.exceptions import (
     HarnessOwnershipError,
     HarnessReentrancyError,
 )
-from fsm_llm_harness.harness import HarnessAgent, RoleRequest
+from fsm_llm_harness.harness import HarnessAgent, RoleRequest, derive_execute_target
 from fsm_llm_harness.plan_validator import Issue
 from fsm_llm_harness.rules import EXPLORE_TOPICS, ROLE_BY_STATE
 from tests.conftest import MockLLM2Interface
@@ -2939,6 +2939,175 @@ class TestDriverAssignedExploreTopics:
         assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
         assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
         assert harness.worker.count_for(HarnessStates.PLAN) == 0
+
+
+def _plan_doc_with(files_rows: str, steps: str | None = None) -> PlanDoc:
+    """``_PLAN_MD`` with its Files-To-Modify rows (and optionally Steps) swapped.
+
+    A clone of the REAL 11-section fixture rather than a hand-stub, because
+    ``PlanDoc.from_markdown`` rejects anything less and the derivation under
+    test only ever sees a plan that parsed.
+    """
+    text = _PLAN_MD.replace("| `harness.py` | wire the seam | step 10 |", files_rows)
+    if steps is not None:
+        text = text.replace(
+            "1. [x] **Wire the pre-step gate onto the on-disk validator.**"
+            " [RISK: high] [deps: none]\n"
+            "2. [ ] **Emit the presentation contracts from the artifacts.**"
+            " [RISK: low] [deps: 1]",
+            steps,
+        )
+    return PlanDoc.from_markdown(text)
+
+
+class TestDriverAssignedExecuteTarget:
+    """The driver names the ONE workspace file an EXECUTE step is to edit.
+
+    B0 (scripts/bench_data/l4-execute-write/B0, n=40) measured why: the native
+    executor issued a write tool 15/40 but landed the requested edit on the
+    assigned workspace file only 2/40 -- 13 of 15 issued writes missed the
+    target, in the wrong-root shapes ``write_file('<plan-id>/uploader.py')`` /
+    ``read_plan_file('<plan-id>/uploader.py')``.  D-010 extends the D-035
+    driver-assigned-target pattern to EXECUTE: the driver reads plan.md's
+    Files To Modify (the plan-writer's existing obligation, rules.py) and
+    assigns the target; the model never infers the root.  The prompt half is
+    pinned in ``test_roles_and_tools.py``.
+
+    Fail-open contract (plan.md edge case, verbatim): never guess a root --
+    unparseable means NO assignment, so the dispatch prompt falls back to the
+    pre-D-010 text, never to a wrong assignment.
+    """
+
+    # -- the pure derivation ------------------------------------------------
+
+    def test_parses_the_seeded_plan_files_to_modify(self) -> None:
+        """The fixture table's one row is the assignment."""
+        assert derive_execute_target(PlanDoc.from_markdown(_PLAN_MD), 1) == (
+            "harness.py"
+        )
+
+    def test_prefers_the_candidate_named_in_the_current_step_text(self) -> None:
+        """The ONE heuristic beyond "first": a per-step mapping, when it exists.
+
+        Without it, every step of a multi-file plan would be pointed at the
+        same first file -- a wrong assignment, which is the one failure shape
+        the fail-open rule forbids.
+        """
+        plan = _plan_doc_with(
+            "| `alpha.py` | a | r |\n| `beta.py` | b | r |",
+            steps=(
+                "1. [x] **Edit `alpha.py`.** [RISK: low] [deps: none]\n"
+                "2. [ ] **Edit `beta.py`.** [RISK: low] [deps: 1]"
+            ),
+        )
+
+        assert derive_execute_target(plan, 1) == "alpha.py"
+        assert derive_execute_target(plan, 2) == "beta.py"
+
+    def test_multiple_files_and_no_step_mapping_assigns_the_first(self) -> None:
+        """The plan.md edge case verbatim: ambiguous -> FIRST target, stated."""
+        plan = _plan_doc_with("| `alpha.py` | a | r |\n| `beta.py` | b | r |")
+
+        assert derive_execute_target(plan, 2) == "alpha.py"
+
+    def test_only_the_file_column_supplies_candidates(self) -> None:
+        """First path-shaped token per LINE -- prose columns must not compete.
+
+        ``beta.py`` here appears only in a Change cell and in the step text;
+        promoting it would assign a file the plan never listed for editing.
+        """
+        plan = _plan_doc_with(
+            "| `alpha.py` | touch `beta.py` too | r |",
+            steps="1. [ ] **Edit `beta.py`.** [RISK: low] [deps: none]",
+        )
+
+        assert derive_execute_target(plan, 1) == "alpha.py"
+
+    @pytest.mark.parametrize(
+        "rows",
+        [
+            "| nothing quoted here | x | y |",
+            "| `/etc/passwd` | absolute | y |",
+            "| `../evil.py` | traversal | y |",
+            "| `scripts/bench_data/**` | a glob, not a file | y |",
+            "| `NEW` | a bare word, not a path | y |",
+            "| `upload()` | a call, not a path | y |",
+        ],
+    )
+    def test_an_unparseable_section_assigns_nothing(self, rows: str) -> None:
+        """Never guess: no path-shaped candidate -> ``None``, not a repair.
+
+        Each row is a shape the derivation must REFUSE -- guessing any of them
+        into an assignment would point a live executor at a file outside the
+        workspace contract (the B0 defect, driver-made).
+        """
+        assert derive_execute_target(_plan_doc_with(rows), 1) is None
+
+    def test_a_step_number_the_plan_does_not_contain_falls_back_to_first(
+        self,
+    ) -> None:
+        """An out-of-range cursor skips the heuristic, not the assignment."""
+        assert derive_execute_target(PlanDoc.from_markdown(_PLAN_MD), 99) == (
+            "harness.py"
+        )
+
+    # -- the driver wrapper fails closed ------------------------------------
+
+    def test_the_wrapper_reads_the_seeded_plan_directory(self, plan_dir: Path) -> None:
+        (plan_dir / ArtifactNames.PLAN).write_text(_PLAN_MD)
+        context = {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
+
+        assert HarnessAgent._assign_execute_target(context) == "harness.py"
+
+    def test_no_plan_md_assigns_nothing(self, plan_dir: Path) -> None:
+        """An unreadable plan is a failed observation, not a licence to guess."""
+        context = {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
+
+        assert HarnessAgent._assign_execute_target(context) is None
+
+    def test_no_plan_directory_key_assigns_nothing(self) -> None:
+        assert HarnessAgent._assign_execute_target({}) is None
+
+    def test_an_absent_plan_directory_is_not_created(self, tmp_path: Path) -> None:
+        """Assignment is a READ (D-035 property 2): no mkdir side effect."""
+        absent = tmp_path / "plans" / "never-created"
+        context = {ContextKeys.PLAN_DIR: str(absent), ContextKeys.STEP_NUMBER: 1}
+
+        assert HarnessAgent._assign_execute_target(context) is None
+        assert not absent.exists()
+
+    # -- the assigned value reaches the dispatch request --------------------
+
+    def test_the_assigned_target_reaches_the_execute_dispatch(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """End of the seam: the ``RoleRequest`` a real EXECUTE worker receives."""
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        targets = [
+            request.assigned_write_target
+            for request in harness.worker.requests
+            if request.state == HarnessStates.EXECUTE
+        ]
+        assert targets == ["harness.py"]
+
+    def test_only_execute_dispatches_are_assigned_a_target(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """No other role is told to edit the workspace; no other state drifts."""
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        assigned = {
+            request.state: request.assigned_write_target
+            for request in harness.worker.requests
+            if request.state != HarnessStates.EXECUTE
+        }
+        assert assigned
+        assert set(assigned.values()) == {None}
 
 
 # ---------------------------------------------------------------------------
