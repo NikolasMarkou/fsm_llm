@@ -49,6 +49,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
+import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -60,7 +62,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.real_llm, pytest.mark.slow]
 
 from fsm_llm_agents.definitions import AgentResult, ApprovalRequest
 from fsm_llm_agents.tools import ToolRegistry
-from fsm_llm_harness.artifacts import PlanDoc
+from fsm_llm_harness.artifacts import PlanDoc, StateDoc
 from fsm_llm_harness.constants import (
     ArtifactNames,
     ContextKeys,
@@ -69,9 +71,16 @@ from fsm_llm_harness.constants import (
     HarnessStates,
     Severity,
 )
+from fsm_llm_harness.exceptions import HarnessArtifactError
 from fsm_llm_harness.harness import HarnessAgent, RoleRequest, derive_execute_target
 from fsm_llm_harness.plan_validator import Issue, audit
-from fsm_llm_harness.roles import build_default_worker_factory, get_role_spec
+from fsm_llm_harness.roles import (
+    build_default_worker_factory,
+    build_role_system_prompt,
+    build_role_task_prompt,
+    get_role_spec,
+    held_tools,
+)
 from fsm_llm_harness.rules import get_rules
 from fsm_llm_harness.tools import PlanMemory, Workspace, gate_files
 from tests.conftest import ollama_available
@@ -1159,3 +1168,712 @@ class TestL5GenuineFindingsCount:
             assert row["successful_dispatches"] >= 1, row
             assert row["reached_plan"] is True, row
             assert row["halt_slug"] != GateSlug.EXPLORE_CAP, row
+
+
+# ---------------------------------------------------------------------------
+# L6 -- the central question: full runs on REAL workers, graded, floor-gated
+# ---------------------------------------------------------------------------
+
+#: Runs for the e2e criterion.  n=3 GRADED vectors, not n=5 binaries: a full
+#: traverse costs 3-10+ minutes, and at this price per observation a per-run
+#: rubric vector carries more information than a fifth pass/fail bit
+#: (`findings/e2e-real-worker-criterion.md` section 7, decisions.md D-004).
+RUNS_E2E = 3
+
+#: Per-run completion seed, base + run - 1 -- same convention as the L4 bench
+#: blocks (D-008: honored by Ollama on the native arm at this digest).
+E2E_SEED_BASE = 20260722100
+
+#: Test-side wall clock per run.  A run still going at 15 minutes FAILS the
+#: floor as a hang instead of hanging pytest; the harness's own caps
+#: (iteration_hard_cap, explore redispatch budget, stall detector, MAX_TURNS)
+#: are expected to fire far earlier.
+E2E_WALL_CLOCK_CEILING_S = 900.0
+
+#: Where the committed rubric vectors live.  TRACKED, like every bench block:
+#: `plans/` and scratch are how the predecessor's benches vanished.
+BENCH_DATA_DIR = Path(__file__).resolve().parents[2] / "scripts" / "bench_data"
+L6_BENCH_ID = "l6-e2e"
+L6_BLOCK = "B0"
+
+#: The slugs that make a halt HONEST: the four pre-step-gate slugs plus the
+#: EXPLORE re-dispatch cap.  A stall halt carries NO slug (`_check_stall`
+#: raises with ``slug=None``) and is deliberately NOT in this set -- "the run
+#: wedged and could not say why" is the dishonest shape the floor exists to
+#: catch.  Reaching terminal CLOSE is the other honest ending.
+HONEST_HALT_SLUGS = frozenset({*GateSlug.ORDER, GateSlug.EXPLORE_CAP})
+
+#: Protocol order for "furthest state reached".  PIVOT and CLOSE share the top
+#: rank on purpose: both sit beyond REFLECT and neither dominates the other
+#: (a pivoting run is not "further" than a closing one, or vice versa).
+E2E_STATE_RANK: Mapping[str, int] = {
+    HarnessStates.EXPLORE: 1,
+    HarnessStates.PLAN: 2,
+    HarnessStates.EXECUTE: 3,
+    HarnessStates.REFLECT: 4,
+    HarnessStates.PIVOT: 5,
+    HarnessStates.CLOSE: 5,
+}
+
+#: The driver's three human-gate names.  Literals here (as in L2), but pinned
+#: against the driver's own constants by an UNGATED test below, so a renamed
+#: gate cannot silently turn the stub into deny-everything.
+_GATE_PLAN = "harness.approve_plan"
+_GATE_CLOSE = "harness.confirm_close"
+_GATE_LEASH = "harness.continue_after_leash"
+
+#: The ``audit()`` checks that judge ``plan.md`` ITSELF.  The plan-approval
+#: predicate is scoped to these two so an unrelated audit error (say, a
+#: malformed decisions entry) cannot veto a sound plan.
+_PLAN_CHECKS = ("plan", "plan-section")
+
+
+def _bench_module() -> Any:
+    """Import ``scripts/harness_bench.py`` for its manifest/jsonl plumbing.
+
+    Interface contract (2 call sites: the L6 live test and the offline
+    manifest-schema test): returns the module, putting ``scripts/`` on
+    ``sys.path`` exactly as ``tests/test_harness_bench.py`` does.  This is
+    pure-IO reuse (manifest fields, ``append_row``, ``_write_json``, the
+    digest query), NOT a reversal of D-001: the authoritative measurement
+    machinery still flows bench -> tests, and ``harness_bench``'s only import
+    of this module is lazy, so no cycle exists at import time.
+    """
+    scripts_dir = str(BENCH_DATA_DIR.parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import harness_bench
+
+    return harness_bench
+
+
+def _l6_placeholder_request(state: str) -> tuple[RoleRequest, Any]:
+    """One state's dispatch request at FIXED placeholder paths, plus its spec.
+
+    Interface contract (3 call sites: the prompt hash, the tool surface, the
+    recorder's offline test): mirrors ``harness_bench._execute_render``'s
+    placeholder-path idea for ALL SIX states, so the L6 manifest can pin the
+    prompt TEMPLATES without a live run.
+    """
+    spec = get_role_spec(state)
+    rules = get_rules(state)
+    request = RoleRequest(
+        role=spec.role,
+        state=state,
+        goal=GOAL,
+        operative_rules=rules.operative_rules,
+        gate_summary=rules.gate_summary,
+        iteration=1,
+        step_number=1,
+        total_steps=1,
+        fix_attempts=0,
+        context={},
+        plan_dir="/plan-dir",
+        workspace_root="/workspace",
+    )
+    return request, spec
+
+
+def _l6_prompt_hash() -> str:
+    """sha256 over all six states' rendered system+task prompt templates.
+
+    The L4 blocks hash ONE state's render because they measure one dispatch;
+    an e2e run speaks every role's prompt, so its manifest pins all of them,
+    in protocol order.
+    """
+    parts: list[str] = []
+    for state in HarnessStates.ALL:
+        request, spec = _l6_placeholder_request(state)
+        parts.append(build_role_system_prompt(request, spec))
+        parts.append(build_role_task_prompt(request, spec))
+    return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
+
+
+def _l6_tool_surface() -> dict[str, Any]:
+    """The worker-factory kwargs plus per-state held tool names."""
+    return {
+        "native_function_calling": True,
+        "timeout_seconds": 600,
+        "retry_attempts": 1,
+        "declared_tools_by_state": {
+            state: sorted(held_tools(*_l6_placeholder_request(state)))
+            for state in HarnessStates.ALL
+        },
+    }
+
+
+def _l6_fixture_hash() -> str:
+    """sha256 pinning GOAL + SEED_FILES -- the ONLY fixed inputs an L6 run gets.
+
+    Deliberately NOT ``harness_bench._fixture_hash``: that one also pins
+    ``EXECUTE_PLAN_MD``/``EXECUTE_STATE_MD``, which in L6 are OUTPUTS -- the
+    real plan-writer authors ``plan.md`` and the driver authors ``state.md``,
+    and pinning an output as a fixture would misdescribe the measurement.
+    """
+    seeds = "\x00".join(f"{k}\n{v}" for k, v in sorted(SEED_FILES.items()))
+    payload = f"{GOAL}\x00{seeds}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _l6_manifest(hb: Any) -> dict[str, Any]:
+    """The L6 pre-registration record; same six comparability fields as L4."""
+    return {
+        "bench_id": L6_BENCH_ID,
+        "block": L6_BLOCK,
+        "n_preregistered": RUNS_E2E,
+        "seed": {
+            "base": E2E_SEED_BASE,
+            "per_row": "base+run-1",
+            "effective_arm": "native",
+        },
+        "model": MODEL,
+        "created_at": hb._utc_now(),
+        "prompt_bytes_sha256": _l6_prompt_hash(),
+        "tool_surface": _l6_tool_surface(),
+        "fixture_hash": _l6_fixture_hash(),
+        "model_digest": hb._model_digest(),
+        "arm": {"native": True, "display": "native"},
+        "git_commit": hb._git_commit(),
+    }
+
+
+class _PassThroughRecorder:
+    """Records every :class:`RoleRequest`, then hands it to the REAL factory.
+
+    Interface contract (1 call site, L6): a shim, never a script.  It makes no
+    decision, writes no artifact and edits no result -- the workers under
+    measurement are exactly the ones ``build_default_worker_factory`` built.
+    ``requests`` is the driver's own dispatch record; ``states_entered``,
+    the dispatch counts and the EXECUTE ``assigned_write_target`` cells of the
+    rubric vector are all read off it rather than off model prose.
+    """
+
+    def __init__(self, factory: Any) -> None:
+        self.factory = factory
+        self.requests: list[RoleRequest] = []
+
+    def __call__(self, request: RoleRequest) -> AgentResult:
+        self.requests.append(request)
+        return self.factory(request)
+
+
+# DECISION plan-2026-07-22T114536-879d04a0/D-013
+# The e2e approval stub is DENY-DEFAULT and every YES cites bytes on disk. Do
+# NOT replace it with a blanket-True callback to "get the traverse through":
+# `plan_approved`/`close_confirmed` record a HUMAN decision, and a stub that
+# always says yes makes the plan gate vacuous -- the run would measure a
+# harness with its gate integrity removed (D-004). Do NOT widen the plan
+# predicate beyond the ("plan", "plan-section") audit checks either: a 0-ERROR
+# bar over the WHOLE audit is structurally unreachable for :4b-authored
+# decisions prose (findings/e2e-real-worker-criterion.md section 6), so it
+# would convert this criterion into a guaranteed-fail, which is as
+# uninformative as guaranteed-pass. Leash grants are ALWAYS denied: exact
+# leash claims live in L2 under a scripted executor (D-047) and an e2e stub
+# that granted them would just buy noise. See decisions.md D-013.
+class DiskEvidenceApprovals:
+    """DENY-default approvals whose every YES is bound to a disk predicate.
+
+    Interface contract (1 live call site, plus the UNGATED predicate tests):
+
+    * ``harness.approve_plan`` -- approve iff ``plan.md`` exists non-empty AND
+      ``audit()`` reports zero ERRORs from the two plan.md checks
+      (:data:`_PLAN_CHECKS`).  Scoped on purpose; see the D-013 anchor above.
+    * ``harness.confirm_close`` -- approve iff ``verification.md`` exists
+      non-empty.
+    * ``harness.continue_after_leash`` -- ALWAYS denied.
+    * anything else -- denied (the package's own default, kept).
+    * ``decisions`` records every consultation in order:
+      ``{"gate", "approved", "evidence"}`` -- the rubric vector commits it raw.
+    """
+
+    def __init__(self, plan_dir: Path) -> None:
+        self.plan_dir = Path(plan_dir)
+        self.decisions: list[dict[str, Any]] = []
+
+    def _artifact_bytes(self, name: str) -> int:
+        path = self.plan_dir / name
+        return path.stat().st_size if path.is_file() else 0
+
+    def _decide(self, gate: str) -> tuple[bool, str]:
+        if gate == _GATE_PLAN:
+            size = self._artifact_bytes(ArtifactNames.PLAN)
+            if size == 0:
+                return False, f"{ArtifactNames.PLAN} is absent or empty"
+            errors = [
+                str(issue)
+                for issue in audit(self.plan_dir)
+                if issue.is_error and issue.check in _PLAN_CHECKS
+            ]
+            if errors:
+                return False, (
+                    f"{ArtifactNames.PLAN} has {len(errors)} "
+                    f"plan-check error(s): {errors}"
+                )
+            return True, (
+                f"{ArtifactNames.PLAN} carries {size} bytes and zero "
+                f"{'/'.join(_PLAN_CHECKS)} audit errors"
+            )
+        if gate == _GATE_CLOSE:
+            size = self._artifact_bytes(ArtifactNames.VERIFICATION)
+            if size == 0:
+                return False, f"{ArtifactNames.VERIFICATION} is absent or empty"
+            return True, f"{ArtifactNames.VERIFICATION} carries {size} bytes"
+        if gate == _GATE_LEASH:
+            return False, "leash grants are ALWAYS denied in e2e (D-013/D-047)"
+        return False, f"unknown gate '{gate}': denied by default"
+
+    def __call__(self, request: ApprovalRequest) -> bool:
+        approved, evidence = self._decide(request.tool_name)
+        self.decisions.append(
+            {"gate": request.tool_name, "approved": approved, "evidence": evidence}
+        )
+        return approved
+
+
+def _run_with_ceiling(
+    agent: HarnessAgent, goal: str, roots: dict[str, str], ceiling_s: float
+) -> dict[str, Any]:
+    """Run the agent under a wall clock; a hung run FAILS instead of hanging.
+
+    Interface contract (1 call site, L6): returns a box holding ``result``
+    (an ``AgentResult``) or ``error`` (the exception ``run`` raised), plus
+    ``timed_out``.  The worker thread is a daemon: on a ceiling hit it is
+    ABANDONED, not killed -- its row is already below the floor, and later
+    runs use fresh directories and a fresh agent, so a straggler can slow
+    them but cannot corrupt them.
+    """
+    box: dict[str, Any] = {}
+
+    def _target() -> None:
+        try:
+            box["result"] = agent.run(goal, initial_context=roots)
+        except BaseException as exc:  # deliberate: graded, never re-raised
+            box["error"] = exc
+
+    thread = threading.Thread(target=_target, name="l6-e2e-run", daemon=True)
+    thread.start()
+    thread.join(ceiling_s)
+    box["timed_out"] = thread.is_alive()
+    return box
+
+
+def _bytes_of(plan_dir: Path, name: str) -> int:
+    path = plan_dir / name
+    return path.stat().st_size if path.is_file() else 0
+
+
+def _issue_families(issues: list[Issue], *, errors: bool) -> dict[str, int]:
+    """``check -> count`` for the ERROR (or WARNING) half of an audit."""
+    families: dict[str, int] = {}
+    for issue in issues:
+        if issue.is_error is errors:
+            families[issue.check] = families.get(issue.check, 0) + 1
+    return dict(sorted(families.items()))
+
+
+def _furthest_state(states: list[str]) -> str | None:
+    """The highest-ranked protocol state in *states*, or ``None``."""
+    ranked = [state for state in states if state in E2E_STATE_RANK]
+    return max(ranked, key=E2E_STATE_RANK.__getitem__, default=None)
+
+
+def _bench_defect(row: Mapping[str, Any]) -> bool:
+    """Pre-Mortem #3's trigger shape: a crash, a hang, or a slugless stall.
+
+    These are the endings that indicate a BENCH/HARNESS defect rather than
+    model attainment -- a configuration that could not have succeeded.  An
+    honest cap halt (named slug) or a CLOSE is never a defect, however early.
+    """
+    return bool(
+        row["error"] is not None
+        or row["timed_out"]
+        or (not row["close_reached"] and row["halt_slug"] is None)
+    )
+
+
+def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
+    """One full real-worker protocol run; returns its rubric vector.
+
+    Asserts nothing.  Every dimension is disk- or driver-derived: transition
+    evidence comes from the recorder's dispatch log and the final ``state.md``,
+    write evidence from sha256 digests plus the factory's own D-016
+    verified-write channel, audit numbers from ``audit()`` over the directory
+    the run really wrote.  The plan directory starts EMPTY -- unlike L4/L5
+    there is no corpus seed, so every artifact found afterwards was produced
+    by the run under measurement.
+    """
+    root = tmp_path / f"e2e-{run}"
+    plan_dir = root / "plan"
+    plan_dir.mkdir(parents=True)
+    workspace = _seed_workspace(root)
+    seed = E2E_SEED_BASE + run - 1
+    before_ws = _digests(workspace)
+
+    observations: list[dict[str, Any]] = []
+    live = build_default_worker_factory(
+        Workspace(str(workspace)),
+        model=MODEL,
+        timeout_seconds=600,
+        retry_attempts=1,
+        # Pinned for the reason L5 pins it (D-048): the arm this criterion's
+        # history is measured on must survive a future default flip.
+        native_function_calling=True,
+        seed=seed,
+        observer=lambda record: observations.append(dict(record)),
+    )
+    worker = _PassThroughRecorder(live)
+    approvals = DiskEvidenceApprovals(plan_dir)
+    agent = _live_agent(worker, approvals=approvals)
+
+    started = time.monotonic()
+    box = _run_with_ceiling(
+        agent, GOAL, _roots(plan_dir, workspace), E2E_WALL_CLOCK_CEILING_S
+    )
+    wall = round(time.monotonic() - started, 1)
+
+    result = box.get("result")
+    error = box.get("error")
+    final: Mapping[str, Any] = result.final_context if result is not None else {}
+
+    # -- write evidence: sha256 first (an echo-back write scores not-written),
+    #    cross-checked against the factory's own D-016 verified-write channel.
+    after_ws = _digests(workspace)
+    ws_changed = sorted(
+        name for name, digest in after_ws.items() if before_ws.get(name) != digest
+    )
+    # The plan dir started EMPTY, so everything under it was produced by the
+    # run; `state.md` is the DRIVER's one owned write (invariant I7) and is
+    # excluded -- a run whose only bytes are the driver's own bookkeeping has
+    # shown no verified WORKER write.
+    pd_written = sorted(
+        name for name in _digests(plan_dir) if name != ArtifactNames.STATE
+    )
+    write_dispatches = sum(
+        1 for record in observations if (record.get("write_evidence") or 0) >= 1
+    )
+    verified_write = bool(write_dispatches and (ws_changed or pd_written))
+
+    # -- position evidence: the dispatch log plus the final state.md.
+    states_entered: list[str] = []
+    for request in worker.requests:
+        if request.state not in states_entered:
+            states_entered.append(request.state)
+    dispatch_counts = {
+        state: sum(1 for r in worker.requests if r.state == state)
+        for state in states_entered
+    }
+    final_disk_state: str | None = None
+    transition_history: list[str] = []
+    state_path = plan_dir / ArtifactNames.STATE
+    if state_path.is_file():
+        try:
+            doc = StateDoc.from_markdown(state_path.read_text(encoding="utf-8"))
+            final_disk_state = doc.state
+            transition_history = list(doc.transition_history)
+        except HarnessArtifactError:
+            final_disk_state = None  # a garbled state.md is itself a finding
+    furthest = _furthest_state(
+        states_entered + ([final_disk_state] if final_disk_state else [])
+    )
+
+    # -- halt evidence.
+    halt_slug = final.get(ContextKeys.LAST_GATE_SLUG)
+    close_reached = (
+        final_disk_state == HarnessStates.CLOSE
+        or HarnessStates.CLOSE in states_entered
+        or final.get(ContextKeys.CLOSE_CONFIRMED) is True
+    )
+    honest_halt = (
+        error is None
+        and not box["timed_out"]
+        and (close_reached or halt_slug in HONEST_HALT_SLUGS)
+    )
+
+    issues = audit(plan_dir, workspace_root=str(workspace))
+    return {
+        "run": run,
+        "seed": seed,
+        "arm": "native_fc (package default)",
+        "native": True,
+        "goal": GOAL,
+        "wall_clock_s": wall,
+        "timed_out": box["timed_out"],
+        "error": repr(error) if error is not None else None,
+        "success": bool(result.success) if result is not None else False,
+        "states_entered": states_entered,
+        "dispatch_counts": dispatch_counts,
+        "dispatches_total": len(worker.requests),
+        "furthest_state": furthest,
+        "state_md_final_state": final_disk_state,
+        "state_md_transition_history": transition_history,
+        "findings_nonempty": len(_findings_on_disk(plan_dir)),
+        "plan_md_bytes": _bytes_of(plan_dir, ArtifactNames.PLAN),
+        "decisions_md_bytes": _bytes_of(plan_dir, ArtifactNames.DECISIONS),
+        "verification_md_bytes": _bytes_of(plan_dir, ArtifactNames.VERIFICATION),
+        "changelog_bytes": _bytes_of(plan_dir, ArtifactNames.CHANGELOG),
+        "audit_errors": sum(1 for issue in issues if issue.is_error),
+        "audit_warnings": sum(1 for issue in issues if not issue.is_error),
+        "audit_error_checks": _issue_families(issues, errors=True),
+        "audit_warning_checks": _issue_families(issues, errors=False),
+        "execute_assigned_targets": [
+            r.assigned_write_target
+            for r in worker.requests
+            if r.state == HarnessStates.EXECUTE
+        ],
+        "workspace_files_changed": ws_changed,
+        "plan_dir_files_written": pd_written,
+        "write_evidence_dispatches": write_dispatches,
+        "verified_write": verified_write,
+        "halt_slug": halt_slug,
+        "halt_reason": final.get(ContextKeys.HALT_REASON),
+        "close_reached": close_reached,
+        "honest_halt": honest_halt,
+        "iteration": final.get(ContextKeys.ITERATION),
+        "fix_attempts": final.get(ContextKeys.FIX_ATTEMPTS),
+        "criteria_pass_count": final.get(ContextKeys.CRITERIA_PASS_COUNT),
+        "criteria_total": final.get(ContextKeys.CRITERIA_TOTAL),
+        "approvals": list(approvals.decisions),
+    }
+
+
+def test_the_L6_criterion_is_structurally_closed_to_scripted_workers() -> None:
+    """UNGATED: the plan invariant, pinned on SOURCE rather than promised.
+
+    Scripted-worker results must never be presented as model capability, so
+    the L6 measurement path must be INCAPABLE of holding one: no
+    ``ScriptedRoles`` anywhere in it, the real factory constructed by name,
+    and none of the exact-count projections D-047 reserves for scripted
+    executors (``fix_attempts_for`` is the L2/L3 leash-count probe).
+    """
+    import inspect
+
+    sources = "".join(
+        inspect.getsource(obj)
+        for obj in (
+            TestL6EndToEndRealWorkers,
+            _one_e2e_run,
+            _PassThroughRecorder,
+            DiskEvidenceApprovals,
+            _run_with_ceiling,
+        )
+    )
+    assert "ScriptedRoles" not in sources
+    assert "build_default_worker_factory" in inspect.getsource(_one_e2e_run)
+    assert "fix_attempts_for" not in sources
+
+
+class TestTheL6ApprovalStubIsDenyDefaultAndDiskBound:
+    """UNGATED: every YES the stub can give is bound to bytes on disk."""
+
+    def test_an_empty_plan_directory_approves_nothing(self, tmp_path: Path) -> None:
+        stub = DiskEvidenceApprovals(tmp_path)
+        for gate in (_GATE_PLAN, _GATE_CLOSE, _GATE_LEASH, "anything.else"):
+            assert stub(ApprovalRequest(tool_name=gate)) is False, gate
+        assert [d["approved"] for d in stub.decisions] == [False] * 4
+
+    def test_a_clean_plan_md_earns_plan_approval(self, tmp_path: Path) -> None:
+        plan_dir = make_plan_dir(tmp_path)
+        stub = DiskEvidenceApprovals(plan_dir)
+        assert stub(ApprovalRequest(tool_name=_GATE_PLAN)) is True
+        assert "zero" in stub.decisions[-1]["evidence"]
+
+    def test_a_garbled_plan_md_is_denied_with_the_errors_as_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        plan_dir = make_plan_dir(tmp_path)
+        (plan_dir / ArtifactNames.PLAN).write_text(
+            "# Plan v1: broken\n\n## Goal\nonly a goal, no other section\n",
+            encoding="utf-8",
+        )
+        stub = DiskEvidenceApprovals(plan_dir)
+        assert stub(ApprovalRequest(tool_name=_GATE_PLAN)) is False
+        assert "plan-check error" in stub.decisions[-1]["evidence"]
+
+    def test_unrelated_audit_errors_do_not_veto_a_sound_plan(
+        self, tmp_path: Path
+    ) -> None:
+        """The predicate is SCOPED to plan.md's own checks (D-013).
+
+        A garbage ``decisions.md`` raises decisions-schema ERRORs; the plan
+        gate must not read them -- a 0-ERROR bar over the whole audit is the
+        guaranteed-fail shape the finding's section 6 warns about.
+        """
+        plan_dir = make_plan_dir(tmp_path)
+        (plan_dir / ArtifactNames.DECISIONS).write_text(
+            "not a decision log at all\n", encoding="utf-8"
+        )
+        full_errors = [i for i in audit(plan_dir) if i.is_error]
+        assert full_errors, "fixture defect: garbage decisions.md audited clean"
+        stub = DiskEvidenceApprovals(plan_dir)
+        assert stub(ApprovalRequest(tool_name=_GATE_PLAN)) is True
+
+    def test_the_leash_is_denied_even_when_everything_is_clean(
+        self, tmp_path: Path
+    ) -> None:
+        stub = DiskEvidenceApprovals(make_plan_dir(tmp_path))
+        assert stub(ApprovalRequest(tool_name=_GATE_LEASH)) is False
+
+    def test_close_approval_requires_a_nonempty_verification_md(
+        self, tmp_path: Path
+    ) -> None:
+        plan_dir = make_plan_dir(tmp_path)
+        stub = DiskEvidenceApprovals(plan_dir)
+        assert stub(ApprovalRequest(tool_name=_GATE_CLOSE)) is True
+        (plan_dir / ArtifactNames.VERIFICATION).write_text("", encoding="utf-8")
+        assert stub(ApprovalRequest(tool_name=_GATE_CLOSE)) is False
+
+    def test_the_gate_names_are_the_drivers_own(self) -> None:
+        """A renamed gate must break HERE, not silently deny everything."""
+        from fsm_llm_harness import harness as harness_module
+
+        assert _GATE_PLAN == harness_module._APPROVAL_PLAN
+        assert _GATE_CLOSE == harness_module._APPROVAL_CLOSE
+        assert _GATE_LEASH == harness_module._APPROVAL_LEASH
+
+
+class TestTheL6RubricPlumbingOffline:
+    """UNGATED: the graded rubric's own helpers, checked without a daemon."""
+
+    def test_the_recorder_is_a_shim_not_a_script(self) -> None:
+        sentinel = AgentResult(answer="x", success=True, final_context={"k": 1})
+        recorder = _PassThroughRecorder(lambda request: sentinel)
+        request, _ = _l6_placeholder_request(HarnessStates.EXPLORE)
+        assert recorder(request) is sentinel
+        assert recorder.requests == [request]
+
+    def test_the_state_ranking_grades_every_protocol_state(self) -> None:
+        assert set(E2E_STATE_RANK) == set(HarnessStates.ALL)
+        assert _furthest_state([]) is None
+        assert _furthest_state(list(HarnessStates.ALL[:2])) == HarnessStates.PLAN
+        assert (
+            _furthest_state([HarnessStates.REFLECT, HarnessStates.EXECUTE])
+            == HarnessStates.REFLECT
+        )
+        assert (
+            E2E_STATE_RANK[HarnessStates.PIVOT] == E2E_STATE_RANK[HarnessStates.CLOSE]
+        )
+
+    def test_a_slugless_stall_is_a_bench_defect_but_a_named_slug_is_not(
+        self,
+    ) -> None:
+        base: dict[str, Any] = {
+            "error": None,
+            "timed_out": False,
+            "close_reached": False,
+            "halt_slug": None,
+        }
+        assert _bench_defect(base) is True
+        assert _bench_defect({**base, "halt_slug": GateSlug.LEASH_CAP}) is False
+        assert _bench_defect({**base, "halt_slug": GateSlug.EXPLORE_CAP}) is False
+        assert _bench_defect({**base, "close_reached": True}) is False
+        assert _bench_defect({**base, "timed_out": True}) is True
+        assert _bench_defect({**base, "error": "RuntimeError('x')"}) is True
+
+    def test_the_L6_manifest_pins_the_same_six_fields_as_the_L4_blocks(self) -> None:
+        hb = _bench_module()
+        static = {
+            "prompt_bytes_sha256": _l6_prompt_hash(),
+            "tool_surface": _l6_tool_surface(),
+            "fixture_hash": _l6_fixture_hash(),
+        }
+        live_only = {"model_digest", "arm", "git_commit"}
+        assert set(hb.MANIFEST_FIELDS) == set(static) | live_only
+        # Deterministic: the pre-registration record cannot depend on when it
+        # is rendered.
+        assert _l6_prompt_hash() == _l6_prompt_hash()
+        assert static["tool_surface"]["declared_tools_by_state"][
+            HarnessStates.EXECUTE
+        ], "the EXECUTE role holds no tools -- the surface pin is vacuous"
+        # And it is NOT the L4 fixture hash: plan.md/state.md are OUTPUTS here.
+        assert _l6_fixture_hash() != hb._fixture_hash(sys.modules[__name__])
+
+
+@requires_live
+class TestL6EndToEndRealWorkers:
+    """THREE full protocol runs on the REAL worker stack, graded not binary.
+
+    The plan's central question (W1, decisions.md D-004): no test before this
+    one has ever driven the protocol end-to-end with
+    ``build_default_worker_factory`` doing EVERY state's job -- L1-L3 script
+    the workers (harness claims), L4/L5 measure one state each (model claims).
+    Here the plan directory starts EMPTY: ``plan.md`` is authored by the real
+    plan-writer, the EXECUTE target derivation (D-010) reads THAT plan.md, and
+    if a :4b-authored plan never parses a target, the dispatch honestly falls
+    back to no-assigned-target -- that is part of what is being measured.
+
+    The FLOOR (Success Criterion 4, exact): all 3 runs reach >= EXECUTE
+    (dispatch log + final state.md), show >= 1 verified write (sha256-diffed
+    bytes AND the factory's own D-016 verified-write channel), and halt
+    honestly (a named ``GateSlug`` or terminal CLOSE; an unhandled exception,
+    a hang or a slugless stall is a floor FAIL).  The floor sits at EXECUTE,
+    not CLOSE, because no real-worker REFLECT has ever been measured (A3).
+
+    REPORTED but not asserted: the full rubric vector per run -- artifact
+    bytes, audit ERROR/WARNING counts by check family, approval decisions with
+    their disk evidence -- committed raw to ``scripts/bench_data/l6-e2e/``.
+    EXCLUDED on purpose: exact-leash-count and exact-loop-back claims, which
+    are unfalsifiable on real workers (D-047) and stay in L2/L3.
+    """
+
+    def test_three_full_runs_grade_at_or_above_the_floor(self, tmp_path: Path) -> None:
+        hb = _bench_module()
+        bench_dir = BENCH_DATA_DIR / L6_BENCH_ID
+        rows_path = bench_dir / "rows.jsonl"
+        if rows_path.exists():
+            pytest.fail(
+                f"{rows_path} exists -- an L6 block runs ONCE (D-002); a new "
+                "question needs a new pre-registered block and decision entry"
+            )
+        bench_dir.mkdir(parents=True, exist_ok=True)
+        hb._write_json(bench_dir / "manifest.json", _l6_manifest(hb))
+
+        rows: list[dict[str, Any]] = []
+        for run in range(1, RUNS_E2E + 1):
+            row = _one_e2e_run(tmp_path, run)
+            row.update(bench_id=L6_BENCH_ID, block=L6_BLOCK, ts=hb._utc_now())
+            rows.append(row)
+            hb.append_row(rows_path, row)
+            print(
+                f"  L6 run {run}: furthest={row['furthest_state']} "
+                f"write={row['verified_write']} honest={row['honest_halt']} "
+                f"slug={row['halt_slug']} {row['wall_clock_s']}s",
+                flush=True,
+            )
+            # Pre-Mortem #3: two crashes/hangs/slugless stalls in two runs is
+            # a bench or harness DEFECT, not model attainment.  Do not burn
+            # the third run on a configuration that could not have succeeded;
+            # the two rows are already committed evidence.
+            if run == 2 and all(_bench_defect(r) for r in rows):
+                _report("L6 e2e real workers (HALTED: Pre-Mortem #3)", rows)
+                pytest.fail(
+                    "Pre-Mortem #3: both of the first two runs ended in a "
+                    "crash, hang or slugless stall -- halting sampling before "
+                    f"run 3; fix the bench/harness first. Vectors: {rows}"
+                )
+
+        _report("L6 e2e real workers", rows)
+        assert len(rows) == RUNS_E2E
+
+        floor_misses: list[str] = []
+        for row in rows:
+            missing = [
+                name
+                for name, passed in (
+                    (
+                        "reached>=EXECUTE",
+                        E2E_STATE_RANK.get(str(row["furthest_state"]), 0)
+                        >= E2E_STATE_RANK[HarnessStates.EXECUTE],
+                    ),
+                    ("verified_write", bool(row["verified_write"])),
+                    ("honest_halt", bool(row["honest_halt"])),
+                )
+                if not passed
+            ]
+            if missing:
+                floor_misses.append(f"run {row['run']} missed {missing}")
+        # The floor is the plan's, transcribed: 3/3 at >= EXECUTE with a
+        # verified write and an honest halt.  Any run below it FAILS the
+        # criterion; the full vectors are in the message either way.
+        assert floor_misses == [], (
+            f"L6 floor FAILED: {floor_misses}; full vectors: {rows}"
+        )
