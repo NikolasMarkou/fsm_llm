@@ -1,0 +1,35 @@
+{
+  "arm": "bare",
+  "bench_id": "l7-explore-coldstart",
+  "block": "B0",
+  "finished_at": "2026-07-22T22:40:15Z",
+  "k_bytes_on_disk": 5,
+  "k_content_matched": 0,
+  "k_content_matched_ast": 0,
+  "k_success": 5,
+  "k_write_tool_issued": 5,
+  "manifest": "manifest_bare.json",
+  "n": 12,
+  "started_at": "2026-07-22T22:35:27Z",
+  "status": "complete",
+  "wilson_bytes_on_disk": [
+    0.1933,
+    0.6805
+  ],
+  "wilson_content_matched": [
+    0.0,
+    0.2425
+  ],
+  "wilson_content_matched_ast": [
+    0.0,
+    0.2425
+  ],
+  "wilson_success": [
+    0.1933,
+    0.6805
+  ],
+  "wilson_write_tool_issued": [
+    0.1933,
+    0.6805
+  ]
+}

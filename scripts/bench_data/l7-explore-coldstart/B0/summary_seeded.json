@@ -1,0 +1,35 @@
+{
+  "arm": "seeded",
+  "bench_id": "l7-explore-coldstart",
+  "block": "B0",
+  "finished_at": "2026-07-22T22:45:06Z",
+  "k_bytes_on_disk": 7,
+  "k_content_matched": 0,
+  "k_content_matched_ast": 0,
+  "k_success": 7,
+  "k_write_tool_issued": 7,
+  "manifest": "manifest_seeded.json",
+  "n": 12,
+  "started_at": "2026-07-22T22:40:15Z",
+  "status": "complete",
+  "wilson_bytes_on_disk": [
+    0.3195,
+    0.8067
+  ],
+  "wilson_content_matched": [
+    0.0,
+    0.2425
+  ],
+  "wilson_content_matched_ast": [
+    0.0,
+    0.2425
+  ],
+  "wilson_success": [
+    0.3195,
+    0.8067
+  ],
+  "wilson_write_tool_issued": [
+    0.3195,
+    0.8067
+  ]
+}
