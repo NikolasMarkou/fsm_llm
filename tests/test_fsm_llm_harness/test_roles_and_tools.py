@@ -30,14 +30,20 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import BaseModel, Field
 
+from fsm_llm.definitions import StateNotFoundError
 from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface
-from fsm_llm_agents.definitions import AgentResult, AgentTrace, ToolCall
+from fsm_llm_agents.definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
+from fsm_llm_agents.native_fc import NativeFunctionCallingReactAgent
+from fsm_llm_agents.react import ReactAgent
+from fsm_llm_harness import build_harness_fsm
 from fsm_llm_harness.constants import (
     ArtifactNames,
     ContextKeys,
@@ -45,15 +51,21 @@ from fsm_llm_harness.constants import (
     HarnessStates,
     Role,
 )
-from fsm_llm_harness.exceptions import HarnessConfinementError, HarnessOwnershipError
+from fsm_llm_harness.exceptions import (
+    HarnessConfinementError,
+    HarnessError,
+    HarnessOwnershipError,
+)
 from fsm_llm_harness.hardening import coerce_worker_output, parse_role_output
 from fsm_llm_harness.harness import _WORKER_WRITABLE, RoleRequest
 from fsm_llm_harness.roles import (
     ROLE_SPECS,
+    _default_agent_builder,
     build_default_worker_factory,
     build_role_prompt,
     build_role_system_prompt,
     build_role_task_prompt,
+    count_top_level_json_objects,
     get_role_spec,
     held_tools,
 )
@@ -71,6 +83,9 @@ from fsm_llm_harness.tools import (
     _PER_PLAN_DIRS,
     COMMAND_ALLOWLIST,
     DISK_DERIVED_COUNTS,
+    MAX_GREP_FILE_BYTES,
+    MAX_GREP_HITS,
+    MAX_LIST_ENTRIES,
     PLAN_READ_TOOLS,
     PLAN_WRITE_TOOLS,
     READ_ONLY_TOOLS,
@@ -81,6 +96,12 @@ from fsm_llm_harness.tools import (
     PlanTools,
     Workspace,
     WorkspaceTools,
+    _addresses_plan_memory,
+    _gate_state,
+    _missing_target_hint,
+    _owned_empty_directory,
+    _relocated_hint,
+    _routing_hint,
     build_plan_tools,
     build_workspace_tools,
     count_gate_files,
@@ -1718,7 +1739,10 @@ class TestWriteResultsReportGateState:
         findings = ArtifactNames.FINDINGS_DIR
         for topic in ("a", "b"):
             _call(
-                registry, "write_plan_file", path=f"{findings}/{topic}.md", content="x\n"
+                registry,
+                "write_plan_file",
+                path=f"{findings}/{topic}.md",
+                content="x\n",
             )
 
         told = _call(
@@ -1729,7 +1753,9 @@ class TestWriteResultsReportGateState:
             workspace_root=workspace,
             plan_dir=plan_dir,
             payload=_explore_payload(),
-            calls=(("write_plan_file", {"path": f"{findings}/c.md", "content": "x\n"}),),
+            calls=(
+                ("write_plan_file", {"path": f"{findings}/c.md", "content": "x\n"}),
+            ),
         )
 
         assert count_gate_files(memory, findings) == 3
@@ -1894,7 +1920,9 @@ class TestWrongRootFailuresNameTheRightTool:
         """``plan.md`` IS a protocol artifact: the answer is "not yours", full stop."""
         registry, _ = _plan_registry(plan_dir, workspace)
 
-        failed = _call(registry, "write_plan_file", path=ArtifactNames.PLAN, content="x")
+        failed = _call(
+            registry, "write_plan_file", path=ArtifactNames.PLAN, content="x"
+        )
 
         assert failed.success is False
         assert "may not write" in failed.error
@@ -1967,7 +1995,9 @@ class TestAnOwnedDirectoryReportsEmptyNotMissing:
         registry, _ = _plan_registry(bare, workspace)
 
         assert _call(registry, "list_plan_dir", path="src").success is False
-        assert _call(registry, "read_plan_file", path=ArtifactNames.PLAN).success is False
+        assert (
+            _call(registry, "read_plan_file", path=ArtifactNames.PLAN).success is False
+        )
 
     def test_a_listing_names_what_the_gate_counts(
         self, plan_dir: Path, workspace: Path
@@ -2253,7 +2283,6 @@ class TestDeriveDiskCountsIsTheOneDerivation:
         assert all(isinstance(value, int) for value in derived.values())
 
 
-
 # ---------------------------------------------------------------------------
 # Driver-assigned topic slugs (D-035)
 # ---------------------------------------------------------------------------
@@ -2284,9 +2313,7 @@ class TestExploreTopicTable:
         assert len(explore_topics()) >= Defaults.FINDINGS_THRESHOLD
 
     @pytest.mark.parametrize("threshold", [1, 3, 4, 7])
-    def test_a_raised_threshold_is_extended_not_truncated(
-        self, threshold: int
-    ) -> None:
+    def test_a_raised_threshold_is_extended_not_truncated(self, threshold: int) -> None:
         topics = explore_topics(threshold)
         slugs = [topic.slug for topic in topics]
 
@@ -2420,9 +2447,7 @@ class TestTheAssignedTopicNamesOneTargetPath:
     ) -> None:
         """Only EXPLORE is assigned a topic; the others must not drift."""
         spec = get_role_spec(state)
-        request = _role_request(
-            state, plan_dir=plan_dir, workspace_root=workspace
-        )
+        request = _role_request(state, plan_dir=plan_dir, workspace_root=workspace)
 
         assert "YOUR TOPIC THIS DISPATCH" not in build_role_prompt(request, spec)
 
@@ -2524,9 +2549,7 @@ class TestAMissingPlanArtifactSaysSoAndSaysWhatToDo:
         assert "does not exist yet" in failed.error
         assert "`write_plan_file`" in failed.error
 
-    def test_the_hint_creates_nothing(
-        self, plan_dir: Path, workspace: Path
-    ) -> None:
+    def test_the_hint_creates_nothing(self, plan_dir: Path, workspace: Path) -> None:
         """Advice, not a side effect: the failed read leaves no file behind."""
         registry, _ = _plan_registry(plan_dir, workspace)
 
@@ -2635,3 +2658,1081 @@ class TestAMissingPlanArtifactSaysSoAndSaysWhatToDo:
 
         assert ok.success is True
         assert "does not exist yet" not in str(ok.result)
+
+
+# ---------------------------------------------------------------------------
+# Step 13 gap closure: the branches 430 green tests never entered
+# ---------------------------------------------------------------------------
+
+
+class TestRoleSpecLookupFailsLoudly:
+    """An unknown state is a PROGRAMMER error and must not degrade to a default.
+
+    Silently returning a spec for an unrecognised state would hand a role the
+    wrong tool scope and the wrong writable keys -- the two things every gate
+    downstream trusts.
+    """
+
+    def test_an_unknown_state_raises_state_not_found(self) -> None:
+        with pytest.raises(StateNotFoundError) as excinfo:
+            get_role_spec("EXPLORE_V2")
+
+        assert excinfo.value.state_id == "EXPLORE_V2"
+        assert "EXPLORE_V2" in str(excinfo.value)
+        for state in HarnessStates.ALL:
+            assert state in str(excinfo.value), "the message names the real six"
+
+    def test_the_cause_is_dropped_so_the_message_is_the_message(self) -> None:
+        """``from None``: a bare ``KeyError`` traceback helps nobody here."""
+        with pytest.raises(StateNotFoundError) as excinfo:
+            get_role_spec("")
+
+        assert excinfo.value.__cause__ is None
+
+    @pytest.mark.parametrize("state", HarnessStates.ALL)
+    def test_every_real_state_still_resolves(self, state: str) -> None:
+        """The control: the raise did not become unconditional."""
+        assert get_role_spec(state).state == state
+
+
+class TestTopLevelObjectCount:
+    """The D-031 fail-open DETECTOR.  It observes; it must observe correctly.
+
+    A count that under-reports would make the draft-then-correction path
+    invisible in the live bench, which is the only place it is measured.
+    """
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ('{"a": 1}', 1),
+            ('{"a": 1} {"b": 2}', 2),
+            ('{"a": 1}\n\n{"b": 2}\n\n{"c": 3}', 3),
+            ('{"a": {"b": {"c": 1}}}', 1),
+            ("", 0),
+            ("no braces at all", 0),
+            ('{"a": 1', 0),
+            ('{"a": "}"}', 1),
+            ('prose {"a": 1} more prose {"b": 2} end', 2),
+        ],
+    )
+    def test_the_count_matches_the_extractor_definition_of_top_level(
+        self, text: str, expected: int
+    ) -> None:
+        assert count_top_level_json_objects(text) == expected
+
+    def test_a_nested_object_is_not_counted_separately(self) -> None:
+        """``text.count("{")`` -- the obvious shortcut -- returns 3 here."""
+        assert count_top_level_json_objects('{"a": {"b": 1}, "c": {"d": 2}}') == 1
+
+    def test_an_unbalanced_open_brace_between_two_objects_is_skipped(self) -> None:
+        """The ``partners.get(start) is None`` branch: a truncated middle."""
+        assert count_top_level_json_objects('{"a": 1} { {"b": 2}') == 2
+
+    def test_a_brace_inside_a_string_does_not_open_an_object(self) -> None:
+        """This is why the count borrows core's scanner instead of counting."""
+        assert count_top_level_json_objects('{"note": "a { brace"}') == 1
+
+    @pytest.mark.parametrize("value", [None, 3, 3.5, True, [], {}, object()])
+    def test_a_non_string_counts_zero(self, value: Any) -> None:
+        assert count_top_level_json_objects(value) == 0
+
+    @pytest.mark.parametrize("text", ["{" * 500, "}" * 500, '{"a": "' + "{" * 200])
+    def test_never_raises_on_hostile_input(self, text: str) -> None:
+        assert count_top_level_json_objects(text) >= 0
+
+
+class TestContextSnapshotIsBounded:
+    """A 4B context window is the scarce resource; the snapshot must respect it."""
+
+    def _prompt_for(self, context: dict[str, Any], plan_dir: Path) -> str:
+        request = _role_request(
+            HarnessStates.EXPLORE, plan_dir=plan_dir, context=context
+        )
+        return build_role_prompt(request, get_role_spec(HarnessStates.EXPLORE))
+
+    def test_a_long_value_is_truncated_with_an_ellipsis(self, plan_dir: Path) -> None:
+        prompt = self._prompt_for({"blob": "x" * 5000}, plan_dir)
+
+        assert "x" * 120 + "..." in prompt
+        assert "x" * 121 not in prompt
+
+    def test_the_number_of_keys_is_capped(self, plan_dir: Path) -> None:
+        context = {f"k{index:02d}": f"v{index}" for index in range(40)}
+
+        prompt = self._prompt_for(context, plan_dir)
+
+        rendered = [key for key in context if f"- {key}: " in prompt]
+        assert len(rendered) == 12, "the cap is 12 keys, not 40"
+
+    def test_internal_and_bulk_keys_never_reach_the_prompt(
+        self, plan_dir: Path
+    ) -> None:
+        context = {
+            "_secret": "internal",
+            ContextKeys.DISPATCH_LEDGER: "ledger blob",
+            ContextKeys.ROLE_RESULTS: "results blob",
+            ContextKeys.CURRENT_ROLE_RESULT: "current blob",
+            ContextKeys.GOAL: "the goal",
+            "visible": "kept",
+        }
+
+        prompt = self._prompt_for(context, plan_dir)
+
+        assert "- visible: kept" in prompt
+        for hidden in ("internal", "ledger blob", "results blob", "current blob"):
+            assert hidden not in prompt
+
+    def test_a_none_value_is_omitted_rather_than_rendered_as_none(
+        self, plan_dir: Path
+    ) -> None:
+        prompt = self._prompt_for({"unset": None, "set": "yes"}, plan_dir)
+
+        assert "- unset:" not in prompt
+        assert "- set: yes" in prompt
+
+
+class TestReconcileStructuredFailsClosed:
+    """A payload that cannot carry the DERIVED count is dropped, never passed on."""
+
+    def test_an_unrebuildable_payload_is_dropped_entirely(
+        self, tmp_path: Path, plan_dir: Path, captured_logs: Any
+    ) -> None:
+        """A schema that rejects the real disk count must not survive uncorrected.
+
+        Returning the payload unchanged would leave the worker's CLAIM in
+        ``structured_output`` for ``_apply_role_result`` to merge.
+        """
+
+        class _Strict(BaseModel):
+            findings_count: int = Field(ge=3)
+            needs_explore: bool = False
+
+        spec = get_role_spec(HarnessStates.EXPLORE)
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+                registry,
+                (),
+                '{"findings_count": 3, "needs_explore": false}',
+                _Strict(findings_count=3),
+            ),
+        )
+
+        result = factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        assert result.structured_output is None, "0 files on disk cannot pass ge=3"
+        assert result.final_context.get(ContextKeys.FINDINGS_COUNT) == 0
+        assert any("dropping the payload" in line for line in captured_logs)
+        assert spec.state == HarnessStates.EXPLORE
+
+    def test_a_payload_without_the_derived_key_is_returned_untouched(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """The control: reconciliation only rebuilds what it must."""
+
+        class _Unrelated(BaseModel):
+            message: str
+
+        payload = _Unrelated(message="done")
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+                registry, (), '{"message": "done"}', payload
+            ),
+        )
+
+        result = factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        assert result.structured_output is payload
+
+
+class TestWorkerFactoryFailurePaths:
+    """What the factory does when the agent itself blows up mid-dispatch."""
+
+    def test_an_agent_exception_propagates_after_being_observed(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """The driver must SEE the exception -- and the bench must see the record.
+
+        Swallowing it here would also swallow ``HarnessReentrancyError``, the
+        one exception the driver must never lose (invariant I5).
+        """
+        seen: list[dict[str, Any]] = []
+
+        class _Exploding:
+            def run(self, task: str) -> AgentResult:
+                raise RuntimeError("the agent loop died")
+
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            sleep=lambda _s: None,
+            agent_builder=lambda spec_, registry, config: _Exploding(),
+        )
+
+        with pytest.raises(RuntimeError, match="the agent loop died"):
+            factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        assert len(seen) == 1
+        assert seen[0]["failure_reason"] == "exception:RuntimeError"
+        assert seen[0]["success"] is False
+        assert seen[0]["agent_success"] is False
+        assert seen[0]["elapsed_s"] >= 0.0
+
+    def test_the_failure_record_has_the_SAME_keys_as_a_success_record(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """An observer reading the verification fields must not have to branch."""
+        seen: list[dict[str, Any]] = []
+        payload = _explore_payload()
+        spec = get_role_spec(HarnessStates.EXPLORE)
+
+        class _Exploding:
+            def run(self, task: str) -> AgentResult:
+                raise TimeoutError("provider gone")
+
+        ok_factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+                registry, (), json.dumps(payload), spec.output_schema(**payload)
+            ),
+        )
+        ok_factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        bad_factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            sleep=lambda _s: None,
+            retry_attempts=1,
+            agent_builder=lambda spec_, registry, config: _Exploding(),
+        )
+        with pytest.raises(TimeoutError):
+            bad_factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        assert set(seen[0]) == set(seen[1])
+
+    def test_a_transient_agent_fault_is_retried_before_it_is_reported(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """``retry_attempts`` is wired to the real backoff, not decorative."""
+        seen: list[dict[str, Any]] = []
+        delays: list[float] = []
+        attempts: list[int] = []
+
+        class _FlakyAgent:
+            def run(self, task: str) -> AgentResult:
+                attempts.append(1)
+                raise ConnectionError("ollama not up yet")
+
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            retry_attempts=3,
+            sleep=delays.append,
+            agent_builder=lambda spec_, registry, config: _FlakyAgent(),
+        )
+
+        with pytest.raises(ConnectionError):
+            factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        assert len(attempts) == 3, "one dispatch, three provider attempts"
+        assert len(delays) == 2
+        assert len(seen) == 1, "one dispatch is one observation, not three"
+
+
+class TestPayloadPreference:
+    """Which channel the worker seam believes, and in what order."""
+
+    def _dispatch_with(
+        self, tmp_path: Path, plan_dir: Path, *, answer: str, structured: Any
+    ) -> AgentResult:
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+                registry, (), answer, structured
+            ),
+        )
+        return factory(_role_request(HarnessStates.PLAN, plan_dir=plan_dir))
+
+    def test_a_validated_structured_output_beats_the_free_text_answer(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        spec = get_role_spec(HarnessStates.PLAN)
+        structured = spec.output_schema(
+            **{
+                ContextKeys.TOTAL_STEPS: 7,
+                ContextKeys.NEEDS_EXPLORE: False,
+                "message": "plan drafted",
+            }
+        )
+
+        result = self._dispatch_with(
+            tmp_path,
+            plan_dir,
+            answer='{"total_steps": 99, "needs_explore": true}',
+            structured=structured,
+        )
+
+        assert result.final_context[ContextKeys.TOTAL_STEPS] == 7
+
+    def test_a_mapping_structured_output_is_accepted_without_a_model(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        result = self._dispatch_with(
+            tmp_path,
+            plan_dir,
+            answer="prose only, no json here",
+            structured={
+                ContextKeys.TOTAL_STEPS: 5,
+                ContextKeys.NEEDS_EXPLORE: False,
+                "message": "plan drafted",
+            },
+        )
+
+        assert result.final_context[ContextKeys.TOTAL_STEPS] == 5
+
+    def test_the_answer_is_used_when_there_is_no_structured_output(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        result = self._dispatch_with(
+            tmp_path,
+            plan_dir,
+            answer='```json\n{"total_steps": 4, "needs_explore": false, '
+            '"message": "ok"}\n```',
+            structured=None,
+        )
+
+        assert result.final_context[ContextKeys.TOTAL_STEPS] == 4
+
+    def test_garbage_in_both_channels_writes_no_gate_key(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """The fail-closed end state: nothing accepted, so the gate stays shut."""
+        result = self._dispatch_with(
+            tmp_path, plan_dir, answer="I am unable to comply.", structured=None
+        )
+
+        assert result.success is False
+        assert ContextKeys.TOTAL_STEPS not in result.final_context
+
+
+class TestVerifiedWritesIgnoresUnusableCalls:
+    """Write EVIDENCE is bytes on disk, reached through the confined root."""
+
+    def test_a_write_call_with_no_path_parameter_is_not_evidence(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """A malformed tool call cannot count as a write."""
+
+        class _BadCallAgent:
+            def run(self, task: str) -> AgentResult:
+                return AgentResult(
+                    answer='{"findings_count": 3, "needs_explore": false, '
+                    '"message": "done"}',
+                    success=True,
+                    trace=AgentTrace(
+                        tool_calls=[
+                            ToolCall(tool_name="write_plan_file", parameters={}),
+                            ToolCall(
+                                tool_name="write_plan_file", parameters={"path": "   "}
+                            ),
+                            ToolCall(
+                                tool_name="write_plan_file", parameters={"path": 42}
+                            ),
+                            ToolCall(
+                                tool_name="read_plan_file",
+                                parameters={"path": "plan.md"},
+                            ),
+                        ],
+                        total_iterations=4,
+                    ),
+                    final_context={},
+                )
+
+        seen: list[dict[str, Any]] = []
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            agent_builder=lambda spec_, registry, config: _BadCallAgent(),
+        )
+
+        result = factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        assert seen[-1]["write_evidence"] == 0
+        assert result.success is False
+        assert seen[-1]["failure_reason"] == "unverified-write"
+
+    def test_a_non_string_path_is_not_evidence_even_when_the_file_exists(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """Evidence must agree with what the TOOL layer would have accepted.
+
+        ``Workspace.resolve`` refuses a non-``str`` path outright, so a trace
+        entry carrying a ``Path`` object cannot have been the call that wrote
+        those bytes.  Stringifying it here -- the obvious relaxation -- would
+        credit a dispatch for a file some EARLIER dispatch wrote.
+        """
+        (plan_dir / "findings" / "scope.md").write_text("# written earlier\n")
+
+        class _PathObjectAgent:
+            def run(self, task: str) -> AgentResult:
+                return AgentResult(
+                    answer='{"findings_count": 3, "needs_explore": false, '
+                    '"message": "done"}',
+                    success=True,
+                    trace=AgentTrace(
+                        tool_calls=[
+                            ToolCall(
+                                tool_name="write_plan_file",
+                                parameters={"path": Path("findings/scope.md")},
+                            )
+                        ],
+                        total_iterations=1,
+                    ),
+                    final_context={},
+                )
+
+        seen: list[dict[str, Any]] = []
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            agent_builder=lambda spec_, registry, config: _PathObjectAgent(),
+        )
+
+        result = factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        assert seen[-1]["write_evidence"] == 0, "a pre-existing file is not this write"
+        assert result.success is False
+        assert seen[-1]["failure_reason"] == "unverified-write"
+
+    def test_the_same_path_as_a_real_string_IS_evidence(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """The control: the check above rejects the TYPE, not the file."""
+        (plan_dir / "findings" / "scope.md").write_text("# written earlier\n")
+
+        seen: list[dict[str, Any]] = []
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+                registry,
+                (
+                    (
+                        "write_plan_file",
+                        {"path": "findings/scope.md", "content": "# rewritten\n"},
+                    ),
+                ),
+                '{"findings_count": 3, "needs_explore": false, "message": "done"}',
+                None,
+            ),
+        )
+
+        factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        assert seen[-1]["write_evidence"] == 1
+
+    def test_a_write_with_no_plan_directory_leaves_no_plan_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        """``plan_dir=None`` means no ``PlanMemory``, so no reader, so no evidence."""
+
+        class _ClaimingAgent:
+            def run(self, task: str) -> AgentResult:
+                return AgentResult(
+                    answer='{"findings_count": 3, "needs_explore": false, '
+                    '"message": "wrote three findings"}',
+                    success=True,
+                    trace=AgentTrace(
+                        tool_calls=[
+                            ToolCall(
+                                tool_name="write_plan_file",
+                                parameters={"path": "findings/a.md"},
+                            )
+                        ],
+                        total_iterations=1,
+                    ),
+                    final_context={},
+                )
+
+        seen: list[dict[str, Any]] = []
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            agent_builder=lambda spec_, registry, config: _ClaimingAgent(),
+        )
+
+        result = factory(_role_request(HarnessStates.EXPLORE, plan_dir=None))
+
+        assert seen[-1]["write_evidence"] == 0
+        assert ContextKeys.FINDINGS_COUNT not in result.final_context
+
+
+class TestDefaultAgentBuilder:
+    """The one construction choice the factory makes when nobody overrides it."""
+
+    def test_the_stock_builder_makes_a_react_agent_with_the_output_schema(
+        self, tmp_path: Path
+    ) -> None:
+        """The schema is what makes constrained decoding D-031's mitigation."""
+        spec = get_role_spec(HarnessStates.EXPLORE)
+        registry = build_workspace_tools(
+            Workspace(tmp_path / "ws"), allowed=spec.tool_scope
+        )
+        config = AgentConfig(model="ollama_chat/x", output_schema=spec.output_schema)
+
+        agent = _default_agent_builder(native_function_calling=False)(
+            spec, registry, config
+        )
+
+        assert isinstance(agent, ReactAgent)
+        assert agent.config.output_schema is spec.output_schema
+
+    def test_native_function_calling_swaps_the_agent_not_the_schema(
+        self, tmp_path: Path
+    ) -> None:
+        spec = get_role_spec(HarnessStates.EXPLORE)
+        registry = build_workspace_tools(
+            Workspace(tmp_path / "ws"), allowed=spec.tool_scope
+        )
+        config = AgentConfig(model="ollama_chat/x", output_schema=spec.output_schema)
+
+        agent = _default_agent_builder(native_function_calling=True)(
+            spec, registry, config
+        )
+
+        assert isinstance(agent, NativeFunctionCallingReactAgent)
+        assert agent.config.output_schema is spec.output_schema
+
+    def test_a_factory_with_no_agent_builder_uses_the_stock_one(
+        self, tmp_path: Path, plan_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-034: faster is not the criterion; a single-object guarantee is.
+
+        ``agent_builder=None`` is the production shape, and it must reach
+        ``create_agent`` with the role's own pattern and its output schema --
+        the schema is what turns into ``response_format`` for constrained
+        decoding, which is D-031's whole mitigation.
+        """
+        built: list[tuple[str, Any]] = []
+
+        class _Stub:
+            def run(self, task: str) -> AgentResult:
+                return AgentResult(answer="{}", success=True, final_context={})
+
+        def _fake_create_agent(*, pattern: str, tools: Any, config: Any) -> Any:
+            built.append((pattern, config.output_schema))
+            return _Stub()
+
+        monkeypatch.setattr("fsm_llm_harness.roles.create_agent", _fake_create_agent)
+        factory = build_default_worker_factory(Workspace(tmp_path / "ws"))
+
+        factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
+
+        spec = get_role_spec(HarnessStates.EXPLORE)
+        assert built == [(spec.pattern, spec.output_schema)]
+
+
+class TestMultiObjectReplyIsWarnedAbout:
+    """The D-031 fail-open is invisible unless the dispatch says so out loud."""
+
+    def test_a_two_object_answer_is_counted_and_warned(
+        self, tmp_path: Path, plan_dir: Path, captured_logs: Any
+    ) -> None:
+        seen: list[dict[str, Any]] = []
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            observer=seen.append,
+            agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+                registry,
+                (),
+                '{"total_steps": 2, "needs_explore": false, "message": "draft"}\n'
+                '{"total_steps": 9, "needs_explore": false, "message": "final"}',
+                None,
+            ),
+        )
+
+        result = factory(_role_request(HarnessStates.PLAN, plan_dir=plan_dir))
+
+        assert seen[-1]["top_level_objects"] == 2
+        assert any("top-level JSON objects" in line for line in captured_logs)
+        assert result.final_context[ContextKeys.TOTAL_STEPS] == 2, "first-wins"
+
+    def test_a_single_object_answer_is_not_warned_about(
+        self, tmp_path: Path, plan_dir: Path, captured_logs: Any
+    ) -> None:
+        """The control: the warning fires on 2+, not on every dispatch."""
+        factory = build_default_worker_factory(
+            Workspace(tmp_path / "ws"),
+            agent_builder=lambda spec_, registry, config: _ScriptedAgent(
+                registry,
+                (),
+                '{"total_steps": 2, "needs_explore": false, "message": "only"}',
+                None,
+            ),
+        )
+
+        factory(_role_request(HarnessStates.PLAN, plan_dir=plan_dir))
+
+        assert not [line for line in captured_logs if "top-level JSON" in line]
+
+
+# ---------------------------------------------------------------------------
+# Step 13 gap closure: `tools.py`'s bounds, refusals and corrective hints
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceOutputIsBounded:
+    """A 4B context window is finite; every read path has to end.
+
+    An unbounded listing or grep does not fail loudly -- it fills the window
+    and the dispatch silently loses its instructions.
+    """
+
+    def test_a_long_listing_is_truncated_and_says_so(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws")
+        for index in range(MAX_LIST_ENTRIES + 25):
+            (ws.root / f"f{index:04d}.py").write_text("x")
+
+        names = ws.list_dir(".")
+
+        assert len(names) == MAX_LIST_ENTRIES + 1
+        assert names[-1] == "... [truncated: 25 more entries]"
+
+    def test_a_short_listing_is_not_marked(self, tmp_path: Path) -> None:
+        """The control: the marker is evidence of a cut, not decoration."""
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "a.py").write_text("x")
+
+        assert ws.list_dir(".") == ["a.py"]
+
+    def test_grep_stops_at_max_hits(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "many.py").write_text("needle\n" * (MAX_GREP_HITS + 10))
+
+        hits = ws.grep("needle")
+
+        assert len(hits) == MAX_GREP_HITS + 1
+        assert "search stopped at" in hits[-1]
+
+    def test_a_matching_line_is_itself_truncated(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "wide.py").write_text("needle" + "x" * 5000 + "\n")
+
+        (hit,) = ws.grep("needle")
+
+        assert "[truncated:" in hit
+        assert len(hit) < 400
+
+    def test_an_oversized_file_is_skipped_by_grep(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "huge.py").write_text("needle\n" + "x" * MAX_GREP_FILE_BYTES)
+        (ws.root / "small.py").write_text("needle\n")
+
+        hits = ws.grep("needle")
+
+        assert hits == ["small.py:1: needle"]
+
+    def test_a_binary_file_is_skipped_by_grep(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "blob.bin").write_bytes(b"needle\xff\xfe\x00binary")
+        (ws.root / "text.py").write_text("needle\n")
+
+        hits = ws.grep("needle")
+
+        assert hits == ["text.py:1: needle"]
+
+    def test_a_symlink_met_during_the_walk_is_skipped(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "real.py").write_text("needle\n")
+        (ws.root / "link.py").symlink_to(ws.root / "real.py")
+
+        hits = ws.grep("needle")
+
+        assert hits == ["real.py:1: needle"], "the same bytes must not count twice"
+
+    def test_an_invalid_regex_is_a_refusal_not_a_crash(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws")
+
+        with pytest.raises(HarnessError, match="Invalid grep pattern"):
+            ws.grep("(unclosed")
+
+    def test_grep_over_a_single_file_target_works(self, tmp_path: Path) -> None:
+        """``_walk_files``'s file branch: a role may grep one named file."""
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "one.py").write_text("needle\n")
+
+        assert ws.grep("needle", "one.py") == ["one.py:1: needle"]
+
+
+class TestWorkspaceRefusals:
+    """The confinement layer's refusals, driven directly rather than inferred."""
+
+    def test_a_non_string_path_is_a_type_error(self, tmp_path: Path) -> None:
+        """A model that emits ``{"path": 3}`` must not index into a Path."""
+        ws = Workspace(tmp_path / "ws")
+
+        with pytest.raises(TypeError, match="must be a str"):
+            ws.resolve(3)  # type: ignore[arg-type]
+
+    def test_deleting_a_directory_is_refused(self, tmp_path: Path) -> None:
+        """``delete`` removes single files; a recursive delete is not on offer."""
+        ws = Workspace(tmp_path / "ws")
+        (ws.root / "pkg").mkdir()
+        (ws.root / "pkg" / "keep.py").write_text("x")
+
+        with pytest.raises(HarnessError, match="delete only removes single files"):
+            ws.delete("pkg")
+        assert (ws.root / "pkg" / "keep.py").exists()
+
+    def test_the_allowed_command_list_is_readable(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws", allow_shell=True)
+
+        assert ws.allowed_commands == COMMAND_ALLOWLIST
+
+    def test_the_reprs_name_the_root_and_the_scope(self, tmp_path: Path) -> None:
+        """Diagnostics: a refusal is unreadable if the object prints as an id."""
+        ws = Workspace(tmp_path / "ws")
+
+        assert "Workspace(root=" in repr(ws)
+        assert "allow_shell=False" in repr(ws)
+
+    def test_the_plan_memory_repr_names_the_role(self, plan_dir: Path) -> None:
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        assert "PlanMemory(plan_dir=" in repr(memory)
+        assert Role.EXPLORER in repr(memory)
+
+
+class TestRunCommandFailurePaths:
+    """``run_command`` is the only tool that leaves the process; it must not throw."""
+
+    def test_an_empty_argv_is_refused(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "ws", allow_shell=True)
+
+        with pytest.raises(HarnessError, match="non-empty argument vector"):
+            ws.run_command([])
+        with pytest.raises(HarnessError, match="non-empty argument vector"):
+            ws.run_command(["   "])
+
+    def test_a_missing_executable_is_a_failed_result_not_an_exception(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An allowlisted command absent from PATH is a normal tool failure."""
+        ws = Workspace(tmp_path / "ws", allow_shell=True)
+        monkeypatch.setattr("fsm_llm_harness.tools.shutil.which", lambda *a, **k: None)
+
+        result = ws.run_command([COMMAND_ALLOWLIST[0]])
+
+        assert result.success is False
+        assert "not found on PATH" in result.error
+
+    def test_a_timeout_is_a_failed_result_not_an_exception(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = Workspace(tmp_path / "ws", allow_shell=True)
+
+        def _boom(*args: Any, **kwargs: Any) -> Any:
+            raise subprocess.TimeoutExpired(cmd="x", timeout=1.0)
+
+        monkeypatch.setattr("fsm_llm_harness.tools.subprocess.run", _boom)
+
+        result = ws.run_command([COMMAND_ALLOWLIST[0]])
+
+        assert result.success is False
+        assert "timed out after" in result.error
+
+    def test_a_start_failure_is_a_failed_result_not_an_exception(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = Workspace(tmp_path / "ws", allow_shell=True)
+
+        def _boom(*args: Any, **kwargs: Any) -> Any:
+            raise OSError("exec format error")
+
+        monkeypatch.setattr("fsm_llm_harness.tools.subprocess.run", _boom)
+
+        result = ws.run_command([COMMAND_ALLOWLIST[0]])
+
+        assert result.success is False
+        assert "failed to start" in result.error
+
+    def test_a_non_zero_exit_is_reported_as_a_failure_with_its_output(
+        self, tmp_path: Path
+    ) -> None:
+        """A failing verification command must READ as failing to the model."""
+        ws = Workspace(tmp_path / "ws", allow_shell=True)
+
+        result = ws.run_command(["cat", "no-such-file.txt"])
+
+        assert result.success is False
+        assert "no-such-file" in result.error
+
+
+class TestCorrectiveHintEdges:
+    """The wrong-root hints must stay silent when they have nothing to say."""
+
+    def test_a_tool_with_no_counterpart_gets_no_routing_hint(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        assert WorkspaceTools.RUN_COMMAND not in _COUNTERPART_TOOL
+        assert (
+            _routing_hint("x.py", tool_name=WorkspaceTools.RUN_COMMAND, memory=None)
+            == ""
+        )
+
+    @pytest.mark.parametrize("path", ["", ".", "./", "   "])
+    def test_the_current_directory_is_never_a_wrong_root_guess(self, path: str) -> None:
+        assert _routing_hint(path, tool_name=WorkspaceTools.LIST_DIR, memory=None) == ""
+
+    @pytest.mark.parametrize("path", ["", ".", "./", "   "])
+    def test_the_current_directory_is_not_a_wrong_root_guess_in_the_PLAN_tier_either(
+        self, plan_dir: Path, path: str
+    ) -> None:
+        """The plan side is the half that actually needs the short circuit.
+
+        ``artifact_for(".")`` legitimately answers ``None`` -- the plan
+        directory itself is not an artifact -- so without the guard a role
+        listing its OWN directory would be told to go use the workspace tool.
+        """
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        assert (
+            _routing_hint(path, tool_name=PlanTools.LIST_PLAN_DIR, memory=memory) == ""
+        )
+
+    def test_a_workspace_path_handed_to_a_workspace_tool_gets_no_hint(self) -> None:
+        assert (
+            _routing_hint(
+                "src/uploader.py", tool_name=WorkspaceTools.READ_FILE, memory=None
+            )
+            == ""
+        )
+
+    def test_a_plan_path_handed_to_a_workspace_tool_names_the_plan_tool(self) -> None:
+        hint = _routing_hint(
+            "findings/scope.md", tool_name=WorkspaceTools.READ_FILE, memory=None
+        )
+
+        assert "belongs to the plan directory" in hint
+        assert _COUNTERPART_TOOL[WorkspaceTools.READ_FILE] in hint
+
+    def test_a_workspace_path_handed_to_a_plan_tool_names_the_workspace_tool(
+        self, plan_dir: Path
+    ) -> None:
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        hint = _routing_hint(
+            "src/uploader.py", tool_name=PlanTools.READ_PLAN_FILE, memory=memory
+        )
+
+        assert "belongs to the workspace" in hint
+
+    def test_an_unclassifiable_path_still_answers_rather_than_raising(
+        self, plan_dir: Path
+    ) -> None:
+        """``artifact_for`` raising must not turn a hint into a crashed dispatch."""
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        hint = _routing_hint(
+            "/etc/passwd", tool_name=PlanTools.READ_PLAN_FILE, memory=memory
+        )
+
+        assert "belongs to the workspace" in hint
+
+    @pytest.mark.parametrize("path", ["", "   ", "/", "."])
+    def test_addresses_plan_memory_is_false_for_a_rootless_path(
+        self, path: str
+    ) -> None:
+        assert _addresses_plan_memory(path) is False
+
+    def test_a_relocated_hint_is_read_off_the_filesystem(self, plan_dir: Path) -> None:
+        """The suggestion is a FACT about disk, never a guess about names."""
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+        (plan_dir / "findings" / "scope.md").write_text("# scope\n")
+
+        assert (
+            _relocated_hint("scope.md", memory) == "Did you mean `findings/scope.md`?"
+        )
+        assert _relocated_hint("never-written.md", memory) == ""
+
+    def test_a_relocated_hint_on_a_pathless_name_is_silent(
+        self, plan_dir: Path
+    ) -> None:
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        assert _relocated_hint("   ", memory) == ""
+
+    def test_a_missing_per_plan_directory_suggests_nothing_and_does_not_raise(
+        self, tmp_path: Path
+    ) -> None:
+        bare = tmp_path / "plans" / "plan-2026-07-21T000000-bareplan"
+        bare.mkdir(parents=True)
+        memory = PlanMemory(bare, role=Role.EXPLORER)
+
+        assert _relocated_hint("scope.md", memory) == ""
+
+
+class TestToolRegistryConstruction:
+    """An unknown tool name is a wiring bug and must fail at BUILD time.
+
+    Degrading to "register what I recognise" would hand a role a silently
+    narrower scope than its ``RoleSpec`` declares -- the exact review-C2 shape.
+    """
+
+    def test_an_unknown_workspace_tool_is_refused(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="Unknown workspace tool"):
+            build_workspace_tools(
+                Workspace(tmp_path / "ws"), allowed=["read_file", "sudo_rm"]
+            )
+
+    def test_an_unknown_plan_tool_is_refused(self, plan_dir: Path) -> None:
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        with pytest.raises(ValueError, match="Unknown plan tool"):
+            build_plan_tools(memory, allowed=["read_plan_file", "rm_plan"])
+
+    def test_every_workspace_tool_is_reachable_through_the_registry(
+        self, tmp_path: Path
+    ) -> None:
+        """Each ``@tool`` wrapper is exercised once, through the agent's path."""
+        ws = Workspace(tmp_path / "ws", allow_shell=True)
+        registry = build_workspace_tools(ws)
+
+        assert _call(registry, "write_file", path="a.py", content="one\n").success
+        assert _call(registry, "append_file", path="a.py", content="two\n").success
+        assert (ws.root / "a.py").read_text() == "one\ntwo\n"
+        assert _call(registry, "read_file", path="a.py").success
+        assert _call(registry, "path_exists", path="a.py").result == "yes"
+        assert _call(registry, "path_exists", path="zz.py").result == "no"
+        assert "a.py" in str(_call(registry, "list_dir", path=".").result)
+        assert "a.py:1" in str(_call(registry, "grep_files", pattern="one").result)
+        assert "no matches" in str(
+            _call(registry, "grep_files", pattern="zzz").result
+        ).replace("(", "")
+        assert _call(registry, "run_command", command="cat", args="a.py").success
+        assert _call(registry, "delete_file", path="a.py").success
+        assert not (ws.root / "a.py").exists()
+
+    def test_an_empty_workspace_directory_lists_as_empty_not_as_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        registry = build_workspace_tools(Workspace(tmp_path / "ws"))
+
+        assert _call(registry, "list_dir", path=".").result == "(empty)"
+
+    def test_plan_path_exists_answers_both_ways(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, _ = _plan_registry(plan_dir, workspace)
+        (plan_dir / ArtifactNames.PLAN).write_text("# Plan\n")
+
+        assert _call(registry, "plan_path_exists", path=ArtifactNames.PLAN).result == (
+            "yes"
+        )
+        assert _call(registry, "plan_path_exists", path="state.md").result == "no"
+
+    def test_the_memory_root_itself_classifies_as_no_artifact(
+        self, plan_dir: Path
+    ) -> None:
+        """``_classify``'s rootless branch: the root is not a protocol artifact."""
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        assert memory.artifact_for(f"{plan_dir.name}/..") is None
+
+    def test_an_empty_path_locates_to_itself(self, plan_dir: Path) -> None:
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        assert memory.locate("   ") == ""
+
+
+class TestNeverRaisesOnAnUnclassifiablePath:
+    """The three ``except Exception: return ''`` guards, driven directly.
+
+    Each of these sits between a REFUSED tool call and the string the model
+    reads back.  If any of them propagated, a confinement refusal -- the layer
+    working correctly -- would surface as a crashed dispatch instead.
+    """
+
+    def test_gate_state_reports_nothing_for_a_refused_path(
+        self, plan_dir: Path
+    ) -> None:
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        with pytest.raises(HarnessConfinementError):
+            memory.artifact_for("/etc/passwd")
+        assert _gate_state(memory, "/etc/passwd", existed=False) == ""
+
+    def test_owned_empty_directory_is_false_for_a_refused_path(
+        self, plan_dir: Path
+    ) -> None:
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        assert _owned_empty_directory(memory, "/etc") is False
+
+    def test_the_missing_target_hint_defers_to_routing_for_a_refused_path(
+        self, plan_dir: Path
+    ) -> None:
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        hint = _missing_target_hint(
+            "/etc/passwd", tool_name=PlanTools.READ_PLAN_FILE, memory=memory
+        )
+
+        assert hint == ""
+
+    def test_the_same_helpers_still_answer_for_a_real_artifact(
+        self, plan_dir: Path
+    ) -> None:
+        """The control: these guards did not swallow the normal answer too."""
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+        (plan_dir / "findings" / "scope.md").write_text("# scope\n")
+
+        assert _gate_state(memory, "findings/scope.md", existed=False) != ""
+        assert _owned_empty_directory(memory, ArtifactNames.CHECKPOINTS_DIR) is True
+        assert (
+            _missing_target_hint(
+                ArtifactNames.PLAN, tool_name=PlanTools.READ_PLAN_FILE, memory=memory
+            )
+            != ""
+        )
+
+
+class TestRulesLookupEdges:
+    """``rules.py``'s two remaining branches: one topic, and an unknown state."""
+
+    def test_an_unknown_state_raises_from_get_rules_too(self) -> None:
+        with pytest.raises(StateNotFoundError) as excinfo:
+            get_rules("EXPLORE_V2")
+
+        assert excinfo.value.state_id == "EXPLORE_V2"
+
+    @pytest.mark.parametrize("threshold", [0, 1, 2, 3, 4, 7])
+    def test_the_topic_list_never_shrinks_below_the_protocol_axes(
+        self, threshold: int
+    ) -> None:
+        """REPORTED DEAD BRANCH, pinned rather than tested into permanence.
+
+        ``rules._topic_phrase`` carries a ``len(labels) == 1`` branch that is
+        structurally UNREACHABLE: ``explore_topics`` floors its result at
+        ``EXPLORE_TOPICS`` (3 axes) for every threshold, including 0 and 1, so
+        the single-label rendering can never be selected.  This test pins the
+        FACT that makes it dead -- if someone ever shrinks ``EXPLORE_TOPICS``
+        to one axis, this fails and the branch stops being dead in the same
+        change that needs it.
+        """
+        labels = explore_topics(threshold)
+
+        assert len(labels) >= 3
+        assert len(labels) >= max(threshold, 3)
+        assert len({topic.slug for topic in labels}) == len(labels)
+
+    def test_the_rendered_topic_phrase_is_an_english_list(self) -> None:
+        fsm = build_harness_fsm("exercise the harness protocol")
+        purpose = fsm["states"][HarnessStates.EXPLORE]["purpose"]
+
+        for topic in explore_topics():
+            assert topic.label in purpose
+        assert ", and " in purpose
