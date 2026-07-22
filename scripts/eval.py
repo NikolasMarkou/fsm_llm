@@ -197,7 +197,7 @@ def discover_examples(
         # Companion scripts get a suffixed name (e.g. "<dir>_manual") so they do
         # not collide with the primary run.py example for the same directory.
         stem = run_py.stem
-        suffix = "" if stem == "run" else f"_{stem[len('run_'):]}"
+        suffix = "" if stem == "run" else f"_{stem[len('run_') :]}"
         name = f"{parts[0]}/{parts[1]}{suffix}"
 
         if category_filter and category != category_filter:
