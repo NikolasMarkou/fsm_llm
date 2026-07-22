@@ -24,7 +24,7 @@ completed work over an empty directory 5/5.
 fsm_llm_harness/
 ├── harness.py          # HarnessAgent -- the driver. 6 state-entry handlers, the pre-step
 │                       #   gate, worker dispatch, the leash, Presentation Contracts,
-│                       #   state.md read/write, resume. (3,026 lines -- the biggest file)
+│                       #   state.md read/write, resume. (3,089 lines -- the biggest file)
 ├── artifacts.py        # Pydantic models + Markdown (de)serializers for 15 artifact kinds,
 │                       #   the 9 decision entry-type schemas and the 6 Presentation Contracts
 ├── storage.py          # PlanDirectory: plan-id minting, atomic writes, LESSONS eviction,
@@ -384,16 +384,16 @@ pytest tests/test_fsm_llm_harness/          # 1,793 tests, 10 test files
 
 | File | Tests |
 |---|---|
-| `test_roles_and_tools.py` | 441 |
+| `test_roles_and_tools.py` | 452 |
+| `test_harness_agent.py` | 277 |
 | `test_artifacts.py` | 273 |
-| `test_harness_agent.py` | 260 |
 | `test_hardening.py` | 258 |
 | `test_plan_validator.py` | 191 |
 | `test_cli.py` | 101 |
 | `test_storage.py` | 93 |
 | `test_fsm_definition.py` | 87 |
+| `test_live_ollama.py` | 37 (15 live, gated off by default) |
 | `test_extraction_cost.py` | 24 |
-| `test_live_ollama.py` | 23 (14 live, gated off by default) |
 
 **Live tests are DOUBLE-gated** and auto-skip: they need both
 `FSM_LLM_HARNESS_LIVE=1` and a reachable Ollama, with the env term checked FIRST
@@ -414,33 +414,64 @@ means something when the executor is GUARANTEED to fail.
 
 ## Status -- what is measured, and what is not
 
-Measured live on `ollama_chat/qwen3.5:4b`. Small n is stated as k/n, not as a
-rate, and the bars are the ones the plan set in advance.
+Measured live on `ollama_chat/qwen3.5:4b` (digest `2a654d98e6fb`). Small n is
+stated as k/n, not as a rate, and the bars are the ones the plans set in
+advance. The two model-level rows (L4/L5) were re-measured ONCE after the
+driver-assigned EXECUTE target fix, bars and assertions byte-untouched
+(`MODEL_BAR=4` / `RUNS_MODEL=5`).
 
 | Criterion | Bar | Measured |
 |---|---|---|
 | L1 full EXPLORE->CLOSE traverse, `audit()` zero ERRORs | pass | **3/3** |
 | L2 leash halts at exactly 2 fix attempts, not resettable by an approving callback | pass | **6/6** |
 | L3 REFLECT -> PIVOT -> PLAN loop-back completes | pass | **3/3** |
-| L5 >= 3 distinct non-empty `findings/*.md` on disk from dispatches | >= 4/5 | **4/5 -- met** |
-| L4 write tool issued AND workspace bytes on disk | >= 4/5 | **3/5 -- NOT met** |
-| L4 content-hash match (the strict reading of the same criterion) | >= 1 | **0/10 -- NOT met** |
+| L4 write tool issued AND workspace bytes on disk | >= 4/5 | **5/5 issued, 5/5 bytes -- MET** |
+| L4 strict sha256 content-hash match of the requested edit | >= 4/5 | **4/5 -- MET** (react control 0/5) |
+| L5 >= 3 distinct non-empty `findings/*.md` on disk from dispatches | >= 4/5 | **5/5 -- met** |
+| L6 end-to-end REAL workers: 3/3 runs reach >= EXECUTE, >= 1 verified write, honest halt | 3/3 | **0/3 -- NOT MET** |
 
-**L4 is the open one, and it is reported as it measured.** Earlier benches in
-this package's history scored higher on the loose form; the discrepancy could not
-be attributed, because those bench scripts were transient and no longer exist, so
-a diff against them is not available. What the traces DO show is that the misses
-spend their budget prefixing the workspace file with the plan-directory path
-(`read_plan_file('<plan-id>/uploader.py')`) -- the wrong-ROOT failure mode, not a
-wrong-TOOL one. Tool IDENTITY selection is flawless (0 hallucinated tool names in
-298 observed calls); tool ROOT selection is not, and the error concentrates
-exactly where both roots are in scope.
+This is the first time L4 has MET the standing bar. (The strict row's in-test
+assertion is existential -- >= 1 content-matched dispatch across both arms,
+measured 4/10; the native arm's 4/5 also clears the >= 4/5 `MODEL_BAR` reading,
+which is the bar reported here.)
+
+**What moved L4: a measured structural fix, not prompt wording.** A durable
+bench now exists -- `scripts/harness_bench.py`, with blocks committed under
+`scripts/bench_data/l4-execute-write/{B0,B1}` (n=40/arm, 6-field manifests +
+raw jsonl rows; `seed` is honored by ollama for `:4b` -- probe committed under
+`scripts/bench_data/seed-probe/` -- and per-row seeds are recorded). B0
+measured the wrong-ROOT defect: native EXECUTE dispatches content-matched the
+requested edit **2/40**. The fix extends the driver-assigned-target pattern to
+EXECUTE: the driver reads plan.md's Files To Modify and names the exact target
+path + tool in the dispatch. B1, same manifest: **40/40** (Fisher p=1.6e-20).
+The ReAct control arm measured 0/40 in both blocks -- its failure mode is
+upstream of target selection.
+
+**L6 is the open one, and it is reported as it measured.**
+`TestL6EndToEndRealWorkers` is the package's first graded end-to-end criterion
+on REAL role workers (n=3, disk-derived rubric vectors, DENY-default
+disk-bound approval stub). Its floor -- all 3 runs reach >= EXECUTE with >= 1
+sha256-verified write and an honest halt -- measured **0/3, NOT MET**. Two
+runs halted honestly at the EXPLORE redispatch cap; one reached PLAN and
+stalled sluglessly after an empty plan-writer reply. The verified-write clause
+held 3/3 and nothing crashed. Two structural findings: EXPLORE over an EMPTY
+plan directory clears the 3-findings gate ~1/3 of the time (vs 5/5 on a seeded
+corpus), and PLAN has no redispatch budget, so one empty reply becomes a
+stall. That 0/3 is the package's honest end-to-end status.
+
+The test suite itself has been audited adversarially, by execution: 5/5
+load-bearing guard mutations (leash-cap boundary, writable-key allowlist,
+empty-file gate counting, ownership deny branch, live-gate short-circuit) each
+flipped tests red in a scratch copy (93 red total), and `test_cli.py`'s
+exit-code 0/1/2 contract close-read verdict was CLEAN.
 
 Offline, the package is green: 1,793 tests, `ruff` clean, `mypy` 0 errors.
 
-**Not claimed**: that the harness is production-ready, or that a 4B model drives
-it unattended to a useful result. What IS claimed is that the gates are
-mechanical -- they read the filesystem, and a confident sentence cannot open one.
+**Not claimed**: that the harness is production-ready, or that a 4B model
+drives it unattended to a useful result -- the L6 0/3 REINFORCES this claim's
+absence, it does not soften it. What IS claimed is that the gates are
+mechanical -- they read the filesystem, and a confident sentence cannot open
+one.
 
 ## Exceptions
 

@@ -62,17 +62,67 @@ package's central design commitment, and it is a response to measurement: a smal
 local model asserted completed code changes over an untouched workspace, and
 claimed three findings over an empty directory. Prompt wording did not fix it.
 
-**Status, stated as measured.** Offline the package is green (1,751 tests, `ruff`
-clean, `mypy` 0 errors). Live on a local 4B model, the harness-level criteria pass
-— a full EXPLORE→CLOSE traverse whose plan directory audits with zero ERRORs (3/3),
-the leash halting at exactly 2 attempts and not resettable by an approving callback
-(6/6), a REFLECT→PIVOT→PLAN loop-back (3/3) — and the findings criterion meets its
-bar (4/5). The remaining model-level criterion, "a role dispatch issues a write
-tool AND workspace bytes land on disk", measures **3/5 against its own 4/5 bar and
-is NOT met**; the traces attribute the misses to wrong-ROOT tool calls (a workspace
-file addressed through the plan directory), not to wrong-tool selection. This is
-recorded rather than rounded up: the package is not claimed to be production-ready,
-and a small model is not claimed to drive it unattended to a useful result.
+**Status, stated as measured.** Offline the package is green (1,793 tests, `ruff`
+clean, `mypy` 0 errors). Live on a local 4B model (`ollama_chat/qwen3.5:4b`), the
+harness-level criteria pass — a full EXPLORE→CLOSE traverse whose plan directory
+audits with zero ERRORs (3/3), the leash halting at exactly 2 attempts and not
+resettable by an approving callback (6/6), a REFLECT→PIVOT→PLAN loop-back (3/3) —
+and after the driver-assigned EXECUTE target fix (next section) the single-state
+model-level criteria are MET at the untouched bars for the first time: write tool
+issued 5/5 and workspace bytes 5/5 (bar >=4/5), strict sha256 content-hash match
+4/5 (vs >=4/5), findings 5/5 (bar >=4/5). The new graded END-TO-END criterion on
+real workers (L6, n=3) measured **0/3 against its floor and is NOT met**: two runs
+halted honestly at the EXPLORE redispatch cap, one reached PLAN and stalled
+sluglessly after an empty plan-writer reply (verified writes 3/3; no crashes).
+This is recorded rather than rounded up: the package is not claimed to be
+production-ready, and a small model is not claimed to drive it unattended to a
+useful result.
+
+### Added — harness measurement iteration: durable bench, driver-assigned EXECUTE targets, e2e criterion
+
+- **`scripts/harness_bench.py` + `scripts/bench_data/`** — a durable, powered
+  bench for harness capability claims: pre-registered fixed-n blocks (n=40/arm),
+  6-field manifests (prompt-bytes hash, tool surface, fixture hash, model digest,
+  arm, git commit), append-only raw jsonl rows, and a `report` subcommand that
+  recomputes every k plus Wilson CI and Fisher exact (stdlib-only math) from the
+  committed rows. Blocks are committed under `scripts/bench_data/` (tracked), so
+  future numbers can be diffed — earlier benches lived in a gitignored scratch
+  directory and no longer exist.
+- **Seed determinism dispositioned by probe** — ollama honors `seed` for `:4b`
+  (same seed byte-identical at temperature 0.7, different seed diverges; raw
+  probe committed at `scripts/bench_data/seed-probe/probe.json`). `seed` is
+  plumbed as an optional keyword-only parameter through
+  `build_default_worker_factory` → `NativeFunctionCallingReactAgent`'s
+  `litellm.completion` call site (default `None` = key absent, byte-identical
+  call shape to before); per-row seeds are recorded in every bench row.
+- **Driver-assigned EXECUTE write target** — baseline block B0 measured the
+  wrong-ROOT defect: native EXECUTE dispatches content-matched the requested
+  edit **2/40**. The fix extends the driver-assigned-target pattern to EXECUTE:
+  `derive_execute_target` reads plan.md's Files To Modify and the dispatch names
+  the exact target path + tool; an unparseable plan falls back to the previous
+  prompt byte-identically. Post block B1, same manifest: **40/40** (Fisher
+  p=1.6e-20). The ReAct control arm measured 0/40 in both blocks. The armed
+  standing-bar classes were then re-run ONCE: L4 MET for the first time (write
+  tool 5/5, bytes 5/5, strict content-hash 4/5 vs >=4/5), L5 MET 5/5;
+  `MODEL_BAR=4` / `RUNS_MODEL=5` unchanged.
+- **`TestL6EndToEndRealWorkers`** — the first graded end-to-end criterion on
+  REAL role workers (n=3, disk-derived rubric vectors committed under
+  `scripts/bench_data/l6-e2e/`, DENY-default disk-bound approval stub). Floor
+  **NOT MET, 0/3** (two honest explore-cap halts at EXPLORE, one slugless PLAN
+  stall; verified writes 3/3). Two structural findings recorded: EXPLORE over an
+  empty plan directory clears the 3-findings gate ~1/3 of the time vs 5/5 on a
+  seeded corpus, and PLAN has no redispatch budget, so one empty reply becomes a
+  stall.
+- **Adversarial audit executed, not just read** — 5/5 load-bearing guard
+  mutations (leash-cap boundary, writable-key allowlist, empty-file gate
+  counting, ownership deny branch, live-gate short-circuit) each flipped tests
+  red in a scratch copy (93 red total); `test_cli.py`'s exit-code 0/1/2 contract
+  close-read verdict: CLEAN.
+- **Count-pinning tests** (`tests/test_packaging.py`) — documented test-count
+  literals are checked against one `pytest --collect-only` subprocess, so doc
+  drift now fails the suite.
+- **Anchor hygiene** — 18 dead plan-ids retired via the skill's `retire` tool;
+  plan-validator `[anchor-unknown-plan]` errors 155 → 0.
 
 ### Added — packaging and CI
 

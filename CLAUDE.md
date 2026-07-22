@@ -90,8 +90,16 @@ and its gate values are **derived from the filesystem**, not read from the model
 report: `findings_count` counts non-empty `findings/*.md`, and a dispatch claiming
 a write must show a tool call whose target now carries bytes. The autonomy leash
 halts at exactly 2 fix attempts and cannot be reset from inside an approving
-callback. See `src/fsm_llm_harness/CLAUDE.md` for the full reference, including
-what is measured and what is not.
+callback. Measured on `ollama_chat/qwen3.5:4b`: the single-state model bars are
+MET for the first time after a bench-measured structural fix (driver-assigned
+EXECUTE write targets: B0 content-match 2/40 -> B1 **40/40**, Fisher p=1.6e-20,
+n=40/arm blocks committed under `scripts/bench_data/`; armed standing bar L4
+write tool 5/5, bytes 5/5, strict content-hash 4/5 vs >=4/5; L5 5/5) -- but the
+first graded end-to-end criterion on REAL workers (L6, n=3) measured **0/3 NOT
+MET** (two honest explore-cap halts, one slugless PLAN stall; verified writes
+3/3). The harness is not production-ready and a 4B model is not claimed to
+drive it unattended to a useful result. See `src/fsm_llm_harness/CLAUDE.md` for
+the full reference, including what is measured and what is not.
 
 ## Code Conventions
 
@@ -176,7 +184,7 @@ pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
 
-Counts measured with `pytest --collect-only` at commit `ce1757e`; the full run is
+Counts measured with `pytest --collect-only` at commit `e9e3907`; the full run is
 5,080 passed / 25 skipped / 2 xfailed in ~377s.
 
 **Conventions**:
@@ -215,6 +223,8 @@ All examples support OpenAI and Ollama fallback. Run with: `python examples/<cat
 ### Evaluation
 
 Automated evaluation via `scripts/eval.py` runs all examples in parallel and produces scorecards. Current baseline: **95.3% health score** (N=3 median, 101 examples) on `ollama_chat/qwen3.5:4b` — Run 006, commit `2df048f`. **This baseline is STALE and must be re-run before it is trusted.** The F-01..F-24 remediation plan (`plans/plan-2026-07-19T191147-4b664252`) changed prompt CONTENT in `prompts.py`, `context.py` and `constants.py` — history capping in `FieldExtractionPromptBuilder`, nested-dict security filtering, and the forbidden-key regexes — and none of the gates available to that plan can observe prompt effects (the eval suite was not run; the fast gate mocks the LLM). See `EVALUATE.md` for methodology and results history. (The heuristic overstates ~15pp; pair with manual log inspection. The ~5 agent score-1s per run are non-deterministic `--workers 4` timeouts, not regressions.)
+
+Harness capability benches run via `scripts/harness_bench.py` (pre-registered fixed-n blocks, 6-field manifests, append-only raw jsonl, Wilson CI + Fisher exact, per-row seeds); committed blocks live under `scripts/bench_data/` (e.g. `l4-execute-write/{B0,B1}`, n=40/arm).
 
 ## Documentation
 
