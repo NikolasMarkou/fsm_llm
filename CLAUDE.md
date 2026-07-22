@@ -12,14 +12,14 @@ FSM-LLM (v0.5.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (3,305 tests)
+make test           # pytest -v (5,107 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
-make type-check     # mypy across all 5 packages
+make type-check     # mypy across all 6 packages
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts and caches
 make coverage       # pytest with coverage report
-make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor]" + pre-commit install
+make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness]" + pre-commit install
 make audit          # audit site-packages for suspicious .pth files
 
 # CLI tools
@@ -28,6 +28,7 @@ fsm-llm-visualize --fsm <path.json>  # ASCII visualization
 fsm-llm-validate --fsm <path.json>   # Validate FSM definition
 fsm-llm-monitor                      # Launch web monitoring dashboard
 fsm-llm-meta                         # Interactive artifact builder (routes to fsm_llm_agents.meta_cli)
+fsm-llm-harness <new|resume|status|validate|close>  # Iterative-planner protocol harness
 ```
 
 ## Architecture -- 2-Pass Flow
@@ -59,7 +60,8 @@ src/
 ├── fsm_llm_reasoning/    # Structured reasoning engine (10 files)
 ├── fsm_llm_workflows/    # Workflow orchestration engine (9 files, incl. dependency resolver)
 ├── fsm_llm_agents/       # Agentic patterns -- 12 patterns + swarm, graph, MCP, A2A, SOPs, semantic tools + meta builder (49 files)
-└── fsm_llm_monitor/      # Web-based monitoring dashboard (11 files, incl. OTEL exporter + static/)
+├── fsm_llm_monitor/      # Web-based monitoring dashboard (11 files, incl. OTEL exporter + static/)
+└── fsm_llm_harness/      # Iterative-planner protocol harness -- 6-state FSM, disk-derived gates, autonomy leash (14 files)
 ```
 
 **Optional extras** (beyond core):
@@ -69,6 +71,7 @@ src/
 | `reasoning` | `pip install fsm-llm[reasoning]` | None |
 | `agents` | `pip install fsm-llm[agents]` | None |
 | `workflows` | `pip install fsm-llm[workflows]` | None |
+| `harness` | `pip install fsm-llm[harness]` | `fsm-llm[agents]` (no third-party deps of its own) |
 | `monitor` | `pip install fsm-llm[monitor]` | fastapi, uvicorn, jinja2 |
 | `mcp` | `pip install fsm-llm[mcp]` | mcp (>=1.0.0) |
 | `otel` | `pip install fsm-llm[otel]` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
@@ -76,6 +79,19 @@ src/
 | `all` | `pip install fsm-llm[all]` | All of the above |
 
 Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, and API reference.
+
+**`fsm_llm_harness` in one paragraph.** It runs the iterative-planner protocol as
+a real FSM: 6 states (EXPLORE / PLAN / EXECUTE / REFLECT / PIVOT / CLOSE), 9
+transitions, and hard gates that are JsonLogic `TransitionCondition` terms -- so a
+gated edge is DETERMINISTIC or BLOCKED, never an LLM judgement call. Its memory is
+a directory of Markdown artifacts (`state.md`, `plan.md`, `decisions.md`,
+`findings/`, ...) with an ownership table saying which role may write which file,
+and its gate values are **derived from the filesystem**, not read from the model's
+report: `findings_count` counts non-empty `findings/*.md`, and a dispatch claiming
+a write must show a tool call whose target now carries bytes. The autonomy leash
+halts at exactly 2 fix attempts and cannot be reset from inside an approving
+callback. See `src/fsm_llm_harness/CLAUDE.md` for the full reference, including
+what is measured and what is not.
 
 ## Code Conventions
 
@@ -91,6 +107,7 @@ Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, a
   - Workflows: `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`
   - Agents: `AgentError` -> `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`
   - Agents (Meta): `MetaBuilderError(AgentError)` -> `BuilderError`, `MetaValidationError`, `OutputError`
+  - Harness: `HarnessError(FSMError)` -> `HarnessArtifactError`, `HarnessOwnershipError`, `HarnessReentrancyError`, `HarnessConfinementError`
   - Monitor: `MonitorError(Exception)` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError` (inherits from `Exception`, not `FSMError`)
 - **Constants**: Centralized in `constants.py` per package. Reasoning uses `ContextKeys` class with class-level string constants
 - **Security**: Internal context key prefixes (`_`, `system_`, `internal_`, `__`). Forbidden patterns for passwords/secrets/tokens. XML tag sanitization in prompts
@@ -142,19 +159,24 @@ Each sub-package has its own `CLAUDE.md` with detailed file maps, key classes, a
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (3,305)
+pytest                                 # Run all tests (5,107 collected)
 pytest tests/test_fsm_llm/            # Core package tests (1,305 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (137 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (931 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (965 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (270 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
+pytest tests/test_fsm_llm_harness/    # Harness tests (1,751 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 8 suites above sum to 3,293; the remaining 12 are tests/test_integration_ollama.py
+# The 9 suites above sum to 5,078. The remaining 29 are two root-level files:
+#   tests/test_integration_ollama.py (12) and tests/test_packaging.py (17)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
+
+Counts measured with `pytest --collect-only` at commit `ce1757e`; the full run is
+5,080 passed / 25 skipped / 2 xfailed in ~377s.
 
 **Conventions**:
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios
@@ -163,8 +185,14 @@ pytest -m integration                 # Integration tests only
 - **Markers**: `@pytest.mark.slow`, `@pytest.mark.integration`, `@pytest.mark.examples`, `@pytest.mark.real_llm`
 - **Mock LLMs**: `Mock(spec=LLMInterface)` (simple mock) and `MockLLM2Interface` (2-pass architecture) in `conftest.py`
 - **Fixtures**: `sample_fsm_definition` (v3.0), `sample_fsm_definition_v2` (v4.1), `mock_llm_interface`, `mock_llm2_interface`
-- **Environment**: `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`, `TEST_LLM_MODEL`, `OPENAI_API_KEY`
+- **Environment**: `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`, `TEST_LLM_MODEL`, `OPENAI_API_KEY`, `FSM_LLM_HARNESS_LIVE`
 - Workflows tests auto-skip if extension not installed
+- `tests/test_packaging.py` derives the package list from the filesystem
+  (`src/*/__init__.py`) and asserts every package appears in all 14 build/CI
+  slots, so a seventh package that misses a slot fails loudly instead of silently
+- Harness live tests (`test_live_ollama.py`) are double-gated on
+  `FSM_LLM_HARNESS_LIVE=1` **and** a reachable Ollama, env term checked first so
+  `make test` pays no socket timeout at collection
 
 ## Examples
 

@@ -1,0 +1,469 @@
+# fsm_llm_harness -- Iterative-Planner Protocol Harness
+
+An FSM-LLM-native emulation of the iterative-planner protocol: a 6-state
+EXPLORE / PLAN / EXECUTE / REFLECT / PIVOT / CLOSE machine whose hard gates are
+JsonLogic `TransitionCondition` terms, whose memory is a directory of Markdown
+artifacts on disk, and whose autonomy leash halts at exactly 2 fix attempts.
+
+- **Version**: 0.5.0 (synced from fsm_llm)
+- **Extra deps**: none of its own; the extra pulls `fsm-llm[agents]` because the
+  package imports `fsm_llm_agents`
+- **Install**: `pip install fsm-llm[harness]`
+- **CLI**: `fsm-llm-harness` (`python -m fsm_llm_harness`)
+
+**The one idea worth carrying away**: a gate reads the FILESYSTEM, never the
+model's account of the filesystem. `findings_count` is a count of non-empty
+`findings/*.md` files, not the integer the worker reported; a dispatch that holds
+a write tool and claims a write must show a tool call whose target now carries
+bytes. Both mechanisms exist because measurement found 4B models asserting
+completed work over an empty directory 5/5.
+
+## File Map
+
+```
+fsm_llm_harness/
+├── harness.py          # HarnessAgent -- the driver. 6 state-entry handlers, the pre-step
+│                       #   gate, worker dispatch, the leash, Presentation Contracts,
+│                       #   state.md read/write, resume. (3,026 lines -- the biggest file)
+├── artifacts.py        # Pydantic models + Markdown (de)serializers for 15 artifact kinds,
+│                       #   the 9 decision entry-type schemas and the 6 Presentation Contracts
+├── storage.py          # PlanDirectory: plan-id minting, atomic writes, LESSONS eviction,
+│                       #   SYSTEM cap, the 4-plan cross-plan sliding window, RunState
+├── plan_validator.py   # pre_step_gate() (4 slugs, ordered, short-circuit) + audit() (30 checks)
+├── tools.py            # Workspace (confined source tree) + PlanMemory (confined AND
+│                       #   ownership-scoped plan directory) + the 13 agent-facing tools
+├── roles.py            # RoleSpec x6, role prompt builders, build_default_worker_factory
+├── rules.py            # OWNERSHIP, ROLE_BY_STATE, per-state StateRules, EXPLORE_TOPICS
+├── fsm_definition.py   # build_harness_fsm() -- 6 states, 9 transitions, the JsonLogic gates
+├── constants.py        # HarnessStates, Role, ContextKeys, ArtifactNames, GateSlug,
+│                       #   Severity, PlanSchema, Defaults, DRIVER_OWNED_SEEDS
+├── hardening.py        # Small-model reply recovery: strip_model_noise, parse_json_payload,
+│                       #   parse_role_output, coerce_worker_output, retry
+├── exceptions.py       # HarnessError -> Artifact / Ownership / Reentrancy / Confinement
+├── __main__.py         # main_cli(): new / resume / status / validate / close, exit 0/1/2
+├── __version__.py      # Imports from fsm_llm.__version__
+└── __init__.py         # 118 public exports in one literal __all__
+```
+
+## The Protocol Graph (`fsm_definition.py`)
+
+6 states, 9 transitions. **Lower `priority` wins** (`TransitionEvaluator` derives
+confidence as `max(0.1, 1.0 - priority/1000)`), and slots are spaced >= 150 apart
+so two passing edges never fall inside the 0.1 ambiguity threshold -- a gate
+decision must never be routed to the LLM classifier.
+
+| Edge | Priority | Gate (JsonLogic) |
+|---|---|---|
+| EXPLORE -> PLAN | 10 | **HARD**: `findings_count >= threshold` |
+| PLAN -> EXECUTE | 10 | **HARD**: `plan_approved AND iteration < cap` |
+| PLAN -> EXPLORE | 200 | `needs_explore` |
+| EXECUTE -> REFLECT | 10 | `execute_complete` |
+| REFLECT -> CLOSE | 10 | **HARD**: `close_confirmed AND all_criteria_pass` |
+| REFLECT -> EXECUTE | 200 | **HARD**: `completion_fix AND fix_attempts < cap` |
+| REFLECT -> PIVOT | 400 | `needs_pivot` |
+| REFLECT -> EXPLORE | 600 | `needs_explore` |
+| PIVOT -> PLAN | 10 | `pivot_resolved` |
+
+Every condition declares `requires_context_keys`, so a garbled or missing worker
+reply leaves the edge **BLOCKED** rather than accidentally satisfied: the
+evaluator fails a condition whose key is absent before it evaluates the logic.
+
+**No harness state carries `extraction_instructions`.** The field was deleted
+from `StateRules` outright, because `pipeline.py`'s additive bulk-extraction pass
+fires on `bool(state.extraction_instructions)` alone and costs one extra LLM call
+per turn. Measured live: 2.000 -> 1.000 core LLM calls per FSM turn.
+
+## Key Classes
+
+### HarnessAgent (`harness.py`)
+
+The driver. A `fsm_llm_agents.BaseAgent` subclass that builds the harness FSM,
+registers handlers at 6 state entries plus a pre-step gate, and dispatches one
+worker per state entry.
+
+```python
+from fsm_llm_harness import HarnessAgent, ContextKeys
+
+agent = HarnessAgent(
+    worker_factory=my_worker,               # Callable[[RoleRequest], AgentResult]
+    approval_callback=lambda req: ...,      # defaults to a callback that DENIES
+    revert_callback=None,                   # None => compute the revert, execute nothing
+    findings_threshold=3,
+    max_fix_attempts=2,
+    max_leash_grants=2,
+    iteration_hard_cap=6,
+    max_explore_redispatches=9,
+)
+result = agent.run(
+    "add a retry to the uploader",
+    initial_context={ContextKeys.PLAN_DIR: "plans/plan-...", ContextKeys.WORKSPACE_ROOT: "."},
+)
+```
+
+- **Public surface**: `run()`, `api`, `conversation_id`, `presentations`,
+  `reverts`, `audit_issues`, `on_leash_cap`.
+- **`worker_factory=None` is a DIAGNOSTIC mode, not a way to run the protocol**:
+  the FSM still turns, but no gate ever opens because a gate flag records worker
+  or human evidence and there is no worker to produce any. Expect a stall halt.
+- **`approval_callback` defaults to DENY.** An unattended run cannot approve its
+  own plan or close itself.
+- **`revert_callback=None` is not a degraded mode**: the `leash-cap`
+  `RevertDirective` is always computed and scoped (never the plan directory) and
+  reported in the leash block; only its EXECUTION is deferred to a confirmed
+  caller. `git` is deliberately absent from `COMMAND_ALLOWLIST`, so the driver
+  never shells out to it.
+- **One run per instance**: `run()` takes a `threading.Lock`; a worker that
+  re-enters `run`/`api`/`conversation_id` gets `HarnessReentrancyError`.
+
+**Leash arithmetic.** Executor dispatches on ONE plan step are bounded by
+`max_fix_attempts * (1 + max_leash_grants)` = 6 for **any** sequence of
+approvals. The approval callback cannot raise it -- an earlier version reset
+`fix_attempts` on every grant and the leash was decorative.
+
+**Driver-owned context.** `constants.DRIVER_OWNED_SEEDS` seeds 16 driver-owned
+keys with falsy values before turn 1 -- the nine gate flags plus the counters and
+rollups -- and `DRIVER_OWNED_UNSET` names 5 more that must stay ABSENT. This is
+not tidiness: core's
+`_build_field_configs_from_state` mints a REQUIRED extraction config for every
+key named in a transition condition's `requires_context_keys`, so an unseeded
+gate key is a key the LLM is asked to invent every turn. Measured before the
+seeds existed: an LLM emitting `{"plan_approved": true, "close_confirmed": true}`
+drove a full traverse to CLOSE while every worker dispatch failed and a DENYING
+approval callback was never consulted.
+
+### PlanDirectory (`storage.py`)
+
+The driver's accessor for one plan directory. Composes `PlanMemory`, so it
+inherits confinement and ownership rather than restating them; what it adds is
+atomicity, the path layout and the three size policies.
+
+- `PlanDirectory(plan_dir, role=Role.ORCHESTRATOR)` / `PlanDirectory.create(parent)`
+- Reads: `read_text`, `read_artifact`, `list_dir`, `exists`, `finding_path`,
+  `checkpoint_path`, `load_run_state`
+- Writes: `write_text`, `append_text`, `write_artifact`, `save_run_state`
+- CLOSE policies: `enforce_lessons_cap`, `enforce_system_cap`, `apply_sliding_window`
+- Module functions: `mint_plan_id()`, `evict_lessons()`, `check_system_cap()`,
+  `apply_sliding_window()`
+- **`path` vs `root`**: `.path` is the plan directory; `.root` is its PARENT,
+  the confinement root `PlanMemory` was constructed with. Pass `.path` to
+  anything that expects a plan directory.
+
+**Atomicity is load-bearing, not belt-and-braces**: a torn `state.md` still
+PARSES, and a truncated Fix-Attempts section reads as a smaller
+`fix_attempt_count` -- i.e. a leash that resets itself on a crash. Writes go
+through a module-local `_atomic_write_text` that creates its temp file in
+`target.parent` (`os.replace` is atomic only within one filesystem) and
+`os.replace`s it into position.
+
+**Two read paths, on purpose.** `PlanMemory.read_text` -- the tool a ROLE calls
+-- keeps a 64 KB cap, because that cap bounds what an untrusted worker can pull
+into an LLM context window. `PlanDirectory.read_text` -- the DRIVER's accessor,
+never handed to a worker -- reads directly with a separate
+`DRIVER_READ_MAX_BYTES` of 4 MB, because a real `decisions.md` outgrows 64 KB and
+the audit checks that matter most were going dark on the biggest artifact.
+
+**LESSONS is EVICTED, SYSTEM is REFUSED -- the caps are not symmetric.**
+`LESSONS.md` carries a protocol-defined eviction order (the `[I:N]` tag, 5
+protected) and is trimmed, but only for a section the parser can reproduce BYTE
+FOR BYTE from its own parse; anything else raises. `SYSTEM.md` carries no
+ordering and all six of its sections are required, so its cap is measured and an
+over-cap atlas is refused, never trimmed.
+
+### plan_validator (`plan_validator.py`)
+
+```python
+from fsm_llm_harness import pre_step_gate, audit
+
+gate = pre_step_gate("plans/plan-...")        # -> GateResult(passed, slug, detail, exit_code)
+issues = audit("plans/plan-...", workspace_root=".")   # -> list[Issue]
+```
+
+- **`pre_step_gate`** evaluates 4 slugs in `GateSlug.ORDER` -- `no-plan`,
+  `wrong-state`, `leash-cap`, `iteration-cap` -- and the FIRST failure returns.
+  Every failure is HARD (`exit_code == 2`). It reads exactly one file,
+  `state.md`, with a plain `Path.read_text` and writes nothing: routing it
+  through `PlanMemory` would `mkdir` the very directory whose absence `no-plan`
+  exists to report.
+- **`audit`** runs 30 checks (`CHECKS`) and NEVER raises for a finding -- a check
+  that raises is itself reported as an ERROR, so one unreadable artifact cannot
+  suppress the others.
+- The two-tier leash thresholds are deliberately NOT the gate thresholds: 2
+  attempts is legal, 3 is a WARNING (the gate was passed), 4+ is an ERROR.
+  Iteration: WARN at 5, ERROR at 6+.
+
+`CHECKS` (30): `anchor-badprefix`, `anchor-orphan`, `anchor-refs-missing`,
+`anchor-refs-stale`, `anchor-unqualified`, `atlas-absent`, `atlas-cap`,
+`changelog-dref-orphan`, `changelog-malformed`, `checkpoints`, `complexity`,
+`compress-markers`, `decisions-schema`, `evidence`, `findings`,
+`findings-index`, `findings-topic`, `iteration`, `leash`, `lessons-absent`,
+`lessons-cap`, `lessons-eviction`, `ownership`, `plan`, `plan-section`,
+`preamble-mismatch`, `preamble-missing`, `progress`, `state`, `verdict`.
+
+### Workspace / PlanMemory (`tools.py`)
+
+Two confined roots, two vocabularies, ONE `resolve()` chokepoint.
+
+| | `Workspace` | `PlanMemory` |
+|---|---|---|
+| Root | the source tree being edited | one plan directory |
+| Checks | confinement | confinement **+** `rules.OWNERSHIP` |
+| Tools | `read_file`, `write_file`, `append_file`, `delete_file`, `list_dir`, `path_exists`, `grep_files`, `run_command` | `read_plan_file`, `write_plan_file`, `append_plan_file`, `list_plan_dir`, `plan_path_exists` |
+
+- **RESOLVE FIRST, COMPARE SECOND.** A model-emitted sentinel-prefixed absolute
+  path (`/workspace/uploader.py`) is rewritten to root-relative BEFORE the
+  unchanged resolve-and-compare. `/etc/passwd`, `../outside.txt`,
+  `a/../../outside.txt`, symlink escapes and the shared-prefix `ws-evil` case all
+  still raise `HarnessConfinementError` (16 escape shapes pinned, and a 43-case
+  attack found zero escapes).
+- The sentinel LISTS are split (`_WORKSPACE_SENTINELS` vs `_PLAN_SENTINELS`) --
+  a shared list let `Workspace.resolve("/plan/findings/x.md")` write protocol
+  memory into the user's source tree, confined but into the wrong root.
+- `run_command` is **disabled by default**; `COMMAND_ALLOWLIST` is
+  `cat grep head ls tail wc` and `git` is deliberately not in it (it executes
+  repo-local hooks, aliases and pagers). `VERIFICATION_COMMANDS`
+  (`git make mypy pytest ruff`) is a NAMED set a caller may opt into, not a
+  default.
+- Caps: `MAX_READ_BYTES` 64 KB, `MAX_OUTPUT_BYTES` 8 KB, `MAX_LIST_ENTRIES` 200,
+  `MAX_GREP_HITS` 50.
+- **Corrective tool feedback, never re-routing.** A FAILED cross-root call is
+  ANNOTATED with the counterpart tool's name ("that path belongs to the plan
+  directory: use `write_plan_file`"); a FAILED `read_plan_file` on a
+  not-yet-existing protocol artifact is annotated with "`write_plan_file`
+  creates the file, and any missing folder, in one call". Neither converts a
+  failure into a success, and a failed WRITE is never told "write it" -- that
+  would make an ownership refusal read as encouragement.
+- Disk-derived gate values: `gate_files`, `count_gate_files`, `has_bytes`,
+  `derive_disk_counts`, `DISK_DERIVED_COUNTS`. The gate value, the number the
+  model is told, and the re-dispatch loop's condition are one derivation by
+  construction.
+
+### Roles (`roles.py`)
+
+Six frozen `RoleSpec`s, one per state, all derived from `rules.OWNERSHIP` so tool
+scope, prompt text and `owned_artifacts` are the same fact read three times.
+
+| State | Role | Owns | Loop budget | Writable gate keys |
+|---|---|---|---|---|
+| EXPLORE | `explorer` | `findings/` | 14 | `findings_count`, `needs_explore` |
+| PLAN | `plan-writer` | `plan.md`, `decisions.md`, `verification.md` | 10 | `needs_explore`, `total_steps` |
+| EXECUTE | `executor` | `decisions.md`, `changelog.md`, `checkpoints/` | 14 | *(none -- `summary` is schema-visible only)* |
+| REFLECT | `verifier` | *(nothing)* | 12 | `all_criteria_pass`, `needs_pivot`, `completion_fix`, `needs_explore`, `criteria_pass_count`, `criteria_total` |
+| PIVOT | `reviewer` | `findings/` | 10 | `pivot_resolved`, `pivot_reason` |
+| CLOSE | `archivist` | `decisions.md`, `summary.md` + all 6 cross-plan files | 10 | `halt_reason` |
+
+The verifier owns nothing on purpose: a verifier RETURNS results and the driver
+merges them into `verification.md`.
+
+**Prompt placement is a MEASURED result, not a preference.** `build_role_prompt`
+is three filters over one ordered block list:
+`build_role_system_prompt` returns the STANDING blocks (identity, exit gate,
+operative rules, held tools, write scope, stop rule, reply shape),
+`build_role_task_prompt` returns the per-dispatch blocks (goal, position, context
+snapshot, assigned topic), and `build_role_prompt` returns all of them in the
+original order, byte-identical to before the split. On `:4b`, EXECUTE, n=5 per
+arm with workspace bytes stat'd: whole prompt in the user turn wrote 0/5;
+deleting the entire rules block reached 2/5; moving the standing half to the
+SYSTEM message reached 4/5. Nothing was deleted or softened -- every byte the
+model was told before, it is still told.
+
+**Every role schema carries `message: str`.** Without it, core's
+`_parse_response_generation_response` replaces any brace-wrapped reply lacking a
+`message` key with `_GENERIC_FALLBACK_MESSAGE`, and a schema-constrained role
+reply is structurally guaranteed to be exactly that shape. Supplying the key
+makes core's EXISTING rescue fire two rungs earlier; the terminal guard is NOT
+weakened. `message` and `summary` are schema-visible, absent from
+`_WORKER_WRITABLE`, dropped by `coerce_worker_output`, and not required by
+`parse_role_output`.
+
+**`build_default_worker_factory(workspace, ...)`** builds the stock worker.
+`native_function_calling=True` is the default: roles are backed by
+`NativeFunctionCallingReactAgent`, which issues provider-native `tool_calls`.
+The shipped ReAct alternative collapses under role-weight prompts -- measured
+`Stall detected: 3 consecutive iterations with no tool selected`, zero tool
+calls -- so every live number this package carries was taken on the native arm.
+
+### hardening (`hardening.py`)
+
+Small-model reply recovery, all fail-CLOSED.
+
+- `strip_model_noise(text)` -- removes `<think>` blocks and fences.
+- `parse_json_payload(text)` -- prefers the cleaned text, retries the RAW text
+  when the cleaned text yields no object (so a payload that lives only inside a
+  `<think>` block is still recovered; a real payload outside always outranks it).
+- `parse_role_output(...) -> RoleOutput` -- required keys, never `message`/`summary`.
+- `coerce_worker_output(...)` -- exact-type filter down to the state's writable keys.
+- `type_matches`, `as_int`, `retry` (strict allowlist: a garbled reply is NOT
+  retried, it fails closed), `RETRYABLE_EXCEPTIONS`.
+
+**Two pinned-not-endorsed behaviours** (documented in their tests): a payload
+whose own STRING VALUE contains `<think>` or a fence comes back with that value
+blanked; and `parse_json_payload`'s raw-text retry means a `<think>`-wrapped
+draft can win when nothing else parses. Both are currently harmless; neither is
+a guarantee.
+
+## Artifacts (`artifacts.py`)
+
+15 artifact kinds with pydantic models and Markdown (de)serializers. **Aim is
+isomorphism with the source protocol's format -- same section names, same order,
+same strict grammars -- not byte-identical Markdown.**
+
+Per-plan: `state.md`, `plan.md`, `decisions.md`, `findings.md`, `findings/`,
+`progress.md`, `verification.md`, `changelog.md`, `summary.md`, `checkpoints/`.
+Cross-plan: `FINDINGS.md`, `DECISIONS.md`, `LESSONS.md`, `SYSTEM.md`, `INDEX.md`.
+
+Strict grammars the validator leans on:
+- `plan.md`: 11 `##` sections in exact order (`PlanSchema.SECTIONS`), positional.
+- `decisions.md`: `## D-NNN | PHASE | YYYY-MM-DD` header, a `**Trade-off**:`
+  field containing `at the cost of`, and 9 entry-type field sets
+  (`DECISION_ENTRY_SCHEMAS`).
+- `verification.md`: a criteria table, 3 mandatory additional-check rows
+  (`MANDATORY_ADDITIONAL_CHECKS`), a 5-bullet verdict (`VERDICT_BULLETS`), a
+  recommendation from `VERDICT_RECOMMENDATIONS`, and evidence-shape rules
+  (`evidence_is_acceptable` / `REJECTED_EVIDENCE`).
+- `changelog.md`: 8 pipe-delimited fields, each regex-validated
+  (`parse_changelog_line`).
+
+`PRESENTATION_CONTRACTS` carries the 6 contracts (`PC-EXPLORE`, `PC-PLAN`,
+`PC-EXECUTE-STEP`, `PC-EXECUTE-LEASH`, `PC-REFLECT`, `PC-PIVOT`) as
+required-field / floor data, checked by `missing_floor_fields`.
+
+## Ownership Model (`rules.OWNERSHIP`)
+
+16 artifacts -> the roles permitted to WRITE them. `PlanMemory.authorise` reads
+this table directly, so an edit here changes what a live role can write.
+
+Two entries look like transcription slips and are not:
+1. `findings/` is `(EXPLORER, REVIEWER)` -- PIVOT's operative rules order the
+   reviewer to correct stale findings in place, so removing REVIEWER would order
+   a role to write a file it holds no tool for.
+2. `decisions.md` has FOUR owners -- the writes are disjoint and sequenced by the
+   driver (one appended entry per phase), and the `## D-NNN | PHASE | date`
+   header records which phase wrote each one.
+
+## CLI (`__main__.py`)
+
+```bash
+fsm-llm-harness new "add a retry to the uploader"        # mint + drive
+fsm-llm-harness new "..." --create-only                  # mint + seed, no LLM call
+fsm-llm-harness resume plans/plan-2026-07-22T101500-1a2b3c4d
+fsm-llm-harness status   plans/plan-...
+fsm-llm-harness validate plans/plan-... [--workspace .]
+fsm-llm-harness close    plans/plan-... [--apply]
+```
+
+**Exit codes -- exactly three, and the third is a contract.**
+
+| Code | Meaning |
+|---|---|
+| `0` | pass |
+| `1` | a negative answer, or no answer: an `audit()` ERROR, a failed run, a missing goal, a broken install |
+| `2` | **RESERVED**: a HARD `pre_step_gate` refusal |
+
+Because `2` is reserved, a `_Parser` subclass overrides `argparse`'s `error()` to
+exit `1` instead of argparse's conventional `2` -- so `fsm-llm-harness --nope`
+reports 1 where `ls --nope` reports 2. The reason is asymmetric risk: a wrapper
+that retries on "usage error" would otherwise silently retry past a `leash-cap`.
+`--help` and `--version` are untouched and exit 0.
+
+`status` calls the gate TWICE on purpose: once with the defaults (which is what
+answers `no-plan` without constructing a `PlanDirectory`, whose `PlanMemory`
+would `mkdir` the directory), then again with `expected_state` read back from
+`state.md`, so a healthy plan sitting in EXPLORE is not reported `wrong-state`.
+
+`close` opens the directory as `Role.ARCHIVIST` (the CLOSE policies act on
+archivist-owned cross-plan files), is DRY-RUN unless `--apply` is passed, and
+REFUSES to compress at all when `audit()` finds ERROR-severity issues.
+
+Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
+
+## Testing
+
+```bash
+pytest tests/test_fsm_llm_harness/          # 1,751 tests, 10 test files
+```
+
+| File | Tests |
+|---|---|
+| `test_roles_and_tools.py` | 441 |
+| `test_artifacts.py` | 273 |
+| `test_harness_agent.py` | 260 |
+| `test_hardening.py` | 258 |
+| `test_plan_validator.py` | 191 |
+| `test_cli.py` | 101 |
+| `test_storage.py` | 93 |
+| `test_fsm_definition.py` | 87 |
+| `test_extraction_cost.py` | 24 |
+| `test_live_ollama.py` | 23 (14 live, gated off by default) |
+
+**Live tests are DOUBLE-gated** and auto-skip: they need both
+`FSM_LLM_HARNESS_LIVE=1` and a reachable Ollama, with the env term checked FIRST
+so `make test` never pays a socket timeout at collection.
+
+```bash
+FSM_LLM_HARNESS_LIVE=1 pytest tests/test_fsm_llm_harness/test_live_ollama.py
+```
+
+The live file splits FIDELITY by what each criterion is a claim about. L1/L2/L3
+are claims about the HARNESS (an audit verdict, a counter, an FSM edge), so the
+FSM runs live while the role workers are SCRIPTED -- they still write REAL
+artifacts through a role-scoped `PlanMemory`, so `OWNERSHIP` authorises them
+exactly as it would a live role. L4/L5 are claims about the MODEL, so they run
+the real `build_default_worker_factory` and report raw k/n. Running everything
+end-to-end would make L2 unfalsifiable: "the leash halted at exactly 2" only
+means something when the executor is GUARANTEED to fail.
+
+## Status -- what is measured, and what is not
+
+Measured live on `ollama_chat/qwen3.5:4b`. Small n is stated as k/n, not as a
+rate, and the bars are the ones the plan set in advance.
+
+| Criterion | Bar | Measured |
+|---|---|---|
+| L1 full EXPLORE->CLOSE traverse, `audit()` zero ERRORs | pass | **3/3** |
+| L2 leash halts at exactly 2 fix attempts, not resettable by an approving callback | pass | **6/6** |
+| L3 REFLECT -> PIVOT -> PLAN loop-back completes | pass | **3/3** |
+| L5 >= 3 distinct non-empty `findings/*.md` on disk from dispatches | >= 4/5 | **4/5 -- met** |
+| L4 write tool issued AND workspace bytes on disk | >= 4/5 | **3/5 -- NOT met** |
+| L4 content-hash match (the strict reading of the same criterion) | >= 1 | **0/10 -- NOT met** |
+
+**L4 is the open one, and it is reported as it measured.** Earlier benches in
+this package's history scored higher on the loose form; the discrepancy could not
+be attributed, because those bench scripts were transient and no longer exist, so
+a diff against them is not available. What the traces DO show is that the misses
+spend their budget prefixing the workspace file with the plan-directory path
+(`read_plan_file('<plan-id>/uploader.py')`) -- the wrong-ROOT failure mode, not a
+wrong-TOOL one. Tool IDENTITY selection is flawless (0 hallucinated tool names in
+298 observed calls); tool ROOT selection is not, and the error concentrates
+exactly where both roots are in scope.
+
+Offline, the package is green: 1,751 tests, `ruff` clean, `mypy` 0 errors.
+
+**Not claimed**: that the harness is production-ready, or that a 4B model drives
+it unattended to a useful result. What IS claimed is that the gates are
+mechanical -- they read the filesystem, and a confident sentence cannot open one.
+
+## Exceptions
+
+```
+FSMError
+└── HarnessError
+    ├── HarnessArtifactError(artifact, message, cause=None)  # unreadable/unparseable/over-cap
+    ├── HarnessOwnershipError(artifact, role, owner)         # OWNERSHIP denies this role the write
+    ├── HarnessReentrancyError(role)                         # a worker re-entered the driver
+    └── HarnessConfinementError(path, root)                  # a path escaped its root
+```
+
+## Conventions specific to this package
+
+- **Constants live in `constants.py`**; `rules.py` owns protocol CONTENT (prose,
+  ownership, topics) and `fsm_definition.py` owns only graph shape and gate logic.
+- **One literal `__all__`** in `__init__.py` -- no dynamic extend/append.
+- **Anchored decisions**: non-obvious code carries a
+  `# DECISION plan-<full-plan-id>/D-NNN` comment stating what NOT to do and why.
+  The full plan-id keeps the `THHMMSS` segment; the commit-tag form drops it.
+  Writing the tag form into an anchor makes it invisible to the anchor audit.
+- **Interface contracts** on shared helpers name their call sites, so a reader
+  can see at the definition whether a change is local.
+- **Evidence over testimony.** If a number can be derived from the filesystem,
+  derive it. If it can only be claimed, treat it as advisory and record it as
+  such.

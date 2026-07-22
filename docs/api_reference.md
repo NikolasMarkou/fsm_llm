@@ -246,6 +246,132 @@ await engine.shutdown()
 
 11 step types: `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`, `conversation_step`, `agent_step`, `retry_step`, `switch_step`.
 
+## Harness (`fsm_llm_harness`)
+
+The iterative-planner protocol as a 6-state FSM over a plan directory. Requires
+`pip install fsm-llm[harness]`. 118 public names in one literal `__all__`; the
+load-bearing ones are below.
+
+### HarnessAgent -- the driver
+
+```python
+from fsm_llm_harness import HarnessAgent, Workspace, build_default_worker_factory, ContextKeys
+
+workspace = Workspace("./src")                       # confined source-tree root
+agent = HarnessAgent(
+    worker_factory=build_default_worker_factory(workspace),
+    approval_callback=None,      # None => a callback that DENIES every human gate
+    revert_callback=None,        # None => compute the leash revert, execute nothing
+    findings_threshold=3,        # EXPLORE -> PLAN
+    max_fix_attempts=2,          # the autonomy leash
+    max_leash_grants=2,          # human leash-continues honoured per plan step
+    iteration_hard_cap=6,        # PLAN -> EXECUTE
+    max_explore_redispatches=9,  # extra EXPLORE dispatches per run while blocked
+)
+result = agent.run(
+    "add a retry to the uploader",
+    initial_context={
+        ContextKeys.PLAN_DIR: "plans/plan-2026-07-22T101500-1a2b3c4d",
+        ContextKeys.WORKSPACE_ROOT: "./src",
+    },
+)
+agent.presentations   # list[Presentation] -- the Presentation Contracts emitted
+agent.reverts         # list[RevertDirective] -- computed, not executed
+agent.audit_issues    # list[Issue] | None -- the CLOSE audit, if CLOSE was reached
+```
+
+Executor dispatches on one plan step are bounded by
+`max_fix_attempts * (1 + max_leash_grants)` for **any** sequence of approvals --
+an approving callback cannot raise it. `worker_factory=None` is a diagnostic mode:
+the FSM turns but no gate opens.
+
+Worker seam: `WorkerFactory = Callable[[RoleRequest], AgentResult]`. `RoleSpec`
+(one per state) carries `tool_scope`, `plan_tool_scope`, `owned_artifacts`,
+`output_schema`, `expected_keys`, `writable_keys`, `max_iterations`;
+`ROLE_SPECS` / `get_role_spec(state)` expose them.
+
+### Plan directory, gate and audit
+
+```python
+from fsm_llm_harness import PlanDirectory, Role, ArtifactNames, StateDoc, pre_step_gate, audit
+
+directory = PlanDirectory.create("plans", role=Role.ORCHESTRATOR)   # mints plan-<ts>-<hex8>
+directory.write_text(ArtifactNames.STATE, StateDoc(state="explore").to_markdown())  # atomic
+run_state = directory.load_run_state()          # RunState(plan_id, doc); .state == "explore"
+
+gate = pre_step_gate(directory.path)            # GateResult(passed, slug, detail, exit_code)
+issues = audit(directory.path, workspace_root=".")     # list[Issue]; [] means clean
+```
+
+`directory.path` is the plan directory; `directory.root` is its **parent** (the
+confinement root `PlanMemory` was given), so pass `path` to anything that expects
+a plan directory. `mint_plan_id()` is exported separately for callers that want
+the id without a directory.
+
+`pre_step_gate` evaluates 4 slugs in `GateSlug.ORDER` (`no-plan`, `wrong-state`,
+`leash-cap`, `iteration-cap`), short-circuits on the first failure, and never
+raises -- an unreadable `state.md` **is** the `no-plan` answer. Every failure is
+HARD and carries `exit_code == 2`. `audit` runs the 30 checks in `CHECKS` and
+reports a check that raises as an ERROR rather than letting it suppress the rest.
+
+CLOSE-phase size policies, all pure and non-writing: `evict_lessons(doc)` and
+`apply_sliding_window(doc)` return `(trimmed_doc, report)`, while
+`check_system_cap(doc)` returns a `CapReport` only -- `SYSTEM.md` is measured and
+REFUSED over its cap, never trimmed, because it carries no eviction order and all
+six of its sections are required. `PlanDirectory.enforce_lessons_cap` /
+`enforce_system_cap` / `apply_sliding_window` are the wrappers that write.
+
+### Confined tools
+
+```python
+from fsm_llm_harness import Workspace, PlanMemory, build_workspace_tools, build_plan_tools, Role
+
+workspace = Workspace("./src")                          # confinement only
+memory = PlanMemory("plans/plan-...", role=Role.EXPLORER)  # confinement + ownership
+registry = build_workspace_tools(workspace, allowed=("read_file", "grep_files"))
+build_plan_tools(memory, allowed=("write_plan_file",), registry=registry)
+```
+
+Tool name groups: `READ_ONLY_TOOLS`, `WRITE_TOOLS`, `SHELL_TOOLS`,
+`PLAN_READ_TOOLS`, `PLAN_WRITE_TOOLS`. `run_command` is off unless
+`Workspace(..., allow_shell=True)`; `COMMAND_ALLOWLIST` is
+`cat grep head ls tail wc` (`git` is deliberately excluded), and
+`VERIFICATION_COMMANDS` (`git make mypy pytest ruff`) is an opt-in set.
+An escape raises `HarnessConfinementError`; an ownership violation raises
+`HarnessOwnershipError`.
+
+### Artifacts and hardening
+
+`ARTIFACT_MODELS` maps each of the 15 artifact names to its pydantic model -- 14
+classes, since `FINDINGS.md` and `DECISIONS.md` share `ConsolidatedDoc`:
+`StateDoc`, `PlanDoc`, `DecisionsDoc`, `FindingsIndexDoc`, `FindingsTopicDoc`,
+`ProgressDoc`, `VerificationDoc`, `ChangelogDoc`, `CheckpointDoc`, `SummaryDoc`,
+`ConsolidatedDoc`, `LessonsDoc`, `SystemAtlasDoc`, `IndexDoc`. Every one carries
+`from_markdown()` / `to_markdown()`. Contract tables: `DECISION_ENTRY_SCHEMAS`,
+`PRESENTATION_CONTRACTS`, `MANDATORY_ADDITIONAL_CHECKS`, `VERDICT_BULLETS`,
+`VERDICT_RECOMMENDATIONS`, `REJECTED_EVIDENCE`.
+
+Small-model reply recovery (`hardening`): `strip_model_noise`,
+`parse_json_payload`, `parse_role_output` -> `RoleOutput`, `coerce_worker_output`,
+`type_matches`, `as_int`, `retry`. All fail CLOSED -- a garbled reply is never
+retried into a pass.
+
+### CLI
+
+```bash
+fsm-llm-harness new "add a retry to the uploader" [--create-only] [--model M] [--workspace .]
+fsm-llm-harness resume   plans/plan-...  [--goal G]
+fsm-llm-harness status   plans/plan-...
+fsm-llm-harness validate plans/plan-...  [--workspace .]
+fsm-llm-harness close    plans/plan-...  [--workspace .] [--apply]
+```
+
+Exit codes: `0` pass, `1` a negative answer (audit ERRORs, a failed run, a usage
+fault), `2` **RESERVED** for a HARD `pre_step_gate` refusal. Because `2` is
+reserved, argparse usage errors exit `1` rather than argparse's conventional `2`.
+Model resolution: `--model` > `$LLM_MODEL` > package default. `close` is DRY-RUN
+without `--apply` and refuses to compress a directory with audit ERRORs.
+
 ## Monitor (`fsm_llm_monitor`)
 
 ```python
@@ -274,6 +400,7 @@ FSMError
 ├── HandlerSystemError (-> HandlerExecutionError)
 ├── ReasoningEngineError (-> ReasoningExecutionError, ReasoningClassificationError)
 ├── WorkflowError (-> Definition, Step, Instance, Timeout, Validation, State, Event, Resource)
+├── HarnessError (-> HarnessArtifactError, HarnessOwnershipError, HarnessReentrancyError, HarnessConfinementError)
 └── AgentError (-> ToolExecution, ToolNotFound, ToolValidation, Budget, Approval, Timeout, Evaluation, Decomposition)
     └── MetaBuilderError (-> Builder, MetaValidation, Output)
 

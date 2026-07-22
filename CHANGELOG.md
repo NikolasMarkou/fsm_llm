@@ -5,6 +5,112 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — new package: `fsm_llm_harness` (extra: `pip install fsm-llm[harness]`)
+
+An FSM-LLM-native emulation of the iterative-planner protocol: a 6-state
+EXPLORE / PLAN / EXECUTE / REFLECT / PIVOT / CLOSE machine with mechanically
+enforced gates, filesystem-as-memory artifacts, per-role file ownership, a
+2-attempt autonomy leash, and a small-model hardening layer. Additive and
+backward-compatible: **no Python file under `src/fsm_llm/` was modified**, and the
+2-pass core contract is unchanged. The only other packages touched are
+`fsm_llm_agents` (two files, listed under *Changed* below) and packaging/CI.
+
+- **`HarnessAgent`** — the protocol driver. Builds the harness FSM, registers a
+  handler per state entry, dispatches one worker role per entry, and owns all nine
+  gate flags. Executor dispatches on one plan step are bounded by
+  `max_fix_attempts * (1 + max_leash_grants)` for **any** sequence of approvals;
+  the approval callback cannot raise it. The default approval callback DENIES, so
+  an unattended run cannot approve its own plan or close itself.
+- **`build_harness_fsm()`** — 6 states, 9 transitions. Every gate is a JsonLogic
+  `TransitionCondition`, so a gated edge is DETERMINISTIC or BLOCKED, never an LLM
+  judgement call, and every condition declares `requires_context_keys` so a
+  garbled worker reply leaves the edge blocked rather than accidentally satisfied.
+- **`artifacts`** — pydantic models and Markdown (de)serializers for 15 artifact
+  kinds, the 9 decision entry-type schemas and the 6 Presentation Contracts, with
+  strict grammars (`plan.md`'s 11 ordered sections, `decisions.md`'s
+  `## D-NNN | PHASE | YYYY-MM-DD` header, `changelog.md`'s 8 pipe-delimited fields).
+- **`storage.PlanDirectory`** — plan-id minting, atomic artifact writes
+  (`mkstemp` in the target's own directory + `os.replace`), LESSONS `[I:N]`
+  eviction, the SYSTEM line cap, the 4-plan cross-plan sliding window, and
+  resumable run state read back from `state.md` itself.
+- **`plan_validator`** — `pre_step_gate()` (4 slugs, ordered, short-circuit, all
+  HARD) and `audit()` (30 structural checks; a check that raises is reported as an
+  ERROR rather than suppressing the rest).
+- **`tools`** — `Workspace` (confined source tree) and `PlanMemory` (confined
+  **and** ownership-scoped plan directory) sharing one `resolve()` chokepoint,
+  plus 13 agent-facing tools. `run_command` is off by default and `git` is
+  deliberately absent from the command allowlist.
+- **`roles`** — six frozen `RoleSpec`s derived from a single `OWNERSHIP` table, so
+  a role's tool scope, its prompt text and its owned artifacts are one fact read
+  three times. `build_default_worker_factory()` builds the stock worker, backed by
+  `NativeFunctionCallingReactAgent`.
+- **`hardening`** — `strip_model_noise`, `parse_json_payload`,
+  `parse_role_output`, `coerce_worker_output`, `retry`. All fail CLOSED: a garbled
+  reply is never retried into a pass.
+- **`fsm-llm-harness` CLI** — `new` / `resume` / `status` / `validate` / `close`,
+  with exactly three exit codes (`0` pass, `1` negative answer, `2` RESERVED for a
+  HARD gate refusal). `close` is dry-run unless `--apply` and refuses to compress
+  a directory with audit ERRORs.
+
+**Gates read the filesystem, not the model's report.** `findings_count` is a count
+of non-empty `findings/*.md` files; a dispatch that holds a write tool and claims a
+write must show a tool call whose target now carries bytes; and a failed
+observation leaves a gate value unchanged rather than writing a zero. This is the
+package's central design commitment, and it is a response to measurement: a small
+local model asserted completed code changes over an untouched workspace, and
+claimed three findings over an empty directory. Prompt wording did not fix it.
+
+**Status, stated as measured.** Offline the package is green (1,751 tests, `ruff`
+clean, `mypy` 0 errors). Live on a local 4B model, the harness-level criteria pass
+— a full EXPLORE→CLOSE traverse whose plan directory audits with zero ERRORs (3/3),
+the leash halting at exactly 2 attempts and not resettable by an approving callback
+(6/6), a REFLECT→PIVOT→PLAN loop-back (3/3) — and the findings criterion meets its
+bar (4/5). The remaining model-level criterion, "a role dispatch issues a write
+tool AND workspace bytes land on disk", measures **3/5 against its own 4/5 bar and
+is NOT met**; the traces attribute the misses to wrong-ROOT tool calls (a workspace
+file addressed through the plan directory), not to wrong-tool selection. This is
+recorded rather than rounded up: the package is not claimed to be production-ready,
+and a small model is not claimed to drive it unattended to a useful result.
+
+### Added — packaging and CI
+
+- `harness` extra (pulls `fsm-llm[agents]`; no third-party dependencies of its
+  own), included in `all`, in `make install-dev`, in `tox`'s `extras`, and in the
+  CI install list.
+- `fsm_llm_harness` added to the mypy target list, the coverage target list, the
+  ruff `known-first-party` list, `package-data`, and `MANIFEST.in`.
+- **`tests/test_packaging.py`** — derives the package list from the filesystem
+  (`src/*/__init__.py`) and asserts every package appears in all 14 build/CI slots,
+  so a future package that misses a slot fails loudly instead of silently. The one
+  pre-existing gap (`fsm_llm_monitor` in `MANIFEST.in`) is a named, ratcheted
+  exception rather than a weakened assertion.
+
+### Changed — `fsm_llm_agents`
+
+Both changes are gated so they are provably inert off Ollama; all pre-existing
+`test_native_fc.py` tests pass unmodified in substance.
+
+- **`NativeFunctionCallingReactAgent`** now applies `apply_ollama_params` /
+  `prepare_ollama_messages` behind an `is_ollama_model` gate, recovers content from
+  the reasoning trace only when there are no `tool_calls`, absorbs a malformed
+  tool-call turn as a failed TURN (the loop breaks; the trace, the bytes already
+  written and any answer survive) instead of losing the whole run, and gained an
+  optional `system_policy` appended to its system prompt.
+- **`AgentResult.success` is honest for `native_fc`** — it now requires a final,
+  tool-call-free answer AND a loop that did not exhaust `max_iterations`. It
+  previously returned `True` for a run that called tools, produced nothing and
+  concluded nothing, which made it useless as a caller's failure signal.
+- **`NativeFunctionCallingReactAgent` structured output** — when
+  `AgentConfig.output_schema` is set and the free-text answer does not validate,
+  exactly ONE additional completion is made carrying `response_format=` and **no**
+  `tools=`. The two are never stacked in one call. Previously `output_schema` was
+  silently inert on this agent's `run()` path.
+- **`base._output_response_format(schema)`** extracted from `_init_context` and
+  shared with the above, so there is one response-format envelope builder rather
+  than two that can drift.
+
 ## [0.5.0] - 2026-07-21
 
 ### Added — agent layer additive improvements (`fsm_llm_agents`)

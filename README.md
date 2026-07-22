@@ -33,7 +33,8 @@ FSM-LLM bridges this gap:
 - **Session persistence** -- `SessionStore` / `FileSessionStore` save and restore conversation state across process restarts with atomic writes.
 - **Working memory** -- `WorkingMemory` provides named buffers (core, scratch, environment, reasoning) for structured agent context.
 - **100+ LLM providers** -- OpenAI, Anthropic, Ollama, Azure, AWS Bedrock, and more via litellm.
-- **4 extension packages** -- Reasoning, workflows, agents (12+ patterns + swarm, agent graph, MCP, A2A, SOPs, semantic tools, meta builder), and monitoring dashboard (with OTEL export).
+- **5 extension packages** -- Reasoning, workflows, agents (12+ patterns + swarm, agent graph, MCP, A2A, SOPs, semantic tools, meta builder), monitoring dashboard (with OTEL export), and the iterative-planner harness.
+- **Iterative-planner harness** -- A 6-state planning protocol driven as a real FSM, with JsonLogic hard gates, Markdown artifacts on disk as memory, per-role file ownership, and a 2-attempt autonomy leash. Gate values are derived from the filesystem, so a confident sentence cannot open a gate.
 - **Security built in** -- Internal key prefixes, forbidden context patterns, XML tag sanitization. Compromised litellm 1.82.7/1.82.8 are excluded; `make audit` scans for malicious `.pth` injections.
 
 ## Installation
@@ -55,6 +56,7 @@ Or pick what you need:
 | `reasoning` | `pip install fsm-llm[reasoning]` | None |
 | `agents` | `pip install fsm-llm[agents]` | None |
 | `workflows` | `pip install fsm-llm[workflows]` | None |
+| `harness` | `pip install fsm-llm[harness]` | None (pulls `fsm-llm[agents]`) |
 | `monitor` | `pip install fsm-llm[monitor]` | fastapi, uvicorn, jinja2 |
 | `mcp` | `pip install fsm-llm[mcp]` | mcp (>=1.0.0) |
 | `otel` | `pip install fsm-llm[otel]` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
@@ -192,6 +194,40 @@ Pages: Dashboard, Control Center, Visualizer, Conversations, Logs, Builder, Sett
 fsm-llm-meta  # Interactive CLI for building FSMs, workflows, agents
 ```
 
+### Harness -- the iterative-planner protocol as an FSM
+
+A 6-state planning protocol -- EXPLORE, PLAN, EXECUTE, REFLECT, PIVOT, CLOSE --
+driven as a real FSM over a plan directory of Markdown artifacts.
+
+```bash
+fsm-llm-harness new "add a retry to the uploader"
+fsm-llm-harness status   plans/plan-2026-07-22T101500-1a2b3c4d
+fsm-llm-harness validate plans/plan-2026-07-22T101500-1a2b3c4d
+```
+
+```python
+from fsm_llm_harness import HarnessAgent, Workspace, build_default_worker_factory, ContextKeys
+
+workspace = Workspace("./src")
+agent = HarnessAgent(worker_factory=build_default_worker_factory(workspace))
+result = agent.run(
+    "add a retry to the uploader",
+    initial_context={ContextKeys.PLAN_DIR: "plans/plan-...", ContextKeys.WORKSPACE_ROOT: "./src"},
+)
+```
+
+All nine of its transitions are gated by JsonLogic conditions -- four of them
+HARD -- so a gated edge is DETERMINISTIC or BLOCKED, never an LLM judgement call.
+Every condition declares its required context keys, so a garbled worker reply
+leaves the edge blocked rather than accidentally satisfied. Gate values are derived
+from the filesystem rather than read from the model's report, each role holds only
+the file-writing tools its ownership entry grants it, and the autonomy leash halts
+at exactly 2 fix attempts and cannot be reset from inside an approving callback.
+`fsm-llm-harness validate` audits a plan directory against 30 structural checks.
+See [`src/fsm_llm_harness/CLAUDE.md`](src/fsm_llm_harness/CLAUDE.md) for the
+protocol graph, the ownership table, and an honest account of what has and has not
+been measured on a small local model.
+
 ## CLI Tools
 
 | Command | Description |
@@ -201,6 +237,7 @@ fsm-llm-meta  # Interactive CLI for building FSMs, workflows, agents
 | `fsm-llm-validate --fsm <path.json>` | Validate FSM definition |
 | `fsm-llm-monitor` | Launch web monitoring dashboard |
 | `fsm-llm-meta` | Interactive artifact builder |
+| `fsm-llm-harness <new\|resume\|status\|validate\|close>` | Drive or audit an iterative-planner plan directory |
 
 ## Examples
 
@@ -223,7 +260,7 @@ Run with: `python examples/<category>/<name>/run.py`. See `EVALUATE.md` for eval
 
 ```bash
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
-make test           # Run full test suite (2,382 tests)
+make test           # Run full test suite (5,107 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
@@ -239,7 +276,7 @@ make coverage       # Tests with coverage report
 - [FSM Design Patterns](docs/fsm_design.md) -- patterns, anti-patterns, real-world examples
 - [Handler Development](docs/handlers.md) -- 8 timing points, builder API, error handling
 
-Each extension package also ships a `CLAUDE.md` developer reference and a `README.md`: [reasoning](src/fsm_llm_reasoning/CLAUDE.md), [workflows](src/fsm_llm_workflows/CLAUDE.md), [agents](src/fsm_llm_agents/CLAUDE.md), [monitor](src/fsm_llm_monitor/CLAUDE.md).
+Each extension package also ships a `CLAUDE.md` developer reference: [reasoning](src/fsm_llm_reasoning/CLAUDE.md), [workflows](src/fsm_llm_workflows/CLAUDE.md), [agents](src/fsm_llm_agents/CLAUDE.md), [monitor](src/fsm_llm_monitor/CLAUDE.md), [harness](src/fsm_llm_harness/CLAUDE.md). All but the harness also ship a package-level `README.md`.
 
 ## Contributing
 
