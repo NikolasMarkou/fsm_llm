@@ -595,6 +595,7 @@ class HarnessAgent(BaseAgent):
         max_leash_grants: int = Defaults.MAX_LEASH_GRANTS,
         iteration_hard_cap: int = Defaults.ITERATION_HARD_CAP,
         max_explore_redispatches: int = Defaults.MAX_EXPLORE_REDISPATCHES,
+        max_plan_redispatches: int = Defaults.MAX_PLAN_REDISPATCHES,
         max_stall_turns: int = _DEFAULT_MAX_STALL_TURNS,
         **api_kwargs: Any,
     ) -> None:
@@ -629,6 +630,10 @@ class HarnessAgent(BaseAgent):
                 while the findings gate is BLOCKED.  Bounds total EXPLORE
                 dispatches at ``(genuine entries) + max_explore_redispatches``.
                 Spending it without satisfying the gate is a HALT, never a pass.
+            max_plan_redispatches: EXTRA plan-writer dispatches spent per RUN
+                after a FAILED plan-writer reply.  Bounds total PLAN dispatches
+                per ``(iteration, step)`` at ``1 + max_plan_redispatches``.
+                Spending it is a HALT with the ``plan-cap`` slug, never a pass.
             max_stall_turns: Consecutive no-progress turns before halting.
             api_kwargs: Forwarded to ``fsm_llm.API``.
         """
@@ -640,6 +645,7 @@ class HarnessAgent(BaseAgent):
         self.max_leash_grants = max_leash_grants
         self.iteration_hard_cap = iteration_hard_cap
         self.max_explore_redispatches = max_explore_redispatches
+        self.max_plan_redispatches = max_plan_redispatches
         self.max_stall_turns = max_stall_turns
 
         # DECISION plan-2026-07-21T125237-191b2eb2/D-015
@@ -706,6 +712,15 @@ class HarnessAgent(BaseAgent):
         #      from an approving callback zeroing its own counter) is what it
         #      was written about. See decisions.md D-029.
         self._explore_redispatches = 0
+        # DECISION plan-2026-07-22T184813-6549c7cb/D-001
+        #: The bounded PLAN re-dispatch budget spent this run.  Driver run
+        #: state for exactly the reasons ``_explore_redispatches`` above is
+        #: (D-029): no worker can reach it, the approval callback cannot reset
+        #: it, and only ``_run_once`` resets it.  Do NOT fold it into
+        #: ``fix_attempts``/the leash: a PLAN failure is not an EXECUTE fix
+        #: attempt and must not share budget or reset semantics with one.
+        #: See decisions.md D-001 (plan-2026-07-22T184813-6549c7cb).
+        self._plan_redispatches = 0
         #: Slugs handed out to EXPLORE dispatches this run, in order.  Driver
         #: run state for exactly the reasons ``_explore_redispatches`` above is
         #: (D-029): a worker cannot reach it, and only ``_run_once`` resets it.
@@ -872,6 +887,7 @@ class HarnessAgent(BaseAgent):
         self._stall_turns = 0
         self._stall_signature = None
         self._explore_redispatches = 0
+        self._plan_redispatches = 0
         self._assigned_topics = []
         self._presentations = []
         self._reverts = []
@@ -1932,7 +1948,7 @@ class HarnessAgent(BaseAgent):
         if state == HarnessStates.EXPLORE:
             return self._after_explore_dispatch(result, error, context)
         if state == HarnessStates.PLAN:
-            return self._after_plan_dispatch(result, context)
+            return self._after_plan_dispatch(result, error, context)
         if state == HarnessStates.REFLECT:
             return self._after_reflect_dispatch(context)
         if state == HarnessStates.CLOSE:
@@ -2130,11 +2146,83 @@ class HarnessAgent(BaseAgent):
         )
 
     def _after_plan_dispatch(
-        self, result: AgentResult | None, context: Mapping[str, Any]
+        self,
+        result: AgentResult | None,
+        error: Exception | None,
+        context: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Ask the human to approve the plan."""
-        if result is None or not result.success:
+        """Retry a FAILED plan-writer under a bounded budget, or seek approval.
+
+        Returns:
+            A delta re-opening the PLAN dispatch key, or one recording the
+            ``plan-cap`` halt, or the approval outcome on a successful reply
+            (or ``{}`` when there is no worker at all).
+        """
+        # DECISION plan-2026-07-22T184813-6549c7cb/D-001
+        # PLAN previously dispatched exactly ONCE per (iteration, step): this
+        # handler returned {} on a failed reply, nothing re-opened the dispatch
+        # key, and the eventual halt was the 3-turn stall detector's -- which
+        # always raises slug=None. MEASURED (L6 B0 run 3,
+        # scripts/bench_data/l6-e2e/rows.jsonl, `:4b`): one empty plan-writer
+        # reply was terminal; the run recorded plan_md_bytes 0 and halt_slug
+        # null -- the slugless stall shape the L6 floor exists to catch. The
+        # fix mirrors `_after_explore_dispatch` (D-028/D-029), and the same
+        # properties are load-bearing:
+        #   1. A retry is authorised EXPLICITLY, by removing the SAME
+        #      (state, iteration, step) key from the ledger. Do NOT widen
+        #      `_dispatch_key` with a retry counter instead: D-017 forbids
+        #      exactly that "fix" -- a wider key silently authorises an
+        #      unbounded number of attempts.
+        #   2. The BOUND is `self._plan_redispatches` -- driver run state on
+        #      `self` (see its D-001 block in `__init__`), never a context
+        #      key, reset only by `_run_once`, unreachable from any worker
+        #      and from `_request_approval`'s callback. A PLAN failure is NOT
+        #      an EXECUTE fix attempt: it touches neither `fix_attempts` nor
+        #      the leash, and `_check_iteration_cap` (D-019, a distinct halt
+        #      on genuine PLAN re-entry) is untouched.
+        #   3. Spending the bound HALTS honestly: LAST_GATE_SLUG/HALT_REASON
+        #      are pre-written HERE because `_check_stall` always raises with
+        #      slug=None and `_halt_result` only preserves a slug already in
+        #      context -- the same mechanism EXPLORE's cap relies on. Do NOT
+        #      "finish the job" by writing `plan_approved` or `total_steps`:
+        #      a plan that was never written must not be approved (I8).
+        # The default budget (Defaults.MAX_PLAN_REDISPATCHES = 3) is an
+        # UNMEASURED placeholder -- see the constant's own block. See
+        # decisions.md D-001 (plan-2026-07-22T184813-6549c7cb).
+        if result is None and error is None:
+            # No worker configured (D-045): nothing was attempted, so there is
+            # nothing to re-attempt and no cap to spend.
             return {}
+        if result is None or not result.success:
+            if self._plan_redispatches >= self.max_plan_redispatches:
+                logger.warning(
+                    f"Plan cap [{GateSlug.PLAN_CAP}]: "
+                    f"{self._plan_redispatches} re-dispatch(es) spent (cap "
+                    f"{self.max_plan_redispatches}) and the plan-writer has "
+                    "still not returned a successful reply; not dispatching "
+                    "again."
+                )
+                return {
+                    ContextKeys.LAST_GATE_SLUG: GateSlug.PLAN_CAP,
+                    ContextKeys.HALT_REASON: (
+                        f"Plan cap: {self._plan_redispatches} extra "
+                        f"plan-writer dispatch(es) spent (cap "
+                        f"{self.max_plan_redispatches}) and none returned a "
+                        "successful reply, so there is no plan to approve. "
+                        "The PLAN -> EXECUTE gate is NOT satisfied; "
+                        "characterize the plan-writer failure before raising "
+                        "the budget."
+                    ),
+                }
+            self._plan_redispatches += 1
+            logger.info(
+                f"PLAN dispatch failed; re-dispatching the plan-writer "
+                f"({self._plan_redispatches}/{self.max_plan_redispatches})."
+            )
+            key = self._dispatch_key(context, HarnessStates.PLAN)
+            return self._ledger_delta(
+                [entry for entry in self._read_ledger(context) if entry != key]
+            )
         if context.get(ContextKeys.NEEDS_EXPLORE) is True:
             # The plan-writer bounced back to EXPLORE; there is no plan to approve.
             return {}

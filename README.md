@@ -260,7 +260,7 @@ Run with: `python examples/<category>/<name>/run.py`. See `EVALUATE.md` for eval
 
 ```bash
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
-make test           # Run full test suite (5,192 tests)
+make test           # Run full test suite (5,206 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages

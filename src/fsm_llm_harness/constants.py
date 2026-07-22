@@ -263,6 +263,13 @@ class GateSlug:
     #: still BLOCKED (D-029).  Never means "proceed anyway".
     EXPLORE_CAP = "explore-cap"
 
+    #: The bounded PLAN re-dispatch budget is spent and the plan-writer has
+    #: still not returned a successful reply (D-001 of
+    #: plan-2026-07-22T184813-6549c7cb).  Never means "proceed anyway".  Like
+    #: :data:`EXPLORE_CAP`, deliberately NOT in ``ORDER``: it is a driver halt
+    #: on the PLAN -> EXECUTE edge, not a pre-EXECUTE-step check.
+    PLAN_CAP = "plan-cap"
+
 
 class Severity:
     """Severity levels for advisory ``audit()`` issues.
@@ -469,6 +476,31 @@ class Defaults:
     #: at 0/10 on criterion (b) (decisions.md D-022, D-027).
     #: See decisions.md D-031.
     MAX_EXPLORE_REDISPATCHES = 9
+    # DECISION plan-2026-07-22T184813-6549c7cb/D-001
+    #: EXTRA plan-writer dispatches the driver may spend, per RUN, after a
+    #: FAILED (or empty) plan-writer reply.  Total PLAN dispatches per
+    #: (iteration, step) are bounded by 1 + this number.
+    #:
+    #: Before this bound existed, PLAN dispatched exactly ONCE per
+    #: (iteration, step): `_after_plan_dispatch` returned `{}` on a failed
+    #: reply, nothing re-opened the dispatch key, and the eventual halt was the
+    #: stall detector's -- which always raises `slug=None`.  MEASURED (L6 B0
+    #: run 3, `scripts/bench_data/l6-e2e/rows.jsonl`, `:4b`): one empty
+    #: plan-writer reply was terminal, and the run recorded `plan_md_bytes: 0`
+    #: with `halt_slug: null` -- the slugless stall shape the L6 floor exists
+    #: to catch.
+    #:
+    #: 3 is an UNMEASURED PLACEHOLDER (n=1 stall observation), NOT a measured
+    #: horizon like MAX_EXPLORE_REDISPATCHES above.  It was chosen because
+    #: PLAN's task is ONE structured write, not EXPLORE's multi-topic
+    #: discovery (whose 9 is a yield horizon for a different task shape), and
+    #: 4 total dispatches at the observed ~100-170 s each is enough to
+    #: separate "fails once cold" from "persistently fails" without
+    #: quadrupling worst-case PLAN wall clock.  Do NOT tune it without a
+    #: dedicated bench: `plan-cap` rows with zero plan.md bytes across all 4
+    #: dispatches would mean the budget is not the lever at all.  See
+    #: decisions.md D-001 (plan-2026-07-22T184813-6549c7cb).
+    MAX_PLAN_REDISPATCHES = 3
     #: The autonomy leash: the 3rd fix attempt is HARD-blocked.
     MAX_FIX_ATTEMPTS = 2
     # DECISION plan-2026-07-21T125237-191b2eb2/D-052

@@ -2263,8 +2263,10 @@ class TestBoundedExploreRedispatch:
         """No regression to the ledger's original purpose (invariant I4).
 
         PLAN holds its gate BLOCKED for exactly the reason EXPLORE does above --
-        the gate flag it needs is not there -- and it must NOT re-dispatch.  Only
-        EXPLORE was given that authority.
+        the gate flag it needs is not there -- and it must NOT re-dispatch.
+        PLAN's own re-dispatch budget covers a FAILED plan-writer reply only
+        (``TestBoundedPlanRedispatch``): a SUCCESSFUL dispatch whose plan a
+        human declined to approve is a shut gate, not a retryable failure.
         """
         harness = make_harness(
             _traverse_script(), approvals=ApprovalRecorder(default=False)
@@ -2368,6 +2370,236 @@ class TestExploreBoundIsSizedFromTheMeasuredHorizon:
         assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
         assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
         assert harness.worker.count_for(HarnessStates.PLAN) == 0
+
+
+# ---------------------------------------------------------------------------
+# Bounded PLAN re-dispatch (plan-2026-07-22T184813-6549c7cb D-001)
+# ---------------------------------------------------------------------------
+
+
+def _failing_plan_script() -> dict[str, Any]:
+    """EXPLORE clears its gate; the plan-writer FAILS every dispatch."""
+    script = _traverse_script()
+    script[HarnessStates.PLAN] = {"success": False, "ctx": {}}
+    return script
+
+
+class TestBoundedPlanRedispatch:
+    """A failed plan-writer is retried under a bound, then halted with a slug.
+
+    Guards the defect L6 B0 measured (run 3,
+    ``scripts/bench_data/l6-e2e/rows.jsonl``): PLAN dispatched exactly once per
+    ``(iteration, step)``, so ONE empty plan-writer reply was terminal, and the
+    eventual halt was the stall detector's ``slug=None`` raise -- the run
+    recorded ``plan_md_bytes: 0`` with ``halt_slug: null``, the slugless stall
+    shape the L6 floor exists to catch.
+
+    The mechanism mirrors ``TestBoundedExploreRedispatch`` (D-028/D-029): the
+    SAME dispatch key is re-opened by ledger removal (never a widened key --
+    D-017), the bound lives on ``self`` where no worker or approval callback
+    can reach it, and spending it pre-writes ``plan-cap`` so the halt is never
+    slugless again.
+    """
+
+    def test_an_always_failing_plan_worker_halts_at_the_cap_with_its_own_slug(
+        self, make_harness
+    ) -> None:
+        """The L6 B0 run-3 shape, fixed: 1 + MAX dispatches, then ``plan-cap``.
+
+        Measured RED against the unpatched driver (2026-07-22): PLAN
+        dispatches == 1 and ``LAST_GATE_SLUG`` was ``None``.  The default
+        approval callback here APPROVES every gate, which is the
+        unreachability half: an approving callback is never even consulted,
+        because a plan that was never written is never put to it.
+        """
+        harness = make_harness(_failing_plan_script())
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.PLAN) == (
+            1 + Defaults.MAX_PLAN_REDISPATCHES
+        )
+        assert result.success is False
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.PLAN_CAP
+        assert "Plan cap" in result.answer
+        # ...and NOT by pretending a plan exists.
+        assert harness.worker.count_for(HarnessStates.EXECUTE) == 0
+        assert harness.approvals.count(APPROVAL_PLAN) == 0
+
+    @pytest.mark.parametrize("cap", [0, 1, 2])
+    def test_the_bound_is_exact(self, make_harness, cap: int) -> None:
+        """``cap`` EXTRA dispatches, never ``cap + 1`` -- including ``cap = 0``."""
+        harness = make_harness(_failing_plan_script(), max_plan_redispatches=cap)
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.PLAN) == 1 + cap
+        assert harness.agent._plan_redispatches == cap
+
+    def test_the_halt_names_the_numbers_a_reader_needs(
+        self, make_harness, captured_logs
+    ) -> None:
+        """Spent and cap, in the reason -- an unactionable halt is a bug."""
+        harness = make_harness(_failing_plan_script(), max_plan_redispatches=2)
+        result = harness.run()
+
+        reason = result.final_context[ContextKeys.HALT_REASON]
+        assert "2 extra plan-writer dispatch(es) spent (cap 2)" in reason
+        assert any(GateSlug.PLAN_CAP in line for line in captured_logs)
+
+    def test_a_plan_writer_that_recovers_proceeds_without_the_slug(
+        self, make_harness
+    ) -> None:
+        """Fails twice, succeeds on the third: the run proceeds past PLAN.
+
+        This is the outcome the budget exists to buy -- "fails once cold" is
+        distinguished from "persistently fails" -- and the recovered run must
+        carry no ``plan-cap`` residue.
+        """
+        script = _traverse_script()
+        seen = {"n": 0}
+
+        def plan_writer(request: RoleRequest) -> dict[str, Any]:
+            seen["n"] += 1
+            if seen["n"] <= 2:
+                return {"success": False, "ctx": {}}
+            return {"ctx": {ContextKeys.TOTAL_STEPS: 1}}
+
+        script[HarnessStates.PLAN] = plan_writer
+        harness = make_harness(script)
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.PLAN) == 3
+        assert harness.agent._plan_redispatches == 2
+        assert harness.worker.count_for(HarnessStates.EXECUTE) == 1
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
+            GateSlug.PLAN_CAP
+        )
+
+    def test_the_bound_resets_between_runs_on_one_instance(self, make_harness) -> None:
+        """Per RUN, not per LIFETIME: a reused instance is not pre-exhausted."""
+        harness = make_harness(_failing_plan_script(), max_plan_redispatches=1)
+        harness.run()
+        assert harness.agent._plan_redispatches == 1
+
+        harness.run("a second goal")
+
+        assert harness.agent._plan_redispatches == 1
+        assert harness.worker.count_for(HarnessStates.PLAN) == 4
+
+    def test_a_raising_plan_worker_still_counts_against_the_bound(
+        self, make_harness
+    ) -> None:
+        """A dispatch that RAISED is a dispatch spent; it is not free."""
+        script = _traverse_script()
+        script[HarnessStates.PLAN] = {"raises": RuntimeError("boom")}
+
+        harness = make_harness(script, max_plan_redispatches=2)
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.PLAN) == 3
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.PLAN_CAP
+
+    def test_a_worker_cannot_reach_the_counter(self, make_harness) -> None:
+        """The [I:5] escape shape, aimed at THIS cap.
+
+        A worker's reply reaches context through ``final_context`` and
+        ``structured_output`` (both filtered by ``_WORKER_WRITABLE``) and the
+        FSM's Pass-1 extraction is the second writer.  The bound is reachable
+        from none of them, because it is not a context key at all -- the L6 B0
+        defect must not be "fixed" into a cap a worker can refill.
+        """
+        greedy = {
+            "plan_redispatches": 0,
+            "_plan_redispatches": 0,
+            "max_plan_redispatches": 99,
+        }
+        script = _failing_plan_script()
+        script[HarnessStates.PLAN] = {"success": False, "ctx": dict(greedy)}
+
+        harness = make_harness(script, extraction_data=greedy, max_plan_redispatches=2)
+        result = harness.run()
+
+        assert harness.agent._plan_redispatches == 2
+        assert harness.agent.max_plan_redispatches == 2
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.PLAN_CAP
+
+    def test_the_counter_is_not_a_context_key(self, make_harness) -> None:
+        """Structural pin: the counter exists nowhere a worker can write.
+
+        The counter must never grow a ``ContextKeys`` entry or a
+        ``DRIVER_OWNED_SEEDS`` seed -- that surface is rendered into both LLM
+        prompts every turn and policed by ``_WORKER_WRITABLE``, which is
+        exactly where a refillable cap would be born.
+        """
+        context_key_values = {
+            value
+            for name, value in vars(ContextKeys).items()
+            if isinstance(value, str) and not name.startswith("__")
+        }
+        for spelling in ("plan_redispatches", "plan-redispatches"):
+            assert spelling not in context_key_values
+            assert spelling not in DRIVER_OWNED_SEEDS
+
+        harness = make_harness(_failing_plan_script(), max_plan_redispatches=1)
+        result = harness.run()
+
+        assert "plan_redispatches" not in result.final_context
+        assert "_plan_redispatches" not in result.final_context
+
+    def test_plan_cap_is_not_a_pre_step_gate_slug(self) -> None:
+        """``plan-cap`` sits NEXT TO ``explore-cap``, outside ``ORDER``.
+
+        ``plan_validator.pre_step_gate`` iterates ``ORDER`` to decide what it
+        may report; a driver halt on the PLAN -> EXECUTE edge does not belong
+        in a pre-EXECUTE-step check's vocabulary.
+        """
+        assert GateSlug.PLAN_CAP == "plan-cap"
+        assert GateSlug.PLAN_CAP not in GateSlug.ORDER
+        assert GateSlug.EXPLORE_CAP not in GateSlug.ORDER
+
+    def test_no_worker_at_all_spends_nothing(self, make_harness) -> None:
+        """D-045's diagnostic mode is untouched: nothing attempted, nothing spent."""
+        harness = make_harness(worker=None)
+
+        delta = harness.agent._after_plan_dispatch(None, None, {})
+
+        assert delta == {}
+        assert harness.agent._plan_redispatches == 0
+
+    def test_redispatch_reopens_only_the_plan_key(self, make_harness) -> None:
+        """The re-authorisation is EXPLICIT and one key wide (D-017).
+
+        The ledger's other entries survive and the ``entry:`` marker is
+        untouched -- the dispatch key keeps its exact ``(state, iteration,
+        step)`` shape, re-opened by removal, never widened by a retry count.
+        """
+        harness = make_harness(_failing_plan_script(), max_plan_redispatches=1)
+        context = {
+            ContextKeys.GOAL: "g",
+            ContextKeys.ITERATION: 0,
+            ContextKeys.STEP_NUMBER: 0,
+            ContextKeys.DISPATCH_LEDGER: ["dispatch:execute:1:1", "entry:plan:'x'"],
+            ContextKeys.ROLE_RESULTS: [],
+        }
+
+        delta = harness.agent._dispatch_if_needed(HarnessStates.PLAN, context)
+
+        ledger = delta[ContextKeys.DISPATCH_LEDGER]
+        assert "dispatch:plan:0:0" not in ledger
+        assert "dispatch:execute:1:1" in ledger
+        assert "entry:plan:'x'" in ledger
+
+    def test_explore_budget_is_not_shared_with_plan(self, make_harness) -> None:
+        """Two states, two counters: spending EXPLORE's leaves PLAN's whole."""
+        script = _explore_script([2, 3])  # dispatch 1 blocked, dispatch 2 clears
+        script[HarnessStates.PLAN] = {"success": False, "ctx": {}}
+
+        harness = make_harness(script, max_plan_redispatches=1)
+        result = harness.run()
+
+        assert harness.agent._explore_redispatches == 1
+        assert harness.agent._plan_redispatches == 1
+        assert harness.worker.count_for(HarnessStates.PLAN) == 2
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.PLAN_CAP
 
 
 # ---------------------------------------------------------------------------
