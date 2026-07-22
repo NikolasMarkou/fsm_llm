@@ -4,9 +4,11 @@ FSM definition factory for the iterative-planner harness protocol.
 ``build_harness_fsm()`` returns an FSM-JSON ``dict`` consumable by
 ``fsm_llm.API.from_definition``, following the ``build_*_fsm()`` factory
 convention already used 12 times in ``fsm_llm_agents/fsm_definitions.py``.
-All prose (descriptions, purposes, extraction/response instructions) is sourced
-from :mod:`fsm_llm_harness.rules`; this module contributes only graph shape and
-gate logic.
+All prose (descriptions, purposes, response instructions) is sourced from
+:mod:`fsm_llm_harness.rules`; this module contributes only graph shape and gate
+logic.  No state carries ``extraction_instructions``: the harness extracts
+nothing from user prose, and a non-empty value there costs one LLM round-trip
+per turn (D-041, and the anchor in :func:`_build_state`).
 
 Graph shape -- 6 states, 9 transitions
 --------------------------------------
@@ -153,11 +155,26 @@ def _build_state(
                 if key not in gated_keys:
                     gated_keys.append(key)
 
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-041
+    # NO `extraction_instructions` KEY IS EMITTED, and re-adding one with any
+    # non-empty value -- a one-line placeholder counts -- costs one
+    # `_make_llm_call` on EVERY turn of EVERY state. `State`'s field defaults to
+    # `None`, and `MessagePipeline._execute_data_extraction` reads it as
+    # `has_extraction_instructions = bool(...)`: truthy takes the bulk branch
+    # (early when a state has no field configs, ADDITIVE and UNCONDITIONAL when
+    # it has some), falsy takes neither. `""` is falsy and therefore free, but
+    # the tests reject it too: a present-but-empty field is a standing
+    # invitation to fill it in.
+    # This is the whole mitigation. It is HERE as well as in `rules.py` because
+    # this dict is the other place a string could re-enter the FSM, and the
+    # harness's Pass-1 has nothing to extract: all nine gate flags are
+    # driver-owned, seeded before turn 1, and re-asserted every turn (D-044).
+    # `TestBulkExtractionIsUnreachable` derives core's own trigger over all six
+    # states and fails if this key returns. See decisions.md D-041.
     state: dict[str, Any] = {
         "id": rules.state,
         "description": rules.description,
         "purpose": rules.purpose,
-        "extraction_instructions": rules.extraction_instructions,
         "response_instructions": rules.response_instructions,
         "extraction_retries": _EXTRACTION_RETRIES,
         "transitions": transitions,

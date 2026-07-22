@@ -819,16 +819,31 @@ class TestStateRules:
 
             assert state.description == rules.description
             assert state.purpose == rules.purpose
-            assert state.extraction_instructions == rules.extraction_instructions
             assert state.response_instructions == rules.response_instructions
 
             assert state.description.strip()
             assert state.purpose.strip()
-            assert state.extraction_instructions.strip()
             assert state.response_instructions.strip()
             assert rules.operative_rules
             assert all(rule.strip() for rule in rules.operative_rules)
             assert rules.gate_summary.strip()
+
+    def test_no_state_carries_extraction_instructions(
+        self, harness_fsm: FSMDefinition
+    ) -> None:
+        """D-041: the field is absent, not empty, on every state.
+
+        ``TestBulkExtractionIsUnreachable`` proves what that absence BUYS (core
+        issues no extraction call).  This one pins the shape it buys it with,
+        so a placeholder string reintroduced "for documentation" fails here
+        with a message naming the cost.
+        """
+        for state_id in HarnessStates.ALL:
+            assert harness_fsm.states[state_id].extraction_instructions is None, (
+                f"{state_id} carries extraction_instructions; that costs one "
+                "LLM call per turn (decisions.md D-041)"
+            )
+            assert not hasattr(RULES[state_id], "extraction_instructions")
 
     def test_required_context_keys_match_the_gated_keys(
         self, harness_fsm: FSMDefinition

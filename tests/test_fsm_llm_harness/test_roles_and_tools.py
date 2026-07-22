@@ -1244,8 +1244,13 @@ class TestFindingsCountComesFromDisk:
         explore = get_rules(HarnessStates.EXPLORE)
         explorer = ROLE_BY_STATE[HarnessStates.EXPLORE]
 
-        assert ArtifactNames.FINDINGS_INDEX not in explore.extraction_instructions
-        assert f"{ArtifactNames.FINDINGS_DIR}/" in explore.extraction_instructions
+        # MOVED at step 11 (D-041): the definition used to live in this state's
+        # `extraction_instructions`, which no longer exists -- a non-empty value
+        # there costs one LLM call per turn.  `gate_summary` is where the count
+        # is defined now, and it is the string the role prompt actually carries,
+        # so the C3 assertion is stronger here than it was before.
+        assert ArtifactNames.FINDINGS_INDEX not in explore.gate_summary
+        assert f"{ArtifactNames.FINDINGS_DIR}/" in explore.gate_summary
         assert ArtifactNames.FINDINGS_DIR in artifacts_writable_by(explorer)
 
 

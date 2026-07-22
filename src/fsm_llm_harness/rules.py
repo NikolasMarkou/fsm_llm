@@ -206,12 +206,9 @@ EXPLORE_TOPICS: tuple[ExploreTopic, ...] = (
     ),
     ExploreTopic(
         slug="constraints-and-patterns",
-        label=(
-            "the existing patterns or constraints that any solution must respect"
-        ),
+        label=("the existing patterns or constraints that any solution must respect"),
         brief=(
-            "the conventions, invariants and hard constraints the code already "
-            "imposes"
+            "the conventions, invariants and hard constraints the code already imposes"
         ),
     ),
 )
@@ -287,33 +284,54 @@ def _topic_phrase(threshold: int = Defaults.FINDINGS_THRESHOLD) -> str:
 # ---------------------------------------------------------------------------
 
 
-# DECISION plan-2026-07-21T125237-191b2eb2/D-046
-# READ BEFORE TRUSTING ANY `extraction_instructions` STRING BELOW. Several of
-# them ask the model for a DRIVER-OWNED gate flag (`plan_approved`,
-# `close_confirmed`, `execute_complete`, the routing flags, `findings_count`).
-# Those requests are INERT by construction, not by the model's goodwill:
-# `constants.DRIVER_OWNED_SEEDS` seeds every one of those keys before turn 1 so
-# Pass-1 skips them, and `HarnessAgent._reassert_driver_owned` reverts any value
-# that reaches context anyway (D-044). A reply that sets `plan_approved: true`
-# changes nothing.
-# Do NOT read these strings as the contract for how a gate opens -- the contract
-# is `harness._WORKER_WRITABLE` plus the human approval callback. And do NOT
-# "helpfully" add a new gate flag to an instruction block expecting it to work:
-# unless the driver writes that key, it cannot be set at all.
-# These blocks are kept (rather than deleted) because they are also the Pass-1
-# prompt's only description of what the state is doing, and because deleting
-# them empties `extraction_instructions`, which silently switches core's
-# extraction onto a different branch (`pipeline.py:917-947`) whose effect on a
-# live 4B run has not been measured. Step 7f's re-run is the place to decide
-# whether harness states should extract at all. See decisions.md D-046.
+# DECISION plan-2026-07-21T191807-bf7ffe24/D-041
+# THERE IS NO `extraction_instructions` FIELD HERE, AND ADDING ONE BACK COSTS ONE
+# LLM CALL PER TURN. This resolves the predecessor's D-046, which kept six such
+# blocks and deferred the "should harness states extract at all" question to a
+# live re-run; the re-run happened (step 11) and the answer is no.
+#
+# The mechanism, from `fsm_llm/pipeline.py::_execute_data_extraction` as it
+# stands -- re-read it before changing this, and do not trust the paraphrase:
+#   * `has_extraction_instructions = bool(state.extraction_instructions)`;
+#   * if there are NO field/classification configs, a truthy value takes the
+#     early bulk-fallback branch and issues one `_make_llm_call`;
+#   * if there ARE configs, a truthy value takes the ADDITIVE bulk branch after
+#     the per-field passes and issues one `_make_llm_call` -- UNCONDITIONALLY.
+# The additive branch is gated on `has_extraction_instructions and (configs)`
+# ALONE. It is NOT gated on anything being missing, so "make the field configs
+# exhaustive so the fallback never triggers" (this plan's own D-008) does not
+# work and was measured not to: 2.000 core calls per turn, `data_extraction` on
+# 15/15 turns. The ONLY package-local way to make the trigger unreachable is for
+# `State.extraction_instructions` to be falsy, which is what the absence of this
+# field guarantees for all six states at once.
+#
+# Nothing is lost by the removal, which is why it is a deletion rather than an
+# empty string:
+#   * The strings were never rendered into any prompt the harness issues except
+#     the bulk-extraction prompt itself. `DataExtractionPromptBuilder` (the only
+#     other reader) is constructed but never called on the per-field path, and
+#     Pass 2 reads `response_instructions`, not this.
+#   * They described a JSON payload the harness does not want from Pass-1 prose
+#     anyway: all nine gate flags are driver-owned, seeded before turn 1 and
+#     re-asserted by `HarnessAgent._reassert_driver_owned` (D-044), so every
+#     value the blocks asked for was inert by construction.
+#   * The worker's payload shape is `roles.py`'s `output_schema`; the exit
+#     condition is `gate_summary`. Both outlive this field, so restating it here
+#     was duplication as well as cost.
+# The bulk prompt also told the model "Use descriptive snake_case key names" and
+# merged whatever it invented into context, so removing it also closes an
+# unbounded key-injection channel into every later prompt.
+# `TestBulkExtractionIsUnreachable` derives the trigger from core's own predicate
+# over all six states and fails the moment this comes back. See decisions.md
+# D-041.
 @dataclass(frozen=True)
 class StateRules:
     """The frozen protocol rules for one harness state.
 
     Instances are module-level constants built once at import time and shared
     by the FSM builder (which reads ``description`` / ``purpose`` /
-    ``*_instructions``), the driver (``role``, ``operative_rules``) and the
-    ownership enforcement in ``storage.py`` (``owned_artifacts``).
+    ``response_instructions``), the driver (``role``, ``operative_rules``) and
+    the ownership enforcement in ``storage.py`` (``owned_artifacts``).
 
     Attributes:
         state: The FSM state id this rule set governs.
@@ -322,8 +340,6 @@ class StateRules:
         purpose: What must be accomplished here (FSM ``purpose``).
         operative_rules: The protocol rules a worker must follow, at most 8
             single-sentence imperatives.
-        extraction_instructions: Pass-1 instructions naming the context keys
-            this state must produce.
         response_instructions: Pass-2 instructions for the user-facing report.
         owned_artifacts: Artifacts ``role`` is permitted to write.
         gate_summary: One line describing the exit gate, at default thresholds.
@@ -334,7 +350,6 @@ class StateRules:
     description: str
     purpose: str
     operative_rules: tuple[str, ...]
-    extraction_instructions: str
     response_instructions: str
     owned_artifacts: tuple[str, ...]
     gate_summary: str
@@ -370,32 +385,24 @@ _EXPLORE = StateRules(
         "On re-entry from REFLECT, append corrections marked "
         "[CORRECTED iter-N]; never overwrite an earlier finding.",
     ),
-    # DECISION plan-2026-07-21T191807-bf7ffe24/D-015
-    # This block used to define `findings_count` as "how many findings are
-    # indexed in findings.md" -- the ONE file the operative rule three lines
-    # above forbids the explorer to touch, and which `OWNERSHIP` grants to
-    # `Role.ORCHESTRATOR` (never dispatched). Review C3: a rule-compliant
-    # explorer had to report 0 forever, so the only way the gate ever opened was
-    # a model reporting a number it could not know. Do NOT "restore" the index
-    # wording for consistency with the count's name: the count is now DERIVED
-    # from the `findings/<topic>.md` files on disk -- the files this role DOES
-    # own -- and the number asked for here is advisory, kept only so the driver
-    # can log claim-versus-disk. See decisions.md D-015.
-    extraction_instructions=(
-        "Report exploration progress as JSON with exactly these fields:\n"
-        f"- {ContextKeys.FINDINGS_COUNT} (integer): how many "
-        f"{ArtifactNames.FINDINGS_DIR}/<topic>.md files you have written so "
-        "far.\n"
-        f"- {ContextKeys.NEEDS_EXPLORE} (boolean): true if more research is "
-        "still required.\n"
-        "The driver counts those files itself, so your number is advisory: "
-        "only files that really exist can open the gate."
-    ),
     response_instructions=(
         "State the current findings count, the topics covered so far, and the "
         "single next question you will investigate. Be terse and factual."
     ),
     owned_artifacts=artifacts_writable_by(ROLE_BY_STATE[HarnessStates.EXPLORE]),
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-015
+    # THIS LINE, not an `extraction_instructions` block, is where the count is
+    # defined -- and it is defined against the `findings/` files, the ones
+    # `OWNERSHIP` grants the explorer, NOT against `findings.md`, the index the
+    # operative rule above forbids it to touch. Review C3: while the definition
+    # named the index, a rule-compliant explorer had to report 0 forever, so the
+    # only way the gate ever opened was a model reporting a number it could not
+    # know. Do NOT "restore" the index wording for consistency with the count's
+    # NAME: the count is DERIVED from the files on disk
+    # (`tools.derive_disk_counts`), and a worker's own integer is advisory.
+    # This string is verbatim in the EXPLORE role prompt and was measured there
+    # (step 25, 10/10). Do not reword it for tidiness -- an unmeasured prompt
+    # edit is not free, whatever it costs to read. See decisions.md D-015.
     gate_summary=(
         f"HARD: leave for PLAN only when {ContextKeys.FINDINGS_COUNT} >= "
         f"{Defaults.FINDINGS_THRESHOLD}, counted from the "
@@ -430,15 +437,6 @@ _PLAN = StateRules(
         "of Y'; alternatives belong there, not in the plan.",
         f"Seed {ArtifactNames.VERIFICATION} with one row per success "
         "criterion, then present the plan and wait for approval.",
-    ),
-    extraction_instructions=(
-        "Report planning progress as JSON with exactly these fields:\n"
-        f"- {ContextKeys.PLAN_APPROVED} (boolean): true ONLY after the user "
-        "explicitly approved this plan.\n"
-        f"- {ContextKeys.NEEDS_EXPLORE} (boolean): true if the problem cannot "
-        "be stated or the files cannot be listed.\n"
-        f"Never set {ContextKeys.PLAN_APPROVED} on your own judgement -- it "
-        "records a user decision. An absent field keeps the gate closed."
     ),
     response_instructions=(
         "Present the plan for approval: the steps, the success criteria, the "
@@ -479,17 +477,6 @@ _EXECUTE = StateRules(
         "the failure instead of trying again.",
         "Anchor each non-obvious choice with a DECISION comment and back-link "
         "it from the decision entry in the same commit.",
-    ),
-    extraction_instructions=(
-        "Report step execution as JSON with exactly these fields:\n"
-        f"- {ContextKeys.EXECUTE_COMPLETE} (boolean): true when this step "
-        "finished, failed, hit the fix leash, or produced a surprise "
-        "discovery.\n"
-        f"- {ContextKeys.STEP_NUMBER} (integer): the plan step just "
-        "attempted.\n"
-        f"- {ContextKeys.FIX_ATTEMPTS} (integer): fix attempts used on this "
-        "step so far.\n"
-        "Report the real attempt count; understating it bypasses the leash."
     ),
     response_instructions=(
         "Report the step number and description, the files created or "
@@ -534,21 +521,6 @@ _REFLECT = StateRules(
         "Present completed work, remaining work, verification results, issues "
         "and a recommendation -- and never close without user confirmation.",
     ),
-    extraction_instructions=(
-        "Report the evaluation as JSON with exactly these fields:\n"
-        f"- {ContextKeys.ALL_CRITERIA_PASS} (boolean): true only if every "
-        "success criterion is verified PASS with evidence.\n"
-        f"- {ContextKeys.CLOSE_CONFIRMED} (boolean): true ONLY after the user "
-        "confirmed closing.\n"
-        f"- {ContextKeys.NEEDS_PIVOT} (boolean): true if the approach itself "
-        "failed and a new one is needed.\n"
-        f"- {ContextKeys.COMPLETION_FIX} (boolean): true if small fixes in "
-        "this same iteration finish the work.\n"
-        f"- {ContextKeys.NEEDS_EXPLORE} (boolean): true if unknowns must be "
-        "investigated before deciding.\n"
-        "Set exactly one routing flag, and never set "
-        f"{ContextKeys.CLOSE_CONFIRMED} on your own judgement."
-    ),
     response_instructions=(
         "Report five things in order: what was completed, what remains, the "
         "verification results, the issues found, and one recommendation of "
@@ -591,14 +563,6 @@ _PIVOT = StateRules(
         "Offer one to three candidate directions, each framed as a trade-off, "
         "and name the checkpoints available.",
         "Get an explicit direction from the user before returning to PLAN.",
-    ),
-    extraction_instructions=(
-        "Report the pivot as JSON with exactly these fields:\n"
-        f"- {ContextKeys.PIVOT_RESOLVED} (boolean): true once the user picked "
-        "a direction and the decision is logged.\n"
-        f"- {ContextKeys.PIVOT_REASON} (string): one sentence naming what "
-        "failed and why.\n"
-        "An absent field keeps the gate closed."
     ),
     response_instructions=(
         "Report the pivot reason, the available checkpoints, the ghost "
@@ -643,12 +607,6 @@ _CLOSE = StateRules(
         f"Compress any consolidated file over "
         f"{Defaults.CONSOLIDATED_COMPRESS_LINES} lines behind the "
         "compressed-summary marker.",
-    ),
-    extraction_instructions=(
-        "Report closing housekeeping as JSON with exactly this field:\n"
-        f"- {ContextKeys.HALT_REASON} (string): one sentence recording why "
-        "the run ended.\n"
-        "CLOSE is terminal; no further transition is evaluated."
     ),
     response_instructions=(
         "Report the outcome, the iterations used, the key decisions, the "
