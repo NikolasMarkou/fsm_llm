@@ -23,6 +23,7 @@ from fsm_llm import (
     HandlerTiming,
     LiteLLMInterface,
 )
+from tests.conftest import ollama_available
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -39,16 +40,7 @@ MAX_RETRIES = 3
 
 def _ollama_available() -> bool:
     """Check if Ollama is reachable and the model is pulled."""
-    try:
-        import httpx
-
-        resp = httpx.get("http://localhost:11434/api/tags", timeout=3)
-        if resp.status_code != 200:
-            return False
-        models = [m["name"] for m in resp.json().get("models", [])]
-        return any("qwen3.5:4b" in m for m in models)
-    except Exception:
-        return False
+    return ollama_available("qwen3.5:4b")
 
 
 def _retry(fn, retries=MAX_RETRIES):

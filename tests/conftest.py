@@ -22,6 +22,37 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.llm import LLMInterface
 
+#: Default Ollama tag the repository's live suites are written against.
+OLLAMA_MODEL_TAG = "qwen3.5:4b"
+#: Where a stock Ollama daemon publishes its model list.
+OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
+
+
+def ollama_available(model_tag: str = OLLAMA_MODEL_TAG) -> bool:
+    """Whether Ollama is reachable AND *model_tag* is pulled.
+
+    Interface contract (2 call sites -- ``tests/test_integration_ollama.py``
+    and ``tests/test_fsm_llm_harness/test_live_ollama.py``; centralised so the
+    two live suites cannot drift into probing different daemons):
+        - Parameter: a substring of the tag as ``/api/tags`` reports it.
+        - Returns ``True`` only when the daemon answered 200 AND some pulled
+          model name contains *model_tag*.  Any failure -- httpx absent, the
+          daemon down, a non-200, malformed JSON -- returns ``False``.
+        - Never raises.  Performs ONE bounded HTTP GET, so callers must keep it
+          behind a short-circuit rather than calling it at import time when the
+          live suite is switched off.
+    """
+    try:
+        import httpx
+
+        resp = httpx.get(OLLAMA_TAGS_URL, timeout=3)
+        if resp.status_code != 200:
+            return False
+        models = [m["name"] for m in resp.json().get("models", [])]
+        return any(model_tag in name for name in models)
+    except Exception:
+        return False
+
 
 @pytest.fixture
 def has_workflows():
