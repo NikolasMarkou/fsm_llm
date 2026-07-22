@@ -840,8 +840,17 @@ def _execute_plan_dir(root: Path) -> Path:
     return make_plan_dir(root, plan_md=EXECUTE_PLAN_MD, state_md=EXECUTE_STATE_MD)
 
 
-def _one_execute_dispatch(tmp_path: Path, run: int, *, native: bool) -> dict[str, Any]:
-    """One live EXECUTE dispatch; returns its row, asserts nothing."""
+def _one_execute_dispatch(
+    tmp_path: Path, run: int, *, native: bool, seed: int | None = None
+) -> dict[str, Any]:
+    """One live EXECUTE dispatch; returns its row, asserts nothing.
+
+    ``seed`` (default ``None`` = exactly the pre-seed call shape) reaches the
+    completion call only on the NATIVE arm — ``build_default_worker_factory``
+    documents native-arm-only honoring — so the row records both the seed it
+    was ASKED to use and ``seed_effective``, which is False for every react
+    row even when a seed was requested.
+    """
     root = tmp_path / f"{'native' if native else 'react'}-{run}"
     plan_dir = _execute_plan_dir(root)
     workspace = _seed_workspace(root)
@@ -854,6 +863,7 @@ def _one_execute_dispatch(tmp_path: Path, run: int, *, native: bool) -> dict[str
         timeout_seconds=600,
         retry_attempts=1,
         native_function_calling=native,
+        seed=seed,
     )
     original = _spy_on_tools(calls)
     started = time.monotonic()
@@ -873,6 +883,8 @@ def _one_execute_dispatch(tmp_path: Path, run: int, *, native: bool) -> dict[str
         "arm": "native_fc (package default)" if native else "react (opt-in)",
         "native": native,
         "run": run,
+        "seed": seed,
+        "seed_effective": bool(native and seed is not None),
         "elapsed_s": round(time.monotonic() - started, 1),
         "tool_calls": len(calls),
         "write_tool_issued": any(c["tool"] in WRITE_TOOLS for c in calls),

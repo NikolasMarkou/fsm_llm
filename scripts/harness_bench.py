@@ -178,7 +178,7 @@ def build_manifest(
         "bench_id": bench_id,
         "block": block,
         "n_preregistered": n,
-        "seed": seed,
+        "seed": {"base": seed, "per_row": "base+run-1", "effective_arm": "native"},
         "model": live.MODEL,
         "created_at": _utc_now(),
         "prompt_bytes_sha256": _prompt_hash(live),
@@ -247,7 +247,7 @@ def write_summary(
 
 
 def _run_one(
-    live: Any, tmp: Path, run: int, *, native: bool
+    live: Any, tmp: Path, run: int, *, native: bool, seed: int | None
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """One dispatch plus its tool trace (the helper's spy stacks over ours)."""
     from fsm_llm_agents.tools import ToolRegistry
@@ -255,7 +255,7 @@ def _run_one(
     trace: list[dict[str, Any]] = []
     original = live._spy_on_tools(trace)
     try:
-        row = live._one_execute_dispatch(tmp, run, native=native)
+        row = live._one_execute_dispatch(tmp, run, native=native, seed=seed)
     finally:
         ToolRegistry.execute = original
     return row, trace
@@ -291,11 +291,11 @@ def run_block(
     try:
         with tempfile.TemporaryDirectory(prefix=f"bench-{bench_id}-") as td:
             for run in range(1, n + 1):
-                row, trace = _run_one(live, Path(td), run, native=native)
+                rseed = None if seed is None else seed + run - 1
+                row, trace = _run_one(live, Path(td), run, native=native, seed=rseed)
                 row.update(
                     bench_id=bench_id,
                     block=block,
-                    seed=seed,
                     ts=_utc_now(),
                     tool_trace=trace,
                 )
@@ -437,7 +437,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--block", required=True, help="block name, e.g. B0 or B1")
     run.add_argument("--arm", required=True, choices=sorted(ARMS))
     run.add_argument("--n", type=int, default=40)
-    run.add_argument("--seed", type=int, default=None, help="recorded verbatim")
+    run.add_argument("--seed", type=int, default=None, help="base; row=base+run-1")
     rep = sub.add_parser("report", help="recompute k/n, Wilson, Fisher from jsonl")
     rep.add_argument("bench_id")
     return parser
