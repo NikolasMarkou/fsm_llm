@@ -379,7 +379,7 @@ Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_harness/          # 1,751 tests, 10 test files
+pytest tests/test_fsm_llm_harness/          # 1,793 tests, 10 test files
 ```
 
 | File | Tests |
@@ -436,7 +436,7 @@ wrong-TOOL one. Tool IDENTITY selection is flawless (0 hallucinated tool names i
 298 observed calls); tool ROOT selection is not, and the error concentrates
 exactly where both roots are in scope.
 
-Offline, the package is green: 1,751 tests, `ruff` clean, `mypy` 0 errors.
+Offline, the package is green: 1,793 tests, `ruff` clean, `mypy` 0 errors.
 
 **Not claimed**: that the harness is production-ready, or that a 4B model drives
 it unattended to a useful result. What IS claimed is that the gates are

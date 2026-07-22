@@ -13,8 +13,12 @@ one day it matters: the day a seventh package lands.
 
 from __future__ import annotations
 
+import collections
+import os
 import pathlib
 import re
+import subprocess
+import sys
 
 import pytest
 
@@ -218,3 +222,221 @@ class TestPackageBackedExtrasAreInstalled:
             requested = set(re.findall(r"[\[,]([a-z0-9_]+)", _one_line(rel, needle)))
         missing = self.EXPECTED - requested
         assert not missing, f"{label} does not request extras: {sorted(missing)}"
+
+
+# ══════════════════════════════════════════════════════════════
+# Documented test counts: every hand-maintained literal == measured
+# ══════════════════════════════════════════════════════════════
+
+#: A count literal as the docs spell it: "5,107" or "1751". Comma-tolerant.
+_COUNT = r"(\d[\d,]*)"
+
+
+def _num(token: str) -> int:
+    return int(token.replace(",", ""))
+
+
+def _pinned_counts(rel: str, pattern: str) -> list[int]:
+    """Every numeric token `pattern` captures in `rel`, as ints.
+
+    Matching NOTHING is a loud failure, never a silent pass: a regex that
+    quietly stopped matching (because someone rephrased the doc line) would
+    recreate the exact drift hole this class exists to close.
+    """
+    hits = re.findall(pattern, _read(rel), re.MULTILINE)
+    assert hits, (
+        f"count-pinning regex {pattern!r} matched nothing in {rel} -- the doc "
+        f"anchor text moved; update the pattern here, do not delete the check"
+    )
+    return [_num(h) for h in hits]
+
+
+# DECISION plan-2026-07-22T114536-879d04a0/D-015
+# The measured side comes from ONE guarded `pytest --collect-only -q` SUBPROCESS
+# (sys.executable, module-scoped fixture), not from the running pytest session.
+# Do NOT rewrite this to count `session.items` from inside the very process
+# being counted -- that is circular (this run's own -k/-m/path selection changes
+# the answer) -- and do NOT add per-suite subprocesses (one collection already
+# costs seconds; nine would cost minutes). Do NOT "fix" a failure by loosening
+# a regex to match nothing, by asserting `>=`, or by skipping when parsing
+# fails: unparseable output FAILS loudly below. CHANGELOG.md is deliberately
+# NOT pinned (frozen release history), and CLAUDE.md's "N passed / N skipped /
+# N xfailed" line is a RUN result at a named commit, not a collection count --
+# both exclusions are scope, not oversights. See decisions.md D-015.
+@pytest.fixture(scope="module")
+def measured() -> tuple[int, dict[str, int], dict[str, int]]:
+    """(total, per-suite-dir counts, per-root-file counts), measured once.
+
+    The child env drops every variable that changes what gets collected or
+    probed at collection time: PYTEST_ADDOPTS (an outer `-m "not slow"`
+    would deselect in the child and skew the count), FSM_LLM_HARNESS_LIVE
+    (armed, the live suite's skipif probes a socket at collection), and the
+    SKIP_SLOW_TESTS/TEST_REAL_LLM knobs. Docs document the FULL collection.
+    `-o addopts=` neutralizes pyproject's `addopts = "-v --tb=short"` for
+    the same reason: its `-v` cancels `-q` and flips the output to the
+    unparseable tree format (measured, not hypothetical).
+    """
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k
+        not in (
+            "PYTEST_ADDOPTS",
+            "FSM_LLM_HARNESS_LIVE",
+            "SKIP_SLOW_TESTS",
+            "TEST_REAL_LLM",
+        )
+    }
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-o",
+            "addopts=",
+            "-p",
+            "no:cacheprovider",
+            "tests/",
+        ],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=env,
+    )
+    assert proc.returncode == 0, (
+        f"collection subprocess failed (rc={proc.returncode});\n"
+        f"stdout tail: {proc.stdout[-2000:]}\nstderr tail: {proc.stderr[-2000:]}"
+    )
+    node_ids = [
+        line
+        for line in proc.stdout.splitlines()
+        if line.startswith("tests/") and "::" in line
+    ]
+    summary = re.search(r"^(\d+) tests collected", proc.stdout, re.MULTILINE)
+    assert summary is not None, (
+        "could not find 'N tests collected' in --collect-only output -- "
+        f"pytest output format changed?\ntail: {proc.stdout[-2000:]}"
+    )
+    total = int(summary.group(1))
+    assert total == len(node_ids), (
+        f"summary says {total} collected but {len(node_ids)} node ids "
+        "parsed -- the node-id filter is wrong; fix it, do not skip"
+    )
+    per_suite: collections.Counter[str] = collections.Counter()
+    per_root_file: collections.Counter[str] = collections.Counter()
+    for node_id in node_ids:
+        parts = node_id.split("::", 1)[0].split("/")
+        if len(parts) >= 3:  # tests/<suite-dir>/<file>.py
+            per_suite[parts[1]] += 1
+        else:  # tests/<file>.py
+            per_root_file[parts[1]] += 1
+    return total, dict(per_suite), dict(per_root_file)
+
+
+@pytest.mark.slow
+class TestDocumentedTestCountsMatchCollection:
+    """Every hand-maintained test-count literal equals `pytest --collect-only`.
+
+    Same defect class as the package-wiring tests above: hand-maintained
+    parallel copies of a filesystem-derivable fact. CLAUDE.md, README.md and
+    src/fsm_llm_harness/CLAUDE.md each spell test counts as prose literals
+    ("5,107 tests", a 9-suite breakdown table, "1,751 tests"); every new test
+    silently strands them, and nothing errors. In the predecessor plans the
+    literals drifted for days at a time (3,305/2,382 stated vs 5,107 measured)
+    before a manual `--collect-only` audit caught it. This class measures once
+    per run (one subprocess, marked slow) and pins every literal to it.
+
+    Excluded on purpose: CHANGELOG.md (frozen history -- its counts describe
+    the state AT each release, and must never be retro-edited) and CLAUDE.md's
+    "N passed / N skipped / N xfailed" sentence (a run result at a pinned
+    commit, not a collection count; re-verified by release-gate runs instead).
+    """
+
+    @pytest.mark.parametrize(
+        "rel,pattern",
+        [
+            ("CLAUDE.md", rf"pytest -v \({_COUNT} tests\)"),
+            ("CLAUDE.md", rf"Run all tests \({_COUNT} collected\)"),
+            ("README.md", rf"Run full test suite \({_COUNT} tests\)"),
+        ],
+    )
+    def test_total_literals(self, measured, rel: str, pattern: str):
+        total, _, _ = measured
+        for documented in _pinned_counts(rel, pattern):
+            assert documented == total, (
+                f"{rel} documents {documented} total tests (pattern "
+                f"{pattern!r}) but --collect-only measures {total}"
+            )
+
+    def test_per_suite_table(self, measured):
+        # CLAUDE.md's Testing block: `pytest tests/<suite>/  # ... (N tests)`.
+        # Dict equality both ways: a NEW suite directory must be added to the
+        # table, and a deleted one must leave it.
+        _, per_suite, _ = measured
+        documented = {
+            suite: _num(count)
+            for suite, count in re.findall(
+                rf"^pytest tests/(test_[a-z_]+)/\s+#[^(\n]*\({_COUNT} tests\)",
+                _read("CLAUDE.md"),
+                re.MULTILINE,
+            )
+        }
+        assert documented, "per-suite table regex matched nothing in CLAUDE.md"
+        assert documented == per_suite, (
+            f"CLAUDE.md per-suite table out of sync: doc-only "
+            f"{ {k: v for k, v in documented.items() if k not in per_suite} }, "
+            f"missing {sorted(set(per_suite) - set(documented))}, "
+            f"wrong {[k for k in documented if per_suite.get(k) != documented[k]]} "
+            f"(measured: {per_suite})"
+        )
+
+    def test_suite_sum_and_remainder(self, measured):
+        # `# The N suites above sum to S. The remaining R are ...`
+        total, per_suite, _ = measured
+        line = re.search(
+            rf"The (\d+) suites above sum to {_COUNT}\. The remaining {_COUNT} ",
+            _read("CLAUDE.md"),
+        )
+        assert line is not None, "sum/remainder sentence not found in CLAUDE.md"
+        assert int(line.group(1)) == len(per_suite)
+        assert _num(line.group(2)) == sum(per_suite.values())
+        assert _num(line.group(3)) == total - sum(per_suite.values())
+
+    def test_root_file_breakdown(self, measured):
+        # Every root-level test file must be listed as `tests/<name> (N)` with
+        # the measured N -- and nothing extra may be listed. Derived from the
+        # collection, so a brand-new root-level test file fails this until
+        # CLAUDE.md names it.
+        _, _, per_root_file = measured
+        documented = {
+            name: _num(count)
+            for name, count in re.findall(
+                rf"tests/(test_[a-z_]+\.py) \({_COUNT}\)", _read("CLAUDE.md")
+            )
+        }
+        assert documented == per_root_file, (
+            f"CLAUDE.md root-file breakdown {documented} != measured {per_root_file}"
+        )
+
+    def test_harness_package_doc_literals(self, measured):
+        # src/fsm_llm_harness/CLAUDE.md spells its own suite's count twice
+        # ("1,751 tests, 10 test files" and the status paragraph). EVERY
+        # "N tests" token in that file must equal the measured harness count,
+        # and "N test files" must equal the on-disk test_*.py file count.
+        _, per_suite, _ = measured
+        rel = "src/fsm_llm_harness/CLAUDE.md"
+        harness = per_suite["test_fsm_llm_harness"]
+        for documented in _pinned_counts(rel, rf"{_COUNT} tests"):
+            assert documented == harness, (
+                f"{rel} says {documented} tests; measured {harness}"
+            )
+        n_files = len(
+            list((_REPO_ROOT / "tests" / "test_fsm_llm_harness").glob("test_*.py"))
+        )
+        for documented in _pinned_counts(rel, rf"{_COUNT} test files"):
+            assert documented == n_files, (
+                f"{rel} says {documented} test files; on disk: {n_files}"
+            )
