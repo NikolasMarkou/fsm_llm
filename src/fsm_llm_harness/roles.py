@@ -872,29 +872,47 @@ AgentBuilder = Callable[[RoleSpec, ToolRegistry, AgentConfig], Any]
 def _default_agent_builder(*, native_function_calling: bool) -> AgentBuilder:
     """Return the stock agent builder.
 
-    ``native_function_calling`` swaps the prompt-parsed ReAct loop for
-    ``NativeFunctionCallingReactAgent``.  Both are existing agents; this is a
-    choice between them, not a third implementation.
+    ``native_function_calling`` selects ``NativeFunctionCallingReactAgent``
+    (the default since D-049) or the prompt-parsed ReAct loop.  Both are
+    existing agents; this is a choice between them, not a third implementation.
     """
 
     def build(spec: RoleSpec, registry: ToolRegistry, config: AgentConfig) -> Any:
-        # DECISION plan-2026-07-21T125237-191b2eb2/D-034
-        # The DEFAULT is the prompt-parsed ReAct loop even though this repo has
-        # measured `NativeFunctionCallingReactAgent` to be 5-60x faster and far
-        # more reliable at CALLING TOOLS on this exact 4B model. Do NOT flip the
-        # default on that evidence alone: the two agents differ on the property
-        # this protocol depends on most. `create_agent("react")` routes through
-        # `BaseAgent._init_context`, which turns `AgentConfig.output_schema`
-        # into a `response_format` the pipeline forwards for CONSTRAINED
-        # DECODING (base.py:172-184) -- and constrained decoding is the whole of
-        # decisions.md D-031's mitigation for the draft-then-correction
-        # fail-open path. `NativeFunctionCallingReactAgent.run` sets no
-        # `response_format` at all (native_fc.py:110-117); it only validates the
-        # free-text answer afterwards. So native FC trades a mechanical
-        # single-object guarantee for tool-calling reliability. Step 7's live
-        # spike measures which one the protocol actually needs; until then the
-        # gate-safety default wins and the other is one keyword away.
-        # See decisions.md D-034.
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-049
+        # The DEFAULT is `NativeFunctionCallingReactAgent`. This SUPERSEDES the
+        # predecessor plan's D-034, which kept the prompt-parsed ReAct loop, and
+        # the replacement reason is not the one D-034 pre-registered. Read both
+        # halves before touching this line.
+        #
+        # (1) D-034's PREMISE IS GONE, not overruled. It kept ReAct because
+        # `create_agent("react")` routes through `BaseAgent._init_context`,
+        # turning `AgentConfig.output_schema` into a `response_format` for
+        # CONSTRAINED DECODING, while `NativeFunctionCallingReactAgent.run` set
+        # no `response_format` at all. That second clause stopped being true at
+        # `6c3da51`: native_fc now makes exactly ONE post-loop repair completion
+        # carrying `response_format=` and no `tools=` (native_fc.py, D-002),
+        # measured 5/5 schema-valid on `:4b`. The native arm no longer trades a
+        # single-object guarantee for tool-calling reliability, so D-034's
+        # gate-safety tiebreak has nothing left to weigh.
+        #
+        # (2) THE NATIVE ARM DID NOT PASS ITS BAR, and this flip does not claim
+        # it did. On the L4 EXECUTE bench (`ollama_chat/qwen3.5:4b`) it measured
+        # "write tool issued AND bytes on disk" at 3/5 and, on a second n=5
+        # block taken at this commit, 2/5 -- **5/10 pooled** -- against
+        # plan.md's >=4/5, and 0/20 on the strict content-hash form. Criterion 1
+        # is NOT met. The flip is authorised by the OTHER arm of the same two
+        # benches: ReAct measured 0/5 and 0/5, **0/10 pooled**, issuing ONE tool
+        # call in twenty dispatches, most of them dying with `Stall detected: 3
+        # consecutive iterations with no tool selected` and `success=False`.
+        # 5/10 vs 0/10 is Fisher two-sided p = 0.033. The decision is "5/10
+        # beats 0/10 on the only executor users actually get", NOT "the native
+        # arm cleared 4/5". Do NOT launder that 5/10 into a pass anywhere.
+        #
+        # Do NOT delete the ReAct branch below or drop the keyword: it is the
+        # control arm criterion 1 is measured against (both arms, every run --
+        # see `test_live_ollama.py::TestL4ToolCallAndFileWrite`), and a default
+        # chosen against 0/5 is a default that must stay falsifiable.
+        # See decisions.md D-049 (this plan), superseding D-034 (predecessor).
         if native_function_calling:
             return NativeFunctionCallingReactAgent(tools=registry, config=config)
         return create_agent(pattern=spec.pattern, tools=registry, config=config)
@@ -928,7 +946,8 @@ def _address(agent: Any, request: RoleRequest, spec: RoleSpec) -> str:
     # Do NOT re-merge the two halves "for simplicity": the merged form IS
     # `build_role_prompt`, it is still here, and it is the measured 0/5 arm.
     # Do NOT switch the duck-typed check to `isinstance(...)`: the fallback is
-    # what keeps `create_agent("react")` (the D-034 default) and every injected
+    # what keeps `create_agent("react")` (the pre-D-049 default, still one
+    # keyword away) and every injected
     # `agent_builder` receiving the complete prompt they receive today, so this
     # change is inert for them by construction rather than by promise.
     # See decisions.md D-021.
@@ -1000,7 +1019,7 @@ def build_default_worker_factory(
     max_tokens: int = Defaults.MAX_TOKENS,
     timeout_seconds: float = Defaults.LLM_TIMEOUT_SECONDS,
     retry_attempts: int = Defaults.RETRY_ATTEMPTS,
-    native_function_calling: bool = False,
+    native_function_calling: bool = True,
     agent_builder: AgentBuilder | None = None,
     observer: Callable[[Mapping[str, Any]], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -1020,8 +1039,11 @@ def build_default_worker_factory(
             transient LLM/transport faults (``hardening.retry``'s strict default
             allowlist -- a garbled reply is NOT retried, it fails closed).
         - ``native_function_calling``: back roles with
-            ``NativeFunctionCallingReactAgent`` instead of the ReAct loop; see
-            the D-034 block above before changing the default.
+            ``NativeFunctionCallingReactAgent`` (the default) or, when
+            ``False``, with the prompt-parsed ReAct loop.  The default was
+            flipped by D-049 because the ReAct arm measured **0/10 write tools
+            issued** live, not because the native arm cleared its 4/5 bar (it
+            measured 5/10); read the D-049 block above before changing it back.
         - ``agent_builder``: override the agent construction entirely (tests,
             live spikes, custom backends).
         - ``observer``: called with one observation ``dict`` per dispatch.  The

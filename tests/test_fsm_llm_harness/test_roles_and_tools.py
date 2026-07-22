@@ -3173,10 +3173,16 @@ class TestVerifiedWritesIgnoresUnusableCalls:
 class TestDefaultAgentBuilder:
     """The one construction choice the factory makes when nobody overrides it."""
 
-    def test_the_stock_builder_makes_a_react_agent_with_the_output_schema(
+    def test_the_react_arm_is_still_reachable_with_the_output_schema(
         self, tmp_path: Path
     ) -> None:
-        """The schema is what makes constrained decoding D-031's mitigation."""
+        """D-049 flipped the DEFAULT; it did not delete the ReAct arm.
+
+        The arm stays reachable because it is the control criterion 1 is
+        measured against (0/5 tool calls live), and a default chosen against a
+        0/5 must stay falsifiable.  The schema still reaches it, so this arm
+        keeps the constrained decoding that was D-031's mitigation.
+        """
         spec = get_role_spec(HarnessStates.EXPLORE)
         registry = build_workspace_tools(
             Workspace(tmp_path / "ws"), allowed=spec.tool_scope
@@ -3206,33 +3212,49 @@ class TestDefaultAgentBuilder:
         assert isinstance(agent, NativeFunctionCallingReactAgent)
         assert agent.config.output_schema is spec.output_schema
 
-    def test_a_factory_with_no_agent_builder_uses_the_stock_one(
+    def test_a_factory_with_no_agent_builder_uses_the_native_arm(
         self, tmp_path: Path, plan_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """D-034: faster is not the criterion; a single-object guarantee is.
+        """D-049: the SHIPPED default is native function calling.
 
-        ``agent_builder=None`` is the production shape, and it must reach
-        ``create_agent`` with the role's own pattern and its output schema --
-        the schema is what turns into ``response_format`` for constrained
-        decoding, which is D-031's whole mitigation.
+        ``agent_builder=None`` is the production shape -- it is what
+        ``__main__.py`` builds -- so this pins what a user of this package
+        actually gets, not what a live bench opts into.  Until D-049 the same
+        shape reached ``create_agent`` with the role's pattern; it must now
+        reach ``NativeFunctionCallingReactAgent`` instead, and ``create_agent``
+        must not be called at all.  The output schema still travels with it:
+        the flip changes the agent, never the schema (D-002's repair turn is
+        what makes that safe).
+
+        The bar this pins is a CONTRACT, and it was chosen against 0/5, not
+        4/5 -- see the D-049 block in ``roles.py``.
         """
-        built: list[tuple[str, Any]] = []
+        native_built: list[Any] = []
+        react_built: list[tuple[str, Any]] = []
 
         class _Stub:
             def run(self, task: str) -> AgentResult:
                 return AgentResult(answer="{}", success=True, final_context={})
 
         def _fake_create_agent(*, pattern: str, tools: Any, config: Any) -> Any:
-            built.append((pattern, config.output_schema))
+            react_built.append((pattern, config.output_schema))
+            return _Stub()
+
+        def _fake_native(*, tools: Any, config: Any) -> Any:
+            native_built.append(config.output_schema)
             return _Stub()
 
         monkeypatch.setattr("fsm_llm_harness.roles.create_agent", _fake_create_agent)
+        monkeypatch.setattr(
+            "fsm_llm_harness.roles.NativeFunctionCallingReactAgent", _fake_native
+        )
         factory = build_default_worker_factory(Workspace(tmp_path / "ws"))
 
         factory(_role_request(HarnessStates.EXPLORE, plan_dir=plan_dir))
 
         spec = get_role_spec(HarnessStates.EXPLORE)
-        assert built == [(spec.pattern, spec.output_schema)]
+        assert native_built == [spec.output_schema]
+        assert react_built == [], "the ReAct loop is the opt-in arm, not the default"
 
 
 class TestMultiObjectReplyIsWarnedAbout:

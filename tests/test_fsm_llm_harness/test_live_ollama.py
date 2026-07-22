@@ -866,7 +866,12 @@ def _one_execute_dispatch(tmp_path: Path, run: int, *, native: bool) -> dict[str
     target = workspace / "uploader.py"
     body = target.read_text(encoding="utf-8") if target.is_file() else ""
     return {
-        "arm": "native_fc" if native else "react (package default)",
+        # The label carries which arm SHIPS, because that moved at D-049 and a
+        # reader comparing this table to an older one needs to see it.  The
+        # boolean beside it is what the assertions select on, so renaming the
+        # label can never silently re-point a bar at the other arm.
+        "arm": "native_fc (package default)" if native else "react (opt-in)",
+        "native": native,
         "run": run,
         "elapsed_s": round(time.monotonic() - started, 1),
         "tool_calls": len(calls),
@@ -928,11 +933,20 @@ class TestL4ToolCallAndFileWrite:
     BOTH agent arms are measured, and that is the point rather than thoroughness
     for its own sake.  Every live number this plan carries for criteria 1 and 2
     (steps 5, 20, 21, 24, 25) was taken with ``native_function_calling=True``,
-    while ``build_default_worker_factory`` still SHIPS the prompt-parsed ReAct
-    loop -- ``roles.py``'s D-034 block says the flip waits on the spike, and the
-    spike passed on (a) but failed on (b), so the flip was never made.  A test
-    that measured only one arm would either re-report a number nobody ships or
-    hide the arm everybody gets.
+    and until D-049 ``build_default_worker_factory`` SHIPPED the other arm, so a
+    test measuring one arm would either re-report a number nobody ships or hide
+    the arm everybody gets.
+
+    THIS TEST IS WHY THE DEFAULT MOVED, and the direction matters: the native
+    arm did NOT clear its bar here.  Two n=5 blocks measured it at 3/5 then 2/5
+    (5/10 pooled) on the loose form and 0/20 on the strict one, against >=4/5.
+    The then-shipped ReAct arm measured 0/5 and 0/5 -- ONE tool call in twenty
+    dispatches, most ending in ``Stall detected: 3 consecutive iterations with
+    no tool selected``.  D-049 flipped the default on "5/10 beats 0/10 on the
+    executor users get", not on a pass, and this test stays RED until something
+    actually clears 4/5.  Keep measuring both arms: the losing one is the
+    control that makes a default chosen against 0/10 falsifiable, and if the
+    ordering ever inverts, this table is where it shows up.
     """
 
     def test_a_dispatch_calls_a_write_tool_and_writes_the_asked_for_content(
@@ -945,7 +959,7 @@ class TestL4ToolCallAndFileWrite:
         ]
         _report("L4 tool call + file write", rows)
 
-        native = [r for r in rows if r["arm"] == "native_fc"]
+        native = [r for r in rows if r["native"]]
         issued = sum(1 for r in native if r["write_tool_issued"])
         bytes_written = sum(1 for r in native if r["bytes_on_disk"])
         matched = sum(1 for r in rows if r["content_matched"])
@@ -966,10 +980,12 @@ class TestL4ToolCallAndFileWrite:
         # file".  Counted over every dispatch of both arms; the per-arm k/n is
         # printed either way.
         #
-        # The default arm is measured and REPORTED but not asserted, and the
-        # reason is not indulgence: asserting a rate that is currently 0/5 would
-        # either freeze a defect into the suite or make it red for a fact that
-        # belongs in a decision entry and a default flip, not in this test.
+        # The ReAct arm is measured and REPORTED but not asserted, and the
+        # reason is not indulgence: asserting a rate that is 0/5 would either
+        # freeze a defect into the suite or make it red for a fact that belongs
+        # in a decision entry and a default flip, not in this test.  That flip
+        # has since happened (D-049); the arm is kept, unasserted, as the
+        # control.
         assert matched >= 1, (
             f"content-matched writes {matched}/{2 * RUNS_MODEL} across both arms "
             f"(native issued {issued}/{RUNS_MODEL}, "
@@ -1025,18 +1041,18 @@ class TestL5GenuineFindingsCount:
                 timeout_seconds=600,
                 retry_attempts=1,
                 # DECISION plan-2026-07-21T191807-bf7ffe24/D-048
-                # Do NOT drop this to "measure what ships".  L4 is where the
-                # shipped ReAct default is measured, and it is measured
-                # ALONGSIDE the native arm, never instead of it.
-                #
-                # The SAME arm criterion 2's history was measured on -- step 25
-                # (`2907252`) reached 10/10 with `native_function_calling=True`,
-                # and L4's docstring says so.  Omitting it (this file's first
-                # live L5 run did) silently measures the shipped ReAct default
-                # instead, which is a DIFFERENT claim: n=5 gave 0/5 findings,
-                # 0/5 successful dispatches and `Stall detected: 3 consecutive
-                # iterations with no tool selected` in every dispatch -- the
-                # exact D-034 collapse, not a result about criterion 2.
+                # Do NOT delete this keyword as "redundant now that D-049 made
+                # it the default".  It PINS the arm this criterion's history
+                # was measured on -- step 25 (`2907252`) reached 10/10 with
+                # `native_function_calling=True` -- so the number stays
+                # comparable across a future default flip in either direction.
+                # Omitting it (this file's first live L5 run did, when ReAct
+                # still shipped) silently measured the OTHER arm, which is a
+                # DIFFERENT claim: n=5 gave 0/5 findings, 0/5 successful
+                # dispatches and `Stall detected: 3 consecutive iterations with
+                # no tool selected` in every dispatch -- the D-034 collapse
+                # that D-049 later cited as its reason, not a result about
+                # criterion 2.  L4 is where BOTH arms are measured.
                 native_function_calling=True,
             )
             worker = _RealExplorerScript(live)
