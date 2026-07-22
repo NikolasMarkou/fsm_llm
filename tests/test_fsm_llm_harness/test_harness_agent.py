@@ -36,6 +36,7 @@ mocked into silence -- is a first-class fixture axis instead, exercised by
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -48,6 +49,7 @@ from fsm_llm_harness.constants import (
     DRIVER_OWNED_SEEDS,
     DRIVER_OWNED_UNSET,
     ContextKeys,
+    Defaults,
     GateSlug,
     HandlerNames,
     HarnessStates,
@@ -1015,9 +1017,17 @@ class TestContextCaps:
 
 
 class TestFilesystemRootsInContext:
-    """The plan-dir / workspace roots ride in context untouched by the driver."""
+    """The plan-dir / workspace roots ride in context untouched by the driver.
+
+    Both tests SEED the findings directory.  Since D-032 the driver derives
+    ``findings_count`` from that directory, so a run whose script merely CLAIMS
+    three findings halts at the exploration cap -- which would leave these two
+    asserting that the roots survive a halt, not a full run.  The seeding keeps
+    them measuring what their names say.
+    """
 
     def test_roots_survive_a_full_run(self, make_harness, plan_dir, workspace) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
         harness = make_harness(_traverse_script())
         result = harness.run(
             initial_context={
@@ -1026,12 +1036,17 @@ class TestFilesystemRootsInContext:
             }
         )
 
+        assert HarnessStates.CLOSE in harness.worker.states, (
+            "this test is meant to cover a FULL traverse; if the run now halts "
+            "early it is no longer measuring what its name says"
+        )
         assert result.final_context[ContextKeys.PLAN_DIR] == str(plan_dir)
         assert result.final_context[ContextKeys.WORKSPACE_ROOT] == str(workspace)
 
     def test_roots_are_visible_to_every_worker(
         self, make_harness, plan_dir, workspace
     ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
         harness = make_harness(_traverse_script())
         harness.run(
             initial_context={
@@ -1040,7 +1055,7 @@ class TestFilesystemRootsInContext:
             }
         )
 
-        assert harness.worker.requests
+        assert HarnessStates.CLOSE in harness.worker.states
         for request in harness.worker.requests:
             assert request.context[ContextKeys.PLAN_DIR] == str(plan_dir)
             assert request.context[ContextKeys.WORKSPACE_ROOT] == str(workspace)
@@ -2110,3 +2125,396 @@ class TestBoundedExploreRedispatch:
         harness.run()
 
         assert harness.worker.count_for(HarnessStates.REFLECT) == 1
+
+
+# ---------------------------------------------------------------------------
+# The bound's SIZE, and the arithmetic it came from (D-031)
+# ---------------------------------------------------------------------------
+
+#: Dispatch index by which EVERY measured run that reached the findings
+#: threshold had reached it, on `ollama_chat/qwen3.5:4b`, n=10, at step 24: the
+#: four successful runs took 9, 8, 6 and 5 dispatches.
+MEASURED_YIELD_HORIZON = 9
+
+#: Dispatches measured BEYOND that horizon, and the distinct files they added:
+#: six runs ran to 18 dispatches and added nothing at all after the horizon.
+MEASURED_BEYOND_HORIZON = (60, 0)
+
+
+class TestExploreBoundIsSizedFromTheMeasuredHorizon:
+    """The bound must cover the measured horizon -- and must not exceed it far.
+
+    Two sizings have now been measured and both were wrong in a way this class
+    exists to stop recurring:
+      * 5 (step 23) came from "one topic per dispatch", which step 23's own
+        data falsified;
+      * 17 (step 24, first attempt) came from extrapolating the pooled rate
+        0.35 files/dispatch linearly, and step 24's own data falsified THAT:
+        at 18 dispatches the pooled rate fell to 0.14 and runs reaching 3 went
+        4/10, because the yield is not linear -- it stops.
+    What the traces support is a horizon, so that is what is pinned, on both
+    sides: big enough to contain every measured success, small enough not to
+    spend minutes of wall clock past the point where the yield was measured at
+    exactly zero.
+    """
+
+    def test_the_bound_covers_every_measured_success(self) -> None:
+        total_dispatches = 1 + Defaults.MAX_EXPLORE_REDISPATCHES
+
+        assert total_dispatches >= MEASURED_YIELD_HORIZON, (
+            f"{total_dispatches} total dispatches cannot contain the slowest "
+            f"measured success, which took {MEASURED_YIELD_HORIZON}. Re-size "
+            "the bound from the traces, or re-measure the horizon -- do not "
+            "lower the threshold."
+        )
+
+    def test_the_bound_does_not_run_far_past_the_horizon(self) -> None:
+        """Dispatches past the horizon are measured waste, not headroom."""
+        total_dispatches = 1 + Defaults.MAX_EXPLORE_REDISPATCHES
+        spent, gained = MEASURED_BEYOND_HORIZON
+
+        assert gained == 0, "re-derive this test: the horizon moved"
+        assert total_dispatches <= MEASURED_YIELD_HORIZON + 3, (
+            f"{total_dispatches} total dispatches runs "
+            f"{total_dispatches - MEASURED_YIELD_HORIZON} past the measured "
+            f"horizon, where {spent} measured dispatches produced {gained} new "
+            "findings files. That is wall clock, not headroom."
+        )
+
+    @pytest.mark.parametrize("superseded", [0, 5, 17])
+    def test_the_superseded_bounds_would_fail_these_tests(
+        self, superseded: int
+    ) -> None:
+        """Not vacuous: every value this bound has ever held is now excluded.
+
+        Without this control a later edit could set the bound to anything and
+        the two tests above would still be green for the wrong reason.
+        """
+        total = 1 + superseded
+
+        assert (
+            total < MEASURED_YIELD_HORIZON or total > MEASURED_YIELD_HORIZON + 3
+        ), f"{superseded} is no longer excluded; the horizon moved"
+
+    def test_the_raised_bound_is_still_exactly_enforced(self, make_harness) -> None:
+        """Bigger is not looser: the default bound is spent, then it HALTS."""
+        harness = make_harness(_explore_script([0]))
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == (
+            1 + Defaults.MAX_EXPLORE_REDISPATCHES
+        )
+        assert harness.agent._explore_redispatches == (
+            Defaults.MAX_EXPLORE_REDISPATCHES
+        )
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
+        assert harness.worker.count_for(HarnessStates.PLAN) == 0
+
+
+# ---------------------------------------------------------------------------
+# Evidence vs testimony: the driver's own filesystem read (D-032)
+# ---------------------------------------------------------------------------
+
+
+def _seed_findings(plan_dir: Path, *names: str) -> None:
+    """Write one non-empty ``findings/<name>.md`` per name."""
+    directory = plan_dir / "findings"
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (directory / f"{name}.md").write_text(f"# {name}\n\nreal content\n")
+
+
+class TestDiskDerivedGateCounts:
+    """A count the DRIVER reads off disk is evidence; a worker's is testimony.
+
+    Invariant I8 discards a failed dispatch's gate keys, which is right for a
+    value the worker CLAIMED and wrong for one the driver DERIVED: the files
+    exist whether or not the dispatch that wrote them reported success.  Step 23
+    measured a run holding a real findings file and a gate value of 0 because
+    all six of its dispatches failed.
+
+    Both directions are pinned here on purpose.  Widening this to worker-claimed
+    keys would re-open review C1's fail-open gate (a dispatch that writes zero
+    bytes and claims three findings), so every test that proves the disk is read
+    has a partner proving the claim still is not.
+    """
+
+    # -- the correction -------------------------------------------------
+
+    def test_a_failed_dispatch_still_has_its_disk_read(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The step-23 shape: real files, every dispatch FAILED, gate value 0."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        script = _traverse_script()
+        script[HarnessStates.EXPLORE] = {"success": False, "ctx": {}}
+
+        harness = make_harness(script, roots=roots)
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 3
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 1
+
+    def test_a_raising_dispatch_still_has_its_disk_read(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """A worker that RAISED wrote its files before it raised."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        script = _traverse_script()
+        script[HarnessStates.EXPLORE] = {"raises": RuntimeError("boom")}
+
+        harness = make_harness(script, roots=roots)
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 3
+
+    def test_the_disk_outranks_a_successful_worker_claim(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """One derivation, and it is the filesystem's -- not the reply's."""
+        _seed_findings(plan_dir, "alpha")
+        harness = make_harness(_traverse_script(findings=3), roots=roots)
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 1
+
+    def test_an_empty_file_is_not_a_finding(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The derivation counts BYTES, exactly as ``gate_files`` defines it."""
+        _seed_findings(plan_dir, "alpha", "beta")
+        (plan_dir / "findings" / "empty.md").write_text("   \n")
+        (plan_dir / "findings" / "notes.txt").write_text("not markdown")
+
+        harness = make_harness(_traverse_script(), roots=roots)
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 2
+
+    def test_the_traverse_runs_on_evidence(self, make_harness, roots, plan_dir) -> None:
+        """The positive control: three real files open EXPLORE -> PLAN."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 1
+        assert HarnessStates.PLAN in harness.worker.states
+
+    # -- what must NOT move ---------------------------------------------
+
+    def test_zero_bytes_and_a_claim_of_three_keeps_the_gate_shut(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """Review C1's fail-open reproduction, re-run against this change.
+
+        A dispatch that writes NOTHING and reports ``findings_count: 3`` is the
+        exact shape step 20 closed.  It must stay closed on the SUCCESS path
+        (where I8 would let the claim through) as well as on the failure path.
+        """
+        assert not list((plan_dir / "findings").glob("*.md"))
+        harness = make_harness(_traverse_script(findings=3), roots=roots)
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
+        assert harness.worker.count_for(HarnessStates.PLAN) == 0
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
+        assert harness.approvals.count(APPROVAL_PLAN) == 0
+
+    def test_a_failed_dispatch_claiming_a_non_derived_key_is_still_discarded(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The other half of the pair: I8 is untouched for a CLAIMED key.
+
+        ``needs_explore`` is in EXPLORE's writable set and is NOT disk-derived,
+        so a failed dispatch's value for it must still be dropped -- while the
+        disk-derived count from the SAME reply is read.
+        """
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        script = _traverse_script()
+        script[HarnessStates.EXPLORE] = {
+            "success": False,
+            "ctx": {
+                ContextKeys.NEEDS_EXPLORE: True,
+                ContextKeys.FINDINGS_COUNT: 99,
+            },
+        }
+
+        harness = make_harness(script, roots=roots)
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.NEEDS_EXPLORE] is False
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 3
+
+    def test_a_failed_dispatch_is_still_recorded_as_failed(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """Reading the disk is not counting the dispatch as work done."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        script = _traverse_script()
+        script[HarnessStates.EXPLORE] = {"success": False, "ctx": {}}
+
+        harness = make_harness(script, roots=roots)
+        result = harness.run()
+
+        explore_results = [
+            entry
+            for entry in result.final_context[ContextKeys.ROLE_RESULTS]
+            if entry["state"] == HarnessStates.EXPLORE
+        ]
+        assert explore_results
+        assert all(entry["success"] is False for entry in explore_results)
+
+    def test_a_failed_executor_still_spends_its_leash_attempt(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """EXECUTE owns no disk-derived key, so its accounting cannot move."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(_failing_execute_script(), roots=roots)
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.FIX_ATTEMPTS] == 2
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
+        assert harness.worker.count_for(HarnessStates.EXECUTE) >= 2
+
+    def test_a_state_that_owns_no_disk_derived_key_derives_nothing(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The derivation is scoped by ``_WORKER_WRITABLE``, like the allowlist.
+
+        EXECUTE does not own ``findings_count``, so an executor dispatch must
+        not write one -- a count re-asserted from a state that does not own it
+        is a driver writing a gate value on a turn nobody asked it to.
+        """
+        _seed_findings(plan_dir, "alpha", "beta")
+        harness = make_harness(_traverse_script(), roots=roots)
+        context = {ContextKeys.PLAN_DIR: roots[ContextKeys.PLAN_DIR]}
+
+        assert harness.agent._derive_gate_counts(HarnessStates.EXECUTE, context) == {}
+        assert harness.agent._derive_gate_counts(HarnessStates.REFLECT, context) == {}
+        assert harness.agent._derive_gate_counts(HarnessStates.EXPLORE, context) == {
+            ContextKeys.FINDINGS_COUNT: 2
+        }
+
+    def test_no_plan_directory_leaves_the_worker_reply_alone(
+        self, make_harness
+    ) -> None:
+        """No directory is no evidence: the pre-D-032 path, unchanged.
+
+        This is also what keeps the change narrow -- with nothing to read, the
+        driver falls back to exactly the allowlist behaviour it had before.
+        """
+        harness = make_harness(_traverse_script(findings=3))
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 1
+        assert HarnessStates.PLAN in harness.worker.states
+
+    def test_no_worker_at_all_derives_nothing(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """D-045's diagnostic mode stays byte-identical.
+
+        Three real files sit on disk, but nothing was dispatched, so no gate
+        opens: a directory left behind by an earlier run is not this run's
+        evidence.
+        """
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(worker=None, roots=roots)
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
+            GateSlug.EXPLORE_CAP
+        )
+
+    @pytest.mark.parametrize("shape", ["file", "absent"])
+    def test_an_unreadable_plan_directory_changes_nothing(
+        self, make_harness, tmp_path, workspace, shape: str
+    ) -> None:
+        """A root that cannot be read is not evidence of zero findings."""
+        blocker = tmp_path / "not-a-directory"
+        if shape == "file":
+            blocker.write_text("this is a file, not a plan directory")
+        roots = {
+            ContextKeys.PLAN_DIR: str(blocker),
+            ContextKeys.WORKSPACE_ROOT: str(workspace),
+        }
+
+        harness = make_harness(_traverse_script(findings=3), roots=roots)
+        result = harness.run()
+
+        # The claim survives, because the driver derived nothing to replace it.
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 3
+        # ...and the driver created no protocol memory just by counting it.
+        assert not blocker.is_dir()
+
+    def test_a_raising_filesystem_read_does_not_lose_the_turn(
+        self, make_harness, roots, plan_dir, captured_logs, monkeypatch
+    ) -> None:
+        """The turn survives an I/O error, and still derives nothing from it.
+
+        Every filesystem-shaped failure this could meet in practice (a missing
+        directory, a path that is a file, an unreadable directory) is answered
+        before or inside ``gate_files`` without raising, so the guard's
+        ``except`` is reached only by a genuine OS error.  It is pinned by
+        forcing one: a driver that let it escape would lose the whole protocol
+        turn to a filesystem hiccup, and one that answered 0 would report a
+        confident count it never read.
+        """
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+
+        def boom(*args: Any, **kwargs: Any) -> None:
+            raise OSError("input/output error")
+
+        monkeypatch.setattr(harness_module, "PlanMemory", boom)
+        harness = make_harness(_traverse_script(findings=3), roots=roots)
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 3
+        assert any("Could not derive gate counts" in line for line in captured_logs)
+
+    def test_the_derived_count_is_driver_owned_provenance(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The derivation goes through ``_apply``, so extraction cannot undo it.
+
+        ``findings_count`` is a driver-owned key; a write that bypassed
+        ``_apply`` would be reverted by ``_reassert_driver_owned`` on the next
+        turn, which is the silent failure this asserts against.
+        """
+        _seed_findings(plan_dir, "alpha", "beta")
+        harness = make_harness(
+            _traverse_script(findings=3),
+            roots=roots,
+            extraction_data=FABRICATED_DRIVER_OWNED,
+        )
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 2
+        assert harness.agent._driver_owned[ContextKeys.FINDINGS_COUNT] == 2
+
+    def test_redispatch_stops_when_the_DISK_satisfies_the_gate(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The loop condition still reads the gate's own variable.
+
+        The explorer claims 0 forever; the files appear on disk during the
+        second dispatch.  The re-dispatch loop must end there -- it tests the
+        same number the gate does, and that number is now the disk's.
+        """
+        script = _traverse_script()
+        seen = {"n": 0}
+
+        def explorer(request: RoleRequest) -> dict[str, Any]:
+            seen["n"] += 1
+            if seen["n"] == 2:
+                _seed_findings(plan_dir, "alpha", "beta", "gamma")
+            return {"ctx": {ContextKeys.FINDINGS_COUNT: 0}}
+
+        script[HarnessStates.EXPLORE] = explorer
+        harness = make_harness(script, roots=roots)
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 2
+        assert harness.worker.count_for(HarnessStates.PLAN) == 1

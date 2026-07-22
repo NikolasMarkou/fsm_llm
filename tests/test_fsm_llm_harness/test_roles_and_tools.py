@@ -80,6 +80,7 @@ from fsm_llm_harness.tools import (
     build_plan_tools,
     build_workspace_tools,
     count_gate_files,
+    derive_disk_counts,
     gate_files,
 )
 
@@ -2181,4 +2182,62 @@ class TestCoverageLineTellsARedispatchWhatExists:
 
         assert seen[0].startswith(build_role_prompt(request, spec))
         assert "ALREADY ON DISK" in seen[0]
+
+
+class TestDeriveDiskCountsIsTheOneDerivation:
+    """``derive_disk_counts`` is what the factory AND the driver both call.
+
+    Before D-032 the worker factory owned the only loop over
+    ``DISK_DERIVED_COUNTS``.  The driver now derives the same numbers itself,
+    after every attempted dispatch, so the loop had to become one function: two
+    copies would be a gate value and a re-dispatch condition that can disagree,
+    which is the fail-open shape D-015 closed.
+    """
+
+    def test_it_counts_what_the_gate_counts(self, plan_dir: Path) -> None:
+        findings = ArtifactNames.FINDINGS_DIR
+        (plan_dir / findings).mkdir(parents=True, exist_ok=True)
+        (plan_dir / findings / "a.md").write_text("x\n")
+        (plan_dir / findings / "b.md").write_text("y\n")
+        (plan_dir / findings / "blank.md").write_text("   \n")
+        (plan_dir / findings / "notes.txt").write_text("not markdown\n")
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        derived = derive_disk_counts(memory, [ContextKeys.FINDINGS_COUNT])
+
+        assert derived == {ContextKeys.FINDINGS_COUNT: 2}
+        assert derived[ContextKeys.FINDINGS_COUNT] == count_gate_files(memory, findings)
+
+    def test_a_key_the_caller_does_not_own_is_not_counted_for_it(
+        self, plan_dir: Path
+    ) -> None:
+        """A role (or state) that owns no disk-derived key gets ``{}``."""
+        findings = ArtifactNames.FINDINGS_DIR
+        (plan_dir / findings).mkdir(parents=True, exist_ok=True)
+        (plan_dir / findings / "a.md").write_text("x\n")
+        memory = PlanMemory(plan_dir, role=Role.EXECUTOR)
+
+        assert derive_disk_counts(memory, []) == {}
+        assert derive_disk_counts(memory, ["total_steps", "needs_explore"]) == {}
+
+    def test_a_missing_directory_counts_zero_and_does_not_raise(
+        self, tmp_path: Path
+    ) -> None:
+        """Zero is "none", never "unknown" -- and never an exception."""
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.EXPLORER)
+
+        assert derive_disk_counts(memory, [ContextKeys.FINDINGS_COUNT]) == {
+            ContextKeys.FINDINGS_COUNT: 0
+        }
+
+    def test_every_disk_derived_key_is_reachable_through_it(
+        self, plan_dir: Path
+    ) -> None:
+        """Derived from the table, so a key added later is covered here too."""
+        memory = PlanMemory(plan_dir, role=Role.EXPLORER)
+
+        derived = derive_disk_counts(memory, list(DISK_DERIVED_COUNTS))
+
+        assert set(derived) == set(DISK_DERIVED_COUNTS)
+        assert all(isinstance(value, int) for value in derived.values())
 

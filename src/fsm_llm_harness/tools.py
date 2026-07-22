@@ -77,6 +77,7 @@ __all__ = [
     "build_plan_tools",
     "build_workspace_tools",
     "count_gate_files",
+    "derive_disk_counts",
     "gate_files",
     "has_bytes",
 ]
@@ -1053,6 +1054,31 @@ def gate_files(memory: PlanMemory, directory: str) -> tuple[str, ...]:
 def count_gate_files(memory: PlanMemory, directory: str) -> int:
     """How many non-empty ``.md`` files one plan-directory subdirectory holds."""
     return len(gate_files(memory, directory))
+
+
+def derive_disk_counts(memory: PlanMemory, keys: Iterable[str]) -> dict[str, int]:
+    """The filesystem's own value for every disk-derived gate count in *keys*.
+
+    Interface contract (2 call sites, and they must not be able to disagree:
+    ``roles.py``'s worker factory, which replaces the worker's self-reported
+    integer, and ``harness.py``'s driver, which derives the same number itself
+    regardless of whether the dispatch succeeded):
+        - ``memory``: a role-scoped :class:`PlanMemory`; the count is read back
+          over exactly the confined root the write tools wrote through.
+        - ``keys``: the caller's writable-key set.  A key not in
+          :data:`DISK_DERIVED_COUNTS` is not a disk-derived count and is
+          ignored; a disk-derived key the caller does not own is not counted
+          for it.
+        - Returns ``{key: count}``, ``{}`` when no key qualifies.  A directory
+          that does not exist counts 0 -- "none", never "unknown".
+        - Never raises.
+    """
+    owned = frozenset(keys)
+    return {
+        key: count_gate_files(memory, directory)
+        for key, (directory, _threshold) in DISK_DERIVED_COUNTS.items()
+        if key in owned
+    }
 
 
 def _gate_clause(memory: PlanMemory, artifact: str | None, *, verb: str) -> str:

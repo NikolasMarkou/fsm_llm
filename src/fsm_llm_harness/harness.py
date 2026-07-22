@@ -14,9 +14,13 @@ construction: all of that is ``BaseAgent``'s.  What it adds is the *protocol*:
 * the autonomy-leash and iteration-cap halt paths,
 * fail-closed handling of every worker reply (I8).
 
-**No artifact I/O.**  This module keeps all protocol memory in the FSM context.
-``storage.py`` / ``plan_validator.py`` are wired in by a later step; nothing
-here reads or writes a plan directory.
+**No artifact I/O, with ONE read-only exception.**  This module keeps all
+protocol memory in the FSM context, and it never WRITES a plan directory;
+``storage.py`` / ``plan_validator.py`` are wired in by a later step.  The
+exception is :meth:`HarnessAgent._derive_gate_counts`, which COUNTS the files
+behind a disk-derived gate key after a dispatch (D-032).  A gate value the
+driver reads off the filesystem itself is evidence; one a worker reports is
+testimony, and the two are handled differently on purpose.
 
 Dispatch mechanism
 ------------------
@@ -62,6 +66,7 @@ import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypeVar
 
@@ -87,6 +92,7 @@ from .exceptions import HarnessError, HarnessReentrancyError
 from .fsm_definition import build_harness_fsm
 from .hardening import as_int, coerce_worker_output
 from .rules import ROLE_BY_STATE, get_rules
+from .tools import DISK_DERIVED_COUNTS, PlanMemory, derive_disk_counts
 
 __all__ = [
     "HarnessAgent",
@@ -1045,6 +1051,36 @@ class HarnessAgent(BaseAgent):
         if result is not None and result.success:
             role_delta = self._apply_role_result(state, result)
             self._apply(updates, working, role_delta)
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-032
+        # This runs on EVERY attempted dispatch -- successful or FAILED -- and
+        # that asymmetry with the line above is the entire point. Invariant I8
+        # discards a failed dispatch's gate keys because a worker that did not
+        # finish has not earned the right to be believed; that is TESTIMONY.
+        # A count the driver reads off the filesystem itself is EVIDENCE: the
+        # files exist whether or not the dispatch that wrote them reported
+        # success. Measured (step 23, live `:4b`): one run in five ended holding
+        # a real `findings/*.md` file and a gate value of 0, because all six of
+        # its dispatches were recorded FAILED.
+        # Do NOT "simplify" this by moving it inside the `result.success`
+        # branch (that restores the bug) and, far more importantly, do NOT
+        # generalise it to worker-CLAIMED keys by reading `_apply_role_result`
+        # unconditionally. That would re-open exactly the fail-open gate step 20
+        # closed: review C1 reproduced an EXPLORE dispatch that wrote ZERO bytes,
+        # claimed `findings_count: 3` and SATISFIED the EXPLORE -> PLAN gate.
+        # The rule is narrow and must stay narrow: values the DRIVER derives
+        # from the filesystem are read regardless of dispatch success; values a
+        # WORKER reports are read only from a successful dispatch, through
+        # `_WORKER_WRITABLE`'s exact-type allowlist. A failed dispatch is still
+        # recorded as failed, still spends whatever counter it spends and still
+        # meets the leash -- this changes what the driver KNOWS, not what it
+        # counts as work done.
+        # The one case that derives NOTHING is `(None, None)` -- no worker
+        # configured at all (D-045). Nothing was attempted, so the diagnostic
+        # mode stays byte-identical: a directory left behind by an earlier run
+        # must not open a gate in a run that dispatched no one.
+        # See decisions.md D-032.
+        if result is not None or error is not None:
+            self._apply(updates, working, self._derive_gate_counts(state, working))
         if state == HarnessStates.REFLECT:
             # Runs on EVERY reflect dispatch, over the MERGED view -- see D-044.
             self._apply(
@@ -1185,6 +1221,47 @@ class HarnessAgent(BaseAgent):
         return coerce_worker_output(
             payload, allowed, where=f"Worker for state '{state}'"
         )
+
+    def _derive_gate_counts(
+        self, state: str, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Count *state*'s disk-derived gate keys off the filesystem.
+
+        The driver's own read, over the run's plan directory, through the same
+        ``tools.derive_disk_counts`` the worker factory and the write tools use
+        -- one derivation, so the gate value, the number reported back to the
+        model and the number the re-dispatch loop tests can never disagree.
+
+        Args:
+            state: The state whose ``_WORKER_WRITABLE`` keys are considered.
+            context: The merged view; supplies ``plan_dir``.
+
+        Returns:
+            ``{key: count}`` for every disk-derived gate key *state* owns.
+            ``{}`` when there is no plan directory, when the state owns no such
+            key, or when the directory cannot be read -- an unreadable
+            directory is not evidence of anything and must leave the gate
+            exactly as it was.
+        """
+        allowed = _WORKER_WRITABLE[state]
+        if not any(key in allowed for key in DISK_DERIVED_COUNTS):
+            return {}
+        plan_dir = _as_optional_str(context.get(ContextKeys.PLAN_DIR))
+        try:
+            # A directory that is not there yet is not evidence, and this check
+            # is also what keeps the read a READ: `PlanMemory.__init__` CREATES
+            # its plan directory, and the driver has no business creating
+            # protocol memory as a side effect of counting it.
+            if plan_dir is None or not Path(plan_dir).expanduser().is_dir():
+                return {}
+            memory = PlanMemory(plan_dir, role=ROLE_BY_STATE[state])
+            return dict(derive_disk_counts(memory, allowed))
+        except Exception as exc:  # unreadable root: no evidence, not zero
+            logger.warning(
+                f"Could not derive gate counts for state '{state}' from "
+                f"'{plan_dir}': {exc}. Leaving the gate value unchanged."
+            )
+            return {}
 
     @staticmethod
     def _enforce_routing_exclusivity(

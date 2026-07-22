@@ -437,19 +437,38 @@ class Defaults:
     # --- Protocol gates ---------------------------------------------------
     #: EXPLORE -> PLAN requires at least this many indexed findings.
     FINDINGS_THRESHOLD = 3
-    # DECISION plan-2026-07-21T191807-bf7ffe24/D-029
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-031
     #: EXTRA explorer dispatches the driver may spend, per RUN, while the
     #: findings gate is still BLOCKED.  Total EXPLORE dispatches per run are
     #: bounded by (genuine state entries) + this number.
     #:
-    #: Do NOT raise this to "give the model more chances": measured on
-    #: `ollama_chat/qwen3.5:4b`, one explorer dispatch yields ~1 topic file, so
-    #: 5 extra dispatches is already ~2x the FINDINGS_THRESHOLD of 3, and a run
-    #: that has not reached 3 by then is failing for a reason more dispatches
-    #: cannot fix.  Do NOT set it to 0 either: that restores the shape four
-    #: steps of this plan measured at 0/10 on criterion (b) (decisions.md
-    #: D-022, D-027).  See decisions.md D-029.
-    MAX_EXPLORE_REDISPATCHES = 5
+    #: This number is sized from a MEASURED YIELD HORIZON, not from a rate, and
+    #: NOT by extrapolating one.  The distinction is the whole content of this
+    #: comment, because the extrapolation was tried and measured wrong:
+    #:   * step 23 pooled 9 distinct files over 26 re-dispatches (0.35
+    #:     files/dispatch) and this bound was set to 17 on that average, i.e.
+    #:     18 total dispatches for an expected 6.3 files against a threshold
+    #:     of 3.  MEASURED at that bound (step 24, n=10, `:4b`): the pooled rate
+    #:     fell to 0.14 (19 files / 136 dispatches) and runs reaching 3 went
+    #:     4/10.  Yield is NOT linear in dispatches.
+    #:   * What the per-dispatch traces show instead is a HORIZON.  Every run
+    #:     that ever reached 3 did so by its **9th** dispatch (measured: 9, 8,
+    #:     6, 5).  Every run that had not got going by then stayed exactly where
+    #:     it was: six runs spent dispatches 10-18 -- about 60 dispatches -- and
+    #:     added ZERO new files between them.
+    #:   * So the bound covers the horizon plus one: 9 + 1 = 10 total dispatches
+    #:     = 1 entry dispatch + **9** extra.
+    #:
+    #: Do NOT raise it past ~12 total.  It is not a dial that trades wall clock
+    #: for findings: measured, dispatches beyond the horizon cost ~30-40 s each
+    #: on `:4b` and return nothing.  17 was measured and is strictly worse than
+    #: this value -- same outcome, ~470 s per blocked run instead of ~300 s.
+    #: Do NOT put it back to 5 either (6 total dispatches would have missed two
+    #: of the four measured successes, which took 8 and 9), and do NOT set it to
+    #: 0: that restores the one-dispatch shape four steps of this plan measured
+    #: at 0/10 on criterion (b) (decisions.md D-022, D-027).
+    #: See decisions.md D-031.
+    MAX_EXPLORE_REDISPATCHES = 9
     #: The autonomy leash: the 3rd fix attempt is HARD-blocked.
     MAX_FIX_ATTEMPTS = 2
     # DECISION plan-2026-07-21T125237-191b2eb2/D-052

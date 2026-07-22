@@ -70,7 +70,7 @@ from .tools import (
     WorkspaceTools,
     build_plan_tools,
     build_workspace_tools,
-    count_gate_files,
+    derive_disk_counts,
     gate_files,
     has_bytes,
 )
@@ -1105,9 +1105,10 @@ def build_default_worker_factory(
         # DECISION plan-2026-07-21T191807-bf7ffe24/D-015
         # A gate key listed in `tools.DISK_DERIVED_COUNTS` is REMOVED from the
         # worker's payload and replaced by a count of the files that really
-        # exist -- through `count_gate_files`, which is the ONE derivation the
-        # write tools also report back to the model (D-027); a second count
-        # here would be a gate and a progress report that can disagree.
+        # exist -- through `derive_disk_counts`, which is the ONE derivation the
+        # write tools also report back to the model (D-027) and the one the
+        # DRIVER re-derives for itself after every dispatch (D-032); a second
+        # count here would be a gate and a progress report that can disagree.
         # Do NOT "optimise" this into "trust the worker unless the
         # filesystem disagrees", and do NOT skip the pop when there is no plan
         # directory: review C1 reproduced the fail-open with the repo's own
@@ -1119,13 +1120,12 @@ def build_default_worker_factory(
         # half: the explorer is forbidden to touch the `findings.md` index the
         # count used to be defined against, so a rule-compliant role could
         # never report it truthfully at all. See decisions.md D-015.
-        derived: dict[str, Any] = {}
-        for key, (directory, _threshold) in DISK_DERIVED_COUNTS.items():
-            if key not in spec.writable_keys:
-                continue
-            accepted.pop(key, None)
-            if memory is not None:
-                derived[key] = count_gate_files(memory, directory)
+        for key in DISK_DERIVED_COUNTS:
+            if key in spec.writable_keys:
+                accepted.pop(key, None)
+        derived: dict[str, int] = (
+            derive_disk_counts(memory, spec.writable_keys) if memory is not None else {}
+        )
         accepted.update(derived)
 
         # DECISION plan-2026-07-21T191807-bf7ffe24/D-016
