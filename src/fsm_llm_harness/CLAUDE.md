@@ -379,7 +379,7 @@ Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_harness/          # 1,850 tests, 10 test files
+pytest tests/test_fsm_llm_harness/          # 1,853 tests, 10 test files
 ```
 
 | File | Tests |
@@ -392,7 +392,7 @@ pytest tests/test_fsm_llm_harness/          # 1,850 tests, 10 test files
 | `test_cli.py` | 103 |
 | `test_storage.py` | 93 |
 | `test_fsm_definition.py` | 87 |
-| `test_live_ollama.py` | 56 (15 live, gated off by default) |
+| `test_live_ollama.py` | 59 (15 live, gated off by default) |
 | `test_extraction_cost.py` | 24 |
 
 **Live tests are DOUBLE-gated** and auto-skip: they need both
@@ -468,9 +468,17 @@ honest-halt clauses byte-identical to B0's, n=3, same model digest. B1
 measured **0/3, NOT MET**, in a different and cleaner shape: every run
 `furthest_state=explore`, `halt_slug=explore-cap`, `honest_halt=true` (wall
 clocks 344.6/298.5/357.9 s vs the 1800 s ceiling; findings on disk 0/0/2).
-Zero slugless stalls -- the dishonest B0 shape is structurally gone. No B1
-run reached PLAN, so the redispatch budget and deliverable line are
-offline-verified (unit-proven) but live-unexercised, and the tightened
+Zero slugless stalls in B1's rows. Scope that claim precisely: the
+redispatch budget covers worker-failure replies ONLY -- it retries when
+`result is None or not result.success` and halts on `plan-cap` when spent
+-- so the B0 worker-failure stall shape is structurally closed. NOT closed:
+a plan-writer reply with `success=True` that leaves plan.md empty skips the
+budget, falls through to approval, and a denial (DENY is the unattended
+default, and an empty plan is denied) sets `plan_approved=False` with no
+slug -- the 3-turn stall detector then halts slug=None. That residual
+slugless PLAN stall is reachable, live-unexercised, and named successor
+work. No B1 run reached PLAN, so the redispatch budget and deliverable line
+are offline-verified (unit-proven) but live-unexercised, and the tightened
 verified-write clause measured false 3/3 because nothing reached EXECUTE.
 The measured blocker for the end-to-end claim is now EXPLORE cold-start over
 an EMPTY plan directory -- one state EARLIER than B0's mixed picture, and
@@ -482,8 +490,11 @@ Known gaps, standing after B1 (live-surfaced or live-unexercised):
 - **EXPLORE cold-start is the blocker** (3/3 in B1): no measured harness-side
   lever exists yet; the named successor is a dedicated EXPLORE-only
   cold-start bench (n >= 10) to characterize the mechanism before fixing it.
-- **PLAN redispatch budget**: fixed (`MAX_PLAN_REDISPATCHES=3`, `plan-cap`
-  slug), offline-verified, live-unexercised (no B1 run reached PLAN).
+- **PLAN redispatch budget covers worker-failure replies only**
+  (`MAX_PLAN_REDISPATCHES=3`, `plan-cap` slug; offline-verified,
+  live-unexercised -- no B1 run reached PLAN). Residual: a
+  `success=True`-but-empty plan.md reply bypasses the budget, and the
+  ensuing approval denial stalls sluglessly (successor work).
 - **Bare `/workspace` sentinel is not repaired at confinement**: repair
   handles `/workspace/<path>` but a live run's `list_dir("/workspace")` was
   REJECTED instead of being repaired to the workspace root.
@@ -497,7 +508,7 @@ empty-file gate counting, ownership deny branch, live-gate short-circuit) each
 flipped tests red in a scratch copy (93 red total), and `test_cli.py`'s
 exit-code 0/1/2 contract close-read verdict was CLEAN.
 
-Offline, the package is green: 1,850 tests, `ruff` clean, `mypy` 0 errors.
+Offline, the package is green: 1,853 tests, `ruff` clean, `mypy` 0 errors.
 
 **Not claimed**: that the harness is production-ready, or that a 4B model
 drives it unattended to a useful result -- the L6 0/3, measured twice (B0 and

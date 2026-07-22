@@ -12,7 +12,7 @@ FSM-LLM (v0.5.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (5,250 tests)
+make test           # pytest -v (5,253 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -102,11 +102,14 @@ future blocks) -- but the
 first graded end-to-end criterion on REAL workers (L6, n=3 per block) is NOT
 MET in either committed block: B0 **0/3** (two honest explore-cap halts, one
 slugless PLAN stall) and, after the structural fixes B0 motivated (PLAN
-redispatch budget with an honest `plan-cap` slug, driver-named `plan.md`
-deliverable line, verified-write floor TIGHTENED to an EXECUTE-state
-workspace write), B1 **0/3** -- all three runs honest explore-cap halts, zero
-slugless stalls, tightened verified-write clause false 3/3 because no run
-reached EXECUTE. The measured blocker is now EXPLORE cold-start over an empty
+redispatch budget with an honest `plan-cap` slug -- it covers worker-failure
+replies only, so a `success=True`-but-empty plan.md followed by an approval
+denial can still stall sluglessly: a known residual gap, named successor
+work -- driver-named `plan.md` deliverable line, verified-write floor
+TIGHTENED to an EXECUTE-state workspace write whose own written path must be
+among the changed files), B1 **0/3** -- all three runs honest explore-cap
+halts, zero slugless stalls, tightened verified-write clause false 3/3
+because no run reached EXECUTE. The measured blocker is now EXPLORE cold-start over an empty
 plan directory (one state EARLIER than B0's mixed picture); the PLAN-and-later
 machinery is offline-verified but live-unexercised (no B1 run left EXPLORE).
 The harness is not production-ready and a 4B model is not claimed to
@@ -179,17 +182,17 @@ the full reference, including what is measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (5,250 collected)
+pytest                                 # Run all tests (5,253 collected)
 pytest tests/test_fsm_llm/            # Core package tests (1,305 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (137 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (968 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (270 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
-pytest tests/test_fsm_llm_harness/    # Harness tests (1,850 tests)
+pytest tests/test_fsm_llm_harness/    # Harness tests (1,853 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 5,180. The remaining 70 are three root-level files:
+# The 9 suites above sum to 5,183. The remaining 70 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (24)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests

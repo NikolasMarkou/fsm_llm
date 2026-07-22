@@ -54,7 +54,7 @@ import sys
 import threading
 import time
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
@@ -202,12 +202,17 @@ RETRY_TOKENS = ("retry", "retries", "backoff")
 # FUTURE bench rows only -- frozen L4 B0/B1 and L6 B0 jsonl are never
 # re-scored.  See decisions.md D-006.
 def content_matched_ast(body: str) -> bool:
-    """Vocabulary-decoupled structural verdict: does *body* CONTAIN retry code?
+    """Vocabulary-decoupled STRUCTURAL verdict: does *body* contain retry
+    STRUCTURE (loop + except + sleep present as tree nodes)?
 
-    The fixture's prose says "loop", "sleeping", "re-raise" -- never the code
-    tokens ``for``/``while``/``try``/``time.sleep(`` -- so this predicate
-    shares no vocabulary with the prompt (plan step 4, assumption A7): echoing
-    the prose back cannot satisfy it.  Three conjuncts, all required:
+    Structure, not semantics: a hollow skeleton whose loop/try/sleep retries
+    NOTHING scores True -- a documented limitation, pinned by its own test
+    below and part of this metric's contract (additive, unclaimed on any
+    committed row).  The fixture's prose says "loop", "sleeping", "re-raise"
+    -- never the code tokens ``for``/``while``/``try``/``time.sleep(`` -- so
+    this predicate shares no vocabulary with the prompt (plan step 4,
+    assumption A7): echoing the prose back cannot satisfy it.  Three
+    conjuncts, all required:
 
     * a ``For`` or ``While`` node (the bounded-attempts loop),
     * a ``Try`` node with at least one ``except`` handler,
@@ -1571,6 +1576,7 @@ def _bench_defect(row: Mapping[str, Any]) -> bool:
 
 
 # DECISION plan-2026-07-22T184813-6549c7cb/D-008
+# DECISION plan-2026-07-22T184813-6549c7cb/D-010
 # The B1 floor's verified_write predicate, TIGHTENED from B0's (reviewer
 # WARNING 3): B0 counted write evidence from ANY state, so an EXPLORE dispatch
 # that wrote findings/x.md satisfied the clause alone -- near-vacuous for a
@@ -1579,26 +1585,57 @@ def _bench_defect(row: Mapping[str, Any]) -> bool:
 # conjunction (an EXECUTE dispatch that only wrote decisions.md/changelog.md is
 # legitimate work but NOT the floor's verified write), and do NOT read worker
 # prose for it -- both conjuncts are disk/driver-derived (the factory's D-016
-# root-attributed observer channel AND the test's own sha256 diff).  Bars may
-# be tightened, never loosened.  See decisions.md D-008.
+# root-attributed observer channel AND the test's own sha256 diff).
+# Tightened AGAIN per D-010 (iteration-1 reviewer W3): the first form conjoined
+# an EXECUTE workspace-write COUNT with the GLOBAL changed-file list -- two
+# independent signals, passable by an identical-bytes echo-back EXECUTE write
+# plus a byte change from any other source (e.g. a REFLECT `run_command`
+# dropping a `.pyc`).  Do NOT re-split the conjunction into independent
+# signals: the EXECUTE dispatch's OWN verified write paths (the D-005/D-010
+# `write_evidence_paths` labels) must INTERSECT the changed set.  A path
+# spelling the normalizer does not recognize fails CLOSED (False) -- tighter,
+# never looser.  Bars may be tightened, never loosened.  See decisions.md
+# D-008 and D-010.
+def _normalized_ws_path(label_path: str) -> str:
+    """A write label's path, normalized to the workspace-relative spelling.
+
+    Mirrors ONLY the confinement repair's lexical shape (tools.py D-006: a
+    leading ``/workspace`` sentinel on an absolute path means the workspace
+    root): ``/workspace/uploader.py`` -> ``uploader.py``.  A relative
+    ``workspace/uploader.py`` is NOT stripped -- the repair does not strip it
+    either (it names a real subdirectory).  Anything unrecognized simply
+    fails to intersect the sha256 diff, which fails the floor CLOSED.
+    """
+    parts = PurePosixPath(label_path).parts
+    if parts and parts[0] == "/":
+        parts = parts[1:]
+        if parts and parts[0] == "workspace":
+            parts = parts[1:]
+    return str(PurePosixPath(*parts)) if parts else ""
+
+
 def _verified_execute_workspace_write(
     observations: list[dict[str, Any]], ws_changed: list[str]
 ) -> bool:
     """The tightened B1 floor predicate for ``verified_write``.
 
     Interface contract (2 call sites: ``_one_e2e_run`` and the UNGATED
-    predicate tests): True iff at least one EXECUTE-state dispatch carried
-    >= 1 WORKSPACE-root verified write (the factory's D-016 channel, root
-    split per D-005) AND the workspace sha256 diff shows changed bytes.
-    Pure -- reads its arguments, touches no disk.
+    predicate tests): True iff at least one EXECUTE-state dispatch's OWN
+    verified WORKSPACE-root write (the factory's D-016 channel, per-path
+    labels per D-005/D-010) names a file the workspace sha256 diff shows
+    changed.  Records without the ``write_evidence_paths`` labels carry no
+    attributable write and score False.  Pure -- reads its arguments,
+    touches no disk.
     """
-    execute_workspace_writes = sum(
-        1
-        for record in observations
-        if record.get("state") == HarnessStates.EXECUTE
-        and (record.get("write_evidence_workspace") or 0) >= 1
-    )
-    return bool(execute_workspace_writes and ws_changed)
+    changed = set(ws_changed)
+    for record in observations:
+        if record.get("state") != HarnessStates.EXECUTE:
+            continue
+        for label in record.get("write_evidence_paths") or ():
+            root, sep, path = str(label).partition(":")
+            if sep and root == "workspace" and _normalized_ws_path(path) in changed:
+                return True
+    return False
 
 
 def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
@@ -1661,7 +1698,8 @@ def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
     write_dispatches = sum(
         1 for record in observations if (record.get("write_evidence") or 0) >= 1
     )
-    # Tightened for B1 (D-008): EXECUTE-state WORKSPACE write AND ws_changed.
+    # Tightened for B1 (D-008), attribution-linked per D-010: an EXECUTE-state
+    # WORKSPACE write whose OWN written path is among the changed files.
     # `pd_written` and the any-state `write_dispatches` count stay REPORTED
     # row fields but no longer satisfy the floor's verified_write.
     verified_write = _verified_execute_workspace_write(observations, ws_changed)
@@ -1931,17 +1969,33 @@ class TestTheTightenedVerifiedWritePredicate:
     B0's clause counted write evidence from ANY state, so all three committed
     B0 rows scored ``verified_write=True`` off EXPLORE findings writes alone
     (reviewer WARNING 3).  The tightened predicate must refuse every one of
-    those shapes and accept only an EXECUTE-state WORKSPACE write coinciding
-    with a real sha256 diff.
+    those shapes and accept only an EXECUTE-state WORKSPACE write whose OWN
+    written path is among the sha256-changed files (iteration-1 reviewer W3:
+    merely coinciding with a diff from any source is not attribution).
+    Strictly tightening -- every committed B1 row is ``verified_write=false``
+    and stays false; nothing recorded flips.
     """
 
     @staticmethod
-    def _obs(state: str, workspace: int = 0, plan: int = 0) -> dict[str, Any]:
+    def _obs(
+        state: str,
+        workspace: int = 0,
+        plan: int = 0,
+        paths: tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
+        if paths is None:
+            # Dummy labels consistent with the counts, deliberately NOT
+            # matching any ws_changed name a test passes: attribution must
+            # be asserted with an explicit `paths=`.
+            paths = tuple(
+                f"workspace:unrelated-{i}.py" for i in range(workspace)
+            ) + tuple(f"plan:findings/f{i}.md" for i in range(plan))
         return {
             "state": state,
             "write_evidence": workspace + plan,
             "write_evidence_workspace": workspace,
             "write_evidence_plan": plan,
+            "write_evidence_paths": paths,
         }
 
     def test_no_observations_is_never_a_verified_write(self) -> None:
@@ -1970,23 +2024,67 @@ class TestTheTightenedVerifiedWritePredicate:
         obs = [self._obs(HarnessStates.EXECUTE, plan=2)]
         assert _verified_execute_workspace_write(obs, ["uploader.py"]) is False
 
-    def test_an_execute_workspace_write_with_ws_diff_is_verified(self) -> None:
+    def test_an_execute_workspace_write_to_a_changed_file_is_verified(self) -> None:
+        """The one passing shape: the EXECUTE dispatch's own verified write
+        names a file the sha256 diff shows changed."""
         obs = [
             self._obs(HarnessStates.EXPLORE, plan=1),
-            self._obs(HarnessStates.EXECUTE, workspace=1, plan=1),
+            self._obs(
+                HarnessStates.EXECUTE,
+                workspace=1,
+                plan=1,
+                paths=("workspace:uploader.py", "plan:changelog.md"),
+            ),
         ]
         assert _verified_execute_workspace_write(obs, ["uploader.py"]) is True
+
+    def test_a_byte_change_from_another_source_is_not_attribution(self) -> None:
+        """Iteration-1 reviewer W3's exact hole, pinned closed: an EXECUTE
+        echo-back write to uploader.py (verified by the D-016 channel but
+        changing nothing) plus a byte change from ANY other source -- e.g. a
+        REFLECT ``run_command`` dropping a ``.pyc`` -- satisfied the old
+        unlinked conjunction.  The written path must BE a changed file."""
+        obs = [
+            self._obs(
+                HarnessStates.EXECUTE, workspace=1, paths=("workspace:uploader.py",)
+            )
+        ]
+        changed_elsewhere = ["__pycache__/uploader.cpython-310.pyc"]
+        assert _verified_execute_workspace_write(obs, changed_elsewhere) is False
+
+    def test_the_repaired_sentinel_spelling_still_attributes(self) -> None:
+        """`:4b` emits ``/workspace/uploader.py`` meaning ``uploader.py``
+        (tools.py D-006 repair); the label carries the raw spelling, so the
+        predicate must normalize it -- and ONLY it -- to the diff's
+        workspace-relative name.  A relative ``workspace/...`` names a real
+        subdirectory and must NOT be stripped."""
+        obs = [
+            self._obs(
+                HarnessStates.EXECUTE, workspace=1, paths=("workspace:/workspace/uploader.py",)
+            )
+        ]
+        assert _verified_execute_workspace_write(obs, ["uploader.py"]) is True
+        nested = [
+            self._obs(
+                HarnessStates.EXECUTE, workspace=1, paths=("workspace:workspace/uploader.py",)
+            )
+        ]
+        assert _verified_execute_workspace_write(nested, ["uploader.py"]) is False
 
     def test_both_conjuncts_are_required(self) -> None:
         """Observer evidence without a sha256 diff (or vice versa) is not
         enough: the channel cross-check is the point of the AND."""
-        obs = [self._obs(HarnessStates.EXECUTE, workspace=1)]
+        obs = [
+            self._obs(
+                HarnessStates.EXECUTE, workspace=1, paths=("workspace:uploader.py",)
+            )
+        ]
         assert _verified_execute_workspace_write(obs, []) is False
         assert _verified_execute_workspace_write([], ["uploader.py"]) is False
 
     def test_records_missing_the_root_split_are_tolerated_as_zero(self) -> None:
-        """A record lacking the D-005 split keys counts as no workspace
-        evidence -- never a KeyError."""
+        """A record lacking the D-005 split keys (and the D-010 path labels)
+        counts as no workspace evidence -- never a KeyError."""
         obs = [{"state": HarnessStates.EXECUTE, "write_evidence": 1}]
         assert _verified_execute_workspace_write(obs, ["uploader.py"]) is False
 
@@ -2017,6 +2115,20 @@ _GENUINE_RETRY_BODY = (
 _FROM_IMPORT_RETRY_BODY = _GENUINE_RETRY_BODY.replace(
     "import time", "from time import sleep"
 ).replace("time.sleep(", "sleep(")
+
+#: A HOLLOW skeleton: loop + except + ``time.sleep`` present as tree nodes,
+#: retrying NOTHING (the try body is ``pass``).  The metric's documented
+#: false-positive -- see ``content_matched_ast``'s docstring and the pinning
+#: test below.
+_HOLLOW_SKELETON_BODY = (
+    "import time\n\n\n"
+    "def upload(path, url):\n"
+    "    for attempt in range(3):\n"
+    "        try:\n"
+    "            pass\n"
+    "        except Exception:\n"
+    "            time.sleep(1)\n"
+)
 
 
 class TestContentMatchedAstIsVocabularyDecoupled:
@@ -2078,6 +2190,17 @@ class TestContentMatchedAstIsVocabularyDecoupled:
         assert any(token in echoed.lower() for token in RETRY_TOKENS)
         assert content_matched_ast(echoed) is False
         assert content_matched_ast(_GENUINE_RETRY_BODY) is True
+
+    def test_a_hollow_skeleton_scores_True_the_documented_limitation(self) -> None:
+        """The known false-positive, pinned so nobody 'fixes' it silently
+        (iteration-1 reviewer N4): a for/try/``time.sleep`` skeleton whose
+        try body is ``pass`` -- it retries NOTHING -- DOES score True,
+        because the metric grades structural shape, not semantics.  This
+        test is documentation, not endorsement: the limitation is part of
+        the metric's contract, and tightening it (e.g. requiring a non-pass
+        try body) would change what every future block's number means and
+        must be its own recorded decision, not a drive-by edit."""
+        assert content_matched_ast(_HOLLOW_SKELETON_BODY) is True
 
     def test_content_matched_ast_shares_no_vocabulary_with_the_prose(self) -> None:
         """A7's decoupling claim, pinned offline: the prose says "loop",

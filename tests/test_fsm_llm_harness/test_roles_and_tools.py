@@ -3518,6 +3518,9 @@ class TestWriteEvidenceRootSplit:
         assert record["write_evidence"] == 1
         assert record["write_evidence_workspace"] == 1
         assert record["write_evidence_plan"] == 0
+        # D-010: the raw labels ride along so an observer can attribute a
+        # workspace diff to THIS dispatch's own writes, not just count them.
+        assert record["write_evidence_paths"] == ("workspace:uploader.py",)
 
     def test_a_plan_only_trace_attributes_to_plan(
         self, tmp_path: Path, plan_dir: Path
@@ -3552,6 +3555,10 @@ class TestWriteEvidenceRootSplit:
             record["write_evidence_workspace"] + record["write_evidence_plan"]
             == record["write_evidence"]
         )
+        assert record["write_evidence_paths"] == (
+            "workspace:uploader.py",
+            "plan:changelog.md",
+        )
 
     def test_an_empty_trace_reports_zero_in_all_three(
         self, tmp_path: Path, plan_dir: Path
@@ -3584,6 +3591,7 @@ class TestWriteEvidenceRootSplit:
         assert seen[-1]["write_evidence"] == 0
         assert seen[-1]["write_evidence_workspace"] == 0
         assert seen[-1]["write_evidence_plan"] == 0
+        assert seen[-1]["write_evidence_paths"] == ()
 
 
 class TestDefaultAgentBuilder:

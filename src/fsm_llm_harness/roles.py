@@ -1227,6 +1227,7 @@ def build_default_worker_factory(
                     "write_evidence": 0,
                     "write_evidence_workspace": 0,
                     "write_evidence_plan": 0,
+                    "write_evidence_paths": (),
                     "write_required": False,
                     "claimed_findings_count": None,
                     "derived_findings_count": None,
@@ -1335,6 +1336,14 @@ def build_default_worker_factory(
                 "write_evidence_plan": sum(
                     1 for label in verified if label.startswith(f"{_PLAN_ROOT}:")
                 ),
+                # DECISION plan-2026-07-22T184813-6549c7cb/D-010
+                # The raw "<root>:<path>" labels, verbatim.  Counts alone
+                # cannot ATTRIBUTE a workspace byte-diff to THIS dispatch's
+                # own writes (reviewer W3: an echo-back EXECUTE write plus a
+                # byte change from any other source passed the count-based
+                # floor conjunction).  Do NOT collapse this back to the two
+                # counts above.  See decisions.md D-010.
+                "write_evidence_paths": tuple(verified),
                 "write_required": write_required,
                 "claimed_findings_count": claimed,
                 "derived_findings_count": derived.get(ContextKeys.FINDINGS_COUNT),
