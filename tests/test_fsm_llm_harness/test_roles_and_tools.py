@@ -2648,6 +2648,168 @@ class TestTheAssignedWriteTargetNamesPathToolAndRoot:
         assert "YOUR EDIT THIS STEP" not in build_role_prompt(request, spec)
 
 
+class TestThePlanDeliverableLineNamesPlanMd:
+    """One PLAN dispatch, one static named deliverable: ``plan.md`` (D-001).
+
+    L6 B0 (n=3, ``scripts/bench_data/l6-e2e``) measured the defect this line
+    exists for: the one run that reached PLAN got an empty plan-writer reply
+    with ``plan_md_bytes=0`` and stalled -- nothing in the prompt had named
+    ``plan.md`` as THE deliverable of the dispatch.  This applies the D-035
+    driver-names-the-ONE-file pattern -- the structural-over-verbal lever
+    measured twice (EXPLORE 10/10; EXECUTE content-match 2/40 -> 40/40, Fisher
+    p=1.6e-20) -- to PLAN.  Unlike EXPLORE's topic and EXECUTE's write target
+    the path is STATIC (``plan.md`` is the plan-writer's one obligation per
+    ``rules.OWNERSHIP``), so there is no driver derivation and no
+    ``RoleRequest`` field: the line renders on every PLAN dispatch that holds
+    a plan directory, and on nothing else.  Verified against the pre-change
+    rendering at implementation time: sha256 of all 6 states' full/system/task
+    prompts, with and without a plan dir -- only PLAN-with-plan-dir's full and
+    task halves changed; every other rendering was byte-identical.
+    """
+
+    _MARKER = "YOUR DELIVERABLE THIS DISPATCH"
+
+    def _line(self) -> str:
+        return (
+            f"WRITE IT TO: {ArtifactNames.PLAN} USING {PlanTools.WRITE_PLAN_FILE}"
+        )
+
+    def test_the_plan_task_prompt_renders_the_deliverable_exactly_once(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Exactly one deliverable line -- a repeated one is a new ambiguity."""
+        request = _role_request(
+            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
+        )
+        task = build_role_task_prompt(request, get_role_spec(HarnessStates.PLAN))
+
+        assert task.count(self._line()) == 1
+
+    def test_the_line_names_the_plan_root_and_the_write_tool(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The root is stated, not inferred (the B0 EXECUTE misses were ROOT
+        misses; the same tool-and-root naming is carried over wholesale)."""
+        request = _role_request(
+            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
+        )
+        task = build_role_task_prompt(request, get_role_spec(HarnessStates.PLAN))
+
+        assert PlanTools.WRITE_PLAN_FILE in self._line()
+        assert "plan-directory-relative" in task
+
+    def test_the_line_does_not_forbid_the_other_owned_artifacts(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """No ``nothing else``: the plan-writer also owns ``decisions.md`` and
+        ``verification.md``, and the EXECUTE line's exclusivity clause would
+        order it not to write files its own operative rules require."""
+        request = _role_request(
+            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
+        )
+        task = build_role_task_prompt(request, get_role_spec(HarnessStates.PLAN))
+        block = next(b for b in task.split("\n\n") if self._MARKER in b)
+
+        assert "nothing else" not in block
+
+    def test_the_line_is_in_the_task_half_not_the_standing_half(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Assignment lines are TASK text (D-021, D-035): the sibling topic
+        and target lines live there, and the split's system half must stay
+        byte-identical so the standing-policy measurement is not re-run."""
+        request = _role_request(
+            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
+        )
+        spec = get_role_spec(HarnessStates.PLAN)
+
+        assert self._line() in build_role_task_prompt(request, spec)
+        assert self._line() not in build_role_system_prompt(request, spec)
+
+    def test_the_single_string_prompt_carries_the_line_too(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """``build_role_prompt`` is what a no-system-policy agent receives."""
+        request = _role_request(
+            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
+        )
+
+        assert self._line() in build_role_prompt(
+            request, get_role_spec(HarnessStates.PLAN)
+        )
+
+    def test_no_plan_directory_renders_no_deliverable_line(
+        self, workspace: Path
+    ) -> None:
+        """Fail-open to the status quo: a PLAN dispatch with no plan directory
+        holds no plan-write tool, so naming the deliverable would be an
+        unexecutable instruction -- the prompt stays byte-identical instead
+        (hash-verified against the pre-change rendering)."""
+        request = _role_request(
+            HarnessStates.PLAN, plan_dir=None, workspace_root=workspace
+        )
+
+        assert self._MARKER not in build_role_prompt(
+            request, get_role_spec(HarnessStates.PLAN)
+        )
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            HarnessStates.EXPLORE,
+            HarnessStates.EXECUTE,
+            HarnessStates.REFLECT,
+            HarnessStates.PIVOT,
+            HarnessStates.CLOSE,
+        ],
+    )
+    def test_a_state_other_than_plan_never_carries_the_line(
+        self, state: str, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Only the plan-writer's deliverable is ``plan.md``; no other state's
+        prompt drifts (hash-verified byte-identical at implementation time)."""
+        request = _role_request(state, plan_dir=plan_dir, workspace_root=workspace)
+
+        assert self._MARKER not in build_role_prompt(request, get_role_spec(state))
+
+    def test_the_line_reaches_a_real_dispatch_through_the_factory(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """End of the seam: the text a REAL worker sends, not a rebuilt one."""
+        built: list[_PolicyAgent] = []
+        spec = get_role_spec(HarnessStates.PLAN)
+
+        def builder(spec_: Any, registry: Any, config: Any) -> _PolicyAgent:
+            agent = _PolicyAgent(
+                registry,
+                (),
+                "done",
+                spec.output_schema(
+                    **{
+                        name: (
+                            "s"
+                            if field.annotation is str
+                            else (False if field.annotation is bool else 0)
+                        )
+                        for name, field in spec.output_schema.model_fields.items()
+                    }
+                ),
+            )
+            built.append(agent)
+            return agent
+
+        factory = build_default_worker_factory(
+            Workspace(workspace), agent_builder=builder
+        )
+        factory(
+            _role_request(
+                HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
+            )
+        )
+
+        assert self._line() in built[0].tasks[0]
+
+
 class TestAMissingPlanArtifactSaysSoAndSaysWhatToDo:
     """A read of a file nobody has written yet is a teachable failure (D-036).
 

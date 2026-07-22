@@ -599,6 +599,35 @@ def _execute_target_line(request: RoleRequest) -> str:
     )
 
 
+def _plan_deliverable_line(request: RoleRequest) -> str:
+    """The plan-writer's ONE static deliverable, or ``""`` (mirrors
+    :func:`_topic_line`: every other state -> a byte-identical prompt)."""
+    # DECISION plan-2026-07-22T184813-6549c7cb/D-001
+    # D-035's driver-names-the-ONE-file pattern (measured: EXPLORE 10/10,
+    # EXECUTE content-match 2/40 -> 40/40) applied to PLAN, because L6 B0
+    # measured a plan-writer dispatch return an empty reply with
+    # plan_md_bytes=0 and stall -- nothing in the prompt named plan.md as THE
+    # deliverable of the dispatch.  The path is STATIC (the ownership table in
+    # rules.py makes plan.md the plan-writer's one obligation), so there is
+    # deliberately NO driver derivation and NO RoleRequest field -- do NOT add
+    # either; assigned_* fields are for values that change per dispatch.  Do
+    # NOT move this into the SYSTEM half (assignment lines are TASK text,
+    # D-021), do NOT say "nothing else" the way the EXECUTE line does (the
+    # plan-writer also legitimately writes decisions.md and verification.md),
+    # and do NOT render it without a plan directory -- that dispatch holds no
+    # plan-write tool, and naming an unwritable deliverable is an unexecutable
+    # instruction.  See decisions.md D-001.
+    if request.state != HarnessStates.PLAN or request.plan_dir is None:
+        return ""
+    return (
+        f"YOUR DELIVERABLE THIS DISPATCH -- WRITE IT TO: {ArtifactNames.PLAN} "
+        f"USING {PlanTools.WRITE_PLAN_FILE} (this path is "
+        "plan-directory-relative). That file is THE deliverable: a dispatch "
+        "that ends with no bytes in it has not done its job, whatever else "
+        "it wrote."
+    )
+
+
 def _finish_line(spec: RoleSpec, can_write: bool) -> str:
     """Render the terminal instruction: what to do, and when to stop doing it."""
     # DECISION plan-2026-07-21T191807-bf7ffe24/D-013
@@ -728,6 +757,9 @@ def _prompt_blocks(request: RoleRequest, spec: RoleSpec) -> list[tuple[bool, str
     target = _execute_target_line(request)
     if target:
         blocks.append((False, target))
+    deliverable = _plan_deliverable_line(request)
+    if deliverable:
+        blocks.append((False, deliverable))
     blocks.extend(
         [
             (
