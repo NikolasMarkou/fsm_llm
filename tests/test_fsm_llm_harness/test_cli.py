@@ -667,6 +667,41 @@ class TestStatus:
         assert writes == []
         assert before == after
 
+    def test_over_bound_state_md_is_unusable_not_a_crash(
+        self, seeded_plan: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A state.md the DRIVER read path refuses: gate exit, never a traceback.
+
+        The CLI's two ``state.md`` parse paths genuinely diverge (D-009 LOW 2):
+        ``pre_step_gate`` reads the file with an UNCAPPED plain
+        ``Path.read_text`` (D-024 -- one file open, no ``PlanDirectory``),
+        while ``load_run_state`` goes through ``PlanDirectory.read_text``,
+        which refuses any artifact over ``DRIVER_READ_MAX_BYTES``.  A
+        valid-parsing state.md over that bound therefore passes the ``no-plan``
+        gate and then raises ``HarnessArtifactError`` out of
+        ``load_run_state``.
+        """
+        # DECISION plan-2026-07-22T184813-6549c7cb/D-007
+        # Do NOT mark `_cmd_status`'s `except _failures()` branch around
+        # `load_run_state` as `# pragma: no cover - unreachable` to match its
+        # two pragma-marked siblings: this test REACHES it through the CLI.
+        # The divergence is the driver read bound, which the gate's plain read
+        # deliberately does not share. See decisions.md D-007.
+        from fsm_llm_harness.storage import DRIVER_READ_MAX_BYTES
+
+        entry = "INIT " + "x" * 100
+        doc = StateDoc(
+            state=HarnessStates.EXPLORE,
+            transition_history=[entry] * (DRIVER_READ_MAX_BYTES // len(entry)),
+        )
+        state_path = seeded_plan / ArtifactNames.STATE
+        state_path.write_text(doc.to_markdown(), encoding="utf-8")
+        assert state_path.stat().st_size > DRIVER_READ_MAX_BYTES
+        assert cli.main_cli(["status", str(seeded_plan)]) == cli.EXIT_GATE
+        err = capsys.readouterr().err
+        assert GateSlug.NO_PLAN in err
+        assert "state.md is unusable" in err
+
 
 # ---------------------------------------------------------------------------
 # validate
@@ -807,13 +842,29 @@ class TestClose:
         seeded_plan: Path,
         plans_root: Path,
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        """A dry-run ``close`` must not touch the write path at all.
+
+        Same escaping-mutant class as ``TestStatus.test_status_writes_nothing``
+        (mutation M19, D-009 LOW 4): a spurious write of byte-identical
+        eviction output leaves identical bytes and passes a pure content
+        assertion while having genuinely rewritten a file the dry run promised
+        only to read.  Spying on the single atomic-write chokepoint names the
+        property; the byte diff stays as a belt-and-suspenders secondary check.
+        """
+        from fsm_llm_harness import plan_validator, storage
 
         monkeypatch.setattr(plan_validator, "audit", lambda *a, **k: [])
+        writes: list[str] = []
+        monkeypatch.setattr(
+            storage,
+            "_atomic_write_text",
+            lambda target, content, *, artifact: writes.append(artifact),
+        )
         _seed_cross_plan(plans_root, lessons_lines=Defaults.LESSONS_LINE_CAP + 50)
         lessons = plans_root / ArtifactNames.LESSONS
         before = lessons.read_bytes()
         assert cli.main_cli(["close", str(seeded_plan)]) == cli.EXIT_PASS
+        assert writes == []
         assert lessons.read_bytes() == before
         assert not (plans_root / ArtifactNames.LESSONS_ARCHIVE).exists()
 
@@ -973,6 +1024,25 @@ class TestRunReporting:
         )
         assert self._run(fake_agent, plans_root, tmp_path) == cli.EXIT_GATE
 
+    def test_gate_slug_outranks_a_successful_result(
+        self, fake_agent: type[_RecordingAgent], plans_root: Path, tmp_path: Path
+    ) -> None:
+        """A hard slug wins even when the run itself reports ``success=True``.
+
+        Every other gate-slug test in this class pairs the slug with
+        ``success=False``, so an early ``return EXIT_PASS if result.success``
+        mutant inserted BEFORE the slug check would escape all of them
+        (D-009 LOW 1).  The precedence contract says the slug outranks the
+        run's own success flag, so success here stays at the
+        ``_RecordingAgent`` default of True and the slug must still exit 2.
+        """
+        fake_agent.result = AgentResult(
+            answer="done",
+            success=True,
+            final_context={ContextKeys.LAST_GATE_SLUG: GateSlug.LEASH_CAP},
+        )
+        assert self._run(fake_agent, plans_root, tmp_path) == cli.EXIT_GATE
+
     def test_presentations_and_reverts_are_printed(
         self,
         fake_agent: type[_RecordingAgent],
@@ -1027,7 +1097,13 @@ class TestOptionalDependencyGuard:
             raise ImportError("nope")
 
         monkeypatch.setattr(cli, "import_module", _boom)
-        for argv in (["new", "g"], ["resume", "d"], ["status", "d"], ["validate", "d"]):
+        for argv in (
+            ["new", "g"],
+            ["resume", "d"],
+            ["status", "d"],
+            ["validate", "d"],
+            ["close", "d"],
+        ):
             with pytest.raises(SystemExit) as exc:
                 cli.main_cli(argv)
             assert exc.value.code != cli.EXIT_GATE
