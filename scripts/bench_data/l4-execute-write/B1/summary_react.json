@@ -1,0 +1,30 @@
+{
+  "arm": "react",
+  "bench_id": "l4-execute-write",
+  "block": "B1",
+  "finished_at": "2026-07-22T15:17:25Z",
+  "k_bytes_on_disk": 0,
+  "k_content_matched": 0,
+  "k_success": 0,
+  "k_write_tool_issued": 0,
+  "manifest": "manifest_react.json",
+  "n": 40,
+  "started_at": "2026-07-22T14:47:10Z",
+  "status": "complete",
+  "wilson_bytes_on_disk": [
+    0.0,
+    0.0876
+  ],
+  "wilson_content_matched": [
+    0.0,
+    0.0876
+  ],
+  "wilson_success": [
+    0.0,
+    0.0876
+  ],
+  "wilson_write_tool_issued": [
+    0.0,
+    0.0876
+  ]
+}
