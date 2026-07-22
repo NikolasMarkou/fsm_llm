@@ -769,6 +769,105 @@ class PlanDirectory:
                 )
         return self.write_text(path, artifact.to_markdown())
 
+    # -- bootstrap -------------------------------------------------------
+
+    #: Names :meth:`seed_protocol_skeleton` must NEVER create, subtracted from
+    #: the constants tables rather than worked around by hand-listing what IS
+    #: seeded.  ``STATE`` is the driver's own first write and carries the
+    #: position an empty file would misreport; ``FINDINGS_DIR`` and
+    #: ``CHECKPOINTS_DIR`` are directories whose contents are DERIVED gate
+    #: evidence (invariant I3).
+    NEVER_SEEDED: ClassVar[tuple[str, ...]] = (
+        ArtifactNames.STATE,
+        ArtifactNames.FINDINGS_DIR,
+        ArtifactNames.CHECKPOINTS_DIR,
+    )
+
+    def seed_protocol_skeleton(self) -> tuple[str, ...]:
+        """Bring the protocol's artifacts into EXISTENCE as zero-byte files.
+
+        Interface contract (call sites: the plan-creation paths, plus the L7
+        bench's ``seeded`` arm, which calls this PRODUCT method rather than a
+        fixture):
+            - Creates each per-plan artifact (``ArtifactNames.PER_PLAN`` minus
+              :data:`NEVER_SEEDED`) and each cross-plan file
+              (``ArtifactNames.CROSS_PLAN``) **only if it does not already
+              exist**, with **zero bytes**.
+            - Returns the memory-root-relative paths created by THIS call, in
+              seeding order -- so a second call returns ``()``.
+            - Idempotent, and never truncates, overwrites or appends.
+
+        Raises:
+            HarnessArtifactError: If a file that does not exist cannot be
+                created -- a half-skeleton fails loudly rather than silently.
+        """
+        # DECISION plan-2026-07-22T212329-16de43da/D-002
+        # This is a BOOTSTRAP-ONLY, CREATE-IF-ABSENT, ZERO-BYTE capability, and
+        # all three words are load-bearing restrictions, not a description of
+        # the current implementation.
+        #
+        # Do NOT widen it to write CONTENT. The zero-byte restriction is what
+        # makes this method structurally incapable of destroying or fabricating
+        # anything: it cannot overwrite a populated cross-plan `LESSONS.md`
+        # belonging to a whole different plan (the tier is SHARED -- see D-047's
+        # note that the confinement root is the plan directory's PARENT), and it
+        # cannot invent institutional memory that a first-ever plan legitimately
+        # does not have. Header stubs were considered and rejected for exactly
+        # that reason. The `x` open mode, not an `exists()` check plus a write,
+        # is what enforces "never truncate" at the syscall rather than by
+        # inspection.
+        #
+        # Do NOT let it seed a `findings/` path -- not a file, not the
+        # directory. `findings/*.md` is DISK-DERIVED gate evidence
+        # (`tools.derive_disk_counts` / `tools.gate_files` count non-empty
+        # findings files, and `harness._assign_explore_topic` deliberately
+        # writes nothing), so a pre-created reserved topic file would fabricate
+        # the very count the EXPLORE gate exists to measure. `NEVER_SEEDED`
+        # subtracts it from the constants tables; do not "simplify" that
+        # subtraction into a hand-written list of what IS seeded, because a
+        # hand-written duplicate drifting from `ArtifactNames` is the defect
+        # class this project keeps rediscovering.
+        #
+        # Why it exists: `_cmd_new` writes only `state.md` and
+        # `PlanDirectory.create` writes nothing, so EXPLORE's FIRST operative
+        # rule (`rules.py:372-374`: "read the current state and the cross-plan
+        # memory files before the first search") is structurally UNEXECUTABLE on
+        # a first-ever plan -- the files it names exist nowhere. L5 scores 5/5
+        # over a fixture that HAS them; L6 scores 0/3 over a bare `mkdir`.
+        #
+        # The cross-plan five are ARCHIVIST-owned (`rules.OWNERSHIP`), so they
+        # are reached through an explicitly ARCHIVIST-scoped `PlanMemory` opened
+        # here. Do NOT instead widen `OWNERSHIP`: that table drives what a LIVE
+        # worker may write (`roles.held_tools`, `PlanMemory.authorise`), and a
+        # bootstrap need must never change a dispatched role's write scope.
+        #
+        # DELIBERATELY UNWIRED: nothing in the product calls this yet. Wiring it
+        # into `_cmd_new` and `_sync_state_doc` is gated on the pre-registered
+        # L7 A/B decision rule (`l7-explore-coldstart/B0`, `bare` vs `seeded`).
+        # See decisions.md D-002.
+        tiers = (
+            (Role.ORCHESTRATOR, ArtifactNames.PER_PLAN),
+            (Role.ARCHIVIST, ArtifactNames.CROSS_PLAN),
+        )
+        created: list[str] = []
+        for role, table in tiers:
+            memory = PlanMemory(self.path, role=role)
+            for name in table:
+                if name in self.NEVER_SEEDED:
+                    continue
+                target = memory.authorise(name)
+                try:
+                    target.open("x", encoding="utf-8").close()
+                except FileExistsError:
+                    continue
+                except OSError as exc:
+                    raise HarnessArtifactError(
+                        name, "could not be seeded", cause=exc
+                    ) from exc
+                created.append(memory.locate(name))
+        logger.debug(f"seeded {len(created)} protocol placeholders in {self.plan_id}")
+        return tuple(created)
+
     # -- resumable run state --------------------------------------------
 
     def load_run_state(self) -> RunState | None:

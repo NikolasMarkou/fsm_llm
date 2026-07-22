@@ -840,6 +840,206 @@ class TestPlanDirectoryArtifacts:
 
 
 # ---------------------------------------------------------------------------
+# PlanDirectory -- protocol-skeleton seeding (D-002)
+# ---------------------------------------------------------------------------
+
+
+#: A populated ``plan.md`` used to prove seeding never truncates.  Its exact
+#: bytes are the assertion, so any content longer than zero would do -- what
+#: matters is that it is compared byte for byte, not merely "still there".
+SEEDING_PLAN_MD = "# Plan v1\n\n## Goal\nClose the cold-start blocker.\n"
+
+
+def _seeded_names() -> tuple[str, ...]:
+    """The names seeding is contracted to create, derived like the method is."""
+    return tuple(
+        name
+        for name in (*ArtifactNames.PER_PLAN, *ArtifactNames.CROSS_PLAN)
+        if name not in PlanDirectory.NEVER_SEEDED
+    )
+
+
+class TestPlanDirectorySeeding:
+    def test_creates_every_per_plan_and_cross_plan_placeholder(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        created = orchestrator.seed_protocol_skeleton()
+        for name in ArtifactNames.PER_PLAN:
+            if name == ArtifactNames.STATE:
+                continue
+            assert (memory_root / PLAN_A / name).is_file()
+        for name in ArtifactNames.CROSS_PLAN:
+            assert (memory_root / name).is_file()
+        assert len(created) == len(_seeded_names())
+
+    def test_every_created_file_is_zero_bytes(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        for relative in orchestrator.seed_protocol_skeleton():
+            assert (memory_root / relative).stat().st_size == 0
+
+    def test_returns_memory_root_relative_paths(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        created = orchestrator.seed_protocol_skeleton()
+        assert f"{PLAN_A}/{ArtifactNames.PLAN}" in created
+        assert ArtifactNames.LESSONS in created
+        assert all((memory_root / relative).is_file() for relative in created)
+
+    def test_a_second_call_creates_nothing(self, orchestrator: PlanDirectory):
+        orchestrator.seed_protocol_skeleton()
+        assert orchestrator.seed_protocol_skeleton() == ()
+
+    def test_a_second_call_leaves_every_file_untouched(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        created = orchestrator.seed_protocol_skeleton()
+        before = {
+            relative: (memory_root / relative).stat().st_mtime_ns
+            for relative in created
+        }
+        orchestrator.seed_protocol_skeleton()
+        after = {
+            relative: (memory_root / relative).stat().st_mtime_ns
+            for relative in created
+        }
+        assert after == before
+
+    def test_a_populated_per_plan_artifact_is_byte_identical_afterwards(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        payload = SEEDING_PLAN_MD.encode("utf-8")
+        target = memory_root / PLAN_A / ArtifactNames.PLAN
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+        orchestrator.seed_protocol_skeleton()
+        assert target.read_bytes() == payload
+
+    def test_a_populated_cross_plan_file_is_byte_identical_afterwards(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        target = memory_root / ArtifactNames.LESSONS
+        target.write_bytes(LESSONS_MD.encode("utf-8"))
+        orchestrator.seed_protocol_skeleton()
+        assert target.read_bytes() == LESSONS_MD.encode("utf-8")
+
+    def test_a_populated_file_is_not_reported_as_created(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        (memory_root / ArtifactNames.LESSONS).write_text(LESSONS_MD, encoding="utf-8")
+        created = orchestrator.seed_protocol_skeleton()
+        assert ArtifactNames.LESSONS not in created
+        assert len(created) == len(_seeded_names()) - 1
+
+    def test_no_findings_path_is_reported_as_created(self, orchestrator: PlanDirectory):
+        created = orchestrator.seed_protocol_skeleton()
+        assert not any(
+            f"{ArtifactNames.FINDINGS_DIR}/" in relative for relative in created
+        )
+
+    def test_the_findings_directory_itself_is_not_created(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        orchestrator.seed_protocol_skeleton()
+        assert not (memory_root / PLAN_A / ArtifactNames.FINDINGS_DIR).exists()
+
+    def test_the_checkpoints_directory_itself_is_not_created(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        orchestrator.seed_protocol_skeleton()
+        assert not (memory_root / PLAN_A / ArtifactNames.CHECKPOINTS_DIR).exists()
+
+    def test_state_md_is_not_seeded(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        created = orchestrator.seed_protocol_skeleton()
+        assert f"{PLAN_A}/{ArtifactNames.STATE}" not in created
+        assert not (memory_root / PLAN_A / ArtifactNames.STATE).exists()
+
+    def test_an_existing_state_md_is_untouched(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        orchestrator.write_text(ArtifactNames.STATE, STATE_MD)
+        orchestrator.seed_protocol_skeleton()
+        assert (memory_root / PLAN_A / ArtifactNames.STATE).read_text(
+            encoding="utf-8"
+        ) == STATE_MD
+
+    def test_the_orchestrator_can_still_write_the_seeded_per_plan_tier(
+        self, orchestrator: PlanDirectory
+    ):
+        orchestrator.seed_protocol_skeleton()
+        orchestrator.write_text(ArtifactNames.PROGRESS, "# Progress\n")
+        assert orchestrator.read_text(ArtifactNames.PROGRESS) == "# Progress\n"
+
+    def test_a_seeded_per_plan_artifact_reads_back_as_empty(
+        self, orchestrator: PlanDirectory
+    ):
+        orchestrator.seed_protocol_skeleton()
+        assert orchestrator.exists(ArtifactNames.PLAN)
+        assert orchestrator.read_text(ArtifactNames.PLAN) == ""
+
+    def test_appending_to_a_seeded_artifact_starts_from_empty(
+        self, orchestrator: PlanDirectory
+    ):
+        orchestrator.seed_protocol_skeleton()
+        orchestrator.append_text(ArtifactNames.CHANGELOG, "line one\n")
+        assert orchestrator.read_text(ArtifactNames.CHANGELOG) == "line one\n"
+
+    def test_seeding_does_not_depend_on_the_directorys_own_role(
+        self, memory_root: Path
+    ):
+        explorer = PlanDirectory(memory_root / PLAN_A, role=Role.EXPLORER)
+        created = explorer.seed_protocol_skeleton()
+        assert len(created) == len(_seeded_names())
+
+    def test_a_second_plan_leaves_the_shared_cross_plan_tier_alone(
+        self, memory_root: Path
+    ):
+        first = PlanDirectory(memory_root / PLAN_A)
+        first.seed_protocol_skeleton()
+        (memory_root / ArtifactNames.LESSONS).write_text(LESSONS_MD, encoding="utf-8")
+        second = PlanDirectory(memory_root / PLAN_B)
+        created = second.seed_protocol_skeleton()
+        assert ArtifactNames.LESSONS not in created
+        assert (memory_root / ArtifactNames.LESSONS).read_text(
+            encoding="utf-8"
+        ) == LESSONS_MD
+
+    def test_lessons_archive_is_not_seeded(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        orchestrator.seed_protocol_skeleton()
+        assert not (memory_root / ArtifactNames.LESSONS_ARCHIVE).exists()
+
+    def test_summary_is_not_seeded(
+        self, orchestrator: PlanDirectory, memory_root: Path
+    ):
+        orchestrator.seed_protocol_skeleton()
+        assert not (memory_root / PLAN_A / ArtifactNames.SUMMARY).exists()
+
+    def test_never_seeded_is_subtracted_from_the_constants_tables(self):
+        assert ArtifactNames.STATE in PlanDirectory.NEVER_SEEDED
+        assert ArtifactNames.FINDINGS_DIR in PlanDirectory.NEVER_SEEDED
+        assert ArtifactNames.CHECKPOINTS_DIR in PlanDirectory.NEVER_SEEDED
+
+    def test_a_failed_creation_is_reported_as_a_tagged_artifact_error(
+        self, orchestrator: PlanDirectory, monkeypatch: pytest.MonkeyPatch
+    ):
+        real_open = Path.open
+
+        def _refuse(self: Path, *args, **kwargs):
+            if self.name == ArtifactNames.PROGRESS:
+                raise OSError("disk is full")
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", _refuse)
+        with pytest.raises(HarnessArtifactError) as excinfo:
+            orchestrator.seed_protocol_skeleton()
+        assert ArtifactNames.PROGRESS in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
 # Resumable run state
 # ---------------------------------------------------------------------------
 
