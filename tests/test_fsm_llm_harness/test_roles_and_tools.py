@@ -3212,6 +3212,31 @@ class TestDefaultAgentBuilder:
         assert isinstance(agent, NativeFunctionCallingReactAgent)
         assert agent.config.output_schema is spec.output_schema
 
+    def test_seed_reaches_the_native_agent_and_defaults_to_none(
+        self, tmp_path: Path
+    ) -> None:
+        """D-008: the live probe measured Ollama honoring ``seed`` on
+        `qwen3.5:4b`, so the factory chain must carry it to the native agent
+        (native_fc bypasses ``apply_ollama_params`` -- its own call site is the
+        only place the key can land). Unset must stay unset: ``None`` means
+        the provider payload carries no seed key at all.
+        """
+        spec = get_role_spec(HarnessStates.EXPLORE)
+        registry = build_workspace_tools(
+            Workspace(tmp_path / "ws"), allowed=spec.tool_scope
+        )
+        config = AgentConfig(model="ollama_chat/x", output_schema=spec.output_schema)
+
+        seeded = _default_agent_builder(native_function_calling=True, seed=1234)(
+            spec, registry, config
+        )
+        unseeded = _default_agent_builder(native_function_calling=True)(
+            spec, registry, config
+        )
+
+        assert seeded.seed == 1234
+        assert unseeded.seed is None
+
     def test_a_factory_with_no_agent_builder_uses_the_native_arm(
         self, tmp_path: Path, plan_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -3240,8 +3265,9 @@ class TestDefaultAgentBuilder:
             react_built.append((pattern, config.output_schema))
             return _Stub()
 
-        def _fake_native(*, tools: Any, config: Any) -> Any:
+        def _fake_native(*, tools: Any, config: Any, seed: Any = None) -> Any:
             native_built.append(config.output_schema)
+            assert seed is None, "the default factory shape carries no seed"
             return _Stub()
 
         monkeypatch.setattr("fsm_llm_harness.roles.create_agent", _fake_create_agent)

@@ -129,6 +129,8 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             for tests / custom backends. Defaults to a litellm completion.
         system_policy: Standing instructions appended to the system message.
             ``None`` (the default) leaves the system message exactly as it was.
+        seed: Optional sampling seed forwarded to every ``litellm.completion``.
+            ``None`` (the default) sends no ``seed`` key at all.
     """
 
     def __init__(
@@ -137,6 +139,8 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         config: AgentConfig | None = None,
         complete_fn: CompleteFn | None = None,
         system_policy: str | None = None,
+        *,
+        seed: int | None = None,
         **api_kwargs: Any,
     ) -> None:
         if len(tools) == 0:
@@ -144,6 +148,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         super().__init__(config, **api_kwargs)
         self.tools = tools
         self._complete_fn = complete_fn
+        self.seed = seed
         #: Public and mutable on purpose -- see :meth:`_system_message`.
         self.system_policy = system_policy
 
@@ -209,6 +214,18 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
         }
+        # DECISION plan-2026-07-22T114536-879d04a0/D-008
+        # `seed` lands HERE and only here: this agent calls `litellm.completion`
+        # DIRECTLY, bypassing both `apply_ollama_params` and core's
+        # `LiteLLMInterface`, so plumbing it anywhere else reaches nothing.
+        # Live-probed on `ollama_chat/qwen3.5:4b` (digest 2a654d98e6fb) before
+        # this line existed: at temperature=0.7 the same seed twice was
+        # byte-identical and a different seed diverged -- the server HONORS it.
+        # Do NOT emit `seed: None` when unset (the key must be ABSENT, keeping
+        # every existing call byte-identical), and do NOT default it to a fixed
+        # value -- determinism is opt-in for benches. See decisions.md D-008.
+        if self.seed is not None:
+            call_params["seed"] = self.seed
         # DECISION plan-2026-07-21T191807-bf7ffe24/D-002
         # The two keys are MUTUALLY EXCLUSIVE and the omission is structural,
         # not cosmetic: `tools=` and `response_format=` in one completion was

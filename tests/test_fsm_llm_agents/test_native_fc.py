@@ -336,6 +336,50 @@ class TestOllamaHelperGating:
         assert messages == [{"role": "user", "content": "q"}]
 
 
+class TestSeedPassthrough:
+    """DECISION plan-2026-07-22T114536-879d04a0/D-008 — the live seed probe
+    measured Ollama HONORING ``seed`` for `qwen3.5:4b` (temperature=0.7, same
+    seed twice: byte-identical; different seed: diverged), so the optional
+    ``seed`` constructor parameter must land at this agent's own
+    ``litellm.completion`` call site — native_fc bypasses ``apply_ollama_params``
+    and core's ``LiteLLMInterface``, so nowhere else can carry it.
+
+    Prior defect guarded against: an unset seed leaking as ``seed=None`` into
+    the provider payload would change the call shape for every existing caller;
+    ``None`` must mean the key is ABSENT, byte-identical to today's calls.
+    """
+
+    @staticmethod
+    def _agent(seed=None):
+        return NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model"),
+            seed=seed,
+        )
+
+    def test_seed_forwarded_when_set(self, monkeypatch):
+        captured: dict = {}
+        _stub_completion(monkeypatch, _FakeMessage(content="hi"), captured)
+
+        self._agent(seed=1234)._litellm_complete([{"role": "user", "content": "q"}], [])
+
+        assert captured["seed"] == 1234
+
+    def test_seed_key_absent_when_none(self, monkeypatch):
+        captured: dict = {}
+        _stub_completion(monkeypatch, _FakeMessage(content="hi"), captured)
+
+        self._agent()._litellm_complete([{"role": "user", "content": "q"}], [])
+
+        assert "seed" not in captured
+
+    def test_seed_defaults_to_none(self):
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(), config=AgentConfig(model="mock/model")
+        )
+        assert agent.seed is None
+
+
 class TestReasoningTraceRecovery:
     """DECISION plan-2026-07-21T191807-bf7ffe24/D-003 — an empty ``content`` with no
     tool calls is a reasoning-only reply; recover it through the SHARED

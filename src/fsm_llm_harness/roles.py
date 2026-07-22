@@ -869,7 +869,9 @@ def _reconcile_structured(structured: Any, derived: Mapping[str, Any]) -> Any:
 AgentBuilder = Callable[[RoleSpec, ToolRegistry, AgentConfig], Any]
 
 
-def _default_agent_builder(*, native_function_calling: bool) -> AgentBuilder:
+def _default_agent_builder(
+    *, native_function_calling: bool, seed: int | None = None
+) -> AgentBuilder:
     """Return the stock agent builder.
 
     ``native_function_calling`` selects ``NativeFunctionCallingReactAgent``
@@ -914,7 +916,9 @@ def _default_agent_builder(*, native_function_calling: bool) -> AgentBuilder:
         # chosen against 0/5 is a default that must stay falsifiable.
         # See decisions.md D-049 (this plan), superseding D-034 (predecessor).
         if native_function_calling:
-            return NativeFunctionCallingReactAgent(tools=registry, config=config)
+            return NativeFunctionCallingReactAgent(
+                tools=registry, config=config, seed=seed
+            )
         return create_agent(pattern=spec.pattern, tools=registry, config=config)
 
     return build
@@ -1020,6 +1024,7 @@ def build_default_worker_factory(
     timeout_seconds: float = Defaults.LLM_TIMEOUT_SECONDS,
     retry_attempts: int = Defaults.RETRY_ATTEMPTS,
     native_function_calling: bool = True,
+    seed: int | None = None,
     agent_builder: AgentBuilder | None = None,
     observer: Callable[[Mapping[str, Any]], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -1044,6 +1049,9 @@ def build_default_worker_factory(
             flipped by D-049 because the ReAct arm measured **0/10 write tools
             issued** live, not because the native arm cleared its 4/5 bar (it
             measured 5/10); read the D-049 block above before changing it back.
+        - ``seed``: optional sampling seed for the NATIVE arm's completions
+            (``None`` sends no seed key). Live-probed as honored by Ollama on
+            `qwen3.5:4b` (D-008); ignored by ReAct and injected builders.
         - ``agent_builder``: override the agent construction entirely (tests,
             live spikes, custom backends).
         - ``observer``: called with one observation ``dict`` per dispatch.  The
@@ -1071,7 +1079,7 @@ def build_default_worker_factory(
         )
     """
     build_agent = agent_builder or _default_agent_builder(
-        native_function_calling=native_function_calling
+        native_function_calling=native_function_calling, seed=seed
     )
 
     def _observe(record: dict[str, Any]) -> None:

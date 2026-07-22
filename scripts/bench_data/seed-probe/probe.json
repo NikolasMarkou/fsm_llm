@@ -1,0 +1,54 @@
+{
+  "design": "Stage 1 (temperature=0): seed 1234 twice + seed 4321 once. All three byte-identical -> greedy decoding masks any seed effect; inconclusive. Stage 2 (pre-registered disambiguation, temperature=0.7): seed 1234 twice -> byte-identical => seed pins the sampling RNG. Stage 3 (confound closure, temperature=0.7): seed 4321 once -> diverges => identity in stage 2 is the seed's doing, not server-side full determinism or caching.",
+  "different_seed_differs": false,
+  "different_seed_differs_at_temp_07": true,
+  "git_commit": "1807ba8f24228b8e54de6bb8fb5ac378a0784431",
+  "model": "ollama_chat/qwen3.5:4b",
+  "model_digest": {
+    "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+    "tag": "qwen3.5:4b"
+  },
+  "prompt": "List the first five primes, then one short sentence about retries.",
+  "same_seed_identical": true,
+  "same_seed_identical_at_temp_07": true,
+  "stage_1_verdict_superseded": "inconclusive: temp-0 deterministic, seed had no effect",
+  "temperature_07_outputs": [
+    {
+      "seed": 1234,
+      "sha256": "e6bdbf09d35d3e2870e7ce6996168ee0064f5e58e7d8edc92e1339991009f322",
+      "temperature": 0.7,
+      "text": "2, 3, 5, 7, 11\n\nRetrying after a setback is often the difference between failure and eventual success."
+    },
+    {
+      "seed": 1234,
+      "sha256": "e6bdbf09d35d3e2870e7ce6996168ee0064f5e58e7d8edc92e1339991009f322",
+      "temperature": 0.7,
+      "text": "2, 3, 5, 7, 11\n\nRetrying after a setback is often the difference between failure and eventual success."
+    },
+    {
+      "seed": 4321,
+      "sha256": "001445d635f1f4a3caf6f5bdb2a900bc69ea72bac26e53783ef14418447df7e4",
+      "temperature": 0.7,
+      "text": "2, 3, 5, 7, 11\n\nOften, persistence pays off when you try again."
+    }
+  ],
+  "temperature_0_outputs": [
+    {
+      "seed": 1234,
+      "sha256": "ed4d8165db19fbf1a429bb8f75174938679171057dbe07c62766407f3107973c",
+      "text": "2, 3, 5, 7, 11\nPersistence through retries often leads to success."
+    },
+    {
+      "seed": 1234,
+      "sha256": "ed4d8165db19fbf1a429bb8f75174938679171057dbe07c62766407f3107973c",
+      "text": "2, 3, 5, 7, 11\nPersistence through retries often leads to success."
+    },
+    {
+      "seed": 4321,
+      "sha256": "ed4d8165db19fbf1a429bb8f75174938679171057dbe07c62766407f3107973c",
+      "text": "2, 3, 5, 7, 11\nPersistence through retries often leads to success."
+    }
+  ],
+  "ts": "2026-07-22T12:59:06Z",
+  "verdict": "seed-honored: at temperature=0.7 the same seed reproduced byte-identical output and a different seed diverged; ollama honors `seed` for qwen3.5:4b via litellm. Disposition: plumb `seed` (optional, default None) through build_default_worker_factory -> _default_agent_builder -> NativeFunctionCallingReactAgent -> its litellm.completion call site (D-008)."
+}
