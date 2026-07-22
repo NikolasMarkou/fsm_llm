@@ -57,6 +57,7 @@ from fsm_llm_harness.constants import (
 )
 from fsm_llm_harness.exceptions import HarnessError, HarnessReentrancyError
 from fsm_llm_harness.harness import HarnessAgent, RoleRequest
+from fsm_llm_harness.rules import EXPLORE_TOPICS
 from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm_harness.conftest import (
     APPROVAL_CLOSE,
@@ -2472,7 +2473,12 @@ class TestDiskDerivedGateCounts:
         result = harness.run()
 
         assert result.final_context[ContextKeys.FINDINGS_COUNT] == 3
-        assert any("Could not derive gate counts" in line for line in captured_logs)
+        # The construction is now the SHARED read-only helper's (step 25), so
+        # the counting caller and the topic-assigning caller fail identically.
+        assert any(
+            "Could not open plan directory" in line and "unobserved" in line
+            for line in captured_logs
+        )
 
     def test_the_derived_count_is_driver_owned_provenance(
         self, make_harness, roots, plan_dir
@@ -2518,3 +2524,263 @@ class TestDiskDerivedGateCounts:
 
         assert harness.worker.count_for(HarnessStates.EXPLORE) == 2
         assert harness.worker.count_for(HarnessStates.PLAN) == 1
+
+
+# ---------------------------------------------------------------------------
+# Driver-assigned topic slugs (D-035)
+# ---------------------------------------------------------------------------
+
+
+def _explore_topics_seen(harness: Any) -> list[str | None]:
+    """The slug each EXPLORE dispatch was actually handed, in order."""
+    return [
+        request.assigned_topic
+        for request in harness.worker.requests
+        if request.state == HarnessStates.EXPLORE
+    ]
+
+
+class TestDriverAssignedExploreTopics:
+    """The driver names ONE ``findings/<slug>.md`` per EXPLORE dispatch.
+
+    The source protocol assigns each explorer "a distinct kebab-case
+    ``findings/{topic-slug}.md`` slug ... first check ``findings/`` for an
+    existing file with that name -- no two live explorers may share a slug".
+    This harness never did: it let the model choose, and then measured four
+    mechanisms trying to make one model persist toward a COUNT of three
+    (decisions.md D-027, D-031).  These pin the assignment AND the two ways it
+    could quietly become a fail-open:
+
+    * assigning a slug must leave the filesystem untouched -- a driver that
+      pre-created its topics would move the gate without any role writing a
+      byte, which is review C1's defect in a new costume;
+    * a failed observation (no plan directory, an unreadable one) must assign
+      NOTHING rather than a guessed topic.
+    """
+
+    # -- distinctness and the collision rule -----------------------------
+
+    def test_each_dispatch_gets_a_distinct_slug(self, make_harness, roots) -> None:
+        """Three blocked dispatches, three different topics -- never a repeat."""
+        harness = make_harness(
+            _explore_script([0]), roots=roots, max_explore_redispatches=2
+        )
+        harness.run()
+
+        slugs = _explore_topics_seen(harness)
+
+        assert len(slugs) == 3
+        assert len(set(slugs)) == 3
+        assert all(slug for slug in slugs)
+
+    def test_a_redispatch_gets_the_next_slug_not_a_repeat(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The re-dispatch loop (D-028) and the assignment agree on progress.
+
+        Each dispatch writes its own assigned file, so the next one must be
+        handed the NEXT topic -- not sent back at a file that now exists.
+        """
+        written: list[str] = []
+
+        def explorer(request: RoleRequest) -> dict[str, Any]:
+            _seed_findings(plan_dir, request.assigned_topic or "unassigned")
+            written.append(request.assigned_topic or "unassigned")
+            return {"ctx": {}}
+
+        script = _traverse_script()
+        script[HarnessStates.EXPLORE] = explorer
+
+        harness = make_harness(script, roots=roots, max_explore_redispatches=5)
+        result = harness.run()
+
+        assert written == [topic.slug for topic in EXPLORE_TOPICS]
+        assert len(set(written)) == 3
+        # ...and the gate opened off the DISK, on the third file.
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 3
+        assert harness.worker.count_for(HarnessStates.PLAN) == 1
+
+    def test_a_slug_already_on_disk_is_never_assigned(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The source's collision rule, read off the SAME derivation as the gate."""
+        _seed_findings(plan_dir, "problem-scope")
+
+        harness = make_harness(
+            _explore_script([0]), roots=roots, max_explore_redispatches=3
+        )
+        harness.run()
+
+        assert "problem-scope" not in _explore_topics_seen(harness)
+
+    def test_every_topic_is_tried_before_any_is_repeated(
+        self, make_harness, roots
+    ) -> None:
+        """A topic the model never writes must not monopolise the whole bound.
+
+        The selection is "least-assigned free topic", which is BOTH rules at
+        once: distinct while any topic is untried, then round-robin.  A plain
+        "first free topic" rule would re-send every dispatch at the same slug
+        and the other two would never be explored at all.
+        """
+        harness = make_harness(
+            _explore_script([0]), roots=roots, max_explore_redispatches=5
+        )
+        harness.run()
+
+        slugs = _explore_topics_seen(harness)
+
+        assert len(slugs) == 6
+        assert set(slugs) == {topic.slug for topic in EXPLORE_TOPICS}
+        assert slugs[:3] == [topic.slug for topic in EXPLORE_TOPICS]
+        assert sorted(slugs) == sorted(2 * [t.slug for t in EXPLORE_TOPICS])
+
+    # -- assignment writes NOTHING ---------------------------------------
+
+    def test_assigning_a_slug_creates_no_file(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The fail-open this could become: reserving topics as empty files.
+
+        A count that moves because the DRIVER touched the filesystem is not
+        evidence that a role did any work.  Assignment is a read.
+        """
+        harness = make_harness(
+            _explore_script([0]), roots=roots, max_explore_redispatches=4
+        )
+        result = harness.run()
+
+        assert list((plan_dir / "findings").iterdir()) == []
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
+
+    def test_assigning_does_not_create_the_plan_directory(
+        self, make_harness, tmp_path, workspace
+    ) -> None:
+        """``PlanMemory`` CREATES its root; the assignment must not call it."""
+        absent = tmp_path / "plans" / "never-created"
+        roots = {
+            ContextKeys.PLAN_DIR: str(absent),
+            ContextKeys.WORKSPACE_ROOT: str(workspace),
+        }
+
+        harness = make_harness(
+            _explore_script([0]), roots=roots, max_explore_redispatches=2
+        )
+        harness.run()
+
+        assert not absent.exists()
+        assert _explore_topics_seen(harness) == [None, None, None]
+
+    # -- failing closed ---------------------------------------------------
+
+    def test_no_plan_directory_assigns_nothing(self, make_harness) -> None:
+        """No directory to check for collisions means no assignment at all."""
+        harness = make_harness(_explore_script([0]), max_explore_redispatches=2)
+        harness.run()
+
+        assert _explore_topics_seen(harness) == [None, None, None]
+        assert harness.agent._assigned_topics == []
+
+    def test_an_unreadable_plan_directory_assigns_nothing_and_moves_no_gate(
+        self, make_harness, roots, plan_dir, monkeypatch
+    ) -> None:
+        """A failed observation fabricates neither a topic nor a count."""
+        _seed_findings(plan_dir, "alpha")
+
+        def boom(*args: Any, **kwargs: Any) -> None:
+            raise OSError("input/output error")
+
+        monkeypatch.setattr(harness_module, "PlanMemory", boom)
+        harness = make_harness(
+            _explore_script([0]), roots=roots, max_explore_redispatches=1
+        )
+        result = harness.run()
+
+        assert _explore_topics_seen(harness) == [None, None]
+        assert harness.agent._assigned_topics == []
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
+
+    def test_the_diagnostic_mode_assigns_nothing(self, make_harness, roots) -> None:
+        """``worker_factory=None`` attempts no dispatch, so it spends no topic."""
+        harness = make_harness(worker=None, roots=roots)
+        harness.run()
+
+        assert harness.agent._assigned_topics == []
+
+    # -- scope and lifetime ------------------------------------------------
+
+    def test_only_explore_dispatches_are_assigned_a_topic(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """Every other role owns no ``findings/`` file and must not be told to."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(_traverse_script(findings=3), roots=roots)
+        harness.run()
+
+        assigned = {
+            request.state: request.assigned_topic
+            for request in harness.worker.requests
+            if request.state != HarnessStates.EXPLORE
+        }
+
+        assert assigned
+        assert set(assigned.values()) == {None}
+
+    def test_the_assignment_ledger_resets_between_runs(
+        self, make_harness, roots
+    ) -> None:
+        """Per RUN, like ``_explore_redispatches`` -- not per EXPLORE entry.
+
+        A per-entry reset would be refillable by a worker: the verifier may set
+        ``needs_explore``, which routes REFLECT -> EXPLORE (D-029).  A per-run
+        reset means the second run starts from the protocol's first topic
+        again, against whatever that run's directory holds.
+        """
+        harness = make_harness(
+            _explore_script([0]), roots=roots, max_explore_redispatches=1
+        )
+        harness.run()
+        first = list(harness.agent._assigned_topics)
+        harness.run()
+
+        assert first == [topic.slug for topic in EXPLORE_TOPICS[:2]]
+        assert harness.agent._assigned_topics == first
+
+    def test_a_worker_cannot_reach_the_assignment_ledger(
+        self, make_harness, roots
+    ) -> None:
+        """It is driver run state, not context -- so no worker can rewrite it."""
+        harness = make_harness(
+            _explore_script([0]), roots=roots, max_explore_redispatches=1
+        )
+        result = harness.run()
+
+        assert not any(
+            "assigned" in str(key).lower() for key in result.final_context
+        )
+        assert all(
+            "assigned_topic" not in dict(request.context)
+            for request in harness.worker.requests
+        )
+
+    # -- the C1 fail-open, re-run with the assignment in place -------------
+
+    def test_a_dispatch_that_writes_nothing_and_claims_three_leaves_the_gate_shut(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """Review C1's reproduction, under the new mechanism.
+
+        An assignment tells a dispatch WHERE to write; it never tells the gate
+        that it did.  The count is still the driver's own read of the files
+        really on disk.
+        """
+        harness = make_harness(
+            _explore_script([3]), roots=roots, max_explore_redispatches=2
+        )
+        result = harness.run()
+
+        assert list((plan_dir / "findings").iterdir()) == []
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
+        assert harness.worker.count_for(HarnessStates.PLAN) == 0

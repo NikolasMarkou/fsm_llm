@@ -29,6 +29,7 @@ the one subprocess test executes ``cat`` on a file it just wrote.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -57,9 +58,12 @@ from fsm_llm_harness.roles import (
     held_tools,
 )
 from fsm_llm_harness.rules import (
+    EXPLORE_TOPICS,
     OWNERSHIP,
     ROLE_BY_STATE,
     artifacts_writable_by,
+    explore_topic,
+    explore_topics,
     get_rules,
 )
 from fsm_llm_harness.tools import (
@@ -188,6 +192,7 @@ def _role_request(
     plan_dir: Path | None,
     workspace_root: Path | None = None,
     context: dict[str, Any] | None = None,
+    assigned_topic: str | None = None,
 ) -> RoleRequest:
     """Build the ``RoleRequest`` the driver would hand this state's worker.
 
@@ -217,6 +222,7 @@ def _role_request(
         ),
         plan_dir=None if plan_dir is None else str(plan_dir),
         workspace_root=None if workspace_root is None else str(workspace_root),
+        assigned_topic=assigned_topic,
     )
 
 
@@ -2241,3 +2247,386 @@ class TestDeriveDiskCountsIsTheOneDerivation:
         assert set(derived) == set(DISK_DERIVED_COUNTS)
         assert all(isinstance(value, int) for value in derived.values())
 
+
+
+# ---------------------------------------------------------------------------
+# Driver-assigned topic slugs (D-035)
+# ---------------------------------------------------------------------------
+
+
+class TestExploreTopicTable:
+    """The decomposition itself: distinct, kebab-case, and enough of them.
+
+    The harness used to let the model pick its own topics, which the source
+    protocol never does -- ``agents/ip-orchestrator.md``'s EXPLORE dispatch
+    assigns "a distinct kebab-case ``findings/{topic-slug}.md`` slug" per
+    explorer.  These pin the properties the driver's assignment relies on.
+    """
+
+    def test_the_slugs_are_distinct(self) -> None:
+        slugs = [topic.slug for topic in EXPLORE_TOPICS]
+
+        assert len(set(slugs)) == len(slugs)
+
+    @pytest.mark.parametrize("topic", EXPLORE_TOPICS, ids=lambda t: t.slug)
+    def test_every_slug_is_kebab_case(self, topic: Any) -> None:
+        """A slug becomes a FILE NAME; anything else is a confinement problem."""
+        assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", topic.slug), topic.slug
+        assert topic.label and topic.brief
+
+    def test_there_are_at_least_as_many_topics_as_the_gate_requires(self) -> None:
+        """Fewer topics than the threshold is a gate that can never open."""
+        assert len(explore_topics()) >= Defaults.FINDINGS_THRESHOLD
+
+    @pytest.mark.parametrize("threshold", [1, 3, 4, 7])
+    def test_a_raised_threshold_is_extended_not_truncated(
+        self, threshold: int
+    ) -> None:
+        topics = explore_topics(threshold)
+        slugs = [topic.slug for topic in topics]
+
+        assert len(topics) >= threshold
+        assert len(topics) >= len(EXPLORE_TOPICS)
+        assert len(set(slugs)) == len(slugs)
+
+    def test_the_purpose_sentence_is_derived_from_the_table(self) -> None:
+        """The rendered text is PINNED, so the DRY refactor changed no prompt.
+
+        ``_EXPLORE.purpose`` reads its coverage axes off ``EXPLORE_TOPICS``
+        instead of restating them.  This is the control: the string a live run
+        renders is byte-for-byte the hand-written one it replaced, so the live
+        measurement of the assignment is not confounded by a prompt edit
+        nobody intended.
+        """
+        assert get_rules(HarnessStates.EXPLORE).purpose == (
+            "Build enough grounded context to plan: at least 3 indexed "
+            "findings covering problem scope, affected files, and the existing "
+            "patterns or constraints that any solution must respect."
+        )
+
+    @pytest.mark.parametrize("topic", EXPLORE_TOPICS, ids=lambda t: t.slug)
+    def test_a_known_slug_resolves_to_its_own_entry(self, topic: Any) -> None:
+        assert explore_topic(topic.slug) is topic
+
+    def test_an_unknown_slug_renders_rather_than_raising(self) -> None:
+        """A custom driver may assign a slug this module never heard of."""
+        topic = explore_topic("some-other-thing")
+
+        assert topic.slug == "some-other-thing"
+        assert "some other thing" in topic.label
+
+
+class TestTheAssignedTopicNamesOneTargetPath:
+    """One dispatch, one topic, one named file (D-035).
+
+    Four mechanisms tried to make ONE dispatch produce THREE findings files and
+    all four missed the bar (decisions.md D-027, D-031).  This is the shape the
+    source protocol actually specifies and the shape the measured ``:4b``
+    envelope supports: write one named file.  The prompt half is pinned here;
+    the driver half (which slug, and that assigning writes nothing) is in
+    ``test_harness_agent.py``.
+    """
+
+    def _task(self, topic: str | None, plan_dir: Path, workspace: Path) -> str:
+        request = _role_request(
+            HarnessStates.EXPLORE,
+            plan_dir=plan_dir,
+            workspace_root=workspace,
+            assigned_topic=topic,
+        )
+        return build_role_task_prompt(request, get_role_spec(HarnessStates.EXPLORE))
+
+    @pytest.mark.parametrize("topic", EXPLORE_TOPICS, ids=lambda t: t.slug)
+    def test_the_task_prompt_names_exactly_one_target_path(
+        self, topic: Any, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Exactly one ``findings/<slug>.md`` path, and it is the assigned one."""
+        task = self._task(topic.slug, plan_dir, workspace)
+        paths = set(re.findall(r"findings/[a-z0-9-]+\.md", task))
+
+        assert paths == {f"{ArtifactNames.FINDINGS_DIR}/{topic.slug}.md"}
+        assert topic.label in task
+
+    def test_the_other_topics_are_not_named(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Naming the whole decomposition would re-ask for three files."""
+        task = self._task("problem-scope", plan_dir, workspace)
+
+        for other in EXPLORE_TOPICS[1:]:
+            assert other.slug not in task
+
+    def test_the_assignment_is_in_the_task_half_not_the_standing_half(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """It differs between two dispatches of the same role, so it is TASK.
+
+        D-021 split the prompt so the system message carries what is true every
+        turn.  An assignment installed as standing policy would be re-sent
+        unchanged on the next dispatch, telling the second explorer to write
+        the file the first one already wrote.
+        """
+        request = _role_request(
+            HarnessStates.EXPLORE,
+            plan_dir=plan_dir,
+            workspace_root=workspace,
+            assigned_topic="affected-files",
+        )
+        spec = get_role_spec(HarnessStates.EXPLORE)
+
+        assert "affected-files.md" in build_role_task_prompt(request, spec)
+        assert "affected-files.md" not in build_role_system_prompt(request, spec)
+
+    def test_no_assignment_leaves_the_prompt_byte_identical(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The no-regression control: every unassigned dispatch is untouched."""
+        spec = get_role_spec(HarnessStates.EXPLORE)
+        unassigned = _role_request(
+            HarnessStates.EXPLORE, plan_dir=plan_dir, workspace_root=workspace
+        )
+        assigned = _role_request(
+            HarnessStates.EXPLORE,
+            plan_dir=plan_dir,
+            workspace_root=workspace,
+            assigned_topic="problem-scope",
+        )
+
+        base = build_role_task_prompt(unassigned, spec)
+        with_topic = build_role_task_prompt(assigned, spec)
+
+        assert "findings/" not in base
+        assert with_topic != base
+        # Nothing was REPLACED: the assignment is additive.
+        for block in base.split("\n\n"):
+            assert block in with_topic
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            HarnessStates.PLAN,
+            HarnessStates.EXECUTE,
+            HarnessStates.REFLECT,
+            HarnessStates.CLOSE,
+        ],
+    )
+    def test_a_state_the_driver_never_assigns_for_is_unchanged(
+        self, state: str, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Only EXPLORE is assigned a topic; the others must not drift."""
+        spec = get_role_spec(state)
+        request = _role_request(
+            state, plan_dir=plan_dir, workspace_root=workspace
+        )
+
+        assert "YOUR TOPIC THIS DISPATCH" not in build_role_prompt(request, spec)
+
+    def test_the_single_string_prompt_carries_the_assignment_too(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The D-021 fallback (an agent with no ``system_policy``) must see it.
+
+        ``build_role_prompt`` is what ``create_agent("react")`` and every
+        injected builder receive; an assignment only the split path carried
+        would be silently absent for them.
+        """
+        request = _role_request(
+            HarnessStates.EXPLORE,
+            plan_dir=plan_dir,
+            workspace_root=workspace,
+            assigned_topic="constraints-and-patterns",
+        )
+        spec = get_role_spec(HarnessStates.EXPLORE)
+
+        assert "findings/constraints-and-patterns.md" in build_role_prompt(
+            request, spec
+        )
+
+    def test_an_unknown_slug_still_names_a_path(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        task = self._task("cache-invalidation", plan_dir, workspace)
+
+        assert "findings/cache-invalidation.md" in task
+
+    def test_the_assignment_reaches_a_real_dispatch_through_the_factory(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """End of the seam: the text a REAL worker sends, not a rebuilt one."""
+        built: list[_PolicyAgent] = []
+        spec = get_role_spec(HarnessStates.EXPLORE)
+
+        def builder(spec_: Any, registry: Any, config: Any) -> _PolicyAgent:
+            agent = _PolicyAgent(
+                registry,
+                (),
+                "done",
+                spec.output_schema(
+                    **{
+                        name: (
+                            "s"
+                            if field.annotation is str
+                            else (False if field.annotation is bool else 0)
+                        )
+                        for name, field in spec.output_schema.model_fields.items()
+                    }
+                ),
+            )
+            built.append(agent)
+            return agent
+
+        factory = build_default_worker_factory(
+            Workspace(workspace), agent_builder=builder
+        )
+        factory(
+            _role_request(
+                HarnessStates.EXPLORE,
+                plan_dir=plan_dir,
+                workspace_root=workspace,
+                assigned_topic="affected-files",
+            )
+        )
+
+        assert "findings/affected-files.md" in built[0].tasks[0]
+
+
+class TestAMissingPlanArtifactSaysSoAndSaysWhatToDo:
+    """A read of a file nobody has written yet is a teachable failure (D-036).
+
+    Step 25's live n=10 block measured 124 of 323 failed tool calls reading a
+    ``findings/*.md`` that did not exist yet, and in the three runs that missed
+    the gate those reads WERE the failure: run 3 called
+    ``read_plan_file('findings/constraints-and-patterns.md')`` fifteen times,
+    ENOENT every time, and never wrote the file it had been assigned.  A bare
+    ``[Errno 2]`` says nothing about what to do next.
+
+    The refusal stays a refusal.  Nothing here repairs, re-routes or invents a
+    file; every clause is read off the filesystem.
+    """
+
+    def test_a_read_of_an_unwritten_artifact_says_it_can_be_created(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(
+            registry,
+            "read_plan_file",
+            path=f"{ArtifactNames.FINDINGS_DIR}/constraints-and-patterns.md",
+        )
+
+        assert failed.success is False
+        assert "does not exist yet" in failed.error
+        assert "`write_plan_file`" in failed.error
+
+    def test_the_hint_creates_nothing(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Advice, not a side effect: the failed read leaves no file behind."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        _call(registry, "read_plan_file", path="findings/problem-scope.md")
+
+        assert list((plan_dir / ArtifactNames.FINDINGS_DIR).iterdir()) == []
+
+    def test_a_read_of_an_artifact_that_exists_is_untouched(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The control: a successful read gets no hint, because nothing failed."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+        (plan_dir / ArtifactNames.FINDINGS_DIR / "problem-scope.md").write_text("hi\n")
+
+        ok = _call(registry, "read_plan_file", path="findings/problem-scope.md")
+
+        assert ok.success is True
+        assert "does not exist yet" not in str(ok.result)
+
+    def test_a_failed_read_of_something_that_IS_there_is_not_called_missing(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The `exists` guard: a read can fail for reasons other than absence.
+
+        Reading ``findings`` (the directory, which exists) fails with EISDIR.
+        Answering that with "does not exist yet" would have the tool contradict
+        its own filesystem, and would tell the role to `write_plan_file` over a
+        directory.
+        """
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(registry, "read_plan_file", path=ArtifactNames.FINDINGS_DIR)
+
+        assert failed.success is False
+        assert "does not exist yet" not in failed.error
+        assert (plan_dir / ArtifactNames.FINDINGS_DIR).is_dir()
+
+    def test_a_bare_basename_is_pointed_at_the_file_that_really_exists(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """The measured second shape: the owning directory dropped from the path.
+
+        One step-25 run called ``read_plan_file('problem-scope.md')`` eleven
+        times while the file sat at ``findings/problem-scope.md``.  The routing
+        hint alone answered that with "use `read_file`" -- true of the path as
+        typed, and useless, because the file is not in the workspace either.
+        """
+        registry, _ = _plan_registry(plan_dir, workspace)
+        (plan_dir / ArtifactNames.FINDINGS_DIR / "problem-scope.md").write_text("hi\n")
+
+        failed = _call(registry, "read_plan_file", path="problem-scope.md")
+
+        assert failed.success is False
+        assert "Did you mean `findings/problem-scope.md`?" in failed.error
+        assert "use `read_file`" not in failed.error
+
+    def test_a_basename_that_matches_nothing_keeps_the_routing_hint(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """No suggestion is invented: with nothing on disk, D-027's hint stands."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(registry, "read_plan_file", path="uploader.py")
+
+        assert failed.success is False
+        assert "Did you mean" not in failed.error
+        assert "`read_file`" in failed.error
+
+    def test_a_failed_WRITE_is_never_told_to_write(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """Scoped to reads: an ownership refusal must not read as encouragement."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(
+            registry, "write_plan_file", path=ArtifactNames.PLAN, content="mine now\n"
+        )
+
+        assert failed.success is False
+        assert "does not exist yet" not in failed.error
+        assert not (plan_dir / ArtifactNames.PLAN).exists()
+
+    def test_a_workspace_read_is_untouched(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """No plan memory, no plan-artifact claim about a workspace path."""
+        registry, _ = _plan_registry(plan_dir, workspace)
+
+        failed = _call(registry, "read_file", path="uploader.py")
+
+        assert failed.success is False
+        assert "does not exist yet" not in failed.error
+
+    def test_the_ownership_refusal_still_refuses(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """A role reading an artifact it does not own is a refusal, not a hint.
+
+        The explorer may READ any artifact -- so this asserts the other half:
+        the hint fires on ABSENCE, and an artifact that is present is read.
+        """
+        registry, _ = _plan_registry(plan_dir, workspace)
+        (plan_dir / ArtifactNames.PLAN).write_text("# Plan\n")
+
+        ok = _call(registry, "read_plan_file", path=ArtifactNames.PLAN)
+
+        assert ok.success is True
+        assert "does not exist yet" not in str(ok.result)

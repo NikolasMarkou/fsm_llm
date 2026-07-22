@@ -52,10 +52,10 @@ from fsm_llm_agents.definitions import AgentConfig, AgentResult
 from fsm_llm_agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm_agents.tools import ToolRegistry
 
-from .constants import ContextKeys, Defaults, HarnessStates
+from .constants import ArtifactNames, ContextKeys, Defaults, HarnessStates
 from .hardening import coerce_worker_output, parse_role_output, retry
 from .harness import _WORKER_WRITABLE, RoleRequest, WorkerFactory
-from .rules import ROLE_BY_STATE, artifacts_writable_by
+from .rules import ROLE_BY_STATE, artifacts_writable_by, explore_topic
 from .tools import (
     _PER_PLAN_DIRS,
     DISK_DERIVED_COUNTS,
@@ -536,6 +536,41 @@ def _writes_line(request: RoleRequest, spec: RoleSpec) -> str:
     )
 
 
+def _topic_line(request: RoleRequest) -> str:
+    """Render this dispatch's ONE assigned findings file, or ``""``.
+
+    Interface contract (1 call site, :func:`_prompt_blocks`):
+        - ``request``: the driver's ``RoleRequest``; only ``assigned_topic`` is
+          read.
+        - Returns ``""`` when the driver assigned no topic -- so every state
+          but EXPLORE, and an EXPLORE dispatch with no plan directory, receives
+          byte-for-byte the prompt it received before.
+        - Never raises; performs no I/O.
+    """
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-035
+    # A PATH, not a count. The exit gate two blocks up already asks for three
+    # distinct files, and the coverage line at the end of the task message
+    # already reports how many exist -- restating the number here would be the
+    # fifth refutation of a mechanism refuted four times (decisions.md D-027).
+    # What is new is that this dispatch is told WHICH ONE FILE is its job, which
+    # is the shape EXECUTE already succeeds at (write one named file, 10/10).
+    # Do NOT move this into the SYSTEM half: the assignment changes between two
+    # dispatches of the same role, and the system half is the text that does not
+    # (D-021). Do NOT let the role choose or negotiate the path -- the driver
+    # picked it against the files really on disk, so a role that writes
+    # somewhere else re-opens the collision the assignment exists to prevent.
+    # See decisions.md D-035.
+    if not request.assigned_topic:
+        return ""
+    topic = explore_topic(request.assigned_topic)
+    return (
+        f"YOUR TOPIC THIS DISPATCH: {topic.label} -- {topic.brief}.\n"
+        f"WRITE IT TO: {ArtifactNames.FINDINGS_DIR}/{topic.slug}.md\n"
+        "That exact path, nothing else. One topic, one file. The other topics "
+        "belong to other dispatches; do not write them here."
+    )
+
+
 def _finish_line(spec: RoleSpec, can_write: bool) -> str:
     """Render the terminal instruction: what to do, and when to stop doing it."""
     # DECISION plan-2026-07-21T191807-bf7ffe24/D-013
@@ -655,15 +690,25 @@ def _prompt_blocks(request: RoleRequest, spec: RoleSpec) -> list[tuple[bool, str
             "of an iterative planning protocol.",
         ),
         (False, f"GOAL: {request.goal}"),
-        (
-            False,
-            f"POSITION: iteration {request.iteration}, step {request.step_number} "
-            f"of {request.total_steps}, fix attempts used {request.fix_attempts} "
-            f"of {Defaults.MAX_FIX_ATTEMPTS}.",
-        ),
-        (True, f"EXIT GATE: {request.gate_summary}"),
-        (True, f"RULES:\n{rules}"),
     ]
+    topic = _topic_line(request)
+    if topic:
+        # Directly under the GOAL, because it is what this dispatch is FOR: the
+        # goal says what the run wants, this says which one slice of it this
+        # dispatch owns and where that slice goes.
+        blocks.append((False, topic))
+    blocks.extend(
+        [
+            (
+                False,
+                f"POSITION: iteration {request.iteration}, step "
+                f"{request.step_number} of {request.total_steps}, fix attempts "
+                f"used {request.fix_attempts} of {Defaults.MAX_FIX_ATTEMPTS}.",
+            ),
+            (True, f"EXIT GATE: {request.gate_summary}"),
+            (True, f"RULES:\n{rules}"),
+        ]
+    )
     if snapshot:
         blocks.append((False, f"CURRENT STATE:\n{snapshot}"))
     blocks.append(

@@ -151,6 +151,138 @@ def artifacts_writable_by(role: str) -> tuple[str, ...]:
 
 
 # ---------------------------------------------------------------------------
+# EXPLORE topic decomposition
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ExploreTopic:
+    """One EXPLORE topic: a findings-file slug plus the two ways it is phrased.
+
+    Attributes:
+        slug: kebab-case, and the STEM of the ``findings/<slug>.md`` file the
+            driver assigns.  Distinct across :data:`EXPLORE_TOPICS`.
+        label: a noun phrase naming the topic, used both in the EXPLORE
+            purpose sentence and at the head of the assignment prompt.
+        brief: one clause saying what belongs in the file.
+    """
+
+    slug: str
+    label: str
+    brief: str
+
+
+# DECISION plan-2026-07-21T191807-bf7ffe24/D-035
+# The decomposition is a FIXED TABLE, not an LLM call, and the three topics are
+# not invented here: they are the three coverage axes EXPLORE's own `purpose`
+# has always named, which is why that sentence is now DERIVED from this table
+# (`_topic_phrase`) instead of restating it. Two alternatives were rejected.
+#   * A driver-side LLM decomposition of the goal. It would put the SAME 4B
+#     model that has failed four times to produce three topics in charge of
+#     naming them, add a call that must fail closed, and make the assignment
+#     non-reproducible between two runs of the same goal. If it ever becomes
+#     worth it, it belongs behind this function, not instead of it.
+#   * Deriving slugs from the goal TEXT. Goal wording is arbitrary; two
+#     dispatches of "add a retry with backoff to the uploader" would get
+#     `retry`, `backoff`, `uploader` -- three restatements of one topic, which
+#     is the exact degeneracy step 22 measured and D-028 exists to stop.
+# The slugs are goal-INDEPENDENT and the topics are goal-RELATIVE: "the problem
+# scope OF THIS GOAL" is a different finding for every run, and the goal is in
+# the same prompt two blocks above the assignment.
+# Do NOT make this list longer "for coverage": every extra topic is an extra
+# dispatch the run must spend before its gate can open, and the measured
+# yield horizon is ~6-9 dispatches (decisions.md D-031).
+# See decisions.md D-035.
+EXPLORE_TOPICS: tuple[ExploreTopic, ...] = (
+    ExploreTopic(
+        slug="problem-scope",
+        label="problem scope",
+        brief="what the goal actually requires, and what is out of scope",
+    ),
+    ExploreTopic(
+        slug="affected-files",
+        label="affected files",
+        brief="which real files and symbols the change touches, with paths",
+    ),
+    ExploreTopic(
+        slug="constraints-and-patterns",
+        label=(
+            "the existing patterns or constraints that any solution must respect"
+        ),
+        brief=(
+            "the conventions, invariants and hard constraints the code already "
+            "imposes"
+        ),
+    ),
+)
+
+#: Slug used to extend :data:`EXPLORE_TOPICS` when a caller raises the findings
+#: threshold above the number of protocol axes.  Numbered from 1 so the first
+#: extension reads ``open-question-1``.
+_EXTRA_TOPIC_SLUG = "open-question"
+
+
+def explore_topics(
+    threshold: int = Defaults.FINDINGS_THRESHOLD,
+) -> tuple[ExploreTopic, ...]:
+    """The ordered EXPLORE topics, at least *threshold* of them.
+
+    Interface contract (2 call sites: :data:`_EXPLORE`'s purpose sentence and
+    ``harness.HarnessAgent._assign_explore_topic``):
+        - ``threshold``: the findings gate the run is configured with.  A
+          threshold above the number of protocol axes is EXTENDED with
+          numbered ``open-question-N`` topics rather than truncated, because a
+          gate that needs more distinct files than the driver can ever assign
+          slugs for is a gate that cannot open.
+        - Returns at least ``max(threshold, len(EXPLORE_TOPICS))`` topics, in
+          assignment order, with distinct slugs.
+        - Never raises; performs no I/O.
+    """
+    extra = threshold - len(EXPLORE_TOPICS)
+    if extra <= 0:
+        return EXPLORE_TOPICS
+    return (
+        *EXPLORE_TOPICS,
+        *(
+            ExploreTopic(
+                slug=f"{_EXTRA_TOPIC_SLUG}-{n}",
+                label=f"open question {n}",
+                brief=(
+                    "a question the topics above left unanswered, and the "
+                    "evidence that answers it"
+                ),
+            )
+            for n in range(1, extra + 1)
+        ),
+    )
+
+
+def explore_topic(slug: str) -> ExploreTopic:
+    """The topic for *slug*, or a synthesised one for a slug not in the table.
+
+    Interface contract (1 call site, ``roles.py``'s assignment prompt block):
+        - ``slug``: whatever the driver assigned.  A custom driver may assign a
+          slug this module has never heard of; that must render, not raise.
+        - Returns the table entry when there is one, else a topic whose label
+          is the slug with its hyphens spelled out.
+        - Never raises; performs no I/O.
+    """
+    for topic in EXPLORE_TOPICS:
+        if topic.slug == slug:
+            return topic
+    readable = slug.replace("-", " ").strip() or slug
+    return ExploreTopic(slug=slug, label=readable, brief=f"the {readable} of the goal")
+
+
+def _topic_phrase(threshold: int = Defaults.FINDINGS_THRESHOLD) -> str:
+    """Render the topic labels as one English list, for EXPLORE's purpose."""
+    labels = [topic.label for topic in explore_topics(threshold)]
+    if len(labels) == 1:
+        return labels[0]
+    return f"{', '.join(labels[:-1])}, and {labels[-1]}"
+
+
+# ---------------------------------------------------------------------------
 # Per-state rules
 # ---------------------------------------------------------------------------
 
@@ -212,11 +344,15 @@ _EXPLORE = StateRules(
     state=HarnessStates.EXPLORE,
     role=ROLE_BY_STATE[HarnessStates.EXPLORE],
     description="Gather context: read code, index findings, classify constraints.",
+    # The coverage axes are READ from `EXPLORE_TOPICS`, not restated here: the
+    # driver assigns one `findings/<slug>.md` per dispatch from that same table
+    # (D-035), so the topics this sentence promises and the topics actually
+    # handed out are one fact.  The rendered string is unchanged from the
+    # hand-written one it replaces, and a test pins it.
     purpose=(
         "Build enough grounded context to plan: at least "
-        f"{Defaults.FINDINGS_THRESHOLD} indexed findings covering problem "
-        "scope, affected files, and the existing patterns or constraints that "
-        "any solution must respect."
+        f"{Defaults.FINDINGS_THRESHOLD} indexed findings covering "
+        f"{_topic_phrase()}."
     ),
     operative_rules=(
         "Read the current state and the cross-plan memory files before the "

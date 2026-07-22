@@ -81,6 +81,7 @@ from fsm_llm_agents.hitl import ApprovalCallback, HumanInTheLoop
 from .constants import (
     DRIVER_OWNED_SEEDS,
     DRIVER_OWNED_UNSET,
+    ArtifactNames,
     ContextKeys,
     Defaults,
     GateSlug,
@@ -91,8 +92,13 @@ from .constants import (
 from .exceptions import HarnessError, HarnessReentrancyError
 from .fsm_definition import build_harness_fsm
 from .hardening import as_int, coerce_worker_output
-from .rules import ROLE_BY_STATE, get_rules
-from .tools import DISK_DERIVED_COUNTS, PlanMemory, derive_disk_counts
+from .rules import ROLE_BY_STATE, explore_topics, get_rules
+from .tools import (
+    DISK_DERIVED_COUNTS,
+    PlanMemory,
+    derive_disk_counts,
+    gate_files,
+)
 
 __all__ = [
     "HarnessAgent",
@@ -269,6 +275,12 @@ class RoleRequest:
         workspace_root: The code root the run is changing, or ``None``.
             Reported to the worker; the confinement itself lives in the
             ``Workspace`` the factory was built with.
+        assigned_topic: For an EXPLORE dispatch, the ONE kebab-case slug this
+            dispatch is to write ``findings/<slug>.md`` for; ``None`` for every
+            other state, and for an EXPLORE dispatch with no plan directory or
+            no slug left to assign.  Driver-owned and derived per dispatch from
+            the files really on disk (:meth:`HarnessAgent._assign_explore_topic`);
+            a factory renders it into the prompt and must not invent one.
     """
 
     role: str
@@ -283,6 +295,7 @@ class RoleRequest:
     context: Mapping[str, Any] = field(default_factory=dict)
     plan_dir: str | None = None
     workspace_root: str | None = None
+    assigned_topic: str | None = None
 
 
 #: A role worker: one :class:`RoleRequest` in, one ``AgentResult`` out.
@@ -501,6 +514,11 @@ class HarnessAgent(BaseAgent):
         #      from an approving callback zeroing its own counter) is what it
         #      was written about. See decisions.md D-029.
         self._explore_redispatches = 0
+        #: Slugs handed out to EXPLORE dispatches this run, in order.  Driver
+        #: run state for exactly the reasons ``_explore_redispatches`` above is
+        #: (D-029): a worker cannot reach it, and only ``_run_once`` resets it.
+        #: Read by :meth:`_assign_explore_topic`; nothing else.
+        self._assigned_topics: list[str] = []
         # DECISION plan-2026-07-21T125237-191b2eb2/D-055
         # ONE run per instance at a time, enforced -- not documented and hoped
         # for. `_api`, `_conversation_id`, `_stall_turns`, `_stall_signature`
@@ -613,6 +631,7 @@ class HarnessAgent(BaseAgent):
         self._stall_turns = 0
         self._stall_signature = None
         self._explore_redispatches = 0
+        self._assigned_topics = []
 
         fsm_def = build_harness_fsm(
             task,
@@ -1136,6 +1155,14 @@ class HarnessAgent(BaseAgent):
             context=MappingProxyType(dict(context)),
             plan_dir=_as_optional_str(context.get(ContextKeys.PLAN_DIR)),
             workspace_root=_as_optional_str(context.get(ContextKeys.WORKSPACE_ROOT)),
+            # Assigned only for EXPLORE, and only AFTER the `worker_factory is
+            # None` return above: the diagnostic mode attempts no dispatch, so
+            # it must not consume a topic either (D-045).
+            assigned_topic=(
+                self._assign_explore_topic(context)
+                if state == HarnessStates.EXPLORE
+                else None
+            ),
         )
 
         try:
@@ -1246,22 +1273,121 @@ class HarnessAgent(BaseAgent):
         allowed = _WORKER_WRITABLE[state]
         if not any(key in allowed for key in DISK_DERIVED_COUNTS):
             return {}
-        plan_dir = _as_optional_str(context.get(ContextKeys.PLAN_DIR))
+        memory = self._read_only_memory(state, context)
+        if memory is None:
+            return {}
         try:
-            # A directory that is not there yet is not evidence, and this check
-            # is also what keeps the read a READ: `PlanMemory.__init__` CREATES
-            # its plan directory, and the driver has no business creating
-            # protocol memory as a side effect of counting it.
-            if plan_dir is None or not Path(plan_dir).expanduser().is_dir():
-                return {}
-            memory = PlanMemory(plan_dir, role=ROLE_BY_STATE[state])
             return dict(derive_disk_counts(memory, allowed))
         except Exception as exc:  # unreadable root: no evidence, not zero
             logger.warning(
-                f"Could not derive gate counts for state '{state}' from "
-                f"'{plan_dir}': {exc}. Leaving the gate value unchanged."
+                f"Could not derive gate counts for state '{state}': {exc}. "
+                "Leaving the gate value unchanged."
             )
             return {}
+
+    @staticmethod
+    def _read_only_memory(
+        state: str, context: Mapping[str, Any]
+    ) -> PlanMemory | None:
+        """A role-scoped :class:`PlanMemory` for READING the plan directory.
+
+        Interface contract (shared helper, 2 call sites:
+        :meth:`_derive_gate_counts` and :meth:`_assign_explore_topic` -- the two
+        places the driver looks at the plan directory at all):
+            - Returns ``None`` when there is no ``plan_dir``, when the path is
+              not a directory, or when the memory cannot be constructed.
+              ``None`` means "nothing was observed", never "observed nothing".
+            - Never raises.
+
+        The ``is_dir`` precheck is what keeps this a READ.  ``PlanMemory``
+        CREATES its plan directory on construction, and the driver has no
+        business bringing protocol memory into existence as a side effect of
+        looking at it -- a directory it created itself would also be a
+        directory whose emptiness it then mistook for evidence.  Both callers
+        go through here so that guarantee is one line, in one place, rather
+        than a rule two methods have to remember.
+        """
+        plan_dir = _as_optional_str(context.get(ContextKeys.PLAN_DIR))
+        if plan_dir is None:
+            return None
+        try:
+            if not Path(plan_dir).expanduser().is_dir():
+                return None
+            return PlanMemory(plan_dir, role=ROLE_BY_STATE[state])
+        except Exception as exc:  # unreadable / unusable root: no observation
+            logger.warning(
+                f"Could not open plan directory '{plan_dir}' for state "
+                f"'{state}': {exc}. Treating it as unobserved."
+            )
+            return None
+
+    def _assign_explore_topic(self, context: Mapping[str, Any]) -> str | None:
+        """Pick the ONE ``findings/<slug>.md`` topic this dispatch is to write.
+
+        Returns:
+            A kebab-case slug, or ``None`` when there is no plan directory to
+            check or every topic already has a non-empty file on disk.
+        """
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-035
+        # The DRIVER assigns the topic; the model is never asked to invent one.
+        # `agents/ip-orchestrator.md`'s EXPLORE dispatch step 4 is literally
+        # "assign each topic a distinct kebab-case `findings/{topic-slug}.md`
+        # slug and name it in the spawn prompt; first check `findings/` for an
+        # existing file with that name -- no two live explorers may share a
+        # slug", and this harness had never done it: it asked one dispatch to
+        # choose its own topics and persist toward a COUNT. Four mechanisms
+        # were measured against that shape on `ollama_chat/qwen3.5:4b` and all
+        # four missed the bar (turn budget 0/5, observational feedback 0/5,
+        # bounded re-dispatch 1/5, bound re-sizing 4/10). Step 24's falsifier
+        # showed why none of them could work: there is a HORIZON, not a rate --
+        # ~60 measured dispatches past the 9th added ZERO files -- so no budget
+        # is the binding constraint. Do NOT replace this with a fifth attempt to
+        # make one dispatch produce three topics.
+        #
+        # Three properties are load-bearing:
+        #   1. The on-disk set comes from `tools.gate_files`, the SAME
+        #      derivation the gate reads (D-015/D-027/D-032). A second listing
+        #      here would be an assignment and a gate that can disagree, and the
+        #      collision rule would then hand out a slug the gate already counts.
+        #   2. Assigning a slug WRITES NOTHING. `_read_only_memory` refuses to
+        #      construct memory for a directory that is not there, and nothing
+        #      below touches the filesystem. A driver that pre-created empty
+        #      files to "reserve" its topics would be review C1's fail-open
+        #      wearing a different hat: the count would move without a role ever
+        #      producing bytes. `gate_files` ignores empty files, so even a
+        #      reserved-and-unwritten file could not open the gate -- but the
+        #      driver must not create one at all, and a test pins that.
+        #   3. `min(..., key=count)` is BOTH rules at once: prefer a topic never
+        #      assigned this run (count 0, first in table order), and once every
+        #      remaining topic has been tried, round-robin the least-tried one.
+        #      Do NOT "simplify" it to `free[0]`: a topic the model keeps
+        #      failing to write would then be re-assigned forever and the other
+        #      topics would never be reached at all.
+        # See decisions.md D-035.
+        memory = self._read_only_memory(HarnessStates.EXPLORE, context)
+        if memory is None:
+            # No directory to check for collisions, and no plan-file tool for
+            # the role either. Fail CLOSED: no assignment, no fabricated topic.
+            return None
+        on_disk = {
+            name.removesuffix(".md")
+            for name in gate_files(memory, ArtifactNames.FINDINGS_DIR)
+        }
+        free = [
+            topic
+            for topic in explore_topics(self.findings_threshold)
+            if topic.slug not in on_disk
+        ]
+        if not free:
+            return None
+        chosen = min(free, key=lambda topic: self._assigned_topics.count(topic.slug))
+        self._assigned_topics.append(chosen.slug)
+        logger.info(
+            f"EXPLORE dispatch assigned topic '{chosen.slug}' "
+            f"({ArtifactNames.FINDINGS_DIR}/{chosen.slug}.md); "
+            f"{len(on_disk)} of {self.findings_threshold} already on disk."
+        )
+        return chosen.slug
 
     @staticmethod
     def _enforce_routing_exclusivity(

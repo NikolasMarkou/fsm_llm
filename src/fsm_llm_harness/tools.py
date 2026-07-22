@@ -1217,6 +1217,81 @@ def _routing_hint(path: str, *, tool_name: str, memory: PlanMemory | None) -> st
     )
 
 
+def _relocated_hint(path: str, memory: PlanMemory) -> str:
+    """``problem-scope.md`` -> ``findings/problem-scope.md``, when that exists.
+
+    Interface contract (1 call site, :func:`_missing_target_hint`):
+        - Returns a "did you mean" clause only when the BASENAME of *path* is
+          really a file inside one of the owned per-plan directories, so the
+          suggestion is a fact read off the filesystem, never a guess.
+        - Returns ``""`` otherwise.  Never raises.
+    """
+    name = Path(path.strip()).name
+    if not name:
+        return ""
+    for directory in sorted(_PER_PLAN_DIRS):
+        try:
+            if name in memory.list_dir(directory):
+                return f"Did you mean `{directory}/{name}`?"
+        except Exception:  # the directory is not there: no suggestion, no crash
+            continue
+    return ""
+
+
+def _missing_target_hint(
+    path: str, *, tool_name: str, memory: PlanMemory | None
+) -> str:
+    """Say what is TRUE about a plan artifact a READ could not find.
+
+    Interface contract (1 call site, :func:`_corrective`):
+        - Fires only for a FAILED ``read_plan_file`` holding plan memory.  A
+          write is never told "write it", and a workspace call is untouched.
+        - Returns ``""`` when the path does exist (the failure was something
+          else), when it cannot be classified, or when there is nothing true to
+          add.
+        - Never raises.
+    """
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-036
+    # The same seam as D-027's routing hint, for the other half of the same
+    # measurement: an ALREADY-FAILED call is told what is true, and nothing is
+    # repaired, re-routed or turned into a success. Step 25's n=10 live block is
+    # what this is sized from: 124 of 323 failed tool calls were reads of a
+    # `findings/*.md` file that did not exist yet, and in the three runs that
+    # missed the gate those reads WERE the failure -- run 3 called
+    # `read_plan_file('findings/constraints-and-patterns.md')` 15 times, ENOENT
+    # every time, and spent nine dispatches' worth of turns without ever writing
+    # the file it had been assigned. A bare `[Errno 2] No such file or
+    # directory` says nothing about what to do next, and D-013 already recorded
+    # the same false belief from the write side ("cannot write findings without
+    # the directory existing") -- `PlanMemory.write_text` creates parents, so it
+    # was never true.
+    # Do NOT "fix" this by answering the read with empty content instead: D-027
+    # deliberately confined that treatment to an owned DIRECTORY, because a
+    # missing `plan.md` really is missing and a tool that reports absent files
+    # as empty ones lies to every caller.
+    # Do NOT move this into the prompt. The prompt already names the target
+    # path once, at the top of the task; this fires at the moment and the place
+    # the model meets the error, every time it does, and prompt wording is the
+    # mechanism that has now failed three separate times (decisions.md D-027).
+    # See decisions.md D-036.
+    if memory is None or tool_name != PlanTools.READ_PLAN_FILE:
+        return ""
+    try:
+        if memory.exists(path):
+            return ""  # it is there; this failure is about something else
+        artifact = memory.artifact_for(path)
+    except Exception:  # unclassifiable / outside the root: routing answers it
+        return ""
+    if artifact is None:
+        return _relocated_hint(path, memory)
+    return (
+        "That protocol artifact does not exist yet -- nothing has written it. "
+        "Reading it is not a prerequisite for writing it: "
+        f"`{PlanTools.WRITE_PLAN_FILE}` creates the file, and any missing "
+        "folder, in one call."
+    )
+
+
 @contextmanager
 def _corrective(
     path: str,
@@ -1255,7 +1330,13 @@ def _corrective(
     try:
         yield
     except Exception as exc:
-        hint = _routing_hint(path, tool_name=tool_name, memory=memory)
+        # A hint about what IS there outranks one about which root to use: for
+        # `read_plan_file("problem-scope.md")` the routing hint sends the model
+        # to the workspace, and the file is really at `findings/problem-scope.md`
+        # (measured 11 times in one step-25 run).  See `_missing_target_hint`.
+        hint = _missing_target_hint(
+            path, tool_name=tool_name, memory=memory
+        ) or _routing_hint(path, tool_name=tool_name, memory=memory)
         if not hint:
             raise
         if not isinstance(exc, OSError) and exc.args and isinstance(exc.args[0], str):
