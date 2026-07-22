@@ -19,11 +19,22 @@ bench_data/
 │   └── <block>/              # B0, B1, ... one pre-registered block each;
 │                             #   manifest.json + rows.jsonl (no arm suffix:
 │                             #   L6 is always native and test-embedded)
+├── l7-explore-coldstart/     # EXPLORE cold-start A/B, one dispatch per row
+│   └── <block>/              # B0, ... manifest_<arm>.json + rows_<arm>.jsonl
+│                             #   + summary_<arm>.json, arm in {bare, seeded}
 └── seed-probe/               # probe-seed records (plan step 2)
 ```
 
-Arms: `native` (`native_function_calling=True`, the shipped default) and
-`react` (the opt-in control).
+Arms carry TWO different meanings depending on the bench, and they must not be
+read as the same axis:
+
+- `l4-execute-write`: `native` (`native_function_calling=True`, the shipped
+  default) vs `react` (the opt-in control) -- these are AGENT shapes.
+- `l7-explore-coldstart`: `bare` (a plain `mkdir` plan directory, L6's own
+  population) vs `seeded` (the same `mkdir` plus the product's
+  `PlanDirectory.seed_protocol_skeleton()`) -- these are PLAN-DIRECTORY shapes,
+  and BOTH run `native_function_calling=True`. The independent variable is the
+  on-disk population, not the agent.
 
 ## Pre-registration rule (D-002)
 

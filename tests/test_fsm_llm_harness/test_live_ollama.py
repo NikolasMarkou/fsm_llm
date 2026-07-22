@@ -87,8 +87,9 @@ from fsm_llm_harness.roles import (
     get_role_spec,
     held_tools,
 )
-from fsm_llm_harness.rules import get_rules
-from fsm_llm_harness.tools import PlanMemory, Workspace, gate_files
+from fsm_llm_harness.rules import explore_topics, get_rules
+from fsm_llm_harness.storage import PlanDirectory
+from fsm_llm_harness.tools import PlanMemory, Workspace, gate_files, has_bytes
 from tests.conftest import ollama_available
 from tests.test_fsm_llm_harness.test_plan_validator import (
     PLAN_MD,
@@ -2314,3 +2315,651 @@ class TestL6EndToEndRealWorkers:
         assert floor_misses == [], (
             f"L6 floor FAILED: {floor_misses}; full vectors: {rows}"
         )
+
+
+# ---------------------------------------------------------------------------
+# L7 -- the EXPLORE cold-start A/B: does the plan directory's POPULATION move
+# the first dispatch's disk-derived output?
+# ---------------------------------------------------------------------------
+
+#: L6 B1 measured the e2e floor at FAIL 0/3 with all three rows halting
+#: `explore-cap` over a bare ``mkdir`` plan directory, and EXPLORE returned zero
+#: bytes on disk in 20/30 dispatches.  L5 scores 5/5 on the same gate -- over a
+#: fixture (``make_plan_dir``) that hands the explorer a COMPLETE protocol
+#: skeleton plus the cross-plan memory files.  The two benches were never the
+#: same population, and EXPLORE's FIRST operative rule ("read the current state
+#: and the cross-plan memory files before the first search") is structurally
+#: unexecutable over the bare one.  This block measures that difference
+#: DIRECTLY, at one dispatch per row, before any product path is wired.
+L7_BENCH_ID = "l7-explore-coldstart"
+L7_BLOCK = "B0"
+
+#: The two arms are PLAN-DIRECTORY SHAPES, not agent shapes.  Both run
+#: ``native_function_calling=True``; L4's ``native``/``react`` pair is the other
+#: kind of arm and the two must not be read as the same axis.  ``report``
+#: derives the arm from the ``rows_<arm>.jsonl`` filename, so this needs no
+#: ``harness_bench.ARMS`` entry (whose documented meaning is the native flag).
+L7_ARMS = ("bare", "seeded")
+
+#: n per arm.  24 dispatches at the measured 27-40 s each is ~20-25 minutes --
+#: the point of a ONE-dispatch row is that the lever gets a real sample without
+#: an e2e block's price.  Fixed here, before the block runs, and never extended.
+RUNS_L7 = 12
+
+#: Per-row completion seed, base + run - 1, SHARED across the two arms and
+#: recorded for provenance only.  Same-seed live runs are not token-level
+#: reproducible once tool outputs embed per-run tmpdir paths, so the arms are
+#: two independent samples, not a paired comparison.
+L7_SEED_BASE = 20260723100
+
+#: The topic ``_assign_explore_topic`` hands the FIRST dispatch over a plan
+#: directory with no ``findings/`` files.  Both arms start there by construction
+#: -- seeding creates no ``findings/`` path (invariant I3) -- so the assignment
+#: is deterministic and the manifest can pin the prompt the dispatch really
+#: gets, not a template with the topic blanked out.  Pinned against the driver's
+#: own derivation by ``test_the_first_assigned_topic_is_the_one_the_hash_pins``.
+L7_FIRST_TOPIC = explore_topics(Defaults.FINDINGS_THRESHOLD)[0].slug
+
+
+def _l7_explore_request(
+    plan_dir: Path, workspace: Path, *, topic: str | None
+) -> RoleRequest:
+    """One EXPLORE dispatch, shaped exactly as the driver shapes it.
+
+    Interface contract (2 call sites -- the L7 prompt hash, at FIXED
+    placeholder paths, and the live dispatch, at real ones): mirrors
+    ``HarnessAgent._run_worker``'s ``RoleRequest`` construction for EXPLORE.
+    Follows L4's ``_execute_request`` pattern deliberately: ONE builder called
+    twice means the manifest hashes the template the dispatch really renders,
+    rather than a second hand-written copy of it that can drift.
+    """
+    spec = get_role_spec(HarnessStates.EXPLORE)
+    rules = get_rules(HarnessStates.EXPLORE)
+    return RoleRequest(
+        role=spec.role,
+        state=HarnessStates.EXPLORE,
+        goal=GOAL,
+        operative_rules=rules.operative_rules,
+        gate_summary=rules.gate_summary,
+        iteration=1,
+        step_number=1,
+        total_steps=1,
+        fix_attempts=0,
+        context={},
+        plan_dir=str(plan_dir),
+        workspace_root=str(workspace),
+        assigned_topic=topic,
+    )
+
+
+def _l7_prompt_hash() -> str:
+    """sha256 of the rendered EXPLORE system+task prompts, placeholder paths.
+
+    ONE state, like the L4 blocks and unlike :func:`_l6_prompt_hash`'s
+    six-state digest -- an L7 row is a single EXPLORE dispatch, so hashing the
+    other five roles' templates would pin bytes this block never speaks.  The
+    two hashes are therefore NOT comparable by construction; what invariant I5
+    asserts is that neither MOVES.
+    """
+    request = _l7_explore_request(
+        Path("/plan-dir"), Path("/workspace"), topic=L7_FIRST_TOPIC
+    )
+    spec = get_role_spec(HarnessStates.EXPLORE)
+    system = build_role_system_prompt(request, spec)
+    task = build_role_task_prompt(request, spec)
+    return hashlib.sha256(f"{system}\x00{task}".encode()).hexdigest()
+
+
+def _l7_tool_surface() -> dict[str, Any]:
+    """The worker-factory kwargs plus the tool names an EXPLORE dispatch holds."""
+    request = _l7_explore_request(
+        Path("/plan-dir"), Path("/workspace"), topic=L7_FIRST_TOPIC
+    )
+    spec = get_role_spec(HarnessStates.EXPLORE)
+    return {
+        "native_function_calling": True,
+        "timeout_seconds": 600,
+        "retry_attempts": 1,
+        "declared_tools": sorted(held_tools(request, spec)),
+    }
+
+
+def _l7_fixture_hash() -> str:
+    """sha256 pinning GOAL -- the ONLY fixed input an L7 row gets.
+
+    Deliberately NOT :func:`_l6_fixture_hash`: that one also pins
+    ``SEED_FILES``, and the workspace an explorer reads is incidental here.
+    The thing that VARIES between the arms is the plan directory's population,
+    and it is deliberately absent from this hash -- it is the independent
+    variable, so pinning it would make the two arms non-comparable on the very
+    field ``report`` uses to decide comparability.
+    """
+    return hashlib.sha256(GOAL.encode("utf-8")).hexdigest()
+
+
+def _l7_manifest(hb: Any, arm: str) -> dict[str, Any]:
+    """The L7 pre-registration record for ONE arm; same six fields as L4/L6.
+
+    Interface contract (2 call sites: the gated block, which writes it before
+    that arm's first dispatch, and the UNGATED parity test): every field except
+    ``arm`` and ``created_at`` is computed from arm-INDEPENDENT inputs, and the
+    parity test pins exactly that.  It is the causal-attribution guarantee of
+    the whole block -- if the arms differed in prompt bytes, tool surface,
+    fixture, model digest or source commit, a delta could not be attributed to
+    the on-disk population.
+    """
+    return {
+        "bench_id": L7_BENCH_ID,
+        "block": L7_BLOCK,
+        "n_preregistered": RUNS_L7,
+        "seed": {
+            "base": L7_SEED_BASE,
+            "per_row": "base+run-1",
+            "effective_arm": "native",
+        },
+        "model": MODEL,
+        "created_at": hb._utc_now(),
+        "prompt_bytes_sha256": _l7_prompt_hash(),
+        "tool_surface": _l7_tool_surface(),
+        "fixture_hash": _l7_fixture_hash(),
+        "model_digest": hb._model_digest(),
+        # Both arms are native; the DISPLAY label is the plan-directory shape.
+        "arm": {"native": True, "display": arm, "plan_dir_shape": arm},
+        "git_commit": hb._git_commit(),
+    }
+
+
+def _l7_plan_dir(root: Path, *, arm: str) -> Path:
+    """The plan directory for one arm -- the block's ONLY independent variable.
+
+    Interface contract (2 call sites: the live dispatch and the UNGATED shape
+    tests):
+
+    * ``bare``   -- ``plan_dir.mkdir(parents=True)`` and nothing else, which is
+      byte-for-byte what :func:`_one_e2e_run` does.  This arm IS L6's
+      population, so a delta here is a delta against the measured 0/3.
+    * ``seeded`` -- the same ``mkdir``, then the PRODUCT's
+      ``PlanDirectory.seed_protocol_skeleton()``.
+
+    The parent directory is per-arm-per-run on purpose: the cross-plan tier
+    (``../LESSONS.md`` et al.) is SHARED between plan directories under one
+    root, so a shared parent would leak the seeded arm's files into the bare
+    arm's reads and destroy the contrast.
+    """
+    plan_dir = root / "plan"
+    plan_dir.mkdir(parents=True)
+    if arm == "seeded":
+        # The PRODUCT function, never `make_plan_dir`/`BASE_FILES` or any other
+        # fixture.  A fixture here would measure a population the product does
+        # not produce, and a hand-written duplicate drifting from its source of
+        # truth is precisely the defect class `plans/LESSONS.md` records -- it
+        # is also how L5 (fixture-seeded, 5/5) and L6 (bare mkdir, 0/3) came to
+        # be reported as if they were the same population in the first place.
+        PlanDirectory(plan_dir).seed_protocol_skeleton()
+    return plan_dir
+
+
+def _l7_population(plan_dir: Path) -> tuple[str, ...]:
+    """Every file an arm's construction put on disk, BOTH tiers, sorted.
+
+    The per-plan tier is the plan directory's own tree; the cross-plan tier is
+    the ``*.md`` files sitting directly beside it under the shared parent.  A
+    check that looked only inside the plan directory would miss exactly half of
+    what the seeding does, which is the half EXPLORE's first operative rule
+    names.
+    """
+    per_plan = [
+        f"plan/{path.relative_to(plan_dir)}"
+        for path in plan_dir.rglob("*")
+        if path.is_file()
+    ]
+    cross_plan = [
+        path.name for path in plan_dir.parent.glob("*.md") if path.is_file()
+    ]
+    return tuple(sorted(per_plan + cross_plan))
+
+
+def _one_explore_dispatch(
+    tmp_path: Path, run: int, *, arm: str, seed: int
+) -> dict[str, Any]:
+    """ONE live EXPLORE dispatch over one arm's plan directory; returns its row.
+
+    Asserts nothing.  Exactly one dispatch -- no redispatch loop, no driver
+    traverse: the question is whether the FIRST cold-start dispatch puts bytes
+    on disk, and a redispatch budget would confound the arms with the number of
+    tries each got.  ``state.md`` is written through the DRIVER's own
+    ``_sync_state_doc`` and the topic assigned through the DRIVER's own
+    ``_assign_explore_topic``, so both arms face the request a real run
+    produces rather than a hand-shaped one.
+    """
+    root = tmp_path / f"l7-{arm}-{run}"
+    plan_dir = _l7_plan_dir(root, arm=arm)
+    workspace = _seed_workspace(root)
+    context = _roots(plan_dir, workspace)
+
+    observations: list[dict[str, Any]] = []
+    live = build_default_worker_factory(
+        Workspace(str(workspace)),
+        model=MODEL,
+        timeout_seconds=600,
+        retry_attempts=1,
+        # Pinned for the reason L5 and L6 pin it (D-048): the arm this block's
+        # numbers are measured on must survive a future default flip.  BOTH L7
+        # arms are native -- the independent variable is the directory.
+        native_function_calling=True,
+        seed=seed,
+        observer=lambda record: observations.append(dict(record)),
+    )
+    agent = _live_agent(live, approvals=DiskEvidenceApprovals(plan_dir))
+    agent._sync_state_doc(HarnessStates.EXPLORE, context)
+    topic = agent._assign_explore_topic(context)
+
+    calls: list[dict[str, Any]] = []
+    original = _spy_on_tools(calls)
+    started = time.monotonic()
+    try:
+        result = live(_l7_explore_request(plan_dir, workspace, topic=topic))
+    finally:
+        ToolRegistry.execute = original  # type: ignore[method-assign]
+    elapsed = round(time.monotonic() - started, 1)
+
+    # The PRIMARY metric, disk-derived: did the assigned topic file end up
+    # carrying bytes?  Read through `tools.has_bytes` over a CONFINED reader --
+    # the same predicate `tools.gate_files` applies for the EXPLORE gate itself
+    # -- rather than a local `stat`, so the row cannot score a file the gate
+    # would not count.
+    memory = PlanMemory(plan_dir, role=ROLE_FOR_READING)
+    on_disk = bool(
+        topic
+        and has_bytes(memory.read_text, f"{ArtifactNames.FINDINGS_DIR}/{topic}.md")
+    )
+    last = observations[-1] if observations else {}
+    return {
+        "arm": arm,
+        "native": True,
+        "run": run,
+        "seed": seed,
+        "elapsed_s": elapsed,
+        "assigned_topic": topic,
+        "tool_calls": len(calls),
+        "tool_trace": calls,
+        # The three `harness_bench.K_METRICS` names, verbatim, so `report`
+        # recounts this block with ZERO changes to `scripts/harness_bench.py`.
+        "write_tool_issued": any(c["tool"] in WRITE_TOOLS for c in calls),
+        "bytes_on_disk": on_disk,
+        "success": bool(result.success),
+        # Diagnostics: the MECHANISM, so a refutation says what it rules out
+        # rather than only that it rules something out.
+        "reason": last.get("failure_reason"),
+        "objects": last.get("top_level_objects"),
+        "answer_chars": last.get("answer_chars"),
+        "write_evidence_paths": list(last.get("write_evidence_paths") or ()),
+        "findings_nonempty": len(_findings_on_disk(plan_dir)),
+        "plan_dir_files_written": sorted(
+            name for name in _digests(plan_dir) if name != ArtifactNames.STATE
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# L7's UNGATED guards.  Every one of these runs in a normal `make test`.
+# ---------------------------------------------------------------------------
+
+
+def test_the_l7_arm_manifests_have_manifest_parity_except_the_arm_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UNGATED: the two arms differ ONLY in ``arm`` (and ``created_at``).
+
+    This is the causal-attribution guarantee of the whole block.  If the arms
+    ever differed in prompt bytes, tool surface, fixture, model digest, source
+    commit, n or seed, a measured delta could be attributed to any of those
+    instead of to the plan directory's population -- which is the ONE thing L7
+    exists to vary.  ``model_digest`` is stubbed to a constant because the real
+    one queries a running Ollama; the point of the test is that BOTH arms read
+    the same builder for it, and a stub proves that as well as a live digest
+    would (and unlike a live digest, it proves it in ``make test``).
+    """
+    hb = _bench_module()
+    monkeypatch.setattr(hb, "_model_digest", lambda: {"tag": MODEL_TAG, "digest": "x"})
+    bare = _l7_manifest(hb, "bare")
+    seeded = _l7_manifest(hb, "seeded")
+
+    differing = {
+        key
+        for key in set(bare) | set(seeded)
+        if bare.get(key) != seeded.get(key) and key != "created_at"
+    }
+    assert differing == {"arm"}, (
+        f"the L7 arms differ on {sorted(differing)}; only `arm` may differ, or "
+        "a delta cannot be attributed to the plan directory's population"
+    )
+    assert bare["arm"] == {"native": True, "display": "bare", "plan_dir_shape": "bare"}
+    assert seeded["arm"]["native"] is True, "both L7 arms are native (D-048)"
+    # And the six comparability fields the bench requires are all present.
+    for manifest in (bare, seeded):
+        missing = [f for f in hb.MANIFEST_FIELDS if f not in manifest]
+        assert missing == [], missing
+
+
+def test_the_first_assigned_topic_is_the_one_the_hash_pins(tmp_path: Path) -> None:
+    """UNGATED: the manifest's prompt hash renders the topic really assigned.
+
+    ``_assign_explore_topic`` is the DRIVER's derivation; :data:`L7_FIRST_TOPIC`
+    is what the manifest hashes.  If they drifted, the block would pre-register
+    prompt bytes no dispatch ever sees.  Checked over BOTH arms, because the
+    seeding must not disturb the assignment (invariant I3: it creates no
+    ``findings/`` path).
+    """
+    for arm in L7_ARMS:
+        # A FRESH agent per arm: `_assign_explore_topic` round-robins off the
+        # instance's own `_assigned_topics`, so the SAME agent would hand the
+        # second arm the next topic -- and `_one_explore_dispatch` builds a new
+        # agent per row for exactly this reason.
+        agent = _live_agent(None, approvals=Approvals())
+        plan_dir = _l7_plan_dir(tmp_path / f"topic-{arm}", arm=arm)
+        context = _roots(plan_dir, tmp_path / "ws")
+        assert agent._assign_explore_topic(context) == L7_FIRST_TOPIC, arm
+        # ...and asking for it wrote nothing (D-035 property 2).
+        assert not (plan_dir / ArtifactNames.FINDINGS_DIR).exists(), arm
+
+
+def test_the_bare_arm_population_is_L6s_own(tmp_path: Path) -> None:
+    """UNGATED: ``bare`` really is the population L6 measured 0/3 over.
+
+    Both a SOURCE check (the same one-line construction, and no seeding call in
+    ``_one_e2e_run``) and a BEHAVIOURAL one (the resulting file set is empty in
+    both tiers).  If ``bare`` ever drifted away from L6's shape, the block would
+    compare ``seeded`` against something no committed number belongs to.
+    """
+    import inspect
+
+    e2e_src = inspect.getsource(_one_e2e_run)
+    arm_src = inspect.getsource(_l7_plan_dir)
+    assert "plan_dir.mkdir(parents=True)" in e2e_src
+    assert "plan_dir.mkdir(parents=True)" in arm_src
+    assert "seed_protocol_skeleton" not in e2e_src, (
+        "_one_e2e_run now seeds; L6's population moved and `bare` no longer "
+        "reproduces the block it is the control for"
+    )
+    assert _l7_population(_l7_plan_dir(tmp_path / "bare", arm="bare")) == ()
+
+
+def test_the_seeded_arm_content_is_the_products_own(tmp_path: Path) -> None:
+    """UNGATED: ``seeded`` is exactly ``seed_protocol_skeleton()``'s output.
+
+    Pins that no fixture duplicate crept into the arm.  The control directory
+    is seeded by calling the product method directly; the arm's directory is
+    built by the arm helper.  Their populations must be identical, and the
+    helper's source must reach for the product rather than for the test corpus.
+    """
+    import inspect
+
+    arm_src = inspect.getsource(_l7_plan_dir)
+    assert "PlanDirectory(plan_dir).seed_protocol_skeleton()" in arm_src
+    # The CALL form, not the word: the D-anchor comment above names the fixture
+    # to say it must NOT be used, so a bare-substring check would flag its own
+    # warning.  What is forbidden is a fixture INVOCATION in the arm builder.
+    assert "make_plan_dir(" not in arm_src, (
+        "the seeded arm reaches for a test fixture; it must call the PRODUCT "
+        "function, or the block measures a population the product never mints"
+    )
+
+    control = tmp_path / "control" / "plan"
+    control.mkdir(parents=True)
+    PlanDirectory(control).seed_protocol_skeleton()
+    arm = _l7_plan_dir(tmp_path / "arm", arm="seeded")
+    assert _l7_population(arm) == _l7_population(control)
+    # Zero bytes, both tiers -- presence, never content (invariant I2).
+    assert all(
+        (arm.parent / name).stat().st_size == 0 for name in _l7_population(arm)
+    )
+    # ...and no `findings/` path was created (invariant I3).
+    assert not (arm / ArtifactNames.FINDINGS_DIR).exists()
+
+
+def test_seeding_moves_no_l6_floor_clause_and_no_bench_defect_predicate() -> None:
+    """UNGATED: the fields seeding moves are REPORTED, never graded.
+
+    Assumption A5, pinned on SOURCE rather than promised.  Seeding changes
+    ``plan_dir_files_written``, ``audit_errors`` and ``audit_warnings`` -- and
+    ONLY those.  None of the three floor clauses (``reached>=EXECUTE``,
+    ``verified_write``, ``honest_halt``) nor :func:`_bench_defect` may read any
+    of them, or a population change would silently move the L6 bar rather than
+    the measurement.  A source-level assertion is the right shape here for the
+    reason ``test_the_L6_criterion_is_structurally_closed_to_scripted_workers``
+    is: it makes the property IMPOSSIBLE to violate quietly, not merely
+    unobserved on today's fabricated records.
+    """
+    import inspect
+
+    moved = ("plan_dir_files_written", "audit_errors", "audit_warnings")
+    graded = "".join(
+        inspect.getsource(obj)
+        for obj in (
+            _bench_defect,
+            _verified_execute_workspace_write,
+            _normalized_ws_path,
+            TestL6EndToEndRealWorkers.test_three_full_runs_grade_at_or_above_the_floor,
+        )
+    )
+    # The floor loop's own clause names, so this cannot pass by the clauses
+    # having been renamed out from under it.
+    for clause in ("reached>=EXECUTE", "verified_write", "honest_halt"):
+        assert clause in graded, clause
+    present = [field for field in moved if field in graded]
+    assert present == [], (
+        f"an L6 floor clause or the bench-defect predicate now reads {present}, "
+        "which seeding moves -- the bar would follow the population"
+    )
+
+
+def test_a_seeded_plan_dir_still_denies_plan_approval_when_nothing_was_written(
+    tmp_path: Path,
+) -> None:
+    """UNGATED: a ZERO-BYTE seeded ``plan.md`` earns no approval.
+
+    Assumption A4 and Pre-Mortem STOP IF #3(b).  ``DiskEvidenceApprovals``
+    approves the plan gate iff ``plan.md`` carries bytes AND the two
+    :data:`_PLAN_CHECKS` audit checks report no ERROR.  Seeding brings
+    ``plan.md`` into EXISTENCE, so the question nobody had checked is whether
+    existence alone opens the gate.  It must not: presence is not content, and
+    a gate that opened on an empty file would let a run past PLAN having
+    planned nothing.
+
+    If this test ever goes red, STOP IF #3(b) has fired.  Do NOT repair it by
+    widening the approval predicate or by dropping the size check -- narrow the
+    SEEDING scope instead (``plan.md`` is the artifact with a gate consumer).
+    """
+    plan_dir = _l7_plan_dir(tmp_path / "seeded", arm="seeded")
+    assert (plan_dir / ArtifactNames.PLAN).is_file(), "the seeding did not run"
+    assert (plan_dir / ArtifactNames.PLAN).stat().st_size == 0
+
+    stub = DiskEvidenceApprovals(plan_dir)
+    assert stub(ApprovalRequest(tool_name=_GATE_PLAN)) is False
+    assert "absent or empty" in stub.decisions[-1]["evidence"]
+    # The close gate is the same shape over a seeded `verification.md`.
+    assert stub(ApprovalRequest(tool_name=_GATE_CLOSE)) is False
+    # And the shared predicate the driver's own gates read agrees.
+    memory = PlanMemory(plan_dir, role=ROLE_FOR_READING)
+    assert has_bytes(memory.read_text, ArtifactNames.PLAN) is False
+
+
+# STOP IF #3(c) FIRED, and this test PINS the firing rather than hiding it.
+# `audit()` reports an ABSENT artifact as a WARNING but a ZERO-BYTE one as an
+# ERROR ("first line must be an '# ' H1 heading"), so seeding converts audit
+# WARNINGs into audit ERRORs on a fresh directory. Do NOT "fix" this by
+# relaxing the H1 check in `artifacts.py`/`plan_validator.py`, and do NOT
+# delete this test: the audit is what tells a human the plan directory is
+# unfinished, and an empty artifact IS a worse-formed document than a missing
+# one -- the validator is right.
+#
+# Why it does not block THIS block: `audit()` runs at CLOSE only
+# (`_after_close_dispatch`), it is ADVISORY there by construction (the CLOSE
+# gate is `close_confirmed`, a human decision, and audit issues are logged, not
+# raised), and an L7 row is ONE EXPLORE dispatch that never audits at all. What
+# it does affect is L6 B2's REPORTED `audit_errors`/`audit_warnings` -- a B1<->B2
+# comparison of those two fields would be confounded by the population change,
+# not by the run. That is a step 9/10 decision (narrow the seed scope, or
+# record the confound), and it belongs to the orchestrator; it is Pre-Mortem
+# STOP IF #3(c) in plan.md, recorded here as a measured fact rather than a
+# named decision, because the seeding scope is not changed in this step.
+def test_seeding_converts_audit_warnings_into_audit_errors(tmp_path: Path) -> None:
+    """UNGATED: the measured audit delta a zero-byte skeleton causes.
+
+    Pre-Mortem STOP IF #3(c) asked whether ``audit()`` over a seeded fresh
+    directory produces an ERROR family it does not produce over a bare one.  It
+    does -- seven of them -- and this records exactly which, so the fact is a
+    committed measurement rather than a surprise inside a live block.  The
+    parents are separate directories on purpose: the cross-plan tier is SHARED,
+    so auditing two sibling plan directories under one root would credit the
+    bare arm with the seeded arm's ``LESSONS.md``.
+    """
+    bare = _l7_plan_dir(tmp_path / "bare", arm="bare")
+    seeded = _l7_plan_dir(tmp_path / "seeded", arm="seeded")
+    bare_errors = _issue_families(list(audit(bare)), errors=True)
+    seeded_errors = _issue_families(list(audit(seeded)), errors=True)
+
+    new_families = sorted(set(seeded_errors) - set(bare_errors))
+    assert new_families == [
+        "atlas-cap",
+        "findings-index",
+        "lessons-cap",
+        "plan-section",
+        "preamble-missing",
+        "progress",
+        "verdict",
+    ], (
+        "the seeded-vs-bare audit ERROR delta moved; STOP IF #3(c)'s shape is "
+        f"no longer what D-003 recorded: bare={bare_errors} seeded={seeded_errors}"
+    )
+    # The mechanism, so the record says WHY and not only THAT.
+    unparseable = [
+        issue
+        for issue in audit(seeded)
+        if issue.is_error and "H1 heading" in issue.message
+    ]
+    assert len(unparseable) == 6, [str(i) for i in unparseable]
+    # And the direction: the seeded directory audits STRICTLY worse, never
+    # better -- so no gate or report can read seeding as progress.
+    assert sum(seeded_errors.values()) > sum(bare_errors.values())
+
+
+def test_the_l7_row_keys_are_the_bench_metric_names(tmp_path: Path) -> None:
+    """UNGATED: ``report l7-explore-coldstart`` needs no ``harness_bench`` edit.
+
+    Assumption A6.  ``report`` globs ``rows_<arm>.jsonl``, derives the arm from
+    the filename and counts only the ``K_METRICS`` a block's rows actually
+    carry, so L7's three metric keys must be spelled exactly as the bench
+    spells them.  A row is fabricated here rather than dispatched -- the point
+    is the SCHEMA, and a live dispatch would make this test cost 30 seconds and
+    a running Ollama.
+    """
+    hb = _bench_module()
+    row = {"write_tool_issued": True, "bytes_on_disk": False, "success": True}
+    assert set(row) <= set(hb.K_METRICS)
+    counts = hb.summarize_rows([row])
+    assert counts["write_tool_issued"] == 1
+    assert counts["bytes_on_disk"] == 0
+    # The arm derivation `report` uses, on THIS block's filenames.
+    for arm in L7_ARMS:
+        assert Path(f"rows_{arm}.jsonl").stem.split("_", 1)[1] == arm
+    # ...and the dispatch helper really emits those three keys.
+    import inspect
+
+    src = inspect.getsource(_one_explore_dispatch)
+    for metric in ("write_tool_issued", "bytes_on_disk", "success"):
+        assert f'"{metric}":' in src, metric
+    # The primary metric is DISK-derived through the gate's own predicate, not
+    # a local stat or a read of the worker's reply (invariant I1).
+    assert "has_bytes(memory.read_text" in src
+    assert "result.answer" not in src
+
+
+@requires_live
+class TestL7ExploreColdStart:
+    """The cold-start A/B: TWO plan-directory populations, one dispatch each.
+
+    The block is pre-registered per arm -- ``manifest_<arm>.json`` is written
+    before that arm's first dispatch -- runs ONCE at n=12 per arm, and takes no
+    interim look.  It asserts NO bar: the pre-registered decision rule
+    (``k_seeded > k_bare`` on ``bytes_on_disk`` AND Fisher two-sided p < 0.05)
+    is applied exactly once, in ``decisions.md``, on the committed rows.  A test
+    that also graded the rule would be a second look at the same data.
+
+    What it CANNOT tell you: whether the seeded population helps a full
+    traverse.  One EXPLORE dispatch is one EXPLORE dispatch.  The e2e question
+    stays L6's, and is answered by a separate block over the wired product.
+    """
+
+    def test_twelve_dispatches_per_plan_dir_population(self, tmp_path: Path) -> None:
+        hb = _bench_module()
+        bench_dir = BENCH_DATA_DIR / L7_BENCH_ID / L7_BLOCK
+        existing = [
+            path.name
+            for arm in L7_ARMS
+            for path in (bench_dir / f"rows_{arm}.jsonl",)
+            if path.exists()
+        ]
+        if existing:
+            pytest.fail(
+                f"{existing} already exist under {bench_dir} -- a block runs "
+                "ONCE (D-002); a new question needs a new pre-registered block "
+                "and decision entry"
+            )
+        bench_dir.mkdir(parents=True, exist_ok=True)
+
+        by_arm: dict[str, list[dict[str, Any]]] = {}
+        for arm in L7_ARMS:
+            # Manifest FIRST, then this arm's dispatches (invariant I6).
+            hb._write_json(bench_dir / f"manifest_{arm}.json", _l7_manifest(hb, arm))
+            started = hb._utc_now()
+            rows_path = bench_dir / f"rows_{arm}.jsonl"
+            rows: list[dict[str, Any]] = []
+            for run in range(1, RUNS_L7 + 1):
+                row = _one_explore_dispatch(
+                    tmp_path, run, arm=arm, seed=L7_SEED_BASE + run - 1
+                )
+                row.update(bench_id=L7_BENCH_ID, block=L7_BLOCK, ts=hb._utc_now())
+                rows.append(row)
+                hb.append_row(rows_path, row)
+                print(
+                    f"  L7 [{arm}] run {run}: bytes={row['bytes_on_disk']} "
+                    f"tool={row['write_tool_issued']} ok={row['success']} "
+                    f"reason={row['reason']} objects={row['objects']} "
+                    f"{row['elapsed_s']}s",
+                    flush=True,
+                )
+            hb.write_summary(bench_dir, arm, status="complete", started_at=started)
+            by_arm[arm] = rows
+            _report(f"L7 explore cold start [{arm}]", rows)
+
+        for arm in L7_ARMS:
+            assert len(by_arm[arm]) == RUNS_L7, arm
+
+        # The ONE look: k/n, both Wilson CIs and the Fisher p, printed for the
+        # decision entry to transcribe.  No assertion on the delta -- the
+        # verdict is recorded in decisions.md, not enforced here.
+        counts = {
+            arm: sum(1 for row in by_arm[arm] if row["bytes_on_disk"])
+            for arm in L7_ARMS
+        }
+        for arm in L7_ARMS:
+            lo, hi = hb.wilson_ci(counts[arm], RUNS_L7)
+            print(
+                f"L7 [{arm}] bytes_on_disk {counts[arm]}/{RUNS_L7} "
+                f"wilson95=[{lo:.3f}, {hi:.3f}]",
+                flush=True,
+            )
+        p = hb.fisher_exact_two_sided(
+            counts["bare"], RUNS_L7, counts["seeded"], RUNS_L7
+        )
+        print(f"L7 Fisher two-sided bare vs seeded on bytes_on_disk: p={p:.4f}")
+        # Per-arm mechanism distribution, so a refutation says what it rules
+        # OUT rather than only that it rules something out.
+        for arm in L7_ARMS:
+            reasons: dict[str, int] = {}
+            for row in by_arm[arm]:
+                key = str(row["reason"])
+                reasons[key] = reasons.get(key, 0) + 1
+            print(f"L7 [{arm}] reason distribution: {dict(sorted(reasons.items()))}")
