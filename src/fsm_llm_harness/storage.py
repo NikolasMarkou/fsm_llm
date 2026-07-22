@@ -64,6 +64,7 @@ __all__ = [
     "COMPRESSED_SUMMARY_CLOSE",
     "COMPRESSED_SUMMARY_OPEN",
     "COMPRESSED_SUMMARY_SECTION",
+    "DRIVER_READ_MAX_BYTES",
     "PLAN_ID_RE",
     "CapReport",
     "PlanDirectory",
@@ -91,6 +92,28 @@ COMPRESSED_SUMMARY_CLOSE = COMPRESSED_SUMMARY_OPEN.replace("<!-- ", "<!-- /")
 #: (see ``plans/DECISIONS.md``).  It is not a plan id, so the window below can
 #: never select it for trimming -- which is the failsafe, expressed structurally.
 COMPRESSED_SUMMARY_SECTION = "Summary (compressed)"
+
+# DECISION plan-2026-07-21T191807-bf7ffe24/D-037
+# The DRIVER's read of its own protocol memory is bounded HERE, and this bound
+# is deliberately ~62x `tools.MAX_READ_BYTES`. Do NOT "align" the two, and above
+# all do NOT raise `MAX_READ_BYTES` to fix an oversized artifact: that cap exists
+# to bound what an UNTRUSTED WORKER can pull into an LLM context window, and
+# raising it widens exactly the surface it was put there to narrow. The driver
+# is a different actor with a different risk profile -- it parses these bytes
+# with a pydantic model, never renders them into a prompt, and reads only fixed
+# `ArtifactNames` under a root it supplied itself.
+# MEASURED: this plan's own `decisions.md` is ~108 KB. Read through the
+# agent-facing cap it comes back TRUNCATED, and a truncated artifact is worse
+# than a missing one -- `decisions-schema`, the plan-id preamble checks, the
+# `Anchor-Refs` back-links and the compression-marker scan all go dark on the
+# missing tail, which is precisely where an appended entry lives.
+# The bound is not removed, only moved: a runaway artifact still fails CLOSED
+# with `HarnessArtifactError` rather than being silently shortened or read into
+# memory without limit. Confinement is untouched -- every path still resolves
+# through `PlanMemory.locate_path` -> `Workspace.resolve`, the single chokepoint.
+# See decisions.md D-037.
+#: Sanity bound on the driver's own read of one protocol artifact.
+DRIVER_READ_MAX_BYTES = 4_000_000
 
 
 # ---------------------------------------------------------------------------
@@ -632,13 +655,35 @@ class PlanDirectory:
         return self._memory.list_dir(path)
 
     def read_text(self, path: str) -> str:
-        """Read a protocol artifact.
+        """Read a protocol artifact WHOLE, on the driver's read path (D-037).
+
+        Interface contract (3+ call sites: :meth:`read_artifact`,
+        :meth:`append_text`, and ``plan_validator``'s shared reader):
+            - Returns the file's ENTIRE text.  This class is the driver's own
+              accessor -- it is never handed to a role -- so it deliberately
+              does not inherit ``PlanMemory.read_text``'s agent-facing 64 KB
+              cap, which would silently truncate a real ``decisions.md``.
+            - Still confined: the path resolves through
+              ``PlanMemory.locate_path`` -> ``Workspace.resolve``.
+            - Still bounded: :data:`DRIVER_READ_MAX_BYTES`.
 
         Raises:
-            HarnessArtifactError: If the file is absent or unreadable.
+            HarnessArtifactError: If the file is absent, unreadable, or over
+                the driver read bound.
         """
+        target = self._memory.locate_path(path)
         try:
-            return self._memory.read_text(path)
+            size = target.stat().st_size
+        except OSError as exc:
+            raise HarnessArtifactError(path, "could not be read", cause=exc) from exc
+        if size > DRIVER_READ_MAX_BYTES:
+            raise HarnessArtifactError(
+                path,
+                f"is {size} bytes, over the {DRIVER_READ_MAX_BYTES}-byte driver "
+                "read bound; it must be split or compressed, not truncated",
+            )
+        try:
+            return target.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
             raise HarnessArtifactError(path, "could not be read", cause=exc) from exc
 

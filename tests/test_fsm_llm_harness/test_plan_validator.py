@@ -51,6 +51,8 @@ from fsm_llm_harness.plan_validator import (
     audit,
     pre_step_gate,
 )
+from fsm_llm_harness.storage import DRIVER_READ_MAX_BYTES
+from fsm_llm_harness.tools import MAX_READ_BYTES
 
 # ---------------------------------------------------------------------------
 # Real fixtures
@@ -608,11 +610,34 @@ class TestAuditBaseline:
 
     def test_audit_never_raises_for_an_unreadable_artifact(self, tmp_path: Path) -> None:
         plan_dir = make_plan_dir(tmp_path)
-        # Over the confined reader's cap: fail CLOSED, as an issue, not a crash.
-        (plan_dir / ArtifactNames.PLAN).write_text("# x\n" + "y\n" * 40_000)
+        # Over the DRIVER's read bound (storage.py D-037), not the agent-facing
+        # 64 KB cap: fail CLOSED, as an issue, not a crash.
+        (plan_dir / ArtifactNames.PLAN).write_text(
+            "# x\n" + "y" * DRIVER_READ_MAX_BYTES
+        )
         issues = audit(plan_dir)
         assert "state" in tags(issues)
         assert any("could not complete" in issue.message for issue in issues)
+
+    def test_a_real_sized_decisions_log_is_audited_whole(self, tmp_path: Path) -> None:
+        """The 64 KB blocker: a REAL ``decisions.md`` outgrows the agent cap.
+
+        This plan's own decision log is ~108 KB.  Read through
+        ``PlanMemory.read_text`` it came back clipped, and every check that
+        reads the TAIL -- the schema scan, the ``Anchor-Refs`` back-links, the
+        compression-marker scan -- went dark on a document that was fine.
+        Here the tail carries the only malformed entry, so a truncated read
+        would report the file as clean.
+        """
+        padding = "\n".join(
+            f"**Note {index}**: filler that pushes the tail past the agent cap"
+            for index in range(1200)
+        )
+        oversized = f"{DECISIONS_MD}{padding}\n\n## D-004 | EXECUTE | 2026-07-22\n**Title**: no trade-off line\n"
+        plan_dir = make_plan_dir(tmp_path, decisions_md=oversized)
+        assert (plan_dir / ArtifactNames.DECISIONS).stat().st_size > MAX_READ_BYTES
+        issues = only(audit(plan_dir), "decisions-schema")
+        assert any("D-004" in issue.message for issue in issues), tags(audit(plan_dir))
 
     def test_every_emitted_tag_is_registered(self, tmp_path: Path) -> None:
         plan_dir = make_plan_dir(tmp_path, plan_md=None, decisions_md=None, state_md=None)
@@ -1188,7 +1213,9 @@ class TestAuditCrossPlan:
 
     def test_an_oversized_consolidated_file_is_reported_not_crashed(self, tmp_path: Path) -> None:
         plan_dir = make_plan_dir(tmp_path)
-        (plan_dir.parent / ArtifactNames.CROSS_DECISIONS).write_text("# D\n" + "x\n" * 40_000)
+        (plan_dir.parent / ArtifactNames.CROSS_DECISIONS).write_text(
+            "# D\n" + "x" * DRIVER_READ_MAX_BYTES
+        )
         issues = only(audit(plan_dir), "compress-markers")
         assert [issue.severity for issue in issues] == [Severity.WARNING]
         assert "could not be checked" in issues[0].message

@@ -914,6 +914,23 @@ class PlanMemory:
             return candidate
         return f"{self._plan_id}/{candidate}"
 
+    def locate_path(self, path: str) -> Path:
+        """Resolve *path* to a confined absolute path, WITHOUT reading it.
+
+        Interface contract (2 call sites: :meth:`_classify` here and
+        ``storage.PlanDirectory.read_text``):
+            - Returns the fully resolved absolute path, or raises
+              ``HarnessConfinementError`` if it escapes the memory root.
+            - Performs NO I/O and no ownership check: resolving is not reading
+              and not writing.
+
+        This exists so the DRIVER can read its own protocol memory through the
+        one confinement chokepoint without also inheriting ``Workspace``'s
+        agent-facing read cap (D-037).  Do NOT hand it to a role tool: every
+        agent-facing read stays on :meth:`read_text`, which is capped.
+        """
+        return self._workspace.resolve(self.locate(path))
+
     def artifact_for(self, path: str) -> str | None:
         """Return the ``ArtifactNames`` id *path* addresses, or ``None``.
 
@@ -927,7 +944,7 @@ class PlanMemory:
 
     def _classify(self, path: str) -> tuple[Path, str | None]:
         """Resolve *path* and name the artifact it addresses."""
-        target = self._workspace.resolve(self.locate(path))
+        target = self.locate_path(path)
         parts = Path(self._workspace.relative(target)).parts
         if not parts:
             return target, None  # the memory root itself

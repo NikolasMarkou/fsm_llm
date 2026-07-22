@@ -76,7 +76,7 @@ from .constants import (
 from .exceptions import HarnessArtifactError, HarnessError
 from .rules import OWNERSHIP
 from .storage import PlanDirectory
-from .tools import MAX_READ_BYTES, Workspace
+from .tools import Workspace
 
 __all__ = [
     "CHECKS",
@@ -230,19 +230,19 @@ def _absolute(directory: PlanDirectory, name: str) -> Path:
 def _read(directory: PlanDirectory, name: str) -> str | None:
     """Read an artifact's full text, ``None`` if absent.
 
+    The read goes through ``PlanDirectory.read_text``, the DRIVER's read path
+    (storage.py D-037), so a real ``decisions.md`` is audited whole instead of
+    coming back clipped at the agent-facing 64 KB cap.  A truncated artifact
+    must never be audited as if it were whole -- the missing tail is exactly
+    where an appended entry lives.
+
     Raises:
-        HarnessArtifactError: If the file is larger than the confined reader's
-            cap.  A truncated artifact must never be audited as if it were
-            whole -- the missing tail is exactly where an appended entry lives.
+        HarnessArtifactError: If the file is over the driver read bound, or
+            cannot be read at all.  Either way the audit fails CLOSED: the
+            caller records it as an ERROR against the check's own tag.
     """
-    target = _absolute(directory, name)
-    if not target.is_file():
+    if not _absolute(directory, name).is_file():
         return None
-    size = target.stat().st_size
-    if size > MAX_READ_BYTES:
-        raise HarnessArtifactError(
-            name, f"is {size} bytes, over the {MAX_READ_BYTES}-byte read cap"
-        )
     return directory.read_text(name)
 
 

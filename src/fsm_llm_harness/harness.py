@@ -14,13 +14,35 @@ construction: all of that is ``BaseAgent``'s.  What it adds is the *protocol*:
 * the autonomy-leash and iteration-cap halt paths,
 * fail-closed handling of every worker reply (I8).
 
-**No artifact I/O, with ONE read-only exception.**  This module keeps all
-protocol memory in the FSM context, and it never WRITES a plan directory;
-``storage.py`` / ``plan_validator.py`` are wired in by a later step.  The
-exception is :meth:`HarnessAgent._derive_gate_counts`, which COUNTS the files
-behind a disk-derived gate key after a dispatch (D-032).  A gate value the
-driver reads off the filesystem itself is evidence; one a worker reports is
-testimony, and the two are handled differently on purpose.
+Artifact I/O
+------------
+The driver reads its own protocol memory freely and writes exactly ONE artifact,
+``state.md`` -- the only one ``rules.OWNERSHIP`` gives it alone.  Everything
+else under the plan directory belongs to a role, and a driver write to one
+raises ``HarnessOwnershipError`` from ``PlanMemory.authorise`` rather than being
+policed here.  Four seams carry it:
+
+* :meth:`HarnessAgent._sync_state_doc` records the driver's position on every
+  state ENTRY and after every loop-turn dispatch -- never inside
+  :meth:`HarnessAgent._dispatch_if_needed`, so the pre-step gate always reads a
+  document written by an earlier event than itself (D-038).
+* :meth:`HarnessAgent._pre_step_gate` runs ``plan_validator.pre_step_gate``
+  over that document and routes each of its four slugs to its OWN action
+  (D-040).  Only ``leash-cap`` emits a leash block; only ``iteration-cap`` ends
+  the run; neither recovery slug writes ``state.md``.
+* The five presentation contracts are filled from the artifacts they quote --
+  ``findings.md``, ``plan.md``, ``changelog.md``, ``progress.md``,
+  ``verification.md`` -- rather than from what a worker says it did.
+* :meth:`HarnessAgent._derive_gate_counts` COUNTS the files behind a
+  disk-derived gate key after a dispatch (D-032).  A gate value the driver
+  reads off the filesystem itself is evidence; one a worker reports is
+  testimony, and the two are handled differently on purpose.
+
+Every read goes through ``storage.PlanDirectory``, which is the DRIVER's
+accessor: confined like every other path, but uncapped, because the 64 KB
+read cap bounds what an untrusted worker pulls into a prompt and a real
+``decisions.md`` outgrows it (storage.py D-037).  Every write goes through it
+too, which makes it atomic (storage.py D-019).
 
 Dispatch mechanism
 ------------------
@@ -62,6 +84,7 @@ decisions.md D-028 / D-029.
 
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -78,6 +101,17 @@ from fsm_llm_agents.definitions import AgentConfig, AgentResult, AgentTrace, Too
 from fsm_llm_agents.exceptions import AgentError
 from fsm_llm_agents.hitl import ApprovalCallback, HumanInTheLoop
 
+from .artifacts import (
+    PRESENTATION_CONTRACTS,
+    Artifact,
+    FindingsIndexDoc,
+    PlanDoc,
+    ProgressDoc,
+    StateDoc,
+    VerificationDoc,
+    missing_floor_fields,
+    parse_changelog_line,
+)
 from .constants import (
     DRIVER_OWNED_SEEDS,
     DRIVER_OWNED_UNSET,
@@ -88,11 +122,16 @@ from .constants import (
     HandlerNames,
     HandlerPriorities,
     HarnessStates,
+    PlanSchema,
+    Role,
+    Severity,
 )
 from .exceptions import HarnessError, HarnessReentrancyError
 from .fsm_definition import build_harness_fsm
 from .hardening import as_int, coerce_worker_output
+from .plan_validator import GateResult, Issue, audit, pre_step_gate
 from .rules import ROLE_BY_STATE, explore_topics, get_rules
+from .storage import PlanDirectory
 from .tools import (
     DISK_DERIVED_COUNTS,
     PlanMemory,
@@ -102,6 +141,9 @@ from .tools import (
 
 __all__ = [
     "HarnessAgent",
+    "Presentation",
+    "RevertCallback",
+    "RevertDirective",
     "RoleRequest",
     "WorkerFactory",
 ]
@@ -132,6 +174,10 @@ _DEFAULT_MAX_STALL_TURNS = 3
 _APPROVAL_PLAN = "harness.approve_plan"
 _APPROVAL_CLOSE = "harness.confirm_close"
 _APPROVAL_LEASH = "harness.continue_after_leash"
+#: The fourth approval point, added with the leash-cap revert (D-039).  It is
+#: consulted ONLY when the caller supplied a ``revert_callback``; without one
+#: there is nothing to approve, because nothing will be executed.
+_APPROVAL_REVERT = "harness.revert_uncommitted"
 
 #: Ledger entry prefixes.  Both live in the single ``dispatch_ledger`` list:
 #: a ``dispatch:`` entry records "this key has been dispatched", an ``entry:``
@@ -309,6 +355,78 @@ WorkerFactory = Callable[[RoleRequest], AgentResult]
 
 
 # ---------------------------------------------------------------------------
+# Revert seam (the leash-cap recovery action)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RevertDirective:
+    """What the ``leash-cap`` action asks to be reverted, and what to spare.
+
+    Attributes:
+        root: The workspace root -- the CODE the protocol is changing.  Never
+            the plan directory (D-009).
+        exclude: Paths under *root* that must survive the revert, relative to
+            it.  Non-empty exactly when the plan directory lives inside the
+            workspace, which is the common layout (``<repo>/plans/<plan-id>``).
+        commands: The revert the protocol asks for, as shell text.  This class
+            EXECUTES NOTHING; the strings are what a ``revert_callback`` (or a
+            human reading the leash block) is being asked to run.
+    """
+
+    root: str
+    exclude: tuple[str, ...] = ()
+    commands: tuple[str, ...] = ()
+
+    def __str__(self) -> str:
+        spared = f"; spare {', '.join(self.exclude)}" if self.exclude else ""
+        return f"{' && '.join(self.commands)} (in {self.root}{spared})"
+
+
+#: Executes a :class:`RevertDirective`.  Returns whether the revert was done.
+RevertCallback = Callable[[RevertDirective], bool]
+
+
+# ---------------------------------------------------------------------------
+# Presentation contracts
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Presentation:
+    """One emitted user-facing block, plus what it failed to fill.
+
+    ``missing_floor`` is the mechanism that makes "emitted with its floor
+    fields" checkable rather than hoped for: it is the contract's floor minus
+    what was actually supplied, in contract order, and it is ``()`` on every
+    healthy emission.
+    """
+
+    name: str
+    fields: Mapping[str, str]
+    missing_floor: tuple[str, ...]
+    block: str
+
+
+#: ``state.md``'s ``## Current Plan Step:`` cursor, as the driver writes it
+#: (``"7 of 17"``).  Only the leading integer is read back, so a hand-edited
+#: cursor carrying prose (``"10 (wiring seam) + 12 (CLI)"``) still resumes.
+_STEP_CURSOR_RE = re.compile(r"^(\d+)")
+
+#: Rendered when a contract field has no value the driver can honestly supply.
+#: Deliberately NOT counted as supplied by :meth:`HarnessAgent._emit_contract`,
+#: so a placeholder can never satisfy a floor field.
+_CONTRACT_ABSENT = "(not on record)"
+
+#: Longest artifact excerpt rendered into one contract field.
+_CONTRACT_FIELD_CHARS = 600
+
+#: The protocol's Revert-First recovery, as text.  Nothing here is executed by
+#: this module (D-039); a ``revert_callback`` or a human runs it.
+_REVERT_COMMANDS: tuple[str, ...] = ("git checkout -- .", "git clean -fd")
+
+
+# ---------------------------------------------------------------------------
 # Re-entrancy guard (invariant I5)
 # ---------------------------------------------------------------------------
 
@@ -425,6 +543,7 @@ class HarnessAgent(BaseAgent):
         *,
         worker_factory: WorkerFactory | None = None,
         approval_callback: ApprovalCallback | None = None,
+        revert_callback: RevertCallback | None = None,
         config: AgentConfig | None = None,
         findings_threshold: int = Defaults.FINDINGS_THRESHOLD,
         max_fix_attempts: int = Defaults.MAX_FIX_ATTEMPTS,
@@ -447,6 +566,10 @@ class HarnessAgent(BaseAgent):
             approval_callback: Consulted at every human gate.  Defaults to a
                 callback that DENIES, so an unattended run cannot approve its
                 own plan or close itself.
+            revert_callback: Executes the ``leash-cap`` revert.  ``None`` (the
+                default) means the driver COMPUTES the directive, reports it in
+                the leash block, and executes nothing -- see D-039.  A supplied
+                callback is still gated by *approval_callback* first.
             config: Agent configuration; defaults to the harness profile.
             findings_threshold: EXPLORE -> PLAN findings gate.
             max_fix_attempts: The autonomy leash -- unattended fix attempts per
@@ -486,6 +609,30 @@ class HarnessAgent(BaseAgent):
         # See decisions.md D-015.
         self._approval_callback: ApprovalCallback = approval_callback or _deny_approval
         self.hitl = HumanInTheLoop(approval_callback=self._approval_callback)
+
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-039
+        # The driver COMPUTES the leash-cap revert and does not EXECUTE it. Do
+        # NOT "finish the job" by shelling out to `git checkout -- . && git
+        # clean -fd` from here. Three reasons, and the first two are this
+        # package's own already-made decisions:
+        #   1. `git` is deliberately NOT in `tools.COMMAND_ALLOWLIST` (D-050 of
+        #      the predecessor plan) precisely because it executes repo-local
+        #      hooks, aliases and pagers, and `Workspace.run_command` is
+        #      disabled by default. A driver that shells out to git would hold a
+        #      capability the package withholds from every other actor in it.
+        #   2. `git clean -fd` destroys UNTRACKED files with no backup, and the
+        #      plan directory is untracked (`plans/` is gitignored) -- so the
+        #      one action D-009 forbids is exactly the one an unscoped revert
+        #      performs. `RevertDirective.exclude` is what states that scope,
+        #      and stating it is the driver's job; running it is not.
+        #   3. It is the protocol's only IRREVERSIBLE action, so it belongs
+        #      behind the human gate the driver already has. A supplied callback
+        #      is consulted only after `_APPROVAL_REVERT` is granted, and the
+        #      default approval callback DENIES.
+        # `None` is therefore not a degraded mode: the directive is computed,
+        # scoped and reported in PC-EXECUTE-LEASH either way. See decisions.md
+        # D-039.
+        self._revert_callback = revert_callback
 
         self._api: API | None = None
         self._conversation_id: str | None = None
@@ -538,6 +685,25 @@ class HarnessAgent(BaseAgent):
         #: :meth:`run` and :meth:`_apply`; read only by
         #: :meth:`_reassert_driver_owned`.  See decisions.md D-044.
         self._driver_owned: dict[str, Any] = {}
+        #: Every :class:`Presentation` emitted this run, in order.  Driver run
+        #: state for D-029's two reasons: no worker can reach it, and nothing
+        #: gates on it -- and for a third, D-020's: a contract block is hundreds
+        #: of characters of verbatim artifact text, and the FSM context is
+        #: rendered into BOTH prompts on EVERY turn.
+        self._presentations: list[Presentation] = []
+        #: Every :class:`RevertDirective` the leash-cap action computed.
+        self._reverts: list[RevertDirective] = []
+        #: The CLOSE audit's findings, or ``None`` if CLOSE was never reached.
+        self._audit_issues: list[Issue] | None = None
+        #: A halt decided inside a HANDLER, raised by the next loop turn.
+        #: `fsm_llm.handlers.execute_handlers` CATCHES every handler exception,
+        #: so a halt raised from a state-entry handler is swallowed AND takes
+        #: that handler's whole delta (including its ledger entry) with it.
+        #: `_on_loop_iteration` is the only place the driver may raise from.
+        self._halt_request: _HarnessHalt | None = None
+        #: The state the FSM starts in.  Normally ``HarnessStates.INITIAL``;
+        #: a resumed run starts where its ``state.md`` left off (D-038).
+        self._initial_state = HarnessStates.INITIAL
 
         logger.info(
             f"HarnessAgent started with model={self.config.model}, "
@@ -581,6 +747,36 @@ class HarnessAgent(BaseAgent):
         """
         _reject_reentry("conversation_id")
         return self._conversation_id
+
+    @property
+    def presentations(self) -> tuple[Presentation, ...]:
+        """Every user-facing contract block emitted by the last run.
+
+        Raises:
+            HarnessReentrancyError: If read from inside a dispatched worker.
+        """
+        _reject_reentry("presentations")
+        return tuple(self._presentations)
+
+    @property
+    def reverts(self) -> tuple[RevertDirective, ...]:
+        """Every leash-cap revert directive computed by the last run.
+
+        Raises:
+            HarnessReentrancyError: If read from inside a dispatched worker.
+        """
+        _reject_reentry("reverts")
+        return tuple(self._reverts)
+
+    @property
+    def audit_issues(self) -> tuple[Issue, ...] | None:
+        """The CLOSE audit's findings, or ``None`` if CLOSE was never reached.
+
+        Raises:
+            HarnessReentrancyError: If read from inside a dispatched worker.
+        """
+        _reject_reentry("audit_issues")
+        return None if self._audit_issues is None else tuple(self._audit_issues)
 
     # ------------------------------------------------------------------
     # Public API
@@ -632,6 +828,10 @@ class HarnessAgent(BaseAgent):
         self._stall_signature = None
         self._explore_redispatches = 0
         self._assigned_topics = []
+        self._presentations = []
+        self._reverts = []
+        self._audit_issues = None
+        self._halt_request = None
 
         fsm_def = build_harness_fsm(
             task,
@@ -678,9 +878,14 @@ class HarnessAgent(BaseAgent):
             for key in (ContextKeys.PLAN_DIR, ContextKeys.WORKSPACE_ROOT)
             if _as_optional_str(supplied.get(key)) is not None
         }
+        resumed_state, resumed_counters = self._resume(roots.get(ContextKeys.PLAN_DIR))
+        self._initial_state = resumed_state or HarnessStates.INITIAL
+        if self._initial_state != fsm_def["initial_state"]:
+            fsm_def["initial_state"] = self._initial_state
         seeds: dict[str, Any] = {
             ContextKeys.GOAL: task,
             **DRIVER_OWNED_SEEDS,
+            **resumed_counters,
             **roots,
         }
         self._driver_owned = {
@@ -775,7 +980,11 @@ class HarnessAgent(BaseAgent):
             api.create_handler(HandlerNames.START_DISPATCH)
             .with_priority(HandlerPriorities.START_DISPATCH)
             .at(HandlerTiming.START_CONVERSATION)
-            .do(self._make_entry_handler(HarnessStates.INITIAL))
+            # `self._initial_state`, not the `HarnessStates.INITIAL` literal:
+            # a resumed run starts where its `state.md` left off (D-038), and a
+            # START handler naming EXPLORE there would dispatch an EXPLORER
+            # while the FSM sits in EXECUTE.
+            .do(self._make_entry_handler(self._initial_state))
         )
 
         for state, handler_name in HandlerNames.BY_STATE.items():
@@ -920,6 +1129,12 @@ class HarnessAgent(BaseAgent):
         updates: dict[str, Any] = {}
         self._apply(updates, working, self._ledger_delta([*ledger, marker]))
         self._apply(updates, working, self._entry_bookkeeping(state, context))
+
+        # The transition record, written BEFORE the dispatch so a worker reads
+        # the position it is being dispatched into -- and outside
+        # `_dispatch_if_needed`, so the pre-step gate below never reads a
+        # document written inside its own call (D-038).
+        self._sync_state_doc(state, working)
 
         # A genuine entry authorises exactly one dispatch for this state's key,
         # even when the counters did not move (a completion-fix retry of the
@@ -1286,40 +1501,239 @@ class HarnessAgent(BaseAgent):
             return {}
 
     @staticmethod
-    def _read_only_memory(
-        state: str, context: Mapping[str, Any]
-    ) -> PlanMemory | None:
-        """A role-scoped :class:`PlanMemory` for READING the plan directory.
+    def _existing_plan_dir(context: Mapping[str, Any]) -> Path | None:
+        """The run's plan directory, but ONLY if it is already a directory.
 
-        Interface contract (shared helper, 2 call sites:
-        :meth:`_derive_gate_counts` and :meth:`_assign_explore_topic` -- the two
-        places the driver looks at the plan directory at all):
-            - Returns ``None`` when there is no ``plan_dir``, when the path is
-              not a directory, or when the memory cannot be constructed.
-              ``None`` means "nothing was observed", never "observed nothing".
-            - Never raises.
+        Interface contract (shared guard, 4 call sites: the two accessors
+        below, the disk gate and the resume path):
+            - Returns ``None`` when there is no ``plan_dir`` or the path is not
+              an existing directory.  ``None`` means "nothing to observe",
+              never "observed nothing".
+            - Never raises and never creates anything.
 
-        The ``is_dir`` precheck is what keeps this a READ.  ``PlanMemory``
-        CREATES its plan directory on construction, and the driver has no
-        business bringing protocol memory into existence as a side effect of
-        looking at it -- a directory it created itself would also be a
-        directory whose emptiness it then mistook for evidence.  Both callers
-        go through here so that guarantee is one line, in one place, rather
-        than a rule two methods have to remember.
+        The existence precheck is the whole point.  ``PlanMemory`` (and through
+        it ``PlanDirectory``) CREATES its plan directory on construction, and
+        the driver has no business bringing protocol memory into existence as a
+        side effect of looking at it -- a directory it created itself would
+        also be a directory whose emptiness it then mistook for evidence, and
+        whose absence the ``no-plan`` gate slug exists to report.  Every caller
+        goes through here so that guarantee is one line in one place rather
+        than a rule four methods have to remember.
         """
         plan_dir = _as_optional_str(context.get(ContextKeys.PLAN_DIR))
         if plan_dir is None:
             return None
         try:
-            if not Path(plan_dir).expanduser().is_dir():
-                return None
-            return PlanMemory(plan_dir, role=ROLE_BY_STATE[state])
+            path = Path(plan_dir).expanduser()
+            return path if path.is_dir() else None
+        except (OSError, ValueError):  # unusable path: no observation
+            return None
+
+    @classmethod
+    def _read_only_memory(
+        cls, state: str, context: Mapping[str, Any]
+    ) -> PlanMemory | None:
+        """A role-scoped :class:`PlanMemory` for READING the plan directory.
+
+        Interface contract (shared helper, 2 call sites:
+        :meth:`_derive_gate_counts` and :meth:`_assign_explore_topic` -- the two
+        places the driver reads the plan directory AS A ROLE would):
+            - Returns ``None`` when :meth:`_existing_plan_dir` does, or when
+              the memory cannot be constructed.
+            - Never raises.
+        """
+        path = cls._existing_plan_dir(context)
+        if path is None:
+            return None
+        try:
+            return PlanMemory(path, role=ROLE_BY_STATE[state])
         except Exception as exc:  # unreadable / unusable root: no observation
             logger.warning(
-                f"Could not open plan directory '{plan_dir}' for state "
+                f"Could not open plan directory '{path}' for state "
                 f"'{state}': {exc}. Treating it as unobserved."
             )
             return None
+
+    @classmethod
+    def _plan_directory(cls, context: Mapping[str, Any]) -> PlanDirectory | None:
+        """The DRIVER's own accessor for the plan directory.
+
+        Interface contract (shared helper, 5+ call sites: the state.md sync,
+        the resume path, the four contract builders and the CLOSE audit):
+            - Scoped to ``Role.ORCHESTRATOR``, so a write to an artifact the
+              driver does not own raises ``HarnessOwnershipError`` from
+              ``PlanMemory.authorise`` rather than being policed here.  The
+              ownership table stays the single model (rules.py D-048).
+            - Reads go through ``PlanDirectory``, which is uncapped (storage.py
+              D-037); writes go through it too, which makes them ATOMIC
+              (storage.py D-019).
+            - Returns ``None`` exactly when :meth:`_existing_plan_dir` does.
+              Never raises, never creates the directory.
+        """
+        path = cls._existing_plan_dir(context)
+        if path is None:
+            return None
+        try:
+            return PlanDirectory(path, role=Role.ORCHESTRATOR)
+        except Exception as exc:  # unusable root: no protocol memory
+            logger.warning(
+                f"Could not open plan directory '{path}': {exc}. "
+                "The driver will keep protocol state in context only."
+            )
+            return None
+
+    @staticmethod
+    def _artifact(
+        directory: PlanDirectory, name: str, model: type[Artifact]
+    ) -> Any | None:
+        """Read and parse one owned artifact, or ``None`` if it is unusable.
+
+        Interface contract (shared reader, 5 call sites: the four contract
+        builders and the resume path):
+            - Returns an instance of *model*, or ``None`` when the artifact is
+              absent, unreadable, oversized or malformed.
+            - Never raises.  A contract block is a REPORT: an unreadable
+              artifact must leave its field empty (and therefore show up in
+              ``Presentation.missing_floor``), not abort the protocol turn --
+              handler exceptions are swallowed whole by the core handler
+              system, taking the turn's ledger entry with them.
+        """
+        try:
+            if not directory.exists(name):
+                return None
+            doc = directory.read_artifact(name)
+        except (HarnessError, OSError) as exc:
+            logger.warning(f"Could not read '{name}': {exc}")
+            return None
+        return doc if isinstance(doc, model) else None
+
+    # ------------------------------------------------------------------
+    # state.md -- the driver's one owned WRITE (invariant I7)
+    # ------------------------------------------------------------------
+
+    def _sync_state_doc(self, state: str, context: Mapping[str, Any]) -> str | None:
+        """Record the driver's position in ``state.md``, atomically.
+
+        Called on every state ENTRY and after every loop-turn dispatch -- the
+        two events at which the driver's position actually changes -- and never
+        from inside :meth:`_dispatch_if_needed`, so the pre-step gate always
+        reads a document written by an EARLIER event than itself.
+
+        Returns:
+            The path written, or ``None`` when there is no plan directory or
+            the write failed.  A failed write is logged and swallowed: protocol
+            memory is a record of the run, not a precondition for it, and
+            raising here would lose the whole handler delta.
+        """
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-038
+        # `state.md` is the ONE artifact the driver writes, and it writes
+        # exactly the fields it is the authority for. Two rules are
+        # load-bearing:
+        #   1. `## Transition History:` is PRESERVED, never appended to. Do NOT
+        #      "improve" this by logging one line per FSM entry: the protocol's
+        #      own auditor DERIVES an iteration count from the `EXECUTE ->
+        #      REFLECT` arrows in that section and takes the maximum against the
+        #      declared `## Iteration:` (`plan_validator._iteration_of`). A
+        #      completion-fix cycle legitimately re-enters REFLECT several times
+        #      inside ONE iteration (D-018), so a line per entry would make the
+        #      derived count outrun the real one and fire `iteration-cap` on a
+        #      run that never re-planned. The history is a narrative the
+        #      orchestrator and the human write in phase-sized units; the driver
+        #      owns `## Iteration:`, which is a counter it actually holds.
+        #   2. The write is `PlanDirectory.write_artifact`, i.e. ATOMIC
+        #      (storage.py D-019). Do NOT route it through `PlanMemory.write_text`
+        #      to "reuse the tool the roles use": that is a plain
+        #      `Path.write_text`, and a crash mid-write leaves a truncated
+        #      state.md that still PARSES -- which the pre-step gate would then
+        #      read as a smaller `fix_attempt_count`, i.e. a leash that resets
+        #      itself on a torn write.
+        # See decisions.md D-038.
+        directory = self._plan_directory(context)
+        if directory is None:
+            return None
+        try:
+            return directory.write_artifact(
+                ArtifactNames.STATE, self._state_doc(directory, state, context)
+            )
+        except (HarnessError, OSError) as exc:
+            logger.warning(
+                f"Could not write {ArtifactNames.STATE} for state '{state}': "
+                f"{exc}. The run continues on context alone; the pre-step gate "
+                "will report the disagreement."
+            )
+            return None
+
+    def _state_doc(
+        self, directory: PlanDirectory, state: str, context: Mapping[str, Any]
+    ) -> StateDoc:
+        """Build the ``state.md`` document for the driver's current position."""
+        existing = self._artifact(directory, ArtifactNames.STATE, StateDoc)
+        step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        total = max(1, as_int(context.get(ContextKeys.TOTAL_STEPS), 1))
+        attempts = as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0)
+        return StateDoc(
+            state=state,
+            skill_version=existing.skill_version if existing else None,
+            iteration=as_int(context.get(ContextKeys.ITERATION), 0),
+            current_step=f"{step} of {total}",
+            checklist=list(existing.checklist) if existing else [],
+            # The protocol's own Fix-Attempts grammar, which
+            # `StateDoc.fix_attempt_count` -- and therefore the `leash-cap` gate
+            # -- counts. One line per attempt already spent on THIS step.
+            fix_attempts=[f"Step {step}, attempt {index}" for index in range(1, attempts + 1)],
+            change_manifest=list(existing.change_manifest) if existing else [],
+            last_transition=f"{context.get('_previous_state') or 'INIT'} → {state.upper()}",
+            transition_history=list(existing.transition_history) if existing else [],
+        )
+
+    def _resume(self, plan_dir: Any) -> tuple[str | None, dict[str, Any]]:
+        """Read a previous run's position out of ``state.md``.
+
+        Interface contract (1 call site: :meth:`_run_once`, before the FSM is
+        built):
+            - Returns ``(initial_state, counter_seeds)``.  ``(None, {})`` means
+              there is nothing to resume: no plan directory, no ``state.md``,
+              or one that could not be parsed.
+            - Reads only.  Never raises, never creates the directory.
+        """
+        context = {ContextKeys.PLAN_DIR: plan_dir}
+        directory = self._plan_directory(context)
+        if directory is None:
+            return None, {}
+        doc = self._artifact(directory, ArtifactNames.STATE, StateDoc)
+        if doc is None:
+            return None, {}
+
+        seeds: dict[str, Any] = {
+            ContextKeys.ITERATION: doc.iteration,
+            ContextKeys.FIX_ATTEMPTS: doc.fix_attempt_count,
+        }
+        cursor = _STEP_CURSOR_RE.match(doc.current_step.strip())
+        if cursor is not None:
+            seeds[ContextKeys.STEP_NUMBER] = int(cursor.group(1))
+        plan = self._artifact(directory, ArtifactNames.PLAN, PlanDoc)
+        if plan is not None and plan.steps():
+            seeds[ContextKeys.TOTAL_STEPS] = len(plan.steps())
+        logger.info(
+            f"Resuming plan '{directory.plan_id}' from {ArtifactNames.STATE}: "
+            f"state={doc.state.upper()}, iteration={seeds[ContextKeys.ITERATION]}, "
+            f"step={seeds.get(ContextKeys.STEP_NUMBER, '?')}, "
+            f"fix_attempts={seeds[ContextKeys.FIX_ATTEMPTS]}."
+        )
+        if doc.state == HarnessStates.TERMINAL:
+            # A CLOSED plan is not resumable, and the reason is structural
+            # rather than a policy call: `CLOSE` has no outbound transitions, so
+            # making it the initial state leaves every other state ORPHANED and
+            # `FSMDefinition` refuses the whole definition. The counters still
+            # resume; the run starts a fresh EXPLORE over the same directory,
+            # which is what "run again against a closed plan" has to mean.
+            logger.warning(
+                f"Plan '{directory.plan_id}' is already CLOSED. Its counters are "
+                f"resumed, but the run starts a fresh {HarnessStates.INITIAL.upper()}"
+                ": a closed plan has nowhere to resume TO."
+            )
+            return None, seeds
+        return doc.state, seeds
 
     def _assign_explore_topic(self, context: Mapping[str, Any]) -> str | None:
         """Pick the ONE ``findings/<slug>.md`` topic this dispatch is to write.
@@ -1456,6 +1870,37 @@ class HarnessAgent(BaseAgent):
             return self._after_plan_dispatch(result, context)
         if state == HarnessStates.REFLECT:
             return self._after_reflect_dispatch(context)
+        if state == HarnessStates.CLOSE:
+            return self._after_close_dispatch(context)
+        return {}
+
+    def _after_close_dispatch(self, context: Mapping[str, Any]) -> dict[str, Any]:
+        """Audit the finished plan directory.  Reports; never blocks the close.
+
+        The CLOSE gate is ``close_confirmed``, a HUMAN decision (invariant I6).
+        An audit finding is advisory by construction -- ``audit()`` returns
+        typed issues and raises for none of them -- so it is recorded and
+        logged, and the human who confirms the close is the one it is for.
+        """
+        path = self._existing_plan_dir(context)
+        if path is None:
+            return {}
+        workspace = _as_optional_str(context.get(ContextKeys.WORKSPACE_ROOT))
+        try:
+            issues = audit(path, workspace_root=workspace)
+        except Exception as exc:  # audit's contract says it cannot; log, do not crash
+            logger.warning(f"CLOSE audit raised ({exc}); no findings recorded.")
+            return {}
+        self._audit_issues = issues
+        errors = sum(1 for issue in issues if issue.severity == Severity.ERROR)
+        logger.info(
+            f"CLOSE audit of '{path.name}': {len(issues)} issue(s), "
+            f"{errors} of them errors."
+        )
+        for issue in issues:
+            logger.log(
+                "ERROR" if issue.severity == Severity.ERROR else "WARNING", str(issue)
+            )
         return {}
 
     # ------------------------------------------------------------------
@@ -1501,6 +1946,7 @@ class HarnessAgent(BaseAgent):
         total = max(1, as_int(context.get(ContextKeys.TOTAL_STEPS), 1))
 
         if result is not None and result.success:
+            self._emit_execute_step(context)
             if step < total:
                 # More steps remain: hold EXECUTE and let the loop-iteration
                 # dispatch pick up the new (state, iteration, step) key.  A new
@@ -1522,6 +1968,10 @@ class HarnessAgent(BaseAgent):
                 f"Autonomy leash: step {step} failed {attempts} times "
                 f"(cap {self.max_fix_attempts}); reporting instead of retrying."
             )
+            # The SAME action the pre-step gate's `leash-cap` slug runs: this is
+            # where a healthy protocol actually hits the leash, and the block
+            # must not depend on which of the two paths got there (D-040).
+            self.on_leash_cap(context, step=step, attempts=attempts)
         else:
             updates[ContextKeys.COMPLETION_FIX] = True
         return updates
@@ -1579,6 +2029,9 @@ class HarnessAgent(BaseAgent):
 
         found = as_int(context.get(ContextKeys.FINDINGS_COUNT), 0)
         if found >= self.findings_threshold:
+            # The EXPLORE -> PLAN handoff: the gate is satisfied, so this is the
+            # last EXPLORE dispatch and the index is final.
+            self._emit_explore(context)
             return {}
 
         if self._explore_redispatches >= self.max_explore_redispatches:
@@ -1620,6 +2073,9 @@ class HarnessAgent(BaseAgent):
         if context.get(ContextKeys.NEEDS_EXPLORE) is True:
             # The plan-writer bounced back to EXPLORE; there is no plan to approve.
             return {}
+        # Emitted BEFORE the approval is requested, which is the contract's own
+        # "when emitted": a human cannot approve a plan they have not been shown.
+        self._emit_plan(context)
         approved = self._request_approval(
             _APPROVAL_PLAN,
             context,
@@ -1632,6 +2088,9 @@ class HarnessAgent(BaseAgent):
 
     def _after_reflect_dispatch(self, context: Mapping[str, Any]) -> dict[str, Any]:
         """Ask the human to confirm a close, or to continue past the leash."""
+        # Emitted before the routing decision, which is this contract's own
+        # "when emitted" -- the verdict is what the routing is read from.
+        self._emit_reflect(context)
         if context.get(ContextKeys.LAST_GATE_SLUG) == GateSlug.LEASH_CAP:
             return self._offer_leash_continue(context)
 
@@ -1744,25 +2203,104 @@ class HarnessAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     def _pre_step_gate(self, context: Mapping[str, Any]) -> dict[str, Any] | None:
-        """In-memory analogue of ``plan_validator.pre_step_gate()``.
+        """Decide whether this EXECUTE step may be dispatched, and act on it.
 
-        Only the ``leash-cap`` slug is decidable without a plan directory; the
-        other three (``no-plan`` / ``wrong-state`` / ``iteration-cap``) need
-        on-disk state or belong to a different edge, and a later step adds
-        them.  Returning a delta rather than raising keeps the halt *inside*
-        the protocol: the run routes to REFLECT and reports, it does not crash.
+        Two channels are consulted and BOTH must pass.  ``plan_validator``'s
+        on-disk gate answers all four slugs from ``state.md``; the in-memory
+        leash answers ``leash-cap`` from the driver's own counter.  Each slug
+        then routes to its OWN action -- they are four different events, not
+        four names for one halt.
 
         Returns:
             A context delta when the step must not be dispatched, else ``None``.
         """
+        result = self._disk_gate(context)
+        if result.passed:
+            result = self._memory_leash(context)
+        if result.passed:
+            return None
+        assert result.slug is not None  # GateResult's own model validator
+        return _GATE_ACTIONS[result.slug](self, result, context)
+
+    def _disk_gate(self, context: Mapping[str, Any]) -> GateResult:
+        """Run ``plan_validator.pre_step_gate`` over this run's plan directory.
+
+        Returns ``GateResult(passed=True)`` when there is NO plan directory:
+        the four slugs are statements about an on-disk protocol, and a run
+        without one is not failing them -- it simply has none, and the
+        in-memory leash below is then the whole gate.
+        """
+        path = self._existing_plan_dir(context)
+        if path is None:
+            return GateResult(passed=True)
+        try:
+            return pre_step_gate(
+                path,
+                expected_state=HarnessStates.EXECUTE,
+                max_fix_attempts=self.max_fix_attempts,
+                iteration_cap=self.iteration_hard_cap,
+            )
+        except Exception as exc:  # contract says it cannot; fail CLOSED anyway
+            logger.warning(f"Pre-step gate raised ({exc}); treating as no-plan.")
+            return GateResult(
+                passed=False, slug=GateSlug.NO_PLAN, detail=f"gate raised: {exc}"
+            )
+
+    def _memory_leash(self, context: Mapping[str, Any]) -> GateResult:
+        """The driver's OWN leash check, over its own counter.
+
+        Kept alongside the on-disk gate rather than replaced by it, and the
+        redundancy is the point: ``fix_attempts`` in context is derived by
+        :meth:`_after_execute_dispatch` from ``AgentResult.success``, which no
+        worker can understate, whereas ``state.md``'s attempt lines are a file
+        that a failed write, a truncation or a hand edit can leave behind.  If
+        the two ever disagree the SHUT one wins.
+        """
         attempts = as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0)
         if attempts < self.max_fix_attempts:
-            return None
-        step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
-        logger.warning(
-            f"Pre-step gate [{GateSlug.LEASH_CAP}]: step {step} has {attempts} "
-            f"fix attempts (cap {self.max_fix_attempts}); refusing to dispatch."
+            return GateResult(passed=True)
+        return GateResult(
+            passed=False,
+            slug=GateSlug.LEASH_CAP,
+            detail=f"attempts={attempts} cap={self.max_fix_attempts} (in-memory)",
         )
+
+    # -- the four slug actions ------------------------------------------
+    #
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-040
+    # The four pre-step-gate slugs map to four DIFFERENT actions. Do NOT
+    # "simplify" this table into one halt path parameterised by a slug string,
+    # and in particular do NOT emit the leash block from more than one of them:
+    #   * `leash-cap` is the only genuine LEASH hit. It is the only one that
+    #     computes a revert directive, the only one that emits PC-EXECUTE-LEASH,
+    #     and the only one that sets `execute_complete` -- because it is the
+    #     only one that CONTINUES, routing EXECUTE -> REFLECT so the failure is
+    #     reviewed rather than ending the run.
+    #   * `iteration-cap` ends the run and emits NO leash block. A run can hit
+    #     the iteration cap with ZERO recorded attempts, so PC-EXECUTE-LEASH's
+    #     "attempts" field could not be filled with anything but a fiction, and
+    #     the block would point the user at a failing step that does not exist
+    #     (the predecessor's D-019 made the same call for the PLAN-edge cap).
+    #   * `wrong-state` and `no-plan` are RECOVERY paths and neither writes
+    #     `state.md`. That is not an oversight: `no-plan` fires precisely
+    #     because state.md is unreadable or absent, and "fixing" it by writing
+    #     over it would manufacture the agreement the gate exists to check --
+    #     the driver would silence its own alarm. `wrong-state` is the same
+    #     defect one step further on: something other than the driver moved the
+    #     protocol, and overwriting it discards the evidence of what.
+    # See decisions.md D-040.
+
+    def _act_leash_cap(
+        self, result: GateResult, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """The autonomy leash: revert, report, and route to REFLECT."""
+        step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        attempts = as_int(context.get(ContextKeys.FIX_ATTEMPTS), 0)
+        logger.warning(
+            f"Pre-step gate [{GateSlug.LEASH_CAP}]: step {step} has "
+            f"{result.detail}; refusing to dispatch."
+        )
+        self.on_leash_cap(context, step=step, attempts=attempts)
         return {
             ContextKeys.EXECUTE_COMPLETE: True,
             ContextKeys.LAST_GATE_SLUG: GateSlug.LEASH_CAP,
@@ -1771,6 +2309,446 @@ class HarnessAgent(BaseAgent):
                 f"attempts (cap {self.max_fix_attempts})."
             ),
         }
+
+    def _act_iteration_cap(
+        self, result: GateResult, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """The iteration hard cap: end the run, with NO leash block."""
+        reason = (
+            f"Iteration cap: {result.detail}; this plan may not spend another "
+            "EXECUTE step. Decompose the goal into a fresh plan."
+        )
+        logger.warning(f"Pre-step gate [{GateSlug.ITERATION_CAP}]: {result.detail}")
+        self._halt_request = _HarnessHalt(
+            reason=reason, slug=GateSlug.ITERATION_CAP, context=dict(context)
+        )
+        return {
+            ContextKeys.LAST_GATE_SLUG: GateSlug.ITERATION_CAP,
+            ContextKeys.HALT_REASON: reason,
+        }
+
+    def _act_wrong_state(
+        self, result: GateResult, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Recovery: something else moved the protocol.  Report, write nothing."""
+        return self._recovery(
+            GateSlug.WRONG_STATE,
+            result,
+            f"Recovery [{GateSlug.WRONG_STATE}]: {ArtifactNames.STATE} disagrees "
+            f"with the driver ({result.detail}). Something other than the driver "
+            "moved the protocol; reconcile it by hand. The driver will NOT "
+            "overwrite state.md to make itself right.",
+        )
+
+    def _act_no_plan(
+        self, result: GateResult, context: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Recovery: there is no readable protocol memory.  Write nothing."""
+        return self._recovery(
+            GateSlug.NO_PLAN,
+            result,
+            f"Recovery [{GateSlug.NO_PLAN}]: {result.detail}. Restore or "
+            f"re-bootstrap the plan directory. The driver will NOT create "
+            f"{ArtifactNames.STATE} to satisfy its own gate.",
+        )
+
+    @staticmethod
+    def _recovery(slug: str, result: GateResult, reason: str) -> dict[str, Any]:
+        """Both recovery actions: record the slug and the reason, nothing else.
+
+        No ``execute_complete`` (the run does not route onward on a directory
+        it cannot trust) and no artifact write of any kind.  EXECUTE holds and
+        ``_check_stall`` ends the run with this reason prepended.
+        """
+        logger.warning(reason)
+        return {
+            ContextKeys.LAST_GATE_SLUG: slug,
+            ContextKeys.HALT_REASON: reason,
+        }
+
+    # ------------------------------------------------------------------
+    # The leash-cap recovery (D-009 scope, D-039 execution)
+    # ------------------------------------------------------------------
+
+    def on_leash_cap(
+        self, context: Mapping[str, Any], *, step: int, attempts: int
+    ) -> RevertDirective | None:
+        """The ``leash-cap`` action itself: revert, then report.
+
+        Interface contract (shared action, 2 call sites -- and the sharing is
+        the point):
+            - ``_act_leash_cap``, the pre-step gate, which refuses a dispatch
+              that has already spent the leash;
+            - ``_after_execute_dispatch``, which is where the leash ACTUALLY
+              bites in a healthy protocol -- the FSM's REFLECT -> EXECUTE edge
+              carries ``fix_attempts < cap``, so the gate above is defence in
+              depth and fires only if that edge was bypassed.
+            - *step* and *attempts* are passed EXPLICITLY, not read from
+              *context*: the post-dispatch caller has not applied its own delta
+              yet, so context still holds the pre-increment count.
+            - Never raises; both callers run inside an FSM handler.
+
+        Emitting the leash block from one of the two sites only would make the
+        block's presence depend on which path the leash happened to take, which
+        is exactly the kind of "reported sometimes" the contract exists to rule
+        out.
+        """
+        directive = self._revert_uncommitted(context)
+        self._emit_execute_leash(context, directive, step=step, attempts=attempts)
+        return directive
+
+    def _revert_uncommitted(
+        self, context: Mapping[str, Any]
+    ) -> RevertDirective | None:
+        """Compute -- and only then, if permitted, execute -- the revert.
+
+        Returns:
+            The directive, or ``None`` when there is no ``workspace_root`` to
+            revert.  A returned directive says what SHOULD be reverted; whether
+            it WAS is the callback's business and is logged either way.
+        """
+        root = _as_optional_str(context.get(ContextKeys.WORKSPACE_ROOT))
+        if root is None:
+            logger.info(
+                "Leash revert skipped: the run has no workspace_root, so there "
+                "is no code tree to revert."
+            )
+            return None
+        directive = RevertDirective(
+            root=root,
+            exclude=self._spared_paths(root, context),
+            commands=_REVERT_COMMANDS,
+        )
+        self._reverts.append(directive)
+
+        if self._revert_callback is None:
+            logger.warning(
+                f"Leash revert NOT executed (no revert_callback): {directive}. "
+                "It is reported in the leash block for a human to run."
+            )
+            return directive
+        if not self._request_approval(
+            _APPROVAL_REVERT,
+            context,
+            reasoning=f"Revert uncommitted work? {directive}",
+        ):
+            logger.warning(f"Leash revert DENIED at the approval gate: {directive}")
+            return directive
+        try:
+            done = bool(self._revert_callback(directive))
+        except Exception as exc:  # a failed revert must not crash the turn
+            logger.warning(f"Leash revert callback failed ({exc}): {directive}")
+            return directive
+        logger.info(f"Leash revert {'executed' if done else 'declined'}: {directive}")
+        return directive
+
+    @staticmethod
+    def _spared_paths(root: str, context: Mapping[str, Any]) -> tuple[str, ...]:
+        """Paths under *root* the revert must NOT touch.
+
+        The plan directory, when it lives inside the workspace -- which is the
+        usual layout (``<repo>/plans/<plan-id>``) and exactly the case D-009 is
+        about.  ``plans/`` is gitignored, so it survives ``git checkout -- .``
+        for free but NOT ``git clean -fd``: an unscoped revert deletes the run's
+        own memory, including the record of the failure being reported.
+        """
+        plan_dir = _as_optional_str(context.get(ContextKeys.PLAN_DIR))
+        if plan_dir is None:
+            return ()
+        try:
+            relative = Path(plan_dir).expanduser().resolve().relative_to(
+                Path(root).expanduser().resolve()
+            )
+        except (OSError, ValueError):
+            return ()  # outside the workspace: nothing to spare, D-009 holds
+        return (str(relative),)
+
+    # ------------------------------------------------------------------
+    # Presentation contracts
+    # ------------------------------------------------------------------
+
+    def _emit_contract(self, name: str, fields: Mapping[str, str]) -> Presentation:
+        """Render one user-facing block and record what it could not fill.
+
+        Interface contract (shared emitter, 5 call sites -- one per contract
+        the driver has real data for):
+            - *fields* is keyed by the contract's own field names; unsupplied
+              and blank fields are rendered as :data:`_CONTRACT_ABSENT` and are
+              NOT counted as supplied, so a placeholder can never satisfy a
+              floor field.
+            - Never raises for missing data: a report that aborts the turn is
+              worse than an incomplete report, and handler exceptions are
+              swallowed whole by the core handler system.  A missing FLOOR
+              field is logged at ERROR and recorded in
+              ``Presentation.missing_floor``, which is what a test asserts on.
+
+        Raises:
+            KeyError: If *name* is not a known contract -- a typo in the
+                driver's own source, not a runtime condition.
+        """
+        missing = missing_floor_fields(
+            name, [key for key, value in fields.items() if str(value).strip()]
+        )
+        ordered = PRESENTATION_CONTRACTS[name].required
+        rows = [
+            f"- **{field}**: {str(fields.get(field, '')).strip() or _CONTRACT_ABSENT}"
+            for field in ordered
+        ]
+        presentation = Presentation(
+            name=name,
+            fields=MappingProxyType({key: str(value) for key, value in fields.items()}),
+            missing_floor=missing,
+            block="\n".join([f"### {name}", *rows]),
+        )
+        self._presentations.append(presentation)
+        if missing:
+            logger.error(
+                f"{name} emitted WITHOUT its floor field(s) {list(missing)}: the "
+                "artifacts they are read from were absent or unreadable."
+            )
+        else:
+            logger.info(
+                f"{name} emitted with all "
+                f"{len(PRESENTATION_CONTRACTS[name].floor)} of its floor fields."
+            )
+        return presentation
+
+    def _emit_explore(self, context: Mapping[str, Any]) -> None:
+        """PC-EXPLORE: the findings index and constraints, verbatim from disk."""
+        directory = self._plan_directory(context)
+        index = (
+            None
+            if directory is None
+            else self._artifact(
+                directory, ArtifactNames.FINDINGS_INDEX, FindingsIndexDoc
+            )
+        )
+        found = as_int(context.get(ContextKeys.FINDINGS_COUNT), 0)
+        self._emit_contract(
+            "PC-EXPLORE",
+            {
+                "findings-index": "" if index is None else index.body_of("Index"),
+                "key-constraints": (
+                    "" if index is None else index.body_of("Key Constraints")
+                ),
+                # Not floor fields: the confidence line and the synthesis are
+                # the explorer's prose, and the driver has neither. Reported
+                # honestly as absent rather than invented.
+                "exploration-confidence": "",
+                "synthesis": f"{found} of {self.findings_threshold} findings on disk.",
+            },
+        )
+
+    def _emit_plan(self, context: Mapping[str, Any]) -> None:
+        """PC-PLAN: the 11 plan sections, verbatim, plus the approval prompt."""
+        directory = self._plan_directory(context)
+        plan = (
+            None
+            if directory is None
+            else self._artifact(directory, ArtifactNames.PLAN, PlanDoc)
+        )
+        fields = {
+            _contract_field(section): (
+                "" if plan is None else _excerpt(plan.body_of(section))
+            )
+            for section in PlanSchema.SECTIONS
+        }
+        fields["approval-prompt"] = (
+            f"Approve this plan for iteration "
+            f"{as_int(context.get(ContextKeys.ITERATION), 0) + 1}?"
+        )
+        self._emit_contract("PC-PLAN", fields)
+
+    def _emit_execute_step(self, context: Mapping[str, Any]) -> None:
+        """PC-EXECUTE-STEP: what the finished step actually changed, from disk."""
+        directory = self._plan_directory(context)
+        step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
+        iteration = as_int(context.get(ContextKeys.ITERATION), 0)
+        files, commits = self._changelog_digest(directory, iteration, step)
+        self._emit_contract(
+            "PC-EXECUTE-STEP",
+            {
+                "step": f"iter-{iteration}/step-{step}: {self._step_intent(directory, step)}",
+                "files": ", ".join(files),
+                "commit": ", ".join(commits),
+                "surprises": self._last_answer(context),
+                "next-preview": self._step_intent(directory, step + 1),
+            },
+        )
+
+    def _emit_execute_leash(
+        self,
+        context: Mapping[str, Any],
+        directive: RevertDirective | None,
+        *,
+        step: int,
+        attempts: int,
+    ) -> None:
+        """PC-EXECUTE-LEASH: the block that is emitted for this slug and no other."""
+        directory = self._plan_directory(context)
+        revert = (
+            "no workspace_root to revert" if directive is None else str(directive)
+        )
+        self._emit_contract(
+            "PC-EXECUTE-LEASH",
+            {
+                "step-intent": self._step_intent(directory, step),
+                "attempts": self._attempt_digest(context, step, attempts),
+                # "no worker answer was recorded" IS the root-cause information
+                # available, so it fills the field rather than leaving a gap.
+                "root-cause-guess": (
+                    self._last_answer(context) or "no worker answer recorded"
+                ),
+                "checkpoints": self._checkpoint_digest(directory),
+                "prompt": (
+                    f"The {self.max_fix_attempts}-attempt autonomy leash is spent "
+                    f"on step {step}. Revert directive: {revert}. Continue with "
+                    "direction, pivot to a different approach, or stop here?"
+                ),
+            },
+        )
+
+    def _emit_reflect(self, context: Mapping[str, Any]) -> None:
+        """PC-REFLECT: progress and verification, verbatim from the two artifacts."""
+        directory = self._plan_directory(context)
+        progress = (
+            None
+            if directory is None
+            else self._artifact(directory, ArtifactNames.PROGRESS, ProgressDoc)
+        )
+        verification = (
+            None
+            if directory is None
+            else self._artifact(directory, ArtifactNames.VERIFICATION, VerificationDoc)
+        )
+        recommendation = (
+            ""
+            if verification is None
+            else dict(verification.verdict_bullets()).get("Recommendation", "")
+        )
+        self._emit_contract(
+            "PC-REFLECT",
+            {
+                "completed": (
+                    "" if progress is None else _excerpt(progress.body_of("Completed"))
+                ),
+                "remaining": (
+                    "" if progress is None else _excerpt(progress.body_of("Remaining"))
+                ),
+                "verification-results": (
+                    ""
+                    if verification is None
+                    else _excerpt(verification.body_of("Criteria Verification"))
+                ),
+                "issues": (
+                    ""
+                    if verification is None
+                    else _excerpt(verification.body_of("Not Verified"))
+                ),
+                "recommendation": recommendation
+                or (
+                    "PASS"
+                    if context.get(ContextKeys.ALL_CRITERIA_PASS) is True
+                    else "CONTINUE"
+                ),
+            },
+        )
+
+    # -- contract field sources -----------------------------------------
+
+    def _step_intent(self, directory: PlanDirectory | None, step: int) -> str:
+        """``plan.md``'s own text for *step*, verbatim, or an honest fallback."""
+        plan = (
+            None
+            if directory is None
+            else self._artifact(directory, ArtifactNames.PLAN, PlanDoc)
+        )
+        if plan is not None:
+            for parsed in plan.steps():
+                if parsed.number == str(step):
+                    return _excerpt(parsed.text)
+        return f"plan step {step} (no readable {ArtifactNames.PLAN} entry)"
+
+    def _changelog_digest(
+        self, directory: PlanDirectory | None, iteration: int, step: int
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """The files and commits ``changelog.md`` records for one step.
+
+        Read off the EXECUTOR's own ledger rather than asked of the worker:
+        the same evidence-over-testimony split as ``_derive_gate_counts``
+        (D-032).  A worker that reports a commit it did not make cannot make
+        this field say so.
+        """
+        wanted = f"iter-{iteration}/step-{step}"
+        files: list[str] = []
+        commits: list[str] = []
+        if directory is None:
+            return (), ()
+        try:
+            text = directory.read_text(ArtifactNames.CHANGELOG)
+        except (HarnessError, OSError):
+            return (), ()
+        for line in text.splitlines():
+            try:
+                entry = parse_changelog_line(line)
+            except HarnessError:
+                continue  # header, prose, or a malformed row: audit's business
+            if entry.step != wanted:
+                continue
+            if entry.path not in files:
+                files.append(entry.path)
+            if entry.commit not in commits and entry.commit != "uncommitted":
+                commits.append(entry.commit)
+        return tuple(files), tuple(commits)
+
+    def _checkpoint_digest(self, directory: PlanDirectory | None) -> str:
+        """Every ``checkpoints/cp-NNN-iterN.md`` on disk, as one line.
+
+        "The directory is readable and holds none" is an ANSWER and fills the
+        field; "there is no directory to read" is a gap and leaves it empty, so
+        it shows up in ``Presentation.missing_floor`` instead of being papered
+        over with the same words.
+        """
+        if directory is None:
+            return ""
+        try:
+            names = [
+                name
+                for name in directory.list_dir(ArtifactNames.CHECKPOINTS_DIR)
+                if name.endswith(".md")
+            ]
+        except (HarnessError, OSError):
+            return ""
+        return ", ".join(names) if names else "none on disk"
+
+    @staticmethod
+    def _attempt_digest(
+        context: Mapping[str, Any], step: int, attempts: int
+    ) -> str:
+        """Both failed attempts on *step*, from the driver's own role ledger."""
+        history = context.get(ContextKeys.ROLE_RESULTS)
+        rows = [
+            entry
+            for entry in (history if isinstance(history, list) else [])
+            if isinstance(entry, dict)
+            and entry.get("state") == HarnessStates.EXECUTE
+            and as_int(entry.get("step_number"), -1) == step
+        ]
+        if not rows:
+            return f"{attempts} attempt(s) spent; no dispatch recorded on this step."
+        return "; ".join(
+            f"{index}) {'PASS' if row.get('success') else 'FAIL'}: "
+            f"{_excerpt(str(row.get('answer', '')), 200)}"
+            for index, row in enumerate(rows, start=1)
+        )
+
+    @staticmethod
+    def _last_answer(context: Mapping[str, Any]) -> str:
+        """The most recent dispatch's answer -- the driver's only root-cause data."""
+        entry = context.get(ContextKeys.CURRENT_ROLE_RESULT)
+        if not isinstance(entry, dict):
+            return ""
+        return _excerpt(str(entry.get("answer", "")))
 
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
         """Dispatch for a HELD state, and enforce the run-ending halts.
@@ -1792,8 +2770,24 @@ class HarnessAgent(BaseAgent):
         if updates:
             api.update_context(conv_id, self._writable_updates(updates))
             context = api.get_data(conv_id)
+            # The step cursor and the leash counter move on this path without a
+            # transition, so state.md is re-synced here -- AFTER the gate that
+            # ran inside the dispatch, never before it (D-038).
+            self._sync_state_doc(state, context)
 
+        self._raise_pending_halt()
         self._check_stall(state, context, bool(updates))
+
+    def _raise_pending_halt(self) -> None:
+        """Raise a halt a HANDLER asked for, now that we are outside one.
+
+        Raises:
+            _HarnessHalt: If a handler recorded one (currently only the
+                ``iteration-cap`` pre-step-gate action).
+        """
+        halt, self._halt_request = self._halt_request, None
+        if halt is not None:
+            raise halt
 
     def _check_iteration_cap(self, state: str, context: Mapping[str, Any]) -> None:
         """Halt when PLAN can no longer reach EXECUTE.
@@ -1956,6 +2950,40 @@ class HarnessAgent(BaseAgent):
                 working.pop(key, None)
             else:
                 working[key] = value
+
+
+#: One pre-step-gate slug's action: it may write context, emit a presentation,
+#: compute a revert and record a halt -- but it never dispatches and never
+#: raises, because it runs inside an FSM handler.
+_GateAction = Callable[[HarnessAgent, GateResult, Mapping[str, Any]], "dict[str, Any]"]
+
+#: Slug -> action.  Complete over ``GateSlug.ORDER`` and injective: four slugs,
+#: four distinct functions (D-040).  A test asserts both.
+_GATE_ACTIONS: Mapping[str, _GateAction] = MappingProxyType(
+    {
+        GateSlug.NO_PLAN: HarnessAgent._act_no_plan,
+        GateSlug.WRONG_STATE: HarnessAgent._act_wrong_state,
+        GateSlug.LEASH_CAP: HarnessAgent._act_leash_cap,
+        GateSlug.ITERATION_CAP: HarnessAgent._act_iteration_cap,
+    }
+)
+
+
+def _contract_field(section: str) -> str:
+    """``PlanSchema`` heading -> the PC-PLAN field name for it.
+
+    ``"Pre-Mortem & Falsification Signals"`` -> ``"pre-mortem"``: the contract
+    names the field by its first word, the plan names the section in full.
+    Derived rather than tabulated so the 11 sections stay defined once.
+    """
+    head = section.split("&")[0].strip().lower()
+    return "-".join(head.replace("-", " ").split())
+
+
+def _excerpt(text: str, limit: int = _CONTRACT_FIELD_CHARS) -> str:
+    """One artifact excerpt, whitespace-folded and bounded."""
+    folded = " ".join(str(text).split())
+    return folded if len(folded) <= limit else f"{folded[: limit - 1]}…"
 
 
 def _deny_approval(request: Any) -> bool:

@@ -50,6 +50,7 @@ from fsm_llm_harness.harness import (
     _APPROVAL_CLOSE,
     _APPROVAL_LEASH,
     _APPROVAL_PLAN,
+    _APPROVAL_REVERT,
     _DISPATCH_LOCAL,
     HarnessAgent,
     RoleRequest,
@@ -63,9 +64,12 @@ from tests.conftest import MockLLM2Interface
 APPROVAL_PLAN = _APPROVAL_PLAN
 APPROVAL_CLOSE = _APPROVAL_CLOSE
 APPROVAL_LEASH = _APPROVAL_LEASH
+#: The fourth gate: the leash-cap revert, consulted only when the caller
+#: supplied a ``revert_callback`` (D-039).
+APPROVAL_REVERT = _APPROVAL_REVERT
 
 #: Every gate name the driver may emit.
-APPROVAL_GATES = (APPROVAL_PLAN, APPROVAL_CLOSE, APPROVAL_LEASH)
+APPROVAL_GATES = (APPROVAL_PLAN, APPROVAL_CLOSE, APPROVAL_LEASH, APPROVAL_REVERT)
 
 #: One entry of a worker script: either a literal reply spec or a callable
 #: taking the ``RoleRequest`` and returning one.

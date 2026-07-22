@@ -45,25 +45,35 @@ from fsm_llm.handlers import HandlerTiming
 from fsm_llm_agents.definitions import AgentResult
 from fsm_llm_agents.exceptions import AgentError
 from fsm_llm_harness import harness as harness_module
+from fsm_llm_harness import storage as storage_module
+from fsm_llm_harness.artifacts import PRESENTATION_CONTRACTS, StateDoc
 from fsm_llm_harness.constants import (
     DRIVER_OWNED_SEEDS,
     DRIVER_OWNED_UNSET,
+    ArtifactNames,
     ContextKeys,
     Defaults,
     GateSlug,
     HandlerNames,
     HarnessStates,
+    PlanSchema,
     Role,
 )
-from fsm_llm_harness.exceptions import HarnessError, HarnessReentrancyError
+from fsm_llm_harness.exceptions import (
+    HarnessError,
+    HarnessOwnershipError,
+    HarnessReentrancyError,
+)
 from fsm_llm_harness.harness import HarnessAgent, RoleRequest
-from fsm_llm_harness.rules import EXPLORE_TOPICS
+from fsm_llm_harness.plan_validator import Issue
+from fsm_llm_harness.rules import EXPLORE_TOPICS, ROLE_BY_STATE
 from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm_harness.conftest import (
     APPROVAL_CLOSE,
     APPROVAL_GATES,
     APPROVAL_LEASH,
     APPROVAL_PLAN,
+    APPROVAL_REVERT,
     FABRICATED_DRIVER_OWNED,
     ApprovalRecorder,
     RecordingWorker,
@@ -108,6 +118,137 @@ def _all_failing_script() -> dict[str, Any]:
     approximate.
     """
     return {state: {"success": False, "ctx": {}} for state in HarnessStates.ALL}
+
+
+# ---------------------------------------------------------------------------
+# Plan-directory fixtures for the artifact seam
+# ---------------------------------------------------------------------------
+
+#: A ``plan.md`` with all 11 sections in order and two annotated steps.  Real
+#: shape, not a stub: ``PlanDoc`` REJECTS a plan missing any of them, so a
+#: smoothed-over fixture would exercise only the unreadable branch.
+_PLAN_MD = """# Plan v1: exercise the harness protocol
+
+## Goal
+Make the driver read and write the artifacts it owns.
+
+## Problem Statement
+The driver kept all protocol memory in the FSM context.
+
+## Context
+`findings.md` carries the index; `plan.md` carries the steps.
+
+## Files To Modify
+| File | Change | Reason |
+|---|---|---|
+| `harness.py` | wire the seam | step 10 |
+
+## Steps
+1. [x] **Wire the pre-step gate onto the on-disk validator.** [RISK: high] [deps: none]
+2. [ ] **Emit the presentation contracts from the artifacts.** [RISK: low] [deps: 1]
+
+## Assumptions
+- **A1.** The plan directory is writable.
+
+## Failure Modes
+| Dependency | Slow | Bad data | Down | Blast radius |
+|---|---|---|---|---|
+| plan directory | n/a | truncated artifact | gate goes dark | the whole gate |
+
+## Pre-Mortem & Falsification Signals
+1. **The gate reads what it just wrote.** → **STOP IF** `wrong-state` is unreachable.
+
+## Success Criteria
+1. Each of the four slugs produces its own action.
+
+## Verification Strategy
+| # | Criterion | Method | Command | Pass condition |
+|---|---|---|---|---|
+| 1 | Four slugs, four actions | Automated | `pytest -k FourSlugs` | all pass |
+
+## Complexity Budget
+| Metric | Budget | Notes |
+|---|---|---|
+| Files added | 0/0 | the seam adds none |
+"""
+
+#: A ``changelog.md`` whose ledger line names the step the fixture runs.
+_CHANGELOG_MD = """# Changelog
+*Append-only per-edit ledger. One line per file edit. Owner: ip-executor.*
+2026-07-22T09:00:00Z | iter-1/step-1 | abc1234 | src/fsm_llm_harness/harness.py | EDIT(+300,-40) | radius:HIGH(9) | D-040 | wire the four-slug action table
+"""
+
+_FINDINGS_MD = """# Findings
+*Summary and index of all findings.*
+
+## Index
+1. `findings/seam.md` — the driver writes exactly one artifact
+2. `findings/gate.md` — the four slugs are four events
+3. `findings/caps.md` — the agent read cap is not the driver's
+
+## Key Constraints
+- **HARD**: `plans/` is gitignored, so protocol memory has no VCS backstop.
+"""
+
+_PROGRESS_MD = """# Progress
+
+## Completed
+- [x] step 9: `plan_validator.py`
+
+## In Progress
+- [ ] step 10: the integration seam
+
+## Remaining
+- [ ] step 12: the CLI
+
+## Blocked
+*Nothing currently.*
+"""
+
+_VERIFICATION_MD = """# Verification Results (Iteration 1)
+
+## Criteria Verification
+| # | Criterion (from plan.md) | Method | Command/Action | Result | Evidence |
+|---|---|---|---|---|---|
+| 1 | Four slugs, four actions | Automated | `pytest -k FourSlugs` | PASS | 8/8 |
+
+## Additional Checks
+| Check | Command/Action | Result | Details |
+|---|---|---|---|
+| Regression | `pytest -q` | PASS | 1186/1186 |
+| Scope drift | manifest vs plan.md | PASS | manual review — no unplanned file |
+| Diff review | `git diff` | PASS | manual review — no stray prints |
+
+## Not Verified
+| What | Why |
+|---|---|
+| Live `:4b` traverse | step 15 owns it |
+
+## Verdict
+- Criteria passed: 1/1
+- Regressions: none
+- Scope drift: none
+- Simplification blockers: none
+- Recommendation: → CLOSE
+"""
+
+
+def _seed_plan_directory(plan_dir: Path) -> None:
+    """Write every artifact the contract builders quote.
+
+    Without this the blocks are emitted with EMPTY floor fields -- which is the
+    honest behaviour and has its own test, but makes a "the floor is filled"
+    assertion vacuous.  The three ``findings/*.md`` files are what lets the run
+    LEAVE explore at all: since D-032 the gate counts files on disk, not what a
+    worker says it wrote.
+    """
+    (plan_dir / ArtifactNames.PLAN).write_text(_PLAN_MD)
+    (plan_dir / ArtifactNames.CHANGELOG).write_text(_CHANGELOG_MD)
+    (plan_dir / ArtifactNames.FINDINGS_INDEX).write_text(_FINDINGS_MD)
+    (plan_dir / ArtifactNames.PROGRESS).write_text(_PROGRESS_MD)
+    (plan_dir / ArtifactNames.VERIFICATION).write_text(_VERIFICATION_MD)
+    (plan_dir / "checkpoints" / "cp-000-iter1.md").write_text("# Checkpoint\n")
+    _seed_findings(plan_dir, "seam", "gate", "caps")
 
 
 def _is_exactly(value: Any, expected: Any) -> bool:
@@ -538,7 +679,8 @@ class TestApprovals:
         assert APPROVAL_PLAN == "harness.approve_plan"
         assert APPROVAL_CLOSE == "harness.confirm_close"
         assert APPROVAL_LEASH == "harness.continue_after_leash"
-        assert len(set(APPROVAL_GATES)) == 3
+        assert APPROVAL_REVERT == "harness.revert_uncommitted"
+        assert len(set(APPROVAL_GATES)) == 4
 
     def test_default_callback_denies(self) -> None:
         """An unattended run cannot approve its own plan (invariant I6)."""
@@ -595,10 +737,15 @@ class TestApprovals:
         assert harness.worker.count_for(HarnessStates.CLOSE) == 0
         assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is False
 
-    def test_the_three_gates_are_distinguishable_by_tool_name(
-        self, make_harness
+    def test_every_gate_is_distinguishable_by_tool_name(
+        self, make_harness, roots, plan_dir
     ) -> None:
-        """One callback serves all three gates and can tell them apart."""
+        """One callback serves all four gates and can tell them apart.
+
+        The revert gate only exists when a ``revert_callback`` was supplied --
+        without one there is nothing to approve, because nothing is executed
+        (D-039) -- so it takes its own run to observe.
+        """
         traverse = make_harness(_traverse_script())
         traverse.run()
         leash = make_harness(
@@ -606,8 +753,20 @@ class TestApprovals:
             approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
         )
         leash.run()
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        reverting = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots=roots,
+            revert_callback=lambda directive: True,
+        )
+        reverting.run()
 
-        observed = set(traverse.approvals.names) | set(leash.approvals.names)
+        observed = (
+            set(traverse.approvals.names)
+            | set(leash.approvals.names)
+            | set(reverting.approvals.names)
+        )
         assert observed == set(APPROVAL_GATES)
 
     def test_a_raising_callback_is_treated_as_denied(self, make_harness) -> None:
@@ -2784,3 +2943,873 @@ class TestDriverAssignedExploreTopics:
         assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
         assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.EXPLORE_CAP
         assert harness.worker.count_for(HarnessStates.PLAN) == 0
+
+
+# ---------------------------------------------------------------------------
+# The integration seam: artifacts + storage + validator in the driver
+# (D-037 the driver read path, D-038 the state.md sync + resume,
+#  D-039 the revert seam, D-040 the four-slug action table)
+# ---------------------------------------------------------------------------
+
+
+def _state_md(
+    *,
+    state: str = HarnessStates.EXECUTE,
+    iteration: int = 1,
+    step: str = "1 of 1",
+    attempts: int = 0,
+    history: tuple[str, ...] = (),
+) -> str:
+    """A ``state.md`` the real serializer produces, so it round-trips exactly."""
+    return StateDoc(
+        state=state,
+        iteration=iteration,
+        current_step=step,
+        fix_attempts=[f"Step 1, attempt {n}" for n in range(1, attempts + 1)],
+        transition_history=list(history),
+    ).to_markdown()
+
+
+def _gate_context(**overrides: Any) -> dict[str, Any]:
+    """A merged-view context of the shape ``_pre_step_gate`` is handed."""
+    context: dict[str, Any] = {
+        ContextKeys.ITERATION: 1,
+        ContextKeys.STEP_NUMBER: 1,
+        ContextKeys.TOTAL_STEPS: 1,
+        ContextKeys.FIX_ATTEMPTS: 0,
+        ContextKeys.ROLE_RESULTS: [],
+    }
+    context.update(overrides)
+    return context
+
+
+def _names(agent: HarnessAgent) -> list[str]:
+    return [presentation.name for presentation in agent.presentations]
+
+
+class TestFourSlugsFourActions:
+    """D-040: the four pre-step-gate slugs are four DIFFERENT events."""
+
+    def test_the_table_is_complete_and_injective(self) -> None:
+        """Four slugs, four distinct actions -- not one halt wearing four names."""
+        assert set(harness_module._GATE_ACTIONS) == set(GateSlug.ORDER)
+        assert len(set(harness_module._GATE_ACTIONS.values())) == 4
+
+    def test_leash_cap_emits_the_leash_block_and_routes_to_reflect(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        harness = make_harness(_failing_execute_script(), roots=roots)
+        agent = harness.agent
+        (plan_dir / ArtifactNames.STATE).write_text(_state_md(attempts=2))
+
+        delta = agent._pre_step_gate(
+            _gate_context(**roots, **{ContextKeys.FIX_ATTEMPTS: 2})
+        )
+
+        assert delta is not None
+        assert delta[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
+        # It CONTINUES -- EXECUTE -> REFLECT -- rather than ending the run.
+        assert delta[ContextKeys.EXECUTE_COMPLETE] is True
+        assert _names(agent) == ["PC-EXECUTE-LEASH"]
+        assert agent._halt_request is None
+
+    def test_iteration_cap_hard_stops_with_no_leash_block(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """A run can hit the cap with ZERO attempts; a leash block would lie."""
+        harness = make_harness(_traverse_script(), roots=roots, iteration_hard_cap=2)
+        agent = harness.agent
+        (plan_dir / ArtifactNames.STATE).write_text(_state_md(iteration=2))
+
+        delta = agent._pre_step_gate(
+            _gate_context(**roots, **{ContextKeys.ITERATION: 2})
+        )
+
+        assert delta is not None
+        assert delta[ContextKeys.LAST_GATE_SLUG] == GateSlug.ITERATION_CAP
+        assert _names(agent) == []
+        assert agent._reverts == []
+        # It ENDS the run: a halt is pending, and it does not route onward.
+        assert agent._halt_request is not None
+        assert agent._halt_request.slug == GateSlug.ITERATION_CAP
+        assert ContextKeys.EXECUTE_COMPLETE not in delta
+
+    def test_wrong_state_recovers_and_does_not_write_state_md(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The driver must not silence its own alarm by overwriting state.md."""
+        harness = make_harness(_traverse_script(), roots=roots)
+        stale = _state_md(state=HarnessStates.REFLECT)
+        (plan_dir / ArtifactNames.STATE).write_text(stale)
+
+        delta = harness.agent._pre_step_gate(_gate_context(**roots))
+
+        assert delta is not None
+        assert delta[ContextKeys.LAST_GATE_SLUG] == GateSlug.WRONG_STATE
+        assert (plan_dir / ArtifactNames.STATE).read_text() == stale
+        assert _names(harness.agent) == []
+        assert ContextKeys.EXECUTE_COMPLETE not in delta
+
+    def test_no_plan_recovers_and_does_not_create_state_md(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """``no-plan`` fires BECAUSE state.md is unreadable; writing it is the bug."""
+        harness = make_harness(_traverse_script(), roots=roots)
+
+        delta = harness.agent._pre_step_gate(_gate_context(**roots))
+
+        assert delta is not None
+        assert delta[ContextKeys.LAST_GATE_SLUG] == GateSlug.NO_PLAN
+        assert not (plan_dir / ArtifactNames.STATE).exists()
+        assert _names(harness.agent) == []
+        assert ContextKeys.EXECUTE_COMPLETE not in delta
+
+    def test_each_capability_belongs_to_exactly_one_slug(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """Stated once, as a whole, over every slug at once.
+
+        Three behavioural shapes, not four: ``wrong-state`` and ``no-plan``
+        deliberately SHARE the recovery shape (both record and write nothing)
+        and differ in the slug and reason they record -- which is asserted
+        separately below rather than folded in here, where including the slug
+        would make the comparison trivially true.
+        """
+        harness = make_harness(_traverse_script(), roots=roots, iteration_hard_cap=2)
+        agent = harness.agent
+        seen: dict[str, tuple[Any, ...]] = {}
+        reasons: dict[str, str] = {}
+        cases = {
+            GateSlug.NO_PLAN: (None, _gate_context(**roots)),
+            GateSlug.WRONG_STATE: (
+                _state_md(state=HarnessStates.PLAN),
+                _gate_context(**roots),
+            ),
+            GateSlug.LEASH_CAP: (
+                _state_md(attempts=2),
+                _gate_context(**roots, **{ContextKeys.FIX_ATTEMPTS: 2}),
+            ),
+            GateSlug.ITERATION_CAP: (
+                _state_md(iteration=2),
+                _gate_context(**roots, **{ContextKeys.ITERATION: 2}),
+            ),
+        }
+        for slug, (content, context) in cases.items():
+            agent._presentations = []
+            agent._halt_request = None
+            if content is None:
+                (plan_dir / ArtifactNames.STATE).unlink(missing_ok=True)
+            else:
+                (plan_dir / ArtifactNames.STATE).write_text(content)
+            delta = agent._pre_step_gate(context)
+            assert delta is not None and delta[ContextKeys.LAST_GATE_SLUG] == slug
+            seen[slug] = (
+                delta.get(ContextKeys.EXECUTE_COMPLETE),
+                tuple(_names(agent)),
+                agent._halt_request is not None,
+            )
+            reasons[slug] = str(delta[ContextKeys.HALT_REASON])
+
+        # Exactly one slug emits the leash block.
+        assert [s for s, (_, blocks, _) in seen.items() if blocks] == [
+            GateSlug.LEASH_CAP
+        ]
+        # Exactly one slug arms a halt.
+        assert [s for s, (_, _, halt) in seen.items() if halt] == [
+            GateSlug.ITERATION_CAP
+        ]
+        # Exactly one slug routes the protocol onward.
+        assert [s for s, (done, _, _) in seen.items() if done] == [GateSlug.LEASH_CAP]
+        # The two recovery slugs share a shape and differ in what they say.
+        assert seen[GateSlug.NO_PLAN] == seen[GateSlug.WRONG_STATE]
+        assert len(set(reasons.values())) == 4, reasons
+        assert GateSlug.NO_PLAN in reasons[GateSlug.NO_PLAN]
+        assert GateSlug.WRONG_STATE in reasons[GateSlug.WRONG_STATE]
+
+    def test_an_earlier_slug_short_circuits_the_later_checks(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """``no-plan`` wins over three simultaneous later failures."""
+        harness = make_harness(_traverse_script(), roots=roots, iteration_hard_cap=1)
+        (plan_dir / ArtifactNames.STATE).write_text("not a state document at all\n")
+
+        delta = harness.agent._pre_step_gate(
+            _gate_context(
+                **roots, **{ContextKeys.ITERATION: 9, ContextKeys.FIX_ATTEMPTS: 0}
+            )
+        )
+
+        assert delta is not None
+        assert delta[ContextKeys.LAST_GATE_SLUG] == GateSlug.NO_PLAN
+
+    def test_wrong_state_wins_over_a_simultaneous_leash_cap(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        harness = make_harness(_traverse_script(), roots=roots)
+        (plan_dir / ArtifactNames.STATE).write_text(
+            _state_md(state=HarnessStates.PIVOT, attempts=2)
+        )
+
+        delta = harness.agent._pre_step_gate(_gate_context(**roots))
+
+        assert delta is not None
+        assert delta[ContextKeys.LAST_GATE_SLUG] == GateSlug.WRONG_STATE
+
+    def test_no_plan_directory_at_all_leaves_the_in_memory_leash_intact(
+        self, make_harness
+    ) -> None:
+        """The four slugs are statements about an on-disk protocol.
+
+        A run without one is not FAILING them -- but its leash must still bite,
+        which is what the in-memory channel is for.
+        """
+        harness = make_harness(_traverse_script())
+        agent = harness.agent
+
+        assert agent._pre_step_gate(_gate_context()) is None
+        blocked = agent._pre_step_gate(
+            _gate_context(**{ContextKeys.FIX_ATTEMPTS: 2})
+        )
+        assert blocked is not None
+        assert blocked[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
+
+    def test_the_shut_channel_wins_when_the_two_disagree(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """Disk says fine, the driver's own counter says spent: the leash bites.
+
+        ``fix_attempts`` in context is derived from ``AgentResult.success``,
+        which no worker can understate; state.md's attempt lines are a file a
+        torn write or a hand edit can shorten.
+        """
+        harness = make_harness(_traverse_script(), roots=roots)
+        (plan_dir / ArtifactNames.STATE).write_text(_state_md(attempts=0))
+
+        delta = harness.agent._pre_step_gate(
+            _gate_context(**roots, **{ContextKeys.FIX_ATTEMPTS: 2})
+        )
+
+        assert delta is not None
+        assert delta[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
+
+    def test_a_raising_gate_fails_closed_as_no_plan(
+        self, make_harness, roots, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            harness_module,
+            "pre_step_gate",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk on fire")),
+        )
+        harness = make_harness(_traverse_script(), roots=roots)
+
+        delta = harness.agent._pre_step_gate(_gate_context(**roots))
+
+        assert delta is not None
+        assert delta[ContextKeys.LAST_GATE_SLUG] == GateSlug.NO_PLAN
+
+    def test_the_leash_cap_halt_reaches_the_run_end_to_end(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The real protocol, not a hand-built context."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots=roots,
+        )
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
+        assert harness.worker.count_for(HarnessStates.EXECUTE) == 2
+        assert "PC-EXECUTE-LEASH" in _names(harness.agent)
+
+    def test_the_iteration_cap_halt_reaches_the_run_end_to_end(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The cap ends the run through a real halt, with no leash block."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(
+            _traverse_script(), roots=roots, iteration_hard_cap=1
+        )
+        result = harness.run()
+
+        assert result.success is False
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.ITERATION_CAP
+        assert "PC-EXECUTE-LEASH" not in _names(harness.agent)
+        assert harness.worker.count_for(HarnessStates.EXECUTE) == 0
+        # The cap ENDS the run through its own halt.  Without the deferred
+        # raise the protocol would merely sit there until the stall detector
+        # gave up, which reports the same slug for a different reason -- so the
+        # ANSWER, not the slug, is what discriminates the two.
+        assert result.answer.startswith("Iteration cap:")
+        assert "Stalled" not in result.answer
+
+
+class TestStateDocSync:
+    """D-038: the driver writes exactly one artifact, and writes it atomically."""
+
+    def test_state_md_records_the_drivers_position(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(_traverse_script(total_steps=3), roots=roots)
+        harness.run()
+
+        doc = StateDoc.from_markdown((plan_dir / ArtifactNames.STATE).read_text())
+        assert doc.state in HarnessStates.ALL
+        assert doc.iteration == 1
+        assert doc.current_step.startswith("3 of 3")
+
+    def test_the_attempt_lines_use_the_protocols_own_grammar(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The gate counts these lines; a private format would count zero."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots=roots,
+        )
+        harness.run()
+
+        doc = StateDoc.from_markdown((plan_dir / ArtifactNames.STATE).read_text())
+        assert doc.fix_attempt_count == 2
+
+    def test_transition_history_is_preserved_and_never_appended_to(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """D-038: a line per FSM entry would make the derived iteration outrun
+        the real one and fire ``iteration-cap`` on a run that never re-planned."""
+        history = ("INIT → EXPLORE (task started)",)
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        (plan_dir / ArtifactNames.STATE).write_text(_state_md(history=history))
+        harness = make_harness(_failing_execute_script(), roots=roots)
+        harness.run()
+
+        doc = StateDoc.from_markdown((plan_dir / ArtifactNames.STATE).read_text())
+        assert doc.transition_history == list(history)
+        assert not any("EXECUTE" in line and "REFLECT" in line for line in doc.transition_history)
+
+    def test_the_driver_does_not_create_the_plan_directory(
+        self, make_harness, tmp_path
+    ) -> None:
+        """A directory the driver made is one whose emptiness it would misread."""
+        absent = tmp_path / "plans" / "never-created"
+        harness = make_harness(
+            _traverse_script(),
+            roots={
+                ContextKeys.PLAN_DIR: str(absent),
+                ContextKeys.WORKSPACE_ROOT: str(tmp_path),
+            },
+        )
+        harness.run()
+
+        assert not absent.exists()
+
+    def test_a_write_that_cannot_complete_leaves_the_old_bytes(
+        self, make_harness, roots, plan_dir, monkeypatch
+    ) -> None:
+        """Atomicity at the seam: old-or-new, never a blend, never a temp file."""
+        original = _state_md(state=HarnessStates.PLAN, iteration=7)
+        (plan_dir / ArtifactNames.STATE).write_text(original)
+        monkeypatch.setattr(
+            storage_module.os,
+            "replace",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("no space left on device")),
+        )
+        harness = make_harness(_traverse_script(), roots=roots)
+
+        assert harness.agent._sync_state_doc(HarnessStates.EXPLORE, dict(roots)) is None
+        assert (plan_dir / ArtifactNames.STATE).read_text() == original
+        assert [p.name for p in plan_dir.iterdir() if p.name.startswith(".state")] == []
+
+    def test_a_failed_write_does_not_lose_the_handler_delta(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """Protocol memory is a record of the run, not a precondition for it."""
+        (plan_dir / ArtifactNames.STATE).mkdir()  # unwritable as a file
+        harness = make_harness(_traverse_script(), roots=roots)
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXPLORE) >= 1
+        assert result.final_context[ContextKeys.FINDINGS_COUNT] == 0
+
+    def test_the_driver_may_not_write_an_artifact_it_does_not_own(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """Ownership is composed in, not restated (rules.py D-048)."""
+        directory = HarnessAgent._plan_directory(dict(roots))
+        assert directory is not None
+        assert directory.role == Role.ORCHESTRATOR
+
+        directory.write_text(ArtifactNames.STATE, "# Current State: EXPLORE\n")
+        for unowned in (
+            "findings/whatever.md",
+            "checkpoints/cp-000-iter1.md",
+            "summary.md",
+        ):
+            with pytest.raises(HarnessOwnershipError):
+                directory.write_text(unowned, "not mine")
+
+    def test_the_gate_never_reads_a_document_written_in_its_own_call(
+        self, make_harness, roots, plan_dir, monkeypatch
+    ) -> None:
+        """D-038's ordering rule, stated as a mechanism.
+
+        A sync inside ``_dispatch_if_needed`` would make ``wrong-state`` and
+        ``no-plan`` structurally unreachable: the driver would always have just
+        written the answer it then checks.
+        """
+        events: list[str] = []
+        for attribute, marker in (
+            ("_sync_state_doc", "sync"),
+            ("_pre_step_gate", "gate"),
+            ("_dispatch_if_needed", "dispatch-start"),
+        ):
+            real = getattr(HarnessAgent, attribute)
+
+            def wrapper(self, *args, _real=real, _marker=marker, **kwargs):
+                events.append(_marker)
+                return _real(self, *args, **kwargs)
+
+            monkeypatch.setattr(HarnessAgent, attribute, wrapper)
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        # The rule, stated exactly: between the dispatch call opening and the
+        # gate inside it, NOTHING writes state.md.  A sync there would make
+        # `wrong-state` structurally unreachable -- the driver would always
+        # have just written the answer it then checks.
+        assert "gate" in events
+        for index, event in enumerate(events):
+            if event != "gate":
+                continue
+            opened = max(
+                position
+                for position, earlier in enumerate(events[:index])
+                if earlier == "dispatch-start"
+            )
+            assert "sync" not in events[opened:index], events[opened : index + 1]
+
+
+class TestResumeFromStateMd:
+    """D-038: an interrupted run picks up where its ``state.md`` left off."""
+
+    def test_counters_and_state_are_resumed(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        (plan_dir / ArtifactNames.STATE).write_text(
+            _state_md(state=HarnessStates.EXECUTE, iteration=2, step="3 of 5", attempts=1)
+        )
+        harness = make_harness(_traverse_script(total_steps=5), roots=roots)
+        harness.run()
+
+        first = harness.worker.requests[0]
+        assert first.state == HarnessStates.EXECUTE
+        assert first.role == ROLE_BY_STATE[HarnessStates.EXECUTE]
+        assert (first.iteration, first.step_number, first.fix_attempts) == (2, 3, 1)
+
+    def test_total_steps_is_recovered_from_plan_md(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """``plan.md`` is read, not guessed: the cursor needs its own bound."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        (plan_dir / ArtifactNames.STATE).write_text(
+            _state_md(state=HarnessStates.EXECUTE, step="1 of 1")
+        )
+        (plan_dir / ArtifactNames.PLAN).write_text(_PLAN_MD)
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        assert harness.worker.requests[0].total_steps == 2
+
+    def test_a_run_with_no_state_md_starts_fresh_in_explore(
+        self, make_harness, roots
+    ) -> None:
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        assert harness.worker.requests[0].state == HarnessStates.EXPLORE
+        assert harness.agent._initial_state == HarnessStates.INITIAL
+
+    def test_an_unparseable_state_md_starts_fresh_rather_than_guessing(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        (plan_dir / ArtifactNames.STATE).write_text("# not a state document\n")
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        assert harness.worker.requests[0].state == HarnessStates.EXPLORE
+
+    def test_a_resumed_run_dispatches_the_resumed_states_role(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The START handler names the RESUMED state, not the EXPLORE literal.
+
+        Naming ``HarnessStates.INITIAL`` there would dispatch an EXPLORER while
+        the FSM sits in REFLECT.
+        """
+        (plan_dir / ArtifactNames.STATE).write_text(
+            _state_md(state=HarnessStates.REFLECT)
+        )
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        assert harness.worker.requests[0].state == HarnessStates.REFLECT
+        assert harness.worker.count_for(HarnessStates.EXPLORE) == 0
+
+    def test_a_closed_plan_resumes_its_counters_but_not_its_state(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """CLOSE is terminal, so it orphans every other state as an initial one.
+
+        ``FSMDefinition`` rejects the whole definition in that case, so this is
+        a structural limit rather than a policy call -- and a run that started
+        in CLOSE could do nothing anyway.
+        """
+        (plan_dir / ArtifactNames.STATE).write_text(
+            _state_md(state=HarnessStates.CLOSE, iteration=4)
+        )
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        assert harness.agent._initial_state == HarnessStates.INITIAL
+        assert harness.worker.requests[0].state == HarnessStates.EXPLORE
+        assert harness.worker.requests[0].iteration == 4
+
+
+class TestPresentationContracts:
+    """Every emitted block carries its floor fields, from disk not testimony."""
+
+    def test_the_leash_block_carries_all_five_floor_fields(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots=roots,
+        )
+        harness.run()
+
+        blocks = [p for p in harness.agent.presentations if p.name == "PC-EXECUTE-LEASH"]
+        assert blocks, _names(harness.agent)
+        for block in blocks:
+            assert block.missing_floor == ()
+            assert "cp-000-iter1.md" in block.fields["checkpoints"]
+            assert "attempt" in block.fields["attempts"].lower() or "FAIL" in block.fields["attempts"]
+
+    def test_every_emitted_block_names_a_real_contract(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        assert _names(harness.agent)
+        for presentation in harness.agent.presentations:
+            assert presentation.name in PRESENTATION_CONTRACTS
+            assert presentation.block.startswith(f"### {presentation.name}")
+
+    def test_a_readable_plan_directory_fills_every_floor_field(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        starved = {
+            p.name: p.missing_floor for p in harness.agent.presentations if p.missing_floor
+        }
+        assert starved == {}, starved
+
+    def test_an_unreadable_artifact_shows_up_as_a_missing_floor_field(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The honest failure: report the gap, do not invent the section."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        plan_blocks = [p for p in harness.agent.presentations if p.name == "PC-PLAN"]
+        assert plan_blocks
+        assert set(plan_blocks[0].missing_floor) == set(
+            PRESENTATION_CONTRACTS["PC-PLAN"].floor
+        )
+
+    def test_a_placeholder_cannot_satisfy_a_floor_field(
+        self, make_harness, roots
+    ) -> None:
+        agent = make_harness(_traverse_script(), roots=roots).agent
+        emitted = agent._emit_contract(
+            "PC-EXECUTE-STEP",
+            {field: "   " for field in PRESENTATION_CONTRACTS["PC-EXECUTE-STEP"].required},
+        )
+
+        assert set(emitted.missing_floor) == set(
+            PRESENTATION_CONTRACTS["PC-EXECUTE-STEP"].floor
+        )
+        assert harness_module._CONTRACT_ABSENT in emitted.block
+
+    def test_the_step_block_reads_the_changelog_not_the_worker(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """Evidence over testimony (D-032's rule, applied to a report)."""
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(
+            {
+                **_traverse_script(),
+                HarnessStates.EXECUTE: {
+                    "answer": "I changed src/invented.py and committed deadbee",
+                    "ctx": {},
+                },
+            },
+            roots=roots,
+        )
+        harness.run()
+
+        step_blocks = [p for p in harness.agent.presentations if p.name == "PC-EXECUTE-STEP"]
+        assert step_blocks
+        assert step_blocks[0].fields["files"] == "src/fsm_llm_harness/harness.py"
+        assert step_blocks[0].fields["commit"] == "abc1234"
+        assert "invented.py" not in step_blocks[0].fields["files"]
+
+    def test_the_plan_block_maps_all_eleven_sections(self) -> None:
+        """The PC-PLAN field names are DERIVED from the 11 plan sections."""
+        derived = {harness_module._contract_field(s) for s in PlanSchema.SECTIONS}
+        assert derived <= set(PRESENTATION_CONTRACTS["PC-PLAN"].required)
+        assert harness_module._contract_field(
+            "Pre-Mortem & Falsification Signals"
+        ) == "pre-mortem"
+
+    def test_contract_blocks_stay_out_of_the_fsm_context(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """D-020: context is rendered into BOTH prompts on EVERY turn."""
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(_traverse_script(), roots=roots)
+        result = harness.run()
+
+        rendered = str(result.final_context)
+        assert "PC-EXECUTE-STEP" not in rendered
+        assert "PC-PLAN" not in rendered
+
+    def test_presentations_are_not_reachable_from_inside_a_dispatch(
+        self, make_harness, roots
+    ) -> None:
+        seen: list[type[BaseException]] = []
+
+        def probe(request: RoleRequest) -> AgentResult:
+            for name in ("presentations", "reverts", "audit_issues"):
+                try:
+                    getattr(agent, name)
+                except HarnessReentrancyError as exc:
+                    seen.append(type(exc))
+            return AgentResult(answer="done", success=True, final_context={})
+
+        harness = make_harness(_traverse_script(), roots=roots, worker=probe)
+        agent = harness.agent
+        harness.run()
+
+        assert seen and set(seen) == {HarnessReentrancyError}
+
+
+class TestLeashRevertDirective:
+    """D-009 scope, D-039 execution: computed always, executed never by default."""
+
+    def test_the_directive_spares_the_plan_directory(
+        self, make_harness, tmp_path
+    ) -> None:
+        """``plans/`` is gitignored, so ``git clean -fd`` would delete it."""
+        workspace = tmp_path / "repo"
+        plan_dir = workspace / "plans" / "plan-2026-07-22T000000-abcdef12"
+        plan_dir.mkdir(parents=True)
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots={
+                ContextKeys.PLAN_DIR: str(plan_dir),
+                ContextKeys.WORKSPACE_ROOT: str(workspace),
+            },
+        )
+        harness.run()
+
+        assert harness.agent.reverts
+        for directive in harness.agent.reverts:
+            assert directive.root == str(workspace)
+            assert directive.exclude == ("plans/plan-2026-07-22T000000-abcdef12",)
+            assert str(plan_dir) not in " ".join(directive.commands)
+
+    def test_a_plan_directory_outside_the_workspace_needs_no_exclusion(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots=roots,
+        )
+        harness.run()
+
+        assert harness.agent.reverts
+        assert all(d.exclude == () for d in harness.agent.reverts)
+
+    def test_nothing_is_executed_without_a_revert_callback(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots=roots,
+        )
+        harness.run()
+
+        assert harness.agent.reverts
+        assert harness.approvals.count(APPROVAL_REVERT) == 0
+
+    def test_a_supplied_callback_is_still_gated_by_the_human(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        executed: list[Any] = []
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder(
+                {APPROVAL_LEASH: False, APPROVAL_REVERT: False}
+            ),
+            roots=roots,
+            revert_callback=lambda directive: bool(executed.append(directive)),
+        )
+        harness.run()
+
+        assert harness.approvals.count(APPROVAL_REVERT) >= 1
+        assert executed == []
+
+    def test_an_approved_callback_receives_the_scoped_directive(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        executed: list[Any] = []
+
+        def revert(directive: Any) -> bool:
+            executed.append(directive)
+            return True
+
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots=roots,
+            revert_callback=revert,
+        )
+        harness.run()
+
+        assert executed
+        assert executed[0].commands == harness_module._REVERT_COMMANDS
+
+    def test_a_raising_callback_does_not_crash_the_turn(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots=roots,
+            revert_callback=lambda directive: (_ for _ in ()).throw(
+                RuntimeError("git is not installed")
+            ),
+        )
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
+
+    def test_a_run_with_no_workspace_root_computes_no_directive(
+        self, make_harness, plan_dir
+    ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots={ContextKeys.PLAN_DIR: str(plan_dir)},
+        )
+        harness.run()
+
+        assert harness.agent.reverts == ()
+
+
+class TestCloseAudit:
+    """``audit()``'s second call site: advisory, never a blocker."""
+
+    def test_close_records_the_audit(self, make_harness, roots, plan_dir) -> None:
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(_traverse_script(), roots=roots)
+        harness.run()
+
+        assert harness.agent.audit_issues is not None
+        assert all(isinstance(issue, Issue) for issue in harness.agent.audit_issues)
+
+    def test_audit_findings_do_not_block_the_close(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The CLOSE gate is a HUMAN decision (invariant I6), not an audit."""
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(_traverse_script(), roots=roots)
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.CLOSE) == 1
+        assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is True
+        assert harness.agent.audit_issues
+        assert any(issue.is_error for issue in harness.agent.audit_issues)
+
+    def test_a_run_that_never_closes_records_no_audit(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+            roots=roots,
+        )
+        harness.run()
+
+        assert harness.agent.audit_issues is None
+
+
+class TestTheC1FailOpenIsStillShut:
+    """The seam must not re-open what step 20 closed."""
+
+    def test_a_fabricating_llm_still_cannot_open_a_gate_with_artifacts_wired(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        _seed_plan_directory(plan_dir)
+        harness = make_harness(
+            _all_failing_script(),
+            approvals=ApprovalRecorder(default=False),
+            roots=roots,
+            extraction_data=FABRICATED_DRIVER_OWNED,
+        )
+        result = harness.run()
+
+        assert result.final_context[ContextKeys.PLAN_APPROVED] is False
+        assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is False
+        assert harness.worker.count_for(HarnessStates.CLOSE) == 0
+        assert harness.agent.audit_issues is None
+
+    def test_state_md_records_the_drivers_counters_not_the_models(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The one artifact the driver writes is written from driver-owned state."""
+        harness = make_harness(
+            _all_failing_script(),
+            approvals=ApprovalRecorder(default=False),
+            roots=roots,
+            extraction_data=FABRICATED_DRIVER_OWNED,
+        )
+        harness.run()
+
+        doc = StateDoc.from_markdown((plan_dir / ArtifactNames.STATE).read_text())
+        assert doc.iteration == 0
+        assert doc.current_step.startswith("0 of 1")
