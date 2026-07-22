@@ -1,0 +1,30 @@
+{
+  "arm": "native",
+  "bench_id": "l4-execute-write",
+  "block": "B0",
+  "finished_at": "2026-07-22T13:37:56Z",
+  "k_bytes_on_disk": 14,
+  "k_content_matched": 2,
+  "k_success": 14,
+  "k_write_tool_issued": 15,
+  "manifest": "manifest_native.json",
+  "n": 40,
+  "started_at": "2026-07-22T13:15:56Z",
+  "status": "complete",
+  "wilson_bytes_on_disk": [
+    0.2213,
+    0.5049
+  ],
+  "wilson_content_matched": [
+    0.0138,
+    0.165
+  ],
+  "wilson_success": [
+    0.2213,
+    0.5049
+  ],
+  "wilson_write_tool_issued": [
+    0.2422,
+    0.5297
+  ]
+}
