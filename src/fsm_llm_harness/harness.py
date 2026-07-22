@@ -1680,7 +1680,9 @@ class HarnessAgent(BaseAgent):
             # The protocol's own Fix-Attempts grammar, which
             # `StateDoc.fix_attempt_count` -- and therefore the `leash-cap` gate
             # -- counts. One line per attempt already spent on THIS step.
-            fix_attempts=[f"Step {step}, attempt {index}" for index in range(1, attempts + 1)],
+            fix_attempts=[
+                f"Step {step}, attempt {index}" for index in range(1, attempts + 1)
+            ],
             change_manifest=list(existing.change_manifest) if existing else [],
             last_transition=f"{context.get('_previous_state') or 'INIT'} → {state.upper()}",
             transition_history=list(existing.transition_history) if existing else [],
@@ -2397,9 +2399,7 @@ class HarnessAgent(BaseAgent):
         self._emit_execute_leash(context, directive, step=step, attempts=attempts)
         return directive
 
-    def _revert_uncommitted(
-        self, context: Mapping[str, Any]
-    ) -> RevertDirective | None:
+    def _revert_uncommitted(self, context: Mapping[str, Any]) -> RevertDirective | None:
         """Compute -- and only then, if permitted, execute -- the revert.
 
         Returns:
@@ -2456,8 +2456,11 @@ class HarnessAgent(BaseAgent):
         if plan_dir is None:
             return ()
         try:
-            relative = Path(plan_dir).expanduser().resolve().relative_to(
-                Path(root).expanduser().resolve()
+            relative = (
+                Path(plan_dir)
+                .expanduser()
+                .resolve()
+                .relative_to(Path(root).expanduser().resolve())
             )
         except (OSError, ValueError):
             return ()  # outside the workspace: nothing to spare, D-009 holds
@@ -2586,9 +2589,7 @@ class HarnessAgent(BaseAgent):
     ) -> None:
         """PC-EXECUTE-LEASH: the block that is emitted for this slug and no other."""
         directory = self._plan_directory(context)
-        revert = (
-            "no workspace_root to revert" if directive is None else str(directive)
-        )
+        revert = "no workspace_root to revert" if directive is None else str(directive)
         self._emit_contract(
             "PC-EXECUTE-LEASH",
             {
@@ -2722,9 +2723,7 @@ class HarnessAgent(BaseAgent):
         return ", ".join(names) if names else "none on disk"
 
     @staticmethod
-    def _attempt_digest(
-        context: Mapping[str, Any], step: int, attempts: int
-    ) -> str:
+    def _attempt_digest(context: Mapping[str, Any], step: int, attempts: int) -> str:
         """Both failed attempts on *step*, from the driver's own role ledger."""
         history = context.get(ContextKeys.ROLE_RESULTS)
         rows = [

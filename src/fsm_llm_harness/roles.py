@@ -798,6 +798,7 @@ _BYTE_WRITING_TOOLS: Mapping[str, str] = MappingProxyType(
     }
 )
 
+
 def _verified_writes(
     result: AgentResult,
     *,

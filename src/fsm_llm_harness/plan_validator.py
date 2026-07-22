@@ -213,7 +213,9 @@ def _iteration_of(doc: StateDoc) -> int:
     taking the maximum makes the counter able to over-count (which only halts
     sooner) but never to under-count.
     """
-    derived = sum(1 for line in doc.transition_history if _EXECUTE_REFLECT_RE.search(line))
+    derived = sum(
+        1 for line in doc.transition_history if _EXECUTE_REFLECT_RE.search(line)
+    )
     return max(doc.iteration, derived)
 
 
@@ -528,7 +530,10 @@ def _check_decisions(directory: PlanDirectory, issues: list[Issue]) -> None:
     if text is None:
         issues.append(
             _issue(
-                Severity.ERROR, "decisions-schema", "is missing", ArtifactNames.DECISIONS
+                Severity.ERROR,
+                "decisions-schema",
+                "is missing",
+                ArtifactNames.DECISIONS,
             )
         )
         return
@@ -615,9 +620,7 @@ def _check_progress(directory: PlanDirectory, issues: list[Issue]) -> None:
     text = _read(directory, ArtifactNames.PROGRESS)
     if text is None:
         issues.append(
-            _issue(
-                Severity.WARNING, "progress", "is missing", ArtifactNames.PROGRESS
-            )
+            _issue(Severity.WARNING, "progress", "is missing", ArtifactNames.PROGRESS)
         )
         return
     doc = _parse(text, ProgressDoc, issues, "progress", ArtifactNames.PROGRESS)

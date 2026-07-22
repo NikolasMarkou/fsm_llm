@@ -389,7 +389,9 @@ class TestResultTypes:
         assert str(result) == "GATE:PASS"
 
     def test_a_failing_gate_exits_two_and_renders_its_slug(self) -> None:
-        result = GateResult(passed=False, slug=GateSlug.LEASH_CAP, detail="attempts=2 cap=2")
+        result = GateResult(
+            passed=False, slug=GateSlug.LEASH_CAP, detail="attempts=2 cap=2"
+        )
         assert result.exit_code == 2
         assert str(result) == "GATE:FAIL [leash-cap] attempts=2 cap=2"
 
@@ -418,7 +420,10 @@ class TestResultTypes:
 
     def test_issue_renders_its_tag_and_artifact(self) -> None:
         issue = Issue(
-            severity=Severity.WARNING, check="leash", message="3 attempts", artifact="state.md"
+            severity=Severity.WARNING,
+            check="leash",
+            message="3 attempts",
+            artifact="state.md",
         )
         assert str(issue) == "[leash] state.md: 3 attempts"
         assert not issue.is_error
@@ -439,7 +444,10 @@ class TestPreStepGate:
         assert result.exit_code == 2
 
     def test_no_plan_when_state_md_is_absent(self, tmp_path: Path) -> None:
-        assert pre_step_gate(make_plan_dir(tmp_path, state_md=None)).slug == GateSlug.NO_PLAN
+        assert (
+            pre_step_gate(make_plan_dir(tmp_path, state_md=None)).slug
+            == GateSlug.NO_PLAN
+        )
 
     def test_no_plan_when_state_md_does_not_parse(self, tmp_path: Path) -> None:
         plan_dir = make_plan_dir(tmp_path, state_md="not a protocol artifact at all\n")
@@ -455,28 +463,38 @@ class TestPreStepGate:
     def test_the_gate_writes_nothing_at_all(self, tmp_path: Path) -> None:
         plan_dir = make_plan_dir(tmp_path)
         before = {
-            path: path.stat().st_mtime_ns for path in sorted(plan_dir.rglob("*")) if path.is_file()
+            path: path.stat().st_mtime_ns
+            for path in sorted(plan_dir.rglob("*"))
+            if path.is_file()
         }
         pre_step_gate(plan_dir)
         after = {
-            path: path.stat().st_mtime_ns for path in sorted(plan_dir.rglob("*")) if path.is_file()
+            path: path.stat().st_mtime_ns
+            for path in sorted(plan_dir.rglob("*"))
+            if path.is_file()
         }
         assert before == after
 
     @pytest.mark.parametrize("state", ["explore", "plan", "reflect", "pivot", "close"])
-    def test_wrong_state_for_every_non_execute_state(self, tmp_path: Path, state: str) -> None:
+    def test_wrong_state_for_every_non_execute_state(
+        self, tmp_path: Path, state: str
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(state=state.upper()))
         result = pre_step_gate(plan_dir)
         assert result.slug == GateSlug.WRONG_STATE
         assert result.detail == f"expected=EXECUTE actual={state.upper()}"
 
     @pytest.mark.parametrize("attempts", [0, 1])
-    def test_leash_cap_does_not_fire_below_the_cap(self, tmp_path: Path, attempts: int) -> None:
+    def test_leash_cap_does_not_fire_below_the_cap(
+        self, tmp_path: Path, attempts: int
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(attempts=attempts))
         assert pre_step_gate(plan_dir).passed
 
     @pytest.mark.parametrize("attempts", [2, 3, 4])
-    def test_leash_cap_hard_blocks_the_third_spawn(self, tmp_path: Path, attempts: int) -> None:
+    def test_leash_cap_hard_blocks_the_third_spawn(
+        self, tmp_path: Path, attempts: int
+    ) -> None:
         # THE GATE FIRES AT 2. `audit()` uses 3/4+ for the same counter; see
         # `test_the_two_leash_tiers_are_deliberately_different`.
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(attempts=attempts))
@@ -485,7 +503,9 @@ class TestPreStepGate:
         assert result.detail == f"attempts={attempts} cap={Defaults.MAX_FIX_ATTEMPTS}"
 
     @pytest.mark.parametrize("iteration", [0, 1, 5])
-    def test_iteration_cap_does_not_fire_below_six(self, tmp_path: Path, iteration: int) -> None:
+    def test_iteration_cap_does_not_fire_below_six(
+        self, tmp_path: Path, iteration: int
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(iteration=iteration))
         assert pre_step_gate(plan_dir).passed
 
@@ -494,7 +514,10 @@ class TestPreStepGate:
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(iteration=iteration))
         result = pre_step_gate(plan_dir)
         assert result.slug == GateSlug.ITERATION_CAP
-        assert result.detail == f"iteration={iteration} hard-cap={Defaults.ITERATION_HARD_CAP}"
+        assert (
+            result.detail
+            == f"iteration={iteration} hard-cap={Defaults.ITERATION_HARD_CAP}"
+        )
 
     def test_iteration_is_derived_from_history_when_the_bump_was_forgotten(
         self, tmp_path: Path
@@ -508,14 +531,21 @@ class TestPreStepGate:
             GateSlug.ITERATION_CAP
         )
 
-    def test_the_declared_iteration_still_wins_when_it_is_higher(self, tmp_path: Path) -> None:
+    def test_the_declared_iteration_still_wins_when_it_is_higher(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(iteration=6))
         assert pre_step_gate(plan_dir).slug == GateSlug.ITERATION_CAP
 
     # -- order and short-circuit ----------------------------------------
 
     def test_the_slug_order_is_the_constants_order(self) -> None:
-        assert GateSlug.ORDER == ("no-plan", "wrong-state", "leash-cap", "iteration-cap")
+        assert GateSlug.ORDER == (
+            "no-plan",
+            "wrong-state",
+            "leash-cap",
+            "iteration-cap",
+        )
 
     def test_no_plan_wins_over_every_other_failure(self, tmp_path: Path) -> None:
         # state.md is absent, so wrong-state / leash-cap / iteration-cap cannot
@@ -576,7 +606,10 @@ class TestPreStepGate:
         assert pre_step_gate(plan_dir).passed
         assert pre_step_gate(plan_dir, max_fix_attempts=1).slug == GateSlug.LEASH_CAP
         assert pre_step_gate(plan_dir, iteration_cap=3).slug == GateSlug.ITERATION_CAP
-        assert pre_step_gate(plan_dir, expected_state="reflect").slug == GateSlug.WRONG_STATE
+        assert (
+            pre_step_gate(plan_dir, expected_state="reflect").slug
+            == GateSlug.WRONG_STATE
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -608,7 +641,9 @@ class TestAuditBaseline:
         )
         assert before == after
 
-    def test_audit_never_raises_for_an_unreadable_artifact(self, tmp_path: Path) -> None:
+    def test_audit_never_raises_for_an_unreadable_artifact(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path)
         # Over the DRIVER's read bound (storage.py D-037), not the agent-facing
         # 64 KB cap: fail CLOSED, as an issue, not a crash.
@@ -640,7 +675,9 @@ class TestAuditBaseline:
         assert any("D-004" in issue.message for issue in issues), tags(audit(plan_dir))
 
     def test_every_emitted_tag_is_registered(self, tmp_path: Path) -> None:
-        plan_dir = make_plan_dir(tmp_path, plan_md=None, decisions_md=None, state_md=None)
+        plan_dir = make_plan_dir(
+            tmp_path, plan_md=None, decisions_md=None, state_md=None
+        )
         assert set(tags(audit(plan_dir))) <= set(CHECKS)
 
 
@@ -665,7 +702,9 @@ class TestAuditState:
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(attempts=attempts))
         assert only(audit(plan_dir), "leash") == []
 
-    def test_three_attempts_warns_that_the_gate_was_passed(self, tmp_path: Path) -> None:
+    def test_three_attempts_warns_that_the_gate_was_passed(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(attempts=3))
         issues = only(audit(plan_dir), "leash")
         assert [issue.severity for issue in issues] == [Severity.WARNING]
@@ -680,7 +719,9 @@ class TestAuditState:
         assert [issue.severity for issue in issues] == [Severity.ERROR]
         assert "bypassed" in issues[0].message
 
-    def test_the_two_leash_tiers_are_deliberately_different(self, tmp_path: Path) -> None:
+    def test_the_two_leash_tiers_are_deliberately_different(
+        self, tmp_path: Path
+    ) -> None:
         """D-022: the gate fires at 2; the audit is silent at 2 and WARNs at 3.
 
         These thresholds are INTENTIONALLY not aligned.  The gate runs while a
@@ -696,14 +737,18 @@ class TestAuditState:
         assert only(audit(at_cap), "leash") == []  # legal in retrospect
 
         assert pre_step_gate(past_cap).slug == GateSlug.LEASH_CAP
-        assert [i.severity for i in only(audit(past_cap), "leash")] == [Severity.WARNING]
+        assert [i.severity for i in only(audit(past_cap), "leash")] == [
+            Severity.WARNING
+        ]
 
         assert Defaults.MAX_FIX_ATTEMPTS == 2
         assert Defaults.LEASH_AUDIT_WARN_ATTEMPTS == 3
         assert Defaults.LEASH_AUDIT_ERROR_ATTEMPTS == 4
 
     @pytest.mark.parametrize("iteration", [0, 1, 4])
-    def test_iterations_below_five_are_silent(self, tmp_path: Path, iteration: int) -> None:
+    def test_iterations_below_five_are_silent(
+        self, tmp_path: Path, iteration: int
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(iteration=iteration))
         assert only(audit(plan_dir), "iteration") == []
 
@@ -714,9 +759,13 @@ class TestAuditState:
         assert "decomposition" in issues[0].message
 
     @pytest.mark.parametrize("iteration", [6, 8])
-    def test_iteration_six_or_more_is_an_error(self, tmp_path: Path, iteration: int) -> None:
+    def test_iteration_six_or_more_is_an_error(
+        self, tmp_path: Path, iteration: int
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path, state_md=state_with(iteration=iteration))
-        assert [i.severity for i in only(audit(plan_dir), "iteration")] == [Severity.ERROR]
+        assert [i.severity for i in only(audit(plan_dir), "iteration")] == [
+            Severity.ERROR
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -737,8 +786,13 @@ class TestAuditPlan:
 
     def test_sections_out_of_order_are_a_section_error(self, tmp_path: Path) -> None:
         head, _, tail = PLAN_MD.partition("## Success Criteria")
-        swapped = head + "## Complexity Budget\n| Metric | Budget |\n|---|---|\n| Files | 4/4 |\n\n"
-        swapped += "## Success Criteria" + tail.replace("## Complexity Budget", "## Leftover")
+        swapped = (
+            head
+            + "## Complexity Budget\n| Metric | Budget |\n|---|---|\n| Files | 4/4 |\n\n"
+        )
+        swapped += "## Success Criteria" + tail.replace(
+            "## Complexity Budget", "## Leftover"
+        )
         issues = only(audit(make_plan_dir(tmp_path, plan_md=swapped)), "plan-section")
         assert [issue.severity for issue in issues] == [Severity.ERROR]
 
@@ -761,7 +815,9 @@ class TestAuditPlan:
         issues = only(audit(make_plan_dir(tmp_path, plan_md=emptied)), "plan-section")
         assert "Assumptions" in issues[0].message
 
-    def test_a_placeholder_complexity_budget_gets_its_own_tag(self, tmp_path: Path) -> None:
+    def test_a_placeholder_complexity_budget_gets_its_own_tag(
+        self, tmp_path: Path
+    ) -> None:
         blanked = PLAN_MD.replace(
             "| Metric | Budget | Notes |\n|---|---|---|\n"
             "| Files added — harness source | 4/4 | fixed by the module boundary |\n",
@@ -770,7 +826,9 @@ class TestAuditPlan:
         issues = audit(make_plan_dir(tmp_path, plan_md=blanked))
         assert tags(issues) == ["complexity"]
 
-    def test_backticked_angle_brackets_are_not_placeholders(self, tmp_path: Path) -> None:
+    def test_backticked_angle_brackets_are_not_placeholders(
+        self, tmp_path: Path
+    ) -> None:
         # `<think>` and `<hex8>` appear in the real plan.md; both are code spans.
         assert "`<think>`" in PLAN_MD and "-<hex8>`" in PLAN_MD
         assert _TEMPLATE_SLOT_RE.search("<think>") is not None  # would fire in prose
@@ -818,7 +876,9 @@ class TestPlaceholderDetection:
 
 class TestAuditDecisions:
     def test_a_missing_decisions_log_is_an_error(self, tmp_path: Path) -> None:
-        issues = only(audit(make_plan_dir(tmp_path, decisions_md=None)), "decisions-schema")
+        issues = only(
+            audit(make_plan_dir(tmp_path, decisions_md=None)), "decisions-schema"
+        )
         assert [issue.severity for issue in issues] == [Severity.ERROR]
 
     def test_a_missing_plan_id_preamble_is_an_error(self, tmp_path: Path) -> None:
@@ -828,56 +888,83 @@ class TestAuditDecisions:
 
     def test_a_preamble_naming_another_plan_is_an_error(self, tmp_path: Path) -> None:
         broken = DECISIONS_MD.replace(PLAN_ID, "plan-2026-01-01T000000-deadbeef", 1)
-        issues = only(audit(make_plan_dir(tmp_path, decisions_md=broken)), "preamble-mismatch")
+        issues = only(
+            audit(make_plan_dir(tmp_path, decisions_md=broken)), "preamble-mismatch"
+        )
         assert [issue.severity for issue in issues] == [Severity.ERROR]
 
     def test_a_gap_in_the_d_nnn_sequence_is_an_error(self, tmp_path: Path) -> None:
         broken = DECISIONS_MD.replace("## D-002 |", "## D-004 |")
-        issues = only(audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema")
+        issues = only(
+            audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema"
+        )
         assert [issue.severity for issue in issues] == [Severity.ERROR]
         assert "no gaps" in issues[0].message
 
-    def test_entries_that_do_not_start_at_d_001_are_an_error(self, tmp_path: Path) -> None:
+    def test_entries_that_do_not_start_at_d_001_are_an_error(
+        self, tmp_path: Path
+    ) -> None:
         broken = DECISIONS_MD.replace("## D-001 |", "## D-002 |").replace(
             "## D-002 | EXECUTE", "## D-003 | EXECUTE"
         )
-        assert only(audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema")
+        assert only(
+            audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema"
+        )
 
-    def test_a_trailing_title_on_the_header_line_is_rejected(self, tmp_path: Path) -> None:
+    def test_a_trailing_title_on_the_header_line_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
         """A documented real-world gotcha: the header grammar is exact."""
         broken = DECISIONS_MD.replace(
             "## D-001 | EXPLORE → PLAN | 2026-07-21",
             "## D-001 | EXPLORE → PLAN | 2026-07-21 — native_fc is the role arm",
         )
-        issues = only(audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema")
+        issues = only(
+            audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema"
+        )
         assert [issue.severity for issue in issues] == [Severity.ERROR]
         assert "D-NNN | PHASE | YYYY-MM-DD" in issues[0].message
 
     def test_a_malformed_date_is_rejected(self, tmp_path: Path) -> None:
         broken = DECISIONS_MD.replace("| 2026-07-21", "| 21-07-2026")
-        assert only(audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema")
+        assert only(
+            audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema"
+        )
 
     def test_a_missing_trade_off_line_is_an_error(self, tmp_path: Path) -> None:
         broken = re.sub(
-            r"\*\*Trade-off\*\*: Reliable.*?`output_schema`\.\n", "", DECISIONS_MD, flags=re.S
+            r"\*\*Trade-off\*\*: Reliable.*?`output_schema`\.\n",
+            "",
+            DECISIONS_MD,
+            flags=re.S,
         )
-        issues = only(audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema")
+        issues = only(
+            audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema"
+        )
         assert "Trade-off" in issues[0].message
 
-    def test_a_trade_off_without_at_the_cost_of_is_an_error(self, tmp_path: Path) -> None:
+    def test_a_trade_off_without_at_the_cost_of_is_an_error(
+        self, tmp_path: Path
+    ) -> None:
         broken = DECISIONS_MD.replace(
             "**at the cost of**\nlosing the free constrained decoding ReAct gets from `output_schema`.",
             "and nothing is given up.",
         )
-        issues = only(audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema")
+        issues = only(
+            audit(make_plan_dir(tmp_path, decisions_md=broken)), "decisions-schema"
+        )
         assert "at the cost of" in issues[0].message
 
-    def test_a_trade_off_wrapped_across_a_line_break_is_accepted(self, tmp_path: Path) -> None:
+    def test_a_trade_off_wrapped_across_a_line_break_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
         # The base fixture's D-001 wraps `**at the cost of**` onto the next line.
         assert "**at the cost of**\n" in DECISIONS_MD
         assert only(audit(make_plan_dir(tmp_path)), "decisions-schema") == []
 
-    def test_the_schema_example_in_a_comment_is_not_an_entry(self, tmp_path: Path) -> None:
+    def test_the_schema_example_in_a_comment_is_not_an_entry(
+        self, tmp_path: Path
+    ) -> None:
         assert "## D-001 | EXPLORE → PLAN | YYYY-MM-DD" in DECISIONS_MD
         assert only(audit(make_plan_dir(tmp_path)), "decisions-schema") == []
 
@@ -893,7 +980,9 @@ class TestAuditFindings:
         assert [issue.severity for issue in issues] == [Severity.WARNING]
 
     @pytest.mark.parametrize("keep", [0, 1, 2])
-    def test_fewer_than_three_indexed_findings_warns(self, tmp_path: Path, keep: int) -> None:
+    def test_fewer_than_three_indexed_findings_warns(
+        self, tmp_path: Path, keep: int
+    ) -> None:
         entries = FINDINGS_MD.split("## Index\n")[1].split("\n\n")[0].split("\n")
         thinned = FINDINGS_MD.replace("\n".join(entries), "\n".join(entries[:keep]))
         issues = only(audit(make_plan_dir(tmp_path, findings_md=thinned)), "findings")
@@ -906,19 +995,27 @@ class TestAuditFindings:
 
     def test_a_missing_index_section_warns(self, tmp_path: Path) -> None:
         broken = FINDINGS_MD.replace("## Key Constraints", "## Notes")
-        issues = only(audit(make_plan_dir(tmp_path, findings_md=broken)), "findings-index")
+        issues = only(
+            audit(make_plan_dir(tmp_path, findings_md=broken)), "findings-index"
+        )
         assert [issue.severity for issue in issues] == [Severity.WARNING]
 
-    def test_a_topic_file_missing_one_of_its_five_sections_warns(self, tmp_path: Path) -> None:
+    def test_a_topic_file_missing_one_of_its_five_sections_warns(
+        self, tmp_path: Path
+    ) -> None:
         broken = FINDINGS_TOPIC_MD.replace("## Risks & Unknowns", "## Risks")
         plan_dir = make_plan_dir(tmp_path, findings_topic_md=broken)
         issues = only(audit(plan_dir), "findings-topic")
         assert [issue.severity for issue in issues] == [Severity.WARNING]
         assert "Risks & Unknowns" in issues[0].message
 
-    def test_a_topic_file_that_is_not_markdown_at_all_is_an_error(self, tmp_path: Path) -> None:
+    def test_a_topic_file_that_is_not_markdown_at_all_is_an_error(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path, findings_topic_md="no heading here\n")
-        assert [i.severity for i in only(audit(plan_dir), "findings-topic")] == [Severity.ERROR]
+        assert [i.severity for i in only(audit(plan_dir), "findings-topic")] == [
+            Severity.ERROR
+        ]
 
 
 class TestAuditProgress:
@@ -932,9 +1029,11 @@ class TestAuditProgress:
         assert "Blocked" in issues[0].message
 
     def test_sections_out_of_order_warn(self, tmp_path: Path) -> None:
-        broken = PROGRESS_MD.replace("## In Progress", "## TEMP").replace(
-            "## Remaining", "## In Progress"
-        ).replace("## TEMP", "## Remaining")
+        broken = (
+            PROGRESS_MD.replace("## In Progress", "## TEMP")
+            .replace("## Remaining", "## In Progress")
+            .replace("## TEMP", "## Remaining")
+        )
         issues = only(audit(make_plan_dir(tmp_path, progress_md=broken)), "progress")
         assert any("out of order" in issue.message for issue in issues)
 
@@ -949,9 +1048,17 @@ class TestAuditVerification:
 
     @pytest.mark.parametrize(
         "bullet",
-        ["Criteria passed", "Regressions", "Scope drift", "Simplification blockers", "Recommendation"],
+        [
+            "Criteria passed",
+            "Regressions",
+            "Scope drift",
+            "Simplification blockers",
+            "Recommendation",
+        ],
     )
-    def test_each_missing_verdict_bullet_warns(self, tmp_path: Path, bullet: str) -> None:
+    def test_each_missing_verdict_bullet_warns(
+        self, tmp_path: Path, bullet: str
+    ) -> None:
         broken = re.sub(rf"^- {re.escape(bullet)}:.*$", "", VERIFICATION_MD, flags=re.M)
         issues = only(audit(make_plan_dir(tmp_path, verification_md=broken)), "verdict")
         assert any(bullet in issue.message for issue in issues)
@@ -965,7 +1072,9 @@ class TestAuditVerification:
         assert any("out of the required order" in issue.message for issue in issues)
 
     def test_an_illegal_recommendation_warns(self, tmp_path: Path) -> None:
-        broken = VERIFICATION_MD.replace("→ EXECUTE (continue with step 10)", "→ SHIP IT")
+        broken = VERIFICATION_MD.replace(
+            "→ EXECUTE (continue with step 10)", "→ SHIP IT"
+        )
         issues = only(audit(make_plan_dir(tmp_path, verification_md=broken)), "verdict")
         assert any("SHIP" in issue.message for issue in issues)
 
@@ -973,7 +1082,9 @@ class TestAuditVerification:
     def test_each_missing_mandatory_additional_check_warns(
         self, tmp_path: Path, check: str
     ) -> None:
-        broken = re.sub(rf"^\| {re.escape(check)} \|.*$", "", VERIFICATION_MD, flags=re.M)
+        broken = re.sub(
+            rf"^\| {re.escape(check)} \|.*$", "", VERIFICATION_MD, flags=re.M
+        )
         issues = only(audit(make_plan_dir(tmp_path, verification_md=broken)), "verdict")
         assert any(check in issue.message for issue in issues)
 
@@ -981,8 +1092,12 @@ class TestAuditVerification:
     def test_a_claimed_row_with_rejected_evidence_warns(
         self, tmp_path: Path, evidence: str
     ) -> None:
-        broken = VERIFICATION_MD.replace("| PASS | 5/5 runs wrote bytes |", f"| PASS | {evidence} |")
-        issues = only(audit(make_plan_dir(tmp_path, verification_md=broken)), "evidence")
+        broken = VERIFICATION_MD.replace(
+            "| PASS | 5/5 runs wrote bytes |", f"| PASS | {evidence} |"
+        )
+        issues = only(
+            audit(make_plan_dir(tmp_path, verification_md=broken)), "evidence"
+        )
         assert [issue.severity for issue in issues] == [Severity.WARNING]
         assert "criterion 1 claims 'PASS'" in issues[0].message
 
@@ -992,11 +1107,17 @@ class TestAuditVerification:
         assert only(audit(make_plan_dir(tmp_path)), "evidence") == []
 
     @pytest.mark.parametrize("result", ["PENDING", "BLOCKED", "N/A"])
-    def test_every_unclaimed_verdict_word_is_exempt(self, tmp_path: Path, result: str) -> None:
+    def test_every_unclaimed_verdict_word_is_exempt(
+        self, tmp_path: Path, result: str
+    ) -> None:
         broken = VERIFICATION_MD.replace(
-            "| PASS | 5/5 runs wrote bytes |", f"| **{result} — see the RCA** | looks good |"
+            "| PASS | 5/5 runs wrote bytes |",
+            f"| **{result} — see the RCA** | looks good |",
         )
-        assert only(audit(make_plan_dir(tmp_path, verification_md=broken)), "evidence") == []
+        assert (
+            only(audit(make_plan_dir(tmp_path, verification_md=broken)), "evidence")
+            == []
+        )
 
     @pytest.mark.parametrize(
         ("cell", "expected"),
@@ -1021,13 +1142,17 @@ class TestAuditVerification:
 
 class TestAuditChangelog:
     def test_a_missing_changelog_warns(self, tmp_path: Path) -> None:
-        issues = only(audit(make_plan_dir(tmp_path, changelog_md=None)), "changelog-malformed")
+        issues = only(
+            audit(make_plan_dir(tmp_path, changelog_md=None)), "changelog-malformed"
+        )
         assert [issue.severity for issue in issues] == [Severity.WARNING]
 
     def test_a_well_formed_ledger_is_clean(self, tmp_path: Path) -> None:
         assert only(audit(make_plan_dir(tmp_path)), "changelog-malformed") == []
 
-    def test_the_header_quoting_the_format_is_not_read_as_an_entry(self, tmp_path: Path) -> None:
+    def test_the_header_quoting_the_format_is_not_read_as_an_entry(
+        self, tmp_path: Path
+    ) -> None:
         assert "| iter-N/step-M | commit |" in CHANGELOG_MD
         assert only(audit(make_plan_dir(tmp_path)), "changelog-malformed") == []
 
@@ -1051,7 +1176,9 @@ class TestAuditChangelog:
             "decision_ref": "D-001",
         }[field]
         broken = CHANGELOG_MD.replace(good, bad, 1)
-        issues = only(audit(make_plan_dir(tmp_path, changelog_md=broken)), "changelog-malformed")
+        issues = only(
+            audit(make_plan_dir(tmp_path, changelog_md=broken)), "changelog-malformed"
+        )
         assert [issue.severity for issue in issues] == [Severity.WARNING]
         assert field in issues[0].message
 
@@ -1068,8 +1195,12 @@ class TestAuditChangelog:
         broken = CHANGELOG_MD.replace("| D-001 |", "| D-097 |").replace(
             "| - | repair sentinel", "| D-098 | repair sentinel"
         )
-        issues = only(audit(make_plan_dir(tmp_path, changelog_md=broken)), "changelog-dref-orphan")
-        assert sorted(re.search(r"D-\d{3}", issue.message).group() for issue in issues) == [
+        issues = only(
+            audit(make_plan_dir(tmp_path, changelog_md=broken)), "changelog-dref-orphan"
+        )
+        assert sorted(
+            re.search(r"D-\d{3}", issue.message).group() for issue in issues
+        ) == [
             "D-097",
             "D-098",
         ]
@@ -1078,19 +1209,25 @@ class TestAuditChangelog:
         broken = CHANGELOG_MD.replace("radius:LOW(0)", "radius:LOW(-1)").replace(
             "radius:LOW(2)", "radius:BLAST(2)"
         )
-        issues = only(audit(make_plan_dir(tmp_path, changelog_md=broken)), "changelog-malformed")
+        issues = only(
+            audit(make_plan_dir(tmp_path, changelog_md=broken)), "changelog-malformed"
+        )
         assert [issue.message.split(":")[0] for issue in issues] == ["line 4", "line 5"]
 
     def test_a_decision_ref_with_no_matching_entry_warns(self, tmp_path: Path) -> None:
         broken = CHANGELOG_MD.replace("| D-001 |", "| D-099 |")
-        issues = only(audit(make_plan_dir(tmp_path, changelog_md=broken)), "changelog-dref-orphan")
+        issues = only(
+            audit(make_plan_dir(tmp_path, changelog_md=broken)), "changelog-dref-orphan"
+        )
         assert [issue.severity for issue in issues] == [Severity.WARNING]
         assert "D-099" in issues[0].message
 
     def test_a_dash_decision_ref_is_never_an_orphan(self, tmp_path: Path) -> None:
         assert only(audit(make_plan_dir(tmp_path)), "changelog-dref-orphan") == []
 
-    def test_the_join_still_runs_when_decisions_fails_its_schema(self, tmp_path: Path) -> None:
+    def test_the_join_still_runs_when_decisions_fails_its_schema(
+        self, tmp_path: Path
+    ) -> None:
         # A gap in the D-NNN sequence rejects the DOCUMENT; the join reads the
         # headers directly so it keeps working, and stays permissive.
         broken = DECISIONS_MD.replace("## D-002 |", "## D-005 |")
@@ -1123,11 +1260,15 @@ class TestAuditCheckpoints:
         issues = only(audit(plan_dir), "checkpoints")
         assert any("cp-NNN-iterN.md" in issue.message for issue in issues)
 
-    def test_a_checkpoint_without_the_lockfiles_section_warns(self, tmp_path: Path) -> None:
+    def test_a_checkpoint_without_the_lockfiles_section_warns(
+        self, tmp_path: Path
+    ) -> None:
         broken = CHECKPOINT_MD.replace(
             "## Lockfiles snapshotted:\n- none (no package manager touched)\n\n", ""
         )
-        issues = only(audit(make_plan_dir(tmp_path, checkpoint_md=broken)), "checkpoints")
+        issues = only(
+            audit(make_plan_dir(tmp_path, checkpoint_md=broken)), "checkpoints"
+        )
         assert any("Lockfiles snapshotted" in issue.message for issue in issues)
 
     def test_a_complete_checkpoint_is_clean(self, tmp_path: Path) -> None:
@@ -1146,7 +1287,8 @@ class TestAuditCrossPlan:
     def test_lessons_over_its_line_cap_is_an_error(self, tmp_path: Path) -> None:
         padded = LESSONS_MD.replace(
             "## Codebase Gotchas\n",
-            "## Codebase Gotchas\n" + "- [I:1] filler lesson\n" * Defaults.LESSONS_LINE_CAP,
+            "## Codebase Gotchas\n"
+            + "- [I:1] filler lesson\n" * Defaults.LESSONS_LINE_CAP,
         )
         issues = only(audit(make_plan_dir(tmp_path, lessons_md=padded)), "lessons-cap")
         assert [issue.severity for issue in issues] == [Severity.ERROR]
@@ -1155,7 +1297,9 @@ class TestAuditCrossPlan:
     def test_lessons_at_its_line_cap_is_clean(self, tmp_path: Path) -> None:
         assert only(audit(make_plan_dir(tmp_path)), "lessons-cap") == []
 
-    def test_the_system_atlas_over_its_line_cap_is_an_error(self, tmp_path: Path) -> None:
+    def test_the_system_atlas_over_its_line_cap_is_an_error(
+        self, tmp_path: Path
+    ) -> None:
         padded = SYSTEM_MD.replace(
             "## Known Patterns\n",
             "## Known Patterns\n" + "- filler\n" * Defaults.SYSTEM_LINE_CAP,
@@ -1173,7 +1317,9 @@ class TestAuditCrossPlan:
         assert [issue.severity for issue in issues] == [Severity.ERROR]
         assert "never evict this one" in issues[0].message
 
-    def test_an_archive_of_only_unprotected_lessons_is_clean(self, tmp_path: Path) -> None:
+    def test_an_archive_of_only_unprotected_lessons_is_clean(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path)
         (plan_dir.parent / ArtifactNames.LESSONS_ARCHIVE).write_text(
             "# Evicted\n- [I:1] cheap\n- [I:4] still not protected\n"
@@ -1196,7 +1342,10 @@ class TestAuditCrossPlan:
             "<!-- COMPRESSED-SUMMARY -->\n- x\n<!-- /COMPRESSED-SUMMARY -->\n"
             "<!-- /COMPRESSED-SUMMARY -->\n"
         )
-        assert any("nested" in issue.message for issue in only(audit(plan_dir), "compress-markers"))
+        assert any(
+            "nested" in issue.message
+            for issue in only(audit(plan_dir), "compress-markers")
+        )
 
     def test_a_balanced_block_is_clean(self, tmp_path: Path) -> None:
         plan_dir = make_plan_dir(tmp_path)
@@ -1211,7 +1360,9 @@ class TestAuditCrossPlan:
         assert "`<!-- COMPRESSED-SUMMARY -->`" in DECISIONS_MD
         assert only(audit(make_plan_dir(tmp_path)), "compress-markers") == []
 
-    def test_an_oversized_consolidated_file_is_reported_not_crashed(self, tmp_path: Path) -> None:
+    def test_an_oversized_consolidated_file_is_reported_not_crashed(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path)
         (plan_dir.parent / ArtifactNames.CROSS_DECISIONS).write_text(
             "# D\n" + "x" * DRIVER_READ_MAX_BYTES
@@ -1255,7 +1406,7 @@ class TestAuditOwnership:
 #: real anchor by the external ``validate-plan.mjs`` anchor audit, which scans
 #: `tests/` too -- so the fixtures below would become 12 bad-prefix findings
 #: against this repository's own plan directory.  Do NOT inline this constant.
-ANCHOR_WORD = "DECI" "SION"
+ANCHOR_WORD = "DECISION"
 
 
 def anchor(decision_id: str, *, prefix: str | None = PLAN_ID, marker: str = "#") -> str:
@@ -1279,12 +1430,15 @@ class TestAnchorScan:
 
     def test_an_absent_workspace_root_is_an_error(self, tmp_path: Path) -> None:
         issues = only(
-            audit(make_plan_dir(tmp_path), workspace_root=tmp_path / "gone"), "anchor-orphan"
+            audit(make_plan_dir(tmp_path), workspace_root=tmp_path / "gone"),
+            "anchor-orphan",
         )
         assert [issue.severity for issue in issues] == [Severity.ERROR]
         assert not (tmp_path / "gone").exists()
 
-    def test_an_anchor_with_no_decision_entry_is_an_orphan(self, tmp_path: Path) -> None:
+    def test_an_anchor_with_no_decision_entry_is_an_orphan(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
         write_source(source, "roles.py", anchor("D-404") + "\nx = 1\n")
@@ -1295,8 +1449,14 @@ class TestAnchorScan:
     def test_an_anchor_with_a_matching_entry_is_clean(self, tmp_path: Path) -> None:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
-        write_source(source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n")
-        assert [tag for tag in tags(audit(plan_dir, workspace_root=source)) if "anchor" in tag] == []
+        write_source(
+            source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
+        )
+        assert [
+            tag
+            for tag in tags(audit(plan_dir, workspace_root=source))
+            if "anchor" in tag
+        ] == []
 
     def test_the_commit_tag_form_is_rejected(self, tmp_path: Path) -> None:
         """D-014's real defect: anchors keep `THHMMSS`, commit tags drop it."""
@@ -1315,16 +1475,30 @@ class TestAnchorScan:
         assert [issue.severity for issue in issues] == [Severity.WARNING]
         assert "roles.py:1" in issues[0].artifact
 
-    def test_another_plans_anchor_is_not_this_plans_business(self, tmp_path: Path) -> None:
+    def test_another_plans_anchor_is_not_this_plans_business(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
-        write_source(source, "roles.py", anchor("D-404", prefix="plan-2026-01-01T000000-deadbeef") + "\n")
-        assert [tag for tag in tags(audit(plan_dir, workspace_root=source)) if "anchor" in tag] == []
+        write_source(
+            source,
+            "roles.py",
+            anchor("D-404", prefix="plan-2026-01-01T000000-deadbeef") + "\n",
+        )
+        assert [
+            tag
+            for tag in tags(audit(plan_dir, workspace_root=source))
+            if "anchor" in tag
+        ] == []
 
-    def test_anchors_quoted_inside_the_plan_directory_are_skipped(self, tmp_path: Path) -> None:
+    def test_anchors_quoted_inside_the_plan_directory_are_skipped(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path)
         (plan_dir / "findings" / "quoting.md").write_text(
-            "# Finding: quoting\n\n## Summary\nThe anchor `" + anchor("D-404") + "` is prose.\n"
+            "# Finding: quoting\n\n## Summary\nThe anchor `"
+            + anchor("D-404")
+            + "` is prose.\n"
             "\n## Key Findings\n- x\n\n## Constraints\n- x\n\n## Code Patterns\n- x\n"
             "\n## Risks & Unknowns\n- x\n"
         )
@@ -1352,11 +1526,17 @@ class TestAnchorScan:
 
     # -- Anchor-Refs back-links -----------------------------------------
 
-    def test_an_anchored_decision_without_anchor_refs_is_an_error(self, tmp_path: Path) -> None:
-        broken = DECISIONS_MD.replace("**Anchor-Refs**: `src/fsm_llm_harness/roles.py:12`\n", "")
+    def test_an_anchored_decision_without_anchor_refs_is_an_error(
+        self, tmp_path: Path
+    ) -> None:
+        broken = DECISIONS_MD.replace(
+            "**Anchor-Refs**: `src/fsm_llm_harness/roles.py:12`\n", ""
+        )
         plan_dir = make_plan_dir(tmp_path, decisions_md=broken)
         source = tmp_path / "src"
-        write_source(source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n")
+        write_source(
+            source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
+        )
         issues = only(audit(plan_dir, workspace_root=source), "anchor-refs-missing")
         assert [issue.severity for issue in issues] == [Severity.ERROR]
         assert "D-001" in issues[0].message
@@ -1365,31 +1545,45 @@ class TestAnchorScan:
         # D-002 carries no Anchor-Refs and is anchored nowhere: that is correct.
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
-        write_source(source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n")
+        write_source(
+            source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
+        )
         assert only(audit(plan_dir, workspace_root=source), "anchor-refs-missing") == []
 
-    def test_a_back_link_to_a_file_with_no_such_anchor_warns(self, tmp_path: Path) -> None:
+    def test_a_back_link_to_a_file_with_no_such_anchor_warns(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
-        write_source(source, "fsm_llm_harness/tools.py", "\n" * 11 + anchor("D-001") + "\n")
+        write_source(
+            source, "fsm_llm_harness/tools.py", "\n" * 11 + anchor("D-001") + "\n"
+        )
         issues = only(audit(plan_dir, workspace_root=source), "anchor-refs-stale")
         assert [issue.severity for issue in issues] == [Severity.WARNING]
         assert "roles.py" in issues[0].message
 
-    def test_a_back_link_with_a_drifted_line_number_is_info(self, tmp_path: Path) -> None:
+    def test_a_back_link_with_a_drifted_line_number_is_info(
+        self, tmp_path: Path
+    ) -> None:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
-        write_source(source, "fsm_llm_harness/roles.py", "\n" * 40 + anchor("D-001") + "\n")
+        write_source(
+            source, "fsm_llm_harness/roles.py", "\n" * 40 + anchor("D-001") + "\n"
+        )
         issues = only(audit(plan_dir, workspace_root=source), "anchor-refs-stale")
         assert [issue.severity for issue in issues] == [Severity.INFO]
         assert "line 41" in issues[0].message
 
-    def test_prose_after_the_anchor_refs_line_is_not_a_reference(self, tmp_path: Path) -> None:
+    def test_prose_after_the_anchor_refs_line_is_not_a_reference(
+        self, tmp_path: Path
+    ) -> None:
         """The decisions parser folds an `**Outcome ...**` line into the value."""
         assert "`bench_step2.py:40`" in DECISIONS_MD
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
-        write_source(source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n")
+        write_source(
+            source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
+        )
         issues = only(audit(plan_dir, workspace_root=source), "anchor-refs-stale")
         assert issues == []
 

@@ -2020,9 +2020,7 @@ class TestBothGateChannelsAreRead:
 
     def test_a_dropped_key_leaves_the_gate_shut(self, make_harness) -> None:
         """No plan directory means nothing to count: the key must not appear."""
-        delta = self._explore_delta(
-            make_harness, structured=None, final_context={}
-        )
+        delta = self._explore_delta(make_harness, structured=None, final_context={})
 
         assert ContextKeys.FINDINGS_COUNT not in delta
 
@@ -2352,9 +2350,9 @@ class TestExploreBoundIsSizedFromTheMeasuredHorizon:
         """
         total = 1 + superseded
 
-        assert (
-            total < MEASURED_YIELD_HORIZON or total > MEASURED_YIELD_HORIZON + 3
-        ), f"{superseded} is no longer excluded; the horizon moved"
+        assert total < MEASURED_YIELD_HORIZON or total > MEASURED_YIELD_HORIZON + 3, (
+            f"{superseded} is no longer excluded; the horizon moved"
+        )
 
     def test_the_raised_bound_is_still_exactly_enforced(self, make_harness) -> None:
         """Bigger is not looser: the default bound is spent, then it HALTS."""
@@ -2915,9 +2913,7 @@ class TestDriverAssignedExploreTopics:
         )
         result = harness.run()
 
-        assert not any(
-            "assigned" in str(key).lower() for key in result.final_context
-        )
+        assert not any("assigned" in str(key).lower() for key in result.final_context)
         assert all(
             "assigned_topic" not in dict(request.context)
             for request in harness.worker.requests
@@ -3167,9 +3163,7 @@ class TestFourSlugsFourActions:
         agent = harness.agent
 
         assert agent._pre_step_gate(_gate_context()) is None
-        blocked = agent._pre_step_gate(
-            _gate_context(**{ContextKeys.FIX_ATTEMPTS: 2})
-        )
+        blocked = agent._pre_step_gate(_gate_context(**{ContextKeys.FIX_ATTEMPTS: 2}))
         assert blocked is not None
         assert blocked[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
 
@@ -3228,13 +3222,13 @@ class TestFourSlugsFourActions:
     ) -> None:
         """The cap ends the run through a real halt, with no leash block."""
         _seed_findings(plan_dir, "alpha", "beta", "gamma")
-        harness = make_harness(
-            _traverse_script(), roots=roots, iteration_hard_cap=1
-        )
+        harness = make_harness(_traverse_script(), roots=roots, iteration_hard_cap=1)
         result = harness.run()
 
         assert result.success is False
-        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.ITERATION_CAP
+        assert (
+            result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.ITERATION_CAP
+        )
         assert "PC-EXECUTE-LEASH" not in _names(harness.agent)
         assert harness.worker.count_for(HarnessStates.EXECUTE) == 0
         # The cap ENDS the run through its own halt.  Without the deferred
@@ -3288,7 +3282,9 @@ class TestStateDocSync:
 
         doc = StateDoc.from_markdown((plan_dir / ArtifactNames.STATE).read_text())
         assert doc.transition_history == list(history)
-        assert not any("EXECUTE" in line and "REFLECT" in line for line in doc.transition_history)
+        assert not any(
+            "EXECUTE" in line and "REFLECT" in line for line in doc.transition_history
+        )
 
     def test_the_driver_does_not_create_the_plan_directory(
         self, make_harness, tmp_path
@@ -3401,7 +3397,9 @@ class TestResumeFromStateMd:
     ) -> None:
         _seed_findings(plan_dir, "alpha", "beta", "gamma")
         (plan_dir / ArtifactNames.STATE).write_text(
-            _state_md(state=HarnessStates.EXECUTE, iteration=2, step="3 of 5", attempts=1)
+            _state_md(
+                state=HarnessStates.EXECUTE, iteration=2, step="3 of 5", attempts=1
+            )
         )
         harness = make_harness(_traverse_script(total_steps=5), roots=roots)
         harness.run()
@@ -3494,12 +3492,17 @@ class TestPresentationContracts:
         )
         harness.run()
 
-        blocks = [p for p in harness.agent.presentations if p.name == "PC-EXECUTE-LEASH"]
+        blocks = [
+            p for p in harness.agent.presentations if p.name == "PC-EXECUTE-LEASH"
+        ]
         assert blocks, _names(harness.agent)
         for block in blocks:
             assert block.missing_floor == ()
             assert "cp-000-iter1.md" in block.fields["checkpoints"]
-            assert "attempt" in block.fields["attempts"].lower() or "FAIL" in block.fields["attempts"]
+            assert (
+                "attempt" in block.fields["attempts"].lower()
+                or "FAIL" in block.fields["attempts"]
+            )
 
     def test_every_emitted_block_names_a_real_contract(
         self, make_harness, roots, plan_dir
@@ -3521,7 +3524,9 @@ class TestPresentationContracts:
         harness.run()
 
         starved = {
-            p.name: p.missing_floor for p in harness.agent.presentations if p.missing_floor
+            p.name: p.missing_floor
+            for p in harness.agent.presentations
+            if p.missing_floor
         }
         assert starved == {}, starved
 
@@ -3545,7 +3550,10 @@ class TestPresentationContracts:
         agent = make_harness(_traverse_script(), roots=roots).agent
         emitted = agent._emit_contract(
             "PC-EXECUTE-STEP",
-            {field: "   " for field in PRESENTATION_CONTRACTS["PC-EXECUTE-STEP"].required},
+            {
+                field: "   "
+                for field in PRESENTATION_CONTRACTS["PC-EXECUTE-STEP"].required
+            },
         )
 
         assert set(emitted.missing_floor) == set(
@@ -3570,7 +3578,9 @@ class TestPresentationContracts:
         )
         harness.run()
 
-        step_blocks = [p for p in harness.agent.presentations if p.name == "PC-EXECUTE-STEP"]
+        step_blocks = [
+            p for p in harness.agent.presentations if p.name == "PC-EXECUTE-STEP"
+        ]
         assert step_blocks
         assert step_blocks[0].fields["files"] == "src/fsm_llm_harness/harness.py"
         assert step_blocks[0].fields["commit"] == "abc1234"
@@ -3580,9 +3590,10 @@ class TestPresentationContracts:
         """The PC-PLAN field names are DERIVED from the 11 plan sections."""
         derived = {harness_module._contract_field(s) for s in PlanSchema.SECTIONS}
         assert derived <= set(PRESENTATION_CONTRACTS["PC-PLAN"].required)
-        assert harness_module._contract_field(
-            "Pre-Mortem & Falsification Signals"
-        ) == "pre-mortem"
+        assert (
+            harness_module._contract_field("Pre-Mortem & Falsification Signals")
+            == "pre-mortem"
+        )
 
     def test_contract_blocks_stay_out_of_the_fsm_context(
         self, make_harness, roots, plan_dir
@@ -3678,9 +3689,7 @@ class TestLeashRevertDirective:
         executed: list[Any] = []
         harness = make_harness(
             _failing_execute_script(),
-            approvals=ApprovalRecorder(
-                {APPROVAL_LEASH: False, APPROVAL_REVERT: False}
-            ),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False, APPROVAL_REVERT: False}),
             roots=roots,
             revert_callback=lambda directive: bool(executed.append(directive)),
         )
