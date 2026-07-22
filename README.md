@@ -276,7 +276,7 @@ make coverage       # Tests with coverage report
 - [FSM Design Patterns](docs/fsm_design.md) -- patterns, anti-patterns, real-world examples
 - [Handler Development](docs/handlers.md) -- 8 timing points, builder API, error handling
 
-Each extension package also ships a `CLAUDE.md` developer reference: [reasoning](src/fsm_llm_reasoning/CLAUDE.md), [workflows](src/fsm_llm_workflows/CLAUDE.md), [agents](src/fsm_llm_agents/CLAUDE.md), [monitor](src/fsm_llm_monitor/CLAUDE.md), [harness](src/fsm_llm_harness/CLAUDE.md). All but the harness also ship a package-level `README.md`.
+Each extension package also ships a `CLAUDE.md` developer reference: [reasoning](src/fsm_llm_reasoning/CLAUDE.md), [workflows](src/fsm_llm_workflows/CLAUDE.md), [agents](src/fsm_llm_agents/CLAUDE.md), [monitor](src/fsm_llm_monitor/CLAUDE.md), [harness](src/fsm_llm_harness/CLAUDE.md). Every package also ships a package-level `README.md`.
 
 ## Contributing
 
