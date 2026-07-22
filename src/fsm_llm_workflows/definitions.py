@@ -257,7 +257,7 @@ class WorkflowDefinition(BaseModel):
         if not self.initial_step_id:
             return False
 
-        # DECISION plan_2026-05-29_d9092060/D-005
+        # DECISION plan_2026-05-29_d9092060/D-005 [STALE]
         # NOTE: do NOT revert to the recursive has_cycle() inner function --
         # Python's default recursion limit (~1000) causes RecursionError on
         # linear workflows with >1000 steps. See decisions.md D-005.

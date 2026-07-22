@@ -3190,7 +3190,7 @@ def wilson_interval(successes: int, n: int) -> tuple[float, float]:
     return (100.0 * max(0.0, center - half), 100.0 * min(1.0, center + half))
 
 
-# DECISION plan-2026-07-20T144233-47e8c662/D-012
+# DECISION plan-2026-07-20T144233-47e8c662/D-012 [STALE]
 # The SHAPE rate is the PRIMARY REPORTED figure; the ROW rate remains the GATE.
 # DO NOT "finish the job" by re-denominating the two bounds tests
 # (`test_the_shipped_corpus_scores_inside_both_bounds_on_both_arms` and

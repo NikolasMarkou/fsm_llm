@@ -116,7 +116,7 @@ class BasePromptConfig:
 class BasePromptBuilder:
     """Base class with shared functionality for all prompt builders."""
 
-    # DECISION plan-2026-07-18T162030-a02151fe/D-017: ALLOW-list, not a deny-list.
+    # DECISION plan-2026-07-18T162030-a02151fe/D-017 [STALE]: ALLOW-list, not a deny-list.
     # Do NOT reintroduce a `_CRITICAL_TAGS` enumeration of structural tags to
     # escape. That design was a live injection bypass: the denylist and the tags
     # prompts.py actually emits were two hand-maintained lists, and they drifted —
@@ -135,12 +135,12 @@ class BasePromptBuilder:
     # attributes are not inspected, so `<b onclick="...">` passes through on the
     # strength of its tag name alone.
     _SAFE_TAGS: ClassVar[frozenset[str]] = frozenset({"b", "i"})
-    # DECISION plan-2026-07-18T162030-a02151fe/D-024
+    # DECISION plan-2026-07-18T162030-a02151fe/D-024 [STALE]
     # `\s*` after `</?` is load-bearing — do NOT drop it as noise. Without it the
     # pattern required a letter IMMEDIATELY after `<`, so `< task>` and
     # `<   persona>` were left unescaped while `<task>` was escaped. See D-024.
     #
-    # DECISION plan-2026-07-18T162030-a02151fe/D-026
+    # DECISION plan-2026-07-18T162030-a02151fe/D-026 [STALE]
     # BOTH `\s*` around the optional slash are load-bearing. D-024 placed one only
     # AFTER the slash, which closed the OPENER form and left the CLOSING form
     # wide open: `< /task>` was unmatched and reached the prompt raw, and
@@ -183,7 +183,7 @@ class BasePromptBuilder:
         if text is None:
             return ""
 
-        # DECISION plan-2026-07-18T162030-a02151fe/D-024
+        # DECISION plan-2026-07-18T162030-a02151fe/D-024 [STALE]
         # ORDER IS LOAD-BEARING. Newline stripping must run BEFORE escaping, not
         # after. Reversed (as it was), `<\ntask>x` did not match the tag pattern,
         # was left unescaped, and the newline strip THEN turned it into the live
@@ -286,7 +286,7 @@ class BasePromptBuilder:
             logger.warning(f"Unknown history strategy: {self.config.history_strategy}")
             return exchanges
 
-    # DECISION plan-2026-07-18T162030-a02151fe/D-020
+    # DECISION plan-2026-07-18T162030-a02151fe/D-020 [STALE]
     # Do NOT replace this with a token-budget cap mirroring
     # `_limit_history_by_token_budget`. A token budget makes the set of context
     # keys the model sees depend on the byte size of their VALUES, so one long
@@ -316,7 +316,7 @@ class BasePromptBuilder:
             )
         return result
 
-    # DECISION plan-2026-07-19T191147-4b664252/D-011
+    # DECISION plan-2026-07-19T191147-4b664252/D-011 [STALE]
     # This filter is the LAST line of defense before context text reaches the
     # LLM. `clean_context_keys` does NOT cover it: that function has exactly one
     # first-party caller (`pipeline.py`, with strip_forbidden_keys=False) and is
@@ -1365,7 +1365,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
 
         # Dynamic context (previously extracted fields)
         if self.config.include_context_data and dynamic_context:
-            # DECISION plan-2026-07-18T162030-a02151fe/D-025
+            # DECISION plan-2026-07-18T162030-a02151fe/D-025 [STALE]
             # This builder assembles its OWN context section rather than calling
             # `_build_enhanced_context_section`, so it does NOT inherit the
             # `max_context_keys` cap applied there — measured at 500/500 keys
@@ -1398,7 +1398,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 )
 
         # Conversation history (compact)
-        # DECISION plan-2026-07-19T191147-4b664252/D-012
+        # DECISION plan-2026-07-19T191147-4b664252/D-012 [STALE]
         # This block assembles its own history text, so it must apply the SAME
         # capping the base builders get from `_manage_conversation_history` --
         # it previously took `get_recent()` and emitted it whole, so a
@@ -1412,7 +1412,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             recent = instance.context.conversation.get_recent(
                 self.config.max_history_messages
             )
-            # DECISION plan-2026-07-19T191147-4b664252/D-019
+            # DECISION plan-2026-07-19T191147-4b664252/D-019 [STALE]
             # Emit ONE single-key dict per (role, message) pair. Do NOT collapse
             # an entry's roles into a single dict keyed by "user"/"system": the
             # role mapping is many-to-one (`"user" if role == "user" else
@@ -1451,13 +1451,13 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         sections.append("")
         sections.append(f"User message: {self._sanitize_text_for_prompt(user_message)}")
 
-        # DECISION plan_2026-05-31_f08da86d/D-002: literal "Continue." is INLINED,
+        # DECISION plan_2026-05-31_f08da86d/D-002 [STALE]: literal "Continue." is INLINED,
         # NOT imported from fsm_llm_agents.constants.CONTINUE_MESSAGE — core
         # (src/fsm_llm/) must never import the agents package. Do NOT replace this
         # with that import. The branch only ADDS guidance (it never suppresses
         # normal user-message extraction) so a real user typing "Continue." is
         # unharmed. See decisions.md D-002.
-        # DECISION plan-2026-07-18T051819-80b0bd4d/D-007: this sentinel test reads the
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-007 [STALE]: this sentinel test reads the
         # RAW user_message, NOT the sanitized copy emitted above. Do NOT collapse
         # the two into one local — see decisions.md D-007.
         if user_message.strip() == "Continue.":

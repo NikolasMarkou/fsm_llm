@@ -300,7 +300,7 @@ class WorkflowEngine:
                 result = await current_step.execute(instance.context)
 
             # Update context and history (filter internal keys to prevent overwrites).
-            # DECISION plan-2026-07-20T040150-876e7164/D-003
+            # DECISION plan-2026-07-20T040150-876e7164/D-003 [STALE]
             # TWO layers, and both are load-bearing:
             #   1. `has_internal_prefix` is the canonical predicate. Do NOT
             #      re-inline `k.startswith("_")` -- it is case-sensitive and
@@ -555,7 +555,7 @@ class WorkflowEngine:
         # Update instance
         instance = self.workflow_instances[instance_id]
 
-        # DECISION plan_2026-05-29_5b2fbb09/D-001
+        # DECISION plan_2026-05-29_5b2fbb09/D-001 [STALE]
         # If the event already fired, process_event has consumed the listener
         # and called _transition_to_state, which synchronously flips status to
         # RUNNING before its first await. A timeout firing during that (slow)

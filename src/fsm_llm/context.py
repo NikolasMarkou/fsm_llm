@@ -159,7 +159,7 @@ class ContextCompactor:
         return fallback_result
 
 
-# DECISION plan-2026-07-19T191147-4b664252/D-010
+# DECISION plan-2026-07-19T191147-4b664252/D-010 [STALE]
 # The depth bound is a SECURITY control, not a performance tweak, and the
 # behavior AT the bound is fail-CLOSED on purpose: a container nested deeper
 # than MAX_CONTEXT_FILTER_DEPTH is DROPPED, never passed through. Do NOT "fix"
@@ -249,7 +249,7 @@ def clean_context_keys(
             full_key = f"{path}.{key}" if path else str(key)
             removal_reason = ""
 
-            # DECISION plan-2026-07-19T191147-4b664252/D-017
+            # DECISION plan-2026-07-19T191147-4b664252/D-017 [STALE]
             # The `isinstance(key, str)` guard MUST stay ABOVE the emptiness
             # check. It used to sit below it, so `if not key` fired first and
             # `0`, `False`, `0.0` and `()` were destroyed as "empty key" --

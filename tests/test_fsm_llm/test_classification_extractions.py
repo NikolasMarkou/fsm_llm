@@ -811,7 +811,7 @@ class TestIntentNameCharsetMatchesSiblingIdentifiers:
         and `API.from_file` agree on a non-conformant intent name. This test
         fails if someone "simplifies" the rule into a `Field(pattern=)`.
 
-        # DECISION plan-2026-07-20T040150-876e7164/D-001
+        # DECISION plan-2026-07-20T040150-876e7164/D-001 [STALE]
         The original rationale here was that `Field(pattern=)` emits
         `string_pattern_mismatch`, "which validator.py's ALLOW-list (D-013)
         deliberately excludes". That is NO LONGER TRUE: the D-013 carve-out was

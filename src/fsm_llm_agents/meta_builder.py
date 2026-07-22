@@ -318,7 +318,7 @@ class MetaBuilderAgent:
 
         logger.debug(f"Extracted spec keys: {list(spec.keys())}")
 
-        # DECISION plan_2026-05-30_26c9510a/D-001: reject a JSON-schema echo —
+        # DECISION plan_2026-05-30_26c9510a/D-001 [STALE]: reject a JSON-schema echo —
         # small models sometimes return the type definition ({"type",
         # "properties","required"}) instead of a concrete artifact. Without
         # this guard, _assemble_fsm silently emits an empty stub ("Unnamed
@@ -561,7 +561,7 @@ class MetaBuilderAgent:
                 },
             }
 
-        # DECISION plan-2026-07-20T040150-876e7164/D-006: this clause used to be
+        # DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE]: this clause used to be
         # `except Exception as e: logger.error(...); return ""`. Do NOT restore
         # that. It reported a provider outage as an EMPTY ANSWER, which is
         # strictly worse than an exception: `_run_deterministic_pipeline` fed

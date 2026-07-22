@@ -159,7 +159,7 @@ class FileSessionStore(SessionStore):
             os.replace(tmp_name, str(path))
             logger.debug(f"Session saved: {session_id}")
         finally:
-            # DECISION plan-2026-07-18T162030-a02151fe/D-011
+            # DECISION plan-2026-07-18T162030-a02151fe/D-011 [STALE]
             # Do NOT "simplify" this back to `except OSError: ... raise`. That
             # shape leaked the temp file on every non-OSError exit (RuntimeError,
             # MemoryError, a TypeError out of json.dumps, KeyboardInterrupt).

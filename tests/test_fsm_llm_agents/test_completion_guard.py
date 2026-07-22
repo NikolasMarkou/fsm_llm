@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """Tests for the degenerate-completion guard (DECISION
-plan_2026-05-30_26c9510a/D-001) — a run with neither an answer key nor a tool
+plan_2026-05-30_26c9510a/D-001 [STALE]) — a run with neither an answer key nor a tool
 call must report success=False instead of leaking planner prose."""
 
 from fsm_llm_agents.base import BaseAgent
@@ -46,7 +46,7 @@ class TestCompletionGuard:
 
 
 class TestPlannerExecutionEvidence:
-    """Planner mode (DECISION plan_2026-05-31_cb91a9d5/D-001): when
+    """Planner mode (DECISION plan_2026-05-31_cb91a9d5/D-001 [STALE]): when
     execution_evidence_keys is supplied, success requires REAL execution
     evidence — an answer key and/or a `delegate` control-action ToolCall are
     NOT sufficient. Covers orchestrator/rewoo/plan_execute B6 filler-success."""

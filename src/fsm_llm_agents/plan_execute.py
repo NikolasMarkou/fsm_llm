@@ -105,7 +105,7 @@ class PlanExecuteAgent(BaseAgent):
             },
         )
 
-        # DECISION plan_2026-05-31_cb91a9d5/D-001: require ≥1 executed step —
+        # DECISION plan_2026-05-31_cb91a9d5/D-001 [STALE]: require ≥1 executed step —
         # a run that never left `plan` (weak decomposition) must not pass as
         # success on synthesis prose alone.
         return self._standard_run(
@@ -202,7 +202,7 @@ class PlanExecuteAgent(BaseAgent):
 
             step_result = context.get("step_result", "")
             if step_result:
-                # DECISION plan_2026-05-31_f08da86d/D-001: tie the per-entry
+                # DECISION plan_2026-05-31_f08da86d/D-001 [STALE]: tie the per-entry
                 # `success` flag to a REAL tool execution for this step, not to
                 # `not step_failed` alone. `step_failed` defaults False, so a
                 # weak model that NARRATES a step (zero tool calls) would set

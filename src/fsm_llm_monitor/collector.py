@@ -385,7 +385,7 @@ class EventCollector:
         """
         out: dict[str, str] = {}
         for k, v in ctx.items():
-            # DECISION plan-2026-07-20T040150-876e7164/D-003
+            # DECISION plan-2026-07-20T040150-876e7164/D-003 [STALE]
             # TWO layers: `has_internal_prefix` is the canonical security
             # predicate (do NOT re-inline `k.startswith("_")` -- case-sensitive
             # and blind to `system_`/`internal_`/`__`), and _CONTEXT_NOISE_KEYS

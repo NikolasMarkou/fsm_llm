@@ -267,7 +267,7 @@ class ReasoningEngine:
             reasoning_type_str = "analytical"  # Default
 
         # Allow CLI --type / initial_context override (R-ISSUE-003)
-        # DECISION plan_2026-05-29_d9092060/D-004
+        # DECISION plan_2026-05-29_d9092060/D-004 [STALE]
         # NOTE: preferred_reasoning_type is checked AFTER the normal priority chain.
         # Overriding earlier would bypass the FSM's own classified type which the
         # orchestrator FSM has already validated; we only apply the preference when
@@ -427,7 +427,7 @@ class ReasoningEngine:
 
                     # Execute sub-FSM with iteration limit
                     force_popped = False
-                    # DECISION plan_2026-05-29_73c30922/D-001 (FA-001): init here so the
+                    # DECISION plan_2026-05-29_73c30922/D-001 [STALE] (FA-001): init here so the
                     # force-pop path cannot raise UnboundLocalError if get_data() below
                     # raises before assigning it. The MR-NEW-005 fix sets force_popped=True
                     # before get_data(), which skips the normal-completion assignment.

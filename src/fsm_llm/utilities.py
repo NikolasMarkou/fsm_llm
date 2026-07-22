@@ -224,7 +224,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # Find all potential JSON start positions
         brace_positions = [m.start() for m in re.finditer(r"\{", text)]
 
-        # DECISION plan-2026-07-19T191147-4b664252/D-002
+        # DECISION plan-2026-07-19T191147-4b664252/D-002 [STALE]
         # The closing partner of every `{` is precomputed ONCE, innermost-first,
         # instead of rescanning text[start_pos:] from every start position. That
         # rescan was O(n^2): 20,000 bare `{` characters took 18.2s of CPU on
@@ -247,7 +247,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         closing_index = _match_brace_partners(text, brace_positions)
 
         skip_until = -1
-        # DECISION plan-2026-07-18T162030-a02151fe/D-023
+        # DECISION plan-2026-07-18T162030-a02151fe/D-023 [STALE]
         # This strategy is FIRST-wins: it returns on the first successful parse.
         # That disagrees with Strategy 4 below and with
         # llm.py::_extract_content_from_thinking, both of which prefer the LAST

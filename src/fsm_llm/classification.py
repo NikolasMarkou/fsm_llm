@@ -40,7 +40,7 @@ from .utilities import (
 )
 
 # Type alias for intent handler functions
-# DECISION plan-2026-07-19T124525-9899fbac/D-001: the entity VALUE type is
+# DECISION plan-2026-07-19T124525-9899fbac/D-001 [STALE]: the entity VALUE type is
 # `str | None` deliberately — do NOT narrow it back to `dict[str, str]`.
 # `coerce_entity_values` (definitions.py) intentionally preserves `None` for an
 # entity the LLM reported as absent, so `dict[str, str]` was an annotation that
@@ -202,7 +202,7 @@ class Classifier:
         )
         call_params["messages"] = messages
 
-        # DECISION plan-2026-07-19T191147-4b664252/D-004: wrap the litellm boundary
+        # DECISION plan-2026-07-19T191147-4b664252/D-004 [STALE]: wrap the litellm boundary
         # HERE, not by widening pipeline.py's classification except tuple.
         # Real transient litellm classes (RateLimitError/Timeout/
         # APIConnectionError) descend from openai.APIError -> Exception and

@@ -65,7 +65,7 @@ class SemanticToolRegistry(ToolRegistry):
         self._embedding_model = embedding_model
         self._default_top_k = top_k
         self._auto_embed = auto_embed
-        # DECISION plan-2026-07-20T040150-876e7164/D-005: `_embeddings` gets its OWN
+        # DECISION plan-2026-07-20T040150-876e7164/D-005 [STALE]: `_embeddings` gets its OWN
         # non-reentrant lock, separate from the inherited `_tools_lock`, because the
         # two dicts are mutated at different times and holding one across the other
         # would create a lock-order dependency. Guard iteration as well as mutation:

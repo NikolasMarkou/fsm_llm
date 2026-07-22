@@ -136,7 +136,7 @@ class ReactAgent(BaseAgent):
 
     @property
     def _hitl_active(self) -> bool:
-        # DECISION plan_2026-05-29_1d66f861/D-001
+        # DECISION plan_2026-05-29_1d66f861/D-001 [STALE]
         # Single source of truth for "this run needs HITL approval gating".
         # INVARIANT: the await_approval FSM state (build_react_fsm
         # include_approval_state) MUST be built under exactly this predicate,

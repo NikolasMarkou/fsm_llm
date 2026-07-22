@@ -116,7 +116,7 @@ class AgentGraphBuilder:
         ~1000+ chained nodes (AG-001). Mirrors the shipped iterative pattern in
         fsm_llm_workflows/definitions.py:has_cycles (W-ISSUE-003 / D-005).
         """
-        # DECISION plan_2026-05-29_73c30922/D-001 (AG-001)
+        # DECISION plan_2026-05-29_73c30922/D-001 [STALE] (AG-001)
         # NOTE: do NOT revert to a recursive inner dfs() -- Python's default
         # recursion limit (~1000) causes RecursionError on long chain graphs.
         WHITE, GRAY, BLACK = 0, 1, 2

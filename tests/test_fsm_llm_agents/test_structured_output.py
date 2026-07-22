@@ -150,7 +150,7 @@ class TestAgentResultStructuredOutput:
 
 
 class TestStructuredOutputDiagnostic:
-    """DECISION plan_2026-05-30_26c9510a/D-001 — a partial-context construction
+    """DECISION plan_2026-05-30_26c9510a/D-001 [STALE] — a partial-context construction
     failure must emit a diagnostic instead of being silently swallowed."""
 
     def test_partial_context_logs_diagnostic_and_falls_through(self):

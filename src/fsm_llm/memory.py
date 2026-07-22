@@ -93,7 +93,7 @@ class WorkingMemory:
                 not appear in LLM prompts.  Defaults to ``{"metadata"}``.
         """
         buffer_names = buffers or DEFAULT_BUFFERS
-        # DECISION plan-2026-07-19T191147-4b664252/D-007: single NON-REENTRANT lock guarding
+        # DECISION plan-2026-07-19T191147-4b664252/D-007 [STALE]: single NON-REENTRANT lock guarding
         # every read and write of `_buffers`. Acquisitions must NEVER nest: a public
         # method that needs another's body calls the lock-free `_*_locked()` twin
         # (`_get_all_data_locked`, `_update_buffer_locked`), mirroring
@@ -304,7 +304,7 @@ class WorkingMemory:
         query_lower = query.lower()
         results: list[tuple[str, str, Any]] = []
 
-        # DECISION plan-2026-07-20T040150-876e7164/D-011
+        # DECISION plan-2026-07-20T040150-876e7164/D-011 [STALE]
         # `str(value)` must NOT run while `self._lock` is held. It calls
         # arbitrary third-party `__str__`, and an object that re-enters this
         # same WorkingMemory from its `__str__` (e.g. an agent object that
@@ -358,7 +358,7 @@ class WorkingMemory:
                     if decided >= limit:
                         break
 
-                    # DECISION plan-2026-07-20T040150-876e7164/D-016
+                    # DECISION plan-2026-07-20T040150-876e7164/D-016 [STALE]
                     # `str.lower(key)`, NOT `key.lower()`: the unbound builtin
                     # cannot be overridden by a `str` SUBCLASS, so no consumer
                     # type can run code here while `self._lock` is held. Do NOT
@@ -368,7 +368,7 @@ class WorkingMemory:
                         decided += 1
                         continue
 
-                    # DECISION plan-2026-07-20T040150-876e7164/D-016
+                    # DECISION plan-2026-07-20T040150-876e7164/D-016 [STALE]
                     # EXACT type, not `isinstance`. D-011 stated this rule
                     # correctly one arm below and then failed to apply it here,
                     # leaving a live deadlock: a `str` subclass overriding
@@ -495,7 +495,7 @@ class WorkingMemory:
             memory._buffers[name] = dict(contents)
         return memory
 
-    # DECISION plan-2026-07-19T191147-4b664252/D-018
+    # DECISION plan-2026-07-19T191147-4b664252/D-018 [STALE]
     # `threading.Lock` is not picklable, so introducing `self._lock` in D-007
     # silently made `WorkingMemory` un-`deepcopy`-able and un-`pickle`-able
     # (`TypeError: cannot pickle '_thread.lock' object`). Nothing in-tree hit it
@@ -512,7 +512,7 @@ class WorkingMemory:
     # `_lock` back into the returned state.
     # See decisions.md D-018.
     #
-    # DECISION plan-2026-07-19T191147-4b664252/D-027 (CORRECTS D-018)
+    # DECISION plan-2026-07-19T191147-4b664252/D-027 [STALE] (CORRECTS D-018)
     # D-018's first version held the lock but returned LIVE references:
     #     with self._lock:
     #         return {"_buffers": self._buffers, ...}
@@ -560,7 +560,7 @@ class WorkingMemory:
     def __setstate__(self, state: dict[str, Any]) -> None:
         """Restore state and give the copy its OWN fresh lock."""
         self._buffers = state["_buffers"]
-        # DECISION plan-2026-07-19T191147-4b664252/D-032
+        # DECISION plan-2026-07-19T191147-4b664252/D-032 [STALE]
         # `frozenset(...)`, NOT a bare assignment, and NOT `set(...)`.
         # `_hidden_buffers` is declared `frozenset[str]` (see the attribute above)
         # because it gates `get_all_data`/`to_scoped_view`/`search` -- i.e. what

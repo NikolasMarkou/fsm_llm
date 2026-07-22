@@ -266,7 +266,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                 messages, self.config.model, sent_format
             )
 
-        # DECISION plan-2026-07-20T040150-876e7164/D-006: wrap the litellm
+        # DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE]: wrap the litellm
         # boundary so a provider outage reaches this agent's caller as an
         # AgentError, not as a raw openai.APIError that no `except AgentError`
         # can see. Deliberately the CONCRETE `AgentError` root — do NOT

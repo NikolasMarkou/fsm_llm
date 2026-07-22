@@ -21,7 +21,7 @@ from fsm_llm_agents.meta_builder import MetaBuilderAgent
 
 
 class TestSchemaEchoRejection:
-    """DECISION plan_2026-05-30_26c9510a/D-001 — a JSON-schema echo must be
+    """DECISION plan_2026-05-30_26c9510a/D-001 [STALE] — a JSON-schema echo must be
     rejected, not silently assembled into an empty 'Unnamed FSM' stub."""
 
     def test_detects_schema_echo(self):
@@ -346,7 +346,7 @@ class TestLlmCallProviderFailure:
     raise ``BuilderError`` (an ``AgentError`` subclass) chained from the
     provider exception.
 
-    DECISION plan-2026-07-20T040150-876e7164/D-006.
+    DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE].
     """
 
     @staticmethod

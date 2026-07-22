@@ -63,7 +63,7 @@ class TestToolDefinition:
 class TestToolDefinitionNameCharset:
     """Tool names are a provider function-calling contract: ASCII, 1-64 chars.
 
-    DECISION plan-2026-07-20T040150-876e7164/D-008. These pin BOTH directions —
+    DECISION plan-2026-07-20T040150-876e7164/D-008 [STALE]. These pin BOTH directions —
     a fix that only tightened the charset would break `web-search`, and a fix that
     only capped the length would still accept Unicode.
     """

@@ -103,7 +103,7 @@ def _fit(content: str, width: int) -> str:
         ``content`` unchanged when it fits, otherwise ``head + "…" + tail`` of
         exactly ``width`` characters.
     """
-    # DECISION plan-2026-07-19T191147-4b664252/D-033
+    # DECISION plan-2026-07-19T191147-4b664252/D-033 [STALE]
     # D-028 fixed the ALIGNMENT by slicing every over-long row to the box width. That
     # was correct and is not being undone — but a plain head slice is SILENT and
     # LOSSY-AT-THE-TAIL, and for rows that carry a state id those two properties
@@ -140,7 +140,7 @@ def _states_box_row(vertical: str, content: str) -> str:
         A row of exactly ``_STATES_BOX_INNER_WIDTH + 6`` characters, so that every
         row of every box lines up with the section's outer border.
     """
-    # DECISION plan-2026-07-19T191147-4b664252/D-022
+    # DECISION plan-2026-07-19T191147-4b664252/D-022 [STALE]
     # The `[:width]` slice before `.ljust(width)` is load-bearing, not defensive.
     # `ljust` NEVER shortens, so before this helper existed a long state id or a long
     # required-keys list pushed the right-hand border out of alignment for the rest of
@@ -171,7 +171,7 @@ def _section_box_row(content: str) -> str:
         A row of exactly ``_SECTION_BOX_INNER_WIDTH + 4`` == 62 characters, matching
         the section's own border, for ANY input including one longer than the box.
     """
-    # DECISION plan-2026-07-19T191147-4b664252/D-028
+    # DECISION plan-2026-07-19T191147-4b664252/D-028 [STALE]
     # SC-18 says "a 100-char state id does not break box alignment" — unscoped. Step 14
     # fixed only `create_states_section` (via `_states_box_row`) and the pinning test
     # measured only that section, so the suite stayed green while METADATA rendered a
@@ -201,7 +201,7 @@ def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:
     Raises:
         ValueError: naming both fields, if the id is absent.
     """
-    # DECISION plan-2026-07-19T191147-4b664252/D-021
+    # DECISION plan-2026-07-19T191147-4b664252/D-021 [STALE]
     # This guard belongs HERE, ahead of `build_graph_representation`, and NOT in
     # `create_states_section`. The finding located the failure at `states[state_id]` in the
     # states section, but the FIRST raise is actually `calculate_depths`'
@@ -230,7 +230,7 @@ def _require_valid_transition_targets(states: dict[str, Any]) -> None:
     Raises:
         ValueError: naming both the source state and the missing target.
     """
-    # DECISION plan-2026-07-20T040150-876e7164/D-013
+    # DECISION plan-2026-07-20T040150-876e7164/D-013 [STALE]
     # Placement mirrors `_require_initial_state` (D-021) for the SAME measured reason:
     # the first raise is `calculate_depths`' `state_metrics[target]["depth"] = ...`
     # (probed, not read -- it fires for all three styles), which runs before any
@@ -413,7 +413,7 @@ def create_metadata_section(
     ]
 
     # Format description with word wrapping
-    # DECISION plan-2026-07-18T051819-80b0bd4d/D-009: do NOT "simplify" this back to
+    # DECISION plan-2026-07-18T051819-80b0bd4d/D-009 [STALE]: do NOT "simplify" this back to
     # fsm_data.get("description", "No description") + a bare textwrap.wrap(...).
     # `.get(k, default)` returns None for an explicit null, and textwrap.wrap("")
     # / wrap("   ") both return [], so `wrapped_desc[0]` raised out of this
@@ -547,7 +547,7 @@ def create_states_section(
         )
 
         # State ID with type and metrics.
-        # DECISION plan-2026-07-19T191147-4b664252/D-022
+        # DECISION plan-2026-07-19T191147-4b664252/D-022 [STALE]
         # No leading "│ " here: the border glyph is supplied by `_states_box_row` from the
         # box's own style. Baking one in produced the doubled "║│ greeting" glyph on every
         # state box in the default `full` style. See decisions.md D-022.
@@ -818,7 +818,7 @@ def sort_states_logically(
             visited.add(state_id)
 
     # End with terminal states
-    # DECISION plan-2026-07-18T162030-a02151fe/D-010
+    # DECISION plan-2026-07-18T162030-a02151fe/D-010 [STALE]
     # `sorted()` here is load-bearing, not cosmetic. Do NOT "simplify" this back to
     # `list(terminal_states)`: `terminal_states` is a set of str, so its iteration order
     # varies with PYTHONHASHSEED and the rendered diagram silently differs run-to-run
@@ -1346,7 +1346,7 @@ def visualize_fsm_from_file(json_file: str, style: str = "full") -> str:
 
 
 def main(fsm_path, style: str = "full"):
-    # DECISION plan-2026-07-19T191147-4b664252/D-014
+    # DECISION plan-2026-07-19T191147-4b664252/D-014 [STALE]
     # NOT redundant — do not delete. See the twin anchor in `validator.py:main`.
     # `logging.py`'s import-time `logger.disable("fsm_llm")` is deliberate library
     # hygiene; this function is the APPLICATION (the `fsm-llm-visualize` console

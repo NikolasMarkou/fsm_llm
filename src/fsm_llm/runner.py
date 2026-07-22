@@ -21,7 +21,7 @@ from .logging import logger, setup_file_logging
 _REDACTED = "<redacted>"
 
 
-# DECISION plan-2026-07-18T162030-a02151fe/D-015
+# DECISION plan-2026-07-18T162030-a02151fe/D-015 [STALE]
 # This duplicates the key-matching loop in ``prompts.py``
 # ``_filter_context_for_security`` ON PURPOSE. Do NOT "clean this up" by
 # importing that method or hoisting it into a shared helper: it is a bound
@@ -32,7 +32,7 @@ _REDACTED = "<redacted>"
 # Values are replaced rather than dropped so an operator debugging the CLI can
 # still see WHICH keys exist; a dropped key looks identical to a missing one.
 #
-# DECISION plan-2026-07-19T191147-4b664252/D-014
+# DECISION plan-2026-07-19T191147-4b664252/D-014 [STALE]
 # The recursion is NOT optional and the replace-don't-drop rule above is NOT a
 # harmonization bug. `clean_context_keys` (D-010) and `prompts.py`'s
 # `_filter_context_for_security` (D-011) DROP a matched key; this one keeps the

@@ -101,7 +101,7 @@ class HumanInTheLoop:
             tool_name=tool_call.tool_name,
             parameters=tool_call.parameters,
             reasoning=tool_call.reasoning,
-            # DECISION plan-2026-07-20T040150-876e7164/D-003
+            # DECISION plan-2026-07-20T040150-876e7164/D-003 [STALE]
             # This summary is handed to the approval callback (a human-facing
             # surface). Do NOT re-inline `k.startswith("_")`: it misses
             # `system_`/`internal_`/`__` and is case-sensitive. See D-003.

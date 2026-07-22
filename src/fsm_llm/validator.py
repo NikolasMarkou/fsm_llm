@@ -221,7 +221,7 @@ class FSMValidator:
         try:
             FSMDefinition(**self.fsm_data)
         except ValidationError as e:
-            # DECISION plan-2026-07-19T075908-70b6bdec/D-006: this ALLOW-list now
+            # DECISION plan-2026-07-19T075908-70b6bdec/D-006 [STALE]: this ALLOW-list now
             # promotes `missing` too, closing the OPEN FOLLOW-UP that
             # plan-2026-07-18T051819-80b0bd4d/D-008 left here and that
             # plan-2026-07-18T162030-a02151fe/D-018 deferred for lack of authority.
@@ -240,7 +240,7 @@ class FSMValidator:
             # Do NOT "tidy" `missing` back out — that reopens the lie, and the
             # inverted test_agreement_property_across_fixtures will fail.
             #
-            # DECISION plan-2026-07-20T040150-876e7164/D-001: the ALLOW-list below
+            # DECISION plan-2026-07-20T040150-876e7164/D-001 [STALE]: the ALLOW-list below
             # was widened from 5 names to the full MEASURED loader-raising class.
             # A mechanical sweep of every `Field(pattern=/min_length=/max_length=/
             # ge=/le=)` and every model_validator reachable from `FSMDefinition`
@@ -655,7 +655,7 @@ class FSMValidator:
             List of cycles, where each cycle is a list of state IDs
         """
 
-        # DECISION plan_2026-05-29_73c30922/D-002 (RWM-002)
+        # DECISION plan_2026-05-29_73c30922/D-002 [STALE] (RWM-002)
         # Iterative DFS with an explicit (node, is_exit) frame stack -- avoids
         # RecursionError on FSMs with ~1000+ chained states. Faithfully
         # reproduces the prior recursive traversal: children are pushed in
@@ -815,7 +815,7 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
 
 
 def main(fsm_path):
-    # DECISION plan-2026-07-19T191147-4b664252/D-014
+    # DECISION plan-2026-07-19T191147-4b664252/D-014 [STALE]
     # NOT redundant — do not delete. `logging.py` calls `logger.disable("fsm_llm")`
     # at import time, which is correct LIBRARY hygiene (a library must not hijack a
     # host application's logging). But this function IS the application: it is the

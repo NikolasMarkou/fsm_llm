@@ -17,7 +17,7 @@ from fsm_llm.logging import logger
 from .constants import Defaults, MetaDefaults
 from .truncation import smart_truncate
 
-# DECISION plan-2026-07-20T040150-876e7164/D-008
+# DECISION plan-2026-07-20T040150-876e7164/D-008 [STALE]
 # Tool names are what get sent to provider function-calling APIs, so this pattern is
 # the provider contract, not a general identifier rule. Two things NOT to do here:
 #
@@ -59,7 +59,7 @@ class ToolDefinition(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        # DECISION plan-2026-07-20T040150-876e7164/D-008 — see _TOOL_NAME_PATTERN above.
+        # DECISION plan-2026-07-20T040150-876e7164/D-008 [STALE] — see _TOOL_NAME_PATTERN above.
         # `fullmatch` on a pattern with no anchors is intentional: it anchors both ends
         # itself, so the cap cannot be escaped by a trailing newline the way `$` allows.
         if not _TOOL_NAME_PATTERN.fullmatch(v):

@@ -16,7 +16,7 @@ from urllib.parse import unquote
 INTERNAL_KEY_PREFIXES = ["_", "system_", "internal_", "__"]
 
 
-# DECISION plan-2026-07-19T191147-4b664252/D-009
+# DECISION plan-2026-07-19T191147-4b664252/D-009 [STALE]
 # This helper exists because the identical `any(key.startswith(p) ...)`
 # expression was copy-pasted to FIVE call sites (context.py, fsm.py,
 # definitions.py x2, prompts.py) and NONE of them case-folded -- so
@@ -44,7 +44,7 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
     """
     if prefixes is None:
         prefixes = INTERNAL_KEY_PREFIXES
-    # DECISION plan-2026-07-20T103203-b8a6b855/D-006 -- unbound `str.lower`, not
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-006 [STALE] -- unbound `str.lower`, not
     # `key.lower()`: a `str` SUBCLASS overriding `.lower` ran arbitrary code here
     # and out of every prompt builder (probed at `a414601`). `lowered` is then an
     # exact `str`, so bound `.startswith` is safe. Do NOT re-bind either call.
@@ -52,7 +52,7 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
     return any(lowered.startswith(str.lower(prefix)) for prefix in prefixes)
 
 
-# DECISION plan-2026-07-19T191147-4b664252/D-011
+# DECISION plan-2026-07-19T191147-4b664252/D-011 [STALE]
 # One bound for BOTH recursive context filters (`context.clean_context_keys`
 # and `prompts.BasePromptBuilder._filter_context_for_security`). Do NOT
 # re-declare a local depth limit in either module: two hand-maintained copies
@@ -158,7 +158,7 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
     "context_length",
 }
 
-# DECISION plan-2026-07-19T191147-4b664252/D-009
+# DECISION plan-2026-07-19T191147-4b664252/D-009 [STALE]
 # These patterns fail in BOTH directions, and both are real harm:
 #   - Over-match STRIPS legitimate user data out of context and out of the
 #     LLM prompt, silently degrading replies. The old password pattern's
@@ -179,7 +179,7 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
 # similar to a positive. A negative set of obviously-safe keys ("username",
 # "email") validates whatever the implementation happens to do.
 #
-# DECISION plan-2026-07-19T191147-4b664252/D-016 (SUPERSEDES the `password_hash`
+# DECISION plan-2026-07-19T191147-4b664252/D-016 [STALE] (SUPERSEDES the `password_hash`
 # "accepted gap" that D-009 recorded here)
 # D-009 claimed "no regex can separate `password_hash` from
 # `password_reset_flow_enabled`" and therefore terminal-anchored the password
@@ -207,7 +207,7 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
 # `reset` -- is still stripped.
 # See decisions.md D-016.
 #
-# DECISION plan-2026-07-19T191147-4b664252/D-026 (CORRECTS D-016's SHAPE, keeps
+# DECISION plan-2026-07-19T191147-4b664252/D-026 [STALE] (CORRECTS D-016's SHAPE, keeps
 # its fail-CLOSED direction)
 # D-016 got the DIRECTION right and the SHAPE wrong. Its lookahead tested only
 # the token IMMEDIATELY following `password` and let the rest of the key run on
@@ -237,7 +237,7 @@ ALLOWED_JSONLOGIC_OPERATIONS = {
 #     unbounded-tail bypass exactly.
 # See decisions.md D-026.
 #
-# DECISION plan-2026-07-19T191147-4b664252/D-030 (bounds D-026's OVER-strictness;
+# DECISION plan-2026-07-19T191147-4b664252/D-030 [STALE] (bounds D-026's OVER-strictness;
 # does NOT change its shape)
 # D-026 closed the under-match and opened an over-match of the same class: the
 # `+$` anchor requires EVERY trailing token to be allowlisted, so one ordinary
@@ -288,7 +288,7 @@ _PASSWORD_POLICY_SUFFIXES = (
     "|fail|failed|failure|failures|complete|completed|create|created"
 )
 
-# DECISION plan-2026-07-20T040150-876e7164/D-015
+# DECISION plan-2026-07-20T040150-876e7164/D-015 [STALE]
 # (CORRECTS D-014, which is superseded for the `key` trigger and AMENDED for the
 #  `token` trigger. D-014's own in-code text made a class claim that was false
 #  for the code it annotated; that text is replaced here rather than preserved.)
@@ -396,7 +396,7 @@ _TOKEN_TRIGGER = rf"token{_TRIGGER_PLURAL}"
 # retried at every separator position.
 _WORD_END = r"(?:[\W_]|$)"
 
-# DECISION plan-2026-07-20T040150-876e7164/D-019
+# DECISION plan-2026-07-20T040150-876e7164/D-019 [STALE]
 # A separator RUN, not a single optional separator. The token suffix arm used
 # `[-_.]?`, which permits at most ONE separator between the qualifier and the
 # trigger, so a second separator left `[a-z0-9]+` with nothing to match and the
@@ -456,7 +456,7 @@ _CRYPTO_KEY_QUALIFIERS = (
 # `keystone_species`, `key_value_pair` and `key_performance_indicator` need no
 # allowlist of their own -- which is why D-014's `_SAFE_KEY_WORDS` and
 # `_SAFE_KEY_HEADS` are gone rather than moved.
-# DECISION plan-2026-07-20T040150-876e7164/D-019
+# DECISION plan-2026-07-20T040150-876e7164/D-019 [STALE]
 # The two head lists are kept at PARITY deliberately. They drifted apart once
 # already: `_TOKEN_MATERIAL_HEADS` omitted `material|content|body|payload|bytes|
 # data` which its stated mirror `_KEY_MATERIAL_HEADS` carried, and omitted the
@@ -489,7 +489,7 @@ _KEY_MATERIAL_HEADS = (
     "|holder|slot|private|rsa|ssh|" + _CREDENTIAL_MATERIAL_HEADS_SHARED
 )
 
-# DECISION plan-2026-07-20T040150-876e7164/D-019
+# DECISION plan-2026-07-20T040150-876e7164/D-019 [STALE]
 # Bounded lazy gap between a crypto qualifier and the trigger, so that EVERY
 # intervening word is skipped rather than only the last one (the D-014 defect).
 #
@@ -514,7 +514,7 @@ _KEY_MATERIAL_HEADS = (
 _CRYPTO_GAP_REACH = 192
 _CRYPTO_GAP = rf"[a-z0-9_.\-]{{0,{_CRYPTO_GAP_REACH}}}?"
 
-# DECISION plan-2026-07-20T040150-876e7164/D-019
+# DECISION plan-2026-07-20T040150-876e7164/D-019 [STALE]
 # The crypto word must either end at a word boundary (`ssh_...`) or abut the
 # trigger directly (`sshkey`). Without this, the gap would let a crypto word
 # match as a mere PREFIX of an unrelated word (`secretary_monkey`).
@@ -547,7 +547,7 @@ _SAFE_TOKEN_QUALIFIERS = (
     "|budget|remaining|average|avg|estimated|estimate|cached|reasoning"
     "|audio|text|image|per|page|next|continuation|pagination|sync"
     "|bos|eos|eot|sos|pad|unk|mask|sep|cls|special|delimiter|stop"
-    # DECISION plan-2026-07-20T040150-876e7164/D-021 -- the cursor group is
+    # DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE] -- the cursor group is
     # extended to the other published spellings of the same concept
     # (Elasticsearch `scroll_id`, MongoDB change-stream `resumeToken`, AWS
     # `Marker`/`NextMarker`, Azure `continuationToken`, Relay `cursor`, stream
@@ -561,7 +561,7 @@ _SAFE_TOKEN_QUALIFIERS = (
     "|cursor|scroll|resume|marker|watermark|checkpoint"
 )
 
-# DECISION plan-2026-07-20T040150-876e7164/D-021
+# DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE]
 # STRIP-list (DENYLIST) of unambiguous bearer-credential qualifiers, ADJACENT to
 # the trigger. This is the token arm's counterpart to `_CRYPTO_KEY_QUALIFIERS`
 # and it exists for exactly the reason that one does: the value layer below
@@ -616,7 +616,7 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     r"(?:^|.*[\W_])secret(?:s)?(?:[\W_].*|$)",  # Secret-related keys (not "secretary")
     r".*(?:api[-_.]?key|key[-_.]?api).*",  # API key patterns (both orderings, with dash/underscore/dot)
     r"(?:^|.*[\W_])credential(?:s)?(?:[\W_].*|$)",  # Credential-related keys
-    # DECISION plan-2026-07-20T040150-876e7164/D-015 -- cryptographic key
+    # DECISION plan-2026-07-20T040150-876e7164/D-015 [STALE] -- cryptographic key
     # material. This is an ENUMERATED CRYPTO DENYLIST and it FAILS OPEN on
     # vocabulary nobody listed; it is NOT a class control and must not be
     # described as one. Read the D-015 block above before editing.
@@ -632,7 +632,7 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     rf"|(?:^|.*[\W_]){_CRYPTO_AT_WORD}{_CRYPTO_GAP}{_KEY_TRIGGER}{_WORD_END}"
     rf"|(?:^|.*[\W_]){_KEY_TRIGGER}[-_.]?"
     rf"(?:{_KEY_MATERIAL_HEADS})s?{_WORD_END}",
-    # DECISION plan-2026-07-20T040150-876e7164/D-015 -- the ENUMERATED residual.
+    # DECISION plan-2026-07-20T040150-876e7164/D-015 [STALE] -- the ENUMERATED residual.
     # These name key material but contain no "key" substring, so the pattern
     # above cannot structurally reach them. This entry is a DENYLIST and is
     # therefore incomplete by construction; it is disclosed as a list, never
@@ -640,7 +640,7 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     # list-shaped -- it is the explicit admission that one narrow corner is.
     r"(?:^|.*[\W_])(?:kek|dek|id[-_.]?rsa|id[-_.]?dsa|id[-_.]?ecdsa"
     r"|id[-_.]?ed25519)(?:[\W_]|$)",
-    # DECISION plan-2026-07-20T040150-876e7164/D-021 -- auth tokens. This entry
+    # DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE] -- auth tokens. This entry
     # is NAME-AUTHORITATIVE and it is a DENYLIST on both arms, mirroring the
     # `key` entry above. It replaces D-015's fail-CLOSED allowlist arm, which
     # D-019 finding (2) measured as an allowlist over an UNBOUNDED safe space:
@@ -676,7 +676,7 @@ COMPILED_FORBIDDEN_CONTEXT_PATTERNS = [
 # ==============================================================
 # LAYER 2 -- VALUE SHAPE
 # ==============================================================
-# DECISION plan-2026-07-20T040150-876e7164/D-019
+# DECISION plan-2026-07-20T040150-876e7164/D-019 [STALE]
 # WHY THIS LAYER EXISTS AT ALL. Two previous designs used ONLY the key NAME and
 # both were measured defective on one axis or the other: a fail-closed allowlist
 # over `key` over-stripped 35.5% of ordinary application vocabulary, and the
@@ -829,7 +829,7 @@ _CREDENTIAL_VALUE_PREFIXES = (
 # the whitespace rejection below.
 _PEM_PREFIX = "-----begin"
 
-# DECISION plan-2026-07-20T103203-b8a6b855/D-003
+# DECISION plan-2026-07-20T103203-b8a6b855/D-003 [STALE]
 # THE UUID/ULID CARVE-OUT IS NAME-CONDITIONED AND FAIL-CLOSED. It fires only
 # when the NAME carries a token from `_IDENTIFIER_NOUN_VOCABULARY` below. An
 # unlisted name does NOT get the carve-out: it falls through to the generic
@@ -923,7 +923,7 @@ _ULID_VALUE_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 # disposition was measured; see the D-003 block for what its 12/12 fit is and
 # is not worth.
 #
-# DECISION plan-2026-07-20T144233-47e8c662/D-018
+# DECISION plan-2026-07-20T144233-47e8c662/D-018 [STALE]
 # SECOND MEASURED NEGATIVE (the first is D-006 below, on `_AUTH_SCHEME_WORDS`).
 # Splitting these nouns by POLARITY -- observability (a UUID is an identifier)
 # vs resource/principal (it may be a credential) -- was priced against a
@@ -995,7 +995,7 @@ _CREDENTIAL_VALUE_CHARSET_RE = re.compile(r"^[A-Za-z0-9+/=_.\-]+$")
 # `<scheme> <credential>` is a credential wearing an `Authorization` header's
 # wire syntax, not a sentence. DATA, not control flow: one word per line.
 #
-# DECISION plan-2026-07-20T144233-47e8c662/D-006
+# DECISION plan-2026-07-20T144233-47e8c662/D-006 [STALE]
 # MEASURED NEGATIVE. Replacing this frozenset with a bare positive head-shape
 # test at its single read site below -- `re.compile(r"[A-Za-z][A-Za-z0-9\-]{0,19}")`
 # fullmatching `fields[0]` -- was implemented, measured on a 274-entry
@@ -1056,7 +1056,7 @@ _AUTH_SCHEME_WORDS = frozenset(
     }
 )
 
-# DECISION plan-2026-07-20T040150-876e7164/D-021
+# DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE]
 # COLON-COMPOSITE CREDENTIALS. `:` is deliberately OUTSIDE the charset above,
 # because `cache_key: "sha256:<digest>"` is integrity data that SC-5 pins as
 # KEPT. That exclusion also let two real composite credentials through
@@ -1127,7 +1127,7 @@ def _shannon_entropy(text: str) -> float:
     return entropy
 
 
-# DECISION plan-2026-07-20T103203-b8a6b855/D-005
+# DECISION plan-2026-07-20T103203-b8a6b855/D-005 [STALE]
 # THE CHARSET/SHAPE RULE IS ONE RULE. Internal whitespace, percent-encoding,
 # `count("/") >= 3` and the 24-character length floor were four separate
 # failure modes of the single test below, and they were patched, disclosed and
@@ -1224,7 +1224,7 @@ def _shannon_entropy(text: str) -> float:
 #     D-021's disclosed gap, restated here so the surface is complete. Pinned:
 #     `hex_composite/credential` in `CARVE_OUT_KNOWN_FAIL_OPEN`.
 #
-# DECISION plan-2026-07-20T103203-b8a6b855/D-009
+# DECISION plan-2026-07-20T103203-b8a6b855/D-009 [STALE]
 # ACCEPTED GAPS OF THE **OTHER** RULES ON THIS CHAIN. G1-G7 above are
 # this rule's residual and only this rule's. G8-G9 belong to the D-003
 # identifier-noun carve-out and to the layer-1 qualifier alternation
@@ -1333,7 +1333,7 @@ def _is_path_shaped(stripped: str) -> bool:
     if "/" not in stripped:
         return False
     segments = stripped.split("/")
-    # DECISION plan-2026-07-20T103203-b8a6b855/D-005 -- ReDoS ordering.
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-005 [STALE] -- ReDoS ordering.
     # Segment count first, THEN the regex: `or` short-circuits, and
     # `_PATH_VALUE_RE`'s two adjacent `[^\s]*` runs have a measured backtracking
     # cliff on slash-and-dot-heavy input (~490us at the `_VALUE_SCAN_LIMIT`
@@ -1379,7 +1379,7 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     if not isinstance(value, str):
         return False
 
-    # DECISION plan-2026-07-20T103203-b8a6b855/D-006
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-006 [STALE]
     # THE `str`-SUBCLASS RULE, THIRD SITE ON THIS SEAM. `isinstance` admits a
     # subclass whose `__getitem__`/`.lower`/`__len__`/`__bool__` runs arbitrary
     # code; the slice below propagated `RuntimeError` out of the live prompt path
@@ -1392,7 +1392,7 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     # an EXACT `str` (every `str` method returns one), which is what makes
     # "Never raises" TRUE rather than aspirational on the helpers below.
     #
-    # DECISION plan-2026-07-20T103203-b8a6b855/D-009 -- the containment
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-009 [STALE] -- the containment
     # argument's EXACT SCOPE, measured rather than asserted. This guard is what
     # makes the five helpers below raise-proof, so their claim is scoped to what
     # it actually buys: "never raises for any EXACT `str`". Called DIRECTLY with
@@ -1419,7 +1419,7 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     if lowered.startswith(_PEM_PREFIX):
         return True
 
-    # DECISION plan-2026-07-20T103203-b8a6b855/D-005 -- unwrapping runs BEFORE
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-005 [STALE] -- unwrapping runs BEFORE
     # the vendor-prefix test on purpose, so `Bearer sk_live_...` reaches the
     # enumerated arm. See the D-005 block above `_normalise_credential_value`.
     stripped = _normalise_credential_value(sample.strip())
@@ -1432,7 +1432,7 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     if stripped.lower().startswith(_CREDENTIAL_VALUE_PREFIXES):
         return True
 
-    # DECISION plan-2026-07-20T040150-876e7164/D-021 -- colon composites. Done
+    # DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE] -- colon composites. Done
     # AFTER the vendor-prefix test (a prefixed credential is conclusive whole)
     # and BEFORE the length floor (the tail is shorter than the whole).
     composite_tail = _colon_composite_tail(stripped)
@@ -1442,7 +1442,7 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     # Generic arm. Everything below here is shape, not vocabulary.
     if not _generic_shape_is_credential(stripped):
         return False
-    # DECISION plan-2026-07-20T103203-b8a6b855/D-003 -- the carve-out is
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-003 [STALE] -- the carve-out is
     # name-conditioned and fail-CLOSED. An unlisted name gets no carve-out and
     # falls through to the rules below, which strip a canonical UUID/ULID. Do
     # NOT drop the vocabulary test to "simplify" this back to unconditional;
@@ -1450,14 +1450,14 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
     # limit on the claim, and what NOT to do: see the D-003 block above
     # `_UUID_VALUE_RE`.
     if _UUID_VALUE_RE.match(stripped) or _ULID_VALUE_RE.match(stripped):
-        # DECISION plan-2026-07-20T103203-b8a6b855/D-006 -- site C, deleted.
+        # DECISION plan-2026-07-20T103203-b8a6b855/D-006 [STALE] -- site C, deleted.
         # The `if name else ()` short-circuit that stood here read
         # `bool(name)` -- the subclass's `__len__`/`__bool__`, a latent raise
         # site reachable ONLY under a UUID/ULID value, which is why it survived
         # step 4. Deleting it is verdict-identical (`str.lower("")` splits to
         # `[""]`, not in the vocabulary). Do NOT restore it as an optimisation.
         #
-        # DECISION plan-2026-07-20T103203-b8a6b855/D-009 -- site E, the FIFTH
+        # DECISION plan-2026-07-20T103203-b8a6b855/D-009 [STALE] -- site E, the FIFTH
         # raise site, and the reason a sweep must be re-run after the last edit
         # rather than after the edit that motivated it. `str.lower(name)` is
         # raise-proof for a `str` SUBCLASS (that is why D-006 chose it) but
@@ -1483,7 +1483,7 @@ def _looks_like_credential_value(value: object, name: str = "") -> bool:
         tokens = _NAME_TOKEN_SPLIT_RE.split(str.lower(name))
         if any(token in _IDENTIFIER_NOUN_VOCABULARY for token in tokens):
             return False
-    # DECISION plan-2026-07-20T103203-b8a6b855/D-005 -- positive path evidence.
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-005 [STALE] -- positive path evidence.
     # Do NOT restore the bare `stripped.count("/") >= 3`; standard base64 emits
     # slash runs and that test alone handed `mailer_key` to the prompt.
     if _is_path_shaped(stripped):
@@ -1510,7 +1510,7 @@ _AMBIGUOUS_CREDENTIAL_ABBREVIATIONS = frozenset(
     {"sk", "pk", "mk", "dk", "ek", "psk", "skey", "ckey", "privkey", "seckey"}
 )
 
-# DECISION plan-2026-07-20T040150-876e7164/D-021
+# DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE]
 # Names for which layer 2 decides the TOKEN arm. This regex is CHARACTER-FOR-
 # CHARACTER the middle alternative D-015 shipped inside
 # `FORBIDDEN_CONTEXT_PATTERNS` -- a `<qualifier>_token` shape whose qualifiers
@@ -1598,7 +1598,7 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     if any(pattern.match(key) for pattern in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
         return True
 
-    # DECISION plan-2026-07-20T040150-876e7164/D-021 -- the TOKEN referral is
+    # DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE] -- the TOKEN referral is
     # tested FIRST, and deliberately: a name matching both shapes (`foo_key_token`)
     # must get the STRICTER of the two defaults, and the token arm's is
     # fail-CLOSED where the key arm's is fail-open. Do not reorder these.
@@ -1608,7 +1608,7 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     if value is None:
         return False
 
-    # DECISION plan-2026-07-20T103203-b8a6b855/D-006 -- site B, the key-arm read.
+    # DECISION plan-2026-07-20T103203-b8a6b855/D-006 [STALE] -- site B, the key-arm read.
     # Unbound `str.lower`, not `key.lower()`. The polarity here is NOT the
     # value arm's: failing closed on every `str` subclass KEY would strip
     # unrelated names wholesale, so this site reads the underlying buffer, as the

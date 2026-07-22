@@ -698,7 +698,7 @@ def build_react_fsm(
             "priority": 10,
             "conditions": [
                 {
-                    # DECISION plan_2026-05-30_5598b755/D-004
+                    # DECISION plan_2026-05-30_5598b755/D-004 [STALE]
                     # B4 under-call fix: do NOT conclude on the model's
                     # should_terminate alone — require evidence that a tool has
                     # run (observation_count > 0) OR that termination is forced
@@ -801,7 +801,7 @@ def build_react_fsm(
                     "priority": 1,
                     "conditions": [
                         {
-                            # DECISION plan_2026-05-30_5598b755/D-004
+                            # DECISION plan_2026-05-30_5598b755/D-004 [STALE]
                             # Mirror the think->conclude guard: a should_terminate
                             # set on entry to act (e.g. the model wanted to quit
                             # without a tool) must NOT conclude unless a tool has

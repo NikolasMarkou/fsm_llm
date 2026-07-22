@@ -154,7 +154,7 @@ def build_conclude_extraction_instructions(
     output_schema: type | None = None,
 ) -> str:
     """Build extraction instructions for the conclude state."""
-    # DECISION plan_2026-05-30_5598b755/D-005
+    # DECISION plan_2026-05-30_5598b755/D-005 [STALE]
     # Answer from the TASK/CONTEXT as well as tool observations. Recalled
     # long-term memory and other given facts are injected into the task, NOT
     # into `observations`; anchoring only on observations made conversational/
@@ -200,7 +200,7 @@ def build_conclude_extraction_instructions(
 
 def build_conclude_response_instructions() -> str:
     """Build response instructions for the conclude state."""
-    # DECISION plan_2026-05-30_5598b755/D-003
+    # DECISION plan_2026-05-30_5598b755/D-003 [STALE]
     # Re-anchor the original task: the internal loop sends "Continue." as the
     # user message each iteration, which small models otherwise mistake for a
     # vague new prompt and answer with "I don't have the previous context"

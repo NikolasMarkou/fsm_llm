@@ -67,7 +67,7 @@ try:
         create_workflow,
     )
 
-    # DECISION plan_2026-05-29_0c00a594/D-002: the dashboard exposes a small set of
+    # DECISION plan_2026-05-29_0c00a594/D-002 [STALE]: the dashboard exposes a small set of
     # built-in, DSL-built workflow presets rather than accepting arbitrary
     # `definition_json`. WorkflowDefinition.steps are WorkflowStep ABC subclasses
     # carrying Python callables; there is no JSON->workflow loader, so arbitrary
@@ -171,7 +171,7 @@ try:
         ToolRegistry,
     )
 
-    # DECISION plan_2026-05-29_0c00a594/D-001: EvaluatorOptimizerAgent and
+    # DECISION plan_2026-05-29_0c00a594/D-001 [STALE]: EvaluatorOptimizerAgent and
     # MakerCheckerAgent are intentionally NOT launchable from the dashboard.
     # Their constructors require arguments that cannot be supplied from a web
     # form (a Python `evaluation_fn` callable / maker+checker instruction strings),
@@ -411,7 +411,7 @@ def snapshot_from_api(
         current_state = complete.get("current_state", {})
         context_data = complete.get("collected_data", {})
         if not show_internal_keys:
-            # DECISION plan-2026-07-20T040150-876e7164/D-003
+            # DECISION plan-2026-07-20T040150-876e7164/D-003 [STALE]
             # This is the CONFIRMED leak: `show_internal_keys=False` is the
             # dashboard's "hide it" knob, and the old `k.startswith("_")` here
             # hid only literal `_`-prefixed keys -- `system_password`,
@@ -483,7 +483,7 @@ class InstanceManager:
     @dashboard_config.setter
     def dashboard_config(self, config: DashboardConfig | None) -> None:
         # version is a read-modify-write compound op; lock so concurrent setters
-        # do not lose an increment (DECISION plan_2026-05-29_0c00a594/D-003).
+        # do not lose an increment (DECISION plan_2026-05-29_0c00a594/D-003 [STALE]).
         with self._lock:
             self._dashboard_config = config
             self._dashboard_config_version += 1
@@ -954,7 +954,7 @@ class InstanceManager:
         instance via :meth:`start_workflow_instance`.
 
         Arbitrary ``definition_json`` is intentionally unsupported (see
-        DECISION plan_2026-05-29_0c00a594/D-002).
+        DECISION plan_2026-05-29_0c00a594/D-002 [STALE]).
         """
         if not _HAS_WORKFLOWS:
             raise RuntimeError("fsm_llm_workflows extension is not installed")
@@ -1399,7 +1399,7 @@ class InstanceManager:
 
         # Reconcile a dead thread and snapshot all mutable fields under one lock
         # so status/result/error are mutually consistent for the rest of this call
-        # (DECISION plan_2026-05-29_0c00a594/D-003). A thread that died while
+        # (DECISION plan_2026-05-29_0c00a594/D-003 [STALE]). A thread that died while
         # "running" or "cancelling" is resolved here so it never stays stuck.
         with self._lock:
             if (
@@ -1493,7 +1493,7 @@ class InstanceManager:
         inst = self._get_agent(instance_id)
         # Snapshot under one lock so status/result/error agree, and distinguish
         # "not finished yet" from "finished with no result / failed"
-        # (DECISION plan_2026-05-29_0c00a594/D-003).
+        # (DECISION plan_2026-05-29_0c00a594/D-003 [STALE]).
         with self._lock:
             inst_result = inst.result
             inst_status = inst.status

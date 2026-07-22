@@ -394,7 +394,7 @@ class ClassificationExtractionConfig(BaseModel):
         max_length=100,
     )
 
-    # DECISION plan-2026-07-19T191147-4b664252/D-013: this cap MUST stay in
+    # DECISION plan-2026-07-19T191147-4b664252/D-013 [STALE]: this cap MUST stay in
     # lockstep with its sibling `ClassificationSchema.intents` (same file,
     # `max_length=15`), which `MessagePipeline._execute_classification_extractions`
     # builds FROM this config at conversation runtime. Leaving this side
@@ -1194,7 +1194,7 @@ class IntentDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_name_format(self) -> IntentDefinition:
-        # DECISION plan-2026-07-19T191147-4b664252/D-025: this check is a
+        # DECISION plan-2026-07-19T191147-4b664252/D-025 [STALE]: this check is a
         # `model_validator` raising ValueError ON PURPOSE. Do NOT "simplify" it to
         # `Field(pattern=_ASCII_IDENTIFIER.pattern)` to match `State.id` /
         # `Transition.target_state`, even though that reads cleaner and enforces the
@@ -1262,7 +1262,7 @@ class IntentScore(BaseModel):
         default_factory=dict, description="Extracted entities relevant to this intent"
     )
 
-    # DECISION plan-2026-07-18T051819-80b0bd4d/D-010: this body MUST stay textually identical
+    # DECISION plan-2026-07-18T051819-80b0bd4d/D-010 [STALE]: this body MUST stay textually identical
     # to ClassificationResult.coerce_entity_values below. Do NOT "simplify" back to a
     # bare str(val) and do NOT narrow `entities` to dict[str, str] to appease mypy --
     # str(None) == "None" is a TRUTHY string that silently defeats a handler's

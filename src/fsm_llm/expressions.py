@@ -134,7 +134,7 @@ def soft_equals(a: Any, b: Any) -> bool:
     if isinstance(a, str) and isinstance(b, str):
         return a.lower() == b.lower()
     if isinstance(a, str) or isinstance(b, str):
-        # DECISION plan-2026-07-18T051819-80b0bd4d/D-017
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-017 [STALE]
         # Do NOT delete this guard and do NOT "simplify" it back to a bare
         # `str(a) == str(b)`. `get_var` resolves a MISSING context key to None
         # (default `not_found=None`), so without this guard `str(None) == "None"`
@@ -565,7 +565,7 @@ def _logical_not(*args: Any) -> bool:
     if not args:
         return True
     if len(args) > 1:
-        # DECISION plan-2026-07-19T191147-4b664252/D-023
+        # DECISION plan-2026-07-19T191147-4b664252/D-023 [STALE]
         # Do NOT "fix" this by raising, or by folding the extra args in
         # (e.g. `not any(args)`). Either would change the RESULT of every
         # already-deployed FSM carrying this mistake, mid-conversation, on
@@ -635,7 +635,7 @@ def _op_var(values: list, data: dict[str, Any], _depth: int) -> Any:
     if not values:
         logger.error("var operator requires at least one argument")
         return None
-    # DECISION plan-2026-07-20T040150-876e7164/D-012
+    # DECISION plan-2026-07-20T040150-876e7164/D-012 [STALE]
     # `values[2:]` stays DROPPED. This is observability only: log, then carry on
     # with `values[0]`/`values[1]` exactly as before. Do NOT "finish the job" by
     # returning `None` or raising here — `_op_var` is the most-used operator in

@@ -719,7 +719,7 @@ class API:
         merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE,
     ) -> str:
         """Pop current FSM from stack and return to previous with enhanced context handling."""
-        # DECISION plan_2026-05-29_d9092060/D-001
+        # DECISION plan_2026-05-29_d9092060/D-001 [STALE]
         # Narrow lock scope: snapshot frame references under _stack_lock, then release
         # the lock before calling fsm_manager methods (which acquire per-conversation
         # RLocks and can block). Re-acquire _stack_lock only to pop the stack entry.
@@ -763,7 +763,7 @@ class API:
                 self.fsm_manager.end_conversation(current_frame.conversation_id)
             finally:
                 # Re-acquire lock only to mutate the stack
-                # DECISION plan-2026-07-18T051819-80b0bd4d/D-013
+                # DECISION plan-2026-07-18T051819-80b0bd4d/D-013 [STALE]
                 # Remove the frame we just ended BY OBJECT IDENTITY, at whatever
                 # index it now holds. Do NOT restore the old
                 # `inner_stack[-1].conversation_id == current_frame.conversation_id`
@@ -958,7 +958,7 @@ class API:
                     f"Conversation stack is empty for {conversation_id}. "
                     f"The conversation may have been corrupted."
                 )
-            # DECISION plan-2026-07-18T051819-80b0bd4d/D-014
+            # DECISION plan-2026-07-18T051819-80b0bd4d/D-014 [STALE]
             # THIS is the single idleness-refresh point. Every public method that
             # resolves "which FSM is current" funnels through here (converse,
             # converse_stream, get_data, update_context, get_current_state,

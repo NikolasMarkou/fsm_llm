@@ -51,7 +51,7 @@ class ToolRegistry:
     """
 
     def __init__(self) -> None:
-        # DECISION plan-2026-07-20T040150-876e7164/D-005: single NON-REENTRANT lock
+        # DECISION plan-2026-07-20T040150-876e7164/D-005 [STALE]: single NON-REENTRANT lock
         # guarding EVERY read, write and iteration of `_tools`. Registration racing
         # prompt/schema building was measured to raise
         # `RuntimeError: dictionary changed size during iteration` in 20/20 trials
@@ -179,7 +179,7 @@ class ToolRegistry:
         synchronously via asyncio.
         """
         # Handle async tool functions (e.g. MCP tools)
-        # DECISION plan_2026-05-29_d9092060/D-006
+        # DECISION plan_2026-05-29_d9092060/D-006 [STALE]
         # original_fn is assigned unconditionally so inspect.signature always sees
         # the real function, not the sync wrapper.  The coroutine is created
         # inside the worker lambda so it belongs to the worker thread's event loop

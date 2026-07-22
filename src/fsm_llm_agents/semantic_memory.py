@@ -156,7 +156,7 @@ class SemanticMemoryStore:
                 embedding=self._embed(text),
             )
             self._entries.append(entry)
-            # DECISION plan_2026-05-31_f08da86d/D-003: max_entries is a deliberate
+            # DECISION plan_2026-05-31_f08da86d/D-003 [STALE]: max_entries is a deliberate
             # single-use config knob (charged to the Complexity Budget), NOT a new
             # eviction-policy abstraction. Do NOT generalize this into a pluggable
             # LRU/TTL strategy — default None keeps growth unbounded (prior behavior
@@ -284,7 +284,7 @@ class SemanticMemoryStore:
         target = os.path.expanduser(path) if path else self._persist_path
         if not target:
             raise ValueError("no path provided and persist_path is unset")
-        # DECISION plan-2026-07-20T040150-876e7164/D-004
+        # DECISION plan-2026-07-20T040150-876e7164/D-004 [STALE]
         # Do NOT revert this to a fixed `f"{target}.tmp"` name. `self._lock` is
         # PER-INSTANCE, so two stores sharing one persist_path (two processes,
         # or two stores loaded from one file) have zero mutual exclusion: both

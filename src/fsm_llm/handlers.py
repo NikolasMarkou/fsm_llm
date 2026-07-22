@@ -989,7 +989,7 @@ class LambdaHandler(BaseHandler):
         :raises TypeError: If the lambda returns a value that is neither ``None``
             nor a ``dict``
         """
-        # DECISION plan-2026-07-18T162030-a02151fe/D-013
+        # DECISION plan-2026-07-18T162030-a02151fe/D-013 [STALE]
         # Do NOT reintroduce a try/except HandlerExecutionError wrapper here, and
         # do NOT move the TypeError below back inside a try. This method used to
         # do both, and the result was a message wrapped 2x (raising lambda) or 3x

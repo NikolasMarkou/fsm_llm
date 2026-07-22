@@ -106,7 +106,7 @@ class ADaPTAgent(BaseAgent):
             answer = self._extract_answer(final_context, responses)
             trace = self._build_trace(final_context, iteration)
 
-            # DECISION plan_2026-05-31_03830272/D-001: do NOT hard-code
+            # DECISION plan_2026-05-31_03830272/D-001 [STALE]: do NOT hard-code
             # success=True. A run that looped to the iteration limit without
             # setting final_answer and without executing a tool is degenerate —
             # the answer is _extract_answer's prose/JSON fallback. Apply the
@@ -337,7 +337,7 @@ class ADaPTAgent(BaseAgent):
         ):
             return str(attempt_result)
 
-        # DECISION plan_2026-05-31_03830272/D-001: skip responses that are the
+        # DECISION plan_2026-05-31_03830272/D-001 [STALE]: skip responses that are the
         # raw bulk-extraction envelope ({"extracted_data": ...}). On weak models
         # that internal Pass-2 JSON can be the last response; returning it leaks
         # plumbing as the user-facing answer (the adapt JSON-leak bug).

@@ -423,7 +423,7 @@ class BaseAgent(ABC):
         (a planner state's Pass-2 text leaking as the result) — that is a
         degenerate completion, not a success.
 
-        # DECISION plan_2026-05-31_cb91a9d5/D-001: when ``execution_evidence_keys``
+        # DECISION plan_2026-05-31_cb91a9d5/D-001 [STALE]: when ``execution_evidence_keys``
         # is supplied (planner patterns: orchestrator/rewoo/plan_execute), the
         # answer-key/tool-call test above is NOT sufficient. A planner can reach
         # a synthesis state that sets ``final_answer`` (and record a ``delegate``
@@ -485,7 +485,7 @@ class BaseAgent(ABC):
     # Context filtering
     # ------------------------------------------------------------------
 
-    # DECISION plan-2026-07-20T040150-876e7164/D-003
+    # DECISION plan-2026-07-20T040150-876e7164/D-003 [STALE]
     # This filter's output feeds `AgentResult.final_context`, which is returned
     # straight to the agent's caller. Do NOT re-inline `k.startswith("_")` here:
     # that check is case-SENSITIVE and only sees the literal `_` prefix, so
@@ -663,7 +663,7 @@ class BaseAgent(ABC):
 
             structured = self._try_parse_structured_output(answer, final_context)
 
-            # DECISION plan_2026-05-30_26c9510a/D-001: a run that produced
+            # DECISION plan_2026-05-30_26c9510a/D-001 [STALE]: a run that produced
             # neither a designated answer key (FINAL_ANSWER or a pattern-specific
             # extra_answer_key) NOR any tool call is degenerate — the `answer`
             # came from the prose-fallback in _extract_answer (a planner state's
@@ -726,7 +726,7 @@ class BaseAgent(ABC):
             return None
 
         # 1. Try constructing from context keys (most reliable — uses Pass 1 data)
-        # DECISION plan_2026-05-30_26c9510a/D-001: emit a diagnostic instead of
+        # DECISION plan_2026-05-30_26c9510a/D-001 [STALE]: emit a diagnostic instead of
         # silently swallowing the validation error — a structured_output of None
         # otherwise gives no clue which fields were missing/invalid.
         if context:

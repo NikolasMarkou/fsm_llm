@@ -74,7 +74,7 @@ _JUDGE_PROMPT = (
 def _default_complete(model: str, prompt: str) -> str:
     import litellm
 
-    # DECISION plan-2026-07-20T040150-876e7164/D-006: wrap the litellm boundary
+    # DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE]: wrap the litellm boundary
     # HERE so a provider outage leaves this function as an AgentError subclass,
     # never as a raw openai.APIError. `EvaluationError` rather than the bare
     # `AgentError` root because this function exists only to back

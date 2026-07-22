@@ -56,7 +56,7 @@ from .utilities import load_fsm_definition
 _TOO_DEEP = object()
 
 
-# DECISION plan-2026-07-20T040150-876e7164/D-010
+# DECISION plan-2026-07-20T040150-876e7164/D-010 [STALE]
 # This filter DROPS an internal-prefixed key. It does NOT replace the value
 # with "<redacted>" -- do NOT "harmonize" it into a redactor. `plans/SYSTEM.md`
 # claims this site redacts "by original design"; that claim is FALSE at HEAD
@@ -380,7 +380,7 @@ class FSMManager:
                 current_state=instance.current_state,
             )
         except Exception as cleanup_err:
-            # DECISION plan-2026-07-19T191147-4b664252/D-006
+            # DECISION plan-2026-07-19T191147-4b664252/D-006 [STALE]
             # The CLEANUP exception wins; `original` becomes its `__cause__`.
             # Do NOT "fix" this back to logging `cleanup_err` and re-raising
             # `original`: that was the F-07 defect. A `critical=True` handler
@@ -503,7 +503,7 @@ class FSMManager:
                     self._rollback_user_message(instance, message, log)
                     raise
                 except (KeyboardInterrupt, SystemExit):
-                    # DECISION plan-2026-07-18T162030-a02151fe/D-014
+                    # DECISION plan-2026-07-18T162030-a02151fe/D-014 [STALE]
                     self._rollback_user_message(instance, message, log)
                     raise
                 except Exception as e:
@@ -536,7 +536,7 @@ class FSMManager:
             self._rollback_user_message(instance, message, log)
             raise
         except (KeyboardInterrupt, SystemExit):
-            # DECISION plan-2026-07-18T162030-a02151fe/D-014
+            # DECISION plan-2026-07-18T162030-a02151fe/D-014 [STALE]
             # This clause must stay BEFORE `except Exception` and must re-raise
             # BARE. Do NOT merge it into the Exception clause below and do NOT
             # wrap it in FSMError: KeyboardInterrupt/SystemExit derive from
@@ -565,7 +565,7 @@ class FSMManager:
                     },
                 )
             except Exception as handler_err:
-                # DECISION plan-2026-07-20T040150-876e7164/D-009
+                # DECISION plan-2026-07-20T040150-876e7164/D-009 [STALE]
                 # The HANDLER exception wins; the failure being unwound becomes
                 # its `__cause__`. This is the same shape (and the same rule) as
                 # `_cleanup_after_failed_start` 150 lines above, which chains
@@ -792,7 +792,7 @@ class FSMManager:
             if context_update:
                 log.info(f"Updating context with keys: {list(context_update.keys())}")
 
-                # DECISION plan-2026-07-20T040150-876e7164/D-009
+                # DECISION plan-2026-07-20T040150-876e7164/D-009 [STALE]
                 # Scoped rollback — shape (c) of `pipeline.py`'s three different
                 # partial-commit contracts (D-005 of
                 # plan-2026-07-19T191147-4b664252). Snapshot EXACTLY the keys this

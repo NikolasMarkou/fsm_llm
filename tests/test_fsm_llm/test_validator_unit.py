@@ -587,7 +587,7 @@ class TestValidatorAgreesWithFSMDefinition:
             ("intents_too_short", _fsm_with_n_intents(1)),
             ("intents_in_range", _fsm_with_n_intents(15)),
             ("intents_too_long", _fsm_with_n_intents(16)),
-            # DECISION plan-2026-07-20T040150-876e7164/D-001 -- VACUITY REPAIR.
+            # DECISION plan-2026-07-20T040150-876e7164/D-001 [STALE] -- VACUITY REPAIR.
             # The 7 fixtures above touch only `value_error`, `missing` and the
             # LIST-length classes: i.e. exactly the classes that were ALREADY
             # promoted. They therefore could not fail no matter how large the
@@ -645,7 +645,7 @@ class TestValidatorAgreesWithFSMDefinition:
         assert any(loader_rejects.values()), "no case exercises the reject branch"
         assert not all(loader_rejects.values()), "no case exercises the accept branch"
 
-        # DECISION plan-2026-07-20T040150-876e7164/D-001 -- second vacuity guard.
+        # DECISION plan-2026-07-20T040150-876e7164/D-001 [STALE] -- second vacuity guard.
         # "Both branches were taken" is too weak: the original 7 fixtures
         # satisfied it while covering only already-promoted classes. Assert the
         # case list actually SPANS the classes that were false-green, so deleting
@@ -676,7 +676,7 @@ class TestValidatorAgreesWithFSMDefinition:
     def test_type_coercion_failure_agrees_with_the_loader(self):
         """DELIBERATELY INVERTED. Was `test_simplified_dict_leniency_preserved`.
 
-        # DECISION plan-2026-07-20T040150-876e7164/D-001
+        # DECISION plan-2026-07-20T040150-876e7164/D-001 [STALE]
         This test previously asserted the OPPOSITE: that `priority: "not-an-int"`
         (an `int_parsing` error) must stay a WARNING and leave `is_valid=True`,
         under the rationale "type-coercion leniency is NOT part of the `missing`
@@ -724,7 +724,7 @@ class TestValidatorAgreesWithFSMDefinition:
         cover `missing` must NOT have flipped it into a deny-list -- if it had,
         this synthetic unknown type would be promoted to an error.
 
-        # DECISION plan-2026-07-20T040150-876e7164/D-001
+        # DECISION plan-2026-07-20T040150-876e7164/D-001 [STALE]
         The synthetic stand-in used to be `string_too_short`. That name is now a
         RECOGNIZED, promoted member of the allow-list (it is loader-raising and
         was a measured false green), so it can no longer stand in for "a type
@@ -750,7 +750,7 @@ class TestValidatorAgreesWithFSMDefinition:
         """DELIBERATELY INVERTED. Was
         `test_list_length_promotion_did_not_widen_to_string_lengths`.
 
-        # DECISION plan-2026-07-20T040150-876e7164/D-001
+        # DECISION plan-2026-07-20T040150-876e7164/D-001 [STALE]
         The original asserted that `string_too_short`/`string_too_long` must NOT
         be promoted -- the D-013 "the string classes are deliberately excluded"
         carve-out. The constraint sweep measured that carve-out as a live false
@@ -802,7 +802,7 @@ class TestValidatorAgreesWithFSMDefinition:
 # ------------------------------------------------------------------
 # Mechanical validator/loader agreement sweep.
 #
-# DECISION plan-2026-07-20T040150-876e7164/D-001
+# DECISION plan-2026-07-20T040150-876e7164/D-001 [STALE]
 # THE LIST IN validator.py IS NOT THE CONTROL. THIS IS.
 #
 # Three consecutive plans "fixed" the validator/loader disagreement by adding

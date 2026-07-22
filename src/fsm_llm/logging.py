@@ -198,7 +198,7 @@ def setup_logging(
                 filter=prepare_log_record,
             )
     else:
-        # DECISION plan-2026-07-18T162030-a02151fe/D-012
+        # DECISION plan-2026-07-18T162030-a02151fe/D-012 [STALE]
         # Liveness check, not a plain boolean: the guard must self-heal when a
         # caller drops handlers via logger.remove()/_library_handler_ids.clear()
         # (enable_debug_logging and the test fixtures both do exactly that).

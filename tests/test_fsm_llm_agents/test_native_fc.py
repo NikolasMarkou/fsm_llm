@@ -211,7 +211,7 @@ class TestLitellmBoundaryWrap:
     A provider failure must surface as an ``AgentError`` (the package root)
     with the provider exception preserved as ``__cause__``.
 
-    DECISION plan-2026-07-20T040150-876e7164/D-006.
+    DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE].
     """
 
     @staticmethod

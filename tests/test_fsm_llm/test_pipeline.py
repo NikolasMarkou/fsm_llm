@@ -1129,7 +1129,7 @@ class TestContextScopeInFSMDefinition:
 
 
 # ══════════════════════════════════════════════════════════════
-# Additive bulk extraction (DECISION plan_2026-05-30_26c9510a/D-001)
+# Additive bulk extraction (DECISION plan_2026-05-30_26c9510a/D-001 [STALE])
 # ══════════════════════════════════════════════════════════════
 
 

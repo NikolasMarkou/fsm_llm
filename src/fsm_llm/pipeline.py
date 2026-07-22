@@ -81,7 +81,7 @@ def _coerce_str(v: Any) -> str:
     return v if isinstance(v, str) else str(v)
 
 
-# DECISION plan-2026-07-18T051819-80b0bd4d/D-018
+# DECISION plan-2026-07-18T051819-80b0bd4d/D-018 [STALE]
 # The trailing `raise TypeError` in each of the two coercers below is LOAD-BEARING.
 # Do NOT "restore" a `return v` passthrough for wrong-typed input. Both functions used
 # to end in a bare `return v`, so an int or a dict handed to a `field_type="list"` field
@@ -220,7 +220,7 @@ class MessagePipeline:
                 merge_delta(updated_context)
 
         except Exception as e:
-            # DECISION plan-2026-07-18T051819-80b0bd4d/D-006: re-raise UNCONDITIONALLY.
+            # DECISION plan-2026-07-18T051819-80b0bd4d/D-006 [STALE]: re-raise UNCONDITIONALLY.
             # HandlerSystem.execute_handlers raises only when error_mode == "raise" OR
             # the failing handler is critical=True, so anything escaping it already
             # means "must propagate". Do NOT reintroduce an `if error_mode == "raise"`
@@ -494,7 +494,7 @@ class MessagePipeline:
         # Accumulate chunks to store in conversation history
         chunks: list[str] = []
         persist = True
-        # DECISION plan-2026-07-18T051819-80b0bd4d/D-015: client abandonment and a backend
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-015 [STALE]: client abandonment and a backend
         # stream error MUST diverge here, and the ORDER of these except clauses is
         # the whole mechanism.
         #   * GeneratorExit (the consumer stopped iterating / the generator was
@@ -543,7 +543,7 @@ class MessagePipeline:
             # Store the accumulated response when the stream completed OR the
             # consumer abandoned it — but never when it errored (see D-015).
             #
-            # DECISION plan-2026-07-19T191147-4b664252/D-003
+            # DECISION plan-2026-07-19T191147-4b664252/D-003 [STALE]
             # TWO DISTINCT suppression conditions, deliberately not merged:
             #   * `persist` is False only for a mid-stream ERROR (D-015 above).
             #   * `full_message` is empty when the provider produced no real text
@@ -624,7 +624,7 @@ class MessagePipeline:
             if extraction_response.extracted_data:
                 committed = extraction_response.extracted_data
 
-                # DECISION plan-2026-07-19T191147-4b664252/D-005
+                # DECISION plan-2026-07-19T191147-4b664252/D-005 [STALE]
                 # SHAPE (c) of three DIFFERENT partial-commit contracts in this file.
                 # Roll back ONLY the keys this statement commits, then re-raise:
                 #   (a) _execute_state_transition — FULL context snapshot restore, because
@@ -733,7 +733,7 @@ class MessagePipeline:
                                 updated_keys=set(post_data.keys()),
                             )
                 except HandlerExecutionError:
-                    # DECISION plan-2026-07-18T051819-80b0bd4d/D-012: a handler failure that
+                    # DECISION plan-2026-07-18T051819-80b0bd4d/D-012 [STALE]: a handler failure that
                     # escaped MessagePipeline.execute_handlers must propagate REGARDLESS
                     # of which call site fired it. The "non-fatal" tolerance below exists
                     # for EXTRACTION failures (LLM parse errors, malformed field values),
@@ -1038,7 +1038,7 @@ class MessagePipeline:
                     extracted_data.update(retry_class_data)
 
         # --- Additive bulk extraction for instruction-only fields ---
-        # DECISION plan_2026-05-30_26c9510a/D-001: fields named only in
+        # DECISION plan_2026-05-30_26c9510a/D-001 [STALE]: fields named only in
         # extraction_instructions (not in required_context_keys or any
         # transition condition's requires_context_keys) never get a
         # FieldExtractionConfig, so the per-field passes above silently miss

@@ -41,7 +41,7 @@ from .semantic_memory import SemanticMemoryStore
 from .tools import tool
 
 
-# DECISION plan_2026-05-30_5598b755/D-005
+# DECISION plan_2026-05-30_5598b755/D-005 [STALE]
 # A first-class "answer directly" action. ReAct forces think -> act -> conclude
 # and the under-call guard (D-004) requires a tool to have run before concluding,
 # which is correct for tool tasks but leaves conversational / recall turns (which
@@ -93,7 +93,7 @@ def augment_task_with_memories(
     BEFORE injection. ``search`` returns the top-k by score regardless of how low
     it is, so without a cutoff an unrelated stored fact (e.g. an old calculation)
     leaks into every later turn and the agent repeats it. Substring-fallback
-    matches score 1.0 and always pass. (DECISION plan_2026-05-30_5598b755/D-006)
+    matches score 1.0 and always pass. (DECISION plan_2026-05-30_5598b755/D-006 [STALE])
     """
     try:
         results = memory.search(task, k=recall_k)
@@ -172,7 +172,7 @@ class AutoMemoryReactAgent(ReactAgent):
         self.auto_remember = auto_remember
         self.remember_only_on_success = remember_only_on_success
         self.enable_respond = enable_respond
-        # DECISION plan_2026-05-30_5598b755/D-005
+        # DECISION plan_2026-05-30_5598b755/D-005 [STALE]
         # Give conversational/recall turns a valid "answer directly" action.
         # Idempotent and flag-guarded; skipped if the caller already registered
         # a `respond` tool. Mutates the passed registry by design (this agent

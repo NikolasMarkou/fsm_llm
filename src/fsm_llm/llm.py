@@ -390,7 +390,7 @@ class LiteLLMInterface(LLMInterface):
             if self.timeout is not None:
                 call_params["timeout"] = self.timeout
 
-            # DECISION plan-2026-07-19T075908-70b6bdec/D-007
+            # DECISION plan-2026-07-19T075908-70b6bdec/D-007 [STALE]
             # This is the SECOND of two call-param builders; generate_response_stream
             # does NOT route through _make_llm_call. Do not "fix" retries at only one
             # site — an earlier finding flagged this builder as the un-propagated twin
@@ -550,7 +550,7 @@ class LiteLLMInterface(LLMInterface):
         if self.timeout is not None:
             call_params["timeout"] = self.timeout
 
-        # DECISION plan-2026-07-19T075908-70b6bdec/D-007
+        # DECISION plan-2026-07-19T075908-70b6bdec/D-007 [STALE]
         # Retries are delegated to the provider SDK's own retry layer via
         # `max_retries`. Do NOT change this to `num_retries`: that key routes to
         # litellm's tenacity layer, which sits ON TOP of the SDK layer (giving
@@ -801,7 +801,7 @@ class LiteLLMInterface(LLMInterface):
         # Handle unstructured response (plain text)
         # In this case, use the entire content as the message
         #
-        # DECISION plan-2026-07-18T051819-80b0bd4d/D-016: this is the TERMINAL rung of the
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-016 [STALE]: this is the TERMINAL rung of the
         # degradation ladder (structured -> embedded-JSON fallback -> raw text) and
         # it MUST remain construct-safe — there is nothing below it to fall through
         # to, so anything this construction raises escapes _parse_* and fails the
@@ -811,7 +811,7 @@ class LiteLLMInterface(LLMInterface):
         # it, and do not add an uncapped or non-literal field to this construction
         # without re-checking every constraint on the model.
         #
-        # DECISION plan-2026-07-18T051819-80b0bd4d/D-020: the terminal rung is the LAST
+        # DECISION plan-2026-07-18T051819-80b0bd4d/D-020 [STALE]: the terminal rung is the LAST
         # LINE OF DEFENCE and must be BOTH construct-safe (above) AND
         # ENVELOPE-SAFE (below).  Construct-safety alone is not enough, and
         # shipping only half of it caused a real user-facing regression:
@@ -826,7 +826,7 @@ class LiteLLMInterface(LLMInterface):
         # Never emit a serialized envelope as user-facing text: recover the
         # human-readable `message` out of it, or say something generic.
         #
-        # DECISION plan-2026-07-18T162030-a02151fe/D-022
+        # DECISION plan-2026-07-18T162030-a02151fe/D-022 [STALE]
         # RESIDUAL LEAK, DELIBERATELY LEFT OPEN. `_looks_like_json` requires the
         # text to BOTH start and end with a brace/bracket pair, so three envelope
         # shapes still pass through verbatim: prose-PREFIXED (`Here you go:
@@ -964,7 +964,7 @@ class LiteLLMInterface(LLMInterface):
             raw = content.strip()
             coerced_value: Any = None
             if request.field_type == "str":
-                # DECISION plan-2026-07-18T162030-a02151fe/D-022
+                # DECISION plan-2026-07-18T162030-a02151fe/D-022 [STALE]
                 # This rung hands the raw text back as the field value even when
                 # that text is a prose-wrapped envelope. D-016 guarded it with
                 # `None if is_envelope(raw) else raw`; that guard is REVERTED,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """Regression tests for the plan_execute honesty hole (DECISION
-plan_2026-05-31_f08da86d/D-001).
+plan_2026-05-31_f08da86d/D-001 [STALE]).
 
 The plan_execute step tracker appends entries to ``step_results`` that carry a
 ``success`` flag, so they hit the ``_has_execution_evidence`` "list of dicts all
