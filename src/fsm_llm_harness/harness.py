@@ -137,6 +137,7 @@ from .tools import (
     PlanMemory,
     derive_disk_counts,
     gate_files,
+    has_bytes,
 )
 
 __all__ = [
@@ -2179,6 +2180,49 @@ class HarnessAgent(BaseAgent):
             [entry for entry in self._read_ledger(context) if entry != key]
         )
 
+    def _plan_has_content(self, context: Mapping[str, Any]) -> bool:
+        # DECISION plan-2026-07-22T212329-16de43da/D-005
+        # Whether a CONFIGURED plan directory carries a non-empty plan.md, read
+        # OFF DISK. Used by `_after_plan_dispatch` to catch the residual
+        # slugless PLAN stall (Defect B).
+        #   (a) DISK-DERIVED, satisfying I1: a plan-writer's `success=True`
+        #       claim no longer ALONE advances PLAN. `_after_plan_dispatch`
+        #       already retries on `result is None or not result.success` -- a
+        #       worker-reported flag -- and MEASURED (L6 B0 run 3): a reply
+        #       with `success=True` but an EMPTY plan.md skipped the budget,
+        #       fell through to a denied approval, and stalled sluglessly
+        #       (`_check_stall` always raises slug=None). Folding this disk
+        #       read into that condition makes the empty-plan reply consume the
+        #       budget exactly like a worker failure, so exhaustion halts on
+        #       the honest GateSlug.PLAN_CAP instead of a slugless stall.
+        #   (b) Respects predecessor D-003
+        #       (plan-2026-07-22T184813-6549c7cb): NO generic STALL slug is
+        #       minted. A slug is a claim the halt was BOUNDED BY DESIGN -- this
+        #       structural closure is precisely what earns the EXISTING
+        #       PLAN_CAP slug (already in HONEST_HALT_SLUGS) the right to cover
+        #       this shape, because the stall is now actually bounded.
+        #   (c) Reads through the DRIVER's OWN `PlanDirectory` accessor, NOT
+        #       `PlanMemory`'s 64 KB-capped role-facing reader (storage.py's
+        #       "Two read paths"): the driver is not a worker. `has_bytes` is
+        #       REUSED as the non-empty predicate (I1/DRY) -- do NOT hand-roll
+        #       a second byte check that could drift from the gate's own. A
+        #       zero-byte plan.md therefore reads as EMPTY (has_bytes strips).
+        #   (d) When NO plan directory is configured (the documented degrade
+        #       path -- PLAN_DIR absent from context, `_plan_directory` is
+        #       None), there is no disk to read, so the disk-derived override
+        #       cannot and MUST NOT fire: return True so the OR-ed condition
+        #       defers to `result.success` exactly as before this fix. This is
+        #       a DELIBERATE deviation from plan step 5's literal "no plan dir
+        #       -> False": returning False there would reclassify every
+        #       successful degrade-path plan reply as an empty-plan failure and
+        #       redden 59 existing traverse tests (see decisions.md D-005). The
+        #       real Defect B always has a plan directory, so the override still
+        #       fires for every production/L6 shape.
+        directory = self._plan_directory(context)
+        if directory is None:
+            return True
+        return has_bytes(directory.read_text, ArtifactNames.PLAN)
+
     def _after_plan_dispatch(
         self,
         result: AgentResult | None,
@@ -2227,7 +2271,14 @@ class HarnessAgent(BaseAgent):
             # No worker configured (D-045): nothing was attempted, so there is
             # nothing to re-attempt and no cap to spend.
             return {}
-        if result is None or not result.success:
+        # DECISION plan-2026-07-22T212329-16de43da/D-005
+        # `_plan_has_content` (disk-derived) is OR-ed into the retry condition
+        # so a `success=True` reply that left plan.md EMPTY consumes the budget
+        # exactly like a worker failure and halts on PLAN_CAP, not a slugless
+        # stall. A genuine success WITH a non-empty plan.md still falls through
+        # to `_emit_plan`/`_request_approval` unchanged -- only the empty case
+        # is newly caught. See _plan_has_content and decisions.md D-005.
+        if result is None or not result.success or not self._plan_has_content(context):
             if self._plan_redispatches >= self.max_plan_redispatches:
                 logger.warning(
                     f"Plan cap [{GateSlug.PLAN_CAP}]: "

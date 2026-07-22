@@ -95,11 +95,35 @@ Call = tuple[str, int, int, int]
 # ---------------------------------------------------------------------------
 
 
+def _write_plan_md(request: RoleRequest) -> None:
+    """Put a real, non-empty ``plan.md`` on disk -- a FAITHFUL plan-writer.
+
+    Defect B (harness ``_plan_has_content``, D-005) makes the driver read
+    ``plan.md`` off disk: a ``success=True`` plan reply that left ``plan.md``
+    EMPTY now consumes the PLAN redispatch budget exactly like a worker
+    failure.  A scripted plan-writer that claims success must therefore PRODUCE
+    the artifact -- as a live plan-writer does through its write tools -- or the
+    run honestly stalls at PLAN.  Writes only when a plan directory is
+    configured, and never truncates an already-populated ``plan.md``
+    (idempotent).
+    """
+    if request.plan_dir is None:
+        return
+    plan_path = Path(request.plan_dir) / ArtifactNames.PLAN
+    if not (plan_path.exists() and plan_path.read_text().strip()):
+        plan_path.write_text(_PLAN_MD)
+
+
 def _traverse_script(*, total_steps: int = 1, findings: int = 3) -> dict[str, Any]:
     """A script that walks EXPLORE -> PLAN -> EXECUTE -> REFLECT -> CLOSE."""
+
+    def _plan(request: RoleRequest) -> dict[str, Any]:
+        _write_plan_md(request)
+        return {"ctx": {ContextKeys.TOTAL_STEPS: total_steps}}
+
     return {
         HarnessStates.EXPLORE: {"ctx": {ContextKeys.FINDINGS_COUNT: findings}},
-        HarnessStates.PLAN: {"ctx": {ContextKeys.TOTAL_STEPS: total_steps}},
+        HarnessStates.PLAN: _plan,
         HarnessStates.EXECUTE: {"ctx": {}},
         HarnessStates.REFLECT: {"ctx": {ContextKeys.ALL_CRITERIA_PASS: True}},
         HarnessStates.PIVOT: {"ctx": {ContextKeys.PIVOT_RESOLVED: True}},
@@ -2609,6 +2633,119 @@ class TestBoundedPlanRedispatch:
         assert harness.worker.count_for(HarnessStates.PLAN) == 2
         assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.PLAN_CAP
 
+    # -- Defect B: the disk-derived empty-plan.md check (D-005) --------------
+
+    def test_a_success_reply_with_an_empty_plan_md_halts_with_the_slug(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The residual slugless PLAN stall, closed structurally (D-005).
+
+        Measured shape (CLAUDE 'Known gaps after B1'): a plan-writer that
+        reports ``success=True`` while leaving ``plan.md`` EMPTY used to SKIP
+        the worker-failure budget (which keyed on ``result.success`` alone),
+        fall through to a DENIED approval -- DENY is the unattended default,
+        and an empty plan is denied -- and stall SLUGLESSLY, because
+        ``_check_stall`` always raises ``slug=None``.  The disk-derived
+        ``_plan_has_content`` folds that shape into the budget condition, so the
+        empty-plan reply now consumes the budget exactly like a worker failure
+        and, at exhaustion, halts on the honest ``plan-cap`` slug -- never
+        ``slug=None``.
+        """
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        script = _traverse_script()
+        # A FAITHLESS plan-writer: claims success but writes NO plan.md, so the
+        # on-disk plan stays empty (overrides the faithful default plan entry).
+        script[HarnessStates.PLAN] = {"ctx": {ContextKeys.TOTAL_STEPS: 1}}
+        harness = make_harness(
+            script, roots=roots, approvals=ApprovalRecorder(default=False)
+        )
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.PLAN) == (
+            1 + Defaults.MAX_PLAN_REDISPATCHES
+        )
+        assert harness.agent._plan_redispatches == Defaults.MAX_PLAN_REDISPATCHES
+        slug = result.final_context[ContextKeys.LAST_GATE_SLUG]
+        assert slug == GateSlug.PLAN_CAP
+        assert slug is not None
+        # the empty plan was never advanced to EXECUTE
+        assert harness.worker.count_for(HarnessStates.EXECUTE) == 0
+
+    def test_a_success_reply_with_a_real_plan_md_is_not_second_guessed(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The happy path is UNTOUCHED: a real plan.md still reaches approval.
+
+        A plan-writer that reports success AND writes a non-empty ``plan.md``
+        (the faithful default ``_traverse_script`` writer) consumes NONE of the
+        redispatch budget and is put to approval, exactly as before Defect B's
+        fix.  Only the empty-plan case is newly caught.
+        """
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        harness = make_harness(_traverse_script(), roots=roots)
+        result = harness.run()
+
+        assert harness.agent._plan_redispatches == 0
+        assert harness.approvals.count(APPROVAL_PLAN) == 1
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
+            GateSlug.PLAN_CAP
+        )
+        # the default approval APPROVES, so the run proceeds past PLAN
+        assert harness.worker.count_for(HarnessStates.EXECUTE) >= 1
+
+    def test_a_zero_byte_seeded_plan_md_reads_as_empty(
+        self, make_harness, plan_dir
+    ) -> None:
+        """The step-1/step-5 interaction (A4): a seeded plan.md is EMPTY.
+
+        ``PlanDirectory.seed_protocol_skeleton()`` creates ``plan.md`` as a
+        ZERO-BYTE placeholder.  ``_plan_has_content`` reuses ``has_bytes``
+        (which strips), so a seeded-but-unwritten ``plan.md`` reads as empty --
+        it must NOT accidentally satisfy the content check and let a plan that
+        was never written pass as real.
+        """
+        storage_module.PlanDirectory(plan_dir).seed_protocol_skeleton()
+        plan_path = plan_dir / ArtifactNames.PLAN
+        assert plan_path.exists()
+        assert plan_path.stat().st_size == 0
+
+        agent = make_harness().agent
+        context = {ContextKeys.PLAN_DIR: str(plan_dir)}
+        assert agent._plan_has_content(context) is False
+
+    def test_the_empty_plan_check_leaks_no_key_under_wrong_spellings(
+        self, make_harness, roots, plan_dir
+    ) -> None:
+        """The [I:5] escape shape, aimed at Defect B's check.
+
+        The empty-plan budget consumption is driven off DISK
+        (``_plan_has_content``), not off any context key, so no
+        ``plan_has_content`` spelling -- however a worker misspells it in its
+        reply or the FSM's Pass-1 extraction "finds" it -- appears in the final
+        context.  Mirrors ``test_a_worker_cannot_reach_the_counter``.
+        """
+        _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        greedy = {
+            "plan_has_content": True,
+            "_plan_has_content": True,
+            "plan-has-content": True,
+        }
+        script = _traverse_script()
+        script[HarnessStates.PLAN] = {"success": True, "ctx": dict(greedy)}
+        harness = make_harness(
+            script,
+            roots=roots,
+            extraction_data=greedy,
+            approvals=ApprovalRecorder(default=False),
+        )
+        result = harness.run()
+
+        # the faithless plan-writer left plan.md empty, so the budget caught it
+        assert harness.agent._plan_redispatches == Defaults.MAX_PLAN_REDISPATCHES
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.PLAN_CAP
+        for spelling in ("plan_has_content", "_plan_has_content", "plan-has-content"):
+            assert spelling not in result.final_context
+
 
 # ---------------------------------------------------------------------------
 # Evidence vs testimony: the driver's own filesystem read (D-032)
@@ -4060,6 +4197,13 @@ class TestPresentationContracts:
     ) -> None:
         """The honest failure: report the gap, do not invent the section."""
         _seed_findings(plan_dir, "alpha", "beta", "gamma")
+        # A NON-EMPTY but UNPARSEABLE plan.md: non-empty so Defect B's
+        # disk-derived `_plan_has_content` (D-005) lets the run reach PC-PLAN
+        # emission, unparseable so `PlanDoc.from_markdown` fails and every
+        # floor field is honestly reported missing rather than invented.  An
+        # ABSENT plan.md would now consume the PLAN redispatch budget and never
+        # emit the contract at all.
+        (plan_dir / ArtifactNames.PLAN).write_text("not a valid plan document\n")
         harness = make_harness(_traverse_script(), roots=roots)
         harness.run()
 
