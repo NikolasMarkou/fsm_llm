@@ -15,7 +15,10 @@ bench_data/
 │       ├── manifest_<arm>.json   # written BEFORE the first dispatch
 │       ├── rows_<arm>.jsonl      # one raw row per dispatch, append-only
 │       └── summary_<arm>.json    # k/n + Wilson CI, recounted from rows
-├── l6-e2e/                   # per-run e2e rubric vectors (plan step 7)
+├── l6-e2e/                   # per-run e2e rubric vectors, graded not binary
+│   └── <block>/              # B0, B1, ... one pre-registered block each;
+│                             #   manifest.json + rows.jsonl (no arm suffix:
+│                             #   L6 is always native and test-embedded)
 └── seed-probe/               # probe-seed records (plan step 2)
 ```
 

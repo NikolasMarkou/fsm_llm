@@ -379,7 +379,7 @@ Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_harness/          # 1,842 tests, 10 test files
+pytest tests/test_fsm_llm_harness/          # 1,850 tests, 10 test files
 ```
 
 | File | Tests |
@@ -392,7 +392,7 @@ pytest tests/test_fsm_llm_harness/          # 1,842 tests, 10 test files
 | `test_cli.py` | 103 |
 | `test_storage.py` | 93 |
 | `test_fsm_definition.py` | 87 |
-| `test_live_ollama.py` | 48 (15 live, gated off by default) |
+| `test_live_ollama.py` | 56 (15 live, gated off by default) |
 | `test_extraction_cost.py` | 24 |
 
 **Live tests are DOUBLE-gated** and auto-skip: they need both
@@ -469,7 +469,7 @@ empty-file gate counting, ownership deny branch, live-gate short-circuit) each
 flipped tests red in a scratch copy (93 red total), and `test_cli.py`'s
 exit-code 0/1/2 contract close-read verdict was CLEAN.
 
-Offline, the package is green: 1,842 tests, `ruff` clean, `mypy` 0 errors.
+Offline, the package is green: 1,850 tests, `ruff` clean, `mypy` 0 errors.
 
 **Not claimed**: that the harness is production-ready, or that a 4B model
 drives it unattended to a useful result -- the L6 0/3 REINFORCES this claim's

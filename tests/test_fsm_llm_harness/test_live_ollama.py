@@ -1252,24 +1252,35 @@ RUNS_E2E = 3
 #: blocks (D-008: honored by Ollama on the native arm at this digest).
 E2E_SEED_BASE = 20260722100
 
-#: Test-side wall clock per run.  A run still going at 15 minutes FAILS the
+#: Test-side wall clock per run.  A run still going at 30 minutes FAILS the
 #: floor as a hang instead of hanging pytest; the harness's own caps
-#: (iteration_hard_cap, explore redispatch budget, stall detector, MAX_TURNS)
-#: are expected to fire far earlier.
-E2E_WALL_CLOCK_CEILING_S = 900.0
+#: (iteration_hard_cap, explore/plan redispatch budgets, stall detector,
+#: MAX_TURNS) are expected to fire far earlier.  Raised 900 -> 1800 for B1
+#: (D-004): every B0 row finished in 169-346s but none got past PLAN, so the
+#: 900s ceiling has never been tested against a deeper traverse -- 1800s is
+#: measured-headroom arithmetic (B0 max 345.9s for 2 states, x ~2.5 states
+#: more), sized so the first-ever deep traverse is not masked by an
+#: infrastructure timeout.  NOT a floor change: the floor grades
+#: furthest_state/verified_write/honest_halt, never wall clock, and a
+#: timeout row still fails honestly as `timed_out`.
+E2E_WALL_CLOCK_CEILING_S = 1800.0
 
 #: Where the committed rubric vectors live.  TRACKED, like every bench block:
 #: `plans/` and scratch are how the predecessor's benches vanished.
 BENCH_DATA_DIR = Path(__file__).resolve().parents[2] / "scripts" / "bench_data"
 L6_BENCH_ID = "l6-e2e"
-L6_BLOCK = "B0"
+L6_BLOCK = "B1"
 
 #: The slugs that make a halt HONEST: the four pre-step-gate slugs plus the
-#: EXPLORE re-dispatch cap.  A stall halt carries NO slug (`_check_stall`
-#: raises with ``slug=None``) and is deliberately NOT in this set -- "the run
-#: wedged and could not say why" is the dishonest shape the floor exists to
-#: catch.  Reaching terminal CLOSE is the other honest ending.
-HONEST_HALT_SLUGS = frozenset({*GateSlug.ORDER, GateSlug.EXPLORE_CAP})
+#: EXPLORE and PLAN re-dispatch caps (PLAN_CAP joined for B1: a cap-exhausted
+#: PLAN halt is BOUNDED by design, exactly like EXPLORE_CAP -- see D-008).  A
+#: stall halt carries NO slug (`_check_stall` raises with ``slug=None``) and
+#: is deliberately NOT in this set -- "the run wedged and could not say why"
+#: is the dishonest shape the floor exists to catch.  Reaching terminal CLOSE
+#: is the other honest ending.
+HONEST_HALT_SLUGS = frozenset(
+    {*GateSlug.ORDER, GateSlug.EXPLORE_CAP, GateSlug.PLAN_CAP}
+)
 
 #: Protocol order for "furthest state reached".  PIVOT and CLOSE share the top
 #: rank on purpose: both sit beyond REFLECT and neither dominates the other
@@ -1559,6 +1570,37 @@ def _bench_defect(row: Mapping[str, Any]) -> bool:
     )
 
 
+# DECISION plan-2026-07-22T184813-6549c7cb/D-008
+# The B1 floor's verified_write predicate, TIGHTENED from B0's (reviewer
+# WARNING 3): B0 counted write evidence from ANY state, so an EXPLORE dispatch
+# that wrote findings/x.md satisfied the clause alone -- near-vacuous for a
+# floor whose question is "did the EXECUTE role edit the WORKSPACE".  Do NOT
+# re-widen this to any-state evidence, do NOT put `pd_written` back into the
+# conjunction (an EXECUTE dispatch that only wrote decisions.md/changelog.md is
+# legitimate work but NOT the floor's verified write), and do NOT read worker
+# prose for it -- both conjuncts are disk/driver-derived (the factory's D-016
+# root-attributed observer channel AND the test's own sha256 diff).  Bars may
+# be tightened, never loosened.  See decisions.md D-008.
+def _verified_execute_workspace_write(
+    observations: list[dict[str, Any]], ws_changed: list[str]
+) -> bool:
+    """The tightened B1 floor predicate for ``verified_write``.
+
+    Interface contract (2 call sites: ``_one_e2e_run`` and the UNGATED
+    predicate tests): True iff at least one EXECUTE-state dispatch carried
+    >= 1 WORKSPACE-root verified write (the factory's D-016 channel, root
+    split per D-005) AND the workspace sha256 diff shows changed bytes.
+    Pure -- reads its arguments, touches no disk.
+    """
+    execute_workspace_writes = sum(
+        1
+        for record in observations
+        if record.get("state") == HarnessStates.EXECUTE
+        and (record.get("write_evidence_workspace") or 0) >= 1
+    )
+    return bool(execute_workspace_writes and ws_changed)
+
+
 def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
     """One full real-worker protocol run; returns its rubric vector.
 
@@ -1619,7 +1661,10 @@ def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
     write_dispatches = sum(
         1 for record in observations if (record.get("write_evidence") or 0) >= 1
     )
-    verified_write = bool(write_dispatches and (ws_changed or pd_written))
+    # Tightened for B1 (D-008): EXECUTE-state WORKSPACE write AND ws_changed.
+    # `pd_written` and the any-state `write_dispatches` count stay REPORTED
+    # row fields but no longer satisfy the floor's verified_write.
+    verified_write = _verified_execute_workspace_write(observations, ws_changed)
 
     # -- position evidence: the dispatch log plus the final state.md.
     states_entered: list[str] = []
@@ -1685,6 +1730,11 @@ def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
         "audit_warning_checks": _issue_families(issues, errors=False),
         "execute_assigned_targets": [
             r.assigned_write_target
+            for r in worker.requests
+            if r.state == HarnessStates.EXECUTE
+        ],
+        "execute_target_reasons": [
+            r.execute_target_reason
             for r in worker.requests
             if r.state == HarnessStates.EXECUTE
         ],
@@ -1833,9 +1883,28 @@ class TestTheL6RubricPlumbingOffline:
         assert _bench_defect(base) is True
         assert _bench_defect({**base, "halt_slug": GateSlug.LEASH_CAP}) is False
         assert _bench_defect({**base, "halt_slug": GateSlug.EXPLORE_CAP}) is False
+        assert _bench_defect({**base, "halt_slug": GateSlug.PLAN_CAP}) is False
         assert _bench_defect({**base, "close_reached": True}) is False
         assert _bench_defect({**base, "timed_out": True}) is True
         assert _bench_defect({**base, "error": "RuntimeError('x')"}) is True
+
+    def test_a_plan_cap_halt_is_honest_and_a_slugless_stall_is_not(self) -> None:
+        """D-008: the cap-exhausted PLAN halt is BOUNDED by design (the new
+        redispatch budget earns the slug its honesty, exactly as EXPLORE_CAP's
+        budget did), while a slugless stall stays outside the honest set AND
+        stays a ``_bench_defect`` -- the classification did not soften when
+        PLAN_CAP joined."""
+        assert GateSlug.PLAN_CAP in HONEST_HALT_SLUGS
+        assert GateSlug.EXPLORE_CAP in HONEST_HALT_SLUGS
+        assert None not in HONEST_HALT_SLUGS
+        assert _bench_defect(
+            {
+                "error": None,
+                "timed_out": False,
+                "close_reached": False,
+                "halt_slug": None,
+            }
+        ) is True
 
     def test_the_L6_manifest_pins_the_same_six_fields_as_the_L4_blocks(self) -> None:
         hb = _bench_module()
@@ -1854,6 +1923,72 @@ class TestTheL6RubricPlumbingOffline:
         ], "the EXECUTE role holds no tools -- the surface pin is vacuous"
         # And it is NOT the L4 fixture hash: plan.md/state.md are OUTPUTS here.
         assert _l6_fixture_hash() != hb._fixture_hash(sys.modules[__name__])
+
+
+class TestTheTightenedVerifiedWritePredicate:
+    """UNGATED: the D-008 B1 floor predicate, pinned on fabricated records.
+
+    B0's clause counted write evidence from ANY state, so all three committed
+    B0 rows scored ``verified_write=True`` off EXPLORE findings writes alone
+    (reviewer WARNING 3).  The tightened predicate must refuse every one of
+    those shapes and accept only an EXECUTE-state WORKSPACE write coinciding
+    with a real sha256 diff.
+    """
+
+    @staticmethod
+    def _obs(state: str, workspace: int = 0, plan: int = 0) -> dict[str, Any]:
+        return {
+            "state": state,
+            "write_evidence": workspace + plan,
+            "write_evidence_workspace": workspace,
+            "write_evidence_plan": plan,
+        }
+
+    def test_no_observations_is_never_a_verified_write(self) -> None:
+        assert _verified_execute_workspace_write([], ["uploader.py"]) is False
+        assert _verified_execute_workspace_write([], []) is False
+
+    def test_the_B0_shape_explore_writes_only_now_scores_False(self) -> None:
+        """The exact vacuousness being closed: EXPLORE dispatches wrote
+        findings (plan-root evidence), no EXECUTE dispatch ever ran -- B0's
+        clause called that a verified write; B1's must not, with or without
+        workspace churn."""
+        obs = [
+            self._obs(HarnessStates.EXPLORE, plan=2),
+            self._obs(HarnessStates.PLAN, plan=1),
+        ]
+        assert _verified_execute_workspace_write(obs, []) is False
+        assert _verified_execute_workspace_write(obs, ["uploader.py"]) is False
+
+    def test_an_explore_workspace_write_does_not_count_for_the_floor(self) -> None:
+        obs = [self._obs(HarnessStates.EXPLORE, workspace=1)]
+        assert _verified_execute_workspace_write(obs, ["uploader.py"]) is False
+
+    def test_an_execute_plan_only_write_does_not_count(self) -> None:
+        """An EXECUTE dispatch that only wrote decisions.md/changelog.md is
+        legitimate work but NOT the floor's workspace write (D-008)."""
+        obs = [self._obs(HarnessStates.EXECUTE, plan=2)]
+        assert _verified_execute_workspace_write(obs, ["uploader.py"]) is False
+
+    def test_an_execute_workspace_write_with_ws_diff_is_verified(self) -> None:
+        obs = [
+            self._obs(HarnessStates.EXPLORE, plan=1),
+            self._obs(HarnessStates.EXECUTE, workspace=1, plan=1),
+        ]
+        assert _verified_execute_workspace_write(obs, ["uploader.py"]) is True
+
+    def test_both_conjuncts_are_required(self) -> None:
+        """Observer evidence without a sha256 diff (or vice versa) is not
+        enough: the channel cross-check is the point of the AND."""
+        obs = [self._obs(HarnessStates.EXECUTE, workspace=1)]
+        assert _verified_execute_workspace_write(obs, []) is False
+        assert _verified_execute_workspace_write([], ["uploader.py"]) is False
+
+    def test_records_missing_the_root_split_are_tolerated_as_zero(self) -> None:
+        """A record lacking the D-005 split keys counts as no workspace
+        evidence -- never a KeyError."""
+        obs = [{"state": HarnessStates.EXECUTE, "write_evidence": 1}]
+        assert _verified_execute_workspace_write(obs, ["uploader.py"]) is False
 
 
 def _prose_as_comment(text: str) -> str:
@@ -1994,7 +2129,9 @@ class TestL6EndToEndRealWorkers:
 
     def test_three_full_runs_grade_at_or_above_the_floor(self, tmp_path: Path) -> None:
         hb = _bench_module()
-        bench_dir = BENCH_DATA_DIR / L6_BENCH_ID
+        # Per-block subdirectory (L4's layout convention, adopted for B1):
+        # B0's frozen files live under l6-e2e/B0/, this block writes B1/.
+        bench_dir = BENCH_DATA_DIR / L6_BENCH_ID / L6_BLOCK
         rows_path = bench_dir / "rows.jsonl"
         if rows_path.exists():
             pytest.fail(
