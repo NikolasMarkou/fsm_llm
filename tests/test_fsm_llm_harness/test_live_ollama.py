@@ -3802,3 +3802,186 @@ class TestClassifyFailedDispatchPartition:
                 ]
             )
             assert classify_failed_dispatch(row) == "wrong-root"
+
+
+# ---------------------------------------------------------------------------
+# L8's manifest + the gated live LOOP block (W1's measurement).
+# ---------------------------------------------------------------------------
+
+L8_BENCH_ID = "l8-explore-loop"
+L8_BLOCK = "B0"
+
+#: n rows for the single arm.  Fixed here, before the block runs (n>=10 per the
+#: mandate), and never extended -- a re-run needs a new block + decision entry.
+RUNS_L8 = 10
+
+#: Per-row completion seed, base + run - 1; a fresh base distinct from L7's
+#: (20260723100) so provenance never collides across blocks.
+L8_SEED_BASE = 20260723200
+
+
+def _l8_manifest(hb: Any) -> dict[str, Any]:
+    """The L8 pre-registration record; SAME six comparability fields as L7.
+
+    Reuses :func:`_l7_prompt_hash` / :func:`_l7_tool_surface` /
+    :func:`_l7_fixture_hash` DIRECTLY: an L8 row drives the SAME EXPLORE dispatch
+    template as an L7 ``bare`` row (same :func:`_l7_explore_request`, same
+    ``GOAL``), so those three hashes are arm-independent and pin the exact
+    EXPLORE dispatch this loop issues -- copying them would be a drift-prone
+    duplicate (DRY).  The arm is single: this is a bare-mkdir LOOP, not an A/B.
+    """
+    return {
+        "bench_id": L8_BENCH_ID,
+        "block": L8_BLOCK,
+        "n_preregistered": RUNS_L8,
+        "seed": {
+            "base": L8_SEED_BASE,
+            "per_row": "base+run-1",
+            "effective_arm": "native",
+        },
+        "model": MODEL,
+        "created_at": hb._utc_now(),
+        "prompt_bytes_sha256": _l7_prompt_hash(),
+        "tool_surface": _l7_tool_surface(),
+        "fixture_hash": _l7_fixture_hash(),
+        "model_digest": hb._model_digest(),
+        "arm": {"native": True, "display": "loop", "shape": "bare-loop"},
+        "git_commit": hb._git_commit(),
+    }
+
+
+def test_the_l8_manifest_carries_the_six_comparability_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UNGATED: ``_l8_manifest`` carries all six comparability fields and pins
+    the same 4b digest B1/L7 pinned.  ``model_digest`` is stubbed (it queries a
+    running Ollama otherwise), exactly as the L7 parity test stubs it, so the
+    guard proves the shape in ``make test``.
+    """
+    hb = _bench_module()
+    monkeypatch.setattr(hb, "_model_digest", lambda: {"tag": MODEL_TAG, "digest": "x"})
+    manifest = _l8_manifest(hb)
+    missing = [f for f in hb.MANIFEST_FIELDS if f not in manifest]
+    assert missing == [], missing
+    assert manifest["model_digest"]["tag"] == MODEL_TAG
+    assert manifest["arm"] == {"native": True, "display": "loop", "shape": "bare-loop"}
+    assert manifest["n_preregistered"] == RUNS_L8
+
+
+@requires_live
+class TestL8ExploreLoop:
+    """The EXPLORE redispatch-LOOP mechanism block: drive the real loop to its
+    ``MAX_EXPLORE_REDISPATCHES`` horizon over a bare plan dir and classify every
+    FAILED dispatch into exactly one mechanism bucket.
+
+    ONE arm, n=10, run ONCE (D-002).  Like L7 it asserts NO capability /
+    gate-clear bar -- it is a CHARACTERIZATION block; the ONLY assertion is the
+    classifier partition (every live failed dispatch maps to exactly one of
+    (i)/(ii)/(iii)), Success Criterion 3's hard gate.  The pooled mechanism
+    distribution written to ``summary.json`` is the artifact the W1->W2 decision
+    table reads.
+    """
+
+    def test_explore_loop_mechanism_block(self, tmp_path: Path) -> None:
+        hb = _bench_module()
+        bench_dir = BENCH_DATA_DIR / L8_BENCH_ID / L8_BLOCK
+        rows_path = bench_dir / "rows.jsonl"
+        if rows_path.exists():
+            pytest.fail(
+                f"{rows_path} exists -- an L8 block runs ONCE (D-002); a new "
+                "question needs a new pre-registered block and decision entry"
+            )
+        bench_dir.mkdir(parents=True, exist_ok=True)
+        # Manifest FIRST, before any row (pre-registration, Success Criterion 1).
+        hb._write_json(bench_dir / "manifest.json", _l8_manifest(hb))
+
+        rows: list[dict[str, Any]] = []
+        for run in range(1, RUNS_L8 + 1):
+            row = _one_explore_loop(tmp_path, run, seed=L8_SEED_BASE + run - 1)
+            mech_counts: dict[str, int] = {}
+            fam_counts: dict[str, int] = {}
+            for dispatch in row["dispatches"]:
+                # classify_failed_dispatch itself returns SUCCESS_SENTINEL for a
+                # dispatch that landed a finding, so success detection is reused
+                # rather than re-derived here.
+                bucket = classify_failed_dispatch(dispatch)
+                dispatch["mechanism"] = bucket
+                if bucket == SUCCESS_SENTINEL:
+                    dispatch["mechanism_family"] = None
+                    continue
+                family = _mechanism_family(bucket)
+                dispatch["mechanism_family"] = family
+                mech_counts[bucket] = mech_counts.get(bucket, 0) + 1
+                fam_counts[family] = fam_counts.get(family, 0) + 1
+            dominant = (
+                max(fam_counts, key=lambda k: fam_counts[k]) if fam_counts else None
+            )
+            row.update(
+                mechanism_counts=mech_counts,
+                family_counts=fam_counts,
+                dominant_family=dominant,
+                bench_id=L8_BENCH_ID,
+                block=L8_BLOCK,
+                ts=hb._utc_now(),
+            )
+            rows.append(row)
+            hb.append_row(rows_path, row)
+            print(
+                f"  L8 run {run}: gate={row['gate_cleared']} "
+                f"dispatches={row['dispatches_used']} halt={row['halt_slug']} "
+                f"families={fam_counts}",
+                flush=True,
+            )
+
+        assert len(rows) == RUNS_L8
+
+        # Success Criterion 3 (the ONLY bar): the classifier partitioned EVERY
+        # live failed dispatch into exactly one bucket with a valid family.
+        for row in rows:
+            for dispatch in row["dispatches"]:
+                if dispatch["mechanism"] == SUCCESS_SENTINEL:
+                    continue
+                assert dispatch["mechanism"] in MECHANISM_BUCKETS, dispatch
+                assert dispatch["mechanism_family"] in {"i", "ii", "iii"}, dispatch
+
+        # Pooled over ALL dispatches across all runs -- the W1->W2 artifact.
+        gate_k = sum(1 for r in rows if r["gate_cleared"])
+        lo, hi = hb.wilson_ci(gate_k, RUNS_L8)
+        pooled_mech: dict[str, int] = {}
+        pooled_fam: dict[str, int] = {}
+        total_dispatches = 0
+        for r in rows:
+            for d in r["dispatches"]:
+                total_dispatches += 1
+                if d["mechanism"] == SUCCESS_SENTINEL:
+                    continue
+                pooled_mech[d["mechanism"]] = pooled_mech.get(d["mechanism"], 0) + 1
+                pooled_fam[d["mechanism_family"]] = (
+                    pooled_fam.get(d["mechanism_family"], 0) + 1
+                )
+        summary = {
+            "bench_id": L8_BENCH_ID,
+            "block": L8_BLOCK,
+            "n": RUNS_L8,
+            "status": "complete",
+            "created_at": hb._utc_now(),
+            "runs_reaching_plan": gate_k,
+            "k_gate_cleared": gate_k,
+            "wilson_gate_cleared": [round(lo, 4), round(hi, 4)],
+            "family_counts": pooled_fam,
+            "mechanism_counts": pooled_mech,
+            # The empty-vs-unparseable split WITHIN family (iii) -- the branch
+            # the W1->W2 decision table keys on.
+            "iii_empty": pooled_mech.get("empty-reply", 0),
+            "iii_unparseable": pooled_mech.get("unparseable", 0),
+            "total_dispatches": total_dispatches,
+        }
+        hb._write_json(bench_dir / "summary.json", summary)
+
+        # The tail for the decision entry to transcribe (mirrors L7's).
+        print(
+            f"L8 pooled: gate_cleared {gate_k}/{RUNS_L8} "
+            f"wilson95=[{lo:.3f}, {hi:.3f}] families={pooled_fam} "
+            f"mechanisms={pooled_mech} total_dispatches={total_dispatches}",
+            flush=True,
+        )
