@@ -129,8 +129,10 @@ Iteration 5 then BUILT and VALIDATED that forced-write fix (additive,
 default-off; the MODEL issues the real `write_plan_file` call -- no driver
 salvage, ethos intact): L8 B1 moved the EXPLORE gate **0/10 -> 9/10** (Fisher
 p=0.00012, `l8-explore-loop/B1`), and L6 B2 (`l6-e2e/B2`, n=3, floor
-sha256-identical to B1) moved the traverse from **0/3-stuck-at-EXPLORE to
-3/3-reach-PLAN** -- the EXPLORE blocker of the last four iterations is FIXED.
+sha256-identical to B1) moved the traverse from B1's **0/3-reaching-PLAN
+(all stuck at EXPLORE) to 3/3-reach-PLAN** -- the EXPLORE blocker of the last
+four iterations is FIXED. (B0, an older weaker anchor, was 0/3 at the floor but
+1/3 reached PLAN via a slugless stall; B1 is the rigorous adjacent baseline.)
 The founding e2e end-goal is still UNMET: the floor (>= EXECUTE) stays **0/3**
 because the wall moved a full state to a NEW PLAN-writer blocker -- the 4b model
 cannot emit a valid 11-section `plan.md` (runs 2/3 empty plan.md ->

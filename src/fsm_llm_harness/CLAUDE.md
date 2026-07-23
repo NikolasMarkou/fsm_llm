@@ -556,8 +556,10 @@ B0); failed dispatches **89/100 -> 8/37**; `empty-reply` (family iii)
 converts the 84%-never-called collapse into gate clearance. **L6 B2**
 (`l6-e2e/B2`, n=3, one look, committed; floor sha256 verified IDENTICAL to B1
 `cbeeb6aa...` before AND after the block-constant edit): **all 3/3 runs now
-reach PLAN** (`furthest_state=plan`) -- B0 and B1 were 0/3, every run stuck at
-EXPLORE (`furthest=explore`, `explore-cap`) -- each writing **3 real,
+reach PLAN** (`furthest_state=plan`) -- vs the rigorous adjacent baseline **B1,
+which was 0/3 reaching PLAN, every run stuck at EXPLORE** (`furthest=explore`,
+`explore-cap`); B0 was 0/3 at the >= EXECUTE floor too but 1/3 DID reach PLAN
+(run 3, an empty-`plan.md` slugless stall) -- each writing **3 real,
 substantive findings** (`problem-scope.md` 1262, `affected-files.md` 1304,
 `constraints-and-patterns.md` 1809 bytes) via the forced write. BUT the e2e
 FLOOR (>= EXECUTE + verified_write + honest_halt) is still **0/3 -- the floor

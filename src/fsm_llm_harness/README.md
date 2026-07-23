@@ -346,8 +346,10 @@ the first EXPLORE gate clearance on 4b.
 **L6 B2** (`l6-e2e/B2`, n=3, one look, committed; floor sha256 verified
 **identical to B1** `cbeeb6aa…` before AND after the block-constant edit) then
 tested the full real-worker traverse. **All 3/3 runs now reach PLAN**
-(`furthest_state=plan`) — B0 and B1 were 0/3, every run stuck at EXPLORE
-(`furthest=explore`, `explore-cap`) — each writing **3 real findings**
+(`furthest_state=plan`) — vs the adjacent baseline **B1, which was 0/3 reaching
+PLAN, every run stuck at EXPLORE** (`furthest=explore`, `explore-cap`); B0 was
+also 0/3 at the ≥ EXECUTE floor but 1/3 reached PLAN (a slugless stall) — each
+writing **3 real findings**
 (`problem-scope.md` 1262, `affected-files.md` 1304, `constraints-and-patterns.md`
 1809 bytes) via the forced write. But the e2e **floor (≥ EXECUTE + verified_write
 + honest_halt) is still 0/3 — the floor test FAILS as measured** — because the
