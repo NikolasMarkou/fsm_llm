@@ -423,6 +423,34 @@ def _empty_plan_scaffold() -> PlanDoc:
     )
 
 
+#: A line that ``artifacts._parse_sectioned`` would read as an ATX heading (its
+#: ``_H2_RE`` = ``^##\s+``; ``_H1_RE`` = ``^#\s+``).  ``#{1,6}\s`` is the
+#: superset, so escaping a match makes the line inert under BOTH.
+_ATX_HEADING_RE = re.compile(r"^#{1,6}\s")
+
+
+def _demote_heading_lines(body: str) -> str:
+    """Escape any body line that would re-parse as a ``## `` / ``# `` heading.
+
+    Interface contract (1 call site: :meth:`HarnessAgent._render_plan_from_structured`):
+        - A section body authored by the model may embed a line that starts
+          ``## `` (or any ``#{1,6} ``).  Rendered verbatim under a section, that
+          line would be read back by ``PlanDoc.from_markdown`` as a SPURIOUS new
+          section -- breaking the 11-section round-trip and the positional
+          section check.  Each such line is prefixed with a backslash so it no
+          longer matches at line start; the content stays readable and the
+          escape is idempotent (an already-escaped ``\\## x`` does not match, so
+          re-rendering never double-escapes).
+        - Pure, deterministic, never raises.  An empty/whitespace body is
+          returned unchanged (no line matches), preserving the no-filler ethos:
+          an empty field stays an empty section that the gate denies.
+    """
+    return "\n".join(
+        "\\" + line if _ATX_HEADING_RE.match(line) else line
+        for line in body.split("\n")
+    )
+
+
 # DECISION plan-2026-07-23T095051-a6dcb40d/D-001
 def _plan_is_approvable(plan: PlanDoc) -> bool:
     """Whether a parsed ``plan.md`` is APPROVABLE: EVERY one of the 11
@@ -1787,6 +1815,67 @@ class HarnessAgent(BaseAgent):
             )
             return None
 
+    # DECISION plan-2026-07-23T124347-09045e6e/D-001
+    def _render_plan_from_structured(
+        self, result: AgentResult | None, context: Mapping[str, Any]
+    ) -> str | None:
+        # The plan-writer authors the 11 PlanSchema.SECTIONS as response_format
+        # STRING fields (via the existing D-002 repair turn; roles.py Step 1 set
+        # PLAN's output_schema to the 11 slug fields).  This renderer maps those
+        # fields, IN SECTIONS ORDER, into a PlanDoc and writes plan.md through the
+        # driver's own atomic write.  Load-bearing restrictions -- do NOT relax:
+        #   1. DISTRIBUTION BY CONSTRUCTION.  Each field is placed under ITS
+        #      heading here.  Do NOT go back to APPENDING model output to plan.md:
+        #      `append_plan_file` lands at the file END and cannot distribute into
+        #      the 11 ordered sections -- the iter-6 scaffold+append mechanism,
+        #      REFUTED live across B0-B3 (floor 0/3; content concentrated in one
+        #      section or duplicated headers).  The model authors fields; the
+        #      driver only formats them.
+        #   2. NEVER INVENT FILLER.  A section body is EXACTLY the model's field
+        #      value (only heading-injection is escaped, `_demote_heading_lines`).
+        #      An empty/whitespace field renders an EMPTY section body, which the
+        #      UNCHANGED `_plan_is_approvable` (read off disk by `_plan_has_content`
+        #      next) treats as a placeholder and DENIES -> honest `plan-cap` halt.
+        #      Do NOT substitute a default, a heading echo, or any placeholder.
+        #      This is the ethos safeguard (plan invariant 3).
+        #   3. DISK STAYS THE GATE TRUTH.  This only writes plan.md; the payload
+        #      itself never opens the gate.  `_plan_has_content` re-reads the
+        #      rendered file and gates on it (plan invariant 2).
+        #   4. FAIL-CLOSED.  A missing/partial `structured_output` (repair turn
+        #      did not fire) or a failed reply writes NOTHING substantive, so the
+        #      unchanged `_plan_has_content` check finds no approvable plan and
+        #      the existing redispatch budget fires -- no behaviour change on the
+        #      failure path.  No plan directory (degrade path) -> None.
+        # See decisions.md D-001.
+        if result is None or not getattr(result, "success", False):
+            return None
+        structured = getattr(result, "structured_output", None)
+        if structured is None or not hasattr(structured, "model_dump"):
+            return None
+        dumped = structured.model_dump()
+        if not isinstance(dumped, dict):
+            return None
+        directory = self._plan_directory(context)
+        if directory is None:
+            return None
+        sections = [
+            Section(
+                name=title,
+                body=_demote_heading_lines(str(dumped.get(slug, "") or "")),
+            )
+            for title, slug in PlanSchema.SLUG_BY_SECTION.items()
+        ]
+        try:
+            plan = PlanDoc(title="Plan", sections=sections)
+            return directory.write_artifact(ArtifactNames.PLAN, plan)
+        except (HarnessError, OSError, ValueError) as exc:
+            logger.warning(
+                f"Could not render {ArtifactNames.PLAN} from the plan-writer's "
+                f"structured reply: {exc}. The disk-read PLAN gate will find no "
+                "approvable plan and the redispatch budget will fire."
+            )
+            return None
+
     def _sync_state_doc(self, state: str, context: Mapping[str, Any]) -> str | None:
         """Record the driver's position in ``state.md``, atomically.
 
@@ -2368,6 +2457,15 @@ class HarnessAgent(BaseAgent):
             # No worker configured (D-045): nothing was attempted, so there is
             # nothing to re-attempt and no cap to spend.
             return {}
+        # DECISION plan-2026-07-23T124347-09045e6e/D-001
+        # Render the plan-writer's structured reply into plan.md BEFORE the
+        # disk-read gate below. This REPLACES appending model output to the file:
+        # append lands at the file END and cannot distribute into the 11 ordered
+        # sections (iter-6 scaffold+append, REFUTED live B0-B3). The renderer is
+        # fail-closed and invents no filler, so on a partial/failed reply it
+        # writes nothing substantive and the unchanged `_plan_has_content` check
+        # below redispatches exactly as before. See decisions.md D-001.
+        self._render_plan_from_structured(result, context)
         # DECISION plan-2026-07-22T212329-16de43da/D-005
         # `_plan_has_content` (disk-derived) is OR-ed into the retry condition
         # so a `success=True` reply that left plan.md EMPTY consumes the budget
