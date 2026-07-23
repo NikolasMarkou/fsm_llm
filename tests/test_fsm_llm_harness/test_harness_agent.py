@@ -71,11 +71,13 @@ from fsm_llm_harness.exceptions import (
 )
 from fsm_llm_harness.harness import (
     EXECUTE_TARGET_ASSIGNED,
+    EXECUTE_TARGET_ASSIGNED_PROSE,
     EXECUTE_TARGET_NO_PLAN_DIR,
     EXECUTE_TARGET_NO_PLAN_DOC,
     EXECUTE_TARGET_NO_TOKEN,
     HarnessAgent,
     RoleRequest,
+    _derive_prose_target,
     derive_execute_target,
 )
 from fsm_llm_harness.plan_validator import Issue, _is_placeholder
@@ -3952,6 +3954,148 @@ def _gate_context(**overrides: Any) -> dict[str, Any]:
 
 def _names(agent: HarnessAgent) -> list[str]:
     return [presentation.name for presentation in agent.presentations]
+
+
+class TestProseExecuteTargetFallback:
+    """D-001: an existence-gated PROSE fallback for the EXECUTE target.
+
+    A real 4b plan writes its Files-To-Modify as prose (no backticks), so the
+    strict ``derive_execute_target`` (backtick-only) returns ``None``, no target
+    is assigned, and the model's self-directed EXECUTE write produces a label the
+    HASH-FROZEN L6 floor normalizer cannot credit (B5 run-1: verified_write=False).
+    The fallback extracts a path-shaped, extension-bearing prose token that names
+    an EXISTING workspace file; the existence gate keeps D-010's real invariant
+    (never point a live executor somewhere the plan never said) and makes
+    selection order-independent.  ``derive_execute_target`` stays byte-unchanged.
+    """
+
+    _REAL_B5_PLAN = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "bench_data"
+        / "l6-e2e"
+        / "B5"
+        / "artifacts"
+        / "run-1"
+        / "plan.md"
+    )
+    _SEED = frozenset({"uploader.py", "config.py", "README.md"})
+
+    @staticmethod
+    def _prose_plan_text(files_body: str) -> str:
+        return _PLAN_MD.replace(
+            "| `harness.py` | wire the seam | step 10 |", files_body
+        )
+
+    # -- the pure prose derivation -----------------------------------------
+
+    def test_prose_target_on_the_real_b5_plan(self) -> None:
+        """The retained real plan whose prose broke B5 run-1 -> ``uploader.py``."""
+        text = self._REAL_B5_PLAN.read_text()
+        plan = PlanDoc.from_markdown(text)
+        # The strict path finds nothing (this is WHY the fallback exists).
+        assert derive_execute_target(plan, 1) is None
+        assert _derive_prose_target(plan, 1, self._SEED) == "uploader.py"
+
+    def test_the_existence_gate_is_order_independent(self) -> None:
+        """A method-call token BEFORE the filename does not win: only a real
+        workspace file can be assigned, wherever it sits in the line."""
+        plan = _plan_doc_with("Wrap requests.post inside uploader.py to add retry")
+        assert _derive_prose_target(plan, 1, self._SEED) == "uploader.py"
+
+    def test_a_method_call_token_alone_assigns_nothing(self) -> None:
+        """``requests.post`` is path-shaped and extension-bearing but is not a
+        workspace file, so the gate refuses it (no guess)."""
+        plan = _plan_doc_with("modify the requests.post call in the uploader")
+        assert _derive_prose_target(plan, 1, self._SEED) is None
+
+    def test_a_token_naming_no_existing_file_assigns_nothing(self) -> None:
+        """A new-file step names a file that does not exist yet -> fail-open."""
+        plan = _plan_doc_with("create retry_helper.py with the backoff logic")
+        assert _derive_prose_target(plan, 1, self._SEED) is None
+
+    def test_an_empty_existence_set_assigns_nothing(self) -> None:
+        """No known workspace files (unset/unreadable root) -> fail-open None."""
+        plan = _plan_doc_with("uploader.py: add retry")
+        assert _derive_prose_target(plan, 1, frozenset()) is None
+
+    def test_first_existing_file_per_line_wins_across_lines(self) -> None:
+        """Multi-line prose: the first existing-file token, line by line."""
+        plan = _plan_doc_with("uploader.py: add retry\nconfig.py: set RETRIES=3")
+        assert _derive_prose_target(plan, 1, self._SEED) == "uploader.py"
+
+    def test_prefers_the_file_named_in_the_current_step_text(self) -> None:
+        """The same per-step preference the strict derivation uses."""
+        plan = _plan_doc_with(
+            "uploader.py: add retry\nconfig.py: set RETRIES=3",
+            steps=(
+                "1. [ ] **Edit config.py first.** [RISK: low] [deps: none]\n"
+                "2. [ ] **Then uploader.py.** [RISK: low] [deps: 1]"
+            ),
+        )
+        assert _derive_prose_target(plan, 1, self._SEED) == "config.py"
+
+    def test_a_backticked_prose_line_is_still_stripped_and_gated(self) -> None:
+        """Inline backticks the strict path already handles are also fine here
+        (the fallback only RUNS on the strict None, but must not choke on them)."""
+        plan = _plan_doc_with("edit `uploader.py` for the retry loop")
+        assert _derive_prose_target(plan, 1, self._SEED) == "uploader.py"
+
+    # -- the driver wrapper, and the new reason tag ------------------------
+
+    def test_assign_execute_target_uses_the_prose_fallback(
+        self, plan_dir: Path, tmp_path: Path
+    ) -> None:
+        """End to end through ``_assign_execute_target`` with a real workspace."""
+        (plan_dir / ArtifactNames.PLAN).write_text(
+            self._prose_plan_text("uploader.py: wrap upload() with retry backoff")
+        )
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        for name in self._SEED:
+            (workspace / name).write_text("x")
+        context = {
+            ContextKeys.PLAN_DIR: str(plan_dir),
+            ContextKeys.WORKSPACE_ROOT: str(workspace),
+            ContextKeys.STEP_NUMBER: 1,
+        }
+        assert HarnessAgent._assign_execute_target(context) == (
+            "uploader.py",
+            EXECUTE_TARGET_ASSIGNED_PROSE,
+        )
+
+    def test_a_backticked_plan_never_reaches_the_prose_fallback(
+        self, plan_dir: Path, tmp_path: Path
+    ) -> None:
+        """Regression: when the strict path finds a target, the reason is the
+        plain ``assigned`` tag, not the prose one -- behaviour unchanged."""
+        (plan_dir / ArtifactNames.PLAN).write_text(_PLAN_MD)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "harness.py").write_text("x")
+        context = {
+            ContextKeys.PLAN_DIR: str(plan_dir),
+            ContextKeys.WORKSPACE_ROOT: str(workspace),
+            ContextKeys.STEP_NUMBER: 1,
+        }
+        assert HarnessAgent._assign_execute_target(context) == (
+            "harness.py",
+            EXECUTE_TARGET_ASSIGNED,
+        )
+
+    def test_no_workspace_root_leaves_the_prose_plan_a_no_token(
+        self, plan_dir: Path
+    ) -> None:
+        """Fail-open: no workspace root -> empty existence set -> the prose plan
+        still resolves to ``no-target-token`` (byte-identical prompt)."""
+        (plan_dir / ArtifactNames.PLAN).write_text(
+            self._prose_plan_text("uploader.py: wrap upload() with retry backoff")
+        )
+        context = {ContextKeys.PLAN_DIR: str(plan_dir), ContextKeys.STEP_NUMBER: 1}
+        assert HarnessAgent._assign_execute_target(context) == (
+            None,
+            EXECUTE_TARGET_NO_TOKEN,
+        )
 
 
 class TestFourSlugsFourActions:
