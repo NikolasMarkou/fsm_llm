@@ -52,7 +52,14 @@ from fsm_llm_agents.definitions import AgentConfig, AgentResult
 from fsm_llm_agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm_agents.tools import ToolRegistry
 
-from .constants import ArtifactNames, ContextKeys, Defaults, HarnessStates, Role
+from .constants import (
+    ArtifactNames,
+    ContextKeys,
+    Defaults,
+    HarnessStates,
+    PlanSchema,
+    Role,
+)
 from .hardening import coerce_worker_output, parse_role_output, retry
 from .harness import _WORKER_WRITABLE, RoleRequest, WorkerFactory
 from .rules import ROLE_BY_STATE, artifacts_writable_by, explore_topic
@@ -111,13 +118,74 @@ _SUMMARY_FIELD = "summary"
 #: the D-004 block on :func:`_build_output_schema`.
 _MESSAGE_FIELD = "message"
 
+#: PLAN structured-plan field prose, keyed by SECTION TITLE, mapped onto the
+#: derived slugs below.  Each of the 11 ``PlanSchema.SECTIONS`` becomes a
+#: required ``str`` field in the PLAN role's ``response_format`` schema; the
+#: model authors the section body and the driver (Step 2) renders it under its
+#: heading.  Keyed by title so it stays in lockstep with SECTIONS; the schema
+#: is keyed by the derived slug.
+_PLAN_SECTION_PROSE: Mapping[str, str] = MappingProxyType(
+    {
+        "Goal": (
+            "The plan's Goal section body: one paragraph stating the objective "
+            "and what 'done' means."
+        ),
+        "Problem Statement": (
+            "The Problem Statement section body: expected vs actual behavior, "
+            "the invariants that must hold, and the edge cases."
+        ),
+        "Context": (
+            "The Context section body: relevant background, findings, and prior "
+            "decisions that shape this plan."
+        ),
+        "Files To Modify": (
+            "The Files To Modify section body: each file to change and what "
+            "changes in it."
+        ),
+        "Steps": (
+            "The Steps section body: an ordered, numbered list of the "
+            "implementation steps."
+        ),
+        "Assumptions": (
+            "The Assumptions section body: what must be true for the plan to "
+            "work, one per line."
+        ),
+        "Failure Modes": (
+            "The Failure Modes section body: how each dependency fails slow, "
+            "returns bad data, or is down, and the blast radius."
+        ),
+        "Pre-Mortem & Falsification Signals": (
+            "The Pre-Mortem & Falsification Signals section body: assume the "
+            "plan failed; list the most likely reasons and their observable "
+            "stop triggers."
+        ),
+        "Success Criteria": (
+            "The Success Criteria section body: the checkable conditions that "
+            "define success, one per line."
+        ),
+        "Verification Strategy": (
+            "The Verification Strategy section body: the commands or tests that "
+            "prove each success criterion."
+        ),
+        "Complexity Budget": (
+            "The Complexity Budget section body: limits on new files, "
+            "abstractions, and net lines added."
+        ),
+    }
+)
+
 #: Short, imperative field descriptions rendered into the JSON schema.
 #:
 #: These are the FIELD-level prose; the protocol rules stay in ``rules.py``.
 #: Sourced per context key so a key used by two states describes itself
-#: identically in both.
+#: identically in both.  The 11 PLAN section descriptions are folded in below,
+#: keyed by their derived slug (``PlanSchema.SLUG_BY_SECTION``).
 _FIELD_DESCRIPTIONS: Mapping[str, str] = MappingProxyType(
     {
+        **{
+            PlanSchema.SLUG_BY_SECTION[title]: prose
+            for title, prose in _PLAN_SECTION_PROSE.items()
+        },
         ContextKeys.FINDINGS_COUNT: (
             "Advisory only: how many findings/<topic>.md files you have "
             "written. The driver counts them on disk."
@@ -174,9 +242,22 @@ def _schema_fields(state: str) -> dict[str, type]:
     #      it cannot reach context. Do NOT "complete" the table by adding
     #      `summary` to `_WORKER_WRITABLE` -- that would make it writable.
     # See decisions.md D-035.
+    #
+    # PLAN is the second special-case, on the SAME rule as `summary`: the 11
+    # `PlanSchema.SECTIONS` become schema-visible `str` fields so the model
+    # authors them under `response_format`, but they are ABSENT from
+    # `_WORKER_WRITABLE[PLAN]` -- `coerce_worker_output` drops them before they
+    # can reach FSM context, so `needs_explore`/`total_steps` stay the ONLY
+    # writable PLAN keys. The driver RENDERS these fields into plan.md (a later
+    # step); they are content, never gate keys. Do NOT add them to
+    # `_WORKER_WRITABLE` -- that would make a section body a writable context
+    # key. See decisions.md D-035 (the `summary` precedent) and D-001.
     allowed = dict(_WORKER_WRITABLE[state])
     if not allowed:
         return {_SUMMARY_FIELD: str}
+    if state == HarnessStates.PLAN:
+        for slug in PlanSchema.SECTION_SLUGS:
+            allowed[slug] = str
     return allowed
 
 

@@ -49,6 +49,7 @@ from fsm_llm_harness.constants import (
     ContextKeys,
     Defaults,
     HarnessStates,
+    PlanSchema,
     Role,
 )
 from fsm_llm_harness.exceptions import (
@@ -3297,6 +3298,10 @@ class TestPayloadPreference:
                 ContextKeys.TOTAL_STEPS: 7,
                 ContextKeys.NEEDS_EXPLORE: False,
                 "message": "plan drafted",
+                # PLAN's schema now requires the 11 SECTIONS-derived content
+                # fields; they are schema-visible but not writable, so they do
+                # not reach context (only TOTAL_STEPS/NEEDS_EXPLORE do).
+                **{slug: f"{slug} body" for slug in PlanSchema.SECTION_SLUGS},
             }
         )
 

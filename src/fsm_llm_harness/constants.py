@@ -9,6 +9,7 @@ artifact serializers all read the protocol's numbers from a single place.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, ClassVar
@@ -392,6 +393,28 @@ class ArtifactNames:
     )
 
 
+def _plan_section_slug(title: str) -> str:
+    """Derive a stable pydantic-identifier slug from a ``plan.md`` section title.
+
+    Deterministic and TOTAL over :data:`PlanSchema.SECTIONS`: lowercase, ``&`` ->
+    ``and``, every run of non-alphanumeric characters -> one ``_``, then strip
+    leading/trailing ``_``.  The result is a valid Python identifier used as a
+    ``response_format`` field name for the PLAN role's structured plan schema;
+    :data:`PlanSchema.SECTION_BY_SLUG` recovers the exact title for rendering.
+
+    Interface contract (2 call sites: this module's ``PlanSchema`` map builders,
+    and ``roles._schema_fields`` via ``PlanSchema.SECTION_SLUGS``):
+        - Parameter: a section title string.
+        - Returns a lowercase snake_case identifier; never empty for the 11
+          real titles (a title with no alphanumerics would return ``""`` -- not
+          possible for SECTIONS, and the uniqueness invariant below would catch
+          a regression).
+        - Pure and deterministic; never raises.
+    """
+    lowered = title.lower().replace("&", " and ")
+    return re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+
+
 class PlanSchema:
     """Structural rules for ``plan.md``."""
 
@@ -409,6 +432,27 @@ class PlanSchema:
         "Success Criteria",
         "Verification Strategy",
         "Complexity Budget",
+    )
+
+    #: The 11 section slugs, in SECTIONS order.  DERIVED via
+    #: :func:`_plan_section_slug` (never hand-written) so the PLAN
+    #: ``response_format`` field set and the renderer's section order are one
+    #: fact.  Order is load-bearing, mirroring SECTIONS.
+    SECTION_SLUGS: ClassVar[tuple[str, ...]] = tuple(
+        _plan_section_slug(title) for title in SECTIONS
+    )
+
+    #: Section title -> its snake_case field slug.  Bidirectional with
+    #: :data:`SECTION_BY_SLUG`.  Invariant (pinned by unit test): keys ==
+    #: SECTIONS and all slugs are unique.
+    SLUG_BY_SECTION: ClassVar[Mapping[str, str]] = MappingProxyType(
+        {title: _plan_section_slug(title) for title in SECTIONS}
+    )
+
+    #: Field slug -> its section title.  The renderer (Step 2) reindexes the 11
+    #: structured fields back into SECTIONS order/titles through this map.
+    SECTION_BY_SLUG: ClassVar[Mapping[str, str]] = MappingProxyType(
+        {_plan_section_slug(title): title for title in SECTIONS}
     )
 
 
