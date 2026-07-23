@@ -832,6 +832,8 @@ class TestReadConcurrency:
     _WRITER_TURNS = 60
     _SEED_KEYS = 300
     _GROWTH_PER_TURN = 40
+    _MIN_READS = 500
+    _DEADLINE_S = 60.0
 
     def _make_api(self):
         api = API.from_definition(
@@ -862,6 +864,15 @@ class TestReadConcurrency:
         errors: list[tuple[str, BaseException]] = []
         errors_lock = threading.Lock()
         stop = threading.Event()
+        # Live read-cycle tally shared with the writer so the concurrency
+        # window is ADAPTIVE: on a slow/oversubscribed runner a fixed
+        # _WRITER_TURNS can complete before the readers reach the _MIN_READS
+        # coverage floor, failing the final assert as "window too narrow"
+        # with zero actual tears (measured: CI 3.11 hit 349/500). The writer
+        # keeps writing until the floor is met (bounded by _DEADLINE_S), so
+        # the floor asserts coverage, not runner speed.
+        reads_tally = [0]
+        tally_lock = threading.Lock()
 
         def _record(who: str, exc: BaseException) -> None:
             with errors_lock:
@@ -869,8 +880,11 @@ class TestReadConcurrency:
 
         def writer() -> int:
             turns = 0
+            deadline = time.monotonic() + self._DEADLINE_S
             try:
-                while turns < self._WRITER_TURNS:
+                while (
+                    turns < self._WRITER_TURNS or reads_tally[0] < self._MIN_READS
+                ) and time.monotonic() < deadline:
                     try:
                         api.converse("hello", conv_id)
                         turns += 1
@@ -901,6 +915,8 @@ class TestReadConcurrency:
                     hist = api.get_conversation_history(conv_id)
                     assert isinstance(hist, list)
                     local += 1
+                    with tally_lock:
+                        reads_tally[0] += 1
                 except BaseException as exc:
                     _record("reader", exc)
                     break
@@ -942,10 +958,14 @@ class TestReadConcurrency:
                 f"{[(who, repr(exc)) for who, exc in errors][:5]}"
             )
             # Beat the non-determinism: the readers must actually have cycled
-            # many times against in-flight writes, not exited early.
-            assert reads_done >= 500, (
-                f"readers only completed {reads_done} cycles — the window was "
-                "too narrow to prove anything; widen READERS/WRITER_TURNS"
+            # many times against in-flight writes, not exited early. The
+            # writer holds the window open until this floor is met (or the
+            # _DEADLINE_S wall-clock bound trips), so a miss here means a
+            # genuinely pathological environment, not an unlucky fast writer.
+            assert reads_done >= self._MIN_READS, (
+                f"readers only completed {reads_done} cycles within "
+                f"{self._DEADLINE_S}s — the window was too narrow to prove "
+                "anything; widen READERS/WRITER_TURNS/_DEADLINE_S"
             )
         finally:
             api.close()
