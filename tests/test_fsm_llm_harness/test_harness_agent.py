@@ -2351,15 +2351,28 @@ class TestBoundedExploreRedispatch:
         assert harness.worker.count_for(HarnessStates.PLAN) == 1
         assert harness.agent._explore_redispatches == 0
 
-    def test_a_blocked_reflect_still_dispatches_once(self, make_harness) -> None:
-        """The same, one state further on: a held REFLECT dispatches once."""
+    def test_a_blocked_reflect_still_dispatches_once_per_authorisation(
+        self, make_harness
+    ) -> None:
+        """The same, one state further on: one dispatch per authorisation.
+
+        Since Step 4b (plan-2026-07-23T173454-2c22e5f6 D-003) an UNROUTABLE
+        verdict is a retryable failure under ``max_reflect_redispatches`` --
+        the S4b slugless stall this script used to reproduce.  The invariant
+        this test pins is I4's, unchanged: with the budget at 0, the held
+        REFLECT dispatches EXACTLY once, and the run now ends on the honest
+        ``reflect-cap`` slug instead of the stall detector's ``slug=None``.
+        """
         script = _traverse_script()
         script[HarnessStates.REFLECT] = {"ctx": {}}
 
-        harness = make_harness(script)
-        harness.run()
+        harness = make_harness(script, max_reflect_redispatches=0)
+        result = harness.run()
 
         assert harness.worker.count_for(HarnessStates.REFLECT) == 1
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == (
+            GateSlug.REFLECT_CAP
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2788,6 +2801,313 @@ class TestBoundedPlanRedispatch:
         assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.PLAN_CAP
         for spelling in ("plan_has_content", "_plan_has_content", "plan-has-content"):
             assert spelling not in result.final_context
+
+
+# ---------------------------------------------------------------------------
+# Bounded REFLECT re-dispatch (plan-2026-07-23T173454-2c22e5f6 D-003)
+# ---------------------------------------------------------------------------
+
+
+def _stuck_reflect_script() -> dict[str, Any]:
+    """EXPLORE/PLAN/EXECUTE are well-behaved; the verifier is UNROUTABLE.
+
+    NOT a strawman: this is the S5 probe's retained REFLECT record shape
+    (``scripts/bench_data/l6-e2e/probe-s5-mechanism/
+    probe-run-1-observations.json``) -- ``success=True``, a non-empty answer,
+    and a coerced delta that sets NO routing key (no ``all_criteria_pass``, no
+    ``completion_fix``/``needs_pivot``/``needs_explore``) after a SUCCESSFUL
+    EXECUTE step.  The same shape ended L6 B5 run 1 and B6 run 2.
+    """
+    script = _traverse_script()
+    script[HarnessStates.REFLECT] = {"answer": "criteria reviewed", "ctx": {}}
+    return script
+
+
+class TestBoundedReflectRedispatch:
+    """An unroutable verifier is retried under a bound, then halted with a slug.
+
+    Guards the S4b defect the S5 probe reproduced (run 1,
+    ``scripts/bench_data/l6-e2e/probe-s5-mechanism/probe-rows.jsonl``): the
+    REFLECT dispatch returned ``success=True`` with no routing key, the
+    dispatch key stayed in the ledger, all four REFLECT edges stayed BLOCKED,
+    and the run recorded ``halt_slug: null`` / ``honest_halt: false`` off the
+    stall detector's ``slug=None`` raise -- the slugless stall shape the L6
+    floor's honest-halt clause exists to catch.
+
+    The mechanism mirrors ``TestBoundedPlanRedispatch`` (D-001 of
+    plan-2026-07-22T184813-6549c7cb) exactly: the SAME dispatch key is
+    re-opened by ledger removal (never a widened key -- D-017), the bound lives
+    on ``self`` where no worker or approval callback can reach it, and spending
+    it pre-writes ``reflect-cap`` so the halt is never slugless again.
+    """
+
+    def test_the_probe_shape_now_halts_at_the_cap_with_its_own_slug(
+        self, make_harness
+    ) -> None:
+        """The S5-probe run-1 shape, fixed: 1 + MAX dispatches, ``reflect-cap``.
+
+        Measured RED against the unpatched driver (2026-07-23): REFLECT
+        dispatches == 1 and ``LAST_GATE_SLUG`` was ``None`` (the probe row's
+        ``halt_slug: null``).  The default approval callback here APPROVES
+        every gate, which is the unreachability half: an approving callback is
+        never even consulted, because a verdict that routes nowhere never
+        reaches the close gate.
+        """
+        harness = make_harness(_stuck_reflect_script())
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.REFLECT) == (
+            1 + Defaults.MAX_REFLECT_REDISPATCHES
+        )
+        assert result.success is False
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == (
+            GateSlug.REFLECT_CAP
+        )
+        assert "Reflect cap" in result.answer
+        # ...and NOT by pretending a verdict exists.
+        assert harness.worker.count_for(HarnessStates.CLOSE) == 0
+        assert harness.approvals.count(APPROVAL_CLOSE) == 0
+
+    @pytest.mark.parametrize("cap", [0, 1, 2])
+    def test_the_bound_is_exact(self, make_harness, cap: int) -> None:
+        """``cap`` EXTRA dispatches, never ``cap + 1`` -- including ``cap = 0``."""
+        harness = make_harness(_stuck_reflect_script(), max_reflect_redispatches=cap)
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 1 + cap
+        assert harness.agent._reflect_redispatches == cap
+
+    def test_the_halt_names_the_numbers_a_reader_needs(
+        self, make_harness, captured_logs
+    ) -> None:
+        """Spent and cap, in the reason -- an unactionable halt is a bug."""
+        harness = make_harness(_stuck_reflect_script(), max_reflect_redispatches=2)
+        result = harness.run()
+
+        reason = result.final_context[ContextKeys.HALT_REASON]
+        assert "2 extra verifier dispatch(es) spent (cap 2)" in reason
+        assert any(GateSlug.REFLECT_CAP in line for line in captured_logs)
+
+    def test_a_verifier_that_recovers_proceeds_without_the_slug(
+        self, make_harness
+    ) -> None:
+        """Unroutable twice, routable on the third: the run reaches the close.
+
+        This is the outcome the budget exists to buy -- "fails once cold" is
+        distinguished from "persistently fails" -- and the recovered run must
+        carry no ``reflect-cap`` residue.
+        """
+        script = _traverse_script()
+        seen = {"n": 0}
+
+        def verifier(request: RoleRequest) -> dict[str, Any]:
+            seen["n"] += 1
+            if seen["n"] <= 2:
+                return {"ctx": {}}
+            return {"ctx": {ContextKeys.ALL_CRITERIA_PASS: True}}
+
+        script[HarnessStates.REFLECT] = verifier
+        harness = make_harness(script)
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 3
+        assert harness.agent._reflect_redispatches == 2
+        assert harness.approvals.count(APPROVAL_CLOSE) == 1
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
+            GateSlug.REFLECT_CAP
+        )
+
+    def test_a_healthy_verifier_consumes_none_of_the_budget(self, make_harness) -> None:
+        """The happy path is UNTOUCHED: one dispatch, zero budget, a close."""
+        harness = make_harness(_traverse_script())
+        result = harness.run()
+
+        assert harness.agent._reflect_redispatches == 0
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 1
+        assert harness.worker.count_for(HarnessStates.CLOSE) == 1
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
+            GateSlug.REFLECT_CAP
+        )
+
+    def test_a_routable_verdict_consumes_none_of_the_budget(self, make_harness) -> None:
+        """A routing flag IS a verdict: the pivot edge fires, budget untouched."""
+        reflect_calls: list[int] = []
+
+        def verifier(request: RoleRequest) -> dict[str, Any]:
+            reflect_calls.append(request.iteration)
+            if len(reflect_calls) == 1:
+                return {"ctx": {ContextKeys.NEEDS_PIVOT: True}}
+            return {"ctx": {ContextKeys.ALL_CRITERIA_PASS: True}}
+
+        script = _traverse_script()
+        script[HarnessStates.REFLECT] = verifier
+        harness = make_harness(script)
+        harness.run()
+
+        assert harness.worker.count_for(HarnessStates.PIVOT) == 1
+        assert harness.agent._reflect_redispatches == 0
+
+    def test_the_leash_path_is_untouched_and_consumes_none_of_the_budget(
+        self, make_harness
+    ) -> None:
+        """A leash-cap REFLECT entry routes to the leash offer, not the budget.
+
+        ``_failing_execute_script``'s verifier writes no routing flag either,
+        but the driver's own ``completion_fix`` (attempt 1) and ``leash-cap``
+        slug (attempt 2) route every REFLECT entry, so the reflect budget must
+        never fire -- the two counters answer different failures.
+        """
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+        )
+        result = harness.run()
+
+        assert harness.agent._reflect_redispatches == 0
+        assert harness.approvals.count(APPROVAL_LEASH) == 1
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
+
+    def test_the_bound_resets_between_runs_on_one_instance(self, make_harness) -> None:
+        """Per RUN, not per LIFETIME: a reused instance is not pre-exhausted."""
+        harness = make_harness(_stuck_reflect_script(), max_reflect_redispatches=1)
+        harness.run()
+        assert harness.agent._reflect_redispatches == 1
+
+        harness.run("a second goal")
+
+        assert harness.agent._reflect_redispatches == 1
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 4
+
+    def test_a_raising_verifier_still_counts_against_the_bound(
+        self, make_harness
+    ) -> None:
+        """A dispatch that RAISED is a dispatch spent; it is not free."""
+        script = _traverse_script()
+        script[HarnessStates.REFLECT] = {"raises": RuntimeError("boom")}
+
+        harness = make_harness(script, max_reflect_redispatches=2)
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 3
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == (
+            GateSlug.REFLECT_CAP
+        )
+
+    def test_a_worker_cannot_reach_the_counter(self, make_harness) -> None:
+        """The [I:5] escape shape, aimed at THIS cap.
+
+        A worker's reply reaches context through ``final_context`` and
+        ``structured_output`` (both filtered by ``_WORKER_WRITABLE``) and the
+        FSM's Pass-1 extraction is the second writer.  The bound is reachable
+        from none of them, because it is not a context key at all -- the S4b
+        defect must not be "fixed" into a cap a worker can refill.
+        """
+        greedy = {
+            "reflect_redispatches": 0,
+            "_reflect_redispatches": 0,
+            "max_reflect_redispatches": 99,
+        }
+        script = _stuck_reflect_script()
+        script[HarnessStates.REFLECT] = {"ctx": dict(greedy)}
+
+        harness = make_harness(
+            script, extraction_data=greedy, max_reflect_redispatches=2
+        )
+        result = harness.run()
+
+        assert harness.agent._reflect_redispatches == 2
+        assert harness.agent.max_reflect_redispatches == 2
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == (
+            GateSlug.REFLECT_CAP
+        )
+
+    def test_an_approving_callback_cannot_refill_the_counter(
+        self, make_harness
+    ) -> None:
+        """The cap is unreachable from the approval seam, by construction.
+
+        The callback receives an ``ApprovalRequest`` (a context COPY plus
+        parameters) and returns a bool -- it holds no driver reference.  With a
+        stuck verifier it is never even consulted, and an always-approving
+        callback changes neither the spend nor the slug (the LESSONS [I:5]
+        property, proven here for THIS counter the way D-052 proved it for the
+        leash).
+        """
+        approvals = ApprovalRecorder(default=True)
+        harness = make_harness(
+            _stuck_reflect_script(), approvals=approvals, max_reflect_redispatches=1
+        )
+        result = harness.run()
+
+        # The plan approval on the way in is legitimate; DURING the stuck
+        # REFLECT the callback is never consulted at all.
+        assert approvals.names == [APPROVAL_PLAN]
+        assert approvals.count(APPROVAL_CLOSE) == 0
+        assert approvals.count(APPROVAL_LEASH) == 0
+        assert harness.agent._reflect_redispatches == 1
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == (
+            GateSlug.REFLECT_CAP
+        )
+
+    def test_the_counter_is_not_a_context_key(self, make_harness) -> None:
+        """Structural pin: the counter exists nowhere a worker can write."""
+        context_key_values = {
+            value
+            for name, value in vars(ContextKeys).items()
+            if isinstance(value, str) and not name.startswith("__")
+        }
+        for spelling in ("reflect_redispatches", "reflect-redispatches"):
+            assert spelling not in context_key_values
+            assert spelling not in DRIVER_OWNED_SEEDS
+
+        harness = make_harness(_stuck_reflect_script(), max_reflect_redispatches=1)
+        result = harness.run()
+
+        assert "reflect_redispatches" not in result.final_context
+        assert "_reflect_redispatches" not in result.final_context
+
+    def test_reflect_cap_is_not_a_pre_step_gate_slug(self) -> None:
+        """``reflect-cap`` sits NEXT TO ``plan-cap``, outside ``ORDER``."""
+        assert GateSlug.REFLECT_CAP == "reflect-cap"
+        assert GateSlug.REFLECT_CAP not in GateSlug.ORDER
+
+    def test_no_worker_at_all_spends_nothing(self, make_harness) -> None:
+        """D-045's diagnostic mode is untouched: nothing attempted, nothing spent."""
+        harness = make_harness(worker=None)
+
+        delta = harness.agent._after_reflect_dispatch(None, None, {})
+
+        assert delta == {}
+        assert harness.agent._reflect_redispatches == 0
+
+    def test_redispatch_reopens_only_the_reflect_key(self, make_harness) -> None:
+        """The re-authorisation is EXPLICIT and one key wide (D-017)."""
+        harness = make_harness(_stuck_reflect_script(), max_reflect_redispatches=1)
+        context = {
+            ContextKeys.GOAL: "g",
+            ContextKeys.ITERATION: 0,
+            ContextKeys.STEP_NUMBER: 0,
+            ContextKeys.DISPATCH_LEDGER: ["dispatch:execute:1:1", "entry:reflect:'x'"],
+            ContextKeys.ROLE_RESULTS: [],
+        }
+
+        delta = harness.agent._dispatch_if_needed(HarnessStates.REFLECT, context)
+
+        ledger = delta[ContextKeys.DISPATCH_LEDGER]
+        assert "dispatch:reflect:0:0" not in ledger
+        assert "dispatch:execute:1:1" in ledger
+        assert "entry:reflect:'x'" in ledger
+
+    def test_plan_budget_is_not_shared_with_reflect(self, make_harness) -> None:
+        """Two states, two counters: spending REFLECT's leaves PLAN's whole."""
+        harness = make_harness(_stuck_reflect_script(), max_reflect_redispatches=1)
+        result = harness.run()
+
+        assert harness.agent._plan_redispatches == 0
+        assert harness.agent._reflect_redispatches == 1
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == (
+            GateSlug.REFLECT_CAP
+        )
 
 
 # ---------------------------------------------------------------------------

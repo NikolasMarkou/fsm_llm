@@ -271,6 +271,17 @@ class GateSlug:
     #: on the PLAN -> EXECUTE edge, not a pre-EXECUTE-step check.
     PLAN_CAP = "plan-cap"
 
+    # DECISION plan-2026-07-23T173454-2c22e5f6/D-003
+    #: The bounded REFLECT re-dispatch budget is spent and the verifier has
+    #: still not produced a ROUTABLE verdict -- no ``all_criteria_pass`` and no
+    #: routing flag, so no REFLECT edge can fire.  A REFLECT stuck this way
+    #: must halt HERE, honestly, not fall through to the stall detector's
+    #: ``slug=None`` raise (the S4b slugless-stall shape measured in L6 B5
+    #: run 1, B6 run 2 and the S5 probe run).  Never means "proceed anyway",
+    #: and like :data:`PLAN_CAP` deliberately NOT in ``ORDER``: it is a driver
+    #: halt on the REFLECT routing edges, not a pre-EXECUTE-step check.
+    REFLECT_CAP = "reflect-cap"
+
 
 class Severity:
     """Severity levels for advisory ``audit()`` issues.
@@ -545,6 +556,34 @@ class Defaults:
     #: dispatches would mean the budget is not the lever at all.  See
     #: decisions.md D-001 (plan-2026-07-22T184813-6549c7cb).
     MAX_PLAN_REDISPATCHES = 3
+    # DECISION plan-2026-07-23T173454-2c22e5f6/D-003
+    #: EXTRA verifier dispatches the driver may spend, per RUN, after a REFLECT
+    #: dispatch that produced NO routable verdict (no ``all_criteria_pass``, no
+    #: routing flag -- so no REFLECT edge can fire).  Total REFLECT dispatches
+    #: per (iteration, step) are bounded by 1 + this number.
+    #:
+    #: Before this bound existed, REFLECT dispatched exactly ONCE per
+    #: (iteration, step): `_after_reflect_dispatch` returned `{}` on an
+    #: unroutable verdict, nothing re-opened the dispatch key, and the eventual
+    #: halt was the stall detector's -- which always raises `slug=None`.
+    #: MEASURED (S5 probe run 1, `scripts/bench_data/l6-e2e/probe-s5-mechanism/
+    #: probe-rows.jsonl`, `:4b`; same shape in L6 B5 run 1 and B6 run 2): a
+    #: `success=True` verifier reply whose coerced delta set no routing key was
+    #: terminal, and the run recorded `halt_slug: null` with reason "Stalled in
+    #: REFLECT for 3 turns" -- the slugless stall (S4b) the L6 floor's
+    #: honest-halt clause exists to catch.
+    #:
+    #: 3 is an UNMEASURED PLACEHOLDER mirroring MAX_PLAN_REDISPATCHES above
+    #: (n=3 stall observations, zero re-dispatch observations), NOT a measured
+    #: horizon like MAX_EXPLORE_REDISPATCHES.  The verifier's task is ONE
+    #: structured verdict -- PLAN's task shape, not EXPLORE's multi-topic
+    #: discovery -- so PLAN's sizing rationale carries: 4 total dispatches
+    #: separates "fails once cold" from "persistently fails" without
+    #: quadrupling worst-case REFLECT wall clock.  Do NOT tune it without a
+    #: dedicated bench: `reflect-cap` rows with zero routing keys across all 4
+    #: dispatches would mean the budget is not the lever at all.  See
+    #: decisions.md D-003 (plan-2026-07-23T173454-2c22e5f6).
+    MAX_REFLECT_REDISPATCHES = 3
     #: The autonomy leash: the 3rd fix attempt is HARD-blocked.
     MAX_FIX_ATTEMPTS = 2
     # DECISION plan-2026-07-21T125237-191b2eb2/D-052

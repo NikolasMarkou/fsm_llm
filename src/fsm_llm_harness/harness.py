@@ -734,6 +734,7 @@ class HarnessAgent(BaseAgent):
         iteration_hard_cap: int = Defaults.ITERATION_HARD_CAP,
         max_explore_redispatches: int = Defaults.MAX_EXPLORE_REDISPATCHES,
         max_plan_redispatches: int = Defaults.MAX_PLAN_REDISPATCHES,
+        max_reflect_redispatches: int = Defaults.MAX_REFLECT_REDISPATCHES,
         max_stall_turns: int = _DEFAULT_MAX_STALL_TURNS,
         **api_kwargs: Any,
     ) -> None:
@@ -772,6 +773,11 @@ class HarnessAgent(BaseAgent):
                 after a FAILED plan-writer reply.  Bounds total PLAN dispatches
                 per ``(iteration, step)`` at ``1 + max_plan_redispatches``.
                 Spending it is a HALT with the ``plan-cap`` slug, never a pass.
+            max_reflect_redispatches: EXTRA verifier dispatches spent per RUN
+                after a REFLECT reply that produced NO routable verdict.
+                Bounds total REFLECT dispatches per ``(iteration, step)`` at
+                ``1 + max_reflect_redispatches``.  Spending it is a HALT with
+                the ``reflect-cap`` slug, never a pass.
             max_stall_turns: Consecutive no-progress turns before halting.
             api_kwargs: Forwarded to ``fsm_llm.API``.
         """
@@ -784,6 +790,7 @@ class HarnessAgent(BaseAgent):
         self.iteration_hard_cap = iteration_hard_cap
         self.max_explore_redispatches = max_explore_redispatches
         self.max_plan_redispatches = max_plan_redispatches
+        self.max_reflect_redispatches = max_reflect_redispatches
         self.max_stall_turns = max_stall_turns
 
         # DECISION plan-2026-07-21T125237-191b2eb2/D-015
@@ -859,6 +866,21 @@ class HarnessAgent(BaseAgent):
         #: attempt and must not share budget or reset semantics with one.
         #: See decisions.md D-001 (plan-2026-07-22T184813-6549c7cb).
         self._plan_redispatches = 0
+        # DECISION plan-2026-07-23T173454-2c22e5f6/D-003
+        #: The bounded REFLECT re-dispatch budget spent this run.  Driver run
+        #: state for exactly the reasons ``_explore_redispatches`` above is
+        #: (D-029): a worker receives a context SNAPSHOT and returns an
+        #: ``AgentResult`` -- it holds no reference to the driver -- and the
+        #: approval callback is handed a COPY of the context and returns a
+        #: bool, so neither can reach or reset this counter; only ``_run_once``
+        #: resets it.  Do NOT make it a context key (the [I:5]
+        #: cap-reachable-from-callback shape), do NOT fold it into
+        #: ``fix_attempts``/the leash (an unroutable VERDICT is not an EXECUTE
+        #: fix attempt), and do NOT let a REFLECT-stuck run fall through to the
+        #: stall detector's ``slug=None`` raise -- that is the S4b slugless
+        #: stall this counter exists to close.  See decisions.md D-003
+        #: (plan-2026-07-23T173454-2c22e5f6).
+        self._reflect_redispatches = 0
         #: Slugs handed out to EXPLORE dispatches this run, in order.  Driver
         #: run state for exactly the reasons ``_explore_redispatches`` above is
         #: (D-029): a worker cannot reach it, and only ``_run_once`` resets it.
@@ -1026,6 +1048,7 @@ class HarnessAgent(BaseAgent):
         self._stall_signature = None
         self._explore_redispatches = 0
         self._plan_redispatches = 0
+        self._reflect_redispatches = 0
         self._assigned_topics = []
         self._presentations = []
         self._reverts = []
@@ -2206,7 +2229,7 @@ class HarnessAgent(BaseAgent):
         if state == HarnessStates.PLAN:
             return self._after_plan_dispatch(result, error, context)
         if state == HarnessStates.REFLECT:
-            return self._after_reflect_dispatch(context)
+            return self._after_reflect_dispatch(result, error, context)
         if state == HarnessStates.CLOSE:
             return self._after_close_dispatch(context)
         return {}
@@ -2586,23 +2609,104 @@ class HarnessAgent(BaseAgent):
         )
         return {ContextKeys.PLAN_APPROVED: approved}
 
-    def _after_reflect_dispatch(self, context: Mapping[str, Any]) -> dict[str, Any]:
-        """Ask the human to confirm a close, or to continue past the leash."""
+    def _after_reflect_dispatch(
+        self,
+        result: AgentResult | None,
+        error: Exception | None,
+        context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Ask the human to confirm a close, or to continue past the leash --
+        or retry an UNROUTABLE verifier under a bounded budget.
+
+        Returns:
+            The close-approval or leash outcome, ``{}`` when a routing flag
+            lets an outbound edge fire, a delta re-opening the REFLECT dispatch
+            key, or one recording the ``reflect-cap`` halt.
+        """
         # Emitted before the routing decision, which is this contract's own
         # "when emitted" -- the verdict is what the routing is read from.
         self._emit_reflect(context)
         if context.get(ContextKeys.LAST_GATE_SLUG) == GateSlug.LEASH_CAP:
             return self._offer_leash_continue(context)
 
-        if context.get(ContextKeys.ALL_CRITERIA_PASS) is not True:
+        if context.get(ContextKeys.ALL_CRITERIA_PASS) is True:
+            confirmed = self._request_approval(
+                _APPROVAL_CLOSE,
+                context,
+                reasoning="Every success criterion is verified PASS. Close the plan?",
+            )
+            return {ContextKeys.CLOSE_CONFIRMED: confirmed}
+
+        # DECISION plan-2026-07-23T173454-2c22e5f6/D-003
+        # A REFLECT whose verdict routes NOWHERE must not end the run slugless.
+        # REFLECT previously dispatched exactly ONCE per (iteration, step):
+        # this handler returned {} on an unroutable verdict, nothing re-opened
+        # the dispatch key, all four REFLECT edges stayed BLOCKED, and the
+        # eventual halt was the 3-turn stall detector's -- which always raises
+        # slug=None. MEASURED (S5 probe run 1, scripts/bench_data/l6-e2e/
+        # probe-s5-mechanism/, `:4b`; same shape in L6 B5 run 1 and B6 run 2):
+        # a success=True verifier reply (526 answer chars) whose coerced delta
+        # set NO routing key was terminal -- halt_slug null, honest_halt false,
+        # the S4b slugless stall. The fix mirrors `_after_plan_dispatch`
+        # (D-001 of plan-2026-07-22T184813-6549c7cb) exactly, and the same
+        # properties are load-bearing:
+        #   1. A retry is authorised EXPLICITLY, by removing the SAME
+        #      (state, iteration, step) key from the ledger -- never a widened
+        #      key (D-017).
+        #   2. The BOUND is `self._reflect_redispatches` -- driver run state on
+        #      `self` (see its D-003 block in `__init__`), never a context key,
+        #      reset only by `_run_once`, unreachable from any worker and from
+        #      `_request_approval`'s callback.
+        #   3. Spending the bound HALTS honestly: LAST_GATE_SLUG/HALT_REASON
+        #      are pre-written HERE because `_check_stall` always raises with
+        #      slug=None and `_halt_result` only preserves a slug already in
+        #      context. Do NOT "finish the job" by writing `all_criteria_pass`
+        #      or a routing flag: a verdict the verifier never produced must
+        #      not route the run (I8).
+        # The condition is ROUTABILITY, not `result.success`: the measured
+        # stall variant IS a success=True reply, so gating on success would
+        # miss it (the same lesson as _after_plan_dispatch's D-002 disk-keyed
+        # gate). A denied CLOSE approval (all_criteria_pass True, human said
+        # no) deliberately does NOT consume this budget -- approval denial is a
+        # shut human gate, not a retryable verifier failure; that residual
+        # slugless shape is out of scope here, exactly as PLAN's was under
+        # plan-cap before the aligned-gates iteration.
+        if result is None and error is None:
+            # No worker configured (D-045): nothing was attempted, so there is
+            # nothing to re-attempt and no cap to spend.
+            return {}
+        if any(context.get(flag) is True for flag in _REFLECT_ROUTING_FLAGS):
+            # An outbound edge can fire (completion fix / pivot / explore
+            # loop-back): the verdict is routable, no budget is consumed.
             return {}
 
-        confirmed = self._request_approval(
-            _APPROVAL_CLOSE,
-            context,
-            reasoning="Every success criterion is verified PASS. Close the plan?",
+        if self._reflect_redispatches >= self.max_reflect_redispatches:
+            logger.warning(
+                f"Reflect cap [{GateSlug.REFLECT_CAP}]: "
+                f"{self._reflect_redispatches} re-dispatch(es) spent (cap "
+                f"{self.max_reflect_redispatches}) and the verifier has still "
+                "not produced a routable verdict; not dispatching again."
+            )
+            return {
+                ContextKeys.LAST_GATE_SLUG: GateSlug.REFLECT_CAP,
+                ContextKeys.HALT_REASON: (
+                    f"Reflect cap: {self._reflect_redispatches} extra "
+                    f"verifier dispatch(es) spent (cap "
+                    f"{self.max_reflect_redispatches}) and none produced a "
+                    "routable verdict (no criteria verdict, no routing flag), "
+                    "so no REFLECT edge can fire. Characterize the verifier "
+                    "failure before raising the budget."
+                ),
+            }
+        self._reflect_redispatches += 1
+        logger.info(
+            f"REFLECT verdict unroutable; re-dispatching the verifier "
+            f"({self._reflect_redispatches}/{self.max_reflect_redispatches})."
         )
-        return {ContextKeys.CLOSE_CONFIRMED: confirmed}
+        key = self._dispatch_key(context, HarnessStates.REFLECT)
+        return self._ledger_delta(
+            [entry for entry in self._read_ledger(context) if entry != key]
+        )
 
     def _offer_leash_continue(self, context: Mapping[str, Any]) -> dict[str, Any]:
         """Ask the human to continue past an exhausted leash, at most N times.
