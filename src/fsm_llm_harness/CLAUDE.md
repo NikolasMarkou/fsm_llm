@@ -392,7 +392,7 @@ pytest tests/test_fsm_llm_harness/          # 1,891 tests, 10 test files
 | `test_cli.py` | 103 |
 | `test_storage.py` | 115 |
 | `test_fsm_definition.py` | 87 |
-| `test_live_ollama.py` | 60 (15 live, gated off by default) |
+| `test_live_ollama.py` | 69 (16 live, gated off by default) |
 | `test_extraction_cost.py` | 24 |
 
 **Live tests are DOUBLE-gated** and auto-skip: they need both
@@ -482,28 +482,38 @@ generic `STALL` slug was minted (predecessor D-003 respected). Offline-verified,
 still live-unexercised. No B1 run reached PLAN, so the redispatch budget and deliverable line
 are offline-verified (unit-proven) but live-unexercised, and the tightened
 verified-write clause measured false 3/3 because nothing reached EXECUTE.
-The measured blocker for the end-to-end claim is NOT first-dispatch EXPLORE
-cold-start. A dedicated L7 A/B (`l7-explore-coldstart/B0`, committed under
-`scripts/bench_data/`) measured a SINGLE cold-start EXPLORE dispatch over a
-bare `mkdir` at **bare 5/12 vs seeded 7/12** (Fisher two-sided p=0.6843 -- the
-zero-byte protocol-skeleton cold-start lever is **NOT VALIDATED**; a
-positive-but-non-significant delta, and the seeded arm's `empty-reply` rate
-rose 1->3 rather than falling). Bare 5/12 is far above L6's e2e 0/3, so a
-single cold-start dispatch over a bare dir is NOT the flat blocker the e2e
-picture implied: L6's 0/3 is a multi-dispatch redispatch-loop /
-structured-output-parse (`objects=0`, `empty-reply`) collapse -- a TRAVERSE
-failure, not a first-dispatch impossibility. That honest 0/3, with every row
-naming its blocking state and slug, is the package's end-to-end status.
+The end-to-end blocker was probed by a dedicated L7 A/B
+(`l7-explore-coldstart/B0`, committed under `scripts/bench_data/`): a SINGLE
+cold-start EXPLORE dispatch over a bare `mkdir` scored **bare 5/12 vs seeded
+7/12** (Fisher two-sided p=0.6843 -- the zero-byte protocol-skeleton cold-start
+lever is **NOT VALIDATED**; a positive-but-non-significant delta). What this
+measures precisely: a single first EXPLORE dispatch over a bare dir is NOT
+impossible (5/12), so first-dispatch impossibility is ruled out as the
+mechanism. It does NOT measure the multi-dispatch traverse -- all 24 L7 rows
+carry `assigned_topic="problem-scope"` (one topic, one dispatch, no redispatch
+loop), and one dispatch's `bytes_on_disk` success is NOT the same event as
+clearing the EXPLORE 3-findings gate, so the 5/12-vs-0/3 magnitudes are not
+directly comparable. The LEADING SUCCESSOR HYPOTHESIS -- consistent with, but
+not established by, this block -- is that L6's 0/3 is a multi-dispatch
+redispatch-loop / structured-output-parse (`objects=0`, `empty-reply`)
+failure rather than a first-dispatch one; that mechanism remains UNMEASURED.
+(The seeded arm's `empty-reply` count shifted 1->3, but at n=12 that is
+within noise and is not read as a signal; the NOT-VALIDATED verdict rests on
+the primary p=0.6843 alone.) L6's honest 0/3, every row naming its blocking
+state and slug, is the package's end-to-end status.
 
 Known gaps, standing after B1 + the L7 characterization block:
-- **The blocker is the multi-dispatch traverse, not first-dispatch cold-start**:
-  the L7 bench (the named EXPLORE-only successor) has now been RUN and measured
-  the zero-byte protocol-skeleton lever NOT VALIDATED (bare 5/12, seeded 7/12,
-  Fisher p=0.6843; `scripts/bench_data/l7-explore-coldstart/B0/`). The refutation
-  localizes the next successor: a dedicated single-state redispatch-LOOP bench
-  (not single-dispatch) instrumented with per-tool-call traces to separate
-  never-calling-a-write-tool from wrong-root from unparseable-output
-  (`empty-reply` / `objects=0` dominates BOTH L7 arms).
+- **First-dispatch cold-start is ruled out; the traverse mechanism is an
+  unmeasured hypothesis**: the L7 bench (the named EXPLORE-only successor) has
+  now been RUN and measured the zero-byte protocol-skeleton lever NOT VALIDATED
+  (bare 5/12, seeded 7/12, Fisher p=0.6843;
+  `scripts/bench_data/l7-explore-coldstart/B0/`). L7 exercised one topic, one
+  dispatch per row -- it did NOT run a redispatch loop or any second topic, so
+  "L6's 0/3 is a traverse failure" is a hypothesis the refutation POINTS TO, not
+  a measured result. The refutation localizes the next successor: a dedicated
+  single-state redispatch-LOOP bench (not single-dispatch) instrumented with
+  per-tool-call traces to separate never-calling-a-write-tool from wrong-root
+  from unparseable-output (`empty-reply` / `objects=0` dominates BOTH L7 arms).
 - **PLAN redispatch budget**: `MAX_PLAN_REDISPATCHES=3` is now GRADEABLE (Defect
   C: an additive `plan_redispatches` L6 row field) but still has ZERO live
   evidence -- no run has reached PLAN. The `success=True`-but-empty-plan.md

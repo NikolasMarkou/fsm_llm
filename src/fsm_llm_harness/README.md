@@ -279,11 +279,16 @@ population:
 Fisher two-sided **p = 0.6843**. The pre-registered rule (VALIDATED iff
 `k_seeded > k_bare` AND p < 0.05) yields **NOT VALIDATED** — a positive but
 non-significant delta. The zero-byte seeding capability exists in the code but
-ships UNWIRED. A second finding falls out of the same block and reframes the
-end-to-end blocker: a single cold-start EXPLORE dispatch over a bare directory
-scores ~5/12, far above L6's e2e 0/3, so **L6's blocker is the multi-dispatch
-redispatch-loop / structured-output-parse collapse, not first-dispatch cold
-start.**
+ships UNWIRED. What the block establishes: a single first EXPLORE dispatch over
+a bare directory is not impossible (5/12), so **first-dispatch impossibility is
+ruled out** as the mechanism. What it does NOT establish: all 24 rows used one
+topic and one dispatch (no redispatch loop), and one dispatch's write is not
+the same as clearing the 3-findings EXPLORE gate, so the 5/12-vs-0/3 magnitudes
+are not directly comparable. The **leading successor hypothesis** — pointed to
+by, not proven by, this block — is that L6's 0/3 is a multi-dispatch
+redispatch-loop / structured-output-parse (`objects=0`, `empty-reply`) failure
+rather than a first-dispatch one; that mechanism is **unmeasured** and is the
+target of the named successor redispatch-loop bench.
 
 ## What is NOT claimed
 
