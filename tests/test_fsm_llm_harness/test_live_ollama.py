@@ -1381,7 +1381,7 @@ E2E_WALL_CLOCK_CEILING_S = 1800.0
 #: `plans/` and scratch are how the predecessor's benches vanished.
 BENCH_DATA_DIR = Path(__file__).resolve().parents[2] / "scripts" / "bench_data"
 L6_BENCH_ID = "l6-e2e"
-L6_BLOCK = "B6"
+L6_BLOCK = "B7"
 
 #: The slugs that make a halt HONEST: the four pre-step-gate slugs plus the
 #: EXPLORE and PLAN re-dispatch caps (PLAN_CAP joined for B1: a cap-exhausted
