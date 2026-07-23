@@ -61,7 +61,7 @@ import pytest
 
 pytestmark = [pytest.mark.integration, pytest.mark.real_llm, pytest.mark.slow]
 
-from fsm_llm_agents.definitions import AgentResult, ApprovalRequest
+from fsm_llm_agents.definitions import AgentResult, ApprovalRequest, ToolCall
 from fsm_llm_agents.tools import ToolRegistry
 from fsm_llm_harness.artifacts import PlanDoc, StateDoc
 from fsm_llm_harness.constants import (
@@ -89,7 +89,13 @@ from fsm_llm_harness.roles import (
 )
 from fsm_llm_harness.rules import explore_topics, get_rules
 from fsm_llm_harness.storage import PlanDirectory
-from fsm_llm_harness.tools import PlanMemory, Workspace, gate_files, has_bytes
+from fsm_llm_harness.tools import (
+    PlanMemory,
+    Workspace,
+    build_workspace_tools,
+    gate_files,
+    has_bytes,
+)
 from tests.conftest import ollama_available
 from tests.test_fsm_llm_harness.test_plan_validator import (
     PLAN_MD,
@@ -876,12 +882,89 @@ def _spy_on_tools(sink: list[dict[str, Any]]):
             {
                 "tool": tool_call.tool_name,
                 "ok": bool(result.success),
+                # `params` recovers the target `path` for a write-tool call;
+                # `error` (None on success) carries the confinement/routing-hint
+                # marker that separates a (ii) wrong-root refusal from an
+                # (iii) accepted-but-no-bytes call.  Both run AFTER the model's
+                # tool-call turn, so recording them changes zero model bytes.
+                "params": dict(tool_call.parameters),
+                "error": result.error,
             }
         )
         return result
 
     ToolRegistry.execute = spied  # type: ignore[method-assign]
     return original
+
+
+#: The routing-hint substring the harness emits when a WORKSPACE write tool is
+#: aimed at a plan-directory path (``tools.py:1243-1254``, ``_routing_hint``).
+#: Pinned as data here so the W1 classifier's (ii)-wrong-root string match reads
+#: the SAME literal the offline guard verifies is present in ``ToolResult.error``
+#: -- if the package ever reworded the hint, this guard fails before the live
+#: block spends a token (plan A3).
+_ROUTING_HINT_MARKER = "use `write_plan_file`"
+
+
+class TestSpyCapturesPerCallOutcome:
+    """The ``_spy_on_tools`` trace must carry the four fields W1 classifies on.
+
+    The spy wraps ``ToolRegistry.execute`` -- which runs AFTER the model's
+    tool-call turn -- so recording ``(tool, ok, params, error)`` changes zero
+    model-facing bytes (plan A2/A4, findings F1).  These are UNGATED offline
+    guards: they drive a REAL confined :class:`Workspace` registry, never a
+    live model, so they run in the default ``make test`` path and pin the spy
+    shape before any live spend.
+    """
+
+    def test_records_tool_ok_params_and_error(self, tmp_path: Path) -> None:
+        workspace = _seed_workspace(tmp_path)
+        registry = build_workspace_tools(Workspace(str(workspace)))
+
+        calls: list[dict[str, Any]] = []
+        original = _spy_on_tools(calls)
+        try:
+            # (a) an ACCEPTED write: success, error None, params carry the path.
+            registry.execute(
+                ToolCall(
+                    tool_name="write_file",
+                    parameters={"path": "note.txt", "content": "hi"},
+                )
+            )
+            # (b) a REFUSED wrong-root write: a workspace tool aimed at a plan
+            #     path escapes the workspace root, so `_corrective` appends the
+            #     routing hint and the call fails.  This is the (ii)-vs-(iii)
+            #     signal the classifier will string-match, so the guard pins
+            #     that the marker survives into `ToolResult.error`.
+            registry.execute(
+                ToolCall(
+                    tool_name="write_file",
+                    parameters={"path": "/plan/findings/scratch.md", "content": "x"},
+                )
+            )
+        finally:
+            ToolRegistry.execute = original  # type: ignore[method-assign]
+
+        assert len(calls) == 2
+        # Every record carries the four fields, in every case.
+        for record in calls:
+            assert set(record) == {"tool", "ok", "params", "error"}
+
+        accepted, refused = calls
+        # (a) accepted call: the existing two keys are UNCHANGED, params echo
+        #     the call, error is None.
+        assert accepted["tool"] == "write_file"
+        assert accepted["ok"] is True
+        assert accepted["params"] == {"path": "note.txt", "content": "hi"}
+        assert accepted["error"] is None
+
+        # (b) refused call: ok is False and the routing-hint marker the W1
+        #     classifier will match on is present in the captured error string.
+        assert refused["tool"] == "write_file"
+        assert refused["ok"] is False
+        assert refused["params"]["path"] == "/plan/findings/scratch.md"
+        assert refused["error"] is not None
+        assert _ROUTING_HINT_MARKER in refused["error"]
 
 
 def _execute_request(plan_dir: Path, workspace: Path) -> RoleRequest:
