@@ -12,7 +12,7 @@ FSM-LLM (v0.5.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (5,331 tests)
+make test           # pytest -v (5,353 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -220,25 +220,25 @@ measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (5,331 collected)
+pytest                                 # Run all tests (5,353 collected)
 pytest tests/test_fsm_llm/            # Core package tests (1,305 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (137 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (976 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (270 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
-pytest tests/test_fsm_llm_harness/    # Harness tests (1,923 tests)
+pytest tests/test_fsm_llm_harness/    # Harness tests (1,945 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 5,261. The remaining 70 are three root-level files:
+# The 9 suites above sum to 5,283. The remaining 70 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (24)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
 
-Counts measured with `pytest --collect-only` at commit `89f3b9c`; the full run is
-5,298 passed / 28 skipped / 2 xfailed in ~251s.
+Counts re-measured with `pytest --collect-only` at plan-2026-07-23-2c22e5f6
+step 4; the full run is 5,323 passed / 28 skipped / 2 xfailed in ~250s.
 
 **Conventions**:
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios

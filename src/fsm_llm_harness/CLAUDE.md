@@ -379,20 +379,20 @@ Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_harness/          # 1,923 tests, 10 test files
+pytest tests/test_fsm_llm_harness/          # 1,945 tests, 10 test files
 ```
 
 | File | Tests |
 |---|---|
-| `test_roles_and_tools.py` | 469 |
-| `test_harness_agent.py` | 311 |
+| `test_roles_and_tools.py` | 479 |
+| `test_harness_agent.py` | 322 |
 | `test_artifacts.py` | 273 |
 | `test_hardening.py` | 258 |
 | `test_plan_validator.py` | 191 |
 | `test_cli.py` | 103 |
 | `test_storage.py` | 115 |
 | `test_fsm_definition.py` | 87 |
-| `test_live_ollama.py` | 92 (17 live, gated off by default) |
+| `test_live_ollama.py` | 93 (17 live, gated off by default) |
 | `test_extraction_cost.py` | 24 |
 
 **Live tests are DOUBLE-gated** and auto-skip: they need both
@@ -696,8 +696,9 @@ empty-file gate counting, ownership deny branch, live-gate short-circuit) each
 flipped tests red in a scratch copy (93 red total), and `test_cli.py`'s
 exit-code 0/1/2 contract close-read verdict was CLEAN.
 
-Offline, the package is green: 1,934 tests (1,917 passed / 17 skipped;
-+10 for the D-001 prose-target fallback), `ruff` clean, `mypy` 0 errors.
+Offline, the package is green: 1,945 tests (1,928 passed / 17 skipped;
++1 for the S5 raw-observation retention round-trip and +10 for the D-002
+write-evidence label-normalization regressions), `ruff` clean, `mypy` 0 errors.
 
 **Not claimed**: that the harness is production-ready, or that a 4B model drives
 it unattended to a useful result YET -- the L6 floor is still **0/3 at >=

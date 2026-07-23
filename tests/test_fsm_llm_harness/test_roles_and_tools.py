@@ -62,6 +62,7 @@ from fsm_llm_harness.harness import _WORKER_WRITABLE, RoleRequest
 from fsm_llm_harness.roles import (
     ROLE_SPECS,
     _default_agent_builder,
+    _verified_writes,
     build_default_worker_factory,
     build_role_prompt,
     build_role_system_prompt,
@@ -3537,6 +3538,242 @@ class TestWriteEvidenceRootSplit:
         assert seen[-1]["write_evidence_workspace"] == 0
         assert seen[-1]["write_evidence_plan"] == 0
         assert seen[-1]["write_evidence_paths"] == ()
+
+
+# DECISION plan-2026-07-23T173454-2c22e5f6/D-002
+# Red-before regressions for the S5 label-normalization fix.  Do NOT "align"
+# these assertions with the raw parameter spelling: the S5 probe
+# (scripts/bench_data/l6-e2e/probe-s5-mechanism/) measured a real, assigned,
+# byte-verified EXECUTE write scoring `verified_write=False` at the frozen L6
+# floor because the label echoed the model's absolute-tmp-path spelling.  The
+# label contract is the root-RELATIVE resolved spelling (`_evidence_path`),
+# and the frozen floor normalizer in test_live_ollama.py is IMPORTED, never
+# re-implemented, so these tests grade against the exact predicate the L6
+# bench grades with.  See decisions.md D-002.
+class TestWriteEvidenceLabelNormalization:
+    """Verified-write labels are root-RELATIVE resolved spellings (D-002).
+
+    The S5 probe measured mechanism (c): the model passed the full in-root
+    ABSOLUTE tmp path to ``write_file``; ``Workspace.resolve`` accepted it and
+    the bytes landed, but the raw-parameter label
+    (``workspace:/tmp/.../workspace/uploader.py``) fails the frozen L6 floor
+    normalizer, which credits root-relative labels only -- so the floor failed
+    CLOSED on a real write.  ``_evidence_path`` now re-spells every verified
+    write's label through the SAME resolve chokepoint that verified its bytes.
+
+    Red-before status at pre-fix f05c8d1, recorded in the plan's
+    verification.md: the absolute / whitespace / sentinel-label / plan-dir
+    spellings and the floor replay FAIL there; the bare-relative label, the
+    sentinel FLOOR-credit guard (the floor repairs ``/workspace/...`` itself),
+    the cross-plan shape and the fallback guard PASS there.
+    """
+
+    _observe_execute = TestWriteEvidenceRootSplit._observe_execute
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["bare-relative", "workspace-sentinel", "absolute-real-path", "padded"],
+    )
+    def test_every_in_root_spelling_labels_the_same_root_relative_path(
+        self, tmp_path: Path, plan_dir: Path, spelling: str
+    ) -> None:
+        """One file, four spellings, ONE label: ``workspace:uploader.py``.
+
+        ``bare-relative`` is the L4-history guard (it passed pre-fix and must
+        never regress); ``workspace-sentinel`` pins the post-fix label for the
+        spelling the floor used to repair downstream; ``absolute-real-path``
+        is the measured S5 variant; ``padded`` is the whitespace sibling.
+        """
+        path = {
+            "bare-relative": "uploader.py",
+            "workspace-sentinel": "/workspace/uploader.py",
+            "absolute-real-path": str(tmp_path / "ws" / "uploader.py"),
+            "padded": "  uploader.py  ",
+        }[spelling]
+        record = self._observe_execute(
+            tmp_path,
+            plan_dir,
+            (("write_file", {"path": path, "content": "x = 1\n"}),),
+        )
+
+        assert record["write_evidence"] == 1
+        assert record["write_evidence_workspace"] == 1
+        assert record["write_evidence_paths"] == ("workspace:uploader.py",)
+
+    def test_the_sentinel_spelling_keeps_frozen_floor_credit(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """Regression guard: the previously-WORKING spelling still earns credit.
+
+        ``/workspace/uploader.py`` is the one absolute spelling the frozen
+        floor's ``_normalized_ws_path`` repairs itself, so a sentinel write
+        earned ``verified_write=True`` even pre-fix.  The normalization must
+        never cost that spelling its credit.  (Frozen-function import is
+        read-only use; the floor objects stay byte-identical.)
+        """
+        from tests.test_fsm_llm_harness.test_live_ollama import (
+            _verified_execute_workspace_write,
+        )
+
+        record = self._observe_execute(
+            tmp_path,
+            plan_dir,
+            (
+                (
+                    "write_file",
+                    {"path": "/workspace/uploader.py", "content": "x = 1\n"},
+                ),
+            ),
+        )
+
+        assert _verified_execute_workspace_write([record], ["uploader.py"]) is True
+
+    def test_the_plan_sentinel_spelling_labels_plan_relative(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """``/plan/changelog.md`` labels ``plan:changelog.md``, not the raw echo."""
+        record = self._observe_execute(
+            tmp_path,
+            plan_dir,
+            (("write_plan_file", {"path": "/plan/changelog.md", "content": "# log\n"}),),
+        )
+
+        assert record["write_evidence"] == 1
+        assert record["write_evidence_plan"] == 1
+        assert record["write_evidence_paths"] == ("plan:changelog.md",)
+
+    def test_an_absolute_plan_dir_path_labels_plan_relative(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """The plan-root sibling of the measured S5 variant: absolute, in-root."""
+        record = self._observe_execute(
+            tmp_path,
+            plan_dir,
+            (
+                (
+                    "write_plan_file",
+                    {"path": str(plan_dir / "changelog.md"), "content": "# log\n"},
+                ),
+            ),
+        )
+
+        assert record["write_evidence"] == 1
+        assert record["write_evidence_plan"] == 1
+        assert record["write_evidence_paths"] == ("plan:changelog.md",)
+
+    def test_a_cross_plan_file_keeps_its_memory_root_relative_shape(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """A cross-plan file resolves to the MEMORY root and keeps its shape.
+
+        ``DECISIONS.md`` lives beside the plan directories, so its resolved
+        path is not under ``plan_dir`` -- the ``memory.root`` fallback inside
+        ``_evidence_path`` keeps the label ``plan:DECISIONS.md``, exactly the
+        shape the raw parameter already had.  Direct ``_verified_writes`` call
+        with the REAL trace shape: the write itself is out of the executor's
+        ownership, so the bytes are pre-placed and only the LABELING is under
+        test (``_verified_writes`` reads, never writes).
+        """
+        ws = tmp_path / "ws"
+        (plan_dir.parent / "DECISIONS.md").write_text("# decisions\n")
+        result = AgentResult(
+            answer="noted",
+            success=True,
+            trace=AgentTrace(
+                tool_calls=[
+                    ToolCall(
+                        tool_name="write_plan_file",
+                        parameters={"path": "DECISIONS.md", "content": "# decisions\n"},
+                    )
+                ],
+                total_iterations=1,
+            ),
+            final_context={},
+        )
+
+        labels = _verified_writes(
+            result,
+            workspace=Workspace(ws),
+            memory=PlanMemory(plan_dir, role=Role.EXECUTOR),
+        )
+
+        assert labels == ("plan:DECISIONS.md",)
+
+    def test_an_unresolvable_path_falls_back_to_the_raw_stripped_label(
+        self, tmp_path: Path, plan_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Resolution failure degrades to the raw stripped label, never raises.
+
+        ``has_bytes`` is stubbed True so the labeling branch is reached with a
+        path ``Workspace.resolve`` refuses (a ``..`` escape).  The label is
+        attribution metadata: a labeling error must never fail the dispatch.
+        """
+        import fsm_llm_harness.roles as roles_module
+
+        monkeypatch.setattr(roles_module, "has_bytes", lambda reader, path: True)
+        ws = tmp_path / "ws"
+        result = AgentResult(
+            answer="wrote",
+            success=True,
+            trace=AgentTrace(
+                tool_calls=[
+                    ToolCall(
+                        tool_name="write_file",
+                        parameters={"path": "../outside.py", "content": "x = 1\n"},
+                    )
+                ],
+                total_iterations=1,
+            ),
+            final_context={},
+        )
+
+        labels = _verified_writes(
+            result,
+            workspace=Workspace(ws),
+            memory=PlanMemory(plan_dir, role=Role.EXECUTOR),
+        )
+
+        assert labels == ("workspace:../outside.py",)
+
+    def test_the_measured_s5_config_now_earns_floor_credit_end_to_end(
+        self, tmp_path: Path, plan_dir: Path
+    ) -> None:
+        """Could THIS exact config have succeeded?  Yes, now -- proven offline.
+
+        The B6 run-2 / probe configuration end-to-end: a real EXECUTE dispatch
+        through the REAL factory whose ``write_file`` path is the full in-root
+        ABSOLUTE spelling, its REAL observation record fed to the frozen
+        ``_verified_execute_workspace_write`` with the sha256-diff shape
+        ``['uploader.py']`` -- the exact grading path the L6 floor runs.
+        Pre-fix this is False (the measured S5 loss); post-fix it must be
+        True, or B7 would be spent on a config that could not have succeeded.
+        """
+        from tests.test_fsm_llm_harness.test_live_ollama import (
+            _normalized_ws_path,
+            _verified_execute_workspace_write,
+        )
+
+        record = self._observe_execute(
+            tmp_path,
+            plan_dir,
+            (
+                (
+                    "write_file",
+                    {
+                        "path": str(tmp_path / "ws" / "uploader.py"),
+                        "content": "def upload():\n    return 1\n",
+                    },
+                ),
+            ),
+        )
+
+        assert record["state"] == HarnessStates.EXECUTE
+        assert record["success"] is True
+        assert record["write_evidence_workspace"] == 1
+        root, _, path = record["write_evidence_paths"][0].partition(":")
+        assert root == "workspace"
+        assert _normalized_ws_path(path) == "uploader.py"
+        assert _verified_execute_workspace_write([record], ["uploader.py"]) is True
 
 
 class TestDefaultAgentBuilder:
