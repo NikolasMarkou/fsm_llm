@@ -432,6 +432,9 @@ driver-assigned EXECUTE target fix, bars and assertions byte-untouched
 | L6 B1, same >= EXECUTE / honest-halt clauses, verified-write TIGHTENED to EXECUTE-state workspace write | 3/3 | **0/3 -- NOT MET** (3/3 furthest=explore, slug=explore-cap, honest; zero slugless stalls) |
 | L6 B2, same floor, forced-write fix live (floor sha256-identical to B1) | 3/3 | **0/3 -- NOT MET at floor, but all 3/3 now reach PLAN** (EXPLORE blocker FIXED; new PLAN-writer blocker) |
 | L6 B3, same floor, scaffold+honest-approval fix live (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor** (S2 slugless-stall FIXED: 3/3 honest plan-cap; plan-writer now writes 15-18KB; but scaffold+append refuted -- content doesn't distribute into sections) |
+| L6 B4, same floor, response_format PLAN dispatch (floor sha256-identical) | 3/3 | **0/3 -- CONFOUNDED** (could-not-succeed: valid structured_output but renderer gated on `result.success`, discarded the plan; fixed by D-002) |
+| L6 B5, same floor, PLAN gate keys on rendered-disk-content (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor**, but run 1 FIRST-EVER to clear PLAN and reach REFLECT on a valid 11-section plan.md; missed verified_write (S4a) + honest_halt (S4b) |
+| L6 B6, same floor, S4a existence-gated prose EXECUTE target (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor**; run 2 reached REFLECT, target ASSIGNED from prose (`assigned-prose`/uploader.py -- B5 `no-target-token` FALSIFIED, model wrote uploader.py), but verified_write still False (credit-layer wall, S5); runs 1/3 explore-cap |
 
 This is the first time L4 has MET the standing bar. (The strict row's in-test
 assertion is existential -- >= 1 content-matched dispatch across both arms,
@@ -693,23 +696,48 @@ empty-file gate counting, ownership deny branch, live-gate short-circuit) each
 flipped tests red in a scratch copy (93 red total), and `test_cli.py`'s
 exit-code 0/1/2 contract close-read verdict was CLEAN.
 
-Offline, the package is green: 1,923 tests, `ruff` clean, `mypy` 0 errors.
+Offline, the package is green: 1,934 tests (1,917 passed / 17 skipped;
++10 for the D-001 prose-target fallback), `ruff` clean, `mypy` 0 errors.
 
-**Not claimed**: that the harness is production-ready, or that a 4B model
-drives it unattended to a useful result -- the L6 floor is still **0/3 at
->= EXECUTE**, measured FOUR times now (B0, B1, B2, B3), which REINFORCES this
-claim's absence, it does not soften it. What iteration 6 DID advance, honestly:
-the slugless PLAN stall (S2) is FIXED (L6 B3 3/3 halt on the honest `plan-cap`
-slug, zero slugless stalls), and 4b was confirmed to write substantial plan
-content (15-18 KB). But the plan-writer still cannot produce an APPROVABLE
-(all-sections-filled) plan -- the chosen scaffold+append mechanism was REFUTED
-(append-to-end concentrates content in one section or duplicates headers, it
-does not distribute into the 11 sections), so the wall advanced from
-"empty/invalid plan" to "content-not-distributed" but was not cleared. Through
-all of this the gates stayed mechanical: the honest approval DENIES a hollow
-(1-real-section) plan (validated live in B3 run 1), the MODEL performs the write
-(no driver salvage), the gate reads the filesystem, and a confident sentence
-still cannot open one.
+**Not claimed**: that the harness is production-ready, or that a 4B model drives
+it unattended to a useful result YET -- the L6 floor is still **0/3 at >=
+EXECUTE**, now measured across seven blocks (B0-B6). This is the founding e2e
+goal and it remains OPEN, not abandoned.
+
+**What the seven blocks establish is a per-STATE progression, each wall cleared
+structurally**: EXPLORE never-called-a-write-tool (fixed, forced write, L8
+0/10->9/10); PLAN empty/invalid/undistributed plan (fixed, response_format
+structured plan, B5 run 1 the first-ever run to clear PLAN and reach REFLECT);
+and now (iteration 8, D-001) the EXECUTE **target-assignment** wall: a real 4b
+plan names its files in PROSE, so the backtick-only `derive_execute_target`
+assigned nothing (B5 `no-target-token`). The additive existence-gated prose
+fallback (`_derive_prose_target`) FIXES that -- B6 run 2 assigned
+`uploader.py` from prose (`assigned-prose`) and the model wrote it. That win is
+permanent and unit-proven; `derive_execute_target` stays byte-frozen.
+
+**The wall B6 revealed (S5, the successor)**: verified_write stayed False in the
+full traverse even though the target was assigned AND `uploader.py` changed on
+disk -- the isolated F4 probe (assigned-target -> verified_write 3/3) did NOT
+reproduce in-loop. The `native_fc.py` trace accumulates all turns, so a
+late-turn-only trace is REFUTED as the cause; the mechanism needs the RAW
+per-dispatch EXECUTE observation, which the L6 bench does not yet retain (a
+bench-instrumentation gap -- S5's first task is to retain observations).
+
+**The leading forward hypothesis is DIVISION OF LABOUR, not a model ceiling.**
+The bench data points at each dispatch asking the 4b model to do too much at
+once: the explorer burns its whole budget on wrong-root read churn across ~10
+dispatches (B6 runs 1/3 explore-cap); PLAN authors all 11 sections in one
+response_format call (single-call approval variance, S4c: only ~1/3 of runs
+reach EXECUTE); the executor bundles target-resolution, the workspace write, and
+plan-dir bookkeeping in one dispatch (where the credit-layer write appears to get
+lost, S5). The aimed direction is to DIVIDE each state's job into smaller, more
+constrained sub-dispatches (e.g. per-section PLAN calls -- the pre-approved S4c
+lever; a read-then-write EXPLORE split; an EXECUTE that does one write and
+nothing else) so each call is small enough for 4b to complete reliably. Whether
+that clears the floor is UNMEASURED -- it is the next hypothesis to test, not a
+foregone conclusion in either direction. Through all seven blocks the gates
+stayed mechanical: the model performs every write, the gate reads the
+filesystem, and a confident sentence still cannot open one.
 
 ## Exceptions
 
