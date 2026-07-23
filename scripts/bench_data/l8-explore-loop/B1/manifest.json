@@ -1,0 +1,40 @@
+{
+  "arm": {
+    "display": "loop",
+    "native": true,
+    "shape": "bare-loop"
+  },
+  "bench_id": "l8-explore-loop",
+  "block": "B1",
+  "created_at": "2026-07-23T08:47:02Z",
+  "fixture_hash": "a84a1fe16342e811e4c0d8bfb706420c6697ccc8c01bb644b812e7cf3321ae44",
+  "git_commit": "09b34cb3914818bb85b8a5d28b532c8e1ff3859d",
+  "model": "ollama_chat/qwen3.5:4b",
+  "model_digest": {
+    "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+    "tag": "qwen3.5:4b"
+  },
+  "n_preregistered": 10,
+  "prompt_bytes_sha256": "29c21d1496f178cc5ce83807722129fe0340933ef94b56893c939e3f8a37be9c",
+  "seed": {
+    "base": 20260723200,
+    "effective_arm": "native",
+    "per_row": "base+run-1"
+  },
+  "tool_surface": {
+    "declared_tools": [
+      "append_plan_file",
+      "grep_files",
+      "list_dir",
+      "list_plan_dir",
+      "path_exists",
+      "plan_path_exists",
+      "read_file",
+      "read_plan_file",
+      "write_plan_file"
+    ],
+    "native_function_calling": true,
+    "retry_attempts": 1,
+    "timeout_seconds": 600
+  }
+}
