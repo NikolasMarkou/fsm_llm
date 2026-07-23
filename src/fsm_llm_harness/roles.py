@@ -52,7 +52,7 @@ from fsm_llm_agents.definitions import AgentConfig, AgentResult
 from fsm_llm_agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm_agents.tools import ToolRegistry
 
-from .constants import ArtifactNames, ContextKeys, Defaults, HarnessStates
+from .constants import ArtifactNames, ContextKeys, Defaults, HarnessStates, Role
 from .hardening import coerce_worker_output, parse_role_output, retry
 from .harness import _WORKER_WRITABLE, RoleRequest, WorkerFactory
 from .rules import ROLE_BY_STATE, artifacts_writable_by, explore_topic
@@ -1191,6 +1191,16 @@ def build_default_worker_factory(
             max_tokens=max_tokens,
             output_schema=spec.output_schema,
         )
+        # DECISION plan-2026-07-23T073649-bb230f18/D-003
+        # EXPLORE-only: only the explorer gets a forced final write_plan_file
+        # turn (the measured 84% never-called-a-write-tool mechanism, L8 B0).
+        # Do NOT extend this to other roles: EXECUTE/REFLECT/PIVOT/CLOSE were
+        # not measured to need it and a forced write elsewhere would fabricate
+        # a tool call the model did not choose. The forced turn itself is
+        # additive/default-off (native_fc.py D-003 block); this line is the
+        # SOLE site that arms it. See decisions.md D-003.
+        if spec.role == Role.EXPLORER:
+            config.force_final_tool = PlanTools.WRITE_PLAN_FILE
         agent = build_agent(spec, registry, config)
         prompt = _address(agent, request, spec)
         coverage = _coverage_line(memory, spec)

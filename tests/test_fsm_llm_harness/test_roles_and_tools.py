@@ -4235,3 +4235,61 @@ class TestRulesLookupEdges:
         for topic in explore_topics():
             assert topic.label in purpose
         assert ", and " in purpose
+
+
+class TestExploreOnlyForcesTheFinalWriteTool:
+    """Only the EXPLORE role arms ``force_final_tool`` (D-003, EXPLORE-only).
+
+    The forced ``write_plan_file`` finalization turn (native_fc D-003) is
+    additive and default-off; ``build_default_worker_factory``'s ``worker()``
+    closure is the SOLE site that arms it, and only for the explorer.  These
+    tests drive the REAL per-dispatch ``AgentConfig`` construction inside that
+    closure -- the same path a live dispatch takes -- and capture the config
+    the worker actually built, rather than asserting against a hand-built
+    ``AgentConfig`` that could drift from the wiring.
+    """
+
+    class _StopBeforeRun(Exception):
+        """Raised inside the agent builder to short-circuit before dispatch."""
+
+    def _config_built_for(
+        self, state: str, plan_dir: Path, workspace: Path
+    ) -> AgentConfig:
+        """Run the factory far enough to capture the config ``worker()`` built."""
+        captured: dict[str, AgentConfig] = {}
+
+        def builder(spec_: Any, registry: Any, config: AgentConfig) -> Any:
+            captured["config"] = config
+            raise self._StopBeforeRun
+
+        factory = build_default_worker_factory(
+            Workspace(workspace), agent_builder=builder
+        )
+        with pytest.raises(self._StopBeforeRun):
+            factory(
+                _role_request(
+                    state, plan_dir=plan_dir, workspace_root=workspace
+                )
+            )
+        return captured["config"]
+
+    def test_explore_config_carries_write_plan_file(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        config = self._config_built_for(
+            HarnessStates.EXPLORE, plan_dir, workspace
+        )
+
+        assert config.force_final_tool == PlanTools.WRITE_PLAN_FILE
+        assert config.force_final_tool == "write_plan_file"
+
+    @pytest.mark.parametrize(
+        "state",
+        [s for s in HarnessStates.ALL if s != HarnessStates.EXPLORE],
+    )
+    def test_non_explore_roles_do_not_force_a_final_tool(
+        self, state: str, plan_dir: Path, workspace: Path
+    ) -> None:
+        config = self._config_built_for(state, plan_dir, workspace)
+
+        assert config.force_final_tool is None
