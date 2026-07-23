@@ -127,7 +127,9 @@ explorer produces a parseable answer (`unverified-write`, `objects=1`) and issue
 only read/list calls (with wrong-root READ churn) but NEVER calls a write tool.
 Per the pre-registered rule the single W2 follow-on is AIMED at a driver-side
 FORCED-WRITE EXPLORE target (the EXECUTE 2/40->40/40 pattern), not
-`response_format`-primary -- a LATER iteration, not executed here. Two named
+`response_format`-primary -- a LATER iteration, not executed here. (Scope: one
+seeded exploration workspace/goal, ~10 runs; the never-called direction is
+robust to classifier precedence and at the run level.) Two named
 deferred defects were closed in the prior iteration (bare
 `/workspace`-sentinel confinement repair; the `success=True`-but-empty-plan.md
 slugless PLAN stall). The PLAN-and-later machinery stays offline-verified but

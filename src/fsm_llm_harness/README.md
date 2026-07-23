@@ -312,6 +312,13 @@ per the pre-registered rule the single follow-on fix is AIMED at a driver-side
 unmeasured contributing hypothesis: the explorer may exhaust its turn budget on
 failed wrong-root reads before ever writing.
 
+Scope of this claim: it is measured on a **single** seeded exploration
+workspace/goal with 3 rotating sub-topics, and n is ~10 runs (89 dispatches
+clustered within them), not 89 independent trials. The never-called **direction**
+is robust to the classifier's precedence (`empty-reply` is ranked above
+`never-called`, so 16% is the *maximal* empty-reply attribution) and at the run
+level (8/10 runs never-called-dominant); no CI is placed on the 84/16 split.
+
 ## What is NOT claimed
 
 - The harness is **NOT production-ready**.

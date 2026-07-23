@@ -528,7 +528,15 @@ structural fix), NOT `response_format`-primary (which would target only the 16%
 tail). The forced-write fix + a fresh L6 B2 are the named successor, a LATER
 iteration -- NOT executed here (D-004). A secondary, UNMEASURED contributing
 hypothesis the trace surfaces: the explorer may burn its 14-turn budget on
-failed wrong-root READ calls before ever reaching a write.
+failed wrong-root READ calls before ever reaching a write. Scope of the L8
+claim, precisely: it is measured on a SINGLE seeded exploration workspace/goal
+(the retry-backoff-uploader fixture) with 3 rotating sub-topics, and n is ~10
+runs (89 dispatches clustered within them, empty-reply concentrated in runs
+3/4/6), not 89 independent trials. The DIRECTION (never-called dominant) is
+robust to classifier precedence -- `empty-reply` is ranked ABOVE `never-called`
+(the ordering most generous to the parse-collapse hypothesis) and never-called
+still wins, so the 16% is the MAXIMAL empty-reply attribution, not a floor; and
+robust at the run level too (8/10 runs never-called-dominant).
 
 Known gaps, standing after B1 + the L7/L8 characterization blocks:
 - **The traverse mechanism is now MEASURED (i) never-called, not an unmeasured
