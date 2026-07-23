@@ -602,29 +602,37 @@ def _execute_target_line(request: RoleRequest) -> str:
 def _plan_deliverable_line(request: RoleRequest) -> str:
     """The plan-writer's ONE static deliverable, or ``""`` (mirrors
     :func:`_topic_line`: every other state -> a byte-identical prompt)."""
-    # DECISION plan-2026-07-22T184813-6549c7cb/D-001
+    # DECISION plan-2026-07-23T095051-a6dcb40d/D-001
     # D-035's driver-names-the-ONE-file pattern (measured: EXPLORE 10/10,
-    # EXECUTE content-match 2/40 -> 40/40) applied to PLAN, because L6 B0
-    # measured a plan-writer dispatch return an empty reply with
-    # plan_md_bytes=0 and stall -- nothing in the prompt named plan.md as THE
-    # deliverable of the dispatch.  The path is STATIC (the ownership table in
-    # rules.py makes plan.md the plan-writer's one obligation), so there is
-    # deliberately NO driver derivation and NO RoleRequest field -- do NOT add
-    # either; assigned_* fields are for values that change per dispatch.  Do
-    # NOT move this into the SYSTEM half (assignment lines are TASK text,
-    # D-021), do NOT say "nothing else" the way the EXECUTE line does (the
-    # plan-writer also legitimately writes decisions.md and verification.md),
-    # and do NOT render it without a plan directory -- that dispatch holds no
-    # plan-write tool, and naming an unwritable deliverable is an unexecutable
-    # instruction.  See decisions.md D-001.
+    # EXECUTE content-match 2/40 -> 40/40) applied to PLAN.  This iteration the
+    # driver SEEDS plan.md with the 11 headers (EMPTY bodies) BEFORE this
+    # dispatch (harness `_seed_plan_scaffold`, D-001), so the line now steers
+    # the model to FILL the seeded scaffold by APPENDING content UNDER each
+    # header with `append_plan_file` -- NOT `write_plan_file`, which OVERWRITES
+    # and would DESTROY the seeded headers (measured: told the scaffold exists,
+    # 4b picks append 5/5, the step-1 probe).  Load-bearing, do NOT change:
+    #   - APPEND, never overwrite: naming `write_plan_file` here re-invites the
+    #     clobber the scaffold exists to prevent.
+    #   - The path is STATIC (ownership makes plan.md the plan-writer's one
+    #     obligation), so NO driver derivation and NO RoleRequest field -- do
+    #     NOT add either.
+    #   - Do NOT move this into the SYSTEM half (assignment lines are TASK text,
+    #     D-021), do NOT say "nothing else" the way the EXECUTE line does (the
+    #     plan-writer also legitimately writes decisions.md and verification.md),
+    #     and do NOT render it without a plan directory -- that dispatch holds no
+    #     plan-write tool, and naming an unwritable deliverable is unexecutable.
+    # See decisions.md D-001.
     if request.state != HarnessStates.PLAN or request.plan_dir is None:
         return ""
     return (
-        f"YOUR DELIVERABLE THIS DISPATCH -- WRITE IT TO: {ArtifactNames.PLAN} "
-        f"USING {PlanTools.WRITE_PLAN_FILE} (this path is "
-        "plan-directory-relative). That file is THE deliverable: a dispatch "
-        "that ends with no bytes in it has not done its job, whatever else "
-        "it wrote."
+        f"YOUR DELIVERABLE THIS DISPATCH -- FILL IN {ArtifactNames.PLAN} "
+        f"USING {PlanTools.APPEND_PLAN_FILE} (this path is "
+        f"plan-directory-relative). {ArtifactNames.PLAN} ALREADY EXISTS as a "
+        "scaffold with all 11 section headers and EMPTY bodies; author the "
+        f"content of each section by APPENDING it under its header -- do NOT "
+        f"rewrite the whole file with {PlanTools.WRITE_PLAN_FILE} (that would "
+        "destroy the headers). That file is THE deliverable: a dispatch that "
+        "leaves its sections empty has not done its job, whatever else it wrote."
     )
 
 
@@ -1192,15 +1200,27 @@ def build_default_worker_factory(
             output_schema=spec.output_schema,
         )
         # DECISION plan-2026-07-23T073649-bb230f18/D-003
-        # EXPLORE-only: only the explorer gets a forced final write_plan_file
-        # turn (the measured 84% never-called-a-write-tool mechanism, L8 B0).
-        # Do NOT extend this to other roles: EXECUTE/REFLECT/PIVOT/CLOSE were
-        # not measured to need it and a forced write elsewhere would fabricate
-        # a tool call the model did not choose. The forced turn itself is
-        # additive/default-off (native_fc.py D-003 block); this line is the
-        # SOLE site that arms it. See decisions.md D-003.
+        # Two roles arm the forced final-tool turn, each with the tool its own
+        # deliverable needs:
+        #   - EXPLORER -> write_plan_file (the measured 84%
+        #     never-called-a-write-tool mechanism, L8 B0; the explorer CREATES
+        #     its findings file).
+        #   - PLAN_WRITER -> append_plan_file (plan-2026-07-23T095051-a6dcb40d
+        #     D-001): the driver seeds a HEADERS-ONLY plan.md scaffold at PLAN
+        #     entry, so the plan-writer must APPEND content UNDER the headers --
+        #     forcing write_plan_file would OVERWRITE and destroy the scaffold.
+        #     This is a DELIBERATE, scoped widening of the original EXPLORE-only
+        #     rule: PLAN is now included for APPEND (never write), because L6 B2
+        #     measured the plan-writer stall the seed+append design closes.
+        # Still EXCLUDED: EXECUTE/REFLECT/PIVOT/CLOSE were not measured to need
+        # it and a forced write there would fabricate a tool call the model did
+        # not choose. The forced turn itself is additive/default-off (native_fc.py
+        # D-003 block); this line is the SOLE site that arms it.
+        # See decisions.md D-003 and D-001.
         if spec.role == Role.EXPLORER:
             config.force_final_tool = PlanTools.WRITE_PLAN_FILE
+        elif spec.role == Role.PLAN_WRITER:
+            config.force_final_tool = PlanTools.APPEND_PLAN_FILE
         agent = build_agent(spec, registry, config)
         prompt = _address(agent, request, spec)
         coverage = _coverage_line(memory, spec)

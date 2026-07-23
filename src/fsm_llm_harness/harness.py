@@ -107,6 +107,7 @@ from .artifacts import (
     FindingsIndexDoc,
     PlanDoc,
     ProgressDoc,
+    Section,
     StateDoc,
     VerificationDoc,
     missing_floor_fields,
@@ -129,7 +130,7 @@ from .constants import (
 from .exceptions import HarnessError, HarnessReentrancyError
 from .fsm_definition import build_harness_fsm
 from .hardening import as_int, coerce_worker_output
-from .plan_validator import GateResult, Issue, audit, pre_step_gate
+from .plan_validator import GateResult, Issue, _is_placeholder, audit, pre_step_gate
 from .rules import ROLE_BY_STATE, explore_topics, get_rules
 from .storage import PlanDirectory
 from .tools import (
@@ -404,6 +405,22 @@ def derive_execute_target(plan: PlanDoc, step_number: int) -> str | None:
     text = next((s.text for s in plan.steps() if s.number == str(step_number)), "")
     named = [target for target in targets if target in text]
     return (named or targets)[0]
+
+
+def _empty_plan_scaffold() -> PlanDoc:
+    """A HEADERS-ONLY ``plan.md``: the 11 ``## `` sections with EMPTY bodies.
+
+    Interface contract (1 call site: :meth:`HarnessAgent._seed_plan_scaffold`):
+        - Returns a ``PlanDoc`` that is schema-VALID (all 11
+          ``PlanSchema.SECTIONS`` present, in order) yet carries NO section
+          content, so every body reads as a placeholder.  The driver seeds
+          STRUCTURE; the model authors CONTENT.
+        - No I/O; never raises.
+    """
+    return PlanDoc(
+        title="Plan",
+        sections=[Section(name=name, body="") for name in PlanSchema.SECTIONS],
+    )
 
 
 #: A role worker: one :class:`RoleRequest` in, one ``AgentResult`` out.
@@ -1214,6 +1231,12 @@ class HarnessAgent(BaseAgent):
         # document written inside its own call (D-038).
         self._sync_state_doc(state, working)
 
+        # Seed the HEADERS-ONLY plan.md scaffold at PLAN entry, BEFORE the
+        # plan-writer dispatches, so the model FILLS a known structure instead
+        # of composing 11 sections from a blank file (D-001).
+        if state == HarnessStates.PLAN:
+            self._seed_plan_scaffold(working)
+
         # A genuine entry authorises exactly one dispatch for this state's key,
         # even when the counters did not move (a completion-fix retry of the
         # same step, or a loop-back into an already-visited state).
@@ -1695,6 +1718,48 @@ class HarnessAgent(BaseAgent):
     # ------------------------------------------------------------------
     # state.md -- the driver's one owned WRITE (invariant I7)
     # ------------------------------------------------------------------
+
+    def _seed_plan_scaffold(self, context: Mapping[str, Any]) -> str | None:
+        # DECISION plan-2026-07-23T095051-a6dcb40d/D-001
+        # At PLAN entry the driver seeds plan.md with the 11 PlanSchema.SECTIONS
+        # headers (EMPTY bodies) so the plan-writer FILLS a known structure
+        # (measured: 4b appends real content under seeded headers 5/5, the
+        # step-1 probe) instead of composing 11 ordered sections from blank.
+        # Load-bearing restrictions -- do NOT relax any of them:
+        #   1. HEADERS ONLY. The driver authors NO section content: the MODEL
+        #      authors CONTENT, exactly like the EXECUTE driver-assigned write
+        #      target and the EXPLORE topic (SYSTEM.md Invariants). The seeded
+        #      scaffold is all-placeholder, so `_plan_has_content` (substantive)
+        #      reads it as NOT substantive and the PLAN->EXECUTE gate cannot open
+        #      on the skeleton -- "a confident sentence cannot open a gate" is
+        #      INTACT (F4). Do NOT seed placeholder prose to "help": that would
+        #      hand the model, and the honest-approval stub, real content nobody
+        #      wrote.
+        #   2. SEED ONLY IF plan.md is ABSENT or EMPTY. `has_bytes` (the same
+        #      predicate the gate uses) gates the write, so a real or partial
+        #      plan on a re-entry / completion-fix is NEVER clobbered. Do NOT
+        #      overwrite unconditionally.
+        #   3. Written through the driver's OWN `PlanDirectory.write_artifact`
+        #      (ATOMIC, storage.py D-019) -- ORCHESTRATOR is an authorised plan.md
+        #      owner (rules.OWNERSHIP), so this is not an ownership breach. A
+        #      failed seed is logged and SWALLOWED (like `_sync_state_doc`): the
+        #      model then composes from blank as before the fix -- no regression.
+        #   4. When NO plan directory is configured (`_plan_directory` is None,
+        #      the documented degrade path) there is nowhere to seed; return None.
+        # See decisions.md D-001.
+        directory = self._plan_directory(context)
+        if directory is None:
+            return None
+        if has_bytes(directory.read_text, ArtifactNames.PLAN):
+            return None
+        try:
+            return directory.write_artifact(ArtifactNames.PLAN, _empty_plan_scaffold())
+        except (HarnessError, OSError) as exc:
+            logger.warning(
+                f"Could not seed the {ArtifactNames.PLAN} scaffold: {exc}. The "
+                "plan-writer will compose from a blank file, as before the fix."
+            )
+            return None
 
     def _sync_state_doc(self, state: str, context: Mapping[str, Any]) -> str | None:
         """Record the driver's position in ``state.md``, atomically.
@@ -2181,47 +2246,52 @@ class HarnessAgent(BaseAgent):
         )
 
     def _plan_has_content(self, context: Mapping[str, Any]) -> bool:
-        # DECISION plan-2026-07-22T212329-16de43da/D-005
-        # Whether a CONFIGURED plan directory carries a non-empty plan.md, read
-        # OFF DISK. Used by `_after_plan_dispatch` to catch the residual
-        # slugless PLAN stall (Defect B).
-        #   (a) DISK-DERIVED, satisfying I1: a plan-writer's `success=True`
-        #       claim no longer ALONE advances PLAN. `_after_plan_dispatch`
-        #       already retries on `result is None or not result.success` -- a
-        #       worker-reported flag -- and MEASURED (L6 B0 run 3): a reply
-        #       with `success=True` but an EMPTY plan.md skipped the budget,
-        #       fell through to a denied approval, and stalled sluglessly
-        #       (`_check_stall` always raises slug=None). Folding this disk
-        #       read into that condition makes the empty-plan reply consume the
-        #       budget exactly like a worker failure, so exhaustion halts on
-        #       the honest GateSlug.PLAN_CAP instead of a slugless stall.
-        #   (b) Respects predecessor D-003
-        #       (plan-2026-07-22T184813-6549c7cb): NO generic STALL slug is
-        #       minted. A slug is a claim the halt was BOUNDED BY DESIGN -- this
-        #       structural closure is precisely what earns the EXISTING
-        #       PLAN_CAP slug (already in HONEST_HALT_SLUGS) the right to cover
-        #       this shape, because the stall is now actually bounded.
-        #   (c) Reads through the DRIVER's OWN `PlanDirectory` accessor, NOT
-        #       `PlanMemory`'s 64 KB-capped role-facing reader (storage.py's
-        #       "Two read paths"): the driver is not a worker. `has_bytes` is
-        #       REUSED as the non-empty predicate (I1/DRY) -- do NOT hand-roll
-        #       a second byte check that could drift from the gate's own. A
-        #       zero-byte plan.md therefore reads as EMPTY (has_bytes strips).
-        #   (d) When NO plan directory is configured (the documented degrade
-        #       path -- PLAN_DIR absent from context, `_plan_directory` is
-        #       None), there is no disk to read, so the disk-derived override
-        #       cannot and MUST NOT fire: return True so the OR-ed condition
-        #       defers to `result.success` exactly as before this fix. This is
-        #       a DELIBERATE deviation from plan step 5's literal "no plan dir
-        #       -> False": returning False there would reclassify every
-        #       successful degrade-path plan reply as an empty-plan failure and
-        #       redden 59 existing traverse tests (see decisions.md D-005). The
-        #       real Defect B always has a plan directory, so the override still
-        #       fires for every production/L6 shape.
+        # DECISION plan-2026-07-23T095051-a6dcb40d/D-001
+        # Whether a CONFIGURED plan directory carries a SUBSTANTIVE plan.md, read
+        # OFF DISK. Used by `_after_plan_dispatch` to catch BOTH the empty-plan
+        # stall (predecessor D-005) AND the seeded-scaffold / invalid-plan shapes
+        # this iteration adds. "Substantive" = plan.md parses as a valid
+        # `PlanDoc` (all 11 sections, in order) AND is NOT-ALL-placeholder (at
+        # least one section body carries real, model-authored content).
+        #   (a) NOT-ALL-placeholder, not any-placeholder, is the deliberate bar:
+        #       the driver seeds a HEADERS-ONLY scaffold whose 11 bodies are ALL
+        #       placeholder (`_is_placeholder` reads an empty body as a
+        #       placeholder), so an un-filled scaffold -> all placeholder ->
+        #       False; the moment the model fills ONE section with real content
+        #       -> some non-placeholder -> True. A stricter all-must-be-filled
+        #       bar would fail a partially-written plan the model is still
+        #       building across redispatches; the honest-approval stub (step 3)
+        #       is where a placeholder-heavy plan is denied, not here.
+        #   (b) The seeded scaffold is ALWAYS `PlanDoc`-valid, so validity alone
+        #       never gates the scaffold out -- the placeholder check is what
+        #       does. A NON-empty but SCHEMA-INVALID plan.md (bad/missing
+        #       headers) fails `PlanDoc` parse, `_artifact` returns None -> False
+        #       (this closes predecessor S2's non-empty-but-invalid slugless
+        #       stall). So an empty scaffold OR an invalid plan -> not
+        #       substantive -> the redispatch budget fires -> exhaustion halts on
+        #       the honest GateSlug.PLAN_CAP; NO generic STALL slug is minted
+        #       (predecessor D-003 respected).
+        #   (c) Reads through the DRIVER's OWN `PlanDirectory` (uncapped,
+        #       storage.py D-037) via the existing `_artifact` parse-or-None
+        #       helper, and REUSES `plan_validator._is_placeholder` (I1/DRY) --
+        #       do NOT hand-roll a second content predicate that could drift from
+        #       the validator's own. No worker-claimed flag is trusted (I1).
+        #   (d) PRESERVE the no-plan-directory degrade path (predecessor D-005):
+        #       when `_plan_directory` is None (PLAN_DIR absent) there is no disk
+        #       to read, so return True so the OR-ed condition defers to
+        #       `result.success` exactly as before. Returning False here would
+        #       reclassify every successful degrade-path plan reply as a failure
+        #       and redden ~59 traverse tests (D-005's measured trap). The real
+        #       PLAN shape always has a plan directory, so the override still
+        #       fires for every production/L6 case.
+        # See decisions.md D-001.
         directory = self._plan_directory(context)
         if directory is None:
             return True
-        return has_bytes(directory.read_text, ArtifactNames.PLAN)
+        plan = self._artifact(directory, ArtifactNames.PLAN, PlanDoc)
+        if plan is None:
+            return False
+        return not all(_is_placeholder(section.body) for section in plan.sections)
 
     def _after_plan_dispatch(
         self,

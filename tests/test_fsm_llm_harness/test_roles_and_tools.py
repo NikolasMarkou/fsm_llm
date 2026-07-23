@@ -2684,22 +2684,20 @@ class TestThePlanDeliverableLineNamesPlanMd:
     ``plan.md`` as THE deliverable of the dispatch.  This applies the D-035
     driver-names-the-ONE-file pattern -- the structural-over-verbal lever
     measured twice (EXPLORE 10/10; EXECUTE content-match 2/40 -> 40/40, Fisher
-    p=1.6e-20) -- to PLAN.  Unlike EXPLORE's topic and EXECUTE's write target
-    the path is STATIC (``plan.md`` is the plan-writer's one obligation per
-    ``rules.OWNERSHIP``), so there is no driver derivation and no
-    ``RoleRequest`` field: the line renders on every PLAN dispatch that holds
-    a plan directory, and on nothing else.  Verified against the pre-change
-    rendering at implementation time: sha256 of all 6 states' full/system/task
-    prompts, with and without a plan dir -- only PLAN-with-plan-dir's full and
-    task halves changed; every other rendering was byte-identical.
+    p=1.6e-20) -- to PLAN.  Since plan-2026-07-23 the driver SEEDS a
+    HEADERS-ONLY scaffold at PLAN entry, so the line steers the model to FILL it
+    by APPENDING with ``append_plan_file`` (measured: 4b picks append 5/5 when
+    told the scaffold exists), NOT the overwriting ``write_plan_file`` -- which
+    would destroy the seeded headers.  The path is STATIC (``plan.md`` is the
+    plan-writer's one obligation per ``rules.OWNERSHIP``), so there is no driver
+    derivation and no ``RoleRequest`` field: the line renders on every PLAN
+    dispatch that holds a plan directory, and on nothing else.
     """
 
     _MARKER = "YOUR DELIVERABLE THIS DISPATCH"
 
     def _line(self) -> str:
-        return (
-            f"WRITE IT TO: {ArtifactNames.PLAN} USING {PlanTools.WRITE_PLAN_FILE}"
-        )
+        return f"FILL IN {ArtifactNames.PLAN} USING {PlanTools.APPEND_PLAN_FILE}"
 
     def test_the_plan_task_prompt_renders_the_deliverable_exactly_once(
         self, plan_dir: Path, workspace: Path
@@ -2712,18 +2710,25 @@ class TestThePlanDeliverableLineNamesPlanMd:
 
         assert task.count(self._line()) == 1
 
-    def test_the_line_names_the_plan_root_and_the_write_tool(
+    def test_the_line_names_the_append_tool_and_the_scaffold(
         self, plan_dir: Path, workspace: Path
     ) -> None:
-        """The root is stated, not inferred (the B0 EXECUTE misses were ROOT
-        misses; the same tool-and-root naming is carried over wholesale)."""
+        """The tool is APPEND (never the overwriting write), and the line tells
+        the model the scaffold already exists so it FILLS rather than clobbers."""
         request = _role_request(
             HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
         )
         task = build_role_task_prompt(request, get_role_spec(HarnessStates.PLAN))
+        block = next(b for b in task.split("\n\n") if self._MARKER in b)
 
-        assert PlanTools.WRITE_PLAN_FILE in self._line()
+        assert PlanTools.APPEND_PLAN_FILE in self._line()
         assert "plan-directory-relative" in task
+        assert "ALREADY EXISTS" in block
+        assert "11 section headers" in block
+        # write_plan_file appears only as the tool NOT to use (do NOT rewrite)
+        assert f"do NOT rewrite the whole file with {PlanTools.WRITE_PLAN_FILE}" in (
+            block
+        )
 
     def test_the_line_does_not_forbid_the_other_owned_artifacts(
         self, plan_dir: Path, workspace: Path
@@ -4238,14 +4243,17 @@ class TestRulesLookupEdges:
 
 
 class TestExploreOnlyForcesTheFinalWriteTool:
-    """Only the EXPLORE role arms ``force_final_tool`` (D-003, EXPLORE-only).
+    """EXPLORE and PLAN arm ``force_final_tool``; nothing else does (D-003/D-001).
 
-    The forced ``write_plan_file`` finalization turn (native_fc D-003) is
-    additive and default-off; ``build_default_worker_factory``'s ``worker()``
-    closure is the SOLE site that arms it, and only for the explorer.  These
-    tests drive the REAL per-dispatch ``AgentConfig`` construction inside that
-    closure -- the same path a live dispatch takes -- and capture the config
-    the worker actually built, rather than asserting against a hand-built
+    The forced finalization turn (native_fc D-003) is additive and default-off;
+    ``build_default_worker_factory``'s ``worker()`` closure is the SOLE site
+    that arms it.  Two roles arm it, each with the tool its deliverable needs:
+    EXPLORER -> ``write_plan_file`` (it CREATES its findings file), and
+    PLAN_WRITER -> ``append_plan_file`` (it FILLS the driver-seeded scaffold, so
+    forcing ``write_plan_file`` would OVERWRITE the headers -- D-001).
+    EXECUTE/REFLECT/PIVOT/CLOSE arm nothing.  These tests drive the REAL
+    per-dispatch ``AgentConfig`` construction inside that closure -- the same
+    path a live dispatch takes -- rather than asserting against a hand-built
     ``AgentConfig`` that could drift from the wiring.
     """
 
@@ -4283,11 +4291,26 @@ class TestExploreOnlyForcesTheFinalWriteTool:
         assert config.force_final_tool == PlanTools.WRITE_PLAN_FILE
         assert config.force_final_tool == "write_plan_file"
 
+    def test_plan_config_carries_append_plan_file(
+        self, plan_dir: Path, workspace: Path
+    ) -> None:
+        """PLAN forces APPEND, never write: the driver seeds the scaffold and a
+        forced overwrite would destroy the 11 headers (D-001)."""
+        config = self._config_built_for(HarnessStates.PLAN, plan_dir, workspace)
+
+        assert config.force_final_tool == PlanTools.APPEND_PLAN_FILE
+        assert config.force_final_tool == "append_plan_file"
+        assert config.force_final_tool != PlanTools.WRITE_PLAN_FILE
+
     @pytest.mark.parametrize(
         "state",
-        [s for s in HarnessStates.ALL if s != HarnessStates.EXPLORE],
+        [
+            s
+            for s in HarnessStates.ALL
+            if s not in (HarnessStates.EXPLORE, HarnessStates.PLAN)
+        ],
     )
-    def test_non_explore_roles_do_not_force_a_final_tool(
+    def test_execute_reflect_pivot_close_do_not_force_a_final_tool(
         self, state: str, plan_dir: Path, workspace: Path
     ) -> None:
         config = self._config_built_for(state, plan_dir, workspace)
