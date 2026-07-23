@@ -70,6 +70,7 @@ from fsm_llm_harness.constants import (
     Defaults,
     GateSlug,
     HarnessStates,
+    Role,
     Severity,
 )
 from fsm_llm_harness.exceptions import HarnessArtifactError
@@ -93,6 +94,7 @@ from fsm_llm_harness.storage import PlanDirectory
 from fsm_llm_harness.tools import (
     PlanMemory,
     Workspace,
+    build_plan_tools,
     build_workspace_tools,
     gate_files,
     has_bytes,
@@ -3280,6 +3282,138 @@ def _real_run_collapse(tmp_path: Path, run: int) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# The W1 mechanism classifier: partition every FAILED dispatch into ONE bucket.
+# ---------------------------------------------------------------------------
+
+#: The substrings a wrong-root / confinement refusal actually puts into
+#: ``ToolResult.error``, pinned as data so the (ii)-vs-(iii) split reads the
+#: SAME literals the offline guard verifies against REAL refusals -- not a
+#: guess (plan A3 / Pre-Mortem #2).  Each was provoked against a live confined
+#: registry and confirmed present in ``test_the_markers_are_pinned_to_real_
+#: refusals`` below:
+#:  * ``use `write_plan_file` `` -- a WORKSPACE write aimed at a plan path
+#:    (``tools.py:1243`` ``_routing_hint``); the workspace->plan direction.
+#:  * ``use `write_file` `` -- a PLAN write aimed at a workspace path
+#:    (``tools.py:1251``); the plan->workspace direction.
+#:  * ``resolves outside the permitted root`` -- the raw
+#:    ``HarnessConfinementError`` message (``exceptions.py:129``) for a path that
+#:    escaped its root entirely (no counterpart tool owns it), so a confinement
+#:    escape with no routing hint still reads as (ii) wrong-root, not (iii).
+#: If the package ever reworded any of these, the pinning guard fails BEFORE the
+#: live block spends a token.
+_WRONG_ROOT_MARKERS = (
+    "use `write_plan_file`",
+    "use `write_file`",
+    "resolves outside the permitted root",
+)
+
+#: The six fine mechanism buckets ``classify_failed_dispatch`` may return for a
+#: FAILED dispatch, and the family each rolls up to (the mandate's three:
+#: (i) never-called, (ii) wrong-root, (iii) accepted/empty/unparseable/other).
+#: The W1->W2 decision table keys on BOTH the fine bucket (empty-vs-unparseable
+#: inside iii) and the family, so both must be recordable per dispatch.
+MECHANISM_FAMILY: Mapping[str, str] = {
+    "never-called": "i",
+    "wrong-root": "ii",
+    "accepted-no-bytes": "iii",
+    "empty-reply": "iii",
+    "unparseable": "iii",
+    "other-write-failure": "iii",
+}
+
+#: The exact set of buckets a FAILED dispatch partitions into -- the exhaustive-
+#: and-exclusive contract the offline guard asserts over the whole synthetic
+#: population.  ``"success"`` is NOT here: it is the sentinel for a dispatch that
+#: DID land a finding (see :func:`classify_failed_dispatch`), never a failure
+#: mechanism, and carries no family.
+MECHANISM_BUCKETS = frozenset(MECHANISM_FAMILY)
+
+#: Returned for a dispatch that DID advance the findings count -- the classifier
+#: is only DEFINED for failed dispatches, so a non-failure is flagged distinctly
+#: (the caller filters successes out first; this makes a mis-filter loud instead
+#: of silently misclassified).
+SUCCESS_SENTINEL = "success"
+
+
+def _mechanism_family(bucket: str) -> str:
+    """Roll a fine mechanism bucket up to its (i)/(ii)/(iii) family.
+
+    Interface contract (2 call sites: the parametrized bucket guard and the
+    exhaustiveness guard):
+        - ``bucket``: one of :data:`MECHANISM_BUCKETS`.
+        - Returns ``"i"`` | ``"ii"`` | ``"iii"``.
+        - Raises ``KeyError`` for :data:`SUCCESS_SENTINEL` or any non-bucket --
+          a success has no failure family, and asking for one is a caller bug.
+    """
+    return MECHANISM_FAMILY[bucket]
+
+
+def classify_failed_dispatch(dispatch: Mapping[str, Any]) -> str:
+    """Partition ONE dispatch into exactly one mechanism bucket.
+
+    Interface contract (call sites: the offline partition guards and, later, the
+    live L8 block's per-row classification):
+        - ``dispatch``: a per-dispatch rubric row as :func:`_one_explore_loop`
+          builds it -- reads ``bytes_on_disk`` (the disk-derived findings
+          delta), ``tool_trace`` (the spy's ``{tool, ok, params, error}``
+          records) and ``reason`` (the observer's ``failure_reason``).
+        - A FAILED dispatch is one that landed NO new findings byte
+          (``bytes_on_disk`` falsy).  A dispatch that DID land a finding is not
+          a failure and returns :data:`SUCCESS_SENTINEL` -- the classifier is
+          only defined for failures, so this is a distinct, testable flag rather
+          than a silent misclassification.
+        - Returns exactly one of :data:`MECHANISM_BUCKETS` for a failure.  The
+          ladder below is a FIRST-MATCH precedence, so the partition is total
+          (every failure maps to one bucket) and exclusive (never two), and it
+          NEVER returns ``None`` for a failure.  Never raises.
+
+    The precedence is fixed and mutually exclusive; the ONLY subtle ordering is
+    that (iii-empty) empty-reply outranks (i) never-called -- edge case (a) in
+    the plan's Problem Statement -- because an empty collapse is WHY no write
+    happened, so it is the mechanism, not the absence of a call.
+    """
+    # A dispatch that advanced the gate is not a failure: flag it distinctly.
+    if dispatch.get("bytes_on_disk"):
+        return SUCCESS_SENTINEL
+
+    tool_trace = dispatch.get("tool_trace") or ()
+    write_calls = [c for c in tool_trace if c.get("tool") in WRITE_TOOLS]
+    reason = dispatch.get("reason")
+
+    # (ii) wrong-root: a refused write whose error carries a routing/confinement
+    # marker.  Ranked FIRST because the refusal is the definitive mechanism.
+    for call in write_calls:
+        if call.get("ok") is False and any(
+            marker in (call.get("error") or "") for marker in _WRONG_ROOT_MARKERS
+        ):
+            return "wrong-root"
+
+    # (iii-a) accepted-no-bytes: the tool accepted a write yet no finding landed
+    # (empty content skipped by `gate_files` per D-015, or a non-findings path).
+    if any(call.get("ok") is True for call in write_calls):
+        return "accepted-no-bytes"
+
+    # (iii-empty) empty-reply: no usable final answer at all.  Ranked ABOVE
+    # never-called -- an empty collapse is the reason no write happened.
+    if reason == "empty-reply":
+        return "empty-reply"
+
+    # (iii-unparseable) non-empty content the parser rejected.
+    if reason == "unparseable":
+        return "unparseable"
+
+    # (i) never-called: no write call at all, and the model DID produce a usable
+    # answer (nothing above matched) -- it answered but chose not to write.
+    if not write_calls:
+        return "never-called"
+
+    # (iii-residual) other-write-failure: a refused write that is NOT a
+    # wrong-root marker (e.g. a pure ownership refusal) -- the catch-all that
+    # makes the partition TOTAL.
+    return "other-write-failure"
+
+
+# ---------------------------------------------------------------------------
 # L8's UNGATED guards.  Every one of these runs in a normal `make test`.
 # ---------------------------------------------------------------------------
 
@@ -3353,3 +3487,318 @@ class TestL8ExploreLoopRunner:
                 "findings_count",
             } <= set(row)
             assert row["findings_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# L8's UNGATED guards for the mechanism classifier (RED-first, Pre-Mortem #3).
+# ---------------------------------------------------------------------------
+
+
+def _spy_call(
+    tool: str, *, ok: bool, error: str | None = None, path: str = "findings/x.md"
+) -> dict[str, Any]:
+    """One synthetic ``_spy_on_tools`` record in the exact shape the spy emits."""
+    return {"tool": tool, "ok": ok, "params": {"path": path}, "error": error}
+
+
+def _failed_row(
+    *,
+    tool_trace: list[dict[str, Any]] | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """A FAILED per-dispatch row (``bytes_on_disk`` False) for the classifier."""
+    return {
+        "bytes_on_disk": False,
+        "tool_trace": tool_trace or [],
+        "reason": reason,
+    }
+
+
+#: (row-builder, expected fine bucket, expected family) -- one case per bucket,
+#: plus edge case (a).  Each row is the SHAPE the live loop produces for that
+#: mechanism, so a bucket rename or a precedence flip fails here BEFORE the live
+#: block spends a token (Success Criterion 3 / Pre-Mortem #3).
+_CLASSIFIER_CASES: tuple[tuple[str, dict[str, Any], str, str], ...] = (
+    # (i) never-called: a usable answer (missing-keys parsed fine), no write.
+    (
+        "never-called",
+        _failed_row(tool_trace=[], reason="missing-keys:findings"),
+        "never-called",
+        "i",
+    ),
+    # (ii) wrong-root, one case per REAL marker string.
+    (
+        "wrong-root/write_plan_file-hint",
+        _failed_row(
+            tool_trace=[
+                _spy_call(
+                    "write_file",
+                    ok=False,
+                    error="... not the workspace: use `write_plan_file`.",
+                )
+            ]
+        ),
+        "wrong-root",
+        "ii",
+    ),
+    (
+        "wrong-root/write_file-hint",
+        _failed_row(
+            tool_trace=[
+                _spy_call(
+                    "write_plan_file",
+                    ok=False,
+                    error="... not the plan directory: use `write_file`.",
+                )
+            ]
+        ),
+        "wrong-root",
+        "ii",
+    ),
+    (
+        "wrong-root/confinement",
+        _failed_row(
+            tool_trace=[
+                _spy_call(
+                    "write_file",
+                    ok=False,
+                    error="Path '../x' resolves outside the permitted root '/ws'",
+                )
+            ]
+        ),
+        "wrong-root",
+        "ii",
+    ),
+    # (iii-a) accepted-no-bytes: the write was accepted, no finding landed.
+    (
+        "accepted-no-bytes",
+        _failed_row(tool_trace=[_spy_call("write_plan_file", ok=True)]),
+        "accepted-no-bytes",
+        "iii",
+    ),
+    # (iii-empty) empty-reply, no write call.
+    (
+        "empty-reply",
+        _failed_row(tool_trace=[], reason="empty-reply"),
+        "empty-reply",
+        "iii",
+    ),
+    # (iii-unparseable) non-empty content the parser rejected.
+    (
+        "unparseable",
+        _failed_row(tool_trace=[], reason="unparseable"),
+        "unparseable",
+        "iii",
+    ),
+    # (iii-residual) other-write-failure: a refused write, NOT a wrong-root
+    # marker (a pure ownership refusal on an owned-root path).
+    (
+        "other-write-failure",
+        _failed_row(
+            tool_trace=[
+                _spy_call(
+                    "write_plan_file",
+                    ok=False,
+                    error="Role 'executor' may not write 'decisions.md' (owner: 'x')",
+                )
+            ]
+        ),
+        "other-write-failure",
+        "iii",
+    ),
+    # Edge case (a): empty-reply AND no write call -> empty-reply, NOT
+    # never-called.  The fixed precedence resolves the two-bucket ambiguity the
+    # plan's Problem Statement names.
+    (
+        "edge-a/empty-reply-and-never-called",
+        _failed_row(tool_trace=[], reason="empty-reply"),
+        "empty-reply",
+        "iii",
+    ),
+)
+
+
+class TestClassifyFailedDispatchPartition:
+    """The mechanism classifier is a deterministic, total, exclusive partition.
+
+    UNGATED offline guards (zero LLM): they pin the 6-bucket ladder, the
+    (i)/(ii)/(iii) family rollup, edge case (a)'s precedence, and the
+    exhaustive-and-exclusive contract that is the HARD gate on the live block
+    (Pre-Mortem #3).  The wrong-root marker strings are separately pinned to
+    REAL confinement refusals so (ii)-vs-(iii) is not a guess (plan A3).
+    """
+
+    @pytest.mark.parametrize(
+        "row, expected_bucket, expected_family",
+        [(row, bucket, family) for _, row, bucket, family in _CLASSIFIER_CASES],
+        ids=[case_id for case_id, _, _, _ in _CLASSIFIER_CASES],
+    )
+    def test_each_shape_maps_to_its_bucket_and_family(
+        self,
+        row: dict[str, Any],
+        expected_bucket: str,
+        expected_family: str,
+    ) -> None:
+        bucket = classify_failed_dispatch(row)
+        assert bucket == expected_bucket
+        assert _mechanism_family(bucket) == expected_family
+
+    def test_empty_reply_outranks_never_called_edge_case_a(self) -> None:
+        """Edge case (a), stated as its own guard: an empty collapse with NO
+        write call is ``empty-reply`` (the mechanism), never ``never-called``.
+        """
+        row = _failed_row(tool_trace=[], reason="empty-reply")
+        assert classify_failed_dispatch(row) == "empty-reply"
+        assert classify_failed_dispatch(row) != "never-called"
+
+    def test_accepted_write_outranks_an_empty_reply_reason(self) -> None:
+        """When a write was ACCEPTED but the reply also read empty, the accepted
+        call is the mechanism (iii-a), per the fixed ladder -- the tool did fire.
+        """
+        row = _failed_row(
+            tool_trace=[_spy_call("write_plan_file", ok=True)], reason="empty-reply"
+        )
+        assert classify_failed_dispatch(row) == "accepted-no-bytes"
+
+    def test_a_dispatch_that_landed_a_finding_is_the_success_sentinel(self) -> None:
+        """The classifier is only DEFINED for failures: a dispatch that advanced
+        the gate returns the distinct sentinel, never a failure bucket.
+        """
+        row = {"bytes_on_disk": True, "tool_trace": [], "reason": None}
+        assert classify_failed_dispatch(row) == SUCCESS_SENTINEL
+        assert SUCCESS_SENTINEL not in MECHANISM_BUCKETS
+
+    def test_the_partition_is_exhaustive_and_exclusive_over_a_fuzz(self) -> None:
+        """Pre-Mortem #3's HARD gate: EVERY failed dispatch maps to exactly ONE
+        of the 6 buckets, never raises, never returns ``None``.
+
+        The fuzz is the full cartesian product of the trace shapes the live loop
+        can produce (no write / accepted / refused-with-marker / refused-without)
+        against every observed ``failure_reason``.  Because the classifier
+        returns a single string, "exactly one" is enforced by construction; the
+        guard is that it is always a KNOWN bucket with a valid family and that no
+        input escapes the partition.
+        """
+        trace_shapes: tuple[list[dict[str, Any]], ...] = (
+            [],
+            [_spy_call("write_plan_file", ok=True)],
+            [_spy_call("write_file", ok=False, error="use `write_plan_file`")],
+            [_spy_call("write_file", ok=False, error="use `write_file`")],
+            [
+                _spy_call(
+                    "write_file",
+                    ok=False,
+                    error="resolves outside the permitted root",
+                )
+            ],
+            [_spy_call("write_plan_file", ok=False, error="owner: 'x'")],
+            # A non-write tool call is invisible to the write-call ladder.
+            [_spy_call("read_plan_file", ok=True, error=None)],
+            # Mixed: an accepted write AND a refused wrong-root write.
+            [
+                _spy_call("write_plan_file", ok=True),
+                _spy_call("write_file", ok=False, error="use `write_plan_file`"),
+            ],
+        )
+        reasons: tuple[str | None, ...] = (
+            None,
+            "empty-reply",
+            "unparseable",
+            "missing-keys:findings",
+        )
+        seen: set[str] = set()
+        for trace in trace_shapes:
+            for reason in reasons:
+                row = _failed_row(tool_trace=list(trace), reason=reason)
+                bucket = classify_failed_dispatch(row)
+                assert bucket in MECHANISM_BUCKETS
+                assert bucket is not None
+                # A valid family exists for every produced bucket (never raises).
+                assert _mechanism_family(bucket) in {"i", "ii", "iii"}
+                seen.add(bucket)
+        # The fuzz exercises every one of the six buckets, so the partition guard
+        # is not vacuously green on a shape that can never occur.
+        assert seen == MECHANISM_BUCKETS
+
+    def test_the_family_rollup_covers_exactly_the_six_buckets(self) -> None:
+        """``MECHANISM_FAMILY`` maps each of the 6 buckets to one of the 3
+        families and names no phantom bucket -- the rollup and the partition are
+        the SAME six names.
+        """
+        assert set(MECHANISM_FAMILY) == MECHANISM_BUCKETS
+        assert set(MECHANISM_FAMILY.values()) == {"i", "ii", "iii"}
+        # Exactly one bucket in family (i), one in (ii), four in (iii).
+        by_family: dict[str, int] = {}
+        for family in MECHANISM_FAMILY.values():
+            by_family[family] = by_family.get(family, 0) + 1
+        assert by_family == {"i": 1, "ii": 1, "iii": 4}
+
+    def test_the_markers_are_pinned_to_real_refusals(self, tmp_path: Path) -> None:
+        """Plan A3 / Pre-Mortem #2: each ``_WRONG_ROOT_MARKERS`` entry actually
+        appears in a REAL ``ToolResult.error``, and the classifier reads every
+        such refusal as ``wrong-root`` -- so (ii)-vs-(iii) is pinned by a live
+        refusal, not by a guessed string.  If a marker is NOT provoked here, this
+        guard fails BEFORE the live block spends a token.
+        """
+        workspace = _seed_workspace(tmp_path)
+        plan_dir = tmp_path / "plan"
+        plan_dir.mkdir()
+
+        ws_registry = build_workspace_tools(Workspace(str(workspace)))
+        plan_registry = build_plan_tools(
+            PlanMemory(str(plan_dir), role=Role.EXPLORER)
+        )
+
+        # (1) workspace write -> plan path: routing hint + confinement text.
+        ws_to_plan = ws_registry.execute(
+            ToolCall(
+                tool_name="write_file",
+                parameters={"path": "/plan/findings/x.md", "content": "y"},
+            )
+        )
+        # (2) plan write -> workspace path: the counterpart routing hint.
+        plan_to_ws = plan_registry.execute(
+            ToolCall(
+                tool_name="write_plan_file",
+                parameters={"path": "src/uploader.py", "content": "y"},
+            )
+        )
+        # (3) a raw escape that no counterpart tool owns: confinement only.
+        escape = ws_registry.execute(
+            ToolCall(
+                tool_name="write_file",
+                parameters={"path": "../../../etc/passwd", "content": "y"},
+            )
+        )
+
+        real_errors = {
+            "use `write_plan_file`": ws_to_plan.error,
+            "use `write_file`": plan_to_ws.error,
+            "resolves outside the permitted root": escape.error,
+        }
+        for marker, error in real_errors.items():
+            assert marker in _WRONG_ROOT_MARKERS
+            assert error is not None
+            assert marker in error, (
+                f"marker {marker!r} not found in a REAL refusal ({error!r}) -- "
+                "A3 falsified, STOP per Pre-Mortem #2"
+            )
+
+        # Every real refusal classifies as wrong-root (ii), through the same
+        # spy-record shape the live loop builds.
+        for tool_name, result in (
+            ("write_file", ws_to_plan),
+            ("write_plan_file", plan_to_ws),
+            ("write_file", escape),
+        ):
+            row = _failed_row(
+                tool_trace=[
+                    {
+                        "tool": tool_name,
+                        "ok": bool(result.success),
+                        "params": {},
+                        "error": result.error,
+                    }
+                ]
+            )
+            assert classify_failed_dispatch(row) == "wrong-root"
