@@ -441,8 +441,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                 forced_schema = [
                     s
                     for s in schemas
-                    if s.get("function", {}).get("name")
-                    == self.config.force_final_tool
+                    if s.get("function", {}).get("name") == self.config.force_final_tool
                 ]
                 if forced_schema:
                     try:

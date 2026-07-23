@@ -1447,9 +1447,7 @@ def build_default_worker_factory(
                 # trace anywhere else -- these two counts are the one
                 # derivation.  See decisions.md D-005.
                 "write_evidence_workspace": sum(
-                    1
-                    for label in verified
-                    if label.startswith(f"{_WORKSPACE_ROOT}:")
+                    1 for label in verified if label.startswith(f"{_WORKSPACE_ROOT}:")
                 ),
                 "write_evidence_plan": sum(
                     1 for label in verified if label.startswith(f"{_PLAN_ROOT}:")

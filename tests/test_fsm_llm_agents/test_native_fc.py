@@ -885,7 +885,9 @@ class TestForcedFinalTool:
         """A genuine outage on the forced turn is NOT swallowed."""
 
         def complete_fn(model, messages, schemas):
-            if any("record your findings" in str(m.get("content", "")) for m in messages):
+            if any(
+                "record your findings" in str(m.get("content", "")) for m in messages
+            ):
                 raise AgentError("Native function-calling LLM call failed: 503")
             return {"content": "prose", "tool_calls": []}
 

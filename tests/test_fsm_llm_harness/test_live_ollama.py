@@ -2258,14 +2258,17 @@ class TestTheL6RubricPlumbingOffline:
         assert GateSlug.PLAN_CAP in HONEST_HALT_SLUGS
         assert GateSlug.EXPLORE_CAP in HONEST_HALT_SLUGS
         assert None not in HONEST_HALT_SLUGS
-        assert _bench_defect(
-            {
-                "error": None,
-                "timed_out": False,
-                "close_reached": False,
-                "halt_slug": None,
-            }
-        ) is True
+        assert (
+            _bench_defect(
+                {
+                    "error": None,
+                    "timed_out": False,
+                    "close_reached": False,
+                    "halt_slug": None,
+                }
+            )
+            is True
+        )
 
     def test_a_reflect_cap_halt_is_deliberately_not_yet_in_the_honest_set(
         self,
@@ -2406,13 +2409,17 @@ class TestTheTightenedVerifiedWritePredicate:
         subdirectory and must NOT be stripped."""
         obs = [
             self._obs(
-                HarnessStates.EXECUTE, workspace=1, paths=("workspace:/workspace/uploader.py",)
+                HarnessStates.EXECUTE,
+                workspace=1,
+                paths=("workspace:/workspace/uploader.py",),
             )
         ]
         assert _verified_execute_workspace_write(obs, ["uploader.py"]) is True
         nested = [
             self._obs(
-                HarnessStates.EXECUTE, workspace=1, paths=("workspace:workspace/uploader.py",)
+                HarnessStates.EXECUTE,
+                workspace=1,
+                paths=("workspace:workspace/uploader.py",),
             )
         ]
         assert _verified_execute_workspace_write(nested, ["uploader.py"]) is False
@@ -2517,10 +2524,14 @@ class TestContentMatchedAstIsVocabularyDecoupled:
             pytest.param(
                 "def upload(:\n    retry backoff while", False, id="unparseable"
             ),
-            pytest.param(SEED_FILES["uploader.py"], False, id="original-seed-unchanged"),
+            pytest.param(
+                SEED_FILES["uploader.py"], False, id="original-seed-unchanged"
+            ),
         ],
     )
-    def test_content_matched_ast_structural_verdicts(self, body: str, expected: bool) -> None:
+    def test_content_matched_ast_structural_verdicts(
+        self, body: str, expected: bool
+    ) -> None:
         """Echo shapes -> False; genuine loop+except+sleep -> True."""
         assert content_matched_ast(body) is expected
 
@@ -2858,9 +2869,7 @@ def _l7_population(plan_dir: Path) -> tuple[str, ...]:
         for path in plan_dir.rglob("*")
         if path.is_file()
     ]
-    cross_plan = [
-        path.name for path in plan_dir.parent.glob("*.md") if path.is_file()
-    ]
+    cross_plan = [path.name for path in plan_dir.parent.glob("*.md") if path.is_file()]
     return tuple(sorted(per_plan + cross_plan))
 
 
@@ -3056,9 +3065,7 @@ def test_the_seeded_arm_content_is_the_products_own(tmp_path: Path) -> None:
     arm = _l7_plan_dir(tmp_path / "arm", arm="seeded")
     assert _l7_population(arm) == _l7_population(control)
     # Zero bytes, both tiers -- presence, never content (invariant I2).
-    assert all(
-        (arm.parent / name).stat().st_size == 0 for name in _l7_population(arm)
-    )
+    assert all((arm.parent / name).stat().st_size == 0 for name in _l7_population(arm))
     # ...and no `findings/` path was created (invariant I3).
     assert not (arm / ArtifactNames.FINDINGS_DIR).exists()
 
@@ -3974,9 +3981,7 @@ class TestClassifyFailedDispatchPartition:
         plan_dir.mkdir()
 
         ws_registry = build_workspace_tools(Workspace(str(workspace)))
-        plan_registry = build_plan_tools(
-            PlanMemory(str(plan_dir), role=Role.EXPLORER)
-        )
+        plan_registry = build_plan_tools(PlanMemory(str(plan_dir), role=Role.EXPLORER))
 
         # (1) workspace write -> plan path: routing hint + confinement text.
         ws_to_plan = ws_registry.execute(

@@ -3128,9 +3128,7 @@ class TestSubstantivePlanHasContent:
     PRESERVED (D-005's measured 59-test trap).
     """
 
-    def test_a_filled_valid_plan_is_substantive(
-        self, make_harness, plan_dir
-    ) -> None:
+    def test_a_filled_valid_plan_is_substantive(self, make_harness, plan_dir) -> None:
         (plan_dir / ArtifactNames.PLAN).write_text(_PLAN_MD)
         agent = make_harness().agent
         assert agent._plan_has_content({ContextKeys.PLAN_DIR: str(plan_dir)}) is True
@@ -3244,9 +3242,7 @@ class TestRenderPlanFromStructured:
 
         plan = PlanDoc.from_markdown(text)
         assert len(plan.sections) == 11
-        assert [section.name for section in plan.sections] == list(
-            PlanSchema.SECTIONS
-        )
+        assert [section.name for section in plan.sections] == list(PlanSchema.SECTIONS)
         dumped = payload.model_dump()
         for section, slug in zip(
             PlanSchema.SECTIONS, PlanSchema.SECTION_SLUGS, strict=True
@@ -3272,9 +3268,7 @@ class TestRenderPlanFromStructured:
         plan = PlanDoc.from_markdown(text)
         # the injected headers did NOT create spurious sections
         assert len(plan.sections) == 11
-        assert [section.name for section in plan.sections] == list(
-            PlanSchema.SECTIONS
-        )
+        assert [section.name for section in plan.sections] == list(PlanSchema.SECTIONS)
         assert PlanDoc.from_markdown(text).to_markdown() == text
         goal_body = plan.body_of(PlanSchema.SECTIONS[0])
         # the text is preserved (escaped/demoted), not dropped

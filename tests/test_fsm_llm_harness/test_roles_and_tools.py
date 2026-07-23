@@ -3482,9 +3482,7 @@ class TestWriteEvidenceRootSplit:
         assert record["write_evidence_workspace"] == 0
         assert record["write_evidence_plan"] == 1
 
-    def test_a_mixed_trace_splits_by_root(
-        self, tmp_path: Path, plan_dir: Path
-    ) -> None:
+    def test_a_mixed_trace_splits_by_root(self, tmp_path: Path, plan_dir: Path) -> None:
         record = self._observe_execute(
             tmp_path,
             plan_dir,
@@ -3635,7 +3633,12 @@ class TestWriteEvidenceLabelNormalization:
         record = self._observe_execute(
             tmp_path,
             plan_dir,
-            (("write_plan_file", {"path": "/plan/changelog.md", "content": "# log\n"}),),
+            (
+                (
+                    "write_plan_file",
+                    {"path": "/plan/changelog.md", "content": "# log\n"},
+                ),
+            ),
         )
 
         assert record["write_evidence"] == 1
@@ -4425,19 +4428,13 @@ class TestExploreOnlyForcesTheFinalWriteTool:
             Workspace(workspace), agent_builder=builder
         )
         with pytest.raises(self._StopBeforeRun):
-            factory(
-                _role_request(
-                    state, plan_dir=plan_dir, workspace_root=workspace
-                )
-            )
+            factory(_role_request(state, plan_dir=plan_dir, workspace_root=workspace))
         return captured["config"]
 
     def test_explore_config_carries_write_plan_file(
         self, plan_dir: Path, workspace: Path
     ) -> None:
-        config = self._config_built_for(
-            HarnessStates.EXPLORE, plan_dir, workspace
-        )
+        config = self._config_built_for(HarnessStates.EXPLORE, plan_dir, workspace)
 
         assert config.force_final_tool == PlanTools.WRITE_PLAN_FILE
         assert config.force_final_tool == "write_plan_file"
