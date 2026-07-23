@@ -1,0 +1,119 @@
+[
+  {
+    "role": "explorer",
+    "state": "explore",
+    "success": false,
+    "failure_reason": "empty-reply",
+    "missing_keys": [],
+    "top_level_objects": 0,
+    "agent_success": false,
+    "answer_chars": 0,
+    "elapsed_s": 35.83684757699666,
+    "write_evidence": 1,
+    "write_evidence_workspace": 0,
+    "write_evidence_plan": 1,
+    "write_evidence_paths": [
+      "plan:findings/problem-scope.md"
+    ],
+    "write_required": true,
+    "claimed_findings_count": null,
+    "derived_findings_count": 1
+  },
+  {
+    "role": "explorer",
+    "state": "explore",
+    "success": true,
+    "failure_reason": null,
+    "missing_keys": [],
+    "top_level_objects": 1,
+    "agent_success": true,
+    "answer_chars": 261,
+    "elapsed_s": 24.932284280992462,
+    "write_evidence": 1,
+    "write_evidence_workspace": 0,
+    "write_evidence_plan": 1,
+    "write_evidence_paths": [
+      "plan:findings/affected-files.md"
+    ],
+    "write_required": true,
+    "claimed_findings_count": 2,
+    "derived_findings_count": 2
+  },
+  {
+    "role": "explorer",
+    "state": "explore",
+    "success": false,
+    "failure_reason": "empty-reply",
+    "missing_keys": [],
+    "top_level_objects": 0,
+    "agent_success": false,
+    "answer_chars": 0,
+    "elapsed_s": 32.45089617400663,
+    "write_evidence": 1,
+    "write_evidence_workspace": 0,
+    "write_evidence_plan": 1,
+    "write_evidence_paths": [
+      "plan:findings/constraints-and-patterns.md"
+    ],
+    "write_required": true,
+    "claimed_findings_count": null,
+    "derived_findings_count": 3
+  },
+  {
+    "role": "plan-writer",
+    "state": "plan",
+    "success": false,
+    "failure_reason": "unverified-write",
+    "missing_keys": [],
+    "top_level_objects": 1,
+    "agent_success": true,
+    "answer_chars": 3168,
+    "elapsed_s": 20.2269026569993,
+    "write_evidence": 0,
+    "write_evidence_workspace": 0,
+    "write_evidence_plan": 0,
+    "write_evidence_paths": [],
+    "write_required": true,
+    "claimed_findings_count": null,
+    "derived_findings_count": null
+  },
+  {
+    "role": "executor",
+    "state": "execute",
+    "success": true,
+    "failure_reason": null,
+    "missing_keys": [],
+    "top_level_objects": 1,
+    "agent_success": true,
+    "answer_chars": 198,
+    "elapsed_s": 11.637934698999743,
+    "write_evidence": 2,
+    "write_evidence_workspace": 2,
+    "write_evidence_plan": 0,
+    "write_evidence_paths": [
+      "workspace:/tmp/s5-probe-1-0wob0yk7/e2e-1/workspace/uploader.py",
+      "workspace:/tmp/s5-probe-1-0wob0yk7/e2e-1/workspace/uploader.py"
+    ],
+    "write_required": true,
+    "claimed_findings_count": null,
+    "derived_findings_count": null
+  },
+  {
+    "role": "verifier",
+    "state": "reflect",
+    "success": true,
+    "failure_reason": null,
+    "missing_keys": [],
+    "top_level_objects": 1,
+    "agent_success": true,
+    "answer_chars": 526,
+    "elapsed_s": 20.297847030000412,
+    "write_evidence": 0,
+    "write_evidence_workspace": 0,
+    "write_evidence_plan": 0,
+    "write_evidence_paths": [],
+    "write_required": false,
+    "claimed_findings_count": null,
+    "derived_findings_count": null
+  }
+]
