@@ -96,19 +96,20 @@ Call = tuple[str, int, int, int]
 
 
 def _plan_is_substantive(text: str) -> bool:
-    """Mirror the driver's ``_plan_has_content`` substantive rule.
+    """Mirror the driver's ``_plan_has_content`` APPROVABLE rule.
 
-    True only when *text* parses as a valid ``PlanDoc`` AND is not-all
-    placeholder (at least one section body carries real content).  Stated here
-    rather than imported so a regression that loosens the driver's own bar
-    cannot loosen the fixture's at the same time -- the same reason
-    :func:`_is_exactly` restates ``_exactly``.
+    True only when *text* parses as a valid ``PlanDoc`` AND is
+    ALL-non-placeholder (EVERY section body carries real content) -- the same
+    bar the honest approval gate uses (`_plan_is_approvable`), since approval
+    denial does not redispatch.  Stated here rather than imported so a
+    regression that loosens the driver's own bar cannot loosen the fixture's at
+    the same time -- the same reason :func:`_is_exactly` restates ``_exactly``.
     """
     try:
         plan = PlanDoc.from_markdown(text)
     except Exception:
         return False
-    return not all(_is_placeholder(section.body) for section in plan.sections)
+    return all(not _is_placeholder(section.body) for section in plan.sections)
 
 
 def _write_plan_md(request: RoleRequest) -> None:
@@ -2859,13 +2860,16 @@ class TestPlanScaffoldSeed:
 
 
 class TestSubstantivePlanHasContent:
-    """``_plan_has_content`` is SUBSTANTIVE: valid PlanDoc AND not-all placeholder.
+    """``_plan_has_content`` is APPROVABLE: valid PlanDoc AND ALL-non-placeholder.
 
-    This subsumes predecessor D-005's bytes-only check -- an empty seeded
-    scaffold (all placeholder) and a non-empty-but-INVALID plan (bad headers)
-    both read False, so each consumes the redispatch budget and halts on the
-    honest ``plan-cap`` slug.  The no-plan-directory degrade path (return True)
-    is PRESERVED (D-005's measured 59-test trap).
+    ALIGNED to the honest approval gate's bar (`_plan_is_approvable`, D-001):
+    since approval DENIAL does not redispatch, the budget gate MUST match the
+    approval gate or a substantive-but-unapprovable plan reopens the slugless
+    stall.  So an empty seeded scaffold (all placeholder), a PARTIALLY-filled
+    plan (some placeholder), and a non-empty-but-INVALID plan (bad headers) all
+    read False -- each consumes the redispatch budget and halts on the honest
+    ``plan-cap`` slug.  The no-plan-directory degrade path (return True) is
+    PRESERVED (D-005's measured 59-test trap).
     """
 
     def test_a_filled_valid_plan_is_substantive(
@@ -2895,15 +2899,20 @@ class TestSubstantivePlanHasContent:
         agent = make_harness().agent
         assert agent._plan_has_content({ContextKeys.PLAN_DIR: str(plan_dir)}) is False
 
-    def test_a_valid_plan_with_one_filled_section_is_substantive(
+    def test_a_partially_filled_plan_is_not_substantive(
         self, make_harness, plan_dir
     ) -> None:
-        """NOT-ALL-placeholder is the bar: one real section suffices."""
+        """ALL-non-placeholder is the ALIGNED bar (D-001): a valid PlanDoc with
+        ONE real section but the rest still placeholder is NOT approvable, so it
+        reads False -- it consumes the budget and the model is redispatched to
+        fill the rest.  Aligning with the approval gate (which would DENY this
+        partial plan) closes the slugless-stall gap: approval denial does not
+        redispatch."""
         scaffold = harness_module._empty_plan_scaffold()
         scaffold.sections[0].body = "Ship the retry with capped backoff."
         (plan_dir / ArtifactNames.PLAN).write_text(scaffold.to_markdown())
         agent = make_harness().agent
-        assert agent._plan_has_content({ContextKeys.PLAN_DIR: str(plan_dir)}) is True
+        assert agent._plan_has_content({ContextKeys.PLAN_DIR: str(plan_dir)}) is False
 
     def test_no_plan_directory_returns_true_degrade_path_preserved(
         self, make_harness
@@ -4364,25 +4373,26 @@ class TestPresentationContracts:
     ) -> None:
         """The honest failure: report the gap, do not invent the section.
 
-        Since plan-2026-07-23 a NON-EMPTY-but-INVALID plan.md consumes the PLAN
-        redispatch budget (substantive ``_plan_has_content``, D-001) and never
-        reaches PC-PLAN, so the old unparseable-plan probe cannot exercise this
-        path.  A plan that IS valid+substantive (one filled section) but leaves
-        its FLOOR sections EMPTY does reach emission -- and each empty floor
-        section must be honestly reported missing rather than invented.
+        Since plan-2026-07-23 both a NON-EMPTY-but-INVALID plan.md AND a
+        PARTIALLY-filled valid plan (some placeholder sections) consume the PLAN
+        redispatch budget (ALIGNED ``_plan_has_content``, D-001: valid PlanDoc
+        AND ALL sections non-placeholder) and NEVER reach PC-PLAN via the run --
+        the gate now stops exactly the shape this test used to walk through.  So
+        the emission's honest-gap behaviour is exercised at the SEAM directly:
+        ``_emit_plan`` over a plan whose floor sections are EMPTY must report
+        each one missing rather than invent it.  (The complementary
+        placeholder-cannot-satisfy-a-floor case is covered by the sibling test
+        just below.)
         """
-        _seed_findings(plan_dir, "alpha", "beta", "gamma")
-        # Valid PlanDoc, substantive (Goal filled) so it reaches emission, but
-        # every PC-PLAN floor section (steps/success/verification/failure/
-        # assumptions) left EMPTY.  `_write_plan_md` sees it substantive and
-        # leaves it alone.
+        # Valid PlanDoc, Goal filled, every PC-PLAN floor section
+        # (steps/success/verification/failure/assumptions) left EMPTY.
         scaffold = harness_module._empty_plan_scaffold()
         scaffold.sections[0].body = "Wire the seam the run exercises."
         (plan_dir / ArtifactNames.PLAN).write_text(scaffold.to_markdown())
-        harness = make_harness(_traverse_script(), roots=roots)
-        harness.run()
+        agent = make_harness(_traverse_script(), roots=roots).agent
+        agent._emit_plan({ContextKeys.PLAN_DIR: str(plan_dir)})
 
-        plan_blocks = [p for p in harness.agent.presentations if p.name == "PC-PLAN"]
+        plan_blocks = [p for p in agent.presentations if p.name == "PC-PLAN"]
         assert plan_blocks
         assert set(plan_blocks[0].missing_floor) == set(
             PRESENTATION_CONTRACTS["PC-PLAN"].floor

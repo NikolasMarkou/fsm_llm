@@ -423,6 +423,32 @@ def _empty_plan_scaffold() -> PlanDoc:
     )
 
 
+# DECISION plan-2026-07-23T095051-a6dcb40d/D-001
+def _plan_is_approvable(plan: PlanDoc) -> bool:
+    """Whether a parsed ``plan.md`` is APPROVABLE: EVERY one of the 11
+    ``PlanSchema.SECTIONS`` bodies carries non-placeholder content.
+
+    Interface contract (TWO call sites, deliberately ONE predicate so the two
+    PLAN gates CANNOT drift):
+        - :meth:`HarnessAgent._plan_has_content` -- the PLAN redispatch BUDGET
+          gate (an un-approvable plan consumes the budget and halts on the
+          honest ``plan-cap`` slug, never a slugless stall).
+        - ``DiskEvidenceApprovals._decide`` -- the test-side APPROVAL gate
+          (``test_live_ollama.py`` imports THIS function; see its D-013 anchor).
+    The two MUST share one bar because approval DENIAL does NOT redispatch
+    (predecessor D-005 / this plan's S2): a plan the budget gate PASSES but the
+    approval gate DENIES falls through to ``_check_stall`` and stalls
+    ``slug=None`` -- the exact slugless stall this iteration closes.  If the
+    budget bar were LOOSER than the approval bar, that gap reopens, so BOTH read
+    the SAME all-sections-non-placeholder predicate.  Reuses
+    :func:`plan_validator._is_placeholder` (empty/whitespace/template-slot body
+    -> placeholder); NEVER hand-roll a second content predicate (DRY, I1).  The
+    seeded HEADERS-ONLY scaffold is ``PlanDoc``-valid but all-placeholder, so
+    validity ALONE never gates it -- this predicate is what does.
+    """
+    return all(not _is_placeholder(plan.body_of(name)) for name in PlanSchema.SECTIONS)
+
+
 #: A role worker: one :class:`RoleRequest` in, one ``AgentResult`` out.
 #:
 #: Deliberately WIDER than ``OrchestratorAgent``'s ``Callable[[str],
@@ -2247,35 +2273,36 @@ class HarnessAgent(BaseAgent):
 
     def _plan_has_content(self, context: Mapping[str, Any]) -> bool:
         # DECISION plan-2026-07-23T095051-a6dcb40d/D-001
-        # Whether a CONFIGURED plan directory carries a SUBSTANTIVE plan.md, read
-        # OFF DISK. Used by `_after_plan_dispatch` to catch BOTH the empty-plan
-        # stall (predecessor D-005) AND the seeded-scaffold / invalid-plan shapes
-        # this iteration adds. "Substantive" = plan.md parses as a valid
-        # `PlanDoc` (all 11 sections, in order) AND is NOT-ALL-placeholder (at
-        # least one section body carries real, model-authored content).
-        #   (a) NOT-ALL-placeholder, not any-placeholder, is the deliberate bar:
-        #       the driver seeds a HEADERS-ONLY scaffold whose 11 bodies are ALL
-        #       placeholder (`_is_placeholder` reads an empty body as a
-        #       placeholder), so an un-filled scaffold -> all placeholder ->
-        #       False; the moment the model fills ONE section with real content
-        #       -> some non-placeholder -> True. A stricter all-must-be-filled
-        #       bar would fail a partially-written plan the model is still
-        #       building across redispatches; the honest-approval stub (step 3)
-        #       is where a placeholder-heavy plan is denied, not here.
-        #   (b) The seeded scaffold is ALWAYS `PlanDoc`-valid, so validity alone
-        #       never gates the scaffold out -- the placeholder check is what
-        #       does. A NON-empty but SCHEMA-INVALID plan.md (bad/missing
-        #       headers) fails `PlanDoc` parse, `_artifact` returns None -> False
-        #       (this closes predecessor S2's non-empty-but-invalid slugless
-        #       stall). So an empty scaffold OR an invalid plan -> not
-        #       substantive -> the redispatch budget fires -> exhaustion halts on
-        #       the honest GateSlug.PLAN_CAP; NO generic STALL slug is minted
+        # Whether a CONFIGURED plan directory carries an APPROVABLE plan.md, read
+        # OFF DISK. Used by `_after_plan_dispatch` to catch the empty-plan stall
+        # (predecessor D-005) AND the seeded-scaffold / invalid-plan /
+        # PARTIALLY-filled shapes. "Approvable" = plan.md parses as a valid
+        # `PlanDoc` (all 11 sections, in order) AND EVERY section body is
+        # NON-placeholder -- the EXACT SAME bar `DiskEvidenceApprovals` (the
+        # approval gate) uses, via the shared `_plan_is_approvable` predicate.
+        #   (a) ALL-non-placeholder (NOT not-all-placeholder) is the bar, and the
+        #       ALIGNMENT with the approval gate is load-bearing: the harness
+        #       does NOT redispatch on approval DENIAL, so a plan this BUDGET gate
+        #       PASSED but the approval gate then DENIED would fall through to
+        #       `_check_stall` and stall slug=None -- the slugless stall this
+        #       iteration closes. The budget gate MUST therefore match the
+        #       approval gate exactly (both call `_plan_is_approvable`); a LOOSER
+        #       bar here reopens the gap. So an un-filled scaffold (all
+        #       placeholder), a PARTIALLY-filled plan (some placeholder), OR an
+        #       invalid plan -> not approvable -> the redispatch budget fires ->
+        #       the model is redispatched to fill MORE -> exhaustion halts on the
+        #       honest GateSlug.PLAN_CAP; NO generic STALL slug is minted
         #       (predecessor D-003 respected).
+        #   (b) The seeded scaffold is ALWAYS `PlanDoc`-valid, so validity alone
+        #       never gates it out -- the placeholder check does. A NON-empty but
+        #       SCHEMA-INVALID plan.md (bad/missing headers) fails `PlanDoc`
+        #       parse, `_artifact` returns None -> False (closing predecessor
+        #       S2's non-empty-but-invalid slugless stall).
         #   (c) Reads through the DRIVER's OWN `PlanDirectory` (uncapped,
         #       storage.py D-037) via the existing `_artifact` parse-or-None
-        #       helper, and REUSES `plan_validator._is_placeholder` (I1/DRY) --
-        #       do NOT hand-roll a second content predicate that could drift from
-        #       the validator's own. No worker-claimed flag is trusted (I1).
+        #       helper; the content bar is the shared `_plan_is_approvable` ->
+        #       `plan_validator._is_placeholder` (I1/DRY): ONE predicate, TWO
+        #       gates, no drift. No worker-claimed flag is trusted (I1).
         #   (d) PRESERVE the no-plan-directory degrade path (predecessor D-005):
         #       when `_plan_directory` is None (PLAN_DIR absent) there is no disk
         #       to read, so return True so the OR-ed condition defers to
@@ -2291,7 +2318,7 @@ class HarnessAgent(BaseAgent):
         plan = self._artifact(directory, ArtifactNames.PLAN, PlanDoc)
         if plan is None:
             return False
-        return not all(_is_placeholder(section.body) for section in plan.sections)
+        return _plan_is_approvable(plan)
 
     def _after_plan_dispatch(
         self,

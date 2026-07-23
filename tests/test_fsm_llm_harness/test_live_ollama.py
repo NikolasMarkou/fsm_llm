@@ -70,6 +70,7 @@ from fsm_llm_harness.constants import (
     Defaults,
     GateSlug,
     HarnessStates,
+    PlanSchema,
     Role,
     Severity,
 )
@@ -79,9 +80,11 @@ from fsm_llm_harness.harness import (
     EXECUTE_TARGET_ASSIGNED,
     HarnessAgent,
     RoleRequest,
+    _empty_plan_scaffold,
+    _plan_is_approvable,
     derive_execute_target,
 )
-from fsm_llm_harness.plan_validator import Issue, audit
+from fsm_llm_harness.plan_validator import Issue, _is_placeholder, audit
 from fsm_llm_harness.roles import (
     build_default_worker_factory,
     build_role_system_prompt,
@@ -1548,7 +1551,10 @@ class DiskEvidenceApprovals:
 
     * ``harness.approve_plan`` -- approve iff ``plan.md`` exists non-empty AND
       ``audit()`` reports zero ERRORs from the two plan.md checks
-      (:data:`_PLAN_CHECKS`).  Scoped on purpose; see the D-013 anchor above.
+      (:data:`_PLAN_CHECKS`) AND EVERY one of the 11 ``PlanSchema.SECTIONS``
+      bodies is non-placeholder (the shared ``_plan_is_approvable`` predicate --
+      the SAME bar the harness ``_plan_has_content`` budget gate uses, so the
+      two gates cannot drift).  Scoped on purpose; see the D-013 anchor above.
     * ``harness.confirm_close`` -- approve iff ``verification.md`` exists
       non-empty.
     * ``harness.continue_after_leash`` -- ALWAYS denied.
@@ -1580,9 +1586,32 @@ class DiskEvidenceApprovals:
                     f"{ArtifactNames.PLAN} has {len(errors)} "
                     f"plan-check error(s): {errors}"
                 )
+            # DECISION plan-2026-07-23T095051-a6dcb40d/D-001
+            # Honest approval: a structurally-VALID plan whose sections are
+            # still PLACEHOLDER (an un-filled or PARTIALLY-filled seeded
+            # scaffold) is NOT approvable -- the gate opens ONLY on complete
+            # model-authored content.  This shares the EXACT bar the harness
+            # BUDGET gate uses (`_plan_is_approvable`, all 11 sections
+            # non-placeholder) so the two gates cannot drift: approval-DENIAL
+            # does NOT redispatch, so a plan the budget passed but approval
+            # denied would stall slug=None (the slugless stall this closes).
+            plan = PlanDoc.from_markdown(
+                (self.plan_dir / ArtifactNames.PLAN).read_text(encoding="utf-8")
+            )
+            if not _plan_is_approvable(plan):
+                unfilled = [
+                    name
+                    for name in PlanSchema.SECTIONS
+                    if _is_placeholder(plan.body_of(name))
+                ]
+                return False, (
+                    f"{ArtifactNames.PLAN} has {len(unfilled)} placeholder "
+                    f"section(s): {unfilled}"
+                )
             return True, (
-                f"{ArtifactNames.PLAN} carries {size} bytes and zero "
-                f"{'/'.join(_PLAN_CHECKS)} audit errors"
+                f"{ArtifactNames.PLAN} carries {size} bytes, zero "
+                f"{'/'.join(_PLAN_CHECKS)} audit errors, and all 11 sections "
+                "filled"
             )
         if gate == _GATE_CLOSE:
             size = self._artifact_bytes(ArtifactNames.VERIFICATION)
@@ -1961,6 +1990,64 @@ class TestTheL6ApprovalStubIsDenyDefaultAndDiskBound:
         stub = DiskEvidenceApprovals(plan_dir)
         assert stub(ApprovalRequest(tool_name=_GATE_PLAN)) is False
         assert "plan-check error" in stub.decisions[-1]["evidence"]
+
+    def test_an_empty_seeded_scaffold_is_denied_as_placeholder(
+        self, tmp_path: Path
+    ) -> None:
+        """The vacuous-gate closer (D-001): a seeded HEADERS-ONLY scaffold is
+        ``PlanDoc``-VALID (all 11 sections, in order, zero plan-check ERRORs) yet
+        ALL-placeholder, so the honest approval DENIES it -- the gate opens only
+        on model-authored CONTENT, never the driver skeleton."""
+        plan_dir = make_plan_dir(tmp_path)
+        (plan_dir / ArtifactNames.PLAN).write_text(
+            _empty_plan_scaffold().to_markdown(), encoding="utf-8"
+        )
+        stub = DiskEvidenceApprovals(plan_dir)
+        assert stub(ApprovalRequest(tool_name=_GATE_PLAN)) is False
+        assert "placeholder section" in stub.decisions[-1]["evidence"]
+
+    def test_a_partially_filled_plan_is_denied_as_placeholder(
+        self, tmp_path: Path
+    ) -> None:
+        """ALL-non-placeholder is the bar: a plan with SOME sections still empty
+        is DENIED -- a partially-written plan is not yet approvable, and the
+        model must fill EVERY section across its dispatches before the gate
+        opens."""
+        plan_dir = make_plan_dir(tmp_path)
+        scaffold = _empty_plan_scaffold()
+        scaffold.sections[0].body = "Ship the retry with capped backoff."
+        (plan_dir / ArtifactNames.PLAN).write_text(
+            scaffold.to_markdown(), encoding="utf-8"
+        )
+        stub = DiskEvidenceApprovals(plan_dir)
+        assert stub(ApprovalRequest(tool_name=_GATE_PLAN)) is False
+        assert "placeholder section" in stub.decisions[-1]["evidence"]
+
+    def test_the_approval_gate_shares_one_bar_with_the_budget_gate(
+        self, tmp_path: Path
+    ) -> None:
+        """The approval gate and the harness ``_plan_has_content`` budget gate
+        share ONE predicate (:func:`_plan_is_approvable`), so they cannot drift.
+
+        Approval DENIAL does NOT redispatch (D-005 / this plan's S2): a plan the
+        budget gate PASSED but the approval gate then DENIED would stall
+        slug=None.  This asserts the approval verdict IS ``_plan_is_approvable``
+        for a filled / empty-scaffold / partial plan -- the identical bar the
+        budget gate reads, so no gap remains.
+        """
+        filled = PlanDoc.from_markdown(PLAN_MD)
+        scaffold = _empty_plan_scaffold()
+        partial = _empty_plan_scaffold()
+        partial.sections[0].body = "real goal content"
+        plan_dir = make_plan_dir(tmp_path)
+        for doc, expected in ((filled, True), (scaffold, False), (partial, False)):
+            (plan_dir / ArtifactNames.PLAN).write_text(
+                doc.to_markdown(), encoding="utf-8"
+            )
+            stub = DiskEvidenceApprovals(plan_dir)
+            approved = stub(ApprovalRequest(tool_name=_GATE_PLAN))
+            assert approved is expected
+            assert approved is _plan_is_approvable(doc)
 
     def test_unrelated_audit_errors_do_not_veto_a_sound_plan(
         self, tmp_path: Path
