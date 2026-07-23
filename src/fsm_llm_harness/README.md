@@ -390,9 +390,13 @@ measured **0/3 at the floor** (all 3 `furthest_state=plan`, `verified_write=fals
   file END, so content does not distribute into the 11 ordered sections — run 1
   is a valid `PlanDoc` but with 10 placeholder sections (content concentrated in
   one), runs 2/3 hit a `plan-section` ERROR (appended content duplicated headers).
-- The **honest approval earned its keep live**: run 1's valid-but-1-section plan
-  was correctly DENIED — under a loose bar it would have vacuously passed to
-  EXECUTE; the aligned strict bar prevented exactly that hollow gate.
+- The **aligned strict bar held the line live — via the BUDGET gate, not the
+  approval stub**: run 1's valid-but-1-section plan made `_plan_has_content`
+  False (shared `_plan_is_approvable`), so it redispatched and halted on honest
+  `plan-cap`, never approved. Under a loose bar it would have reached approval and
+  passed to EXECUTE. Precision: all 3 B3 rows have `approvals: []` — the approval
+  stub was never invoked live (unit-validated only), and the declared
+  honest-approval confound was thus inert in B3.
 
 The floor stays **0/3** and the wall advanced from "empty/invalid plan" to
 "content-not-distributed." The aimed successor is a **`response_format`
@@ -416,7 +420,8 @@ deleted post-session; it rests on the audit signature).
   L8 B1 0/10 → 9/10 p=0.00012, L6 B2 EXPLORE cleared 3/3), and iteration 6 FIXED
   the slugless PLAN stall (S2: L6 B3 3/3 honest `plan-cap`) and confirmed 4b
   writes 15-18 KB plans — the MODEL issues the write, the honest gates held (B3
-  run 1's hollow plan was DENIED). But the **≥ EXECUTE e2e goal is still 0/3**:
+  run 1's hollow plan was held out by the aligned budget gate → honest
+  `plan-cap`, never approved). But the **≥ EXECUTE e2e goal is still 0/3**:
   the scaffold+append mechanism was refuted (append-to-end doesn't distribute
   content into the 11 sections), so the dominant wall is now DISTRIBUTING plan
   content into sections — the aimed fix is a `response_format` structured plan.

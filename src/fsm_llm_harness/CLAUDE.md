@@ -618,11 +618,20 @@ the 11 ordered sections -- run 1's plan.md parses as a valid `PlanDoc` (no
 concentrated in one; audit `plan-section` WARNING x10), and runs 2/3 hit a
 `plan-section` ERROR (the appended content included its own `## ` headers ->
 duplicate sections -> invalid). Appending cannot fill in-place sections. (4) The
-**honest approval earned its keep LIVE**: run 1's valid-but-1-section plan was
-correctly DENIED -- under a loose not-all-placeholder bar it would have
-VACUOUSLY passed to EXECUTE (1 real + 10 empty = a hollow plan); the aligned
-strict all-non-placeholder bar prevented exactly the hollow gate the design set
-out to close. The ethos held live. Hedge honestly: the S2 honesty fix and the
+**aligned strict bar held the line LIVE (via the BUDGET gate, not the approval
+stub)**: run 1's valid-but-1-section plan made `_plan_has_content` return False
+(through the shared `_plan_is_approvable` = all-non-placeholder), so it consumed
+the redispatch budget and halted on the honest `plan-cap` -- it was NEVER
+approved. Under a loose not-all-placeholder bar that hollow plan (1 real + 10
+empty) would have been substantive → reached approval → passed to EXECUTE; the
+aligned strict bar prevented exactly that hollow gate. IMPORTANT precision: all
+3 B3 rows carry `approvals: []` -- `DiskEvidenceApprovals` was NEVER invoked live
+(approval is only reachable once `_plan_has_content` is True), so the honest
+APPROVAL stub is UNIT-validated only; the gate that held the hollow plan out live
+was the aligned BUDGET gate. A corollary: the declared honest-approval B2↔B3
+confound turned out INERT (no B3 plan was substantive enough to reach approval),
+so B2↔B3 comparability is cleaner than declared. The ethos held live via the
+shared predicate. Hedge honestly: the S2 honesty fix and the
 aligned-gates machinery are permanent, VALIDATED wins that ship regardless; the
 S1 CAPABILITY goal (a full run reaching >= EXECUTE) is NOT met; the wall
 advanced from "empty/invalid plan" to "content authored but not distributed
