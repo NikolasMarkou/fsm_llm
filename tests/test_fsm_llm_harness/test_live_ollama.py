@@ -63,7 +63,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.real_llm, pytest.mark.slow]
 
 from fsm_llm_agents.definitions import AgentResult, ApprovalRequest, ToolCall
 from fsm_llm_agents.tools import ToolRegistry
-from fsm_llm_harness.artifacts import PlanDoc, StateDoc
+from fsm_llm_harness.artifacts import PlanDoc, Section, StateDoc
 from fsm_llm_harness.constants import (
     ArtifactNames,
     ContextKeys,
@@ -80,7 +80,6 @@ from fsm_llm_harness.harness import (
     EXECUTE_TARGET_ASSIGNED,
     HarnessAgent,
     RoleRequest,
-    _empty_plan_scaffold,
     _plan_is_approvable,
     derive_execute_target,
 )
@@ -258,6 +257,22 @@ def content_matched_ast(body: str) -> bool:
             ) or (isinstance(func, ast.Name) and func.id == "sleep"):
                 has_sleep = True
     return has_loop and has_except and has_sleep
+
+
+def _hollow_plan_doc() -> PlanDoc:
+    """A schema-VALID ``plan.md`` PlanDoc: all 11 ``PlanSchema.SECTIONS`` present
+    and in order, every body EMPTY (all-placeholder).
+
+    Test helper: builds the hollow-plan fixture directly (the removed
+    ``_empty_plan_scaffold`` seed helper produced the same shape), so the
+    approval-gate ethos tests can assert a driver skeleton is DENIED.  Callers
+    may fill ``sections[i].body`` to build partially-filled plans.
+    """
+    return PlanDoc(
+        title="Plan",
+        sections=[Section(name=name, body="") for name in PlanSchema.SECTIONS],
+    )
+
 
 #: The plan L4's executor is dispatched against.  The imported corpus is a plan
 #: for THIS repository, and an executor handed it is told to run a step that has
@@ -2000,7 +2015,7 @@ class TestTheL6ApprovalStubIsDenyDefaultAndDiskBound:
         on model-authored CONTENT, never the driver skeleton."""
         plan_dir = make_plan_dir(tmp_path)
         (plan_dir / ArtifactNames.PLAN).write_text(
-            _empty_plan_scaffold().to_markdown(), encoding="utf-8"
+            _hollow_plan_doc().to_markdown(), encoding="utf-8"
         )
         stub = DiskEvidenceApprovals(plan_dir)
         assert stub(ApprovalRequest(tool_name=_GATE_PLAN)) is False
@@ -2014,7 +2029,7 @@ class TestTheL6ApprovalStubIsDenyDefaultAndDiskBound:
         model must fill EVERY section across its dispatches before the gate
         opens."""
         plan_dir = make_plan_dir(tmp_path)
-        scaffold = _empty_plan_scaffold()
+        scaffold = _hollow_plan_doc()
         scaffold.sections[0].body = "Ship the retry with capped backoff."
         (plan_dir / ArtifactNames.PLAN).write_text(
             scaffold.to_markdown(), encoding="utf-8"
@@ -2036,8 +2051,8 @@ class TestTheL6ApprovalStubIsDenyDefaultAndDiskBound:
         budget gate reads, so no gap remains.
         """
         filled = PlanDoc.from_markdown(PLAN_MD)
-        scaffold = _empty_plan_scaffold()
-        partial = _empty_plan_scaffold()
+        scaffold = _hollow_plan_doc()
+        partial = _hollow_plan_doc()
         partial.sections[0].body = "real goal content"
         plan_dir = make_plan_dir(tmp_path)
         for doc, expected in ((filled, True), (scaffold, False), (partial, False)):

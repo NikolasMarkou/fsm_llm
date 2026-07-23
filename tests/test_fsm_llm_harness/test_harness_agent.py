@@ -46,7 +46,12 @@ from fsm_llm_agents.definitions import AgentResult
 from fsm_llm_agents.exceptions import AgentError
 from fsm_llm_harness import harness as harness_module
 from fsm_llm_harness import storage as storage_module
-from fsm_llm_harness.artifacts import PRESENTATION_CONTRACTS, PlanDoc, StateDoc
+from fsm_llm_harness.artifacts import (
+    PRESENTATION_CONTRACTS,
+    PlanDoc,
+    Section,
+    StateDoc,
+)
 from fsm_llm_harness.constants import (
     DRIVER_OWNED_SEEDS,
     DRIVER_OWNED_UNSET,
@@ -223,6 +228,22 @@ The driver kept all protocol memory in the FSM context.
 |---|---|---|
 | Files added | 0/0 | the seam adds none |
 """
+
+
+def _hollow_plan_doc() -> PlanDoc:
+    """A schema-VALID ``plan.md`` PlanDoc with all 11 sections present in order
+    but EMPTY bodies (every section reads as a placeholder).
+
+    Test helper: mirrors what the removed ``_empty_plan_scaffold`` produced, so
+    a test can assert the gate DENIES a hollow plan without the deleted seed
+    machinery.  Callers may fill ``sections[i].body`` to build partially-filled
+    plans.
+    """
+    return PlanDoc(
+        title="Plan",
+        sections=[Section(name=name, body="") for name in PlanSchema.SECTIONS],
+    )
+
 
 #: A ``changelog.md`` whose ledger line names the step the fixture runs.
 _CHANGELOG_MD = """# Changelog
@@ -2768,96 +2789,8 @@ class TestBoundedPlanRedispatch:
 
 
 # ---------------------------------------------------------------------------
-# PLAN scaffold seed + substantive _plan_has_content (D-001)
+# substantive _plan_has_content (D-001)
 # ---------------------------------------------------------------------------
-
-
-class TestPlanScaffoldSeed:
-    """The driver seeds a HEADERS-ONLY ``plan.md`` scaffold at PLAN entry (D-001).
-
-    STRUCTURE from the driver, CONTENT from the model: the seed writes the 11
-    ``PlanSchema.SECTIONS`` headers with EMPTY bodies, so the model FILLS a
-    known shape instead of composing 11 ordered sections from a blank file.  It
-    seeds only when ``plan.md`` is absent or empty -- a real or partial plan on
-    a re-entry is never clobbered -- and it degrades silently when no plan
-    directory is configured.
-    """
-
-    def test_entering_plan_with_no_plan_md_seeds_the_11_headers_in_order(
-        self, make_harness, plan_dir
-    ) -> None:
-        agent = make_harness().agent
-        context = {ContextKeys.PLAN_DIR: str(plan_dir)}
-        assert not (plan_dir / ArtifactNames.PLAN).exists()
-
-        agent._seed_plan_scaffold(context)
-
-        plan = PlanDoc.from_markdown((plan_dir / ArtifactNames.PLAN).read_text())
-        assert [section.name for section in plan.sections] == list(
-            PlanSchema.SECTIONS
-        )
-        assert all(section.body == "" for section in plan.sections)
-
-    def test_the_seeded_scaffold_is_not_substantive(
-        self, make_harness, plan_dir
-    ) -> None:
-        """The seeded scaffold is PlanDoc-VALID yet all-placeholder, so the
-        PLAN gate cannot open on the driver skeleton -- the ethos bar (F4)."""
-        agent = make_harness().agent
-        context = {ContextKeys.PLAN_DIR: str(plan_dir)}
-        agent._seed_plan_scaffold(context)
-
-        # valid PlanDoc (parses) ...
-        PlanDoc.from_markdown((plan_dir / ArtifactNames.PLAN).read_text())
-        # ... but not substantive: every body is a placeholder
-        assert agent._plan_has_content(context) is False
-
-    def test_an_empty_plan_md_is_seeded(self, make_harness, plan_dir) -> None:
-        (plan_dir / ArtifactNames.PLAN).write_text("   \n\n")
-        agent = make_harness().agent
-        context = {ContextKeys.PLAN_DIR: str(plan_dir)}
-
-        agent._seed_plan_scaffold(context)
-
-        plan = PlanDoc.from_markdown((plan_dir / ArtifactNames.PLAN).read_text())
-        assert [section.name for section in plan.sections] == list(
-            PlanSchema.SECTIONS
-        )
-
-    def test_a_pre_existing_real_plan_is_not_clobbered(
-        self, make_harness, plan_dir
-    ) -> None:
-        (plan_dir / ArtifactNames.PLAN).write_text(_PLAN_MD)
-        agent = make_harness().agent
-        context = {ContextKeys.PLAN_DIR: str(plan_dir)}
-
-        agent._seed_plan_scaffold(context)
-
-        assert (plan_dir / ArtifactNames.PLAN).read_text() == _PLAN_MD
-
-    def test_no_plan_directory_seeds_nothing_and_does_not_raise(
-        self, make_harness
-    ) -> None:
-        agent = make_harness().agent
-        assert agent._seed_plan_scaffold({}) is None
-
-    def test_the_run_seeds_the_scaffold_before_the_plan_writer_dispatches(
-        self, make_harness, roots, plan_dir
-    ) -> None:
-        """End-to-end: a full traverse's faithful plan-writer fills the seeded
-        scaffold and the run still reaches EXECUTE (the happy path holds)."""
-        _seed_findings(plan_dir, "alpha", "beta", "gamma")
-        harness = make_harness(_traverse_script(), roots=roots)
-        result = harness.run()
-
-        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
-            GateSlug.PLAN_CAP
-        )
-        assert harness.worker.count_for(HarnessStates.EXECUTE) >= 1
-        # the plan-writer FILLED the scaffold: the final plan.md is substantive
-        assert harness.agent._plan_has_content(
-            {ContextKeys.PLAN_DIR: str(plan_dir)}
-        )
 
 
 class TestSubstantivePlanHasContent:
@@ -2866,7 +2799,7 @@ class TestSubstantivePlanHasContent:
     ALIGNED to the honest approval gate's bar (`_plan_is_approvable`, D-001):
     since approval DENIAL does not redispatch, the budget gate MUST match the
     approval gate or a substantive-but-unapprovable plan reopens the slugless
-    stall.  So an empty seeded scaffold (all placeholder), a PARTIALLY-filled
+    stall.  So an all-placeholder plan, a PARTIALLY-filled
     plan (some placeholder), and a non-empty-but-INVALID plan (bad headers) all
     read False -- each consumes the redispatch budget and halts on the honest
     ``plan-cap`` slug.  The no-plan-directory degrade path (return True) is
@@ -2880,12 +2813,14 @@ class TestSubstantivePlanHasContent:
         agent = make_harness().agent
         assert agent._plan_has_content({ContextKeys.PLAN_DIR: str(plan_dir)}) is True
 
-    def test_an_empty_seeded_scaffold_is_not_substantive(
+    def test_an_all_placeholder_plan_is_not_substantive(
         self, make_harness, plan_dir
     ) -> None:
+        """A valid PlanDoc with all 11 sections present but every body EMPTY is
+        all-placeholder, so the gate DENIES it (the ethos bar, F4)."""
+        (plan_dir / ArtifactNames.PLAN).write_text(_hollow_plan_doc().to_markdown())
         agent = make_harness().agent
         context = {ContextKeys.PLAN_DIR: str(plan_dir)}
-        agent._seed_plan_scaffold(context)
         assert agent._plan_has_content(context) is False
 
     def test_a_non_empty_but_invalid_plan_is_not_substantive(
@@ -2909,9 +2844,9 @@ class TestSubstantivePlanHasContent:
         fill the rest.  Aligning with the approval gate (which would DENY this
         partial plan) closes the slugless-stall gap: approval denial does not
         redispatch."""
-        scaffold = harness_module._empty_plan_scaffold()
-        scaffold.sections[0].body = "Ship the retry with capped backoff."
-        (plan_dir / ArtifactNames.PLAN).write_text(scaffold.to_markdown())
+        partial = _hollow_plan_doc()
+        partial.sections[0].body = "Ship the retry with capped backoff."
+        (plan_dir / ArtifactNames.PLAN).write_text(partial.to_markdown())
         agent = make_harness().agent
         assert agent._plan_has_content({ContextKeys.PLAN_DIR: str(plan_dir)}) is False
 
@@ -4508,9 +4443,9 @@ class TestPresentationContracts:
         """
         # Valid PlanDoc, Goal filled, every PC-PLAN floor section
         # (steps/success/verification/failure/assumptions) left EMPTY.
-        scaffold = harness_module._empty_plan_scaffold()
-        scaffold.sections[0].body = "Wire the seam the run exercises."
-        (plan_dir / ArtifactNames.PLAN).write_text(scaffold.to_markdown())
+        plan = _hollow_plan_doc()
+        plan.sections[0].body = "Wire the seam the run exercises."
+        (plan_dir / ArtifactNames.PLAN).write_text(plan.to_markdown())
         agent = make_harness(_traverse_script(), roots=roots).agent
         agent._emit_plan({ContextKeys.PLAN_DIR: str(plan_dir)})
 

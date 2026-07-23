@@ -138,7 +138,6 @@ from .tools import (
     PlanMemory,
     derive_disk_counts,
     gate_files,
-    has_bytes,
 )
 
 __all__ = [
@@ -405,22 +404,6 @@ def derive_execute_target(plan: PlanDoc, step_number: int) -> str | None:
     text = next((s.text for s in plan.steps() if s.number == str(step_number)), "")
     named = [target for target in targets if target in text]
     return (named or targets)[0]
-
-
-def _empty_plan_scaffold() -> PlanDoc:
-    """A HEADERS-ONLY ``plan.md``: the 11 ``## `` sections with EMPTY bodies.
-
-    Interface contract (1 call site: :meth:`HarnessAgent._seed_plan_scaffold`):
-        - Returns a ``PlanDoc`` that is schema-VALID (all 11
-          ``PlanSchema.SECTIONS`` present, in order) yet carries NO section
-          content, so every body reads as a placeholder.  The driver seeds
-          STRUCTURE; the model authors CONTENT.
-        - No I/O; never raises.
-    """
-    return PlanDoc(
-        title="Plan",
-        sections=[Section(name=name, body="") for name in PlanSchema.SECTIONS],
-    )
 
 
 #: A line that ``artifacts._parse_sectioned`` would read as an ATX heading (its
@@ -1285,12 +1268,6 @@ class HarnessAgent(BaseAgent):
         # document written inside its own call (D-038).
         self._sync_state_doc(state, working)
 
-        # Seed the HEADERS-ONLY plan.md scaffold at PLAN entry, BEFORE the
-        # plan-writer dispatches, so the model FILLS a known structure instead
-        # of composing 11 sections from a blank file (D-001).
-        if state == HarnessStates.PLAN:
-            self._seed_plan_scaffold(working)
-
         # A genuine entry authorises exactly one dispatch for this state's key,
         # even when the counters did not move (a completion-fix retry of the
         # same step, or a loop-back into an already-visited state).
@@ -1772,48 +1749,6 @@ class HarnessAgent(BaseAgent):
     # ------------------------------------------------------------------
     # state.md -- the driver's one owned WRITE (invariant I7)
     # ------------------------------------------------------------------
-
-    def _seed_plan_scaffold(self, context: Mapping[str, Any]) -> str | None:
-        # DECISION plan-2026-07-23T095051-a6dcb40d/D-001
-        # At PLAN entry the driver seeds plan.md with the 11 PlanSchema.SECTIONS
-        # headers (EMPTY bodies) so the plan-writer FILLS a known structure
-        # (measured: 4b appends real content under seeded headers 5/5, the
-        # step-1 probe) instead of composing 11 ordered sections from blank.
-        # Load-bearing restrictions -- do NOT relax any of them:
-        #   1. HEADERS ONLY. The driver authors NO section content: the MODEL
-        #      authors CONTENT, exactly like the EXECUTE driver-assigned write
-        #      target and the EXPLORE topic (SYSTEM.md Invariants). The seeded
-        #      scaffold is all-placeholder, so `_plan_has_content` (substantive)
-        #      reads it as NOT substantive and the PLAN->EXECUTE gate cannot open
-        #      on the skeleton -- "a confident sentence cannot open a gate" is
-        #      INTACT (F4). Do NOT seed placeholder prose to "help": that would
-        #      hand the model, and the honest-approval stub, real content nobody
-        #      wrote.
-        #   2. SEED ONLY IF plan.md is ABSENT or EMPTY. `has_bytes` (the same
-        #      predicate the gate uses) gates the write, so a real or partial
-        #      plan on a re-entry / completion-fix is NEVER clobbered. Do NOT
-        #      overwrite unconditionally.
-        #   3. Written through the driver's OWN `PlanDirectory.write_artifact`
-        #      (ATOMIC, storage.py D-019) -- ORCHESTRATOR is an authorised plan.md
-        #      owner (rules.OWNERSHIP), so this is not an ownership breach. A
-        #      failed seed is logged and SWALLOWED (like `_sync_state_doc`): the
-        #      model then composes from blank as before the fix -- no regression.
-        #   4. When NO plan directory is configured (`_plan_directory` is None,
-        #      the documented degrade path) there is nowhere to seed; return None.
-        # See decisions.md D-001.
-        directory = self._plan_directory(context)
-        if directory is None:
-            return None
-        if has_bytes(directory.read_text, ArtifactNames.PLAN):
-            return None
-        try:
-            return directory.write_artifact(ArtifactNames.PLAN, _empty_plan_scaffold())
-        except (HarnessError, OSError) as exc:
-            logger.warning(
-                f"Could not seed the {ArtifactNames.PLAN} scaffold: {exc}. The "
-                "plan-writer will compose from a blank file, as before the fix."
-            )
-            return None
 
     # DECISION plan-2026-07-23T124347-09045e6e/D-001
     def _render_plan_from_structured(

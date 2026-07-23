@@ -2751,173 +2751,6 @@ class TestTheAssignedWriteTargetNamesPathToolAndRoot:
         assert "YOUR EDIT THIS STEP" not in build_role_prompt(request, spec)
 
 
-class TestThePlanDeliverableLineNamesPlanMd:
-    """One PLAN dispatch, one static named deliverable: ``plan.md`` (D-001).
-
-    L6 B0 (n=3, ``scripts/bench_data/l6-e2e``) measured the defect this line
-    exists for: the one run that reached PLAN got an empty plan-writer reply
-    with ``plan_md_bytes=0`` and stalled -- nothing in the prompt had named
-    ``plan.md`` as THE deliverable of the dispatch.  This applies the D-035
-    driver-names-the-ONE-file pattern -- the structural-over-verbal lever
-    measured twice (EXPLORE 10/10; EXECUTE content-match 2/40 -> 40/40, Fisher
-    p=1.6e-20) -- to PLAN.  Since plan-2026-07-23 the driver SEEDS a
-    HEADERS-ONLY scaffold at PLAN entry, so the line steers the model to FILL it
-    by APPENDING with ``append_plan_file`` (measured: 4b picks append 5/5 when
-    told the scaffold exists), NOT the overwriting ``write_plan_file`` -- which
-    would destroy the seeded headers.  The path is STATIC (``plan.md`` is the
-    plan-writer's one obligation per ``rules.OWNERSHIP``), so there is no driver
-    derivation and no ``RoleRequest`` field: the line renders on every PLAN
-    dispatch that holds a plan directory, and on nothing else.
-    """
-
-    _MARKER = "YOUR DELIVERABLE THIS DISPATCH"
-
-    def _line(self) -> str:
-        return f"FILL IN {ArtifactNames.PLAN} USING {PlanTools.APPEND_PLAN_FILE}"
-
-    def test_the_plan_task_prompt_renders_the_deliverable_exactly_once(
-        self, plan_dir: Path, workspace: Path
-    ) -> None:
-        """Exactly one deliverable line -- a repeated one is a new ambiguity."""
-        request = _role_request(
-            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
-        )
-        task = build_role_task_prompt(request, get_role_spec(HarnessStates.PLAN))
-
-        assert task.count(self._line()) == 1
-
-    def test_the_line_names_the_append_tool_and_the_scaffold(
-        self, plan_dir: Path, workspace: Path
-    ) -> None:
-        """The tool is APPEND (never the overwriting write), and the line tells
-        the model the scaffold already exists so it FILLS rather than clobbers."""
-        request = _role_request(
-            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
-        )
-        task = build_role_task_prompt(request, get_role_spec(HarnessStates.PLAN))
-        block = next(b for b in task.split("\n\n") if self._MARKER in b)
-
-        assert PlanTools.APPEND_PLAN_FILE in self._line()
-        assert "plan-directory-relative" in task
-        assert "ALREADY EXISTS" in block
-        assert "11 section headers" in block
-        # write_plan_file appears only as the tool NOT to use (do NOT rewrite)
-        assert f"do NOT rewrite the whole file with {PlanTools.WRITE_PLAN_FILE}" in (
-            block
-        )
-
-    def test_the_line_does_not_forbid_the_other_owned_artifacts(
-        self, plan_dir: Path, workspace: Path
-    ) -> None:
-        """No ``nothing else``: the plan-writer also owns ``decisions.md`` and
-        ``verification.md``, and the EXECUTE line's exclusivity clause would
-        order it not to write files its own operative rules require."""
-        request = _role_request(
-            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
-        )
-        task = build_role_task_prompt(request, get_role_spec(HarnessStates.PLAN))
-        block = next(b for b in task.split("\n\n") if self._MARKER in b)
-
-        assert "nothing else" not in block
-
-    def test_the_line_is_in_the_task_half_not_the_standing_half(
-        self, plan_dir: Path, workspace: Path
-    ) -> None:
-        """Assignment lines are TASK text (D-021, D-035): the sibling topic
-        and target lines live there, and the split's system half must stay
-        byte-identical so the standing-policy measurement is not re-run."""
-        request = _role_request(
-            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
-        )
-        spec = get_role_spec(HarnessStates.PLAN)
-
-        assert self._line() in build_role_task_prompt(request, spec)
-        assert self._line() not in build_role_system_prompt(request, spec)
-
-    def test_the_single_string_prompt_carries_the_line_too(
-        self, plan_dir: Path, workspace: Path
-    ) -> None:
-        """``build_role_prompt`` is what a no-system-policy agent receives."""
-        request = _role_request(
-            HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
-        )
-
-        assert self._line() in build_role_prompt(
-            request, get_role_spec(HarnessStates.PLAN)
-        )
-
-    def test_no_plan_directory_renders_no_deliverable_line(
-        self, workspace: Path
-    ) -> None:
-        """Fail-open to the status quo: a PLAN dispatch with no plan directory
-        holds no plan-write tool, so naming the deliverable would be an
-        unexecutable instruction -- the prompt stays byte-identical instead
-        (hash-verified against the pre-change rendering)."""
-        request = _role_request(
-            HarnessStates.PLAN, plan_dir=None, workspace_root=workspace
-        )
-
-        assert self._MARKER not in build_role_prompt(
-            request, get_role_spec(HarnessStates.PLAN)
-        )
-
-    @pytest.mark.parametrize(
-        "state",
-        [
-            HarnessStates.EXPLORE,
-            HarnessStates.EXECUTE,
-            HarnessStates.REFLECT,
-            HarnessStates.PIVOT,
-            HarnessStates.CLOSE,
-        ],
-    )
-    def test_a_state_other_than_plan_never_carries_the_line(
-        self, state: str, plan_dir: Path, workspace: Path
-    ) -> None:
-        """Only the plan-writer's deliverable is ``plan.md``; no other state's
-        prompt drifts (hash-verified byte-identical at implementation time)."""
-        request = _role_request(state, plan_dir=plan_dir, workspace_root=workspace)
-
-        assert self._MARKER not in build_role_prompt(request, get_role_spec(state))
-
-    def test_the_line_reaches_a_real_dispatch_through_the_factory(
-        self, plan_dir: Path, workspace: Path
-    ) -> None:
-        """End of the seam: the text a REAL worker sends, not a rebuilt one."""
-        built: list[_PolicyAgent] = []
-        spec = get_role_spec(HarnessStates.PLAN)
-
-        def builder(spec_: Any, registry: Any, config: Any) -> _PolicyAgent:
-            agent = _PolicyAgent(
-                registry,
-                (),
-                "done",
-                spec.output_schema(
-                    **{
-                        name: (
-                            "s"
-                            if field.annotation is str
-                            else (False if field.annotation is bool else 0)
-                        )
-                        for name, field in spec.output_schema.model_fields.items()
-                    }
-                ),
-            )
-            built.append(agent)
-            return agent
-
-        factory = build_default_worker_factory(
-            Workspace(workspace), agent_builder=builder
-        )
-        factory(
-            _role_request(
-                HarnessStates.PLAN, plan_dir=plan_dir, workspace_root=workspace
-            )
-        )
-
-        assert self._line() in built[0].tasks[0]
-
-
 class TestAMissingPlanArtifactSaysSoAndSaysWhatToDo:
     """A read of a file nobody has written yet is a teachable failure (D-036).
 
@@ -4323,18 +4156,19 @@ class TestRulesLookupEdges:
 
 
 class TestExploreOnlyForcesTheFinalWriteTool:
-    """EXPLORE and PLAN arm ``force_final_tool``; nothing else does (D-003/D-001).
+    """EXPLORE arms ``force_final_tool``; nothing else does (D-003).
 
     The forced finalization turn (native_fc D-003) is additive and default-off;
     ``build_default_worker_factory``'s ``worker()`` closure is the SOLE site
-    that arms it.  Two roles arm it, each with the tool its deliverable needs:
-    EXPLORER -> ``write_plan_file`` (it CREATES its findings file), and
-    PLAN_WRITER -> ``append_plan_file`` (it FILLS the driver-seeded scaffold, so
-    forcing ``write_plan_file`` would OVERWRITE the headers -- D-001).
-    EXECUTE/REFLECT/PIVOT/CLOSE arm nothing.  These tests drive the REAL
-    per-dispatch ``AgentConfig`` construction inside that closure -- the same
-    path a live dispatch takes -- rather than asserting against a hand-built
-    ``AgentConfig`` that could drift from the wiring.
+    that arms it.  Only EXPLORER arms it, with the tool its deliverable needs:
+    ``write_plan_file`` (it CREATES its findings file, the measured 84%
+    never-called-a-write-tool mechanism, L8 B0).  PLAN no longer forces a tool:
+    the iter-6 scaffold+append design that armed ``append_plan_file`` for PLAN
+    was REFUTED and PLAN's plan.md is now authored by the driver-side structured
+    renderer.  EXECUTE/REFLECT/PIVOT/CLOSE arm nothing.  These tests drive the
+    REAL per-dispatch ``AgentConfig`` construction inside that closure -- the
+    same path a live dispatch takes -- rather than asserting against a
+    hand-built ``AgentConfig`` that could drift from the wiring.
     """
 
     class _StopBeforeRun(Exception):
@@ -4371,28 +4205,15 @@ class TestExploreOnlyForcesTheFinalWriteTool:
         assert config.force_final_tool == PlanTools.WRITE_PLAN_FILE
         assert config.force_final_tool == "write_plan_file"
 
-    def test_plan_config_carries_append_plan_file(
-        self, plan_dir: Path, workspace: Path
-    ) -> None:
-        """PLAN forces APPEND, never write: the driver seeds the scaffold and a
-        forced overwrite would destroy the 11 headers (D-001)."""
-        config = self._config_built_for(HarnessStates.PLAN, plan_dir, workspace)
-
-        assert config.force_final_tool == PlanTools.APPEND_PLAN_FILE
-        assert config.force_final_tool == "append_plan_file"
-        assert config.force_final_tool != PlanTools.WRITE_PLAN_FILE
-
     @pytest.mark.parametrize(
         "state",
-        [
-            s
-            for s in HarnessStates.ALL
-            if s not in (HarnessStates.EXPLORE, HarnessStates.PLAN)
-        ],
+        [s for s in HarnessStates.ALL if s != HarnessStates.EXPLORE],
     )
-    def test_execute_reflect_pivot_close_do_not_force_a_final_tool(
+    def test_non_explore_states_do_not_force_a_final_tool(
         self, state: str, plan_dir: Path, workspace: Path
     ) -> None:
+        """PLAN included: the refuted scaffold+append branch is gone, so PLAN
+        arms nothing, like EXECUTE/REFLECT/PIVOT/CLOSE."""
         config = self._config_built_for(state, plan_dir, workspace)
 
         assert config.force_final_tool is None
