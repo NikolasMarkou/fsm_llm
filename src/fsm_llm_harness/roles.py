@@ -911,6 +911,54 @@ _BYTE_WRITING_TOOLS: Mapping[str, str] = MappingProxyType(
 )
 
 
+def _evidence_path(
+    path: str,
+    root: str,
+    *,
+    workspace: Workspace,
+    memory: PlanMemory | None,
+) -> str:
+    """The root-RELATIVE resolved spelling of one verified write's path.
+
+    Interface contract (1 call site: :func:`_verified_writes`):
+        - ``path`` is the raw (stripped) ``call.parameters["path"]`` string;
+          ``root`` is the ``_BYTE_WRITING_TOOLS`` label of the root that
+          verified its bytes.
+        - Re-spells the path relative to that root through the SAME resolve
+          chokepoint that verified it (``Workspace.resolve``/``.relative`` for
+          the workspace root, ``PlanMemory.locate_path`` relative to
+          ``.plan_dir`` -- or ``.root`` for a cross-plan file -- for the plan
+          root).  Never a second normalization implementation.
+        - Falls back to *path* unchanged when resolution fails.  The label is
+          attribution metadata; a labeling error must never fail a dispatch.
+          Never raises.
+    """
+    # DECISION plan-2026-07-23T173454-2c22e5f6/D-002
+    # Do NOT label write evidence with the raw model-typed spelling.  The S5
+    # probe (2026-07-23, scripts/bench_data/l6-e2e/probe-s5-mechanism/)
+    # measured the model passing the full in-root ABSOLUTE tmp path to
+    # `write_file`: `Workspace.resolve()` accepted it and the bytes landed,
+    # but the raw label (`workspace:/tmp/.../workspace/uploader.py`) fails the
+    # frozen L6 floor normalizer, which credits root-relative labels only
+    # (the `/workspace/...` SENTINEL is the one absolute spelling it repairs)
+    # -- so a real, assigned, verified write scored `verified_write=False`.
+    # Resolve through the chokepoint that verified the bytes and label with
+    # the root-relative result.  See decisions.md D-002.
+    try:
+        if root == _WORKSPACE_ROOT:
+            return workspace.relative(workspace.resolve(path))
+        if memory is not None:
+            resolved = memory.locate_path(path)
+            for base in (memory.plan_dir, memory.root):
+                try:
+                    return str(resolved.relative_to(base))
+                except ValueError:
+                    continue
+    except Exception:  # unresolvable label: fall back, never fail the dispatch
+        pass
+    return path
+
+
 def _verified_writes(
     result: AgentResult,
     *,
@@ -924,8 +972,10 @@ def _verified_writes(
         - Reads ``result.trace.tool_calls`` -- the agent loop's own record of
           what it dispatched -- and re-reads each target through the confined
           root that tool writes to.
-        - Returns ``"<root>:<path>"`` labels, one per VERIFIED write.  A call
-          whose target is missing, empty or refused is not in the result.
+        - Returns ``"<root>:<path>"`` labels, one per VERIFIED write, with the
+          path in the root-RELATIVE resolved spelling (:func:`_evidence_path`),
+          not the raw parameter string.  A call whose target is missing, empty
+          or refused is not in the result.
         - Never raises, whatever shape the trace has.
     """
     calls = getattr(getattr(result, "trace", None), "tool_calls", None) or []
@@ -937,11 +987,13 @@ def _verified_writes(
         path = (getattr(call, "parameters", None) or {}).get("path")
         if not isinstance(path, str) or not path.strip():
             continue
+        path = path.strip()
         reader = workspace.read_text if root == _WORKSPACE_ROOT else None
         if reader is None and memory is not None:
             reader = memory.read_text
         if reader is not None and has_bytes(reader, path):
-            verified.append(f"{root}:{path}")
+            label = _evidence_path(path, root, workspace=workspace, memory=memory)
+            verified.append(f"{root}:{label}")
     return tuple(verified)
 
 
