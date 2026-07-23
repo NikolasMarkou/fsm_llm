@@ -50,6 +50,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
+import shutil
 import sys
 import threading
 import time
@@ -1379,7 +1380,7 @@ E2E_WALL_CLOCK_CEILING_S = 1800.0
 #: `plans/` and scratch are how the predecessor's benches vanished.
 BENCH_DATA_DIR = Path(__file__).resolve().parents[2] / "scripts" / "bench_data"
 L6_BENCH_ID = "l6-e2e"
-L6_BLOCK = "B3"
+L6_BLOCK = "B4"
 
 #: The slugs that make a halt HONEST: the four pre-step-gate slugs plus the
 #: EXPLORE and PLAN re-dispatch caps (PLAN_CAP joined for B1: a cap-exhausted
@@ -1870,6 +1871,21 @@ def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
         and not box["timed_out"]
         and (close_reached or halt_slug in HONEST_HALT_SLUGS)
     )
+
+    # Additive, diagnostic-only (B4, Deferred Work #2): retain each run's failed
+    # plan artifacts before pytest tears down tmp_path.  Wrapped so a copy
+    # failure NEVER fails the run or perturbs the grade; touches no floor clause.
+    try:
+        _retain_dir = (
+            BENCH_DATA_DIR / L6_BENCH_ID / L6_BLOCK / "artifacts" / f"run-{run}"
+        )
+        _retain_dir.mkdir(parents=True, exist_ok=True)
+        for _name in (ArtifactNames.PLAN, ArtifactNames.DECISIONS, ArtifactNames.STATE):
+            _src = plan_dir / _name
+            if _src.is_file():
+                shutil.copy2(_src, _retain_dir / _name)
+    except Exception:  # retention is diagnostic, never graded
+        pass
 
     issues = audit(plan_dir, workspace_root=str(workspace))
     return {
