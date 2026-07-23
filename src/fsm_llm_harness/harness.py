@@ -365,6 +365,7 @@ _TARGET_RE = re.compile(r"^(?!/)(?!.*\.\.)(?=.*[./])[\w./-]*\w$")
 #: whose Files-To-Modify simply had no path-shaped token -- all three causes
 #: collapsed into one silent ``None``.
 EXECUTE_TARGET_ASSIGNED = "assigned"
+EXECUTE_TARGET_ASSIGNED_PROSE = "assigned-prose"
 EXECUTE_TARGET_NO_PLAN_DIR = "no-plan-dir"
 EXECUTE_TARGET_NO_PLAN_DOC = "no-plan-doc"
 EXECUTE_TARGET_NO_TOKEN = "no-target-token"
@@ -404,6 +405,72 @@ def derive_execute_target(plan: PlanDoc, step_number: int) -> str | None:
     text = next((s.text for s in plan.steps() if s.number == str(step_number)), "")
     named = [target for target in targets if target in text]
     return (named or targets)[0]
+
+
+#: A token that ends in a real file extension (``.py``, ``.md`` ...): a dot then
+#: 1-6 alnum chars at the very end.  Distinguishes ``uploader.py`` (a file) from
+#: ``upload()`` (no extension); it does NOT by itself distinguish ``uploader.py``
+#: from ``requests.post`` -- the workspace-existence gate in
+#: :func:`_derive_prose_target` does that.
+_EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,6}$")
+#: Prose/markdown punctuation stripped from a whitespace token before it is
+#: tested as a path (``uploader.py:`` -> ``uploader.py``, ``` `config.py` ``` ->
+#: ``config.py``).  Only surrounding chars are stripped; interior ``.``/``/``/``-``
+#: (part of a real path) survive because they are not in this set.
+_PROSE_EDGE = "`*_,;:()[]{}\"'<>. "
+
+
+def _derive_prose_target(
+    plan: PlanDoc, step_number: int, existing_files: frozenset[str]
+) -> str | None:
+    """A Files-To-Modify target from UN-backticked prose, gated by existence.
+
+    Interface contract (1 call site: ``HarnessAgent._assign_execute_target``,
+    invoked ONLY when the strict :func:`derive_execute_target` returns ``None``):
+    per Files-To-Modify line, take path-shaped, extension-bearing whitespace
+    tokens (prose punctuation stripped) that name a file the caller says EXISTS
+    under the workspace root; prefer one the step's own text names, else the
+    first per line.  ``None`` when no line yields an existing-file token.  Never
+    raises; no I/O (the existence set is supplied by the caller).
+
+    # DECISION plan-2026-07-23T155204-fdc2d181/D-001
+    # This is the ADDITIVE prose fallback S4a needs: a real 4b plan writes
+    # `uploader.py`/`config.py` as PROSE (no backticks), so `derive_execute_target`
+    # (backtick-only, `_TICKED_RE`) returns None, no target is assigned, and the
+    # model's self-directed EXECUTE write produces a label the HASH-FROZEN L6
+    # floor normalizer cannot credit (verified_write=False, B5 run-1).  Measured
+    # levers: assigning `uploader.py` flips verified_write 3/3 live (F4); steering
+    # 4b to backtick via the response_format field DESCRIPTION is a no-op over
+    # Ollama -- the schema is sent as a grammar constraint, not prompt text (F5).
+    # So the fix is DETERMINISTIC prose extraction here, NOT model-steering and
+    # NOT loosening `derive_execute_target` (kept byte-frozen with its D-010
+    # anchor + tests).  The `existing_files` gate is what keeps D-010's real
+    # invariant ("never point a live executor somewhere the plan never said"):
+    # a target MUST name a real workspace file, so `requests.post`, invented
+    # names, and new-file tokens are all rejected -- order-independently (a file
+    # named AFTER a method-call token still wins).  A step naming no existing
+    # file yields None -> no assignment -> byte-identical prompt (fail-open).
+    # Do NOT drop the existence gate (it becomes the guess D-010 forbids) and do
+    # NOT feed it un-filtered tokens.  See decisions.md D-001, findings F1/F4/F5/F7.
+    """
+    if not existing_files:
+        return None
+    per_line: list[str] = []
+    for line in plan.body_of(PlanSchema.SECTIONS[3]).splitlines():
+        for token in line.split():
+            candidate = token.strip(_PROSE_EDGE)
+            if (
+                _TARGET_RE.match(candidate)
+                and _EXT_RE.search(candidate)
+                and candidate in existing_files
+            ):
+                per_line.append(candidate)
+                break
+    if not per_line:
+        return None
+    text = next((s.text for s in plan.steps() if s.number == str(step_number)), "")
+    named = [target for target in per_line if target in text]
+    return (named or per_line)[0]
 
 
 #: A line that ``artifacts._parse_sectioned`` would read as an ATX heading (its
@@ -2047,8 +2114,31 @@ class HarnessAgent(BaseAgent):
         step = as_int(context.get(ContextKeys.STEP_NUMBER), 0)
         target = derive_execute_target(plan, step)
         if target is None:
+            # DECISION plan-2026-07-23T155204-fdc2d181/D-001
+            # Additive S4a fallback: a real 4b plan names its target in PROSE
+            # (no backticks), so the strict `derive_execute_target` finds no
+            # token.  Try the existence-gated prose derivation before conceding
+            # `no-target-token`.  This is the ONLY caller of `_derive_prose_target`
+            # and the existence set comes from the workspace root, so a token
+            # that names no real file cannot be assigned (D-010 fail-open holds).
+            prose = _derive_prose_target(plan, step, cls._workspace_files(context))
+            if prose is not None:
+                return prose, EXECUTE_TARGET_ASSIGNED_PROSE
             return None, EXECUTE_TARGET_NO_TOKEN
         return target, EXECUTE_TARGET_ASSIGNED
+
+    @staticmethod
+    def _workspace_files(context: Mapping[str, Any]) -> frozenset[str]:
+        """Top-level file names under the workspace root, for D-001's prose
+        target existence gate.  Empty (fail-open) when the root is unset or
+        unreadable -- never raises.  A READ."""
+        root = _as_optional_str(context.get(ContextKeys.WORKSPACE_ROOT))
+        if not root:
+            return frozenset()
+        try:
+            return frozenset(p.name for p in Path(root).iterdir() if p.is_file())
+        except OSError:
+            return frozenset()
 
     @staticmethod
     def _enforce_routing_exclusivity(
