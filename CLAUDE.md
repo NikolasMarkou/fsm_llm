@@ -125,16 +125,21 @@ dedicated single-state redispatch-LOOP bench (`l8-explore-loop/B0`, n=10 loops /
 REFUTES the multi-dispatch parse-collapse guess as the primary driver: the
 explorer produces a parseable answer (`unverified-write`, `objects=1`) and issues
 only read/list calls (with wrong-root READ churn) but NEVER calls a write tool.
-Per the pre-registered rule the single W2 follow-on is AIMED at a driver-side
-FORCED-WRITE EXPLORE target (the EXECUTE 2/40->40/40 pattern), not
-`response_format`-primary -- a LATER iteration, not executed here. (Scope: one
-seeded exploration workspace/goal, ~10 runs; the never-called direction is
-robust to classifier precedence and at the run level.) Two named
-deferred defects were closed in the prior iteration (bare
-`/workspace`-sentinel confinement repair; the `success=True`-but-empty-plan.md
-slugless PLAN stall). The PLAN-and-later machinery stays offline-verified but
-live-unexercised (no run has left EXPLORE).
-The harness is not production-ready and a 4B model is not claimed to
+Iteration 5 then BUILT and VALIDATED that forced-write fix (additive,
+default-off; the MODEL issues the real `write_plan_file` call -- no driver
+salvage, ethos intact): L8 B1 moved the EXPLORE gate **0/10 -> 9/10** (Fisher
+p=0.00012, `l8-explore-loop/B1`), and L6 B2 (`l6-e2e/B2`, n=3, floor
+sha256-identical to B1) moved the traverse from **0/3-stuck-at-EXPLORE to
+3/3-reach-PLAN** -- the EXPLORE blocker of the last four iterations is FIXED.
+The founding e2e end-goal is still UNMET: the floor (>= EXECUTE) stays **0/3**
+because the wall moved a full state to a NEW PLAN-writer blocker -- the 4b model
+cannot emit a valid 11-section `plan.md` (runs 2/3 empty plan.md ->
+`plan_redispatches=3=MAX` -> `plan-cap` honest halt; run 1 a non-empty but
+schema-invalid plan.md -> approval denied -> slugless stall). W3 got its first
+live evidence: `MAX_PLAN_REDISPATCHES=3` fired at the cap with a `plan-cap`
+honest halt 2/3 (not refuted). Two named successors carry forward (S1 the
+PLAN-writer valid-plan.md blocker; S2 the non-empty-but-invalid-plan.md slugless
+stall). The harness is not production-ready and a 4B model is not claimed to
 drive it unattended to a useful result. See `src/fsm_llm_harness/CLAUDE.md` for
 the full reference, including what is measured and what is not.
 

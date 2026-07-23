@@ -430,6 +430,7 @@ driver-assigned EXECUTE target fix, bars and assertions byte-untouched
 | L5 >= 3 distinct non-empty `findings/*.md` on disk from dispatches | >= 4/5 | **5/5 -- met** |
 | L6 B0 end-to-end REAL workers: 3/3 runs reach >= EXECUTE, >= 1 verified write, honest halt | 3/3 | **0/3 -- NOT MET** (2 explore-cap, 1 slugless PLAN stall) |
 | L6 B1, same >= EXECUTE / honest-halt clauses, verified-write TIGHTENED to EXECUTE-state workspace write | 3/3 | **0/3 -- NOT MET** (3/3 furthest=explore, slug=explore-cap, honest; zero slugless stalls) |
+| L6 B2, same floor, forced-write fix live (floor sha256-identical to B1) | 3/3 | **0/3 -- NOT MET at floor, but all 3/3 now reach PLAN** (EXPLORE blocker FIXED; new PLAN-writer blocker) |
 
 This is the first time L4 has MET the standing bar. (The strict row's in-test
 assertion is existential -- >= 1 content-matched dispatch across both arms,
@@ -538,19 +539,77 @@ robust to classifier precedence -- `empty-reply` is ranked ABOVE `never-called`
 still wins, so the 16% is the MAXIMAL empty-reply attribution, not a floor; and
 robust at the run level too (8/10 runs never-called-dominant).
 
-Known gaps, standing after B1 + the L7/L8 characterization blocks:
-- **The traverse mechanism is now MEASURED (i) never-called, not an unmeasured
-  hypothesis**: L8 (above) ran the per-tool-call redispatch-LOOP bench and found
-  never-called dominant (75/89) with parse-collapse secondary (14/89), gate
-  0/10. What is now the AIMED-but-UNEXECUTED successor: the driver-side
-  forced-write EXPLORE target + a fresh L6 B2 (n=3, floor sha256-identical to
-  B1). What remains UNMEASURED: whether that forced-write fix actually lifts the
-  gate-clear rate (it is EXECUTE-proven, EXPLORE-untested), and whether the
-  wrong-root-READ churn is a co-cause worth a second lever.
-- **PLAN redispatch budget**: `MAX_PLAN_REDISPATCHES=3` is now GRADEABLE (Defect
-  C: an additive `plan_redispatches` L6 row field) but still has ZERO live
-  evidence -- no run has reached PLAN. The `success=True`-but-empty-plan.md
-  slugless-stall residual is CLOSED (D-005, above). Still unbudgeted:
+**L8 B1 + L6 B2 (NEW this iteration) VALIDATE the forced-write fix -- the
+EXPLORE blocker of the last four iterations is FIXED, and the wall MOVED a full
+state to PLAN.** The fix (D-003) is an additive, default-off forced-write
+finalization: `AgentConfig.force_final_tool` plus a post-loop forced-`tool_choice`
+turn in `native_fc.py` (it mirrors the D-002 repair turn -- `tools=`+`tool_choice`,
+never `response_format=`; it fires at most once, after the read loop), wired
+EXPLORE-only in `roles.py` (`Role.EXPLORER` -> `write_plan_file`). Crucially the
+MODEL issues the real `write_plan_file` call (recorded in the trace);
+`_verified_writes` stays honest, there is NO driver salvage, and the founding
+"a confident sentence cannot open a gate" ethos is INTACT. **L8 B1**
+(`l8-explore-loop/B1`, n=10, one look, committed): `gate_cleared`
+**0/10 -> 9/10** (Wilson95 [0.596, 0.982]; Fisher two-sided p=**0.00012** vs
+B0); failed dispatches **89/100 -> 8/37**; `empty-reply` (family iii)
+**14 -> 0**; residual `never-called` **75 -> 8** absolute -- the forced write
+converts the 84%-never-called collapse into gate clearance. **L6 B2**
+(`l6-e2e/B2`, n=3, one look, committed; floor sha256 verified IDENTICAL to B1
+`cbeeb6aa...` before AND after the block-constant edit): **all 3/3 runs now
+reach PLAN** (`furthest_state=plan`) -- B0 and B1 were 0/3, every run stuck at
+EXPLORE (`furthest=explore`, `explore-cap`) -- each writing **3 real,
+substantive findings** (`problem-scope.md` 1262, `affected-files.md` 1304,
+`constraints-and-patterns.md` 1809 bytes) via the forced write. BUT the e2e
+FLOOR (>= EXECUTE + verified_write + honest_halt) is still **0/3 -- the floor
+test FAILS as measured** -- because a NEW, deeper blocker emerged at PLAN: the
+4b plan-writer cannot emit a valid 11-section `plan.md`. Runs 2 & 3: the
+plan-writer returned an EMPTY `plan.md`, consumed the redispatch budget
+(`plan_redispatches=3=MAX_PLAN_REDISPATCHES`), and halted HONESTLY on
+`plan-cap` (`honest_halt=true`). Run 1: a NON-EMPTY (4153 bytes) but
+SCHEMA-INVALID `plan.md` (missing all 11 `## `-sections; `PlanDoc` validation
+failed), which the DENY-default disk-bound approval correctly REFUSED, after
+which the run stalled `slug=None` (`honest_halt=false`) -- a slugless stall.
+This is the biggest capability advance in the package's history AND an honest
+floor FAIL: the fix did exactly what it was built to do (the p=0.00012 L8 shift
+proves it), the founding e2e end-goal is NOT YET achieved, and the wall is now a
+DIFFERENT failure class -- structured-output conformance, not
+never-called-a-write-tool (run 1 proves forcing the write alone yields an
+invalid plan.md, not a valid one). **W3 gets its first live evidence.**
+`MAX_PLAN_REDISPATCHES=3` had ZERO live evidence before this block; runs 2 & 3
+both show `plan_redispatches=3` (== the cap) with `plan-cap` + `honest_halt=true`
+-- the PLAN redispatch budget's worker-failure branch is now live-exercised 2/3
+(run 1 wrote a plan.md, `plan_redispatches=0`, and stalled on the approval-denial
+path). The falsifier is NOT refuted. Two named successors, deferred (NOT fixed
+here): **S1** -- the PLAN-writer valid-`plan.md` blocker (the new dominant e2e
+wall; needs its own investigation: a `response_format` plan schema, a plan.md
+scaffold the model fills, or a looser accepted schema); **S2** -- the
+non-empty-but-schema-invalid-`plan.md` slugless stall (run 1): predecessor
+D-005 (`plan-2026-07-22T212329-16de43da`) closed the EMPTY-plan.md slugless
+stall via `_plan_has_content` (a BYTES check), but a non-empty-but-INVALID
+plan.md passes the bytes check, is denied at approval, and stalls `slug=None`;
+`_plan_has_content` should check plan VALIDITY (parseable `PlanDoc`), not just
+bytes.
+
+Known gaps, standing after L8 B1 + L6 B2 (the forced-write fix):
+- **#1 gap -- the PLAN-writer valid-`plan.md` blocker (S1)**: the never-called
+  EXPLORE mechanism is now FIXED (the forced-write turn; L8 B1 0/10 -> 9/10,
+  L6 B2 EXPLORE cleared 3/3). The new dominant e2e wall is a DIFFERENT failure
+  class -- the 4b plan-writer cannot emit a valid 11-section `plan.md`
+  (structured-output conformance, not never-called). It needs its own
+  investigation: a `response_format` plan schema, a plan.md scaffold the model
+  fills, or a looser accepted schema. UNMEASURED how far a fix here would carry
+  a run past PLAN toward the >= EXECUTE floor.
+- **The non-empty-but-schema-invalid-`plan.md` slugless stall (S2)**: a NARROW
+  harness honesty defect surfaced by L6 B2 run 1. Predecessor D-005 closed the
+  EMPTY-plan.md slugless stall via `_plan_has_content` (a BYTES check), but a
+  non-empty-but-INVALID plan.md passes the bytes check, is denied at approval,
+  and stalls `slug=None` (`honest_halt=false`); `_plan_has_content` should check
+  plan VALIDITY (parseable `PlanDoc`), not just bytes.
+- **PLAN redispatch budget**: `MAX_PLAN_REDISPATCHES=3` now has its FIRST live
+  evidence (L6 B2 runs 2/3: `plan_redispatches=3=MAX` + `plan-cap` +
+  `honest_halt=true`) -- the worker-failure branch is live-exercised, NOT
+  refuted. The `success=True`-but-EMPTY-plan.md slugless-stall residual is CLOSED
+  (D-005); the non-empty-but-invalid variant is S2 (above). Still unbudgeted:
   REFLECT/PIVOT/CLOSE worker-failure stalls (no generic `STALL` slug is minted,
   per predecessor D-003).
 - **Bare `/workspace` sentinel** -- CLOSED this iteration (D-004): a bare
@@ -570,10 +629,16 @@ exit-code 0/1/2 contract close-read verdict was CLEAN.
 Offline, the package is green: 1,917 tests, `ruff` clean, `mypy` 0 errors.
 
 **Not claimed**: that the harness is production-ready, or that a 4B model
-drives it unattended to a useful result -- the L6 0/3, measured twice (B0 and
-B1), REINFORCES this claim's absence, it does not soften it. What IS claimed
-is that the gates are mechanical -- they read the filesystem, and a confident
-sentence cannot open one.
+drives it unattended to a useful result -- the L6 floor is still **0/3 at
+>= EXECUTE**, measured three times now (B0, B1, B2), which REINFORCES this
+claim's absence, it does not soften it. What DID advance, honestly and for the
+first time: the forced-write fix cleared the EXPLORE blocker of the last four
+iterations (L8 B1 0/10 -> 9/10, p=0.00012) and moved the wall a full state --
+all 3/3 L6 B2 runs now reach PLAN -- but the end-goal is unmet because the wall
+moved to a new PLAN-writer blocker (the 4b model cannot emit a valid 11-section
+plan.md). Through all of this the gates stayed mechanical: the MODEL performs
+the write (no driver salvage), the gate reads the filesystem, and a confident
+sentence still cannot open one.
 
 ## Exceptions
 
