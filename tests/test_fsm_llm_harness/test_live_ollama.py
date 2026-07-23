@@ -3809,7 +3809,7 @@ class TestClassifyFailedDispatchPartition:
 # ---------------------------------------------------------------------------
 
 L8_BENCH_ID = "l8-explore-loop"
-L8_BLOCK = "B0"
+L8_BLOCK = "B1"
 
 #: n rows for the single arm.  Fixed here, before the block runs (n>=10 per the
 #: mandate), and never extended -- a re-run needs a new block + decision entry.
