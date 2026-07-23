@@ -1,0 +1,98 @@
+{
+  "arm": {
+    "display": "native",
+    "native": true
+  },
+  "bench_id": "l6-e2e",
+  "block": "B7",
+  "created_at": "2026-07-23T19:17:25Z",
+  "fixture_hash": "80d942beca6628604baa5b0773bca776c17e43b5b9888fa547983ffcc23a6136",
+  "git_commit": "18a77e98f26d833feff4325c8e8a1f9913a81c5f",
+  "model": "ollama_chat/qwen3.5:4b",
+  "model_digest": {
+    "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+    "tag": "qwen3.5:4b"
+  },
+  "n_preregistered": 3,
+  "prompt_bytes_sha256": "62a85aa8a339909d7ee737abb3b5b04bdeb539fbbf2813ebe9a9d8863c38a75a",
+  "seed": {
+    "base": 20260722100,
+    "effective_arm": "native",
+    "per_row": "base+run-1"
+  },
+  "tool_surface": {
+    "declared_tools_by_state": {
+      "close": [
+        "append_plan_file",
+        "grep_files",
+        "list_dir",
+        "list_plan_dir",
+        "path_exists",
+        "plan_path_exists",
+        "read_file",
+        "read_plan_file",
+        "write_plan_file"
+      ],
+      "execute": [
+        "append_file",
+        "append_plan_file",
+        "delete_file",
+        "grep_files",
+        "list_dir",
+        "list_plan_dir",
+        "path_exists",
+        "plan_path_exists",
+        "read_file",
+        "read_plan_file",
+        "write_file",
+        "write_plan_file"
+      ],
+      "explore": [
+        "append_plan_file",
+        "grep_files",
+        "list_dir",
+        "list_plan_dir",
+        "path_exists",
+        "plan_path_exists",
+        "read_file",
+        "read_plan_file",
+        "write_plan_file"
+      ],
+      "pivot": [
+        "append_plan_file",
+        "grep_files",
+        "list_dir",
+        "list_plan_dir",
+        "path_exists",
+        "plan_path_exists",
+        "read_file",
+        "read_plan_file",
+        "write_plan_file"
+      ],
+      "plan": [
+        "append_plan_file",
+        "grep_files",
+        "list_dir",
+        "list_plan_dir",
+        "path_exists",
+        "plan_path_exists",
+        "read_file",
+        "read_plan_file",
+        "write_plan_file"
+      ],
+      "reflect": [
+        "grep_files",
+        "list_dir",
+        "list_plan_dir",
+        "path_exists",
+        "plan_path_exists",
+        "read_file",
+        "read_plan_file",
+        "run_command"
+      ]
+    },
+    "native_function_calling": true,
+    "retry_attempts": 1,
+    "timeout_seconds": 600
+  }
+}
