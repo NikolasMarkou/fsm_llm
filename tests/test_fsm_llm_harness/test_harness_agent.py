@@ -74,6 +74,7 @@ from fsm_llm_harness.harness import (
     derive_execute_target,
 )
 from fsm_llm_harness.plan_validator import Issue, _is_placeholder
+from fsm_llm_harness.roles import get_role_spec
 from fsm_llm_harness.rules import EXPLORE_TOPICS, ROLE_BY_STATE, get_rules
 from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm_harness.conftest import (
@@ -2921,6 +2922,127 @@ class TestSubstantivePlanHasContent:
         reclassification of every degrade-path plan reply as a failure."""
         agent = make_harness().agent
         assert agent._plan_has_content({}) is True
+
+
+# ---------------------------------------------------------------------------
+# structured_output -> plan.md renderer (D-001 of this plan)
+# ---------------------------------------------------------------------------
+
+
+def _plan_payload(**overrides: Any) -> Any:
+    """A real PLAN ``output_schema`` instance with 11 DISTINCT non-empty bodies.
+
+    Built through ``get_role_spec(PLAN).output_schema`` so the test exercises
+    the same schema the live repair turn produces, not a hand-rolled stand-in;
+    ``overrides`` replaces individual slug bodies (e.g. an empty ``steps``).
+    Each default body is distinct and non-placeholder, so an all-defaults
+    payload renders an APPROVABLE plan (`_plan_is_approvable` True).
+    """
+    spec = get_role_spec(HarnessStates.PLAN)
+    bodies = {
+        slug: f"Real content for the {section} section, item {index}."
+        for index, (section, slug) in enumerate(
+            zip(PlanSchema.SECTIONS, PlanSchema.SECTION_SLUGS, strict=True)
+        )
+    }
+    bodies.update(overrides)
+    return spec.output_schema(
+        **{
+            ContextKeys.TOTAL_STEPS: 3,
+            ContextKeys.NEEDS_EXPLORE: False,
+            "message": "plan drafted",
+            **bodies,
+        }
+    )
+
+
+def _render(agent: HarnessAgent, plan_dir: Path, payload: Any) -> str:
+    """Render *payload* to ``plan.md`` via the driver and return the file text."""
+    result = AgentResult(answer="", success=True, structured_output=payload)
+    agent._render_plan_from_structured(result, {ContextKeys.PLAN_DIR: str(plan_dir)})
+    return (plan_dir / ArtifactNames.PLAN).read_text()
+
+
+class TestRenderPlanFromStructured:
+    """``_render_plan_from_structured`` distributes the 11 fields BY CONSTRUCTION.
+
+    Success Criteria 2 & 3 (D-001).  The renderer maps each ``response_format``
+    field under ITS ``PlanSchema.SECTIONS`` heading, so the result round-trips
+    exactly and every field lands in its own section -- the property the refuted
+    iter-6 append-to-end mechanism could not hold (content concentrated in one
+    section / duplicate headers, floor 0/3 across B0-B3).  It NEVER invents
+    filler: an empty field renders an empty section the UNCHANGED
+    ``_plan_is_approvable`` denies.  Offline, deterministic, no live model.
+    """
+
+    def test_eleven_non_empty_fields_render_and_roundtrip(
+        self, make_harness, plan_dir
+    ) -> None:
+        """Exactly 11 sections, titles in SECTIONS order, each body == its field,
+        and an EXACT ``to_markdown(from_markdown(text)) == text`` round-trip."""
+        agent = make_harness().agent
+        payload = _plan_payload()
+
+        text = _render(agent, plan_dir, payload)
+
+        plan = PlanDoc.from_markdown(text)
+        assert len(plan.sections) == 11
+        assert [section.name for section in plan.sections] == list(
+            PlanSchema.SECTIONS
+        )
+        dumped = payload.model_dump()
+        for section, slug in zip(
+            PlanSchema.SECTIONS, PlanSchema.SECTION_SLUGS, strict=True
+        ):
+            assert plan.body_of(section) == dumped[slug]
+        # exact text round-trip: the rendered file re-serialises to itself
+        assert PlanDoc.from_markdown(text).to_markdown() == text
+        # by construction every section is real, so the plan is approvable
+        assert harness_module._plan_is_approvable(plan) is True
+
+    def test_a_heading_injection_body_still_roundtrips_and_is_preserved(
+        self, make_harness, plan_dir
+    ) -> None:
+        """A field embedding ``## `` / ``# `` lines is DEMOTED, not lost: still
+        exactly 11 sections, exact round-trip, and the injected text survives in
+        the body (the ``_demote_heading_lines`` guard, D-001)."""
+        agent = make_harness().agent
+        injected = "Real goal line.\n## Injected H2 header\n# Injected H1 header\ntail"
+        payload = _plan_payload(**{PlanSchema.SECTION_SLUGS[0]: injected})
+
+        text = _render(agent, plan_dir, payload)
+
+        plan = PlanDoc.from_markdown(text)
+        # the injected headers did NOT create spurious sections
+        assert len(plan.sections) == 11
+        assert [section.name for section in plan.sections] == list(
+            PlanSchema.SECTIONS
+        )
+        assert PlanDoc.from_markdown(text).to_markdown() == text
+        goal_body = plan.body_of(PlanSchema.SECTIONS[0])
+        # the text is preserved (escaped/demoted), not dropped
+        assert "## Injected H2 header" in goal_body
+        assert "# Injected H1 header" in goal_body
+
+    def test_an_empty_field_denied_by_the_unchanged_gate_no_filler(
+        self, make_harness, plan_dir
+    ) -> None:
+        """Ethos (Success Criterion 3): ONE empty field renders an empty section
+        that the UNCHANGED ``_plan_is_approvable`` DENIES, and NO filler prose is
+        substituted for the hole -- the section body stays empty."""
+        agent = make_harness().agent
+        # `steps` is SECTIONS[4]; author every other field, leave this one blank
+        payload = _plan_payload(**{PlanSchema.SECTION_SLUGS[4]: "   "})
+
+        text = _render(agent, plan_dir, payload)
+
+        plan = PlanDoc.from_markdown(text)
+        # the empty section is a placeholder the unchanged gate denies
+        assert harness_module._plan_is_approvable(plan) is False
+        # ... and NO filler was invented: the body is empty/whitespace, not prose
+        empty_body = plan.body_of(PlanSchema.SECTIONS[4])
+        assert empty_body.strip() == ""
+        assert _is_placeholder(empty_body) is True
 
 
 # ---------------------------------------------------------------------------

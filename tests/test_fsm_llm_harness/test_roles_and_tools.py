@@ -873,6 +873,81 @@ class TestEveryRoleSchemaCarriesMessage:
 
 
 # ---------------------------------------------------------------------------
+# PLAN's 11-section response_format schema (D-001 of this plan)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanOutputSchemaCarriesElevenSectionFields:
+    """PLAN's ``output_schema`` authors the 11 ``PlanSchema.SECTIONS`` as
+    required string content fields, DERIVED from the section tuple (never
+    hand-written), and those fields stay OUT of the writable-key allowlist.
+
+    This is Success Criterion 1: the model authors the sections under
+    ``response_format`` (schema-visible), the driver RENDERS them into
+    ``plan.md``, and they never reach FSM context as gate keys (not writable).
+    It is the ``summary`` special-case (D-035) applied to eleven fields at once
+    -- so a regression that either drops a section from the schema OR promotes a
+    section body into ``_WORKER_WRITABLE`` fails here.
+    """
+
+    def test_the_field_set_is_the_slugs_plus_the_three_gate_and_prose_keys(
+        self,
+    ) -> None:
+        """Field set == 11 SECTIONS slugs plus needs_explore/total_steps/message.
+
+        Derived, not enumerated: the expected set is built FROM
+        ``PlanSchema.SECTION_SLUGS`` so adding a 12th section would have to add
+        its field here too, and a hand-typed literal cannot silently drift.
+        """
+        spec = get_role_spec(HarnessStates.PLAN)
+
+        fields = set(spec.output_schema.model_fields)
+
+        expected = set(PlanSchema.SECTION_SLUGS) | {
+            ContextKeys.NEEDS_EXPLORE,
+            ContextKeys.TOTAL_STEPS,
+            "message",
+        }
+        assert fields == expected
+
+    def test_all_eleven_content_fields_are_required_strings(self) -> None:
+        """A reply missing any section fails schema validation (fail closed)."""
+        model_fields = get_role_spec(HarnessStates.PLAN).output_schema.model_fields
+
+        for slug in PlanSchema.SECTION_SLUGS:
+            info = model_fields[slug]
+            assert info.annotation is str, slug
+            assert info.is_required(), slug
+
+    def test_the_eleven_slugs_are_absent_from_worker_writable(self) -> None:
+        """The section bodies are CONTENT, never gate keys: the driver renders
+        them, and only ``needs_explore``/``total_steps`` may reach context."""
+        spec = get_role_spec(HarnessStates.PLAN)
+
+        for slug in PlanSchema.SECTION_SLUGS:
+            assert slug not in _WORKER_WRITABLE[HarnessStates.PLAN], slug
+            assert slug not in spec.writable_keys, slug
+
+        assert set(spec.writable_keys) == {
+            ContextKeys.NEEDS_EXPLORE,
+            ContextKeys.TOTAL_STEPS,
+        }
+
+    def test_the_slug_maps_are_consistent_and_section_ordered(self) -> None:
+        """The section↔slug maps are exact inverses over the 11 unique slugs,
+        and ``SECTION_SLUGS`` is in ``SECTIONS`` order -- the invariant the
+        renderer relies on to place each field under ITS heading."""
+        assert set(PlanSchema.SLUG_BY_SECTION.keys()) == set(PlanSchema.SECTIONS)
+        assert PlanSchema.SECTION_BY_SLUG == {
+            slug: section for section, slug in PlanSchema.SLUG_BY_SECTION.items()
+        }
+        assert len(set(PlanSchema.SECTION_SLUGS)) == len(PlanSchema.SECTIONS) == 11
+        assert PlanSchema.SECTION_SLUGS == tuple(
+            PlanSchema.SLUG_BY_SECTION[section] for section in PlanSchema.SECTIONS
+        )
+
+
+# ---------------------------------------------------------------------------
 # Turn budget + stopping condition (D-013 of plan-2026-07-21-bf7ffe24)
 # ---------------------------------------------------------------------------
 
