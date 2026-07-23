@@ -21,7 +21,10 @@ Floor rows (`>= EXECUTE` AND `verified_write` AND `honest_halt`): **0/3**
 (frozen defect-halt: runs 1 AND 2 both crash/hang/slugless) did NOT fire —
 run 1 halted honestly on `explore-cap`, run 2 carried the `reflect-cap` slug.
 
-## (i) S5 / `verified_write` — **VALIDATED live, in-loop (2/2, n=2)**
+## (i) S5 / `verified_write` — **2/2 EXECUTE-reaching runs credited in-loop; fix proven load-bearing OFFLINE (probe record), not attributed in-loop**
+
+*(Heading and scope qualified at step 7 per the adversarial review, concern 1;
+the row citations below are unchanged.)*
 
 Both EXECUTE-reaching runs (2 and 3) show `verified_write=true` with the exact
 normalized label the D-002 fix (`roles.py` `_evidence_path`, commit `aa0ecb6`)
@@ -37,14 +40,29 @@ was built to produce:
 
 Per the pre-registered branch (i), the refute condition (an EXECUTE-reaching
 run that changed workspace files yet shows `verified_write=false`) did not
-occur. **The fix credits the write in-loop** — the failure mode B6 run 2
-exhibited (bytes landed, credit lost to a raw absolute-path label) did not
-recur in either EXECUTE-reaching run. This is the first block in the B0-B7
-lineage with ANY `verified_write=true` row (B6: 0/1 EXECUTE-reaching;
-ad hoc per O1: verified_write 0/3 vs 2/3, Fisher two-sided p=0.4; Wilson 95%
-CI for 2/3 is [0.208, 0.939]). n=2 EXECUTE-reaching runs, one goal, one
-configuration — this validates the mechanism fix; it is NOT an unqualified
-reliability claim for the credit layer.
+occur. **Scope the claim precisely:** the retained `write_evidence_paths`
+labels are POST-normalization — `_evidence_path` runs INSIDE
+`_verified_writes`, upstream of the retention observer — so B7's committed
+records cannot show what raw spelling the model typed, and therefore CANNOT
+prove the fix was load-bearing in runs 2/3. Run 2's single clean
+`workspace:uploader.py` with `write_evidence=1` is a DIFFERENT EXECUTE shape
+from the probe/B6 record (`write_evidence=2`, absolute path) and is
+consistent with the model simply typing a relative path unaided. The
+load-bearing proof is OFFLINE: the frozen-floor replay of the retained n=1
+probe record (probe-run-1) flips `verified_write` False→True under the fix
+(verification.md M3). The honest statement is therefore: the S5 credit layer
+no longer blocks floor credit for any in-root spelling (proven offline on the
+measured probe record); B7 shows 2/2 EXECUTE-reaching runs credited in-loop —
+an existence proof, not attribution of those two credits to the fix. The
+failure mode B6 run 2 exhibited (bytes landed, credit lost to a raw
+absolute-path label) did not recur in either EXECUTE-reaching run. This is
+the first block in the B0-B7 lineage with ANY `verified_write=true` row
+(B6: 0/1 EXECUTE-reaching; ad hoc per O1: verified_write 0/3 vs 2/3, Fisher
+two-sided p=0.4; Wilson 95% CI for 2/3 is [0.208, 0.939]). n=2
+EXECUTE-reaching runs, one goal, one configuration; a future recurrence of
+the exact S5 class would be invisible in blocks that retain only the
+normalized label — retaining the raw `call.parameters["path"]` alongside it
+is a named successor instrumentation item.
 
 ## (ii) S4b / `honest_halt` — **PARTIALLY validated, two measured gaps**
 

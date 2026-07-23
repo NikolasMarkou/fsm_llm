@@ -12,7 +12,7 @@ FSM-LLM (v0.5.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (5,371 tests)
+make test           # pytest -v (5,372 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -147,9 +147,37 @@ stall (L6 B3, `l6-e2e/B3`, n=3, floor sha256-identical: 3/3 halt on the honest
 content (15-18 KB), but the scaffold+append mechanism was REFUTED --
 `append_plan_file` appends to the file END, so content does not distribute into
 the 11 sections (concentrated in one, or duplicate headers) and the floor stays
-**0/3** (measured four times now: B0/B1/B2/B3). The aimed successor is a
-`response_format` structured plan (the model authors 11 fields, the driver
-renders correctly-structured Markdown). The harness is not production-ready and
+**0/3** (B0/B1/B2/B3). The `response_format` structured plan then LANDED across
+B4/B5 (the model authors 11 fields, the driver renders correctly-structured
+Markdown): B4 was CONFOUNDED (renderer gated on `result.success`, a
+could-not-succeed config, fixed), B5 put the FIRST-EVER run past PLAN into
+REFLECT on a valid 11-section plan.md, and B6's existence-gated prose fallback
+fixed EXECUTE target-ASSIGNMENT (the model wrote the assigned `uploader.py`)
+-- exposing S5, a credit-layer wall: bytes on disk, `verified_write` still
+False. S5's root cause was then MEASURED, not guessed (scratch probe at the B6
+seed; retained raw per-dispatch observations are now a standing bench
+feature): mechanism (c) -- the model wrote the assigned file via its ABSOLUTE
+tmp path; bytes verified, but the raw-path label escaped the frozen
+normalizer; division-of-labour REFUTED as the S5 cause (the bundled EXECUTE
+dispatch did its one assigned write correctly). The `_evidence_path`
+label-normalization fix is proven load-bearing OFFLINE on the retained probe
+record (frozen-floor replay flips False->True). L6 B7 (n=3, floor
+sha256-identical `cbeeb6aa...`, 8th block): floor **0/3 honest** -- run 1 an
+explore-cap halt (S4c variance); runs 2/3 BOTH reached EXECUTE and BOTH
+earned `verified_write=True` with the exact normalized label
+`workspace:uploader.py`, the first rows in the lineage with ANY true (in-loop
+2/2 is an existence proof, not attribution of those credits to the fix). The
+S4b reflect-cap budget (routability-keyed, mirroring plan-cap) landed and
+FIRED honestly (run 2: 4/4 unparseable verifier replies -> `reflect-cap`).
+Two named residuals: (α) the bench-side `HONEST_HALT_SLUGS` allowlist
+(non-frozen) lacks `REFLECT_CAP`, so an honest reflect-cap halt grades
+`honest_halt=False` by construction -- a B7 confound for that clause, pinned
+as a recorded decision (any extension rides its own pre-registered B8); (β) a
+denied-CLOSE approval does not consume the reflect budget -> run 3's slugless
+stall (pre-named residual). Run 3 was functionally the deepest lineage run:
+the verifier claimed 4/4 criteria PASS and the close gate DENIED on an empty
+verification.md -- the disk-truth gates held. The floor stays OPEN, not a
+ceiling. The harness is not production-ready and
 a 4B model is not claimed to drive it unattended to a useful result. See
 `src/fsm_llm_harness/CLAUDE.md` for the full reference, including what is
 measured and what is not.
@@ -220,17 +248,17 @@ measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (5,371 collected)
+pytest                                 # Run all tests (5,372 collected)
 pytest tests/test_fsm_llm/            # Core package tests (1,305 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (137 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (976 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (270 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
-pytest tests/test_fsm_llm_harness/    # Harness tests (1,963 tests)
+pytest tests/test_fsm_llm_harness/    # Harness tests (1,964 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 5,301. The remaining 70 are three root-level files:
+# The 9 suites above sum to 5,302. The remaining 70 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (24)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
@@ -238,7 +266,7 @@ pytest -m integration                 # Integration tests only
 ```
 
 Counts re-measured with `pytest --collect-only` at plan-2026-07-23-2c22e5f6
-step 4; the full run is 5,323 passed / 28 skipped / 2 xfailed in ~250s.
+step 7; the step-7 full run is 5,342 passed / 28 skipped / 2 xfailed in ~250s.
 
 **Conventions**:
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios

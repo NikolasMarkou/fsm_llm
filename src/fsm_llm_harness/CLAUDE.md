@@ -379,7 +379,7 @@ Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_harness/          # 1,963 tests, 10 test files
+pytest tests/test_fsm_llm_harness/          # 1,964 tests, 10 test files
 ```
 
 | File | Tests |
@@ -392,7 +392,7 @@ pytest tests/test_fsm_llm_harness/          # 1,963 tests, 10 test files
 | `test_cli.py` | 103 |
 | `test_storage.py` | 115 |
 | `test_fsm_definition.py` | 87 |
-| `test_live_ollama.py` | 93 (17 live, gated off by default) |
+| `test_live_ollama.py` | 94 (17 live, gated off by default) |
 | `test_extraction_cost.py` | 24 |
 
 **Live tests are DOUBLE-gated** and auto-skip: they need both
@@ -435,6 +435,7 @@ driver-assigned EXECUTE target fix, bars and assertions byte-untouched
 | L6 B4, same floor, response_format PLAN dispatch (floor sha256-identical) | 3/3 | **0/3 -- CONFOUNDED** (could-not-succeed: valid structured_output but renderer gated on `result.success`, discarded the plan; fixed by D-002) |
 | L6 B5, same floor, PLAN gate keys on rendered-disk-content (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor**, but run 1 FIRST-EVER to clear PLAN and reach REFLECT on a valid 11-section plan.md; missed verified_write (S4a) + honest_halt (S4b) |
 | L6 B6, same floor, S4a existence-gated prose EXECUTE target (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor**; run 2 reached REFLECT, target ASSIGNED from prose (`assigned-prose`/uploader.py -- B5 `no-target-token` FALSIFIED, model wrote uploader.py), but verified_write still False (credit-layer wall, S5); runs 1/3 explore-cap |
+| L6 B7, same floor, S5 label-normalization fix + S4b reflect-cap budget (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor, honest**; run 1 explore-cap (S4c); runs 2/3 BOTH reached EXECUTE and BOTH `verified_write=true` (exact normalized label `workspace:uploader.py` -- first lineage rows with ANY true); honest_halt false on both: run 2 gap (α) bench-allowlist lag on `reflect-cap`, run 3 gap (β) denied-CLOSE slugless stall |
 
 This is the first time L4 has MET the standing bar. (The strict row's in-test
 assertion is existential -- >= 1 content-matched dispatch across both arms,
@@ -679,9 +680,11 @@ Known gaps, standing after L6 B3 (the scaffold+honest-approval fix):
   evidence (L6 B2 runs 2/3: `plan_redispatches=3=MAX` + `plan-cap` +
   `honest_halt=true`) -- the worker-failure branch is live-exercised, NOT
   refuted. The `success=True`-but-EMPTY-plan.md slugless-stall residual is CLOSED
-  (D-005); the non-empty-but-invalid variant is S2 (above). Still unbudgeted:
-  REFLECT/PIVOT/CLOSE worker-failure stalls (no generic `STALL` slug is minted,
-  per predecessor D-003).
+  (D-005); the non-empty-but-invalid variant is S2 (above). REFLECT is now
+  budgeted too (`reflect-cap`, plan-2c22e5f6 D-003, live-fired in B7 run 2 on
+  an unroutable verifier); still unbudgeted: PIVOT/CLOSE worker-failure stalls
+  and the denied-CLOSE approval loop (residual β) -- no generic `STALL` slug
+  is minted, per predecessor D-003.
 - **Bare `/workspace` sentinel** -- CLOSED this iteration (D-004): a bare
   `/workspace` (and bare `/plan`) sentinel now maps to the confinement root
   inside the single `_strip_root_sentinel` chokepoint instead of being refused;
@@ -696,50 +699,84 @@ empty-file gate counting, ownership deny branch, live-gate short-circuit) each
 flipped tests red in a scratch copy (93 red total), and `test_cli.py`'s
 exit-code 0/1/2 contract close-read verdict was CLEAN.
 
-Offline, the package is green: 1,963 tests (1,946 passed / 17 skipped;
-+1 for the S5 raw-observation retention round-trip and +10 for the D-002
+Offline, the package is green: 1,964 tests (1,947 passed / 17 skipped;
++1 for the S5 raw-observation retention round-trip, +10 for the D-002
 write-evidence label-normalization regressions, +18 for the D-003
-reflect-cap budget regressions), `ruff` clean, `mypy` 0 errors.
+reflect-cap budget regressions, +1 for the D-005 pin that `REFLECT_CAP`
+stays OUT of the bench `HONEST_HALT_SLUGS` until a pre-registered B8 decides
+otherwise), `ruff` clean, `mypy` 0 errors.
 
 **Not claimed**: that the harness is production-ready, or that a 4B model drives
 it unattended to a useful result YET -- the L6 floor is still **0/3 at >=
-EXECUTE**, now measured across seven blocks (B0-B6). This is the founding e2e
+EXECUTE**, now measured across eight blocks (B0-B7). This is the founding e2e
 goal and it remains OPEN, not abandoned.
 
-**What the seven blocks establish is a per-STATE progression, each wall cleared
+**What the eight blocks establish is a per-STATE progression, each wall cleared
 structurally**: EXPLORE never-called-a-write-tool (fixed, forced write, L8
 0/10->9/10); PLAN empty/invalid/undistributed plan (fixed, response_format
 structured plan, B5 run 1 the first-ever run to clear PLAN and reach REFLECT);
-and now (iteration 8, D-001) the EXECUTE **target-assignment** wall: a real 4b
+the EXECUTE **target-assignment** wall (fixed, iteration 8, D-001: a real 4b
 plan names its files in PROSE, so the backtick-only `derive_execute_target`
-assigned nothing (B5 `no-target-token`). The additive existence-gated prose
-fallback (`_derive_prose_target`) FIXES that -- B6 run 2 assigned
-`uploader.py` from prose (`assigned-prose`) and the model wrote it. That win is
-permanent and unit-proven; `derive_execute_target` stays byte-frozen.
+assigned nothing -- the additive existence-gated prose fallback
+`_derive_prose_target` assigned `uploader.py` in B6 run 2 and the model wrote
+it; `derive_execute_target` stays byte-frozen); and now the EXECUTE
+**credit-layer** wall (S5 -- fixed, plan-2c22e5f6 D-002, measured first, see
+below).
 
-**The wall B6 revealed (S5, the successor)**: verified_write stayed False in the
-full traverse even though the target was assigned AND `uploader.py` changed on
-disk -- the isolated F4 probe (assigned-target -> verified_write 3/3) did NOT
-reproduce in-loop. The `native_fc.py` trace accumulates all turns, so a
-late-turn-only trace is REFUTED as the cause; the mechanism needs the RAW
-per-dispatch EXECUTE observation, which the L6 bench does not yet retain (a
-bench-instrumentation gap -- S5's first task is to retain observations).
+**S5 is DIAGNOSED and FIXED (measured, not guessed).** B6 revealed the wall:
+`verified_write` stayed False in the full traverse even though the target was
+assigned AND `uploader.py` changed on disk. A scratch probe replayed the B6
+run-2 configuration at the same seed with raw per-dispatch observation
+retention active (retention is now a STANDING bench feature -- every L6 row
+carries its full `observations` list plus `artifacts/run-{n}/observations.json`)
+and reproduced the anomaly 1/1. The retained EXECUTE record NAMED the
+mechanism: **(c) label-spelling, absolute-real-path variant** -- the model
+wrote the assigned file via its ABSOLUTE tmp path; `Workspace.resolve()`
+accepted it and the bytes were verified, but the raw-parameter label escaped
+the frozen `_normalized_ws_path` membership test, so the floor failed CLOSED.
+**Division-of-labour is REFUTED as the S5 cause** -- the bundled EXECUTE
+dispatch did its one assigned write correctly -- as are (a) bundled-dispatch
+bookkeeping loss and (b) exception-branch empty evidence, for that run. The
+fix (`roles.py` `_evidence_path`, D-002) labels every verified write through
+the SAME resolve chokepoint that verified the bytes. Its load-bearingness is
+proven OFFLINE: the frozen-floor replay of the retained probe record flips
+`verified_write` False->True under the fix. B7's in-loop 2/2 credits are an
+existence proof, not attribution (the retained labels are POST-normalization,
+so B7's records cannot show what raw spelling the model typed).
 
-**The leading forward hypothesis is DIVISION OF LABOUR, not a model ceiling.**
-The bench data points at each dispatch asking the 4b model to do too much at
-once: the explorer burns its whole budget on wrong-root read churn across ~10
-dispatches (B6 runs 1/3 explore-cap); PLAN authors all 11 sections in one
-response_format call (single-call approval variance, S4c: only ~1/3 of runs
-reach EXECUTE); the executor bundles target-resolution, the workspace write, and
-plan-dir bookkeeping in one dispatch (where the credit-layer write appears to get
-lost, S5). The aimed direction is to DIVIDE each state's job into smaller, more
-constrained sub-dispatches (e.g. per-section PLAN calls -- the pre-approved S4c
-lever; a read-then-write EXPLORE split; an EXECUTE that does one write and
-nothing else) so each call is small enough for 4b to complete reliably. Whether
-that clears the floor is UNMEASURED -- it is the next hypothesis to test, not a
-foregone conclusion in either direction. Through all seven blocks the gates
-stayed mechanical: the model performs every write, the gate reads the
-filesystem, and a confident sentence still cannot open one.
+**L6 B7 (`l6-e2e/B7`, n=3, floor sha256-identical `cbeeb6aa...`, 8th block):
+floor 0/3 honest, both fixes exercised live.** Run 1: honest `explore-cap`
+halt, never reached EXECUTE (S4c variance). Runs 2/3: BOTH reached EXECUTE
+and BOTH earned `verified_write=true` with the exact normalized label
+`workspace:uploader.py` -- the first rows in the B0-B7 lineage with ANY true.
+The S4b reflect-cap budget (`MAX_REFLECT_REDISPATCHES` + honest `reflect-cap`
+slug, routability-keyed, mirroring plan-cap; D-003) landed and FIRED honestly:
+run 2 spent the cap on 4/4 unparseable verifier replies and halted on
+`reflect-cap`. Two named residuals kept both EXECUTE-reaching runs off the
+floor's honest_halt clause: **(α)** the bench-side `HONEST_HALT_SLUGS`
+allowlist (non-frozen) lacks `REFLECT_CAP`, so an honest reflect-cap halt
+grades `honest_halt=false` BY CONSTRUCTION -- a measured B7 confound for that
+clause; the exclusion is now PINNED as a recorded decision (D-005) so any
+extension rides its own pre-registered B8, not a silent regrade; **(β)** a
+denied-CLOSE approval does not consume the reflect budget (D-003 pre-named
+this out of scope), so run 3 ended in a slugless stall. Run 3 was functionally
+the DEEPEST lineage run: the verifier claimed 4/4 criteria PASS and routed
+toward CLOSE, and the close gate DENIED on an empty `verification.md` -- the
+disk-truth gates held; the failure point is the protocol's evidence
+requirement, not traverse inability.
+
+**Forward: the floor stays OPEN, not a ceiling.** Measured successor items,
+in order of evidence: (α) the `HONEST_HALT_SLUGS`/`REFLECT_CAP` allowlist
+decision (pre-registered B8); (β) the denied-CLOSE slugless stall (budget
+coverage or its own honest slug); S4c explore variance (top-of-funnel, ~1/3
+of runs never reach EXECUTE, unchanged since B5/B6 and untouched by this
+plan); and `MAX_REFLECT_REDISPATCHES` tuning, which requires its own bench --
+B7 run 2's 4/4-unparseable verifier is one datapoint that the verifier, not
+the budget, may be the lever. Division-of-labour remains an UNMEASURED
+forward direction for the S4c-class variance, but it is refuted as the S5
+cause. Through all eight blocks the gates stayed mechanical: the model
+performs every write, the gate reads the filesystem, and a confident sentence
+still cannot open one.
 
 ## Exceptions
 

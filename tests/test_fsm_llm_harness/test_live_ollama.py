@@ -2267,6 +2267,29 @@ class TestTheL6RubricPlumbingOffline:
             }
         ) is True
 
+    def test_a_reflect_cap_halt_is_deliberately_not_yet_in_the_honest_set(
+        self,
+    ) -> None:
+        """RECORDED DECISION: ``REFLECT_CAP`` stays OUT of the honest set."""
+        # DECISION plan-2026-07-23T173454-2c22e5f6/D-005: do NOT add
+        # GateSlug.REFLECT_CAP to HONEST_HALT_SLUGS as a drive-by.  The
+        # allowlist is bench-side and NON-frozen, so the edit is trivially
+        # easy -- but it is a bench-GRADING semantics change (it flips what
+        # counts as an honest halt for the L6 floor's honest_halt clause),
+        # and B7 measured gap (alpha) precisely because the S4b reflect-cap
+        # budget (D-003) shipped an honest-BY-DESIGN slug the bench cannot
+        # yet grade as honest.  Extending the set mid-lineage without a
+        # pre-registered block would silently regrade the clause the way
+        # post-hoc rule changes always do; the extension must ride its own
+        # pre-registered block (B8) with the decision made on its merits.
+        # Until then this pin keeps the exclusion an EXPLICIT, tested state
+        # rather than an unpinned accident (reviewer/verifier concern:
+        # nothing previously asserted membership EITHER way).
+        assert GateSlug.REFLECT_CAP not in HONEST_HALT_SLUGS
+        # The slug itself exists and is a real GateSlug -- the exclusion
+        # above is a grading decision, not a typo'd constant.
+        assert GateSlug.REFLECT_CAP == "reflect-cap"
+
     def test_the_L6_manifest_pins_the_same_six_fields_as_the_L4_blocks(self) -> None:
         hb = _bench_module()
         static = {
