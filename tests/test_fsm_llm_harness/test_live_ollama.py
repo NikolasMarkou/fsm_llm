@@ -73,6 +73,7 @@ from fsm_llm_harness.constants import (
     Severity,
 )
 from fsm_llm_harness.exceptions import HarnessArtifactError
+from fsm_llm_harness.hardening import as_int
 from fsm_llm_harness.harness import (
     EXECUTE_TARGET_ASSIGNED,
     HarnessAgent,
@@ -96,7 +97,7 @@ from fsm_llm_harness.tools import (
     gate_files,
     has_bytes,
 )
-from tests.conftest import ollama_available
+from tests.conftest import MockLLM2Interface, ollama_available
 from tests.test_fsm_llm_harness.test_plan_validator import (
     PLAN_MD,
     STATE_MD,
@@ -3076,3 +3077,279 @@ class TestL7ExploreColdStart:
                 key = str(row["reason"])
                 reasons[key] = reasons.get(key, 0) + 1
             print(f"L7 [{arm}] reason distribution: {dict(sorted(reasons.items()))}")
+
+
+# ---------------------------------------------------------------------------
+# L8 -- the EXPLORE redispatch-LOOP runner (W1's core instrument)
+#
+# L7 measured ONE cold-start dispatch per row; L8 drives the harness's OWN
+# multi-dispatch EXPLORE redispatch loop to its real
+# ``MAX_EXPLORE_REDISPATCHES`` horizon and STOPS at EXPLORE -- so the mechanism
+# of the traverse collapse (L6's 0/3) can be classified per dispatch.  The
+# runner reuses the DRIVER's own per-dispatch cycle; the only new code is the
+# outer while-loop.
+# ---------------------------------------------------------------------------
+
+
+def _never_writing_explorer(request: RoleRequest) -> AgentResult:
+    """A scripted explorer that writes NO findings and reports failure.
+
+    Interface contract (2 offline call sites: the faithfulness guard and the
+    stop-at-EXPLORE guard): a zero-LLM ``WorkerFactory`` that never touches the
+    plan directory, so ``findings_count`` stays 0, the EXPLORE gate never
+    opens, and BOTH the hand-rolled loop and the real ``agent.run`` traverse
+    collapse to the same ``explore-cap`` halt.  It is the always-fail worker
+    the loop's faithfulness is proven against -- it must NOT write, or the gate
+    would open and there would be no collapse to compare.
+    """
+    return AgentResult(
+        answer=f"{request.role} produced no findings for {request.state}",
+        success=False,
+        final_context={},
+    )
+
+
+# DECISION plan-2026-07-23T050609-8787a3ca/D-003
+# The loop reconstructs the driver's OWN per-EXPLORE-dispatch cycle out of the
+# REAL methods -- `_assign_explore_topic`, the worker, `_derive_gate_counts`,
+# then `_after_explore_dispatch` -- rather than re-implementing the cap check
+# or the gate condition.  Do NOT "simplify" this by testing
+# `_explore_redispatches >= max` or `findings_count >= threshold` inline here:
+# a hand-rolled cap/gate is exactly the unfaithfulness Pre-Mortem #1 warns
+# about -- the loop would then measure ITS copy of the stop rule, not the
+# driver's.  The real `_after_explore_dispatch` (harness.py:2095) is called
+# every iteration and its returned delta IS the stop decision: an `explore-cap`
+# slug halts, `{}` means the gate cleared, a ledger delta means re-dispatch.
+# The stop-at-EXPLORE property is STRUCTURAL, not enforced: the loop never
+# turns the FSM, so a satisfied gate stops it BEFORE the PLAN transition.  The
+# faithfulness guard below proves this matches `agent.run`'s collapse (same
+# furthest_state, halt slug and EXPLORE dispatch count) over the same scripted
+# worker.  See decisions.md D-003.
+def _one_explore_loop(
+    tmp_path: Path,
+    run: int,
+    *,
+    seed: int,
+    worker_factory: Any | None = None,
+) -> dict[str, Any]:
+    """Drive the REAL EXPLORE redispatch loop over a bare plan dir; STOP at EXPLORE.
+
+    Asserts nothing (like :func:`_one_e2e_run` / :func:`_one_explore_dispatch`);
+    returns a pure rubric dict.  ``worker_factory`` defaults to the live
+    :func:`build_default_worker_factory` explorer -- the subject of the live
+    block -- while the offline guards inject :func:`_never_writing_explorer` so
+    the loop's faithfulness is proven in ``make test`` without a live model
+    (the runner drives the driver's handlers directly and never turns the FSM,
+    so a scripted worker needs no Ollama at all).
+    """
+    root = tmp_path / f"l8-{run}"
+    plan_dir = _l7_plan_dir(root, arm="bare")  # bare mkdir = L6's cold population
+    workspace = _seed_workspace(root)
+    context = _roots(plan_dir, workspace)
+
+    observations: list[dict[str, Any]] = []
+    worker = worker_factory
+    if worker is None:
+        worker = build_default_worker_factory(
+            Workspace(str(workspace)),
+            model=MODEL,
+            timeout_seconds=600,
+            retry_attempts=1,
+            # Pinned for the reason L6/L7 pin it (D-048): the arm this block's
+            # numbers are measured on must survive a future default flip.
+            native_function_calling=True,
+            seed=seed,
+            observer=lambda record: observations.append(dict(record)),
+        )
+    agent = _live_agent(worker, approvals=DiskEvidenceApprovals(plan_dir))
+    agent._sync_state_doc(HarnessStates.EXPLORE, context)
+
+    dispatches: list[dict[str, Any]] = []
+    gate_cleared = False
+    halt_slug: str | None = None
+    started = time.monotonic()
+    while True:
+        topic = agent._assign_explore_topic(context)
+        calls: list[dict[str, Any]] = []
+        obs_before = len(observations)
+        original = _spy_on_tools(calls)
+        try:
+            result: AgentResult | None = worker(
+                _l7_explore_request(plan_dir, workspace, topic=topic)
+            )
+            error: Exception | None = None
+        except Exception as exc:  # a raising worker is a real failed attempt
+            result, error = None, exc
+        finally:
+            ToolRegistry.execute = original  # type: ignore[method-assign]
+
+        # Merge disk-derived counts into context EXACTLY as the driver does
+        # (harness.py:1394-1395 applies `_derive_gate_counts` before
+        # `_post_dispatch`), so `_after_explore_dispatch` reads the same
+        # `findings_count` a real dispatch would.
+        context.update(agent._derive_gate_counts(HarnessStates.EXPLORE, context))
+        found_after = as_int(context.get(ContextKeys.FINDINGS_COUNT), 0)
+        new_obs = observations[obs_before:]
+        last = new_obs[-1] if new_obs else {}
+        # The per-dispatch disk-derived primary metric, read through the same
+        # confined `has_bytes` the EXPLORE gate itself applies.
+        memory = PlanMemory(plan_dir, role=ROLE_FOR_READING)
+        bytes_on_disk = bool(
+            topic
+            and has_bytes(memory.read_text, f"{ArtifactNames.FINDINGS_DIR}/{topic}.md")
+        )
+        dispatches.append(
+            {
+                "dispatch": len(dispatches) + 1,
+                "assigned_topic": topic,
+                "tool_calls": len(calls),
+                "tool_trace": calls,
+                "write_tool_issued": any(c["tool"] in WRITE_TOOLS for c in calls),
+                "bytes_on_disk": bytes_on_disk,
+                "success": bool(result.success) if result is not None else False,
+                "findings_count": found_after,
+                # Diagnostics from the factory's observer (live only): the
+                # MECHANISM the classifier partitions on in later steps.
+                "reason": last.get("failure_reason"),
+                "objects": last.get("top_level_objects"),
+                "answer_chars": last.get("answer_chars"),
+                "write_evidence_paths": list(last.get("write_evidence_paths") or ()),
+            }
+        )
+
+        # The REAL redispatch decision -- the driver's own counter and cap.
+        delta = agent._after_explore_dispatch(result, error, context)
+        if delta.get(ContextKeys.LAST_GATE_SLUG) == GateSlug.EXPLORE_CAP:
+            halt_slug = GateSlug.EXPLORE_CAP
+            break
+        if not delta:  # gate satisfied -> the driver would transition to PLAN
+            gate_cleared = found_after >= agent.findings_threshold
+            break
+        context.update(delta)  # ledger delta re-opened the key; loop again
+
+    return {
+        "run": run,
+        "seed": seed,
+        "dispatches": dispatches,
+        "dispatches_used": len(dispatches),
+        "gate_cleared": gate_cleared,
+        "halt_slug": halt_slug,
+        # Structural, not enforced: the runner never transitions, so the
+        # furthest state it can ever reach IS EXPLORE.
+        "furthest_state": HarnessStates.EXPLORE,
+        "findings_nonempty": len(_findings_on_disk(plan_dir)),
+        "elapsed_s": round(time.monotonic() - started, 1),
+    }
+
+
+def _real_run_collapse(tmp_path: Path, run: int) -> dict[str, Any]:
+    """Drive the FULL ``agent.run`` traverse over the always-fail explorer.
+
+    Interface contract (1 call site, the faithfulness guard): OFFLINE -- the
+    harness FSM's own Pass-1/Pass-2 turns are served by
+    :class:`MockLLM2Interface` (the mechanism the 300 offline ``test_harness_
+    agent`` cases use), so this needs no Ollama; the mock extracts nothing, so
+    the collapse advances only on the driver's disk-derived gate, exactly as
+    the live FSM would.  Returns the ``(furthest_state, halt_slug,
+    explore_dispatches)`` the real driver produces, extracted the way
+    :func:`_one_e2e_run` extracts them (the dispatch log for the state set,
+    ``final_context`` for the slug).
+    """
+    root = tmp_path / f"real-{run}"
+    plan_dir = root / "plan"
+    plan_dir.mkdir(parents=True)
+    workspace = _seed_workspace(root)
+    recorder = _PassThroughRecorder(_never_writing_explorer)
+    agent = HarnessAgent(
+        worker_factory=recorder,
+        approval_callback=DiskEvidenceApprovals(plan_dir),
+        llm_interface=MockLLM2Interface(),
+    )
+    result = agent.run(GOAL, initial_context=_roots(plan_dir, workspace))
+    states: list[str] = []
+    for request in recorder.requests:
+        if request.state not in states:
+            states.append(request.state)
+    return {
+        "furthest_state": _furthest_state(states),
+        "halt_slug": result.final_context.get(ContextKeys.LAST_GATE_SLUG),
+        "explore_dispatches": sum(
+            1 for r in recorder.requests if r.state == HarnessStates.EXPLORE
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# L8's UNGATED guards.  Every one of these runs in a normal `make test`.
+# ---------------------------------------------------------------------------
+
+
+class TestL8ExploreLoopRunner:
+    """UNGATED offline guards for the L8 EXPLORE redispatch-loop runner.
+
+    Every test drives a SCRIPTED always-fail worker (zero LLM) and serves the
+    FSM's own turns from :class:`MockLLM2Interface`, so all of this runs in the
+    default ``make test`` path and pins the runner's FAITHFULNESS and its
+    stop-at-EXPLORE property BEFORE any live spend.
+    """
+
+    def test_the_loop_matches_agent_run_on_the_collapse_case(
+        self, tmp_path: Path
+    ) -> None:
+        """Pre-Mortem #1 / A1 guard: the hand-rolled loop and the REAL
+        ``agent.run`` traverse collapse IDENTICALLY over the always-fail
+        explorer -- same furthest state, same honest halt slug, same EXPLORE
+        dispatch count.  If they diverge, the runner is not faithful.
+        """
+        loop = _one_explore_loop(
+            tmp_path / "loop", 1, seed=1, worker_factory=_never_writing_explorer
+        )
+        real = _real_run_collapse(tmp_path / "real", 1)
+
+        # The initial dispatch plus the REAL cap's worth of redispatches.
+        expected_dispatches = Defaults.MAX_EXPLORE_REDISPATCHES + 1
+        # Both paths stop at EXPLORE ...
+        assert loop["furthest_state"] == HarnessStates.EXPLORE
+        assert real["furthest_state"] == HarnessStates.EXPLORE
+        # ... halt on the same honest cap slug ...
+        assert loop["halt_slug"] == GateSlug.EXPLORE_CAP
+        assert real["halt_slug"] == GateSlug.EXPLORE_CAP
+        # ... and spend the SAME number of dispatches.
+        assert loop["dispatches_used"] == expected_dispatches
+        assert real["explore_dispatches"] == expected_dispatches
+        assert loop["dispatches_used"] == real["explore_dispatches"]
+
+    def test_the_loop_stops_at_explore_and_honors_the_real_cap(
+        self, tmp_path: Path
+    ) -> None:
+        """The runner never ranks above EXPLORE, reads the REAL cap constant,
+        and reports the honest ``explore-cap`` halt with no gate clearance.
+        """
+        loop = _one_explore_loop(
+            tmp_path, 1, seed=7, worker_factory=_never_writing_explorer
+        )
+        assert loop["furthest_state"] == HarnessStates.EXPLORE
+        # `furthest_state` never RANKS above EXPLORE (the stop-at-EXPLORE claim).
+        assert (
+            E2E_STATE_RANK[loop["furthest_state"]]
+            == E2E_STATE_RANK[HarnessStates.EXPLORE]
+        )
+        # The cap is READ from the constant, not hardcoded: change
+        # `MAX_EXPLORE_REDISPATCHES` and this assertion moves with it.
+        assert loop["dispatches_used"] == Defaults.MAX_EXPLORE_REDISPATCHES + 1
+        assert loop["halt_slug"] == GateSlug.EXPLORE_CAP
+        assert loop["gate_cleared"] is False
+        # The always-fail worker wrote nothing, so the gate stayed shut.
+        assert loop["findings_nonempty"] == 0
+        # Every dispatch is a real per-dispatch row carrying the classifier's
+        # inputs (the spy trace and the disk-derived findings count).
+        assert len(loop["dispatches"]) == loop["dispatches_used"]
+        for row in loop["dispatches"]:
+            assert {
+                "assigned_topic",
+                "tool_trace",
+                "write_tool_issued",
+                "bytes_on_disk",
+                "findings_count",
+            } <= set(row)
+            assert row["findings_count"] == 0
