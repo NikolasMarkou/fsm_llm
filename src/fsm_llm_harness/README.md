@@ -370,23 +370,56 @@ got its first live evidence: `MAX_PLAN_REDISPATCHES=3` fired at the cap with a
 **S1** the PLAN-writer valid-`plan.md` blocker (the new e2e wall), **S2** the
 non-empty-but-schema-invalid-`plan.md` slugless stall (run 1).
 
+### L6 B3 — the scaffold+honest-approval fix (S2 FIXED, gates validated, but scaffold+append REFUTED)
+
+The user-chosen fix seeds `plan.md` with the 11 `PlanSchema.SECTIONS` headers at
+PLAN entry (structure only), steers the plan-writer to fill them via
+`append_plan_file`, and aligns `_plan_has_content` and the approval gate on ONE
+bar (`_plan_is_approvable` = valid `PlanDoc` AND every section non-placeholder).
+**L6 B3** (`l6-e2e/B3`, n=3, one look, committed; floor sha256 **identical** to
+B1/B2 `cbeeb6aa…`; honest-approval confound declared in `PRE_REGISTRATION_B3.md`)
+measured **0/3 at the floor** (all 3 `furthest_state=plan`, `verified_write=false`)
+— but the shape changed decisively:
+
+- **S2 is FIXED**: all 3 runs halt on the honest `plan-cap` slug with
+  `honest_halt=true`; the slugless `slug=None` stall (B2 run 1) no longer occurs.
+- The plan-writer now writes **15-18 KB** of content (`plan_md_bytes`
+  17122 / 15592 / 18455, up from B2's 0 / 0 / 4153) — 4b **can** produce
+  substantial plan content.
+- The **scaffold+append mechanism is REFUTED**: `append_plan_file` appends to the
+  file END, so content does not distribute into the 11 ordered sections — run 1
+  is a valid `PlanDoc` but with 10 placeholder sections (content concentrated in
+  one), runs 2/3 hit a `plan-section` ERROR (appended content duplicated headers).
+- The **honest approval earned its keep live**: run 1's valid-but-1-section plan
+  was correctly DENIED — under a loose bar it would have vacuously passed to
+  EXECUTE; the aligned strict bar prevented exactly that hollow gate.
+
+The floor stays **0/3** and the wall advanced from "empty/invalid plan" to
+"content-not-distributed." The aimed successor is a **`response_format`
+structured plan** (the model authors 11 fields, the driver renders
+correctly-structured Markdown — distribution by construction). Diagnosis
+confidence is STRONG but not byte-confirmed (the `tmp_path` plan dirs are
+deleted post-session; it rests on the audit signature).
+
 ## What is NOT claimed
 
 - The harness is **NOT production-ready**.
 - A 4B model is **NOT claimed to drive it unattended to a useful result** — the
-  L6 floor is still **0/3 at ≥ EXECUTE**, measured three times (B0, B1, B2); this
-  reinforces the claim's absence, it does not soften it.
-- **L6 end-to-end is measured 0/3 (unmet)** in all three committed blocks — now
-  blocked at **PLAN** (the plan-writer can't emit a valid plan.md), no longer at
-  EXPLORE.
+  L6 floor is still **0/3 at ≥ EXECUTE**, measured FOUR times now (B0, B1, B2,
+  B3); this reinforces the claim's absence, it does not soften it.
+- **L6 end-to-end is measured 0/3 (unmet)** in all four committed blocks — now
+  blocked at **PLAN** (the plan-writer can't produce an approvable, all-sections
+  -filled plan.md), no longer at EXPLORE.
 - The **zero-byte cold-start seeding lever was refuted** (Fisher p = 0.6843) and
   ships unwired.
-- The EXPLORE-loop never-called mechanism is now **FIXED** (the forced-write
-  turn; L8 B1 0/10 → 9/10 p=0.00012, L6 B2 EXPLORE cleared 3/3) — the MODEL
-  issues the write, the ethos is intact. But the **≥ EXECUTE e2e goal is still
-  0/3**: the new dominant wall is the 4B plan-writer's inability to emit a valid
-  11-section plan.md (S1), and a non-empty-but-invalid plan.md still stalls
-  sluglessly (S2). Both are named, unmeasured successors.
+- The EXPLORE-loop never-called mechanism is **FIXED** (the forced-write turn;
+  L8 B1 0/10 → 9/10 p=0.00012, L6 B2 EXPLORE cleared 3/3), and iteration 6 FIXED
+  the slugless PLAN stall (S2: L6 B3 3/3 honest `plan-cap`) and confirmed 4b
+  writes 15-18 KB plans — the MODEL issues the write, the honest gates held (B3
+  run 1's hollow plan was DENIED). But the **≥ EXECUTE e2e goal is still 0/3**:
+  the scaffold+append mechanism was refuted (append-to-end doesn't distribute
+  content into the 11 sections), so the dominant wall is now DISTRIBUTING plan
+  content into sections — the aimed fix is a `response_format` structured plan.
 
 What IS claimed is narrow and mechanical: the gates read the filesystem, and a
 confident sentence cannot open one.

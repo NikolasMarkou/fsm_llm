@@ -431,6 +431,7 @@ driver-assigned EXECUTE target fix, bars and assertions byte-untouched
 | L6 B0 end-to-end REAL workers: 3/3 runs reach >= EXECUTE, >= 1 verified write, honest halt | 3/3 | **0/3 -- NOT MET** (2 explore-cap, 1 slugless PLAN stall) |
 | L6 B1, same >= EXECUTE / honest-halt clauses, verified-write TIGHTENED to EXECUTE-state workspace write | 3/3 | **0/3 -- NOT MET** (3/3 furthest=explore, slug=explore-cap, honest; zero slugless stalls) |
 | L6 B2, same floor, forced-write fix live (floor sha256-identical to B1) | 3/3 | **0/3 -- NOT MET at floor, but all 3/3 now reach PLAN** (EXPLORE blocker FIXED; new PLAN-writer blocker) |
+| L6 B3, same floor, scaffold+honest-approval fix live (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor** (S2 slugless-stall FIXED: 3/3 honest plan-cap; plan-writer now writes 15-18KB; but scaffold+append refuted -- content doesn't distribute into sections) |
 
 This is the first time L4 has MET the standing bar. (The strict row's in-test
 assertion is existential -- >= 1 content-matched dispatch across both arms,
@@ -592,21 +593,76 @@ plan.md passes the bytes check, is denied at approval, and stalls `slug=None`;
 `_plan_has_content` should check plan VALIDITY (parseable `PlanDoc`), not just
 bytes.
 
-Known gaps, standing after L8 B1 + L6 B2 (the forced-write fix):
-- **#1 gap -- the PLAN-writer valid-`plan.md` blocker (S1)**: the never-called
-  EXPLORE mechanism is now FIXED (the forced-write turn; L8 B1 0/10 -> 9/10,
-  L6 B2 EXPLORE cleared 3/3). The new dominant e2e wall is a DIFFERENT failure
-  class -- the 4b plan-writer cannot emit a valid 11-section `plan.md`
-  (structured-output conformance, not never-called). It needs its own
-  investigation: a `response_format` plan schema, a plan.md scaffold the model
-  fills, or a looser accepted schema. UNMEASURED how far a fix here would carry
-  a run past PLAN toward the >= EXECUTE floor.
-- **The non-empty-but-schema-invalid-`plan.md` slugless stall (S2)**: a NARROW
-  harness honesty defect surfaced by L6 B2 run 1. Predecessor D-005 closed the
-  EMPTY-plan.md slugless stall via `_plan_has_content` (a BYTES check), but a
-  non-empty-but-INVALID plan.md passes the bytes check, is denied at approval,
-  and stalls `slug=None` (`honest_halt=false`); `_plan_has_content` should check
-  plan VALIDITY (parseable `PlanDoc`), not just bytes.
+**L6 B3 (NEW this iteration) FIXES S2 and VALIDATES the honest-approval /
+aligned-gates machinery LIVE, but REFUTES this iteration's chosen scaffold+append
+S1 mechanism -- the floor stays 0/3 and the wall advances from "empty/invalid
+plan" to "content-not-distributed".** The user-chosen fix (D-001) is a
+scaffold + honest-approval design: at PLAN entry the driver seeds `plan.md` with
+the 11 `PlanSchema.SECTIONS` headers (structure only), the plan-writer fills
+sections via append (`force_final_tool=append_plan_file` for PLAN + a
+deliverable-line instruction), and `_plan_has_content` + the approval gate now
+share ONE bar (`_plan_is_approvable` = valid `PlanDoc` AND every section
+non-placeholder), closing the slugless-stall gap. **L6 B3** (`l6-e2e/B3`, n=3,
+one look, committed; floor sha256 verified IDENTICAL to B1/B2 `cbeeb6aa...`
+before AND after; honest-approval confound DECLARED in `PRE_REGISTRATION_B3.md`)
+measured **0/3 at the floor -- the floor test FAILS as measured**, all 3 runs
+`furthest_state=plan`, `verified_write=false`. But the shape changed decisively.
+(1) **S2 is FIXED**: all 3 runs halt on the honest `plan-cap` slug with
+`honest_halt=true`; the slugless `slug=None` stall (B2 run 1) NO LONGER OCCURS.
+(2) The plan-writer now writes **15-18 KB** of real content (`plan_md_bytes`
+17122 / 15592 / 18455, up from B2's 0 / 0 / 4153) -- 4b IS capable of producing
+substantial plan content. (3) BUT the **scaffold+append mechanism is REFUTED**:
+`append_plan_file` appends to the FILE END, so content does not distribute into
+the 11 ordered sections -- run 1's plan.md parses as a valid `PlanDoc` (no
+`plan-section` ERROR) yet has **10 placeholder sections** (all ~17 KB
+concentrated in one; audit `plan-section` WARNING x10), and runs 2/3 hit a
+`plan-section` ERROR (the appended content included its own `## ` headers ->
+duplicate sections -> invalid). Appending cannot fill in-place sections. (4) The
+**honest approval earned its keep LIVE**: run 1's valid-but-1-section plan was
+correctly DENIED -- under a loose not-all-placeholder bar it would have
+VACUOUSLY passed to EXECUTE (1 real + 10 empty = a hollow plan); the aligned
+strict all-non-placeholder bar prevented exactly the hollow gate the design set
+out to close. The ethos held live. Hedge honestly: the S2 honesty fix and the
+aligned-gates machinery are permanent, VALIDATED wins that ship regardless; the
+S1 CAPABILITY goal (a full run reaching >= EXECUTE) is NOT met; the wall
+advanced from "empty/invalid plan" to "content authored but not distributed
+into the right headers." Diagnosis confidence is STRONG but not byte-confirmed
+(the L6 plan dirs are pytest `tmp_path`, deleted post-session, so run 1's raw
+17 KB plan.md is gone; the append-to-end conclusion rests on the audit signature
+-- valid-`PlanDoc` + 10 placeholder + 17 KB = concentrated in one section for
+run 1, `plan-section` ERROR = duplicate headers for runs 2/3 -- which is
+decisive but derived; a future bench should retain FAILED plan.md artifacts).
+**Aimed successor (grounded, not guessed)**: the model produces ample content
+but cannot place it under the right headers by appending, so the next mechanism
+must DISTRIBUTE content into sections. Strongest = the **`response_format`
+structured plan** (EXPLORE candidate B, NOT chosen this iteration): the model
+authors 11 fields, the driver RENDERS them into correctly-structured Markdown
+(distribution by construction, no append-to-end flaw). Secondary = seed the
+scaffold as a readable TEMPLATE and have the model OVERWRITE the full plan
+(riskier -- reintroduces free-text-structure risk).
+
+Known gaps, standing after L6 B3 (the scaffold+honest-approval fix):
+- **#1 gap -- DISTRIBUTE plan content into the 11 sections**: L6 B3 proved 4b
+  CAN write substantial plan content (15-18 KB) but the scaffold+append
+  mechanism cannot place it under the right headers -- `append_plan_file`
+  appends to the file END, so content concentrates in one section (valid but
+  hollow) or duplicates headers (invalid). The scaffold seed + append steering
+  are SHIPPED but MEASURED-INEFFECTIVE for this goal (the S2/honesty fixes they
+  came bundled with DO stand). The aimed fix is the **`response_format`
+  structured plan** (the model authors 11 fields, the driver renders correctly
+  structured Markdown -- distribution by construction); a secondary is a
+  template-overwrite scaffold. UNMEASURED how far a fix here would carry a run
+  past PLAN toward the >= EXECUTE floor.
+- **The slugless PLAN stall (S2) -- CLOSED/FIXED this iteration (L6 B3, 3/3)**:
+  predecessor D-005 closed the EMPTY-plan.md slugless stall via a BYTES-only
+  `_plan_has_content`, but a non-empty-but-INVALID plan.md (B2 run 1) still
+  passed the bytes check, was denied at approval, and stalled `slug=None`. The
+  aligned `_plan_is_approvable` bar (valid `PlanDoc` AND all-non-placeholder,
+  shared by `_plan_has_content` and the approval stub) now consumes the
+  redispatch budget for that shape too, so exhaustion halts on the honest
+  `plan-cap` slug -- L6 B3 shows 3/3 `plan-cap` + `honest_halt=true`, zero
+  slugless stalls. No generic `STALL` slug was minted (predecessor D-003
+  respected).
 - **PLAN redispatch budget**: `MAX_PLAN_REDISPATCHES=3` now has its FIRST live
   evidence (L6 B2 runs 2/3: `plan_redispatches=3=MAX` + `plan-cap` +
   `honest_halt=true`) -- the worker-failure branch is live-exercised, NOT
@@ -632,15 +688,19 @@ Offline, the package is green: 1,931 tests, `ruff` clean, `mypy` 0 errors.
 
 **Not claimed**: that the harness is production-ready, or that a 4B model
 drives it unattended to a useful result -- the L6 floor is still **0/3 at
->= EXECUTE**, measured three times now (B0, B1, B2), which REINFORCES this
-claim's absence, it does not soften it. What DID advance, honestly and for the
-first time: the forced-write fix cleared the EXPLORE blocker of the last four
-iterations (L8 B1 0/10 -> 9/10, p=0.00012) and moved the wall a full state --
-all 3/3 L6 B2 runs now reach PLAN -- but the end-goal is unmet because the wall
-moved to a new PLAN-writer blocker (the 4b model cannot emit a valid 11-section
-plan.md). Through all of this the gates stayed mechanical: the MODEL performs
-the write (no driver salvage), the gate reads the filesystem, and a confident
-sentence still cannot open one.
+>= EXECUTE**, measured FOUR times now (B0, B1, B2, B3), which REINFORCES this
+claim's absence, it does not soften it. What iteration 6 DID advance, honestly:
+the slugless PLAN stall (S2) is FIXED (L6 B3 3/3 halt on the honest `plan-cap`
+slug, zero slugless stalls), and 4b was confirmed to write substantial plan
+content (15-18 KB). But the plan-writer still cannot produce an APPROVABLE
+(all-sections-filled) plan -- the chosen scaffold+append mechanism was REFUTED
+(append-to-end concentrates content in one section or duplicates headers, it
+does not distribute into the 11 sections), so the wall advanced from
+"empty/invalid plan" to "content-not-distributed" but was not cleared. Through
+all of this the gates stayed mechanical: the honest approval DENIES a hollow
+(1-real-section) plan (validated live in B3 run 1), the MODEL performs the write
+(no driver salvage), the gate reads the filesystem, and a confident sentence
+still cannot open one.
 
 ## Exceptions
 

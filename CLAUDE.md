@@ -141,9 +141,18 @@ schema-invalid plan.md -> approval denied -> slugless stall). W3 got its first
 live evidence: `MAX_PLAN_REDISPATCHES=3` fired at the cap with a `plan-cap`
 honest halt 2/3 (not refuted). Two named successors carry forward (S1 the
 PLAN-writer valid-plan.md blocker; S2 the non-empty-but-invalid-plan.md slugless
-stall). The harness is not production-ready and a 4B model is not claimed to
-drive it unattended to a useful result. See `src/fsm_llm_harness/CLAUDE.md` for
-the full reference, including what is measured and what is not.
+stall). Iteration 6's scaffold+honest-approval fix then CLOSED the S2 slugless
+stall (L6 B3, `l6-e2e/B3`, n=3, floor sha256-identical: 3/3 halt on the honest
+`plan-cap` slug, zero slugless stalls) and confirmed 4b writes substantial plan
+content (15-18 KB), but the scaffold+append mechanism was REFUTED --
+`append_plan_file` appends to the file END, so content does not distribute into
+the 11 sections (concentrated in one, or duplicate headers) and the floor stays
+**0/3** (measured four times now: B0/B1/B2/B3). The aimed successor is a
+`response_format` structured plan (the model authors 11 fields, the driver
+renders correctly-structured Markdown). The harness is not production-ready and
+a 4B model is not claimed to drive it unattended to a useful result. See
+`src/fsm_llm_harness/CLAUDE.md` for the full reference, including what is
+measured and what is not.
 
 ## Code Conventions
 
