@@ -115,13 +115,23 @@ cold-start EXPLORE dispatch over a bare `mkdir` scored bare **5/12** vs seeded
 **7/12** (Fisher two-sided p=0.6843 -- the zero-byte protocol-skeleton lever
 NOT VALIDATED). L7 measured one topic, one dispatch per row (not a redispatch
 loop), and one dispatch's write is not EXPLORE-gate clearance, so it does not
-by itself locate L6's 0/3; the LEADING HYPOTHESIS it points to -- unmeasured --
-is a multi-dispatch redispatch-loop / structured-output-parse failure rather
-than a first-dispatch one. Two named deferred defects were closed this
-iteration (bare
+by itself locate L6's 0/3. That successor hypothesis has now been MEASURED: a
+dedicated single-state redispatch-LOOP bench (`l8-explore-loop/B0`, n=10 loops /
+100 dispatches, per-tool-call spy, one look, committed with a tracked
+`PRE_REGISTRATION.md`) partitioned every failed dispatch by mechanism and found
+**never-called-a-write-tool (family i) = 75/89 (84%) DOMINANT**, `empty-reply`
+(family iii) = 14/89 (16%), and wrong-root / accepted-no-bytes / unparseable =
+0; `gate_cleared` 0/10 (Wilson [0.000, 0.278], still no run to PLAN). This
+REFUTES the multi-dispatch parse-collapse guess as the primary driver: the
+explorer produces a parseable answer (`unverified-write`, `objects=1`) and issues
+only read/list calls (with wrong-root READ churn) but NEVER calls a write tool.
+Per the pre-registered rule the single W2 follow-on is AIMED at a driver-side
+FORCED-WRITE EXPLORE target (the EXECUTE 2/40->40/40 pattern), not
+`response_format`-primary -- a LATER iteration, not executed here. Two named
+deferred defects were closed in the prior iteration (bare
 `/workspace`-sentinel confinement repair; the `success=True`-but-empty-plan.md
 slugless PLAN stall). The PLAN-and-later machinery stays offline-verified but
-live-unexercised (no B1 run left EXPLORE).
+live-unexercised (no run has left EXPLORE).
 The harness is not production-ready and a 4B model is not claimed to
 drive it unattended to a useful result. See `src/fsm_llm_harness/CLAUDE.md` for
 the full reference, including what is measured and what is not.

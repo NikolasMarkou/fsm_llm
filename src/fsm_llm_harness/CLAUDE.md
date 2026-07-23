@@ -502,18 +502,43 @@ within noise and is not read as a signal; the NOT-VALIDATED verdict rests on
 the primary p=0.6843 alone.) L6's honest 0/3, every row naming its blocking
 state and slug, is the package's end-to-end status.
 
-Known gaps, standing after B1 + the L7 characterization block:
-- **First-dispatch cold-start is ruled out; the traverse mechanism is an
-  unmeasured hypothesis**: the L7 bench (the named EXPLORE-only successor) has
-  now been RUN and measured the zero-byte protocol-skeleton lever NOT VALIDATED
-  (bare 5/12, seeded 7/12, Fisher p=0.6843;
-  `scripts/bench_data/l7-explore-coldstart/B0/`). L7 exercised one topic, one
-  dispatch per row -- it did NOT run a redispatch loop or any second topic, so
-  "L6's 0/3 is a traverse failure" is a hypothesis the refutation POINTS TO, not
-  a measured result. The refutation localizes the next successor: a dedicated
-  single-state redispatch-LOOP bench (not single-dispatch) instrumented with
-  per-tool-call traces to separate never-calling-a-write-tool from wrong-root
-  from unparseable-output (`empty-reply` / `objects=0` dominates BOTH L7 arms).
+**L8 (`l8-explore-loop/B0`, NEW this iteration) MEASURES the traverse mechanism
+the L7 hypothesis only pointed to -- and REFUTES parse-collapse as the primary
+driver.** The named successor -- a single-state EXPLORE redispatch-LOOP bench
+(not L7's single dispatch) instrumented with a per-tool-call spy on
+`ToolRegistry.execute` -- has now been built and RUN once (n=10 loops, 100
+dispatches, `ollama_chat/qwen3.5:4b` digest `2a654d98e6fb`, one look, committed
+under `scripts/bench_data/l8-explore-loop/B0/` with a tracked `PRE_REGISTRATION.md`
+fixing n + the mechanism vocabulary + the W1->W2 decision rule before the run).
+A deterministic classifier partitioned every FAILED dispatch into exactly one
+of six buckets (partition hard-gate passed). Pooled result: `gate_cleared`
+**0/10** (Wilson95 [0.000, 0.278] -- no run reached PLAN, consistent with L6),
+and of 89 failed dispatches **`never-called` (family i) = 75 (84%)**,
+**`empty-reply` (family iii) = 14 (16%)**, `wrong-root` (ii) / `accepted-no-bytes`
+/ `unparseable` = **0**. The per-tool-call trace resolves what the
+dispatch-boundary log could not: the dominant `reason=unverified-write objects=1`
+signature (a PARSEABLE answer claiming work) has **`write_calls=0`** -- the
+explorer issues only read/list tools (with heavy wrong-root READ churn,
+`read_file`<->`read_plan_file`) and NEVER calls a write tool. So the dominant
+mechanism is **(i) never-called-a-write-tool**, measured, NOT the
+`empty-reply`/parse-collapse the leading hypothesis predicted (which is real but
+secondary at 16%). Per the pre-registered rule this AIMS the single W2 follow-on
+at a driver-side FORCED-WRITE EXPLORE target (mirroring the EXECUTE 2/40->40/40
+structural fix), NOT `response_format`-primary (which would target only the 16%
+tail). The forced-write fix + a fresh L6 B2 are the named successor, a LATER
+iteration -- NOT executed here (D-004). A secondary, UNMEASURED contributing
+hypothesis the trace surfaces: the explorer may burn its 14-turn budget on
+failed wrong-root READ calls before ever reaching a write.
+
+Known gaps, standing after B1 + the L7/L8 characterization blocks:
+- **The traverse mechanism is now MEASURED (i) never-called, not an unmeasured
+  hypothesis**: L8 (above) ran the per-tool-call redispatch-LOOP bench and found
+  never-called dominant (75/89) with parse-collapse secondary (14/89), gate
+  0/10. What is now the AIMED-but-UNEXECUTED successor: the driver-side
+  forced-write EXPLORE target + a fresh L6 B2 (n=3, floor sha256-identical to
+  B1). What remains UNMEASURED: whether that forced-write fix actually lifts the
+  gate-clear rate (it is EXECUTE-proven, EXPLORE-untested), and whether the
+  wrong-root-READ churn is a co-cause worth a second lever.
 - **PLAN redispatch budget**: `MAX_PLAN_REDISPATCHES=3` is now GRADEABLE (Defect
   C: an additive `plan_redispatches` L6 row field) but still has ZERO live
   evidence -- no run has reached PLAN. The `success=True`-but-empty-plan.md

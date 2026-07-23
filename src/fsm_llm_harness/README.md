@@ -284,11 +284,33 @@ a bare directory is not impossible (5/12), so **first-dispatch impossibility is
 ruled out** as the mechanism. What it does NOT establish: all 24 rows used one
 topic and one dispatch (no redispatch loop), and one dispatch's write is not
 the same as clearing the 3-findings EXPLORE gate, so the 5/12-vs-0/3 magnitudes
-are not directly comparable. The **leading successor hypothesis** — pointed to
-by, not proven by, this block — is that L6's 0/3 is a multi-dispatch
-redispatch-loop / structured-output-parse (`objects=0`, `empty-reply`) failure
-rather than a first-dispatch one; that mechanism is **unmeasured** and is the
-target of the named successor redispatch-loop bench.
+are not directly comparable. That successor hypothesis has now been **measured**
+by the named redispatch-loop bench — see below.
+
+### L8 — the EXPLORE redispatch-loop mechanism (`l8-explore-loop/B0`, n=10)
+
+A single-state EXPLORE **loop** bench (not L7's single dispatch), instrumented
+with a per-tool-call spy on `ToolRegistry.execute`, run once (100 dispatches,
+`qwen3.5:4b`, committed with a tracked `PRE_REGISTRATION.md`). A deterministic
+classifier partitioned every failed dispatch into exactly one mechanism bucket
+(partition hard-gate passed). Pooled over 89 failed dispatches:
+
+| Mechanism (family) | Count |
+|---|---|
+| `never-called`-a-write-tool (i) | **75 (84%)** |
+| `empty-reply` (iii) | 14 (16%) |
+| `wrong-root` (ii) / `accepted-no-bytes` / `unparseable` | 0 |
+
+`gate_cleared` **0/10** (Wilson 95% [0.000, 0.278]) — no run reached PLAN. This
+**refutes** the parse-collapse hypothesis as the *primary* driver: the explorer
+produces a parseable answer (`unverified-write`, `objects=1`) and issues only
+read/list calls (with wrong-root READ churn) but **never calls a write tool**.
+The dominant mechanism is measured to be **(i) never-called-a-write-tool**, so
+per the pre-registered rule the single follow-on fix is AIMED at a driver-side
+**forced-write EXPLORE target** (the EXECUTE 2/40→40/40 pattern), not
+`response_format`-primary — a later iteration, not executed here. A secondary,
+unmeasured contributing hypothesis: the explorer may exhaust its turn budget on
+failed wrong-root reads before ever writing.
 
 ## What is NOT claimed
 
@@ -300,6 +322,9 @@ target of the named successor redispatch-loop bench.
   committed live run reached PLAN.
 - The **zero-byte cold-start seeding lever was refuted** (Fisher p = 0.6843) and
   ships unwired.
+- The EXPLORE-loop mechanism is now **measured** ((i) never-called-a-write-tool,
+  84%, `l8-explore-loop/B0`), but the AIMED forced-write fix is **not executed
+  and unproven for EXPLORE** — it is EXECUTE-proven only, a named later iteration.
 
 What IS claimed is narrow and mechanical: the gates read the filesystem, and a
 confident sentence cannot open one.
