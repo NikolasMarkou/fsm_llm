@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -1770,6 +1771,24 @@ def _verified_execute_workspace_write(
     return False
 
 
+def _jsonable_observation(record: Mapping[str, Any]) -> dict[str, Any]:
+    """JSON-safe copy of one observer record: tuple values cast to lists.
+
+    Interface contract (2 call sites: ``_one_e2e_run``'s retention and the
+    UNGATED round-trip test): takes one observer record (a mapping whose
+    values are str/int/bool/None/tuple per the ``_observe()`` record shapes in
+    ``roles.py``), returns a plain dict with every tuple value -- e.g.
+    ``write_evidence_paths``, ``missing_keys`` -- cast to ``list`` so the
+    record round-trips through ``json.dumps``; all other values pass through
+    unchanged.  Additive S5 retention helper; deliberately OUTSIDE the four
+    floor-hash-frozen objects, and no floor clause reads its output.
+    """
+    return {
+        key: list(value) if isinstance(value, tuple) else value
+        for key, value in record.items()
+    }
+
+
 def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
     """One full real-worker protocol run; returns its rubric vector.
 
@@ -1887,6 +1906,29 @@ def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
     except Exception:  # retention is diagnostic, never graded
         pass
 
+    # DECISION plan-2026-07-23T173454-2c22e5f6/D-001 (S5 retention, Step 1):
+    # retain the FULL raw per-dispatch observation list -- the exact records
+    # `_verified_execute_workspace_write` graded -- so a credit-layer anomaly
+    # (B6 run 2: verified_write=False despite an assigned target and a real
+    # workspace change) is diagnosable without a re-run.  Do NOT filter to
+    # EXECUTE-only records (the diagnosis needs cross-state context; disk cost
+    # is trivial at n=3) and do NOT re-derive evidence post hoc from the
+    # sha256 diff (D-008/D-010 forbid reconstruction -- the row must carry the
+    # factory's OWN attribution).  Same guard as above: a retention failure
+    # NEVER fails the run or perturbs the grade, and this JSON survives even
+    # if the row write later fails.  See decisions.md D-001.
+    jsonable_observations = [_jsonable_observation(record) for record in observations]
+    try:
+        _retain_dir = (
+            BENCH_DATA_DIR / L6_BENCH_ID / L6_BLOCK / "artifacts" / f"run-{run}"
+        )
+        _retain_dir.mkdir(parents=True, exist_ok=True)
+        (_retain_dir / "observations.json").write_text(
+            json.dumps(jsonable_observations, indent=2), encoding="utf-8"
+        )
+    except Exception:  # retention is diagnostic, never graded
+        pass
+
     issues = audit(plan_dir, workspace_root=str(workspace))
     return {
         "run": run,
@@ -1943,6 +1985,10 @@ def _one_e2e_run(tmp_path: Path, run: int) -> dict[str, Any]:
         "criteria_pass_count": final.get(ContextKeys.CRITERIA_PASS_COUNT),
         "criteria_total": final.get(ContextKeys.CRITERIA_TOTAL),
         "approvals": list(approvals.decisions),
+        # Additive (S5 retention): the FULL raw per-dispatch observation list,
+        # tuples cast to lists for JSON round-tripping.  REPORTED only -- no
+        # floor clause or `_bench_defect` predicate reads it.
+        "observations": jsonable_observations,
     }
 
 
@@ -1993,6 +2039,48 @@ def test_the_L6_row_carries_an_int_plan_redispatches() -> None:
     agent = _live_agent(lambda **_: None, approvals=lambda *_a, **_k: False)
     assert isinstance(agent._plan_redispatches, int)
     assert agent._plan_redispatches == 0
+
+
+def test_the_L6_row_retains_the_raw_observations_json_safe() -> None:
+    """UNGATED: S5 retention -- every L6 row carries the raw observation list.
+
+    B6 run 2 could not be retro-diagnosed because ``_one_e2e_run`` discarded
+    the in-memory ``observations`` list after grading it (the row kept only
+    the boolean ``verified_write``).  Pinned two ways, matching this file's
+    offline style: the row builder carries an ``"observations"`` key fed by
+    ``_jsonable_observation`` and writes a guarded ``observations.json``
+    alongside the artifact retention (SOURCE), and a record shaped like the
+    observer's own -- tuple-valued ``write_evidence_paths``/``missing_keys``
+    included -- round-trips through ``json.dumps`` after the cast
+    (BEHAVIOUR).  Additive -- this test asserts nothing about any floor
+    clause.
+    """
+    import inspect
+
+    e2e_src = inspect.getsource(_one_e2e_run)
+    assert '"observations": jsonable_observations' in e2e_src
+    assert "observations.json" in e2e_src
+
+    record = {
+        "role": "ip-executor",
+        "state": HarnessStates.EXECUTE,
+        "success": True,
+        "failure_reason": None,
+        "missing_keys": ("summary",),
+        "write_evidence": 1,
+        "write_evidence_workspace": 1,
+        "write_evidence_plan": 0,
+        "write_evidence_paths": ("workspace:uploader.py",),
+        "write_required": True,
+        "elapsed_s": 1.5,
+    }
+    round_tripped = json.loads(json.dumps(_jsonable_observation(record)))
+    assert round_tripped["write_evidence_paths"] == ["workspace:uploader.py"]
+    assert round_tripped["missing_keys"] == ["summary"]
+    # Non-tuple values pass through unchanged.
+    assert round_tripped["state"] == HarnessStates.EXECUTE
+    assert round_tripped["success"] is True
+    assert round_tripped["failure_reason"] is None
 
 
 class TestTheL6ApprovalStubIsDenyDefaultAndDiskBound:
