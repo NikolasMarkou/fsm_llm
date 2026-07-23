@@ -78,6 +78,14 @@ _REPAIR_PROMPT = (
     "nothing else."
 )
 
+#: The user turn appended for the post-loop forced-write finalization (D-003).
+#: Appended LAST (like `_REPAIR_PROMPT`) so it is the freshest instruction after
+#: the read/tool round-trips: stop reading, commit findings via the forced call.
+_FORCE_WRITE_PROMPT = (
+    "You have gathered enough context. Stop reading now and record your "
+    "findings by calling the required tool with your final content."
+)
+
 #: Provider messages that mean "this turn's TOOL CALL did not render", as
 #: opposed to "the provider is unreachable".
 #:
@@ -195,16 +203,18 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         messages: list[dict[str, Any]],
         schemas: list[dict[str, Any]],
         response_format: dict[str, Any] | None = None,
+        tool_choice: Any | None = None,
     ) -> dict[str, Any]:
         if self._complete_fn is not None:
             return self._complete_fn(self.config.model, messages, schemas)
-        return self._litellm_complete(messages, schemas, response_format)
+        return self._litellm_complete(messages, schemas, response_format, tool_choice)
 
     def _litellm_complete(
         self,
         messages: list[dict[str, Any]],
         schemas: list[dict[str, Any]],
         response_format: dict[str, Any] | None = None,
+        tool_choice: Any | None = None,
     ) -> dict[str, Any]:
         import litellm
 
@@ -239,7 +249,12 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         # turn ships no tool surface at all.
         if schemas:
             call_params["tools"] = schemas
-            call_params["tool_choice"] = "auto"
+            # Default `"auto"` (byte-identical to every existing caller); the
+            # D-003 forced-write turn overrides it to a named-function choice.
+            # Never merges `tools=`/`response_format=` (D-002 branch untouched).
+            call_params["tool_choice"] = (
+                tool_choice if tool_choice is not None else "auto"
+            )
         elif response_format is not None:
             call_params["response_format"] = response_format
 
@@ -403,6 +418,64 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                     "NativeFunctionCallingReactAgent hit max_iterations without "
                     "a final answer."
                 )
+
+            # DECISION plan-2026-07-23T073649-bb230f18/D-003
+            # Forced-write finalization: when `force_final_tool` is set and the
+            # read loop never called it, force the MODEL (not the driver) to emit
+            # ONE real tool call via `self.tools.execute`/`trace_calls`, so
+            # `_verified_writes` sees a genuine model write (disk-is-truth intact).
+            # Do NOT weaken: (a) `tools=`+`tool_choice` ONLY, NEVER
+            # `response_format=` here (the D-002 mutual-exclusion branch, `:229`,
+            # is untouched); (b) fires AT MOST ONCE, strictly AFTER the loop (one
+            # guarded `if`, no loop -- model reads first, no turn-1 write); (c) a
+            # malformed forced turn is ABSORBED like the D-002 repair
+            # (`_degrades_turn`) -- no crash, no fabricated write, `answer`
+            # untouched so `success` stays honest; (d) placed BEFORE `trace =
+            # AgentTrace(...)` so the trace reflects it, and default `None` keeps
+            # every other caller byte-identical. Do NOT fold into the D-002
+            # repair (that ships structured JSON with NO tools; this ships a tool
+            # call with NO `response_format=`). See decisions.md D-003.
+            if self.config.force_final_tool and not any(
+                tc.tool_name == self.config.force_final_tool for tc in trace_calls
+            ):
+                forced_schema = [
+                    s
+                    for s in schemas
+                    if s.get("function", {}).get("name")
+                    == self.config.force_final_tool
+                ]
+                if forced_schema:
+                    try:
+                        forced = self._complete(
+                            [
+                                *messages,
+                                {"role": "user", "content": _FORCE_WRITE_PROMPT},
+                            ],
+                            forced_schema,
+                            tool_choice={
+                                "type": "function",
+                                "function": {"name": self.config.force_final_tool},
+                            },
+                        )
+                    except AgentError as exc:
+                        # Symmetric with the loop and the D-002 repair (D-016): a
+                        # degradable forced turn must not delete a run that
+                        # already has an answer and a trace.
+                        if not _degrades_turn(exc):
+                            raise
+                        logger.warning(
+                            f"Forced-write turn was malformed ({exc}); keeping "
+                            "the trace and answer gathered so far."
+                        )
+                        forced = {"tool_calls": []}
+                    for tc in forced.get("tool_calls") or []:
+                        name = tc.get("name", "")
+                        args = tc.get("arguments") or {}
+                        if not isinstance(args, dict):
+                            args = {}
+                        call = ToolCall(tool_name=name, parameters=args)
+                        self.tools.execute(call)
+                        trace_calls.append(call)
 
             trace = AgentTrace(
                 tool_calls=trace_calls,

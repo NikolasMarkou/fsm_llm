@@ -189,6 +189,16 @@ class AgentConfig(BaseModel):
     subclasses; ignored elsewhere.
     """
 
+    force_final_tool: str | None = None
+    """Optional tool name the agent is forced to call ONCE after the ReAct loop.
+
+    When set to a registry tool that the loop never called,
+    ``NativeFunctionCallingReactAgent`` issues one post-loop completion with
+    ``tool_choice`` pinned to it (no ``response_format=``), executes the returned
+    call, and records it in the trace. None (default) disables (no forced-write
+    finalization). Consumed only by ``NativeFunctionCallingReactAgent``.
+    """
+
     model_config = {"arbitrary_types_allowed": True}
 
     @field_validator("max_history_size", "reflect_every_n", "auto_summarize_after")
@@ -217,6 +227,13 @@ class AgentConfig(BaseModel):
     def validate_temperature(cls, v: float) -> float:
         if not (0.0 <= v <= 2.0):
             raise ValueError("temperature must be between 0.0 and 2.0")
+        return v
+
+    @field_validator("force_final_tool")
+    @classmethod
+    def validate_force_final_tool(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("force_final_tool must be a non-empty tool name when set")
         return v
 
     @field_validator("output_schema")

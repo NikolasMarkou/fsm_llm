@@ -726,6 +726,221 @@ class TestRepairCallEnvelope:
         assert captured[1]["messages"][-1]["content"].startswith("/nothink")
 
 
+class TestForcedFinalTool:
+    """DECISION plan-2026-07-23T073649-bb230f18/D-003 -- forced-write
+    finalization. When ``force_final_tool`` is set and the read loop never
+    called that tool, the agent issues EXACTLY ONE post-loop completion with
+    ``tool_choice`` pinned to that function, so the MODEL itself emits the
+    write. The forced call runs through the SAME ``self.tools.execute`` /
+    ``trace_calls`` path, carries ``tools=``+``tool_choice`` and NO
+    ``response_format=`` (D-002 anchor), fires at most once, and a malformed
+    forced turn is absorbed. Default ``None`` is byte-identical.
+    """
+
+    def test_forced_turn_fires_and_executes_after_toolless_conclusion(self):
+        """A dispatch that concludes in prose without calling the write tool is
+        forced to issue+execute the tool, landing it in ``trace.tool_calls``.
+        """
+        reg = _registry()
+        executed: list[str] = []
+        original_execute = reg.execute
+
+        def spy(call):
+            executed.append(call.tool_name)
+            return original_execute(call)
+
+        reg.execute = spy  # type: ignore[method-assign]
+
+        counter = _Counter(
+            {"content": "here is my prose answer", "tool_calls": []},
+            {
+                "content": None,
+                "tool_calls": [
+                    {"id": "f1", "name": "weather", "arguments": {"city": "Paris"}}
+                ],
+            },
+        )
+        agent = NativeFunctionCallingReactAgent(
+            tools=reg,
+            config=AgentConfig(model="mock/model", force_final_tool="weather"),
+            complete_fn=counter,
+        )
+
+        result = agent.run("explore the tree")
+
+        # One loop turn + exactly one forced turn.
+        assert len(counter.calls) == 2
+        # The forced write is a REAL model tool call routed through execute...
+        assert executed == ["weather"]
+        # ...and recorded in the trace like any loop call.
+        assert [c.tool_name for c in result.trace.tool_calls] == ["weather"]
+
+    def test_forced_turn_carries_tools_and_tool_choice_no_response_format(
+        self, monkeypatch
+    ):
+        """The forced completion names the forced function via ``tool_choice`` and
+        ships NO ``response_format=`` (D-002 mutual-exclusion anchor).
+        """
+        captured: list[dict] = []
+        it = iter(
+            [
+                _FakeMessage(content="prose answer, no tool call"),
+                _FakeMessage(
+                    content=None,
+                    tool_calls=[_FakeToolCall("f1", "weather", '{"city": "Paris"}')],
+                ),
+            ]
+        )
+
+        def fake(**kwargs):
+            captured.append(kwargs)
+            return _FakeResponse(next(it))
+
+        monkeypatch.setattr("litellm.completion", fake)
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model", force_final_tool="weather"),
+        )
+
+        agent.run("explore the tree")
+
+        assert len(captured) == 2
+        forced = captured[1]
+        assert forced["tool_choice"] == {
+            "type": "function",
+            "function": {"name": "weather"},
+        }
+        assert "response_format" not in forced
+        assert forced["tools"]  # only the forced tool's schema
+        # The loop turn keeps the default `auto` tool_choice — unchanged.
+        assert captured[0]["tool_choice"] == "auto"
+
+    def test_default_off_issues_no_forced_turn(self):
+        """``force_final_tool=None`` (every existing caller) is byte-identical:
+        no third completion, no synthesized write.
+        """
+        counter = _Counter({"content": "prose answer", "tool_calls": []})
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model"),
+            complete_fn=counter,
+        )
+
+        result = agent.run("q")
+
+        assert len(counter.calls) == 1  # loop only, no forced turn
+        assert result.trace.tool_calls == []
+
+    def test_forced_turn_fires_exactly_once(self):
+        """A single guarded ``if``, not a loop: only ONE forced completion."""
+        counter = _Counter(
+            {"content": "prose", "tool_calls": []},
+            {
+                "content": None,
+                "tool_calls": [
+                    {"id": "f1", "name": "weather", "arguments": {"city": "X"}}
+                ],
+            },
+        )
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model", force_final_tool="weather"),
+            complete_fn=counter,
+        )
+
+        agent.run("q")
+
+        # Exactly two completions total; a third would raise StopIteration.
+        assert len(counter.calls) == 2
+
+    def test_malformed_forced_turn_is_absorbed(self):
+        """A degradable ``AgentError`` on the forced turn does not crash the
+        dispatch, fabricate a write, or invent a false success.
+        """
+        state = {"turn": 0}
+
+        def complete_fn(model, messages, schemas):
+            state["turn"] += 1
+            if state["turn"] == 1:
+                return {"content": "prose", "tool_calls": []}
+            raise AgentError(
+                "Native function-calling LLM call failed: "
+                "XML syntax error on line 5: element <function> closed",
+                details={"malformed_tool_call": True},
+            )
+
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model", force_final_tool="weather"),
+            complete_fn=complete_fn,
+        )
+
+        result = agent.run("q")
+
+        assert result.answer == "prose"
+        # No fabricated write landed in the trace.
+        assert [c.tool_name for c in result.trace.tool_calls] == []
+
+    def test_non_degradable_forced_turn_error_still_propagates(self):
+        """A genuine outage on the forced turn is NOT swallowed."""
+
+        def complete_fn(model, messages, schemas):
+            if any("record your findings" in str(m.get("content", "")) for m in messages):
+                raise AgentError("Native function-calling LLM call failed: 503")
+            return {"content": "prose", "tool_calls": []}
+
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model", force_final_tool="weather"),
+            complete_fn=complete_fn,
+        )
+
+        with pytest.raises(AgentError):
+            agent.run("q")
+
+    def test_forced_turn_skipped_when_tool_already_called(self):
+        """If the model DID call the forced tool during the loop, the forced turn
+        does NOT fire.
+        """
+        counter = _Counter(
+            {
+                "content": None,
+                "tool_calls": [
+                    {"id": "c1", "name": "weather", "arguments": {"city": "Paris"}}
+                ],
+            },
+            {"content": "done", "tool_calls": []},
+        )
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(
+                model="mock/model", force_final_tool="weather", max_iterations=3
+            ),
+            complete_fn=counter,
+        )
+
+        result = agent.run("q")
+
+        assert len(counter.calls) == 2  # loop only, no forced turn
+        assert [c.tool_name for c in result.trace.tool_calls] == ["weather"]
+
+    def test_forced_turn_skipped_when_tool_absent_from_registry(self):
+        """``force_final_tool`` naming a tool not in the registry is guarded: no
+        forced turn, no crash.
+        """
+        counter = _Counter({"content": "prose", "tool_calls": []})
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model", force_final_tool="not_a_tool"),
+            complete_fn=counter,
+        )
+
+        result = agent.run("q")
+
+        assert len(counter.calls) == 1
+        assert result.trace.tool_calls == []
+
+
 # ---------------------------------------------------------------------------
 # A malformed tool-call turn must not cost the whole dispatch (D-016)
 # ---------------------------------------------------------------------------
