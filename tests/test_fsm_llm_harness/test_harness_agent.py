@@ -2979,6 +2979,82 @@ class TestRenderPlanFromStructured:
         assert empty_body.strip() == ""
         assert _is_placeholder(empty_body) is True
 
+    def test_success_false_but_valid_structured_renders_approvable(
+        self, make_harness, plan_dir
+    ) -> None:
+        """The L6 B4 "config could-not-succeed" regression, fixed (D-002).
+
+        Under ``response_format`` the PLAN model authors every field but calls
+        NO write tool, so the D-016 write-obligation forces ``result.success``
+        to False even on a perfectly VALID 14-field reply.  The OLD renderer
+        guard (``not result.success -> return None``) DISCARDED that valid plan,
+        leaving ``plan.md`` at 0 bytes -> ``_plan_has_content`` False ->
+        redispatch -> honest ``plan-cap`` -- the exact B4 floor-0/3 shape, which
+        measured our own wiring gap, not 4b's plan authoring.  With the render
+        keyed on ``structured_output`` presence (not success), the same reply now
+        WRITES an approvable ``plan.md`` and ``_plan_has_content`` is True, so
+        ``_after_plan_dispatch`` would NOT redispatch and would proceed to
+        approval.  This is the deterministic offline test that RED-flags the B4
+        config before any live run.
+        """
+        agent = make_harness().agent
+        context = {ContextKeys.PLAN_DIR: str(plan_dir)}
+        # a valid 14-field reply, but success=False -- exactly the D-016
+        # unverified-write outcome for a driver-rendered PLAN deliverable
+        result = AgentResult(
+            answer="", success=False, structured_output=_plan_payload()
+        )
+
+        path = agent._render_plan_from_structured(result, context)
+
+        # the valid plan WAS rendered despite success=False
+        assert path is not None
+        plan = PlanDoc.from_markdown((plan_dir / ArtifactNames.PLAN).read_text())
+        assert harness_module._plan_is_approvable(plan) is True
+        # ... and the disk gate the redispatch/approval condition keys on is True
+        assert agent._plan_has_content(context) is True
+
+    def test_success_true_but_no_structured_still_fails_closed(
+        self, make_harness, plan_dir
+    ) -> None:
+        """Fail-closed preserved (D-002 ethos): no structured -> nothing written.
+
+        A reply with ``success=True`` but ``structured_output=None`` renders
+        NOTHING (the model authored no fields), so ``_plan_has_content`` reads
+        False off disk and ``_after_plan_dispatch`` still takes the redispatch
+        path.  Dropping ``not result.success`` from the gate did not let a
+        content-free reply through -- the disk gate catches it.
+        """
+        agent = make_harness().agent
+        context = {ContextKeys.PLAN_DIR: str(plan_dir)}
+        result = AgentResult(answer="", success=True, structured_output=None)
+
+        path = agent._render_plan_from_structured(result, context)
+
+        assert path is None
+        assert not (plan_dir / ArtifactNames.PLAN).exists()
+        assert agent._plan_has_content(context) is False
+
+    def test_success_false_with_empty_field_still_denied(
+        self, make_harness, plan_dir
+    ) -> None:
+        """Fail-closed on a hollow field even when success=False (D-002 ethos).
+
+        A ``success=False`` reply whose structured payload has an EMPTY section
+        renders that section empty; the UNCHANGED ``_plan_is_approvable`` denies
+        it, so ``_plan_has_content`` is False and the redispatch path is taken.
+        Decoupling the render from ``result.success`` never weakens the honest
+        gate: a hollow plan is still denied.
+        """
+        agent = make_harness().agent
+        context = {ContextKeys.PLAN_DIR: str(plan_dir)}
+        payload = _plan_payload(**{PlanSchema.SECTION_SLUGS[4]: "   "})
+        result = AgentResult(answer="", success=False, structured_output=payload)
+
+        agent._render_plan_from_structured(result, context)
+
+        assert agent._plan_has_content(context) is False
+
 
 # ---------------------------------------------------------------------------
 # Evidence vs testimony: the driver's own filesystem read (D-032)

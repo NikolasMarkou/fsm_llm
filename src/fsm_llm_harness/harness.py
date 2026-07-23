@@ -1777,12 +1777,28 @@ class HarnessAgent(BaseAgent):
         #      itself never opens the gate.  `_plan_has_content` re-reads the
         #      rendered file and gates on it (plan invariant 2).
         #   4. FAIL-CLOSED.  A missing/partial `structured_output` (repair turn
-        #      did not fire) or a failed reply writes NOTHING substantive, so the
-        #      unchanged `_plan_has_content` check finds no approvable plan and
-        #      the existing redispatch budget fires -- no behaviour change on the
-        #      failure path.  No plan directory (degrade path) -> None.
+        #      did not fire) writes NOTHING substantive, so the unchanged
+        #      `_plan_has_content` check finds no approvable plan and the existing
+        #      redispatch budget fires -- no behaviour change on the failure path.
+        #      No plan directory (degrade path) -> None.
         # See decisions.md D-001.
-        if result is None or not getattr(result, "success", False):
+        # DECISION plan-2026-07-23T124347-09045e6e/D-002
+        # RENDER ON `structured_output` PRESENCE, NOT `result.success`.  Do NOT
+        # re-add a `not result.success` guard here.  Under response_format the
+        # PLAN model authors every field but calls NO write tool (the driver
+        # renders), so the D-016 write-obligation (roles.py:1360-1363 -- a role
+        # HOLDING a write tool must show a verified byte-write) fires and forces
+        # `result.success=False` even on a perfectly VALID 14-field reply.  That
+        # obligation is correct for tool-writing roles (EXPLORE/EXECUTE) but WRONG
+        # for PLAN, whose deliverable is the DRIVER-rendered plan.md.  Gating the
+        # render on `result.success` DISCARDED the valid plan -> plan.md stayed
+        # 0 bytes -> plan-cap (the L6 B4 "config could-not-succeed" defect,
+        # measured).  The ethos is untouched: the model still authors every field
+        # (schema-validated structured_output, unfakeable), the driver only
+        # formats, and an empty/placeholder field still renders an empty section
+        # the UNCHANGED `_plan_is_approvable` denies.  Disk stays the gate truth.
+        # See decisions.md D-002.
+        if result is None:
             return None
         structured = getattr(result, "structured_output", None)
         if structured is None or not hasattr(structured, "model_dump"):
@@ -2408,7 +2424,33 @@ class HarnessAgent(BaseAgent):
         # stall. A genuine success WITH a non-empty plan.md still falls through
         # to `_emit_plan`/`_request_approval` unchanged -- only the empty case
         # is newly caught. See _plan_has_content and decisions.md D-005.
-        if result is None or not result.success or not self._plan_has_content(context):
+        # DECISION plan-2026-07-23T124347-09045e6e/D-002
+        # KEY THIS GATE ON `_plan_has_content` (DISK), NOT `result.success`, WHEN
+        # A PLAN DIRECTORY EXISTS.  Do NOT re-add `not result.success` to the
+        # plan-directory branch.  The render above now writes plan.md from
+        # `structured_output` regardless of success, so the authority for "is
+        # there an approvable plan?" is the disk read, not the write-obligation-
+        # polluted `result.success` (see the renderer's D-002 block: response_
+        # format PLAN replies are success=False by construction because the model
+        # calls no write tool).  `_plan_has_content` -- via the shared, byte-
+        # unchanged `_plan_is_approvable` -- is True IFF plan.md parses as a valid
+        # PlanDoc with every section non-placeholder.  A dispatch whose
+        # structured_output was None/partial renders nothing substantive ->
+        # `_plan_has_content` False -> redispatch, exactly as before: dropping
+        # `not result.success` does NOT let a failed dispatch through, the disk
+        # gate catches it.  DEGRADE PATH PRESERVED (plan invariant edge-case d,
+        # predecessor D-005): when there is NO plan directory `_plan_has_content`
+        # cannot read disk, so this defers to `result.success` exactly as today
+        # -- the real PLAN/L6 shape ALWAYS has a plan directory, so the disk
+        # authority fires for every production case.  The `result is None` guard
+        # stays (no worker / no reply).  See decisions.md D-002.
+        directory = self._plan_directory(context)
+        plan_approvable = (
+            self._plan_has_content(context)
+            if directory is not None
+            else (result is not None and bool(result.success))
+        )
+        if result is None or not plan_approvable:
             if self._plan_redispatches >= self.max_plan_redispatches:
                 logger.warning(
                     f"Plan cap [{GateSlug.PLAN_CAP}]: "

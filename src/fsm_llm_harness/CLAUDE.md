@@ -379,13 +379,13 @@ Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_harness/          # 1,920 tests, 10 test files
+pytest tests/test_fsm_llm_harness/          # 1,923 tests, 10 test files
 ```
 
 | File | Tests |
 |---|---|
 | `test_roles_and_tools.py` | 469 |
-| `test_harness_agent.py` | 308 |
+| `test_harness_agent.py` | 311 |
 | `test_artifacts.py` | 273 |
 | `test_hardening.py` | 258 |
 | `test_plan_validator.py` | 191 |
@@ -693,7 +693,7 @@ empty-file gate counting, ownership deny branch, live-gate short-circuit) each
 flipped tests red in a scratch copy (93 red total), and `test_cli.py`'s
 exit-code 0/1/2 contract close-read verdict was CLEAN.
 
-Offline, the package is green: 1,920 tests, `ruff` clean, `mypy` 0 errors.
+Offline, the package is green: 1,923 tests, `ruff` clean, `mypy` 0 errors.
 
 **Not claimed**: that the harness is production-ready, or that a 4B model
 drives it unattended to a useful result -- the L6 floor is still **0/3 at
