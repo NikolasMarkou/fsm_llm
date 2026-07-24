@@ -282,6 +282,19 @@ class GateSlug:
     #: halt on the REFLECT routing edges, not a pre-EXECUTE-step check.
     REFLECT_CAP = "reflect-cap"
 
+    # DECISION plan-2026-07-24T032539-032ae337/D-001
+    #: The bounded close-denial budget is spent and the human CLOSE approval
+    #: is still DENIED on an all-criteria-PASS verdict.  A denied-CLOSE
+    #: approval loop must halt HERE, honestly, not fall through to the stall
+    #: detector's ``slug=None`` raise (the residual-β slugless stall measured
+    #: in L6 B7 run 3).  A DEDICATED slug, not a reuse of
+    #: :data:`REFLECT_CAP`: ``halt_slug`` must attribute the MECHANISM (a
+    #: denied human gate vs an unroutable verifier verdict) and the two
+    #: budgets stay disjoint (LESSONS [I:5]).  Never means "proceed anyway",
+    #: and like :data:`REFLECT_CAP` deliberately NOT in ``ORDER``: it is a
+    #: driver halt on the REFLECT -> CLOSE edge, not a pre-EXECUTE-step check.
+    CLOSE_CAP = "close-cap"
+
 
 class Severity:
     """Severity levels for advisory ``audit()`` issues.
@@ -584,6 +597,32 @@ class Defaults:
     #: dispatches would mean the budget is not the lever at all.  See
     #: decisions.md D-003 (plan-2026-07-23T173454-2c22e5f6).
     MAX_REFLECT_REDISPATCHES = 3
+    # DECISION plan-2026-07-24T032539-032ae337/D-001
+    #: EXTRA verifier dispatches the driver may spend, per RUN, after a human
+    #: CLOSE approval DENIAL on an all-criteria-PASS REFLECT verdict.  Each
+    #: redispatch re-consults the approval callback exactly once, so both the
+    #: dispatches and the consultations on the denied-close path are bounded
+    #: by ``1 + this number``.
+    #:
+    #: Before this bound existed, a denied CLOSE approval was terminal but
+    #: SLUGLESS: `_after_reflect_dispatch` returned unconditionally from its
+    #: all-criteria-pass arm, nothing re-opened the dispatch key, every
+    #: REFLECT edge stayed BLOCKED, and the eventual halt was the stall
+    #: detector's -- which always raises `slug=None`.  MEASURED (L6 B7 run 3,
+    #: `scripts/bench_data/l6-e2e/B7/rows.jsonl`, `:4b`): one verifier
+    #: dispatch, 4/4 criteria PASS, ONE denial ("verification.md is absent or
+    #: empty"), then `halt_slug: null` with "Stalled in REFLECT for 3 turns".
+    #:
+    #: 3 is an UNMEASURED PLACEHOLDER mirroring MAX_PLAN_REDISPATCHES /
+    #: MAX_REFLECT_REDISPATCHES above (n=1 stall observation, zero
+    #: re-dispatch observations), NOT a measured horizon.  The redispatch is
+    #: genuinely productive by construction: the measured denial evidence is
+    #: exactly what a re-dispatched verifier -- which holds the write tool
+    #: for `verification.md` -- can repair.  Do NOT tune it without a
+    #: dedicated bench: `close-cap` rows whose denial evidence never changes
+    #: across all 4 consultations would mean the budget is not the lever at
+    #: all.  See decisions.md D-001 (plan-2026-07-24T032539-032ae337).
+    MAX_CLOSE_DENIALS = 3
     #: The autonomy leash: the 3rd fix attempt is HARD-blocked.
     MAX_FIX_ATTEMPTS = 2
     # DECISION plan-2026-07-21T125237-191b2eb2/D-052

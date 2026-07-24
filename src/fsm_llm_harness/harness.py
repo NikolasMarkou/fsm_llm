@@ -735,6 +735,7 @@ class HarnessAgent(BaseAgent):
         max_explore_redispatches: int = Defaults.MAX_EXPLORE_REDISPATCHES,
         max_plan_redispatches: int = Defaults.MAX_PLAN_REDISPATCHES,
         max_reflect_redispatches: int = Defaults.MAX_REFLECT_REDISPATCHES,
+        max_close_denials: int = Defaults.MAX_CLOSE_DENIALS,
         max_stall_turns: int = _DEFAULT_MAX_STALL_TURNS,
         **api_kwargs: Any,
     ) -> None:
@@ -778,6 +779,12 @@ class HarnessAgent(BaseAgent):
                 Bounds total REFLECT dispatches per ``(iteration, step)`` at
                 ``1 + max_reflect_redispatches``.  Spending it is a HALT with
                 the ``reflect-cap`` slug, never a pass.
+            max_close_denials: EXTRA verifier dispatches spent per RUN after
+                a DENIED human CLOSE approval on an all-criteria-pass
+                verdict.  Bounds REFLECT dispatches (and approval
+                consultations) on the denied-close path at
+                ``1 + max_close_denials``.  Spending it is a HALT with the
+                ``close-cap`` slug, never a pass.
             max_stall_turns: Consecutive no-progress turns before halting.
             api_kwargs: Forwarded to ``fsm_llm.API``.
         """
@@ -791,6 +798,7 @@ class HarnessAgent(BaseAgent):
         self.max_explore_redispatches = max_explore_redispatches
         self.max_plan_redispatches = max_plan_redispatches
         self.max_reflect_redispatches = max_reflect_redispatches
+        self.max_close_denials = max_close_denials
         self.max_stall_turns = max_stall_turns
 
         # DECISION plan-2026-07-21T125237-191b2eb2/D-015
@@ -881,6 +889,23 @@ class HarnessAgent(BaseAgent):
         #: stall this counter exists to close.  See decisions.md D-003
         #: (plan-2026-07-23T173454-2c22e5f6).
         self._reflect_redispatches = 0
+        # DECISION plan-2026-07-24T032539-032ae337/D-001
+        #: The bounded close-denial budget spent this run.  Driver run state
+        #: for exactly the reasons ``_explore_redispatches`` above is
+        #: (D-029): a worker receives a context SNAPSHOT and returns an
+        #: ``AgentResult`` -- it holds no reference to the driver -- and the
+        #: approval callback is handed a ``dict(context)`` COPY and returns a
+        #: bool, so neither can reach or reset this counter; only
+        #: ``_run_once`` resets it.  Do NOT make it a context key (the [I:5]
+        #: cap-reachable-from-callback shape), do NOT fold it into
+        #: ``_reflect_redispatches`` (a denied human CLOSE gate is not an
+        #: unroutable verifier verdict -- the two budgets cover DISJOINT
+        #: mechanisms and ``halt_slug`` must attribute which one fired), and
+        #: do NOT let a denied-CLOSE run fall through to the stall detector's
+        #: ``slug=None`` raise -- that is the residual-β slugless stall
+        #: (L6 B7 run 3) this counter exists to close.  See decisions.md
+        #: D-001 (plan-2026-07-24T032539-032ae337).
+        self._close_denials = 0
         #: Slugs handed out to EXPLORE dispatches this run, in order.  Driver
         #: run state for exactly the reasons ``_explore_redispatches`` above is
         #: (D-029): a worker cannot reach it, and only ``_run_once`` resets it.
@@ -1049,6 +1074,7 @@ class HarnessAgent(BaseAgent):
         self._explore_redispatches = 0
         self._plan_redispatches = 0
         self._reflect_redispatches = 0
+        self._close_denials = 0
         self._assigned_topics = []
         self._presentations = []
         self._reverts = []
@@ -2616,12 +2642,13 @@ class HarnessAgent(BaseAgent):
         context: Mapping[str, Any],
     ) -> dict[str, Any]:
         """Ask the human to confirm a close, or to continue past the leash --
-        or retry an UNROUTABLE verifier under a bounded budget.
+        or retry an UNROUTABLE verifier, or a DENIED close, each under its own
+        bounded budget.
 
         Returns:
             The close-approval or leash outcome, ``{}`` when a routing flag
             lets an outbound edge fire, a delta re-opening the REFLECT dispatch
-            key, or one recording the ``reflect-cap`` halt.
+            key, or one recording the ``reflect-cap`` or ``close-cap`` halt.
         """
         # Emitted before the routing decision, which is this contract's own
         # "when emitted" -- the verdict is what the routing is read from.
@@ -2635,7 +2662,70 @@ class HarnessAgent(BaseAgent):
                 context,
                 reasoning="Every success criterion is verified PASS. Close the plan?",
             )
-            return {ContextKeys.CLOSE_CONFIRMED: confirmed}
+            if confirmed is True:
+                return {ContextKeys.CLOSE_CONFIRMED: confirmed}
+            # DECISION plan-2026-07-24T032539-032ae337/D-001
+            # A DENIED close approval must not end the run slugless. This arm
+            # previously returned unconditionally, so a denial left every
+            # REFLECT edge BLOCKED (`close_confirmed` False shuts REFLECT ->
+            # CLOSE), nothing re-opened the dispatch key, and the eventual
+            # halt was the stall detector's -- which always raises slug=None.
+            # MEASURED (L6 B7 run 3, scripts/bench_data/l6-e2e/B7/rows.jsonl,
+            # `:4b`): exactly ONE verifier dispatch, 4/4 criteria PASS, ONE
+            # denial on "verification.md is absent or empty", then halt_slug
+            # null off "Stalled in REFLECT for 3 turns" -- the residual-β
+            # slugless stall. The denial evidence is precisely what a
+            # re-dispatched verifier -- which holds the write tool for
+            # verification.md -- can genuinely repair, so the fix mirrors
+            # `_after_plan_dispatch`'s budget exactly, and the same
+            # properties are load-bearing:
+            #   1. A retry is authorised EXPLICITLY, by removing the SAME
+            #      (state, iteration, step) key from the ledger -- never a
+            #      widened key (D-017).
+            #   2. The BOUND is `self._close_denials` -- driver run state on
+            #      `self` (see its D-001 block in `__init__`), DISJOINT from
+            #      `_reflect_redispatches`: a denied human gate and an
+            #      unroutable verdict are different mechanisms, they spend
+            #      independent budgets, and `halt_slug` must attribute which
+            #      one fired (LESSONS [I:5]).
+            #   3. Spending the bound HALTS honestly on `close-cap`:
+            #      LAST_GATE_SLUG/HALT_REASON are pre-written HERE because
+            #      `_check_stall` always raises with slug=None. Do NOT
+            #      "finish the job" by writing `close_confirmed` True or
+            #      touching `all_criteria_pass`: a close the human refused
+            #      must not close (I8), and the fresh verifier reply
+            #      re-derives its own verdict.
+            # See decisions.md D-001 (plan-2026-07-24T032539-032ae337).
+            if self._close_denials >= self.max_close_denials:
+                logger.warning(
+                    f"Close cap [{GateSlug.CLOSE_CAP}]: "
+                    f"{self._close_denials} re-dispatch(es) spent (cap "
+                    f"{self.max_close_denials}) and the human CLOSE approval "
+                    "is still denied; not dispatching again."
+                )
+                return {
+                    ContextKeys.LAST_GATE_SLUG: GateSlug.CLOSE_CAP,
+                    ContextKeys.HALT_REASON: (
+                        f"Close cap: {self._close_denials} extra verifier "
+                        f"dispatch(es) spent (cap {self.max_close_denials}) "
+                        "and the human CLOSE approval is still denied on an "
+                        "all-criteria-pass verdict, so the REFLECT -> CLOSE "
+                        "gate is NOT satisfied. Characterize the denial "
+                        "evidence before raising the budget."
+                    ),
+                    ContextKeys.CLOSE_CONFIRMED: False,
+                }
+            self._close_denials += 1
+            logger.info(
+                f"CLOSE approval denied; re-dispatching the verifier "
+                f"({self._close_denials}/{self.max_close_denials})."
+            )
+            key = self._dispatch_key(context, HarnessStates.REFLECT)
+            delta = self._ledger_delta(
+                [entry for entry in self._read_ledger(context) if entry != key]
+            )
+            delta[ContextKeys.CLOSE_CONFIRMED] = False
+            return delta
 
         # DECISION plan-2026-07-23T173454-2c22e5f6/D-003
         # A REFLECT whose verdict routes NOWHERE must not end the run slugless.
@@ -2667,10 +2757,13 @@ class HarnessAgent(BaseAgent):
         # stall variant IS a success=True reply, so gating on success would
         # miss it (the same lesson as _after_plan_dispatch's D-002 disk-keyed
         # gate). A denied CLOSE approval (all_criteria_pass True, human said
-        # no) deliberately does NOT consume this budget -- approval denial is a
-        # shut human gate, not a retryable verifier failure; that residual
-        # slugless shape is out of scope here, exactly as PLAN's was under
-        # plan-cap before the aligned-gates iteration.
+        # no) still does NOT consume THIS budget -- approval denial is a shut
+        # human gate, not a retryable verifier failure -- but it is NO LONGER
+        # an out-of-scope slugless shape: since the aligned-gates iteration
+        # this comment pre-named, the denial path is bounded by its OWN
+        # disjoint budget (`self._close_denials` -> `close-cap`) inside the
+        # all-criteria-pass arm above.
+        # DECISION plan-2026-07-24T032539-032ae337/D-001
         if result is None and error is None:
             # No worker configured (D-045): nothing was attempted, so there is
             # nothing to re-attempt and no cap to spend.

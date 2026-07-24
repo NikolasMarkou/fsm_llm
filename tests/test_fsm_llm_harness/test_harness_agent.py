@@ -811,15 +811,15 @@ class TestApprovals:
         assert harness.approvals.count(APPROVAL_CLOSE) >= 1
         assert harness.worker.count_for(HarnessStates.CLOSE) == 0
         assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is False
-        # Red-before pin of the CURRENT denied-CLOSE shape (L6 B7 run 3,
+        # Step-2 FLIP of the step-1 red-before pin (L6 B7 run 3,
         # ``scripts/bench_data/l6-e2e/B7/rows.jsonl``: ``halt_slug: null``,
-        # "Stalled in REFLECT ..."): the ``all_criteria_pass`` arm returns
-        # unconditionally, so a denial bypasses every budget and the run dies
-        # on the stall detector's ``slug=None`` raise.  These two assertions
-        # regression-lock that bug shape and FLIP with the step-2 fix
-        # (``close-cap`` slug + a reason naming the denial).
-        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) is None
-        assert "Stalled in REFLECT" in result.final_context[ContextKeys.HALT_REASON]
+        # "Stalled in REFLECT ..."): the ``all_criteria_pass`` arm no longer
+        # returns unconditionally -- a denial spends the bounded close-denial
+        # budget (D-001 of plan-2026-07-24T032539-032ae337) and the run halts
+        # on the honest ``close-cap`` slug with a reason naming the denial,
+        # never the stall detector's ``slug=None`` raise.
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.CLOSE_CAP
+        assert "denied" in result.final_context[ContextKeys.HALT_REASON]
 
     def test_every_gate_is_distinguishable_by_tool_name(
         self, make_harness, roots, plan_dir
@@ -3117,6 +3117,296 @@ class TestBoundedReflectRedispatch:
         assert result.final_context[ContextKeys.LAST_GATE_SLUG] == (
             GateSlug.REFLECT_CAP
         )
+
+
+# ---------------------------------------------------------------------------
+# Bounded denied-CLOSE re-dispatch (plan-2026-07-24T032539-032ae337 D-001)
+# ---------------------------------------------------------------------------
+
+
+def _denied_close_script() -> dict[str, Any]:
+    """EXPLORE/PLAN/EXECUTE are well-behaved; the verifier routes toward CLOSE.
+
+    NOT a strawman and NOT a pre-seeded context: this is the L6 B7 run-3
+    record shape (``scripts/bench_data/l6-e2e/B7/rows.jsonl`` run 3 and
+    ``artifacts/run-3/observations.json``) -- a ``success=True`` verifier
+    reply whose coerced delta sets ``all_criteria_pass`` True with the 4/4
+    criteria counts and NO other routing flag, arriving through the worker
+    reply path exactly the way ``_traverse_script``'s REFLECT entry sets it.
+    Compose with ``ApprovalRecorder({APPROVAL_CLOSE: False})`` (PLAN still
+    approved) to reproduce the denied-close loop.
+    """
+    script = _traverse_script()
+    script[HarnessStates.REFLECT] = {
+        "answer": "4/4 criteria verified PASS",
+        "ctx": {
+            ContextKeys.ALL_CRITERIA_PASS: True,
+            ContextKeys.CRITERIA_PASS_COUNT: 4,
+            ContextKeys.CRITERIA_TOTAL: 4,
+        },
+    }
+    return script
+
+
+class TestBoundedCloseRedispatch:
+    """A denied CLOSE approval is retried under its own bound, then halted
+    with its own slug.
+
+    Guards residual β (L6 B7 run 3, ``scripts/bench_data/l6-e2e/B7/
+    rows.jsonl``): the ``all_criteria_pass`` arm returned unconditionally, so
+    ONE close-approval denial left every REFLECT edge BLOCKED
+    (``close_confirmed`` False shuts REFLECT -> CLOSE), the dispatch key
+    stayed in the ledger, and the run recorded ``halt_slug: null`` /
+    ``honest_halt: false`` off the stall detector's ``slug=None`` raise --
+    the last slugless-stall shape the L6 floor's honest-halt clause caught.
+
+    The mechanism mirrors ``TestBoundedReflectRedispatch`` (D-003 of
+    plan-2026-07-23T173454-2c22e5f6) exactly -- the SAME dispatch key is
+    re-opened by ledger removal (never a widened key, D-017), the bound lives
+    on ``self`` where no worker or approval callback can reach it, and
+    spending it pre-writes ``close-cap`` -- but the budget is DISJOINT: a
+    denied human gate and an unroutable verifier verdict spend independent
+    counters, and ``halt_slug`` attributes which mechanism fired (D-001 of
+    plan-2026-07-24T032539-032ae337, LESSONS [I:5]).
+    """
+
+    def test_the_b7_run_3_shape_now_halts_at_the_cap_with_its_own_slug(
+        self, make_harness
+    ) -> None:
+        """The B7 run-3 shape, fixed: 1 + MAX dispatches, ``close-cap``.
+
+        Measured RED against the unpatched driver (step 1, commit 9e1fc16):
+        REFLECT dispatches == 1, ``LAST_GATE_SLUG`` was ``None`` and the
+        reason was the stall detector's "Stalled in REFLECT ..." text.
+        """
+        harness = make_harness(
+            _denied_close_script(),
+            approvals=ApprovalRecorder({APPROVAL_CLOSE: False}),
+        )
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.REFLECT) == (
+            1 + Defaults.MAX_CLOSE_DENIALS
+        )
+        assert result.success is False
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.CLOSE_CAP
+        assert "Close cap" in result.answer
+        # ...and NOT by fabricating a confirmation or draining the sibling
+        # budget: the run never reaches CLOSE, and the reflect budget is
+        # untouched by the denial mechanism.
+        assert harness.worker.count_for(HarnessStates.CLOSE) == 0
+        assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is False
+        assert harness.agent._reflect_redispatches == 0
+
+    @pytest.mark.parametrize("cap", [0, 1, 2])
+    def test_the_bound_is_exact(self, make_harness, cap: int) -> None:
+        """``cap`` EXTRA dispatches, never ``cap + 1`` -- including the
+        denial-at-the-boundary case ``cap = 0`` (first denial hits the cap)."""
+        harness = make_harness(
+            _denied_close_script(),
+            approvals=ApprovalRecorder({APPROVAL_CLOSE: False}),
+            max_close_denials=cap,
+        )
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 1 + cap
+        assert harness.agent._close_denials == cap
+        # Each redispatch re-requests the close approval exactly once.
+        assert harness.approvals.count(APPROVAL_CLOSE) == 1 + cap
+        assert harness.worker.count_for(HarnessStates.CLOSE) == 0
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.CLOSE_CAP
+        assert "denied" in result.final_context[ContextKeys.HALT_REASON]
+
+    def test_the_halt_names_the_numbers_a_reader_needs(
+        self, make_harness, captured_logs
+    ) -> None:
+        """Spent and cap, in the reason -- an unactionable halt is a bug."""
+        harness = make_harness(
+            _denied_close_script(),
+            approvals=ApprovalRecorder({APPROVAL_CLOSE: False}),
+            max_close_denials=2,
+        )
+        result = harness.run()
+
+        reason = result.final_context[ContextKeys.HALT_REASON]
+        assert "2 extra verifier dispatch(es) spent (cap 2)" in reason
+        assert any(GateSlug.CLOSE_CAP in line for line in captured_logs)
+
+    def test_a_close_granted_after_a_retry_still_closes(self, make_harness) -> None:
+        """Denied once, granted on the retry: the run still reaches CLOSE.
+
+        This is the outcome the budget exists to buy -- the redispatched
+        verifier holds the write tool for ``verification.md`` (the measured
+        denial evidence) and a later approval must still close the plan --
+        with exactly 1 denial consumed and no cap slug left behind.
+        """
+        harness = make_harness(
+            _denied_close_script(),
+            approvals=ApprovalRecorder({APPROVAL_CLOSE: lambda n: n >= 2}),
+        )
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 2
+        assert harness.worker.count_for(HarnessStates.CLOSE) == 1
+        assert harness.agent._close_denials == 1
+        assert harness.approvals.count(APPROVAL_CLOSE) == 2
+        assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is True
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
+            GateSlug.CLOSE_CAP
+        )
+        assert result.success is True
+
+    def test_a_granted_close_consumes_none_of_the_budget(self, make_harness) -> None:
+        """The happy path is UNTOUCHED: one dispatch, zero denials, a close."""
+        harness = make_harness(_traverse_script())
+        result = harness.run()
+
+        assert harness.agent._close_denials == 0
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 1
+        assert harness.worker.count_for(HarnessStates.CLOSE) == 1
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) != (
+            GateSlug.CLOSE_CAP
+        )
+
+    def test_an_unroutable_retry_drains_the_reflect_budget_not_this_one(
+        self, make_harness
+    ) -> None:
+        """Pre-Mortem-#4 falsification: the two budgets stay DISJOINT.
+
+        First verdict routable-toward-CLOSE and denied (spends exactly 1
+        close denial); every redispatched verdict is an explicit
+        all-criteria-FAIL with no routing flag -- UNROUTABLE, so the EXISTING
+        reflect budget takes over under its own cap and its own slug.
+        Neither counter moves for the other's mechanism.
+        """
+        seen = {"n": 0}
+
+        def verifier(request: RoleRequest) -> dict[str, Any]:
+            seen["n"] += 1
+            if seen["n"] == 1:
+                return {
+                    "ctx": {
+                        ContextKeys.ALL_CRITERIA_PASS: True,
+                        ContextKeys.CRITERIA_PASS_COUNT: 4,
+                        ContextKeys.CRITERIA_TOTAL: 4,
+                    }
+                }
+            return {"ctx": {ContextKeys.ALL_CRITERIA_PASS: False}}
+
+        script = _traverse_script()
+        script[HarnessStates.REFLECT] = verifier
+        harness = make_harness(
+            script,
+            approvals=ApprovalRecorder({APPROVAL_CLOSE: False}),
+            max_close_denials=5,
+            max_reflect_redispatches=1,
+        )
+        result = harness.run()
+
+        # Dispatch 1: routable + denied.  Dispatch 2: unroutable (spends the
+        # reflect budget, 1/1).  Dispatch 3: unroutable at the reflect cap.
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 3
+        assert harness.agent._close_denials == 1
+        assert harness.agent._reflect_redispatches == 1
+        assert harness.approvals.count(APPROVAL_CLOSE) == 1
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == (
+            GateSlug.REFLECT_CAP
+        )
+
+    def test_a_denying_callback_cannot_reset_or_refill_the_counter(
+        self, make_harness
+    ) -> None:
+        """The [I:5] escape shape, aimed at THIS cap from the approval seam.
+
+        Unlike the reflect budget, THIS counter's spend is driven by the
+        callback's own answers -- so the seam property to prove is that
+        consultation cannot reach the counter: the callback receives an
+        ``ApprovalRequest`` (a context COPY plus parameters) and returns a
+        bool, holding no driver reference.  However it answers, the spend is
+        exactly ``min(denials, cap)`` and the cap slug fires at the bound --
+        no sequence of answers zeroes the counter or raises the cap.
+        """
+        approvals = ApprovalRecorder({APPROVAL_CLOSE: False})
+        harness = make_harness(
+            _denied_close_script(), approvals=approvals, max_close_denials=1
+        )
+        result = harness.run()
+
+        assert approvals.count(APPROVAL_CLOSE) == 2
+        assert harness.agent._close_denials == 1
+        assert harness.agent.max_close_denials == 1
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.CLOSE_CAP
+
+    def test_a_worker_cannot_reach_the_counter(self, make_harness) -> None:
+        """The [I:5] escape shape, aimed at THIS cap from the worker seam.
+
+        A worker's reply reaches context through ``final_context`` and
+        ``structured_output`` (both filtered by ``_WORKER_WRITABLE``) and the
+        FSM's Pass-1 extraction is the second writer.  The bound is reachable
+        from none of them, because it is not a context key at all.
+        """
+        greedy = {
+            "close_denials": 0,
+            "_close_denials": 0,
+            "max_close_denials": 99,
+        }
+        script = _denied_close_script()
+        entry = dict(script[HarnessStates.REFLECT])
+        entry["ctx"] = {**entry["ctx"], **greedy}
+        script[HarnessStates.REFLECT] = entry
+
+        harness = make_harness(
+            script,
+            approvals=ApprovalRecorder({APPROVAL_CLOSE: False}),
+            extraction_data=greedy,
+            max_close_denials=2,
+        )
+        result = harness.run()
+
+        assert harness.agent._close_denials == 2
+        assert harness.agent.max_close_denials == 2
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.CLOSE_CAP
+
+    def test_the_counter_is_not_a_context_key(self, make_harness) -> None:
+        """Structural pin: the counter exists nowhere a worker can write."""
+        context_key_values = {
+            value
+            for name, value in vars(ContextKeys).items()
+            if isinstance(value, str) and not name.startswith("__")
+        }
+        for spelling in ("close_denials", "close-denials"):
+            assert spelling not in context_key_values
+            assert spelling not in DRIVER_OWNED_SEEDS
+
+        harness = make_harness(
+            _denied_close_script(),
+            approvals=ApprovalRecorder({APPROVAL_CLOSE: False}),
+            max_close_denials=1,
+        )
+        result = harness.run()
+
+        assert "close_denials" not in result.final_context
+        assert "_close_denials" not in result.final_context
+
+    def test_the_bound_resets_between_runs_on_one_instance(self, make_harness) -> None:
+        """Per RUN, not per LIFETIME: a reused instance is not pre-exhausted."""
+        harness = make_harness(
+            _denied_close_script(),
+            approvals=ApprovalRecorder({APPROVAL_CLOSE: False}),
+            max_close_denials=1,
+        )
+        harness.run()
+        assert harness.agent._close_denials == 1
+
+        harness.run("a second goal")
+
+        assert harness.agent._close_denials == 1
+        assert harness.worker.count_for(HarnessStates.REFLECT) == 4
+
+    def test_close_cap_is_not_a_pre_step_gate_slug(self) -> None:
+        """``close-cap`` sits NEXT TO ``reflect-cap``, outside ``ORDER``."""
+        assert GateSlug.CLOSE_CAP == "close-cap"
+        assert GateSlug.CLOSE_CAP not in GateSlug.ORDER
 
 
 # ---------------------------------------------------------------------------
