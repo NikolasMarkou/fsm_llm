@@ -162,25 +162,32 @@ normalizer; division-of-labour REFUTED as the S5 cause (the bundled EXECUTE
 dispatch did its one assigned write correctly). The `_evidence_path`
 label-normalization fix is proven load-bearing OFFLINE on the retained probe
 record (frozen-floor replay flips False->True). L6 B7 (n=3, floor
-sha256-identical `cbeeb6aa...`, 8th block): floor **0/3 honest** -- run 1 an
-explore-cap halt (S4c variance); runs 2/3 BOTH reached EXECUTE and BOTH
-earned `verified_write=True` with the exact normalized label
-`workspace:uploader.py`, the first rows in the lineage with ANY true (in-loop
-2/2 is an existence proof, not attribution of those credits to the fix). The
-S4b reflect-cap budget (routability-keyed, mirroring plan-cap) landed and
-FIRED honestly (run 2: 4/4 unparseable verifier replies -> `reflect-cap`).
-Two named residuals: (α) the bench-side `HONEST_HALT_SLUGS` allowlist
-(non-frozen) lacks `REFLECT_CAP`, so an honest reflect-cap halt grades
-`honest_halt=False` by construction -- a B7 confound for that clause, pinned
-as a recorded decision (any extension rides its own pre-registered B8); (β) a
-denied-CLOSE approval does not consume the reflect budget -> run 3's slugless
-stall (pre-named residual). Run 3 was functionally the deepest lineage run:
-the verifier claimed 4/4 criteria PASS and the close gate DENIED on an empty
-verification.md -- the disk-truth gates held. The floor stays OPEN, not a
-ceiling. The harness is not production-ready and
-a 4B model is not claimed to drive it unattended to a useful result. See
-`src/fsm_llm_harness/CLAUDE.md` for the full reference, including what is
-measured and what is not.
+sha256-identical `cbeeb6aa...`, 8th block): floor **0/3 honest** -- runs 2/3
+BOTH reached EXECUTE with `verified_write=True` (exact normalized label
+`workspace:uploader.py`, the first true rows in the lineage; an existence
+proof, not attribution), the S4b reflect-cap budget fired honestly, and two
+named residuals kept both off the floor: (α) the non-frozen bench
+`HONEST_HALT_SLUGS` allowlist lacked `REFLECT_CAP` (an honest cap halt graded
+`honest_halt=False` by construction, pinned for a pre-registered B8) and (β)
+a denied-CLOSE approval consumed no budget -> a slugless stall after the
+close gate correctly DENIED on an empty verification.md. Iteration 10 then
+fixed BOTH under B8's registration (`l6-e2e/B8`, n=3, floor sha256-identical,
+9th block): β a bounded close-denial budget with the honest `close-cap` slug
+(live-validated: run 1 took 4 disk-truth-denied confirm_close approvals and
+1+3 verifier redispatches, then halted `close-cap`), α the allowlist extended
+with `reflect-cap`/`close-cap` (a DECLARED grading-semantics change, B8 rows
+only, nothing regraded). B8 floor: **runs 1 and 3 are the FIRST rows in the
+lineage to clear the full per-run conjunction** (reached>=EXECUTE ∧
+verified_write ∧ honest_halt); run 2 an honest plan-cap halt (plan-writer
+empty-reply x4), so the frozen 3/3 bar is honestly NOT MET at 2/3; ZERO
+slugless stalls. The new dominant measured wall is verifier CONTENT: across 7
+funded REFLECT dispatches the verifier never wrote verification.md (run 1
+empty-reply x3, run 3 unparseable x4) -- the disk-truth close gate held and
+the failure point is the protocol's evidence requirement, not traverse
+inability. The floor stays OPEN, not a ceiling. The harness is not
+production-ready and a 4B model is not claimed to drive it unattended to a
+useful result. See `src/fsm_llm_harness/CLAUDE.md` for the full reference,
+including what is measured and what is not.
 
 ## Code Conventions
 
