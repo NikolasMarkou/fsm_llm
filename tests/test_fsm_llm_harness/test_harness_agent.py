@@ -811,6 +811,15 @@ class TestApprovals:
         assert harness.approvals.count(APPROVAL_CLOSE) >= 1
         assert harness.worker.count_for(HarnessStates.CLOSE) == 0
         assert result.final_context[ContextKeys.CLOSE_CONFIRMED] is False
+        # Red-before pin of the CURRENT denied-CLOSE shape (L6 B7 run 3,
+        # ``scripts/bench_data/l6-e2e/B7/rows.jsonl``: ``halt_slug: null``,
+        # "Stalled in REFLECT ..."): the ``all_criteria_pass`` arm returns
+        # unconditionally, so a denial bypasses every budget and the run dies
+        # on the stall detector's ``slug=None`` raise.  These two assertions
+        # regression-lock that bug shape and FLIP with the step-2 fix
+        # (``close-cap`` slug + a reason naming the denial).
+        assert result.final_context.get(ContextKeys.LAST_GATE_SLUG) is None
+        assert "Stalled in REFLECT" in result.final_context[ContextKeys.HALT_REASON]
 
     def test_every_gate_is_distinguishable_by_tool_name(
         self, make_harness, roots, plan_dir
