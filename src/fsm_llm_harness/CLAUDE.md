@@ -251,8 +251,12 @@ scope, prompt text and `owned_artifacts` are the same fact read three times.
 | PIVOT | `reviewer` | `findings/` | 10 | `pivot_resolved`, `pivot_reason` |
 | CLOSE | `archivist` | `decisions.md`, `summary.md` + all 6 cross-plan files | 10 | `halt_reason` |
 
-The verifier owns nothing on purpose: a verifier RETURNS results and the driver
-merges them into `verification.md`.
+The verifier owns nothing on purpose: a verifier RETURNS results. The intended
+counterpart -- the driver merging those results into `verification.md` -- does
+NOT exist yet: no driver code writes `verification.md` after PLAN, and the
+response_format plan render does not seed it either (rules.py:438), so on the
+current configuration nothing populates `verification.md` at all. This is the
+named REFLECT plumbing gap (B8, plan-032ae337 D-002).
 
 **Prompt placement is a MEASURED result, not a preference.** `build_role_prompt`
 is three filters over one ordered block list:
@@ -379,7 +383,7 @@ Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_harness/          # 1,964 tests, 10 test files
+pytest tests/test_fsm_llm_harness/          # 1,977 tests, 10 test files
 ```
 
 | File | Tests |
@@ -436,7 +440,7 @@ driver-assigned EXECUTE target fix, bars and assertions byte-untouched
 | L6 B5, same floor, PLAN gate keys on rendered-disk-content (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor**, but run 1 FIRST-EVER to clear PLAN and reach REFLECT on a valid 11-section plan.md; missed verified_write (S4a) + honest_halt (S4b) |
 | L6 B6, same floor, S4a existence-gated prose EXECUTE target (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor**; run 2 reached REFLECT, target ASSIGNED from prose (`assigned-prose`/uploader.py -- B5 `no-target-token` FALSIFIED, model wrote uploader.py), but verified_write still False (credit-layer wall, S5); runs 1/3 explore-cap |
 | L6 B7, same floor, S5 label-normalization fix + S4b reflect-cap budget (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor, honest**; run 1 explore-cap (S4c); runs 2/3 BOTH reached EXECUTE and BOTH `verified_write=true` (exact normalized label `workspace:uploader.py` -- first lineage rows with ANY true); honest_halt false on both: run 2 gap (α) bench-allowlist lag on `reflect-cap`, run 3 gap (β) denied-CLOSE slugless stall |
-| L6 B8, same floor, β close-cap budget + α honest-set grading extension (floor sha256-identical) | 3/3 | **2/3 -- 3/3 bar NOT MET, honest miss**; runs 1/3 the FIRST lineage rows to clear the full per-run conjunction (`>=EXECUTE` + `verified_write` + `honest_halt`): run 1 `close-cap` after 4 denied `confirm_close` + 1+3 REFLECT dispatches (β live-validated), run 3 `reflect-cap` (α grades it honest); run 2 honest `plan-cap` (plan-writer empty-reply x4); ZERO slugless stalls; verifier never wrote verification.md in any run |
+| L6 B8, same floor, β close-cap budget + α honest-set grading extension (floor sha256-identical) | 3/3 | **2/3 -- 3/3 bar NOT MET, honest miss**; runs 1/3 the FIRST lineage rows to clear the full per-run conjunction (`>=EXECUTE` + `verified_write` + `honest_halt`): run 1 `close-cap` after 4 denied `confirm_close` + 1+3 REFLECT dispatches (β live-validated), run 3 `reflect-cap` (α grades it honest); run 2 honest `plan-cap` (plan-writer empty-reply x4); ZERO slugless stalls; verification.md never written in any run (REFLECT has no write path to it -- plumbing gap, D-002) |
 
 This is the first time L4 has MET the standing bar. (The strict row's in-test
 assertion is existential -- >= 1 content-matched dispatch across both arms,
@@ -778,10 +782,15 @@ requirement, not traverse inability.
 frozen 3/3 bar honestly NOT MET.** The β fix (plan-032ae337 D-001) mints a
 bounded close-denial budget -- `GateSlug.CLOSE_CAP` + `_close_denials` +
 `MAX_CLOSE_DENIALS=3` (an unmeasured placeholder), mirroring plan-cap: each
-denied `confirm_close` re-dispatches the verifier (the denial evidence names
-`verification.md`, which the verifier holds the write tool for) and cap
-exhaustion pre-writes the honest `close-cap` slug before the stall detector
-can fire. The α change extends the NON-frozen bench allowlist
+denied `confirm_close` re-dispatches the verifier and cap exhaustion
+pre-writes the honest `close-cap` slug before the stall detector can fire.
+(CORRECTED post-review, plan-032ae337 D-002: the registration's premise that
+the verifier "holds the write tool for `verification.md`" was FALSE -- the
+REFLECT role gets READ_ONLY + SHELL tools only (roles.py:322), owns no
+artifact (rules.py:122), and no driver path writes `verification.md`, so on
+this configuration the redispatch cannot repair an "absent or empty
+verification.md" denial; the budget's validated value is the bounded HONEST
+halt, not repair.) The α change extends the NON-frozen bench allowlist
 `HONEST_HALT_SLUGS` with `REFLECT_CAP`/`CLOSE_CAP` -- a DECLARED
 grading-semantics change riding B8's registration exactly as B7's D-005 pin
 required; B8 rows only, nothing in B0-B7 regraded. B8 measured: run 1
@@ -794,20 +803,30 @@ unparseable verifier replies, the B7 run 2 shape, now grading honest under
 variance, S4c-adjacent but at PLAN). **Runs 1 and 3 are the FIRST rows in the
 lineage to clear the full per-run floor conjunction** (`>=EXECUTE` ∧
 `verified_write` ∧ `honest_halt`); ZERO slugless stalls; the 3/3 bar fails
-honestly on run 2. The new dominant measured wall is **verifier CONTENT**:
-across 7 funded REFLECT dispatches in the block the verifier never wrote
-`verification.md` (run 1 empty-reply x3, run 3 unparseable x4;
-`verification_md_bytes=0` in every row) -- the close gate's disk-truth denial
-held 4/4 and the failure point is the protocol's evidence requirement, not
-traverse inability. Attribution stays as registered: run 1 exercises both α
+honestly on run 2. The new dominant measured wall is a **harness PLUMBING
+gap, not verifier content**: REFLECT has no write path to `verification.md`
+at all -- the verifier holds no write tool for it, no driver code merges the
+verifier reply to disk, and the PLAN-writer's rules.py:438 obligation to seed
+`verification.md` is unmet under the response_format render
+(`verification_md_bytes=0` in every B7/B8 row; run 1's redispatched verifiers
+empty-replied x3, run 3's were unparseable x4, but even run 1's PARSEABLE
+obs[5] verdict left the file at 0 bytes). No verifier-side
+prompt/response_format fix can populate it; until a driver merge of a
+structured verifier reply or PLAN-render seeding lands, the close-approval
+path cannot open on this configuration -- which is why run 1's cap spend was
+futile-for-repair yet correctly honest. The close gate's disk-truth denial
+held 4/4. Attribution stays as registered: run 1 exercises both α
 and β; run 3 exercises α on the grading side only; neither shows the model
 can produce verification.md content.
 
 **Forward: the floor stays OPEN, not a ceiling.** Measured successor items,
-in order of evidence: the **verifier-content wall** (new, named at B8: the
-verifier never writes `verification.md` -- the same failure class the PLAN
-wall had before the `response_format` structured plan, which is the obvious
-candidate mechanism, NOT chosen yet); top-of-funnel variance (S4c-class, ~1
+in order of evidence: the **REFLECT->`verification.md` plumbing gap** (named
+at B8, reframed post-review D-002: `verification.md` has NO write path on
+this configuration -- neither a verifier tool nor a driver merge -- and PLAN
+never seeds it, so the successor is driver-side: merge a structured verifier
+reply into `verification.md`, or seed it at the PLAN render (rules.py:438);
+a verifier-side prompt/response_format fix alone cannot populate it, and
+neither option is chosen yet); top-of-funnel variance (S4c-class, ~1
 run per block dies before EXECUTE, B5-B8 -- at PLAN in B8 run 2); and budget
 tuning (`MAX_REFLECT_REDISPATCHES`/`MAX_CLOSE_DENIALS` remain unmeasured
 placeholders; B8's funded-retry observations suggest the verifier, not the

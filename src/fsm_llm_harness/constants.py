@@ -615,13 +615,18 @@ class Defaults:
     #:
     #: 3 is an UNMEASURED PLACEHOLDER mirroring MAX_PLAN_REDISPATCHES /
     #: MAX_REFLECT_REDISPATCHES above (n=1 stall observation, zero
-    #: re-dispatch observations), NOT a measured horizon.  The redispatch is
-    #: genuinely productive by construction: the measured denial evidence is
-    #: exactly what a re-dispatched verifier -- which holds the write tool
-    #: for `verification.md` -- can repair.  Do NOT tune it without a
-    #: dedicated bench: `close-cap` rows whose denial evidence never changes
-    #: across all 4 consultations would mean the budget is not the lever at
-    #: all.  See decisions.md D-001 (plan-2026-07-24T032539-032ae337).
+    #: re-dispatch observations), NOT a measured horizon.
+    # DECISION plan-2026-07-24T032539-032ae337/D-002
+    #: CORRECTED post-review (B8): the original claim that the redispatch is
+    #: "genuinely productive by construction" (the verifier holding the write
+    #: tool for `verification.md`) was FALSE -- the verifier holds no write
+    #: tool and no driver path writes `verification.md`, so on the current
+    #: configuration the retry cannot repair this denial (B8 run 1: 3 funded
+    #: retries, file stayed 0 bytes); the budget's value is the bounded
+    #: honest `close-cap` halt.  Do NOT tune it without a dedicated bench:
+    #: `close-cap` rows whose denial evidence never changes across all 4
+    #: consultations would mean the budget is not the lever at all.  See
+    #: decisions.md D-001 and D-002 (plan-2026-07-24T032539-032ae337).
     MAX_CLOSE_DENIALS = 3
     #: The autonomy leash: the 3rd fix attempt is HARD-blocked.
     MAX_FIX_ATTEMPTS = 2

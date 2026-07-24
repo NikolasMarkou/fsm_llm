@@ -149,3 +149,47 @@ not a tuned constant.
    convert either run — B8's observations (empty-reply/unparseable at every
    funded retry) suggest the verifier, not the budget size, is the lever.
    Tuning requires its own pre-registered bench.
+
+## Step-7 amendment (post-review, D-002) — wording/attribution corrections; graded verdicts UNCHANGED
+
+*Appended at plan-032ae337 iter-1/step-7 after the adversarial review
+(`findings/review-iter-1.md`). Per the B7 D-005 precedent this is a MARKED
+amendment: nothing above this section is rewritten, no row is regraded, and
+the graded verdicts stand unchanged — β validated as BOUNDING the denied-CLOSE
+loop and halting it honestly, α exercised twice and grading honest, floor 2/3
+with the 3/3 bar honestly NOT MET, zero slugless stalls. What follows corrects
+two attributions the registration and section (i)/s1 carried.*
+
+**W1 — the registration's "genuinely productive redispatch" premise is FALSE
+on this configuration.** The registration (and D-001) justified
+redispatch-over-immediate-halt on the claim that the verifier "holds the write
+tool for verification.md" and can repair the denial. It does not: the REFLECT
+role receives `READ_ONLY_TOOLS + SHELL_TOOLS` only (roles.py:322; the B8
+manifest's reflect tool surface has no write tool), VERIFICATION is owned by
+PLAN_WRITER/ORCHESTRATOR (rules.py:122), and no driver code merges the
+verifier reply into verification.md. Dispositive in-block proof: run 1 obs[5]
+was a PARSEABLE `success=true` verdict, yet `verification_md_bytes=0` and the
+first `confirm_close` was still denied "verification.md is absent or empty."
+The close-denial redispatch loop is therefore futile-for-repair by
+construction here; what B8 run 1 validated is the bounded HONEST `close-cap`
+halt, not repair. D-001 stands as written (append-only); D-002 in the plan's
+decisions.md is the correcting record.
+
+**s1 reframed (W2) — the dominant wall is a HARNESS PLUMBING gap, not
+"verifier content".** Section s1 above aims the successor at a verifier-side
+`response_format` fix; that cannot work alone, because REFLECT has no write
+path to `verification.md` at all (neither a verifier tool nor a driver
+merge). The named successor options are driver-side: (1) a driver merge of a
+structured verifier reply into `verification.md`, or (2) seeding
+`verification.md` at the PLAN render (the rules.py:438 obligation — reviewer
+N4). Until one lands, the close-approval path cannot open on this
+configuration — which is why run 1's cap spend was futile-for-repair yet
+correctly honest.
+
+**N4, the plumbing gap's second face (same fix surface)** —
+`verification.md` is never seeded during PLAN in any B7/B8 run: the
+plan-writer's rules.py:438 obligation ("Seed verification.md with one row per
+success criterion") is unmet by the response_format plan render
+(`verification_md_bytes=0` in every row despite plan.md rendering 2673/3559
+bytes). This predates β and is the root of every "absent or empty" close
+denial in B7/B8.

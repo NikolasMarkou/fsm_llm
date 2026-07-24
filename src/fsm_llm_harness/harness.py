@@ -2674,11 +2674,22 @@ class HarnessAgent(BaseAgent):
             # `:4b`): exactly ONE verifier dispatch, 4/4 criteria PASS, ONE
             # denial on "verification.md is absent or empty", then halt_slug
             # null off "Stalled in REFLECT for 3 turns" -- the residual-β
-            # slugless stall. The denial evidence is precisely what a
-            # re-dispatched verifier -- which holds the write tool for
-            # verification.md -- can genuinely repair, so the fix mirrors
-            # `_after_plan_dispatch`'s budget exactly, and the same
-            # properties are load-bearing:
+            # slugless stall. The fix mirrors `_after_plan_dispatch`'s budget
+            # exactly.
+            # DECISION plan-2026-07-24T032539-032ae337/D-002
+            # CORRECTED post-review (B8): the original rationale here -- that
+            # the re-dispatched verifier "holds the write tool for
+            # verification.md" and can genuinely repair the denial -- was
+            # FALSE. The redispatch gives the protocol a bounded chance to
+            # produce fresh evidence, but on the CURRENT configuration the
+            # verifier holds READ_ONLY + SHELL tools only (roles.py), owns no
+            # artifact (rules.py OWNERSHIP), and no driver path writes
+            # verification.md, so the retry CANNOT repair an "absent or empty
+            # verification.md" denial -- MEASURED (L6 B8 run 1): a PARSEABLE
+            # success verdict plus 3 funded retries left the file at 0 bytes.
+            # The budget's value here is the bounded HONEST halt (close-cap),
+            # not repair. Do NOT re-justify a larger cap on repair grounds.
+            # The same properties are load-bearing:
             #   1. A retry is authorised EXPLICITLY, by removing the SAME
             #      (state, iteration, step) key from the ledger -- never a
             #      widened key (D-017).
@@ -2693,9 +2704,13 @@ class HarnessAgent(BaseAgent):
             #      `_check_stall` always raises with slug=None. Do NOT
             #      "finish the job" by writing `close_confirmed` True or
             #      touching `all_criteria_pass`: a close the human refused
-            #      must not close (I8), and the fresh verifier reply
-            #      re-derives its own verdict.
-            # See decisions.md D-001 (plan-2026-07-24T032539-032ae337).
+            #      must not close (I8). A ROUTABLE fresh verifier reply may
+            #      re-derive the verdict; an empty or unparseable retry
+            #      leaves the prior flag standing (measured, B8 run 1: all 3
+            #      budgeted retries empty-replied and the loop ran on the
+            #      stale all_criteria_pass=True from the first verdict).
+            # See decisions.md D-001 and D-002
+            # (plan-2026-07-24T032539-032ae337).
             if self._close_denials >= self.max_close_denials:
                 logger.warning(
                     f"Close cap [{GateSlug.CLOSE_CAP}]: "

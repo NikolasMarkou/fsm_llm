@@ -12,7 +12,7 @@ FSM-LLM (v0.5.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (5,372 tests)
+make test           # pytest -v (5,385 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -180,11 +180,17 @@ only, nothing regraded). B8 floor: **runs 1 and 3 are the FIRST rows in the
 lineage to clear the full per-run conjunction** (reached>=EXECUTE ∧
 verified_write ∧ honest_halt); run 2 an honest plan-cap halt (plan-writer
 empty-reply x4), so the frozen 3/3 bar is honestly NOT MET at 2/3; ZERO
-slugless stalls. The new dominant measured wall is verifier CONTENT: across 7
-funded REFLECT dispatches the verifier never wrote verification.md (run 1
-empty-reply x3, run 3 unparseable x4) -- the disk-truth close gate held and
-the failure point is the protocol's evidence requirement, not traverse
-inability. The floor stays OPEN, not a ceiling. The harness is not
+slugless stalls. The new dominant measured wall is a harness PLUMBING gap,
+not verifier content (post-review correction, plan-032ae337 D-002): REFLECT
+has no write path to verification.md at all -- the verifier holds
+read-only+shell tools only, no driver merge of the verifier reply exists,
+and the PLAN render never seeds the file (the rules.py:438 seeding
+obligation is unmet under response_format) -- so no verifier-side
+prompt/response_format fix can populate it; until a driver merge of a
+structured verifier reply or PLAN-render seeding lands, the close-approval
+path cannot open on this configuration (run 1's cap spend was
+futile-for-repair yet correctly honest, and the disk-truth close gate held
+4/4). The floor stays OPEN, not a ceiling. The harness is not
 production-ready and a 4B model is not claimed to drive it unattended to a
 useful result. See `src/fsm_llm_harness/CLAUDE.md` for the full reference,
 including what is measured and what is not.
@@ -255,25 +261,25 @@ including what is measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (5,372 collected)
+pytest                                 # Run all tests (5,385 collected)
 pytest tests/test_fsm_llm/            # Core package tests (1,305 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (137 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (976 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (270 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
-pytest tests/test_fsm_llm_harness/    # Harness tests (1,964 tests)
+pytest tests/test_fsm_llm_harness/    # Harness tests (1,977 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 5,302. The remaining 70 are three root-level files:
+# The 9 suites above sum to 5,315. The remaining 70 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (24)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
 
-Counts re-measured with `pytest --collect-only` at plan-2026-07-23-2c22e5f6
-step 7; the step-7 full run is 5,342 passed / 28 skipped / 2 xfailed in ~250s.
+Counts re-measured with `pytest --collect-only` at plan-2026-07-24-032ae337
+step 7; the step-7 full run is 5,355 passed / 28 skipped / 2 xfailed in ~250s.
 
 **Conventions**:
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios
