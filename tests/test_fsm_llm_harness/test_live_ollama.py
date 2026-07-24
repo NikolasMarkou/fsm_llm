@@ -1384,14 +1384,26 @@ L6_BENCH_ID = "l6-e2e"
 L6_BLOCK = "B7"
 
 #: The slugs that make a halt HONEST: the four pre-step-gate slugs plus the
-#: EXPLORE and PLAN re-dispatch caps (PLAN_CAP joined for B1: a cap-exhausted
-#: PLAN halt is BOUNDED by design, exactly like EXPLORE_CAP -- see D-008).  A
+#: EXPLORE, PLAN, REFLECT and CLOSE re-dispatch caps.  PLAN_CAP joined for B1
+#: (a cap-exhausted PLAN halt is BOUNDED by design, exactly like EXPLORE_CAP
+#: -- see D-008).  REFLECT_CAP joined for B8 -- residual alpha, the extension
+#: D-005 pre-authorized to ride its own pre-registered block: a cap-exhausted
+#: REFLECT halt is bounded by design exactly like PLAN_CAP.  CLOSE_CAP joined
+#: at its minting per the two-file rule (slug declaration AND allowlist
+#: membership in the same change): a denied-CLOSE cap halt is bounded and
+#: honest by design -- see plan-2026-07-24T032539-032ae337/D-001.  A
 #: stall halt carries NO slug (`_check_stall` raises with ``slug=None``) and
 #: is deliberately NOT in this set -- "the run wedged and could not say why"
 #: is the dishonest shape the floor exists to catch.  Reaching terminal CLOSE
 #: is the other honest ending.
 HONEST_HALT_SLUGS = frozenset(
-    {*GateSlug.ORDER, GateSlug.EXPLORE_CAP, GateSlug.PLAN_CAP}
+    {
+        *GateSlug.ORDER,
+        GateSlug.EXPLORE_CAP,
+        GateSlug.PLAN_CAP,
+        GateSlug.REFLECT_CAP,
+        GateSlug.CLOSE_CAP,
+    }
 )
 
 #: Protocol order for "furthest state reached".  PIVOT and CLOSE share the top
@@ -2245,6 +2257,8 @@ class TestTheL6RubricPlumbingOffline:
         assert _bench_defect({**base, "halt_slug": GateSlug.LEASH_CAP}) is False
         assert _bench_defect({**base, "halt_slug": GateSlug.EXPLORE_CAP}) is False
         assert _bench_defect({**base, "halt_slug": GateSlug.PLAN_CAP}) is False
+        assert _bench_defect({**base, "halt_slug": GateSlug.REFLECT_CAP}) is False
+        assert _bench_defect({**base, "halt_slug": GateSlug.CLOSE_CAP}) is False
         assert _bench_defect({**base, "close_reached": True}) is False
         assert _bench_defect({**base, "timed_out": True}) is True
         assert _bench_defect({**base, "error": "RuntimeError('x')"}) is True
@@ -2257,6 +2271,8 @@ class TestTheL6RubricPlumbingOffline:
         PLAN_CAP joined."""
         assert GateSlug.PLAN_CAP in HONEST_HALT_SLUGS
         assert GateSlug.EXPLORE_CAP in HONEST_HALT_SLUGS
+        assert GateSlug.REFLECT_CAP in HONEST_HALT_SLUGS
+        assert GateSlug.CLOSE_CAP in HONEST_HALT_SLUGS
         assert None not in HONEST_HALT_SLUGS
         assert (
             _bench_defect(
@@ -2270,28 +2286,33 @@ class TestTheL6RubricPlumbingOffline:
             is True
         )
 
-    def test_a_reflect_cap_halt_is_deliberately_not_yet_in_the_honest_set(
+    def test_reflect_cap_and_close_cap_halts_are_in_the_honest_set(
         self,
     ) -> None:
-        """RECORDED DECISION: ``REFLECT_CAP`` stays OUT of the honest set."""
-        # DECISION plan-2026-07-23T173454-2c22e5f6/D-005: do NOT add
-        # GateSlug.REFLECT_CAP to HONEST_HALT_SLUGS as a drive-by.  The
-        # allowlist is bench-side and NON-frozen, so the edit is trivially
-        # easy -- but it is a bench-GRADING semantics change (it flips what
-        # counts as an honest halt for the L6 floor's honest_halt clause),
-        # and B7 measured gap (alpha) precisely because the S4b reflect-cap
-        # budget (D-003) shipped an honest-BY-DESIGN slug the bench cannot
-        # yet grade as honest.  Extending the set mid-lineage without a
-        # pre-registered block would silently regrade the clause the way
-        # post-hoc rule changes always do; the extension must ride its own
-        # pre-registered block (B8) with the decision made on its merits.
-        # Until then this pin keeps the exclusion an EXPLICIT, tested state
-        # rather than an unpinned accident (reviewer/verifier concern:
-        # nothing previously asserted membership EITHER way).
-        assert GateSlug.REFLECT_CAP not in HONEST_HALT_SLUGS
-        # The slug itself exists and is a real GateSlug -- the exclusion
-        # above is a grading decision, not a typo'd constant.
+        """RECORDED DECISION: ``REFLECT_CAP`` and ``CLOSE_CAP`` are IN the
+        honest set (supersedes the D-005 exclusion pin)."""
+        # DECISION plan-2026-07-24T032539-032ae337/D-001: REFLECT_CAP and
+        # CLOSE_CAP join HONEST_HALT_SLUGS.  This SUPERSEDES
+        # plan-2026-07-23T173454-2c22e5f6/D-005, which pinned REFLECT_CAP's
+        # exclusion NOT forever but pending a pre-registered block deciding
+        # the extension on its merits (an unregistered mid-lineage edit
+        # would silently regrade the honest_halt clause the way post-hoc
+        # rule changes always do).  B8 IS that block: the extension is
+        # declared as its own what-changed item in PRE_REGISTRATION_B8.md,
+        # committed strictly before any B8 row, and never regrades B0-B7
+        # rows (B7 run 2's honest_halt=False stands as measured).  D-005's
+        # rationale is thereby retired by name, not silently deleted -- the
+        # pin did exactly the job it was minted for.  On the merits: a
+        # cap-exhausted REFLECT halt is bounded by design exactly like
+        # PLAN_CAP (the D-003 routability-keyed budget), and CLOSE_CAP
+        # joins at its minting per the two-file rule -- a denied-CLOSE cap
+        # halt is bounded and honest by design (D-001).
+        assert GateSlug.REFLECT_CAP in HONEST_HALT_SLUGS
+        assert GateSlug.CLOSE_CAP in HONEST_HALT_SLUGS
+        # The slugs themselves exist and are real GateSlug values -- the
+        # inclusion above is a grading decision, not typo'd constants.
         assert GateSlug.REFLECT_CAP == "reflect-cap"
+        assert GateSlug.CLOSE_CAP == "close-cap"
 
     def test_the_L6_manifest_pins_the_same_six_fields_as_the_L4_blocks(self) -> None:
         hb = _bench_module()
