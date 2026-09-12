@@ -6,6 +6,7 @@ Covers: F-001 (ParallelStep), F-002 (event race), F-004 (ConversationStep),
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 from fsm_llm_workflows.engine import WorkflowEngine
@@ -211,3 +212,192 @@ class TestDeadCodeRemoved:
         """WorkflowEngine should not have conversation_map attribute."""
         engine = WorkflowEngine()
         assert not hasattr(engine, "conversation_map")
+
+
+# ---------------------------------------------------------------------------
+# F4: Per-instance lock for WorkflowInstance mutation
+# ---------------------------------------------------------------------------
+
+
+class TestInstanceLockConcurrency:
+    """F4: concurrent advance_workflow/cancel_workflow calls on the SAME
+    instance must not corrupt current_step_id/status/context, and must not
+    execute the same step body twice for a single logical advance.
+
+    Regression test for plan-2026-09-12T065608-089d0ec7 step 2 (D-003).
+    """
+
+    @staticmethod
+    def _build_counting_terminal_step(step_id: str, counter: list):
+        """A step that sleeps briefly (to widen the race window), then
+        completes with no next_state (terminal), incrementing ``counter``
+        each time it actually runs."""
+        import asyncio as _asyncio
+
+        from fsm_llm_workflows.models import WorkflowStepResult
+        from fsm_llm_workflows.steps import WorkflowStep
+
+        class _CountingTerminalStep(WorkflowStep):
+            async def execute(self, context):
+                counter.append(1)
+                await _asyncio.sleep(0.05)
+                return WorkflowStepResult.success_result(
+                    data={"ran": True}, next_state=None, message="done"
+                )
+
+        return _CountingTerminalStep(step_id=step_id, name="Counting")
+
+    @staticmethod
+    def _build_counting_waiting_step(step_id: str, counter: list):
+        """A step that sleeps briefly, then parks the workflow WAITING for
+        an event (not terminal), incrementing ``counter`` each run."""
+        import asyncio as _asyncio
+
+        from fsm_llm_workflows.models import WorkflowStepResult
+        from fsm_llm_workflows.steps import WorkflowStep
+
+        class _CountingWaitingStep(WorkflowStep):
+            async def execute(self, context):
+                counter.append(1)
+                await _asyncio.sleep(0.05)
+                return WorkflowStepResult.success_result(
+                    data={
+                        "_waiting_info": {
+                            "waiting_for_event": True,
+                            "event_type": "resume",
+                        }
+                    },
+                    next_state=None,
+                    message="waiting",
+                )
+
+        return _CountingWaitingStep(step_id=step_id, name="CountingWaiting")
+
+    async def test_concurrent_advance_calls_do_not_double_execute_step(self):
+        """Two concurrent advance_workflow() calls on the same RUNNING
+        instance must only ever execute the step body once: whichever call
+        loses the lock race must observe the (by-then) terminal instance via
+        is_active() and no-op, rather than re-running the step concurrently."""
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+
+        for _ in range(5):
+            counter: list = []
+            engine = WorkflowEngine()
+            step = self._build_counting_terminal_step("slow", counter)
+            definition = WorkflowDefinition(
+                workflow_id="wf-race-advance",
+                name="Race",
+                steps={"slow": step},
+                initial_step_id="slow",
+            )
+            engine.register_workflow(definition)
+
+            instance = WorkflowInstance(
+                instance_id="race-advance-1",
+                workflow_id="wf-race-advance",
+                current_step_id="slow",
+                status=WorkflowStatus.RUNNING,
+            )
+            engine.workflow_instances["race-advance-1"] = instance
+
+            results = await asyncio.gather(
+                engine.advance_workflow("race-advance-1"),
+                engine.advance_workflow("race-advance-1"),
+            )
+
+            # Exactly one step execution, regardless of which call won the
+            # per-instance lock race.
+            assert len(counter) == 1
+            assert sorted(results) == [False, True]
+            assert instance.status == WorkflowStatus.COMPLETED
+            assert instance.current_step_id == "slow"
+            assert instance.context.get("ran") is True
+
+    async def test_concurrent_advance_and_cancel_leave_consistent_state(self):
+        """A concurrent advance_workflow() + cancel_workflow() on the same
+        instance must always end CANCELLED, must never execute the step body
+        more than once, and must never raise (WAITING->CANCELLED is always a
+        valid transition, so no ordering of the two calls can hit an invalid
+        status transition)."""
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+
+        for _ in range(5):
+            counter: list = []
+            engine = WorkflowEngine()
+            step = self._build_counting_waiting_step("slow", counter)
+            definition = WorkflowDefinition(
+                workflow_id="wf-race-cancel",
+                name="Race",
+                steps={"slow": step},
+                initial_step_id="slow",
+            )
+            engine.register_workflow(definition)
+
+            instance = WorkflowInstance(
+                instance_id="race-cancel-1",
+                workflow_id="wf-race-cancel",
+                current_step_id="slow",
+                status=WorkflowStatus.RUNNING,
+            )
+            engine.workflow_instances["race-cancel-1"] = instance
+
+            _advance_result, cancel_result = await asyncio.gather(
+                engine.advance_workflow("race-cancel-1"),
+                engine.cancel_workflow("race-cancel-1"),
+            )
+
+            # The step never ran more than once no matter the interleaving.
+            assert len(counter) <= 1
+            # cancel_workflow always succeeds: RUNNING->CANCELLED and
+            # WAITING->CANCELLED are both valid transitions.
+            assert cancel_result is True
+            assert instance.status == WorkflowStatus.CANCELLED
+            assert instance.current_step_id == "slow"
+            assert instance.context.get("_cancellation_reason") == "Cancelled by user"
+
+    def test_instance_lock_removed_on_remove_instance(self):
+        """F4 cleanup: remove_instance must also drop the per-instance lock
+        so _instance_locks does not grow unbounded."""
+        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+
+        engine = WorkflowEngine()
+        instance = WorkflowInstance(
+            instance_id="done-1",
+            workflow_id="wf-1",
+            current_step_id="done",
+            status=WorkflowStatus.COMPLETED,
+        )
+        engine.workflow_instances["done-1"] = instance
+        engine._get_instance_lock("done-1")
+        assert "done-1" in engine._instance_locks
+
+        assert engine.remove_instance("done-1") is True
+        assert "done-1" not in engine._instance_locks
+
+    def test_instance_lock_removed_on_purge(self):
+        """F4 cleanup: _purge_oldest_terminal_instances must also drop the
+        per-instance locks of purged instances."""
+        from datetime import datetime, timezone
+
+        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+
+        engine = WorkflowEngine(max_completed_instances=1)
+        for i in range(3):
+            iid = f"purge-{i}"
+            engine.workflow_instances[iid] = WorkflowInstance(
+                instance_id=iid,
+                workflow_id="wf-1",
+                current_step_id="done",
+                status=WorkflowStatus.COMPLETED,
+                completed_at=datetime(2026, 1, 1 + i, tzinfo=timezone.utc),
+                updated_at=datetime(2026, 1, 1 + i, tzinfo=timezone.utc),
+            )
+            engine._get_instance_lock(iid)
+
+        engine._purge_oldest_terminal_instances()
+
+        assert "purge-0" not in engine._instance_locks
+        assert "purge-1" not in engine._instance_locks
+        assert "purge-2" in engine._instance_locks

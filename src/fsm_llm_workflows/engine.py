@@ -109,8 +109,51 @@ class WorkflowEngine:
         self.event_listeners: dict[str, dict[str, EventListener]] = {}
         self.timers: dict[str, Timer] = {}
         self._listener_lock = asyncio.Lock()
+        self._instance_locks: dict[str, asyncio.Lock] = {}
 
         logger.info("Workflow engine initialized")
+
+    def _get_instance_lock(self, instance_id: str) -> asyncio.Lock:
+        """Get (creating if absent) the per-instance lock for ``instance_id``.
+
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-003
+        # F4 fix: the lock is acquired ONLY at the outermost public entry
+        # points (`start_workflow`, `advance_workflow`, `cancel_workflow`,
+        # `process_event`'s per-instance transition loop,
+        # `_handle_timer_expiration`, `_handle_event_timeout`) -- never
+        # inside `_execute_workflow_step`/`_transition_to_state` themselves.
+        # `_transition_to_state` recurses into `_execute_workflow_step`
+        # (see the call at the end of `_transition_to_state`), so acquiring
+        # this same `asyncio.Lock` at those inner levels would deadlock on
+        # the very first reentrant call -- `asyncio.Lock` is NOT reentrant.
+        # A depth-aware alternative (only lock when `_depth == 0`) was
+        # considered and rejected: it is more code for the same guarantee
+        # and ties correctness to `_depth`, a counter whose primary job is
+        # unrelated recursion-guarding (MAX_STEP_DEPTH), not lock scoping.
+        # See decisions.md D-003.
+        #
+        # Lock-ordering note: several outermost entry points call into a
+        # method that acquires `self._listener_lock` internally
+        # (`register_event_listener`, `_cleanup_workflow_resources`, and the
+        # `_listener_lock` block inside `_handle_event_timeout`) while the
+        # instance lock is already held. The ordering is consistently
+        # instance-lock-then-listener-lock everywhere in this file; never
+        # the reverse. Do not add a call path that acquires
+        # `self._listener_lock` first and this instance lock second.
+
+        Interface contract: keyed by `instance_id`; returns the same
+        `asyncio.Lock` object for repeated calls with the same id until that
+        id's entry is removed (see `remove_instance`,
+        `_purge_oldest_terminal_instances`). Never raises. Not safe to call
+        with an empty/None `instance_id` in a context where two distinct
+        logical instances must not share a lock -- callers always pass the
+        real `WorkflowInstance.instance_id`.
+        """
+        lock = self._instance_locks.get(instance_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._instance_locks[instance_id] = lock
+        return lock
 
     async def shutdown(self) -> None:
         """Cancel all pending timers and clean up resources."""
@@ -179,7 +222,8 @@ class WorkflowEngine:
         )
         log.info(f"Started workflow instance: {instance_id} (workflow: {workflow_id})")
 
-        await self._execute_workflow_step(instance)
+        async with self._get_instance_lock(instance_id):
+            await self._execute_workflow_step(instance)
         return instance_id
 
     def _get_workflow_definition(self, workflow_id: str) -> WorkflowDefinition:
@@ -555,30 +599,37 @@ class WorkflowEngine:
         # Update instance
         instance = self.workflow_instances[instance_id]
 
-        # DECISION plan_2026-05-29_5b2fbb09/D-001 [STALE]
-        # If the event already fired, process_event has consumed the listener
-        # and called _transition_to_state, which synchronously flips status to
-        # RUNNING before its first await. A timeout firing during that (slow)
-        # success transition must NOT drive a second, concurrent transition to
-        # the timeout state. Only a still-WAITING instance should time out
-        # (RW3-001). _cancel_event_timeout runs only AFTER the success
-        # transition completes, so this status guard is the real defense.
-        if instance.status != WorkflowStatus.WAITING:
-            logger.debug(
-                f"Event timeout for {instance_id} ignored: instance no longer "
-                f"WAITING (status={instance.status.value})"
-            )
-            return
+        # F4: hold the per-instance lock across the status re-check and the
+        # transition, so this timeout cannot interleave with a concurrent
+        # advance_workflow/cancel_workflow/process_event transition on the
+        # same instance. Acquired AFTER the _listener_lock block above has
+        # already released it (instance-lock, then listener-lock, never the
+        # reverse -- see _get_instance_lock's docstring).
+        async with self._get_instance_lock(instance_id):
+            # DECISION plan_2026-05-29_5b2fbb09/D-001 [STALE]
+            # If the event already fired, process_event has consumed the listener
+            # and called _transition_to_state, which synchronously flips status to
+            # RUNNING before its first await. A timeout firing during that (slow)
+            # success transition must NOT drive a second, concurrent transition to
+            # the timeout state. Only a still-WAITING instance should time out
+            # (RW3-001). _cancel_event_timeout runs only AFTER the success
+            # transition completes, so this status guard is the real defense.
+            if instance.status != WorkflowStatus.WAITING:
+                logger.debug(
+                    f"Event timeout for {instance_id} ignored: instance no longer "
+                    f"WAITING (status={instance.status.value})"
+                )
+                return
 
-        instance.context[_KEY_TIMEOUT] = {
-            "event_type": event_type,
-            "timeout_at": datetime.now(timezone.utc).isoformat(),
-        }
+            instance.context[_KEY_TIMEOUT] = {
+                "event_type": event_type,
+                "timeout_at": datetime.now(timezone.utc).isoformat(),
+            }
 
-        # NOTE (W-ISSUE-004): _depth resets to 0 here (timer-mediated transition).
-        # The step-depth guard (MAX_STEP_DEPTH) does not prevent timer-mediated cycles.
-        # Prevent A --timer--> B --auto--> A patterns at workflow design time.
-        await self._transition_to_state(instance, timeout_state)
+            # NOTE (W-ISSUE-004): _depth resets to 0 here (timer-mediated transition).
+            # The step-depth guard (MAX_STEP_DEPTH) does not prevent timer-mediated cycles.
+            # Prevent A --timer--> B --auto--> A patterns at workflow design time.
+            await self._transition_to_state(instance, timeout_state)
 
     async def schedule_timer(
         self, instance_id: str, delay_seconds: int, next_state: str
@@ -624,29 +675,31 @@ class WorkflowEngine:
         # Update instance
         instance = self.workflow_instances[instance_id]
 
-        # Symmetric guard (RW3-001): if the instance was advanced out of WAITING
-        # by some other path (e.g. an external advance_workflow) before this
-        # timer fired, do not drive a stale transition.
-        if instance.status != WorkflowStatus.WAITING:
-            logger.debug(
-                f"Timer for {instance_id} ignored: instance no longer WAITING "
-                f"(status={instance.status.value})"
-            )
-            return
+        # F4: per-instance lock, same reasoning as _handle_event_timeout above.
+        async with self._get_instance_lock(instance_id):
+            # Symmetric guard (RW3-001): if the instance was advanced out of
+            # WAITING by some other path (e.g. an external advance_workflow)
+            # before this timer fired, do not drive a stale transition.
+            if instance.status != WorkflowStatus.WAITING:
+                logger.debug(
+                    f"Timer for {instance_id} ignored: instance no longer WAITING "
+                    f"(status={instance.status.value})"
+                )
+                return
 
-        instance.context[_KEY_TIMER_EXPIRED] = {
-            "expired_at": datetime.now(timezone.utc).isoformat()
-        }
+            instance.context[_KEY_TIMER_EXPIRED] = {
+                "expired_at": datetime.now(timezone.utc).isoformat()
+            }
 
-        # Clean up timer
-        timer_key = f"{instance_id}_timer"
-        if timer_key in self.timers:
-            del self.timers[timer_key]
+            # Clean up timer
+            timer_key = f"{instance_id}_timer"
+            if timer_key in self.timers:
+                del self.timers[timer_key]
 
-        # NOTE (W-ISSUE-004): _depth resets to 0 here (timer-mediated transition).
-        # The step-depth guard (MAX_STEP_DEPTH) does not prevent timer-mediated cycles.
-        # Prevent A --timer--> B --auto--> A patterns at workflow design time.
-        await self._transition_to_state(instance, next_state)
+            # NOTE (W-ISSUE-004): _depth resets to 0 here (timer-mediated transition).
+            # The step-depth guard (MAX_STEP_DEPTH) does not prevent timer-mediated cycles.
+            # Prevent A --timer--> B --auto--> A patterns at workflow design time.
+            await self._transition_to_state(instance, next_state)
 
     async def process_event(self, event: WorkflowEvent) -> list[str]:
         """Process an external event."""
@@ -703,14 +756,22 @@ class WorkflowEngine:
 
                     affected_instances.append(instance_id)
 
-        # Execute transitions outside the lock to prevent deadlock
+        # Execute transitions outside the _listener_lock to prevent deadlock
+        # (unchanged, pre-existing design -- see the comment above
+        # `pending_transitions`). F4 adds a per-instance lock around each
+        # transition so it cannot interleave with a concurrent
+        # advance_workflow/cancel_workflow/timer transition on the same
+        # instance; instance-lock is acquired only after _listener_lock has
+        # already been released above, preserving instance-lock-then-
+        # listener-lock ordering throughout this file.
         for instance, success_state in pending_transitions:
-            # NOTE (W-ISSUE-004): _depth resets to 0 here (event-mediated transition).
-            # The step-depth guard (MAX_STEP_DEPTH) does not prevent event-mediated cycles.
-            # Prevent A --event--> B --auto--> A patterns at workflow design time.
-            await self._transition_to_state(instance, success_state)
-            # Cancel timeout after transition
-            self._cancel_event_timeout(instance.instance_id, event_type)
+            async with self._get_instance_lock(instance.instance_id):
+                # NOTE (W-ISSUE-004): _depth resets to 0 here (event-mediated transition).
+                # The step-depth guard (MAX_STEP_DEPTH) does not prevent event-mediated cycles.
+                # Prevent A --event--> B --auto--> A patterns at workflow design time.
+                await self._transition_to_state(instance, success_state)
+                # Cancel timeout after transition
+                self._cancel_event_timeout(instance.instance_id, event_type)
 
         logger.info(
             f"Processed event {event_type}, affected instances: {len(affected_instances)}"
@@ -731,13 +792,20 @@ class WorkflowEngine:
 
         instance = self.workflow_instances[instance_id]
 
-        if not instance.is_active():
-            return False
+        # F4: hold the per-instance lock across the is_active() check AND the
+        # step execution, so a concurrent cancel_workflow/advance_workflow on
+        # the same instance cannot interleave with this call's mutation of
+        # instance.context/status (re-check is_active() under the lock, not
+        # just before it, to avoid a TOCTOU race against a lock-holder that
+        # just moved the instance to a terminal status).
+        async with self._get_instance_lock(instance_id):
+            if not instance.is_active():
+                return False
 
-        if user_input:
-            instance.context[_KEY_USER_INPUT] = user_input
+            if user_input:
+                instance.context[_KEY_USER_INPUT] = user_input
 
-        await self._execute_workflow_step(instance)
+            await self._execute_workflow_step(instance)
         return True
 
     async def cancel_workflow(
@@ -748,11 +816,15 @@ class WorkflowEngine:
             return False
 
         instance = self.workflow_instances[instance_id]
-        instance.update_status(WorkflowStatus.CANCELLED)
-        instance.context[_KEY_CANCELLATION_REASON] = reason
 
-        # Clean up resources
-        await self._cleanup_workflow_resources(instance_id)
+        # F4: see advance_workflow's comment -- same per-instance lock,
+        # held across the status mutation and resource cleanup.
+        async with self._get_instance_lock(instance_id):
+            instance.update_status(WorkflowStatus.CANCELLED)
+            instance.context[_KEY_CANCELLATION_REASON] = reason
+
+            # Clean up resources
+            await self._cleanup_workflow_resources(instance_id)
 
         logger.info(f"Workflow instance {instance_id} cancelled: {reason}")
         self._purge_oldest_terminal_instances()
@@ -797,6 +869,9 @@ class WorkflowEngine:
             )
             return False
         del self.workflow_instances[instance_id]
+        # F4: drop the per-instance lock too, otherwise _instance_locks grows
+        # unbounded across the engine's lifetime.
+        self._instance_locks.pop(instance_id, None)
         logger.debug(f"Removed terminal instance {instance_id}")
         return True
 
@@ -816,6 +891,8 @@ class WorkflowEngine:
         to_remove = len(terminal) - self.max_completed_instances
         for iid, _ in terminal[:to_remove]:
             del self.workflow_instances[iid]
+            # F4: same lock-leak cleanup as remove_instance.
+            self._instance_locks.pop(iid, None)
         logger.debug(f"Purged {to_remove} oldest terminal workflow instances")
 
     # Getter methods
