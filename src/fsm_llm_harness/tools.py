@@ -659,22 +659,56 @@ class Workspace:
 
     # -- writes ---------------------------------------------------------
 
-    def write_text(self, path: str, content: str) -> str:
-        """Write a UTF-8 text file, creating parent directories inside the root."""
-        target = self.resolve(path)
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-006
+    # `_write_resolved`/`_append_resolved` take an already-resolved `Path` and
+    # do NO confinement check of their own. Do NOT call either from outside
+    # this module without first routing the path through `resolve()` (or
+    # `PlanMemory.authorise()`, which itself resolves via `PlanMemory.locate_path`
+    # -> `Workspace.resolve`) -- `resolve()` stays the ONE confinement
+    # chokepoint (D-032); these two exist only to let a caller that ALREADY
+    # holds a resolved `Path` (`PlanMemory.write_text`/`append_text`, via
+    # `authorise()`) write it without a second, redundant `resolve()` call.
+    # See decisions.md D-006.
+    def _write_resolved(self, target: Path, content: str) -> str:
+        """Write already-resolved *target*, creating parent directories.
+
+        Interface contract (2 call sites: :meth:`write_text`, and
+        ``PlanMemory.write_text``, which passes the ``Path`` its own
+        ``authorise()`` already resolved instead of re-resolving via
+        :meth:`resolve`):
+            - *target* MUST already be a resolved, confined absolute path;
+              this method performs no confinement check.
+            - Returns the workspace-root-relative path written.
+        """
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         rel = self.relative(target)
         logger.debug(f"workspace wrote {rel} ({len(content)} chars)")
         return rel
 
-    def append_text(self, path: str, content: str) -> str:
-        """Append to a UTF-8 text file, creating it (and its parents) if absent."""
+    def write_text(self, path: str, content: str) -> str:
+        """Write a UTF-8 text file, creating parent directories inside the root."""
         target = self.resolve(path)
+        return self._write_resolved(target, content)
+
+    def _append_resolved(self, target: Path, content: str) -> str:
+        """Append to already-resolved *target*, creating it (and parents) if absent.
+
+        Interface contract (2 call sites: :meth:`append_text`, and
+        ``PlanMemory.append_text``, same rationale as :meth:`_write_resolved`):
+            - *target* MUST already be a resolved, confined absolute path;
+              this method performs no confinement check.
+            - Returns the workspace-root-relative path appended to.
+        """
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("a", encoding="utf-8") as handle:
             handle.write(content)
         return self.relative(target)
+
+    def append_text(self, path: str, content: str) -> str:
+        """Append to a UTF-8 text file, creating it (and its parents) if absent."""
+        target = self.resolve(path)
+        return self._append_resolved(target, content)
 
     def delete(self, path: str) -> str:
         """Delete a single confined FILE.
@@ -1023,13 +1057,13 @@ class PlanMemory:
 
     def write_text(self, path: str, content: str) -> str:
         """Write an OWNED artifact, replacing it if it exists."""
-        self.authorise(path)
-        return self._workspace.write_text(self.locate(path), content)
+        target = self.authorise(path)
+        return self._workspace._write_resolved(target, content)
 
     def append_text(self, path: str, content: str) -> str:
         """Append to an OWNED artifact, creating it if absent."""
-        self.authorise(path)
-        return self._workspace.append_text(self.locate(path), content)
+        target = self.authorise(path)
+        return self._workspace._append_resolved(target, content)
 
 
 # ---------------------------------------------------------------------------
