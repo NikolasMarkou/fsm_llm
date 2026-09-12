@@ -150,6 +150,13 @@ def create_agent(
         pattern: Agent pattern — "react" (default), "debate", "rewoo", etc.
         **kwargs: Passed to the agent constructor (config, hitl, etc.).
 
+    Note:
+        ``AgentGraph`` is intentionally excluded from ``pattern`` — it is
+        constructed only via ``AgentGraphBuilder().add_node(...).add_edge(...)
+        .set_entry(...).build()``, taking a pre-built ``nodes``/``adjacency``/
+        ``entry`` graph rather than a flat ``tools``/``config``/``**kwargs``
+        shape this factory's ``cls(**kwargs)`` call convention assumes.
+
     Returns:
         A configured agent instance with ``__call__`` support.
 
@@ -191,6 +198,10 @@ def create_agent(
         "reflexion": ReflexionAgent,
         "meta_builder": MetaBuilderAgent,
         "swarm": SwarmAgent,
+        "parallel_react": ParallelReactAgent,
+        "native_fc": NativeFunctionCallingReactAgent,
+        "verified_react": VerifiedReactAgent,
+        "auto_memory": AutoMemoryReactAgent,
     }
     if _has_reasoning_react:
         _PATTERNS["reasoning_react"] = ReasoningReactAgent

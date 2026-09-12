@@ -87,6 +87,9 @@ class SwarmAgent(BaseAgent):
         )
 
         while True:
+            if time.monotonic() - start_time > self.config.timeout_seconds:
+                raise AgentTimeoutError(self.config.timeout_seconds)
+
             agent = self._agents.get(current_agent_name)
             if agent is None:
                 logger.error(f"Agent '{current_agent_name}' not found in swarm")

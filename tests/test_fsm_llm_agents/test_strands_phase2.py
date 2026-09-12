@@ -227,6 +227,38 @@ class TestSwarmAgent:
         swarm.add_agent("b", agent_b)
         assert "b" in swarm.agents
 
+    def test_swarm_wall_clock_timeout(self):
+        """Swarm raises AgentTimeoutError if wall-clock budget is exceeded,
+        even though each individual sub-agent hand-off completes quickly
+        enough to never trip its own per-call timeout and handoff_count
+        never reaches max_handoffs."""
+        import time
+
+        from fsm_llm_agents.definitions import AgentConfig
+        from fsm_llm_agents.exceptions import AgentTimeoutError
+        from fsm_llm_agents.swarm import SwarmAgent
+
+        def _slow_handoff(*args, **kwargs):
+            time.sleep(0.05)
+            return AgentResult(
+                answer="Handing off",
+                success=True,
+                trace=AgentTrace(total_iterations=1),
+                final_context={"next_agent": "a"},
+            )
+
+        agent_a = Mock()
+        agent_a.run = Mock(side_effect=_slow_handoff)
+
+        swarm = SwarmAgent(
+            agents={"a": agent_a},
+            entry_agent="a",
+            max_handoffs=10_000,
+            config=AgentConfig(timeout_seconds=0.01),
+        )
+        with pytest.raises(AgentTimeoutError):
+            swarm.run("loop forever")
+
 
 # ============================================================================
 # 3. Agent Graph Tests

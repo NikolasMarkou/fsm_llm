@@ -73,7 +73,6 @@ class ADaPTAgent(BaseAgent):
     ) -> AgentResult:
         """Run the ADaPT agent. _depth is internal recursion tracking."""
         start_time = _start_time or time.monotonic()
-        self._current_start_time = start_time
         logger.debug(LogMessages.DECOMPOSITION.format(depth=_depth))
 
         fsm_def = build_adapt_fsm(

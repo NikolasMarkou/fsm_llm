@@ -274,3 +274,51 @@ class TestCreateAgent:
         config = AgentConfig(max_iterations=5)
         agent = create_agent(pattern="debate", config=config)
         assert agent.config.max_iterations == 5
+
+    def test_create_parallel_react_agent(self):
+        from fsm_llm_agents import ParallelReactAgent, create_agent
+        from fsm_llm_agents.tools import tool
+
+        @tool
+        def search(query: str) -> str:
+            """Search the web."""
+            return "results"
+
+        agent = create_agent(pattern="parallel_react", tools=[search])
+        assert isinstance(agent, ParallelReactAgent)
+
+    def test_create_native_fc_agent(self):
+        from fsm_llm_agents import NativeFunctionCallingReactAgent, create_agent
+        from fsm_llm_agents.tools import tool
+
+        @tool
+        def search(query: str) -> str:
+            """Search the web."""
+            return "results"
+
+        agent = create_agent(pattern="native_fc", tools=[search])
+        assert isinstance(agent, NativeFunctionCallingReactAgent)
+
+    def test_create_verified_react_agent(self):
+        from fsm_llm_agents import VerifiedReactAgent, create_agent
+        from fsm_llm_agents.tools import tool
+
+        @tool
+        def search(query: str) -> str:
+            """Search the web."""
+            return "results"
+
+        agent = create_agent(pattern="verified_react", tools=[search])
+        assert isinstance(agent, VerifiedReactAgent)
+
+    def test_create_auto_memory_agent(self):
+        from fsm_llm_agents import AutoMemoryReactAgent, create_agent
+        from fsm_llm_agents.tools import tool
+
+        @tool
+        def search(query: str) -> str:
+            """Search the web."""
+            return "results"
+
+        agent = create_agent(pattern="auto_memory", tools=[search])
+        assert isinstance(agent, AutoMemoryReactAgent)
