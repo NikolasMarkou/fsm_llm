@@ -397,8 +397,8 @@ pytest tests/test_fsm_llm_harness/          # 1,981 tests, 10 test files
 
 | File | Tests |
 |---|---|
-| `test_roles_and_tools.py` | 479 |
-| `test_harness_agent.py` | 340 |
+| `test_roles_and_tools.py` | 483 |
+| `test_harness_agent.py` | 353 |
 | `test_artifacts.py` | 273 |
 | `test_hardening.py` | 258 |
 | `test_plan_validator.py` | 191 |

@@ -64,5 +64,6 @@
 2026-09-13T00:15:00Z | iter-1/step-4.1 | eea84ed | CLAUDE.md | EDIT(+13,-12) | radius:LOW(2) | - | reconcile test-count literals to measured 5,452 collected (per-suite table, sum/remainder, full-run pass/skip/xfail)
 2026-09-13T00:15:00Z | iter-1/step-4.1 | eea84ed | README.md | EDIT(+1,-1) | radius:LOW(2) | - | reconcile make-test comment literal to measured 5,452 tests
 2026-09-13T00:15:00Z | iter-1/step-4.1 | eea84ed | src/fsm_llm_harness/CLAUDE.md | EDIT(+2,-2) | radius:LOW(1) | - | reconcile harness suite count literal (1,977->1,981) at both mentions
-2026-09-12T18:15:00Z | iter-1/step-7.2 | uncommitted | src/fsm_llm_workflows/engine.py | EDIT(+36,-31) | radius:LOW(1) | D-020 | revert D-018 isinstance(SwitchStep) narrowing, restore wide next_state=="" terminal predicate
-2026-09-12T18:16:00Z | iter-1/step-7.2 | uncommitted | tests/test_fsm_llm_workflows/test_workflows.py | EDIT(+102,-7) | radius:MED(3) | D-020 | add RetryStep-wrapped SwitchStep and ConditionStep regression tests for D-020 revert
+2026-09-12T18:15:00Z | iter-1/step-7.2 | cc00cd6 | src/fsm_llm_workflows/engine.py | EDIT(+36,-31) | radius:LOW(1) | D-020 | revert D-018 isinstance(SwitchStep) narrowing, restore wide next_state=="" terminal predicate
+2026-09-12T18:16:00Z | iter-1/step-7.2 | cc00cd6 | tests/test_fsm_llm_workflows/test_workflows.py | EDIT(+102,-7) | radius:MED(3) | D-020 | add RetryStep-wrapped SwitchStep and ConditionStep regression tests for D-020 revert
+2026-09-12T18:25:00Z | iter-1/step-4.2 | uncommitted | src/fsm_llm_harness/CLAUDE.md | EDIT(+2,-2) | radius:LOW(1) | - | fix internally-inconsistent per-file test-count table (340->353, 479->483), now sums to header's 1,981
