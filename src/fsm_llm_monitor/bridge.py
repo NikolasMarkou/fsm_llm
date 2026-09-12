@@ -122,7 +122,11 @@ class MonitorBridge:
         """Get a snapshot of a specific conversation."""
         if self._api is None:
             return None
-        return snapshot_from_api(self._api, conversation_id)
+        return snapshot_from_api(
+            self._api,
+            conversation_id,
+            show_internal_keys=self._config.show_internal_keys,
+        )
 
     def get_all_conversation_snapshots(self) -> list[ConversationSnapshot]:
         """Get snapshots for all active conversations."""

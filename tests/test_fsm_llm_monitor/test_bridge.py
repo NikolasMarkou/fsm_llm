@@ -215,6 +215,44 @@ class TestMonitorBridgeWithMockAPI:
         snap = bridge.get_conversation_snapshot("c1")
         assert snap is None
 
+    def _make_mock_api_with_internal_key(self):
+        api = MagicMock()
+        api.list_active_conversations.return_value = ["c1"]
+        api.get_stack_depth.return_value = 1
+        api.fsm_manager.get_complete_conversation.return_value = {
+            "current_state": {
+                "id": "greeting",
+                "description": "Greet user",
+                "is_terminal": False,
+            },
+            "collected_data": {"name": "Alice", "_internal_secret": "shh"},
+            "conversation_history": [],
+            "last_extraction_response": None,
+            "last_transition_decision": None,
+            "last_response_generation": None,
+        }
+        api.register_handler = MagicMock()
+        return api
+
+    def test_get_conversation_snapshot_respects_show_internal_keys_false(self):
+        """Step B (finding 7): MonitorBridge.get_conversation_snapshot must
+        thread self._config.show_internal_keys into snapshot_from_api, not
+        rely on its default (which shows internal keys)."""
+        api = self._make_mock_api_with_internal_key()
+        bridge = MonitorBridge(api=api, config=MonitorConfig(show_internal_keys=False))
+        snap = bridge.get_conversation_snapshot("c1")
+        assert snap is not None
+        assert "_internal_secret" not in snap.context_data
+        assert snap.context_data == {"name": "Alice"}
+
+    def test_get_conversation_snapshot_shows_internal_keys_when_configured_true(self):
+        """Sanity check for the other side of the same config flag."""
+        api = self._make_mock_api_with_internal_key()
+        bridge = MonitorBridge(api=api, config=MonitorConfig(show_internal_keys=True))
+        snap = bridge.get_conversation_snapshot("c1")
+        assert snap is not None
+        assert "_internal_secret" in snap.context_data
+
 
 class TestMonitorBridgeConnectNone:
     """Tests for the connect(None) edge case."""

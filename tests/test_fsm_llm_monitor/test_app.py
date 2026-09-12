@@ -1043,3 +1043,45 @@ class TestApiKeyGate:
             logger.remove(sink_id)
         output = buf.getvalue()
         assert "previously configured API key is being cleared" not in output
+
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("post", "/api/fsm/does-not-exist/start"),
+            ("post", "/api/fsm/does-not-exist/converse"),
+            ("post", "/api/fsm/does-not-exist/end"),
+            ("post", "/api/workflow/does-not-exist/advance"),
+            ("post", "/api/workflow/does-not-exist/cancel"),
+            ("post", "/api/agent/does-not-exist/cancel"),
+        ],
+    )
+    def test_previously_ungated_routes_401_without_key_when_configured(
+        self, method, path
+    ):
+        """Step B (findings 7-9): these 6 routes now carry
+        ``dependencies=[Depends(_require_api_key)]`` — when an API key is
+        configured, calling them without one must 401 before ever reaching
+        the (missing) instance lookup."""
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        client = TestClient(app)
+        resp = getattr(client, method)(path, json={})
+        assert resp.status_code == 401
+
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("post", "/api/fsm/does-not-exist/start"),
+            ("post", "/api/fsm/does-not-exist/converse"),
+            ("post", "/api/fsm/does-not-exist/end"),
+            ("post", "/api/workflow/does-not-exist/advance"),
+            ("post", "/api/workflow/does-not-exist/cancel"),
+            ("post", "/api/agent/does-not-exist/cancel"),
+        ],
+    )
+    def test_previously_ungated_routes_unaffected_when_unconfigured(self, method, path):
+        """When no API key is configured, these 6 routes must behave exactly
+        as before the fix — never blocked by auth (never a 401)."""
+        configure(manager=InstanceManager())
+        client = TestClient(app)
+        resp = getattr(client, method)(path, json={})
+        assert resp.status_code != 401

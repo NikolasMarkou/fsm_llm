@@ -566,7 +566,7 @@ async def api_fsm_launch(req: LaunchFSMRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@app.post("/api/fsm/{instance_id}/start")
+@app.post("/api/fsm/{instance_id}/start", dependencies=[Depends(_require_api_key)])
 async def api_fsm_start_conversation(
     instance_id: str, req: StartConversationRequest
 ) -> dict[str, Any]:
@@ -585,7 +585,7 @@ async def api_fsm_start_conversation(
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@app.post("/api/fsm/{instance_id}/converse")
+@app.post("/api/fsm/{instance_id}/converse", dependencies=[Depends(_require_api_key)])
 async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[str, Any]:
     """Send a message to an FSM conversation."""
     mgr = get_manager()
@@ -604,7 +604,7 @@ async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[st
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@app.post("/api/fsm/{instance_id}/end")
+@app.post("/api/fsm/{instance_id}/end", dependencies=[Depends(_require_api_key)])
 async def api_fsm_end_conversation(
     instance_id: str, req: EndConversationRequest
 ) -> dict[str, str]:
@@ -671,7 +671,9 @@ async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@app.post("/api/workflow/{instance_id}/advance")
+@app.post(
+    "/api/workflow/{instance_id}/advance", dependencies=[Depends(_require_api_key)]
+)
 async def api_workflow_advance(
     instance_id: str, req: WorkflowAdvanceRequest
 ) -> dict[str, Any]:
@@ -693,7 +695,9 @@ async def api_workflow_advance(
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@app.post("/api/workflow/{instance_id}/cancel")
+@app.post(
+    "/api/workflow/{instance_id}/cancel", dependencies=[Depends(_require_api_key)]
+)
 async def api_workflow_cancel(
     instance_id: str, req: WorkflowCancelRequest
 ) -> dict[str, Any]:
@@ -793,7 +797,7 @@ async def api_agent_result(instance_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@app.post("/api/agent/{instance_id}/cancel")
+@app.post("/api/agent/{instance_id}/cancel", dependencies=[Depends(_require_api_key)])
 async def api_agent_cancel(instance_id: str) -> dict[str, str]:
     """Cancel a running agent."""
     mgr = get_manager()
@@ -1328,8 +1332,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         agent_updates[i.instance_id] = mgr.get_agent_status(
                             i.instance_id
                         )
-                    except (KeyError, Exception):
+                    except KeyError:
                         pass  # Instance destroyed mid-poll; skip it
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to get agent status for {i.instance_id}: {e}"
+                        )
                 if agent_updates:
                     data["agent_updates"] = agent_updates
 
@@ -1350,8 +1358,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             "status": i.status,
                             "workflow_instances": wf_instances,
                         }
-                    except (KeyError, Exception):
-                        pass
+                    except KeyError:
+                        pass  # Instance destroyed mid-poll; skip it
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to get workflow instances for {i.instance_id}: {e}"
+                        )
                 if workflow_updates:
                     data["workflow_updates"] = workflow_updates
 
