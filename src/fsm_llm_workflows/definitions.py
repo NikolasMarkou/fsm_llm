@@ -30,6 +30,58 @@ from .steps import (
 
 # --------------------------------------------------------------
 
+# The callable/object fields no step's serialized form can carry (functions
+# are not JSON-serializable and have no meaningful round-trip representation).
+# Shared by `_serialize_step` and every recursive call site below it so the
+# exclusion set is defined exactly once.
+_STEP_CALLABLE_EXCLUDE_FIELDS = frozenset(
+    {
+        "action",
+        "api_function",
+        "condition",
+        "aggregation_function",
+        "llm_interface",
+    }
+)
+
+
+def _serialize_step(step: WorkflowStep) -> dict[str, Any]:
+    """Serialize a single step to a plain dict, recursing into nested steps.
+
+    Interface contract: takes any ``WorkflowStep`` instance; returns a
+    JSON-safe ``dict`` with a ``"type"`` key set to the step's class name and
+    the 5 known callable fields (`_STEP_CALLABLE_EXCLUDE_FIELDS`) stripped.
+    Nested steps are handled recursively so no caller needs its own
+    per-step-type dump logic:
+    - ``RetryStep.step`` is declared ``Field(exclude=True)`` at the pydantic
+      level, so it never appears in ``model_dump()``'s output; this function
+      adds it back as ``step_dict["step"]`` via a recursive call.
+    - ``ParallelStep.steps`` DOES appear in ``model_dump()``'s output, but
+      pydantic's own recursive dump does not apply this exclusion/tagging
+      logic to nested steps; this function replaces each entry with its own
+      recursive call so nested steps keep their `type` tag and stripped
+      callables.
+
+    Mirrors the ``RetryStep`` recursion precedent in `_get_referenced_states`
+    (`hasattr(step, "step") and isinstance(step.step, WorkflowStep)`).
+    Failure mode: none — every `WorkflowStep` subclass either has no nested
+    steps (returned as-is) or is one of the two known nesting shapes above.
+    """
+    step_dict = step.model_dump(exclude=set(_STEP_CALLABLE_EXCLUDE_FIELDS))
+    step_dict["type"] = step.__class__.__name__
+
+    if isinstance(step, RetryStep) and isinstance(step.step, WorkflowStep):
+        step_dict["step"] = _serialize_step(step.step)
+    elif isinstance(step, ParallelStep):
+        step_dict["steps"] = [
+            _serialize_step(nested_step)
+            if isinstance(nested_step, WorkflowStep)
+            else nested_step
+            for nested_step in step.steps
+        ]
+
+    return step_dict
+
 
 class WorkflowDefinition(BaseModel):
     """Definition of a workflow."""
@@ -294,21 +346,12 @@ class WorkflowDefinition(BaseModel):
         # Convert to dict, but handle special cases like callables
         workflow_dict = self.model_dump(exclude={"steps"})
 
-        # Handle steps separately
-        steps_dict = {}
-        for step_id, step in self.steps.items():
-            step_type = step.__class__.__name__
-            step_dict = step.model_dump(
-                exclude={
-                    "action",
-                    "api_function",
-                    "condition",
-                    "aggregation_function",
-                    "llm_interface",
-                }
-            )
-            step_dict["type"] = step_type
-            steps_dict[step_id] = step_dict
+        # Handle steps separately, recursing into any nested steps
+        # (ParallelStep.steps, RetryStep.step) via _serialize_step so they
+        # round-trip with their `type` tag and stripped callables too.
+        steps_dict = {
+            step_id: _serialize_step(step) for step_id, step in self.steps.items()
+        }
 
         workflow_dict["steps"] = steps_dict
         return workflow_dict

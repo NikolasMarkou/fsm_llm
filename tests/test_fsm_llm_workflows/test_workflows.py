@@ -421,6 +421,151 @@ class TestStepDataInternalKeyFilter:
             assert leaked not in context, f"internal key leaked into context: {leaked}"
 
 
+# ----------------------------------------------------------------
+# SwitchStep default_state="" terminal-route fix
+# (plan-2026-09-12T135914-45a654de step 7, D-013)
+# ----------------------------------------------------------------
+
+
+class TestSwitchStepTerminalRoute:
+    """A ``SwitchStep`` routed to ``default_state=""`` must complete the
+    workflow instance instead of leaving it stuck ``RUNNING`` forever.
+
+    Regression test for finding 10: `get_terminal_states()`'s static
+    whole-step analysis never marks a `SwitchStep` with non-empty `cases`
+    as terminal, even when the specific route taken returns
+    `next_state == ""`. See decisions.md D-013 / engine.py D-013 anchor.
+    """
+
+    async def test_default_empty_string_route_completes_workflow(self):
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.engine import WorkflowEngine
+        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm_workflows.steps import AutoTransitionStep, SwitchStep
+
+        checkout = AutoTransitionStep(
+            step_id="checkout", name="Checkout", next_state=""
+        )
+        switch = SwitchStep(
+            step_id="route",
+            name="Route",
+            key="intent",
+            cases={"buy": "checkout"},
+            default_state="",
+        )
+        definition = WorkflowDefinition(
+            workflow_id="wf-switch-terminal",
+            name="SwitchTerminal",
+            steps={"route": switch, "checkout": checkout},
+            initial_step_id="route",
+        )
+
+        engine = WorkflowEngine()
+        engine.register_workflow(definition)
+        instance_id = await engine.start_workflow(
+            "wf-switch-terminal", initial_context={"intent": "unmatched"}
+        )
+
+        instance = engine.get_workflow_instance(instance_id)
+        assert instance.status == WorkflowStatus.COMPLETED
+
+    async def test_matched_case_still_routes_normally(self):
+        """A route to a real target state is unaffected by the terminal fix."""
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.engine import WorkflowEngine
+        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm_workflows.steps import AutoTransitionStep, SwitchStep
+
+        switch = SwitchStep(
+            step_id="route",
+            name="Route",
+            key="intent",
+            cases={"buy": "checkout"},
+            default_state="",
+        )
+        checkout = AutoTransitionStep(
+            step_id="checkout", name="Checkout", next_state=""
+        )
+        definition = WorkflowDefinition(
+            workflow_id="wf-switch-matched",
+            name="SwitchMatched",
+            steps={"route": switch, "checkout": checkout},
+            initial_step_id="route",
+        )
+
+        engine = WorkflowEngine()
+        engine.register_workflow(definition)
+        instance_id = await engine.start_workflow(
+            "wf-switch-matched", initial_context={"intent": "buy"}
+        )
+
+        instance = engine.get_workflow_instance(instance_id)
+        assert instance.current_step_id == "checkout"
+        assert instance.status == WorkflowStatus.COMPLETED
+
+
+# ----------------------------------------------------------------
+# WorkflowDefinition.serialize() round-trip (finding 11)
+# ----------------------------------------------------------------
+
+
+class TestSerializeNestedSteps:
+    """`serialize()` must recursively serialize nested steps so `RetryStep.step`
+    and `ParallelStep.steps` round-trip with their `type` tag intact.
+    """
+
+    def test_retry_step_wrapped_step_survives(self):
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.steps import AutoTransitionStep, RetryStep
+
+        inner = AutoTransitionStep(step_id="inner", name="Inner", next_state="done")
+        retry = RetryStep(step_id="retry", name="Retry", step=inner, max_retries=2)
+        definition = WorkflowDefinition(
+            workflow_id="wf-retry-serialize",
+            name="RetrySerialize",
+            steps={"retry": retry},
+            initial_step_id="retry",
+        )
+
+        serialized = definition.serialize()
+        retry_dict = serialized["steps"]["retry"]
+
+        assert retry_dict["type"] == "RetryStep"
+        assert "step" in retry_dict
+        assert retry_dict["step"]["type"] == "AutoTransitionStep"
+        assert retry_dict["step"]["next_state"] == "done"
+
+    def test_parallel_step_nested_steps_survive(self):
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.steps import AutoTransitionStep, ParallelStep
+
+        nested_a = AutoTransitionStep(step_id="a", name="A", next_state="done")
+        nested_b = AutoTransitionStep(step_id="b", name="B", next_state="done")
+        parallel = ParallelStep(
+            step_id="parallel",
+            name="Parallel",
+            steps=[nested_a, nested_b],
+            next_state="done",
+        )
+        definition = WorkflowDefinition(
+            workflow_id="wf-parallel-serialize",
+            name="ParallelSerialize",
+            steps={"parallel": parallel},
+            initial_step_id="parallel",
+        )
+
+        serialized = definition.serialize()
+        parallel_dict = serialized["steps"]["parallel"]
+
+        assert parallel_dict["type"] == "ParallelStep"
+        nested_dicts = parallel_dict["steps"]
+        assert len(nested_dicts) == 2
+        for nested_dict, step_id in zip(nested_dicts, ("a", "b"), strict=True):
+            assert nested_dict["type"] == "AutoTransitionStep"
+            assert nested_dict["step_id"] == step_id
+            assert nested_dict["next_state"] == "done"
+
+
 class TestPackageImports:
     """Test that the package exports are correct."""
 

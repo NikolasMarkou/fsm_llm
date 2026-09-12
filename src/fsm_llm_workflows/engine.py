@@ -406,7 +406,21 @@ class WorkflowEngine:
         if result.next_state:
             await self._transition_to_state(instance, result.next_state, _depth=_depth)
         else:
-            await self._handle_step_without_transition(instance)
+            # DECISION plan-2026-09-12T135914-45a654de/D-013
+            # A step (e.g. SwitchStep) can signal "this specific route is
+            # terminal" by returning next_state="" -- distinct from a step
+            # that has no next_state field at all (also falsy, e.g. a step
+            # awaiting an event/timer). Do NOT re-derive terminality from
+            # WorkflowDefinition.get_terminal_states() here: that is a static,
+            # WHOLE-STEP analysis (used for reachability warnings) and cannot
+            # see that only ONE of a SwitchStep's cases routes to "terminal".
+            # Passing the per-invocation signal through explicitly_terminal
+            # keeps get_terminal_states()'s existing semantics untouched for
+            # every other caller. See decisions.md D-013.
+            explicitly_terminal = result.next_state == ""
+            await self._handle_step_without_transition(
+                instance, explicitly_terminal=explicitly_terminal
+            )
 
     async def _handle_failed_step(
         self, instance: WorkflowInstance, result: Any, _depth: int = 0
@@ -466,12 +480,31 @@ class WorkflowEngine:
 
         await self._execute_workflow_step(instance, _depth=_depth + 1)
 
-    async def _handle_step_without_transition(self, instance: WorkflowInstance) -> None:
-        """Handle a step that doesn't specify a next state."""
+    async def _handle_step_without_transition(
+        self, instance: WorkflowInstance, explicitly_terminal: bool = False
+    ) -> None:
+        """Handle a step that doesn't specify a next state.
+
+        Args:
+            instance: The workflow instance whose current step just ran.
+            explicitly_terminal: True when the step's OWN result signalled
+                termination for this invocation (``next_state == ""``, e.g. a
+                ``SwitchStep`` routed to its terminal branch). When True, the
+                instance completes unconditionally, without consulting
+                ``WorkflowDefinition.get_terminal_states()``'s static
+                whole-step analysis (see D-013 in decisions.md).
+        """
         waiting_info = instance.context.get(_KEY_WAITING_INFO, {})
         timer_info = instance.context.get(_KEY_TIMER_INFO, {})
 
-        if waiting_info.get("waiting_for_event"):
+        if explicitly_terminal:
+            logger.info(
+                f"Workflow instance {instance.instance_id} completed successfully "
+                "(step signalled explicit terminal route)"
+            )
+            instance.update_status(WorkflowStatus.COMPLETED)
+            self._purge_oldest_terminal_instances()
+        elif waiting_info.get("waiting_for_event"):
             logger.info(
                 f"Workflow instance {instance.instance_id} is waiting for event"
             )
