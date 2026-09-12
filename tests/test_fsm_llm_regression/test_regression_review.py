@@ -255,12 +255,22 @@ class TestRequirementsAlignment:
         assert "<2.0" in content
 
     def test_litellm_excludes_compromised_versions(self):
-        """Verify pyproject.toml excludes known-compromised litellm versions.
+        """Verify pyproject.toml structurally excludes compromised litellm versions.
 
         litellm 1.82.7 and 1.82.8 were compromised with credential-stealing
-        malware via .pth file injection. These must remain excluded.
+        malware via .pth file injection (March 2026 PyPI supply-chain
+        incident). These must remain unreachable by ANY environment that
+        respects this dependency spec -- either via explicit `!=` excludes,
+        or via a version floor at/above 1.83.0 (litellm's first release
+        built on its post-incident, isolated CI/CD v2 pipeline; see
+        docs.litellm.ai/blog/security-update-march-2026), which excludes
+        them structurally without needing to name them.
         """
         import pathlib
+
+        from packaging.requirements import Requirement
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import Version
 
         if sys.version_info >= (3, 11):
             import tomllib
@@ -277,8 +287,12 @@ class TestRequirementsAlignment:
         litellm_deps = [d for d in deps if d.startswith("litellm")]
         assert len(litellm_deps) == 1, "Expected exactly one litellm dependency"
         litellm_dep = litellm_deps[0]
-        assert "!=1.82.7" in litellm_dep, "Must exclude compromised litellm 1.82.7"
-        assert "!=1.82.8" in litellm_dep, "Must exclude compromised litellm 1.82.8"
+        spec: SpecifierSet = Requirement(litellm_dep).specifier
+        for compromised in ("1.82.7", "1.82.8"):
+            assert not spec.contains(Version(compromised)), (
+                f"litellm dependency spec {litellm_dep!r} must not permit the "
+                f"compromised version {compromised}"
+            )
 
 
 # ══════════════════════════════════════════════════════════════

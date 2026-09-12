@@ -1,7 +1,12 @@
-# Pin litellm to last known-safe version before supply chain compromise.
-# Versions 1.82.7 and 1.82.8 were compromised with credential-stealing malware.
-# Update this pin when a verified safe version is released post-quarantine.
-litellm==1.82.6
+# litellm was upgraded off the last known-safe pre-compromise pin (1.82.6) once
+# a verified-safe post-quarantine release was available. Versions 1.82.7 and
+# 1.82.8 were compromised with credential-stealing malware (March 2026 PyPI
+# supply-chain incident, TeamPCP / Trivy CI token compromise). litellm's own
+# security update (docs.litellm.ai/blog/security-update-march-2026) confirms
+# all releases from v1.78.0 through v1.82.6 as clean, and recommends v1.83.0+
+# (built on a new, isolated CI/CD v2 pipeline with signed releases) going
+# forward. Pinned here to the latest available release as of this upgrade.
+litellm==1.100.1
 
 # ---------------------------------------------------------------------------
 # Dev toolchain — exact pins so CI and every developer resolve the SAME tools.
