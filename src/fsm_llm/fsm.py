@@ -250,10 +250,20 @@ class FSMManager:
             context=context,
         )
 
-    def get_current_state(
+    def resolve_state_definition(
         self, instance: FSMInstance, conversation_id: str | None = None
     ) -> State:
-        """Get current state definition for an instance."""
+        """Resolve the full ``State`` definition for an instance's current state.
+
+        Internal-facing counterpart to ``API.get_current_state(conversation_id)
+        -> str``, which returns only the state ID string for public consumers.
+        This method returns the full ``State`` object (description, purpose,
+        transitions, etc.) and is used internally by ``FSMManager``/pipeline
+        code that needs more than the bare state ID. The two methods
+        deliberately have different names (this one was renamed from
+        ``get_current_state``) to avoid the same-name/incompatible-return-type
+        collision that previously existed between them.
+        """
         return self._pipeline.get_state(instance, conversation_id)
 
     def start_conversation(
@@ -478,7 +488,7 @@ class FSMManager:
                     )
             try:
                 instance = self.instances[conversation_id]
-                current_state = self.get_current_state(instance, conversation_id)
+                current_state = self.resolve_state_definition(instance, conversation_id)
                 if not current_state.transitions:
                     raise FSMError(
                         f"Conversation has ended - current state '{instance.current_state}' is terminal"
@@ -521,7 +531,7 @@ class FSMManager:
         instance = self.instances[conversation_id]
         log.info(f"Processing message in state: {instance.current_state}")
 
-        current_state = self.get_current_state(instance, conversation_id)
+        current_state = self.resolve_state_definition(instance, conversation_id)
         if not current_state.transitions:
             raise FSMError(
                 f"Conversation has ended - current state '{instance.current_state}' is terminal"
@@ -632,20 +642,20 @@ class FSMManager:
             (a broken create-together / remove-together invariant — L11).
 
         HARD RULE: ``snapshot_fn`` runs while holding ``conv_lock`` and MUST do
-        only fast in-memory work. It MUST NOT call ``get_current_state`` /
+        only fast in-memory work. It MUST NOT call ``resolve_state_definition`` /
         ``get_fsm_definition`` (nor anything else that re-enters ``self._lock``):
         that would nest ``_lock`` under ``conv_lock`` and risk the lock-order
         inversion the write path is careful to avoid. Resolve state OUTSIDE this
         call, after it returns. See decisions.md D-005.
         """
         # DECISION plan-2026-07-21T045419-9925aa3a/D-005
-        # State resolution (get_current_state -> get_fsm_definition) re-enters the
-        # plain, NON-reentrant self._lock. Running it inside snapshot_fn (under
+        # State resolution (resolve_state_definition -> get_fsm_definition) re-enters
+        # the plain, NON-reentrant self._lock. Running it inside snapshot_fn (under
         # conv_lock) would hold conv_lock and then block on _lock. The write path
         # acquires conv_lock while holding _lock (non-blocking), so the reverse
         # order here would close a circular wait -> deadlock. Therefore: take
         # _lock ONLY for the dict lookup, RELEASE it, THEN acquire conv_lock
-        # (blocking) for the snapshot. Do NOT move any get_current_state /
+        # (blocking) for the snapshot. Do NOT move any resolve_state_definition /
         # get_fsm_definition call into snapshot_fn. See decisions.md D-005.
         with self._lock:
             if conversation_id not in self.instances:
@@ -669,7 +679,7 @@ class FSMManager:
 
         # State resolution re-enters _lock, so it happens OUTSIDE conv_lock (the
         # _read_under_lock snapshot has already returned). See D-005.
-        current_state = self.get_current_state(instance, conversation_id)
+        current_state = self.resolve_state_definition(instance, conversation_id)
 
         is_ended = not current_state.transitions
         if is_ended:
@@ -938,7 +948,7 @@ class FSMManager:
         # State resolution re-enters _lock, so it happens OUTSIDE conv_lock (the
         # snapshot has already returned). See D-005. Resolve the State from the
         # fsm_id + state_id CAPTURED in the snapshot -- NOT via
-        # get_current_state(instance), which re-reads inst.current_state fresh: a
+        # resolve_state_definition(instance), which re-reads inst.current_state fresh: a
         # concurrent transition between the snapshot and that re-read would yield a
         # torn current_state sub-dict (id from the snapshot, description/purpose/
         # is_terminal from a newer state). Keying off the captured id keeps the
