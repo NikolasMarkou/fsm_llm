@@ -67,5 +67,5 @@
 2026-09-12T18:15:00Z | iter-1/step-7.2 | cc00cd6 | src/fsm_llm_workflows/engine.py | EDIT(+36,-31) | radius:LOW(1) | D-020 | revert D-018 isinstance(SwitchStep) narrowing, restore wide next_state=="" terminal predicate
 2026-09-12T18:16:00Z | iter-1/step-7.2 | cc00cd6 | tests/test_fsm_llm_workflows/test_workflows.py | EDIT(+102,-7) | radius:MED(3) | D-020 | add RetryStep-wrapped SwitchStep and ConditionStep regression tests for D-020 revert
 2026-09-12T18:25:00Z | iter-1/step-4.2 | 88b99e2 | src/fsm_llm_harness/CLAUDE.md | EDIT(+2,-2) | radius:LOW(1) | - | fix internally-inconsistent per-file test-count table (340->353, 479->483), now sums to header's 1,981
-2026-09-12T18:40:00Z | iter-1/step-7.2 | uncommitted | CLAUDE.md | EDIT(+4,-4) | radius:LOW(1) | - | reconcile doc test-count literals after step-7.2 added 2 tests (workflows 157->159, total 5452->5454, sum 5382->5384)
-2026-09-12T18:41:00Z | iter-1/step-7.2 | uncommitted | README.md | EDIT(+1,-1) | radius:LOW(1) | - | reconcile make-test comment literal to 5,454 tests
+2026-09-12T18:40:00Z | iter-1/step-7.2 | 730bd73 | CLAUDE.md | EDIT(+4,-4) | radius:LOW(1) | - | reconcile doc test-count literals after step-7.2 added 2 tests (workflows 157->159, total 5452->5454, sum 5382->5384)
+2026-09-12T18:41:00Z | iter-1/step-7.2 | 730bd73 | README.md | EDIT(+1,-1) | radius:LOW(1) | - | reconcile make-test comment literal to 5,454 tests
