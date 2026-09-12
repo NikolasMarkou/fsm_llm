@@ -77,6 +77,37 @@ def _resolve_reasoning_trace(message: Any) -> str | None:
 
 
 # --------------------------------------------------------------
+# Reasoning-tag / code-fence stripping
+# --------------------------------------------------------------
+
+
+def strip_think_and_fences(content: str) -> str:
+    """Strip a ``<think>...</think>`` block, then any surrounding code fence.
+
+    Some models (e.g. Qwen via Ollama) wrap a JSON reply in a ``<think>``
+    trace and/or a markdown code fence; callers that then ``json.loads`` the
+    result need both stripped first.
+
+    Contract:
+        - Parameter: ``content`` — the raw message content string (already
+          confirmed to be a ``str`` by the caller; this function does not
+          itself branch on type).
+        - Returns the content with any ``<think>...</think>`` span removed
+          (``re.DOTALL``, so it matches across newlines) and then any leading
+          ` ```json `/``` ``` `` fence markers stripped, in that exact order.
+        - Never raises for any ``str`` input.
+        - Shared by ``llm.py::_parse_field_extraction_response`` and
+          ``LiteLLMInterface.extract_bulk_data`` so the two content readers
+          can never re-diverge — the three regex operations were previously
+          byte-identical, hand-duplicated in both places.
+    """
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    content = re.sub(r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE)
+    content = re.sub(r"\n?```\s*$", "", content).strip()
+    return content
+
+
+# --------------------------------------------------------------
 # Confidence coercion
 # --------------------------------------------------------------
 

@@ -59,6 +59,8 @@ from typing import Any
 from litellm import completion, get_supported_openai_params
 
 from .definitions import (
+    BulkExtractionRequest,
+    DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     LLMResponseError,
@@ -80,6 +82,7 @@ from .utilities import (
     _resolve_reasoning_trace,
     coerce_confidence,
     extract_json_from_text,
+    strip_think_and_fences,
 )
 
 # Mirrors ``ResponseGenerationResponse.message``'s ``max_length`` constraint
@@ -198,6 +201,34 @@ class LLMInterface(abc.ABC):
         raise NotImplementedError(
             f"{type(self).__name__} does not implement extract_field. "
             "Override this method to support targeted field extraction."
+        )
+
+    def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse:
+        """
+        Extract free-form key/value data per a state's ``extraction_instructions``.
+
+        This method performs untargeted bulk extraction from a single prompt,
+        for states that have ``extraction_instructions`` but no per-field
+        schema (no ``required_context_keys``/``field_extractions``). Called by
+        the pipeline's additive bulk-extraction pass.
+
+        The default implementation raises ``NotImplementedError`` so
+        existing subclasses that do not need bulk extraction remain
+        compatible.
+
+        Args:
+            request: Bulk extraction request with the extraction prompt
+
+        Returns:
+            Data extraction response with the extracted key/value data
+
+        Raises:
+            LLMResponseError: If bulk extraction fails
+            NotImplementedError: If the subclass does not implement this
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement extract_bulk_data. "
+            "Override this method to support bulk data extraction."
         )
 
 
@@ -373,56 +404,19 @@ class LiteLLMInterface(LLMInterface):
                 {"role": "user", "content": request.user_message},
             ]
 
-            # Build call params (same as _make_llm_call but with stream=True)
-            supported_params = get_supported_openai_params(model=self.model)
-            reserved_keys = {"model", "messages", "temperature", "max_tokens"}
-            safe_kwargs = {
-                k: v for k, v in self.kwargs.items() if k not in reserved_keys
-            }
-            call_params = {
-                **safe_kwargs,
-                "model": self.model,
-                "messages": messages,
-                "temperature": self.temperature,
-                "max_tokens": self.max_tokens,
-                "stream": True,
-            }
-            if self.timeout is not None:
-                call_params["timeout"] = self.timeout
-
-            # DECISION plan-2026-07-19T075908-70b6bdec/D-007 [STALE]
-            # This is the SECOND of two call-param builders; generate_response_stream
-            # does NOT route through _make_llm_call. Do not "fix" retries at only one
-            # site — an earlier finding flagged this builder as the un-propagated twin
-            # that silently leaves streaming unretried. Keep both in sync.
-            # Do NOT change this back to `num_retries`: that key routes to litellm's
-            # tenacity layer, which stacks ON TOP of the SDK's own retry layer (2N+1
-            # requests) and retries deterministic 4xx failures that can never succeed.
-            # The key must be OMITTED (not set to 0) when retries <= 0 so the default
-            # is byte-for-byte the historical call. See decisions.md D-007.
-            if self.retries > 0:
-                call_params["max_retries"] = self.retries
-
-            # Apply response_format if provided (schema-enforced output)
-            if (
-                request.response_format is not None
-                and supported_params
-                and "response_format" in supported_params
-            ):
-                call_params["response_format"] = request.response_format
-            elif request.response_format is not None:
-                logger.warning(
-                    f"response_format requested but not supported by "
-                    f"model '{self.model}'; output may not match schema"
-                )
-
-            self._apply_model_specific_params(call_params, "response_generation")
-
-            # Ollama: prepend /nothink and embed schema in prompt
-            call_params["messages"] = prepare_ollama_messages(
-                call_params["messages"],
-                self.model,
-                call_params.get("response_format"),
+            # Build call params via the shared builder (DECISION
+            # plan-2026-09-12T135914-45a654de/D-015 — this used to be a
+            # second, independently-maintained ~40-line copy of
+            # _make_llm_call's builder; see _build_call_params's own D-015
+            # anchor for the full rationale and the D-007 max_retries
+            # constraint it still preserves). `stream=True` adds
+            # `"stream": True`; the forced-structured-output branch never
+            # fires here because `call_type="response_generation"`.
+            call_params = self._build_call_params(
+                messages,
+                "response_generation",
+                response_format=request.response_format,
+                stream=True,
             )
 
             response = completion(**call_params)
@@ -514,23 +508,104 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def _make_llm_call(
+    def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse:
+        """Extract free-form key/value data per a state's extraction_instructions.
+
+        Interface contract (mirrors ``extract_field``'s error boundary):
+            - Parses whatever the LLM returns via ``_make_llm_call``, reusing
+              the same ``<think>``/fence-stripping and JSON-parsing logic as
+              ``_parse_field_extraction_response``.
+            - A response with no ``extracted_data``/dict-shaped payload
+              (content is neither a ``str`` nor a ``dict``, or the parsed
+              ``extracted_data``/top-level value isn't a ``dict``) resolves to
+              an EMPTY ``DataExtractionResponse`` — this is "the model found
+              nothing", not a failure, so it is NOT raised as
+              ``LLMResponseError``.
+            - Any actual failure (malformed JSON, transport/parsing error)
+              raises ``LLMResponseError``, wrapping the underlying cause.
+            - Filtering of ``None``/empty-string/empty-dict values out of
+              ``extracted_data`` is the CALLER's job (``pipeline.py``'s merge
+              logic), not this method's — this method returns the extraction
+              verbatim.
+        """
+        try:
+            messages = [
+                {"role": "system", "content": request.system_prompt},
+                {"role": "user", "content": request.user_message},
+            ]
+
+            response = self._make_llm_call(messages, "data_extraction")
+            content = response.choices[0].message.content
+
+            if isinstance(content, str):
+                content = strip_think_and_fences(content)
+                data = json.loads(content)
+            elif isinstance(content, dict):
+                data = content
+            else:
+                return DataExtractionResponse(extracted_data={})
+
+            extracted = data.get("extracted_data", data)
+            if not isinstance(extracted, dict):
+                return DataExtractionResponse(extracted_data={})
+
+            confidence = coerce_confidence(data.get("confidence", 1.0), 1.0)
+            return DataExtractionResponse(extracted_data=extracted, confidence=confidence)
+
+        except LLMResponseError:
+            raise
+        except Exception as e:
+            # Broad catch is intentional: wraps any litellm/network/parsing
+            # error into LLMResponseError at the system boundary, matching
+            # extract_field's error boundary above.
+            error_msg = f"Bulk data extraction failed: {e!s}"
+            logger.error(error_msg)
+            raise LLMResponseError(error_msg) from e
+
+    def _build_call_params(
         self,
         messages: list[dict[str, str]],
         call_type: str,
+        *,
         response_format: dict[str, Any] | None = None,
-    ) -> Any:
+        stream: bool = False,
+    ) -> dict[str, Any]:
         """
-        Make LLM API call with appropriate configuration.
+        Build the ``litellm.completion(**call_params)`` kwargs shared by
+        ``_make_llm_call`` (non-streaming) and ``generate_response_stream``.
 
+        # DECISION plan-2026-09-12T135914-45a654de/D-015
+        # Extracted from two independently-maintained ~40-line builders
+        # (_make_llm_call and generate_response_stream) that the codebase's
+        # own D-007 comments (plan-2026-07-19T075908-70b6bdec, now [STALE] but
+        # NOT resolved — see findings/core-reasoning-harness-fixes.md item 3)
+        # already flagged as duplicated and asked to be kept in sync by hand.
+        # Do NOT re-split this back into two builders "for clarity" — that is
+        # exactly the shape that was drifting. Do NOT change `max_retries` to
+        # `num_retries`: see the retry-layer rationale preserved below: this
+        # is the SAME constraint D-007 documented, now enforced in one place
+        # instead of two. See decisions.md D-015 (this plan) and D-007 (prior
+        # plan, historical context only — not re-litigated here).
+        #
+        # The two deltas between callers are parameters, not hardcoded
+        # branches: (a) the structured-output/response_format branch below is
+        # gated on `call_type in ["data_extraction", "field_extraction"]`,
+        # which is NEVER true for a streaming call (streaming call_type is
+        # always "response_generation") — so passing `stream=True` alone does
+        # not need its own extra guard on that branch; (b) `stream=True`
+        # literally adds `"stream": True` to the dict, nothing else.
         Args:
             messages: Message list for LLM
             call_type: Type of call for optimization
             response_format: Optional response format override for constrained
                 decoding (e.g., JSON schema enforcement).
+            stream: Whether this call is a streaming call (adds
+                ``"stream": True``; never applies the forced-structured-output
+                branch, though that branch's own ``call_type`` gate already
+                makes it a no-op for the streaming caller's call_type).
 
         Returns:
-            Raw LLM response
+            The kwargs dict ready to pass to ``litellm.completion(**...)``.
         """
         # Check for structured output support
         supported_params = get_supported_openai_params(model=self.model)
@@ -539,13 +614,15 @@ class LiteLLMInterface(LLMInterface):
         # kwargs go first so explicit params cannot be overridden
         reserved_keys = {"model", "messages", "temperature", "max_tokens"}
         safe_kwargs = {k: v for k, v in self.kwargs.items() if k not in reserved_keys}
-        call_params = {
+        call_params: dict[str, Any] = {
             **safe_kwargs,
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
+        if stream:
+            call_params["stream"] = True
 
         if self.timeout is not None:
             call_params["timeout"] = self.timeout
@@ -557,8 +634,8 @@ class LiteLLMInterface(LLMInterface):
         # 2N+1 requests, not N+1) and retries EVERYTHING, including 400/401 —
         # deterministic failures that can never succeed. `max_retries` is one
         # layer with correct error classification. Do NOT hand-roll a retry loop
-        # here either. Mirrored in generate_response_stream's separate builder.
-        # See decisions.md D-007.
+        # here either. Now shared by both callers via this one builder. See
+        # decisions.md D-007 (historical) / D-015 (this plan's extraction).
         if self.retries > 0:
             call_params["max_retries"] = self.retries
 
@@ -566,7 +643,9 @@ class LiteLLMInterface(LLMInterface):
         # Do NOT force structured output for response_generation — the
         # response is user-facing natural language, not structured data
         # UNLESS an explicit response_format was provided (e.g., for
-        # schema-enforced agent output).
+        # schema-enforced agent output). This branch never fires for a
+        # streaming call: streaming's call_type is always
+        # "response_generation", never "data_extraction"/"field_extraction".
         if (
             supported_params
             and "response_format" in supported_params
@@ -603,6 +682,30 @@ class LiteLLMInterface(LLMInterface):
             call_params["messages"],
             self.model,
             call_params.get("response_format"),
+        )
+
+        return call_params
+
+    def _make_llm_call(
+        self,
+        messages: list[dict[str, str]],
+        call_type: str,
+        response_format: dict[str, Any] | None = None,
+    ) -> Any:
+        """
+        Make LLM API call with appropriate configuration.
+
+        Args:
+            messages: Message list for LLM
+            call_type: Type of call for optimization
+            response_format: Optional response format override for constrained
+                decoding (e.g., JSON schema enforcement).
+
+        Returns:
+            Raw LLM response
+        """
+        call_params = self._build_call_params(
+            messages, call_type, response_format=response_format
         )
 
         # Make the API call
@@ -876,16 +979,12 @@ class LiteLLMInterface(LLMInterface):
         """Parse LLM response for single-field extraction."""
         content = response.choices[0].message.content
 
-        # Strip <think>...</think> tags that some models (e.g. Qwen) emit
+        # Strip <think>...</think> tags and markdown code fences that some
+        # models (e.g. Qwen) emit — shared with extract_bulk_data via
+        # strip_think_and_fences (utilities.py) so the two readers cannot
+        # re-diverge.
         if isinstance(content, str):
-            content = re.sub(
-                r"<think>.*?</think>", "", content, flags=re.DOTALL
-            ).strip()
-
-        # Strip markdown code fences that small models sometimes emit
-        if isinstance(content, str):
-            content = re.sub(r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE)
-            content = re.sub(r"\n?```\s*$", "", content).strip()
+            content = strip_think_and_fences(content)
 
         if isinstance(content, dict) or self._looks_like_json(content):
             try:

@@ -77,6 +77,31 @@ class TransitionEvaluationResult(str, Enum):
 # --------------------------------------------------------------
 
 
+class BulkExtractionRequest(BaseModel):
+    """Request for free-form bulk data extraction from a state's
+    ``extraction_instructions`` (no per-field schema).
+
+    Deliberately minimal (only the two fields the prompt needs): unlike
+    ``FieldExtractionRequest`` this is not targeting one named field, so a
+    required ``field_name``/``field_type`` would not fit. See
+    ``LLMInterface.extract_bulk_data`` for the ABC contract this feeds.
+    """
+
+    system_prompt: str = Field(
+        ...,
+        description="Prompt describing what free-form data to extract",
+        min_length=1,
+        max_length=30000,
+    )
+
+    user_message: str = Field(
+        ...,
+        description="User input to extract data from",
+        min_length=0,
+        max_length=10000,
+    )
+
+
 class DataExtractionResponse(BaseModel):
     """
     Response from data extraction containing only extracted information.

@@ -14,10 +14,9 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 
 import copy
 import json
-import re
 import time
 from collections.abc import Callable, Iterator
-from typing import Any, cast
+from typing import Any
 
 from .classification import Classifier
 from .constants import (
@@ -29,6 +28,7 @@ from .constants import (
 )
 from .context import clean_context_keys
 from .definitions import (
+    BulkExtractionRequest,
     ClassificationError,
     ClassificationExtractionConfig,
     ClassificationResult,
@@ -49,7 +49,7 @@ from .definitions import (
     TransitionOption,
 )
 from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
-from .llm import LiteLLMInterface, LLMInterface
+from .llm import LLMInterface
 from .logging import logger
 from .prompts import (
     ClassificationPromptConfig,
@@ -901,47 +901,30 @@ class MessagePipeline:
             f"user's message. Use descriptive snake_case key names."
         )
 
-        messages = [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": user_message},
-        ]
+        # DECISION plan-2026-09-12T135914-45a654de/D-015
+        # Previously reached past the LLMInterface ABC via
+        # `cast(LiteLLMInterface, self.llm_interface)._make_llm_call(...)` —
+        # a private method of ONE concrete implementation, called from
+        # outside that class. Now goes through the public ABC surface
+        # (`extract_bulk_data`, llm.py), which does its own parsing via the
+        # shared `strip_think_and_fences` helper (utilities.py) — the
+        # <think>-tag/fence-stripping regex that used to be hand-duplicated
+        # here is gone, not reconciled. Do NOT reintroduce a cast+private-call
+        # here; if a future LLMInterface subclass needs bulk extraction, it
+        # implements `extract_bulk_data` (default raises NotImplementedError,
+        # mirroring `extract_field`). See decisions.md D-015.
+        request = BulkExtractionRequest(system_prompt=prompt, user_message=user_message)
 
         try:
-            # `_make_llm_call` is a LiteLLMInterface-only method (not on the LLMInterface
-            # ABC). This data-extraction path is only reached with the concrete
-            # LiteLLMInterface in production; cast narrows for mypy without changing
-            # runtime (a non-LiteLLM interface here would already fail at runtime,
-            # cast or not). Type gap, not a bug — see D-006. Annotation-only.
-            response = cast(LiteLLMInterface, self.llm_interface)._make_llm_call(
-                messages, "data_extraction"
-            )
-            content = response.choices[0].message.content
-            if isinstance(content, str):
-                content = re.sub(
-                    r"<think>.*?</think>", "", content, flags=re.DOTALL
-                ).strip()
-                content = re.sub(
-                    r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE
-                )
-                content = re.sub(r"\n?```\s*$", "", content).strip()
-
-            if isinstance(content, str):
-                import json as json_mod
-
-                data = json_mod.loads(content)
-            elif isinstance(content, dict):
-                data = content
-            else:
-                return {}
-
-            extracted = data.get("extracted_data", data)
-            if isinstance(extracted, dict):
-                # Filter out None/empty values
-                return {
-                    k: v
-                    for k, v in extracted.items()
-                    if v is not None and v != "" and v != {}
-                }
+            response = self.llm_interface.extract_bulk_data(request)
+            # Filter out None/empty values — extract_bulk_data returns the
+            # extraction verbatim; this merge-time filtering is this
+            # caller's own concern, not the LLM interface's.
+            return {
+                k: v
+                for k, v in response.extracted_data.items()
+                if v is not None and v != "" and v != {}
+            }
         except Exception as e:
             log.warning(f"Bulk extraction fallback failed: {e}")
 

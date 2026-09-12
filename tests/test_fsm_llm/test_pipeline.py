@@ -1133,17 +1133,21 @@ class TestContextScopeInFSMDefinition:
 # ══════════════════════════════════════════════════════════════
 
 
-def _mock_bulk_llm_call(extracted: dict):
-    """Build a MagicMock _make_llm_call returning a bulk-extraction response."""
-    import json as _json
+def _mock_bulk_extract_data(extracted: dict):
+    """Build a MagicMock ``extract_bulk_data`` returning a bulk-extraction
+    response.
 
-    msg = MagicMock()
-    msg.content = _json.dumps({"extracted_data": extracted, "confidence": 0.9})
-    choice = MagicMock()
-    choice.message = msg
-    resp = MagicMock()
-    resp.choices = [choice]
-    return MagicMock(return_value=resp)
+    Post-D-015 (Step D dedup): pipeline.py now calls
+    ``self.llm_interface.extract_bulk_data(request)`` through the public
+    ``LLMInterface`` ABC surface instead of reaching into
+    ``LiteLLMInterface._make_llm_call`` directly, so these tests mock at the
+    new call site.
+    """
+    from fsm_llm.definitions import DataExtractionResponse
+
+    return MagicMock(
+        return_value=DataExtractionResponse(extracted_data=extracted, confidence=0.9)
+    )
 
 
 class TestAdditiveBulkExtraction:
@@ -1170,8 +1174,9 @@ class TestAdditiveBulkExtraction:
         fsm_def = _make_fsm_definition({"start": state})
         llm = _make_mock_llm()
         configure_mock_extract_field(llm, {"policyholder_name": "David Wilson"})
-        # Inject _make_llm_call (not on the LLMInterface ABC spec).
-        llm._make_llm_call = _mock_bulk_llm_call({"policy_number": "GS-2024-88431"})
+        llm.extract_bulk_data = _mock_bulk_extract_data(
+            {"policy_number": "GS-2024-88431"}
+        )
 
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance(current_state="start")
@@ -1188,7 +1193,7 @@ class TestAdditiveBulkExtraction:
         llm = _make_mock_llm()
         configure_mock_extract_field(llm, {"policyholder_name": "David Wilson"})
         # Bulk tries to clobber the per-field value — must be ignored.
-        llm._make_llm_call = _mock_bulk_llm_call(
+        llm.extract_bulk_data = _mock_bulk_extract_data(
             {"policyholder_name": "WRONG", "policy_number": "GS-1"}
         )
 
@@ -1205,7 +1210,7 @@ class TestAdditiveBulkExtraction:
         fsm_def = _make_fsm_definition({"start": state})
         llm = _make_mock_llm()
         configure_mock_extract_field(llm, {"policyholder_name": "David Wilson"})
-        llm._make_llm_call = _mock_bulk_llm_call({"policy_number": "BULK"})
+        llm.extract_bulk_data = _mock_bulk_extract_data({"policy_number": "BULK"})
 
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         # policy_number already set (e.g. by a handler) → bulk must not touch it.
@@ -1229,7 +1234,9 @@ class TestAdditiveBulkExtraction:
         fsm_def = _make_fsm_definition({"start": state})
         llm = _make_mock_llm()
         configure_mock_extract_field(llm, {"policyholder_name": "David Wilson"})
-        llm._make_llm_call = _mock_bulk_llm_call({"policy_number": "SHOULD_NOT_APPEAR"})
+        llm.extract_bulk_data = _mock_bulk_extract_data(
+            {"policy_number": "SHOULD_NOT_APPEAR"}
+        )
 
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance(current_state="start")
@@ -1237,7 +1244,7 @@ class TestAdditiveBulkExtraction:
         resp = pipeline._execute_data_extraction(instance, "...", "conv-1")
 
         assert "policy_number" not in resp.extracted_data
-        llm._make_llm_call.assert_not_called()
+        llm.extract_bulk_data.assert_not_called()
 
 
 class TestFieldTypeCoercionRejectsWrongTypes:

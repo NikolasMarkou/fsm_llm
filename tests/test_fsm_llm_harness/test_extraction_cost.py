@@ -77,6 +77,12 @@ class CountingLLM(MockLLM2Interface):
           fired fallback SUCCEEDS and merges data -- the failure mode is
           visible as data, not only as a count.
         - ``extract_field`` behaviour is inherited unchanged.
+        - ``extract_bulk_data`` (the public ABC surface pipeline.py now calls,
+          post-D-015 dedup) is implemented here by delegating to
+          ``_make_llm_call`` and parsing its reply the same way
+          ``LiteLLMInterface.extract_bulk_data`` does, so ``raw_calls`` is
+          still populated -- this fake is not a ``LiteLLMInterface``, so it
+          does not inherit that implementation for free.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -91,6 +97,22 @@ class CountingLLM(MockLLM2Interface):
     ) -> Any:
         self.raw_calls.append(call_type)
         return _Response('{"extracted_data": {"invented_key": "invented_value"}}')
+
+    def extract_bulk_data(self, request: Any) -> Any:
+        from fsm_llm.definitions import DataExtractionResponse
+
+        messages = [
+            {"role": "system", "content": request.system_prompt},
+            {"role": "user", "content": request.user_message},
+        ]
+        response = self._make_llm_call(messages, "data_extraction")
+        import json as _json
+
+        data = _json.loads(response.choices[0].message.content)
+        return DataExtractionResponse(
+            extracted_data=data.get("extracted_data", {}),
+            confidence=data.get("confidence", 1.0),
+        )
 
 
 # ---------------------------------------------------------------------------
