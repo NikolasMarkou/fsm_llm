@@ -392,7 +392,7 @@ Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm_harness/          # 1,977 tests, 10 test files
+pytest tests/test_fsm_llm_harness/          # 1,981 tests, 10 test files
 ```
 
 | File | Tests |
@@ -715,7 +715,7 @@ empty-file gate counting, ownership deny branch, live-gate short-circuit) each
 flipped tests red in a scratch copy (93 red total), and `test_cli.py`'s
 exit-code 0/1/2 contract close-read verdict was CLEAN.
 
-Offline, the package is green: 1,977 tests (1,960 passed / 17 skipped;
+Offline, the package is green: 1,981 tests (1,964 passed / 17 skipped;
 +1 for the S5 raw-observation retention round-trip, +10 for the D-002
 write-evidence label-normalization regressions, +18 for the D-003
 reflect-cap budget regressions, +13 for the β close-cap budget
