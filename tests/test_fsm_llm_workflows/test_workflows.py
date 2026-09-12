@@ -505,17 +505,19 @@ class TestSwitchStepTerminalRoute:
 
 
 # ----------------------------------------------------------------
-# D-013/D-018 narrowing: TimerStep/WaitForEventStep are unaffected by the
-# explicitly_terminal SwitchStep-only narrowing (completion-fix iter-1/step-7.1)
+# D-013/D-020: TimerStep/WaitForEventStep are unaffected by the
+# explicitly_terminal predicate regardless of its width (completion-fix
+# iter-1/step-7.1, reconfirmed by the D-020 revert in step-7.2).
 # ----------------------------------------------------------------
 
 
 class TestTerminalNarrowingUnaffectedSteps:
-    """`_handle_successful_step`'s ``explicitly_terminal`` signal is scoped to
-    ``SwitchStep`` only (D-018). ``TimerStep``/``WaitForEventStep`` never set
-    ``next_state`` on their success result at all (falsy ``None``, not ``""``),
-    so they must keep reaching ``WorkflowStatus.WAITING`` exactly as before
-    D-013/D-018 touched the terminal-detection logic. Regression test for
+    """`_handle_successful_step`'s ``explicitly_terminal`` signal is
+    ``result.next_state == ""`` for ANY step type (D-013, restored by D-020
+    after a since-reverted D-018 narrowing). ``TimerStep``/``WaitForEventStep``
+    never set ``next_state`` on their success result at all (falsy ``None``,
+    not ``""``), so they must keep reaching ``WorkflowStatus.WAITING`` exactly
+    as before D-013 touched the terminal-detection logic. Regression test for
     review-iter-1.md concern 6's confirmation that these two step types are
     safe.
     """
@@ -565,6 +567,99 @@ class TestTerminalNarrowingUnaffectedSteps:
 
         instance = engine.get_workflow_instance(instance_id)
         assert instance.status == WorkflowStatus.WAITING
+
+
+# ----------------------------------------------------------------
+# D-020: revert of D-018's isinstance(step, SwitchStep) narrowing.
+# Regression tests for review-iter-1-pass2.md concerns 1 and 2 -- a
+# RetryStep-wrapped SwitchStep, and a non-SwitchStep step type (ConditionStep)
+# each routing to an explicitly-terminal "" branch must reach COMPLETED, not
+# hang RUNNING.
+# ----------------------------------------------------------------
+
+
+class TestWideTerminalPredicateAfterD020Revert:
+    """`_handle_successful_step`'s ``explicitly_terminal`` signal must fire for
+    ANY successful step result with ``next_state == ""``, regardless of the
+    executing step's own type -- including when that result was produced by
+    an inner step wrapped by a ``RetryStep``. See decisions.md D-020.
+    """
+
+    async def test_retry_wrapped_switch_step_completes_workflow(self):
+        """Concern 1: RetryStep.execute returns the inner SwitchStep's result
+        verbatim, but the engine's terminal check must key off the RESULT
+        (next_state == ""), not the executing step's class -- otherwise the
+        outer RetryStep fails the isinstance(step, SwitchStep) check and the
+        route hangs RUNNING (the exact D-018 regression).
+        """
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.engine import WorkflowEngine
+        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm_workflows.steps import AutoTransitionStep, RetryStep, SwitchStep
+
+        checkout = AutoTransitionStep(
+            step_id="checkout", name="Checkout", next_state=""
+        )
+        inner_switch = SwitchStep(
+            step_id="inner-route",
+            name="Inner Route",
+            key="intent",
+            cases={"buy": "checkout"},
+            default_state="",
+        )
+        retry = RetryStep(
+            step_id="route",
+            name="Retry Route",
+            step=inner_switch,
+            max_retries=1,
+        )
+        definition = WorkflowDefinition(
+            workflow_id="wf-retry-switch-terminal",
+            name="RetrySwitchTerminal",
+            steps={"route": retry, "checkout": checkout},
+            initial_step_id="route",
+        )
+
+        engine = WorkflowEngine()
+        engine.register_workflow(definition)
+        instance_id = await engine.start_workflow(
+            "wf-retry-switch-terminal", initial_context={"intent": "unmatched"}
+        )
+
+        instance = engine.get_workflow_instance(instance_id)
+        assert instance.status == WorkflowStatus.COMPLETED
+
+    async def test_condition_step_empty_branch_completes_workflow(self):
+        """Concern 2: ConditionStep shares SwitchStep's per-route ""-is-terminal
+        semantics -- a condition routing to an empty-string branch must also
+        complete the workflow, not just SwitchStep.
+        """
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.engine import WorkflowEngine
+        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm_workflows.steps import AutoTransitionStep, ConditionStep
+
+        review = AutoTransitionStep(step_id="review", name="Review", next_state="")
+        condition = ConditionStep(
+            step_id="cond",
+            name="Condition",
+            condition=lambda ctx: True,
+            true_state="",
+            false_state="review",
+        )
+        definition = WorkflowDefinition(
+            workflow_id="wf-condition-terminal",
+            name="ConditionTerminal",
+            steps={"cond": condition, "review": review},
+            initial_step_id="cond",
+        )
+
+        engine = WorkflowEngine()
+        engine.register_workflow(definition)
+        instance_id = await engine.start_workflow("wf-condition-terminal")
+
+        instance = engine.get_workflow_instance(instance_id)
+        assert instance.status == WorkflowStatus.COMPLETED
 
 
 # ----------------------------------------------------------------
