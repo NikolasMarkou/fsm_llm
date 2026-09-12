@@ -22,6 +22,7 @@ from typing import Any, cast
 from .classification import Classifier
 from .constants import (
     CLASSIFICATION_EXTRACTION_RESULT_SUFFIX,
+    CONTEXT_KEY_AGENT_TRACE,
     CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
@@ -805,7 +806,7 @@ class MessagePipeline:
         # message (e.g., providing email+age when the FSM just collected
         # the name).  Skipped for agent-managed FSMs (detected by
         # "agent_trace" context key) to avoid extra LLM calls.
-        is_agent_fsm = "agent_trace" in instance.context.data
+        is_agent_fsm = CONTEXT_KEY_AGENT_TRACE in instance.context.data
         if transition_occurred and not is_agent_fsm:
             new_state = self.get_state(instance, conversation_id)
             new_configs = self._build_field_configs_from_state(new_state)
@@ -1707,7 +1708,7 @@ class MessagePipeline:
 
         try:
             result: ClassificationResult = classifier.classify(user_message)
-        except (ClassificationError, Exception) as e:
+        except Exception as e:
             log.warning(
                 f"Classification failed during ambiguous transition resolution: {e}"
             )
@@ -1853,11 +1854,8 @@ class MessagePipeline:
                 f"POST_TRANSITION handler failed ({type(handler_err).__name__}: {handler_err}), rolling back state from {target_state} to {old_state}"
             )
             instance.current_state = old_state
-            if old_context_snapshot is not None:
-                instance.context.data.clear()
-                instance.context.data.update(old_context_snapshot)
-            else:
-                log.error("Rollback snapshot was None, cannot safely restore context")
+            instance.context.data.clear()
+            instance.context.data.update(old_context_snapshot)
             raise
 
         log.info(f"State transition executed: {old_state} -> {target_state}")
