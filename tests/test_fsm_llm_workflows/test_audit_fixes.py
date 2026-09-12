@@ -9,7 +9,10 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from fsm_llm_workflows.engine import WorkflowEngine
+from fsm_llm_workflows.exceptions import WorkflowTimeoutError
 from fsm_llm_workflows.models import WorkflowEvent
 from fsm_llm_workflows.steps import (
     AutoTransitionStep,
@@ -401,3 +404,89 @@ class TestInstanceLockConcurrency:
         assert "purge-0" not in engine._instance_locks
         assert "purge-1" not in engine._instance_locks
         assert "purge-2" in engine._instance_locks
+
+
+class TestHandleStepExceptionTerminalGuard:
+    """F5: an exception raised while the instance is already terminal
+    (CANCELLED/COMPLETED) must not be masked by a WorkflowStateError raised
+    from inside _handle_step_exception's own update_status(FAILED, ...) call
+    -- the original exception must always propagate unchanged.
+
+    Regression test for plan-2026-09-12T065608-089d0ec7 step 4 (D-005).
+    """
+
+    @staticmethod
+    def _make_instance(status, workflow_id="wf-terminal"):
+        from fsm_llm_workflows.models import WorkflowInstance
+
+        return WorkflowInstance(
+            instance_id="terminal-1",
+            workflow_id=workflow_id,
+            current_step_id="slow",
+            status=status,
+        )
+
+    async def test_noop_when_instance_already_cancelled(self):
+        """Calling _handle_step_exception on an already-CANCELLED instance
+        must not raise WorkflowStateError and must not overwrite the status."""
+        from fsm_llm_workflows.models import WorkflowStatus
+
+        engine = WorkflowEngine()
+        instance = self._make_instance(WorkflowStatus.CANCELLED)
+
+        # Before the fix, this line raised WorkflowStateError from inside
+        # update_status (CANCELLED -> FAILED is not a valid transition).
+        await engine._handle_step_exception(instance, ValueError("boom"))
+
+        assert instance.status == WorkflowStatus.CANCELLED
+
+    async def test_noop_when_instance_already_completed(self):
+        """Same guard, COMPLETED variant."""
+        from fsm_llm_workflows.models import WorkflowStatus
+
+        engine = WorkflowEngine()
+        instance = self._make_instance(WorkflowStatus.COMPLETED)
+
+        await engine._handle_step_exception(instance, ValueError("boom"))
+
+        assert instance.status == WorkflowStatus.COMPLETED
+
+    async def test_original_exception_surfaces_not_workflow_state_error(self):
+        """_execute_workflow_step's except block must propagate the ORIGINAL
+        exception even when the instance is already terminal, not the
+        WorkflowStateError that update_status(FAILED, ...) would have raised
+        pre-fix. Uses WorkflowTimeoutError since it is the one exception type
+        _execute_workflow_step re-raises unconditionally (pre-existing,
+        out-of-scope non-timeout-exception swallowing is unaffected by this
+        fix)."""
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm_workflows.steps import WorkflowStep
+
+        class _RaisingStep(WorkflowStep):
+            async def execute(self, context):
+                raise WorkflowTimeoutError(
+                    operation="step boom", timeout_seconds=1.0
+                )
+
+        engine = WorkflowEngine()
+        step = _RaisingStep(step_id="slow", name="Raising")
+        definition = WorkflowDefinition(
+            workflow_id="wf-terminal-exc",
+            name="TerminalExc",
+            steps={"slow": step},
+            initial_step_id="slow",
+        )
+        engine.register_workflow(definition)
+
+        instance = self._make_instance(
+            WorkflowStatus.CANCELLED, workflow_id="wf-terminal-exc"
+        )
+        engine.workflow_instances["terminal-1"] = instance
+
+        with pytest.raises(WorkflowTimeoutError):
+            await engine._execute_workflow_step(instance)
+
+        # Status must remain CANCELLED (not overwritten to FAILED, and
+        # certainly not masked by a WorkflowStateError).
+        assert instance.status == WorkflowStatus.CANCELLED

@@ -422,6 +422,21 @@ class WorkflowEngine:
     ) -> None:
         """Handle an exception during step execution."""
         logger.error(f"Error executing step {instance.current_step_id}: {exception!s}")
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-005
+        # Do NOT call update_status(FAILED, ...) unconditionally here. If the
+        # instance is already terminal (e.g. a concurrent cancel_workflow won
+        # the race for this instance's lock before this exception path ran),
+        # update_status raises WorkflowStateError (terminal states map to an
+        # empty transition set in _VALID_STATUS_TRANSITIONS) from inside this
+        # except-block handler, which REPLACES the original exception `e` in
+        # _execute_workflow_step's except block -- the caller never sees the
+        # real error. See decisions.md D-005.
+        if instance.is_terminal():
+            logger.debug(
+                f"Instance {instance.instance_id} already terminal "
+                f"({instance.status.value}); not overwriting with FAILED"
+            )
+            return
         instance.update_status(WorkflowStatus.FAILED, exception)
 
     async def _transition_to_state(
