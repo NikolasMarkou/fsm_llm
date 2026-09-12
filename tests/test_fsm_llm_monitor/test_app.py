@@ -776,3 +776,141 @@ class TestServerHygieneAndWorkflow:
     def test_workflow_launch_unknown_preset_400(self):
         resp = self.client.post("/api/workflow/launch", json={"preset_id": "nope"})
         assert resp.status_code == 400
+
+
+class TestApiKeyGate:
+    """F2 — optional API-key gate on mutating monitor routes (D-008)."""
+
+    def teardown_method(self):
+        # Ensure no test in this class leaves _api_key set for later tests.
+        configure(manager=InstanceManager())
+
+    def test_unset_api_key_is_unchanged_behavior(self):
+        """Default (api_key never configured): no auth required on a mutating route."""
+        configure(manager=InstanceManager())
+        client = TestClient(app)
+        resp = client.post(
+            "/api/config",
+            json={
+                "refresh_interval": 1.0,
+                "max_events": 1000,
+                "max_log_lines": 5000,
+                "log_level": "INFO",
+                "show_internal_keys": False,
+                "auto_scroll_logs": True,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    def test_gated_route_401_without_key(self):
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        client = TestClient(app)
+        resp = client.post(
+            "/api/config",
+            json={
+                "refresh_interval": 1.0,
+                "max_events": 1000,
+                "max_log_lines": 5000,
+                "log_level": "INFO",
+                "show_internal_keys": False,
+                "auto_scroll_logs": True,
+            },
+        )
+        assert resp.status_code == 401
+
+    def test_gated_route_401_with_wrong_key(self):
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        client = TestClient(app)
+        resp = client.post(
+            "/api/config",
+            json={
+                "refresh_interval": 1.0,
+                "max_events": 1000,
+                "max_log_lines": 5000,
+                "log_level": "INFO",
+                "show_internal_keys": False,
+                "auto_scroll_logs": True,
+            },
+            headers={"Authorization": "Bearer wrong-key"},
+        )
+        assert resp.status_code == 401
+
+    def test_gated_route_200_with_correct_bearer_key(self):
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        client = TestClient(app)
+        resp = client.post(
+            "/api/config",
+            json={
+                "refresh_interval": 1.0,
+                "max_events": 1000,
+                "max_log_lines": 5000,
+                "log_level": "INFO",
+                "show_internal_keys": False,
+                "auto_scroll_logs": True,
+            },
+            headers={"Authorization": "Bearer s3cr3t"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    def test_gated_route_200_with_correct_x_api_key_header(self):
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        client = TestClient(app)
+        resp = client.post(
+            "/api/config",
+            json={
+                "refresh_interval": 1.0,
+                "max_events": 1000,
+                "max_log_lines": 5000,
+                "log_level": "INFO",
+                "show_internal_keys": False,
+                "auto_scroll_logs": True,
+            },
+            headers={"X-API-Key": "s3cr3t"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    def test_all_named_mutating_routes_gated(self):
+        """Every mutating route named in plan.md step 7c returns 401 without a key."""
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        client = TestClient(app)
+        cases = [
+            ("post", "/api/config", {"refresh_interval": 1.0, "max_events": 1000,
+                                      "max_log_lines": 5000, "log_level": "INFO",
+                                      "show_internal_keys": False,
+                                      "auto_scroll_logs": True}),
+            ("post", "/api/dashboard/config", {"name": "x", "panels": {}, "alerts": {}}),
+            ("delete", "/api/dashboard/config", None),
+            ("delete", "/api/instances/nonexistent", None),
+            ("post", "/api/fsm/launch", {"preset_id": "does-not-exist"}),
+            ("post", "/api/workflow/launch", {"preset_id": "does-not-exist"}),
+            ("post", "/api/agent/launch", {"agent_type": "ReactAgent", "task": "x"}),
+            ("post", "/api/builder/start", {}),
+            ("post", "/api/builder/send", {"session_id": "x", "message": "x"}),
+            ("delete", "/api/builder/nonexistent", None),
+        ]
+        for method, path, body in cases:
+            resp = client.request(method, path, json=body)
+            assert resp.status_code == 401, f"{method.upper()} {path} was not gated"
+
+    def test_read_only_route_stays_ungated(self):
+        """GETs and /health remain reachable without a key even when one is configured."""
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        client = TestClient(app)
+        assert client.get("/health").status_code == 200
+        assert client.get("/api/config").status_code == 200
+        assert client.get("/api/instances").status_code == 200
+
+    def test_configure_reread_after_first_request_takes_effect(self):
+        """Unlike CORS, api_key changes after the first request DO take effect
+        (Depends reads the module-level global at request time)."""
+        configure(manager=InstanceManager())
+        client = TestClient(app)
+        assert client.get("/health").status_code == 200  # process a request first
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        resp = client.post(
+            "/api/dashboard/config", json={"name": "x", "panels": {}, "alerts": {}}
+        )
+        assert resp.status_code == 401

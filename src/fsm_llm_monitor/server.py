@@ -10,13 +10,14 @@ and workflows.
 
 import asyncio
 import json
+import os
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -109,6 +110,17 @@ async def no_cache_static(request: Request, call_next):
 # Global instance manager — set via configure()
 _manager: InstanceManager | None = None
 
+# DECISION plan-2026-09-12T065608-089d0ec7/D-008: optional API-key gate for
+# mutating monitor routes (F2). `_api_key` is re-derived on EVERY configure()
+# call (api_key param, else FSM_LLM_MONITOR_API_KEY env var, else None) —
+# unlike `_CORS_ORIGINS` (only mutated when `cors_origins is not None`, so a
+# repeat configure() call intentionally leaves a prior CORS override in
+# place). Do NOT copy the CORS "only overwrite if not None" pattern here: it
+# would let a previously-set `_api_key` leak across independent configure()
+# calls (e.g. between tests), which is exactly the isolation `_api_key` needs.
+# See `_require_api_key` below for the per-request timing note (D-008).
+_api_key: str | None = None
+
 # Flow data loaded from static/flows.json
 _flows: dict[str, Any] = {}
 
@@ -126,6 +138,7 @@ def configure(
     bridge: MonitorBridge | None = None,
     manager: InstanceManager | None = None,
     cors_origins: list[str] | None = None,
+    api_key: str | None = None,
 ) -> None:
     """Configure the global instance manager for the web server.
 
@@ -134,8 +147,15 @@ def configure(
 
     :param cors_origins: List of allowed CORS origins. Defaults to localhost only.
         Pass ``["*"]`` to allow all origins (not recommended for production).
+    :param api_key: Optional API key required (via an ``Authorization: Bearer
+        <key>`` or ``X-API-Key`` header) to reach mutating REST routes. Falls
+        back to the ``FSM_LLM_MONITOR_API_KEY`` env var when not given
+        explicitly. Defaults to ``None`` (no auth — byte-identical to prior
+        behavior). Unlike ``cors_origins``, this is re-derived on every call
+        (see the D-008 comment on the ``_api_key`` global).
     """
-    global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX
+    global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX, _api_key
+    _api_key = api_key if api_key is not None else (os.environ.get("FSM_LLM_MONITOR_API_KEY") or None)
     if _requests_processed > 0:
         logger.warning(
             f"configure() called after server has processed {_requests_processed} "
@@ -194,6 +214,36 @@ def get_bridge() -> MonitorBridge:
         # Use the public setter to share the global collector
         _bridge_cache.set_collector(mgr.global_collector)
     return _bridge_cache
+
+
+def _require_api_key(request: Request) -> None:
+    """FastAPI dependency gating mutating routes behind an optional API key.
+
+    DECISION plan-2026-09-12T065608-089d0ec7/D-008: no-op when `_api_key` is
+    `None` (the default) — byte-identical to pre-F2 behavior for every
+    existing caller who never sets `FSM_LLM_MONITOR_API_KEY`/`api_key`. When
+    `_api_key` is set, requires a matching `Authorization: Bearer <key>` OR
+    `X-API-Key` header, else raises 401.
+
+    Timing note (do NOT assume this mirrors the CORS gotcha in `configure()`
+    above): `configure()`'s CORS mutation only takes effect if called BEFORE
+    the first request, because Starlette builds its middleware stack lazily
+    on first request. `_require_api_key` has NO such restriction — FastAPI
+    resolves `Depends(_require_api_key)` fresh on every request, reading the
+    module-level `_api_key` global at THAT time, so `configure(api_key=...)`
+    can be (and in tests, is) called again after the server has already
+    processed requests, and the new key takes effect immediately.
+    """
+    if _api_key is None:
+        return
+    auth_header = request.headers.get("authorization", "")
+    token: str | None = None
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[len("bearer ") :].strip()
+    if token is None:
+        token = request.headers.get("x-api-key")
+    if token != _api_key:
+        raise HTTPException(status_code=401, detail="missing or invalid API key")
 
 
 # --- HTML Pages ---
@@ -282,7 +332,7 @@ async def api_config_get() -> dict[str, Any]:
     return mgr.config.model_dump()
 
 
-@app.post("/api/config")
+@app.post("/api/config", dependencies=[Depends(_require_api_key)])
 async def api_config_set(config: MonitorConfig) -> dict[str, str]:
     mgr = get_manager()
     mgr.config = config
@@ -302,7 +352,7 @@ async def api_dashboard_config_get() -> dict[str, Any]:
     return {"active": True, "config": cfg.model_dump()}
 
 
-@app.post("/api/dashboard/config")
+@app.post("/api/dashboard/config", dependencies=[Depends(_require_api_key)])
 async def api_dashboard_config_set(req: dict[str, Any]) -> dict[str, str]:
     """Apply a custom dashboard config from MonitorBuilder output.
 
@@ -357,7 +407,7 @@ async def api_dashboard_config_set(req: dict[str, Any]) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.delete("/api/dashboard/config")
+@app.delete("/api/dashboard/config", dependencies=[Depends(_require_api_key)])
 async def api_dashboard_config_delete() -> dict[str, str]:
     """Remove the custom dashboard configuration."""
     mgr = get_manager()
@@ -423,7 +473,7 @@ async def api_instance_events(
     return [e.model_dump() for e in events]
 
 
-@app.delete("/api/instances/{instance_id}")
+@app.delete("/api/instances/{instance_id}", dependencies=[Depends(_require_api_key)])
 async def api_instance_destroy(instance_id: str) -> dict[str, str]:
     """Destroy a managed instance."""
     mgr = get_manager()
@@ -443,7 +493,7 @@ async def api_instance_destroy(instance_id: str) -> dict[str, str]:
 # --- REST API: FSM Launch/Control ---
 
 
-@app.post("/api/fsm/launch")
+@app.post("/api/fsm/launch", dependencies=[Depends(_require_api_key)])
 async def api_fsm_launch(req: LaunchFSMRequest) -> dict[str, Any]:
     """Launch a new FSM instance."""
     mgr = get_manager()
@@ -544,7 +594,7 @@ async def api_workflow_presets() -> dict[str, list[dict[str, str]]]:
     return {"workflows": mgr.get_workflow_presets()}
 
 
-@app.post("/api/workflow/launch")
+@app.post("/api/workflow/launch", dependencies=[Depends(_require_api_key)])
 async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
     """Launch a workflow preset and start an instance."""
     mgr = get_manager()
@@ -646,7 +696,7 @@ async def api_workflow_instances(instance_id: str) -> list[dict[str, Any]]:
 # --- REST API: Agent Launch/Control ---
 
 
-@app.post("/api/agent/launch")
+@app.post("/api/agent/launch", dependencies=[Depends(_require_api_key)])
 async def api_agent_launch(req: LaunchAgentRequest) -> dict[str, Any]:
     """Launch an agent in a background thread."""
     mgr = get_manager()
@@ -989,7 +1039,7 @@ async def _cleanup_stale_builder_sessions() -> None:
             logger.debug(f"Cleaned up stale builder session: {sid}")
 
 
-@app.post("/api/builder/start")
+@app.post("/api/builder/start", dependencies=[Depends(_require_api_key)])
 async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     """Start a new builder session using the meta-agent."""
     await _cleanup_stale_builder_sessions()
@@ -1047,7 +1097,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     return result
 
 
-@app.post("/api/builder/send")
+@app.post("/api/builder/send", dependencies=[Depends(_require_api_key)])
 async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
     """Send a message to an existing builder session.
 
@@ -1146,7 +1196,7 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
     return result
 
 
-@app.delete("/api/builder/{session_id}")
+@app.delete("/api/builder/{session_id}", dependencies=[Depends(_require_api_key)])
 async def api_builder_delete(session_id: str) -> dict[str, Any]:
     """Delete a builder session."""
     async with _get_builder_lock():
@@ -1156,7 +1206,15 @@ async def api_builder_delete(session_id: str) -> dict[str, Any]:
 
 # --- WebSocket for real-time updates ---
 
-
+# NOTE (F2 follow-up, D-008): the `/ws` endpoint is NOT gated by `_api_key`.
+# FastAPI's `Depends`/`dependencies=[...]` mechanism does not attach to
+# `@app.websocket` routes the same way it does to REST routes, so applying
+# the F2 API-key gate here would need a different mechanism (e.g. a
+# query-param or first-message auth handshake). This is an explicit,
+# named-but-deferred follow-up, not a silent gap: `/ws` is read-only (it only
+# streams metrics/events/logs/instance status), so it was judged lower
+# priority than the mutating REST routes this step gates, but it remains
+# unauthenticated when `_api_key` is configured.
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
