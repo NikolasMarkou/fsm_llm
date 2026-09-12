@@ -143,6 +143,56 @@ class TestRetryStep:
         result = await step.execute({})
         assert result.success is False
 
+    async def test_retries_on_non_workflow_step_error(self):
+        """A non-conforming inner step raising a bare exception (e.g.
+        ValueError) must still be retried, not propagated immediately.
+        Regression test for D-010 (steps.py RetryStep.execute except clause
+        widened from WorkflowStepError to Exception)."""
+        call_count = {"n": 0}
+
+        class _RaisesValueErrorThenSucceeds:
+            step_id = "inner"
+            name = "Inner"
+
+            async def execute(self, context):
+                call_count["n"] += 1
+                if call_count["n"] < 3:
+                    raise ValueError("boom")
+                return WorkflowStepResult.success_result(
+                    data={"ok": True}, next_state="done"
+                )
+
+        step = RetryStep(
+            step_id="retry",
+            name="Retry",
+            step=_RaisesValueErrorThenSucceeds(),
+            max_retries=3,
+            backoff_factor=0.01,
+        )
+        result = await step.execute({})
+        assert result.success is True
+        assert call_count["n"] == 3
+
+    async def test_exhausts_retries_reraises_non_workflow_step_error(self):
+        """On exhaustion, the original non-WorkflowStepError exception type
+        propagates unchanged."""
+
+        class _AlwaysRaisesValueError:
+            step_id = "inner"
+
+            async def execute(self, context):
+                raise ValueError("always fails")
+
+        step = RetryStep(
+            step_id="retry",
+            name="Retry",
+            step=_AlwaysRaisesValueError(),
+            max_retries=2,
+            backoff_factor=0.01,
+        )
+        with pytest.raises(ValueError, match="always fails"):
+            await step.execute({})
+
 
 # ---------------------------------------------------------------
 # AgentStep

@@ -686,7 +686,15 @@ class RetryStep(WorkflowStep):
                 result: WorkflowStepResult = await self._with_timeout(
                     self.step.execute(context)
                 )
-            except WorkflowStepError:
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-010
+            # Catch bare Exception (not just WorkflowStepError): a custom/
+            # non-conforming inner WorkflowStep can raise any exception type,
+            # and this must be retried the same way, matching the bare
+            # `except Exception` idiom already used by 6+ other step types
+            # (AutoTransitionStep, APICallStep, ConditionStep,
+            # LLMProcessingStep, ConversationStep, ParallelStep, AgentStep).
+            # See decisions.md D-010.
+            except Exception:
                 # Steps that signal failure by RAISING (ConditionStep,
                 # AutoTransitionStep, LLMProcessingStep, _with_timeout) must
                 # also be retried, not propagated on the first attempt.
