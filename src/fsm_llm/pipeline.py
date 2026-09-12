@@ -228,16 +228,29 @@ class MessagePipeline:
             #
             # SCOPE OF THE partial-context MERGE BELOW: it preserves what earlier
             # handlers at this timing point already produced, and that survives for
-            # PRE_PROCESSING / POST_PROCESSING / CONTEXT_UPDATE. It does NOT survive at
-            # POST_TRANSITION: _execute_state_transition intentionally restores the
-            # pre-transition snapshot (see the rollback below) taken BEFORE these
-            # handlers ran, so the rollback overwrites this merge. That override is
-            # deliberate and correct — a half-applied transition is worse than a lost
-            # partial delta. Pinned by
-            # tests/test_fsm_llm/test_pipeline_handler_contract.py::
+            # CONTEXT_UPDATE. It does NOT survive at POST_TRANSITION:
+            # _execute_state_transition intentionally restores the pre-transition
+            # snapshot (see the rollback below) taken BEFORE these handlers ran, so
+            # the rollback overwrites this merge. That override is deliberate and
+            # correct — a half-applied transition is worse than a lost partial
+            # delta. Pinned by tests/test_fsm_llm/test_pipeline_handler_contract.py::
             # TestPostTransitionHandlerFailure.  It also does not survive for a key
             # that the pre-transition CONTEXT_UPDATE rollback owns (D-005 shape (c));
             # every other key at that timing point is preserved as stated.
+            #
+            # UPDATE (D-002, plan-2026-09-12T065608-089d0ec7): for PRE_PROCESSING
+            # and POST_PROCESSING specifically, this merge no longer survives a
+            # raise that escapes to MessagePipeline.process()/process_stream():
+            # those two call sites are now each individually wrapped in a
+            # restore-on-exception block that reverts the whole pre-turn snapshot
+            # (turn-atomicity), which runs immediately after this merge and undoes
+            # it. The merge below still happens (so a caller catching the
+            # exception at THIS layer, below process(), still sees the partial
+            # delta applied to `instance.context.data` for one statement), but
+            # process()/process_stream() wipe it before the exception reaches
+            # their caller. See D-002 in decisions.md and
+            # test_pipeline_handler_contract.py::TestPartialHandlerResultsPreserved
+            # (updated by the same step) for the narrowed contract.
             merge_delta(getattr(e, "partial_context", None) or {})
             logger.error(f"Handler execution error at {timing.name}: {e!s}")
             raise
@@ -291,13 +304,44 @@ class MessagePipeline:
             pre_turn_wm = copy.deepcopy(instance.context.working_memory)
             pre_turn_metadata = copy.deepcopy(instance.context.metadata)
 
-            # Execute pre-processing handlers
-            self.execute_handlers(
-                instance,
-                HandlerTiming.PRE_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-002
+            # Widened turn-atomicity: PRE_PROCESSING and POST_PROCESSING handler
+            # calls are now EACH individually wrapped in their own restore-on-
+            # exception block (reusing the D-012 pre_turn_* snapshots above, no
+            # new snapshot logic). Two SEPARATE try/except blocks, not one block
+            # spanning PRE_PROCESSING through Pass 2: Pass 1
+            # (_execute_extraction_and_transition_pass) deliberately stays
+            # OUTSIDE both — it owns its own internal partial-commit contracts
+            # (D-005 scoped CONTEXT_UPDATE rollback, D-006 handler re-raise,
+            # _execute_state_transition's POST_TRANSITION rollback), and folding
+            # it into this outer restore would wipe data Pass 1 legitimately
+            # committed before a later failure (see
+            # TestPostTransitionHandlerFailure /
+            # TestPreTransitionContextUpdateRollback in
+            # tests/test_fsm_llm/test_pipeline_handler_contract.py, which pin
+            # exactly that scoped behavior). This narrows D-006's documented
+            # "survives for PRE_PROCESSING / POST_PROCESSING" guarantee for the
+            # case where the SAME handler invocation that produced the partial
+            # merge is also what raises: process() now immediately restores the
+            # pre-turn snapshot in that case. See D-002 in decisions.md.
+            try:
+                # Execute pre-processing handlers
+                self.execute_handlers(
+                    instance,
+                    HandlerTiming.PRE_PROCESSING,
+                    conversation_id,
+                    current_state=instance.current_state,
+                )
+            except Exception:
+                # Restore the pre-turn in-memory state so the turn is atomic.
+                # Covers all handler-mutable fields, not just state+data (D-012).
+                instance.current_state = pre_turn_state
+                instance.context.data.clear()
+                instance.context.data.update(pre_turn_data)
+                instance.context.working_memory = pre_turn_wm
+                instance.context.metadata.clear()
+                instance.context.metadata.update(pre_turn_metadata)
+                raise
 
             # Pass 1: Data extraction + transition evaluation + execution
             extraction_response, transition_occurred, previous_state = (
@@ -306,16 +350,16 @@ class MessagePipeline:
                 )
             )
 
-            # Execute post-processing handlers (after potential transition)
-            self.execute_handlers(
-                instance,
-                HandlerTiming.POST_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
-
-            # Pass 2: Response generation based on final state
             try:
+                # Execute post-processing handlers (after potential transition)
+                self.execute_handlers(
+                    instance,
+                    HandlerTiming.POST_PROCESSING,
+                    conversation_id,
+                    current_state=instance.current_state,
+                )
+
+                # Pass 2: Response generation based on final state
                 return self._execute_response_generation_pass(
                     instance,
                     message,
@@ -384,13 +428,31 @@ class MessagePipeline:
             pre_turn_wm = copy.deepcopy(instance.context.working_memory)
             pre_turn_metadata = copy.deepcopy(instance.context.metadata)
 
-            # Execute pre-processing handlers
-            self.execute_handlers(
-                instance,
-                HandlerTiming.PRE_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-002
+            # Widened turn-atomicity, streaming mirror of process()'s guard
+            # above (same D-002 rationale: two separate try/except blocks,
+            # Pass 1 stays unwrapped). See the comment in process() for the
+            # full explanation; not repeated here to avoid drift between the
+            # two copies.
+            try:
+                # Execute pre-processing handlers
+                self.execute_handlers(
+                    instance,
+                    HandlerTiming.PRE_PROCESSING,
+                    conversation_id,
+                    current_state=instance.current_state,
+                )
+            except Exception:
+                # Restore the pre-turn in-memory state so the streaming turn is
+                # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
+                # D-013). GeneratorExit deliberately does NOT reach here.
+                instance.current_state = pre_turn_state
+                instance.context.data.clear()
+                instance.context.data.update(pre_turn_data)
+                instance.context.working_memory = pre_turn_wm
+                instance.context.metadata.clear()
+                instance.context.metadata.update(pre_turn_metadata)
+                raise
 
             # Pass 1: Data extraction + transition (runs fully)
             extraction_response, transition_occurred, previous_state = (
@@ -399,16 +461,16 @@ class MessagePipeline:
                 )
             )
 
-            # Execute post-processing handlers
-            self.execute_handlers(
-                instance,
-                HandlerTiming.POST_PROCESSING,
-                conversation_id,
-                current_state=instance.current_state,
-            )
-
-            # Pass 2: Stream response generation
             try:
+                # Execute post-processing handlers
+                self.execute_handlers(
+                    instance,
+                    HandlerTiming.POST_PROCESSING,
+                    conversation_id,
+                    current_state=instance.current_state,
+                )
+
+                # Pass 2: Stream response generation
                 yield from self._stream_response_generation_pass(
                     instance,
                     message,

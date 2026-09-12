@@ -26,6 +26,14 @@ asserted in the iteration-1 artifacts before any test covered them:
   * ``TestCriticalHandlerAtPostTransitionExtraction`` pins CONTEXT_UPDATE at the
     *second* of its two call sites (post-transition re-extraction), which sits
     inside a broad ``except Exception`` that used to swallow handler failures.
+
+As of F1/D-002 (plan-2026-09-12T065608-089d0ec7, EXECUTE Step 1),
+``TestPartialHandlerResultsPreserved.test_earlier_handler_context_survives_critical_failure``
+pins a THIRD boundary: guarantee 2 also does NOT extend across a PRE_PROCESSING
+(or POST_PROCESSING) handler failure any more, because ``MessagePipeline.process()``/
+``process_stream()`` now wrap those handler calls in the same turn-atomicity
+restore used for Pass 2. See the updated ``D-006`` comment in
+``pipeline.py::execute_handlers`` for the full rationale.
 """
 
 import pytest
@@ -186,7 +194,24 @@ class TestPartialHandlerResultsPreserved:
     def test_earlier_handler_context_survives_critical_failure(
         self, mock_llm2_interface
     ):
-        """SC-2: 'continue' means 'keep what worked', not 'discard the batch'."""
+        """SC-2, AS NARROWED by F1/D-002 (plan-2026-09-12T065608-089d0ec7,
+        EXECUTE Step 1): 'continue' means 'keep what worked' at the
+        ``execute_handlers`` layer, but ``MessagePipeline.process()`` now
+        wraps the PRE_PROCESSING handler call in its own turn-atomicity
+        restore-on-exception block (reusing the pre-turn snapshot already
+        taken for Pass-2 rollback). A critical PRE_PROCESSING handler raising
+        is exactly the case that restore now catches, so the sibling
+        handler's partial delta is wiped along with everything else before
+        the exception reaches ``API.converse``'s caller.  This is a
+        deliberate narrowing of the previously-documented survival window
+        (see the updated D-006 comment in ``pipeline.py::execute_handlers``),
+        not a relaxation of this test: the partial merge still happens one
+        statement earlier (as ``TestPartialHandlerResultsPreserved`` docs
+        above still describe at the ``execute_handlers`` layer), it just no
+        longer survives the turn once ``process()`` reverts to the pre-turn
+        snapshot. POST_TRANSITION was already documented as NOT surviving
+        (``TestPostTransitionHandlerFailure``); PRE_PROCESSING now joins it.
+        """
         api, conv_id = _make_api(
             mock_llm2_interface,
             [
@@ -208,7 +233,7 @@ class TestPartialHandlerResultsPreserved:
         with pytest.raises(HandlerExecutionError, match="critical_pre"):
             api.converse("hello", conv_id)
 
-        assert api.get_data(conv_id)["validated"] is True
+        assert "validated" not in api.get_data(conv_id)
 
     def test_partial_context_empty_when_first_handler_fails(self, mock_llm2_interface):
         """Edge case: failure in the first handler -> merge is a no-op, raise still fires."""
