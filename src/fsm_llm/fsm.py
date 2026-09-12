@@ -233,6 +233,14 @@ class FSMManager:
             context=context,
         )
 
+    # DECISION plan-2026-09-12T135914-45a654de/D-019
+    # Do NOT rename this back to (or add a sibling method named)
+    # `get_current_state` on FSMManager. `API.get_current_state(conversation_id)
+    # -> str` already owns that name as a public, string-returning contract;
+    # this method returns the full `State` object. The two previously shared
+    # the same name with incompatible return types (finding 16) -- reusing
+    # `get_current_state` here would silently reintroduce that collision. See
+    # decisions.md D-019.
     def resolve_state_definition(
         self, instance: FSMInstance, conversation_id: str | None = None
     ) -> State:
