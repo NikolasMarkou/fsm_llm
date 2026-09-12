@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from fsm_llm_monitor.bridge import MonitorBridge
@@ -923,10 +925,10 @@ class TestApiKeyGate:
         spy is ever tightened to assert call counts."""
         import fsm_llm_monitor.server as server_module
 
-        calls: list[tuple[str, str]] = []
+        calls: list[tuple[bytes, bytes]] = []
         original = server_module.hmac.compare_digest
 
-        def _spy(a: str, b: str) -> bool:
+        def _spy(a: bytes, b: bytes) -> bool:
             calls.append((a, b))
             return original(a, b)
 
@@ -940,9 +942,59 @@ class TestApiKeyGate:
                 headers={"Authorization": "Bearer s3cr3t"},
             )
             assert resp.status_code == 200
-            assert calls == [("s3cr3t", "s3cr3t")]
+            # D-020: compare_digest is now called with encoded bytes, not str,
+            # so non-ASCII input can never raise TypeError (see
+            # test_non_ascii_api_key_header_returns_401_not_500 below).
+            assert calls == [(b"s3cr3t", b"s3cr3t")]
         finally:
             server_module.hmac.compare_digest = original
+
+    def test_non_ascii_api_key_header_returns_401_not_500(self):
+        """D-020: a malformed/non-ASCII X-API-Key header must 401, never 500.
+
+        Pre-fix, `hmac.compare_digest(token, _api_key)` compared two `str`
+        objects directly; CPython's str overload of compare_digest raises
+        `TypeError: comparing strings with non-ASCII characters is not
+        supported` whenever either operand contains a non-ASCII character,
+        turning an unauthenticated, attacker-controlled header into an
+        unhandled 500 instead of the expected 401.
+
+        httpx/TestClient refuse to even construct a request carrying a
+        non-ASCII header value (`UnicodeEncodeError` at the client), so this
+        can only be reached by building the ASGI `Request` directly — the
+        same technique the adversarial review used to first find the bug.
+        """
+        from starlette.requests import Request
+
+        import fsm_llm_monitor.server as server_module
+
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        scope = {
+            "type": "http",
+            "headers": [(b"x-api-key", bytes([0xC3, 0xA9, 0xC3, 0xA9]))],
+        }
+        req = Request(scope=scope)
+        with pytest.raises(HTTPException) as excinfo:
+            server_module._require_api_key(req)
+        assert excinfo.value.status_code == 401
+
+    def test_non_ascii_bearer_token_returns_401_not_500(self):
+        """D-020: same guarantee via the Authorization: Bearer header path."""
+        from starlette.requests import Request
+
+        import fsm_llm_monitor.server as server_module
+
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        scope = {
+            "type": "http",
+            "headers": [
+                (b"authorization", b"Bearer " + bytes([0xC3, 0xA9, 0xC3, 0xA9]))
+            ],
+        }
+        req = Request(scope=scope)
+        with pytest.raises(HTTPException) as excinfo:
+            server_module._require_api_key(req)
+        assert excinfo.value.status_code == 401
 
     def test_reconfigure_without_api_key_warns_when_clearing_prior_key(self):
         """D-016: re-calling configure() without api_key= after a key was

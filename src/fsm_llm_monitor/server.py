@@ -273,7 +273,23 @@ def _require_api_key(request: Request) -> None:
     # checked first because compare_digest requires both arguments to be
     # str/bytes — `hmac.compare_digest(None, _api_key)` raises TypeError,
     # it does not return False. See decisions.md D-016.
-    if token is None or not hmac.compare_digest(token, _api_key):
+    #
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-020: do NOT pass `token`/
+    # `_api_key` to `hmac.compare_digest` as `str` — CPython's `str` overload
+    # of `compare_digest` refuses to compare two `str` objects unless BOTH
+    # are ASCII-only and raises `TypeError` otherwise (this is a NEW crash
+    # D-016's own fix introduced: the old `token != _api_key` never raised on
+    # non-ASCII input). A single non-ASCII byte in an `X-API-Key`/
+    # `Authorization` header — attacker-controlled, unauthenticated — would
+    # therefore turn a 401 into an unhandled 500. Encode both sides to
+    # `bytes` first (`surrogateescape` so an un-decodable header byte still
+    # encodes losslessly instead of raising `UnicodeEncodeError`); comparing
+    # `bytes` is always well-defined for `compare_digest` and preserves the
+    # constant-time property D-016 needs. See decisions.md D-020.
+    if token is None or not hmac.compare_digest(
+        token.encode("utf-8", "surrogateescape"),
+        _api_key.encode("utf-8", "surrogateescape"),
+    ):
         raise HTTPException(status_code=401, detail="missing or invalid API key")
 
 
