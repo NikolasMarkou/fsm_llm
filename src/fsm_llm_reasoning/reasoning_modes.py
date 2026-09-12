@@ -226,7 +226,7 @@ orchestrator_fsm = {
             Present the final solution with complete context:
 
             Set final_solution to:
-            - proposed_solution if solution_valid is True
+            - proposed_solution if validation_result is True
             - proposed_solution with retry warning if max_retries_reached but solution exists
             - 'Unable to find valid solution after maximum attempts' if no valid solution
 
