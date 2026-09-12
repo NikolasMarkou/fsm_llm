@@ -119,7 +119,13 @@ class ReasoningReactAgent(BaseAgent):
         self._reasoning_engine = ReasoningEngine(
             model=reasoning_model_name, **api_kwargs
         )
-        self._handlers = AgentHandlers(self.tools)
+        # DECISION plan-2026-09-12T135914-45a654de/D-012
+        # No `self._handlers` here (matches react.py's D-014 pattern) — a
+        # per-instance AgentHandlers shared across concurrent run() calls is
+        # the D-004/D-014 race. Each call builds and uses its own call-LOCAL
+        # AgentHandlers (see run() below), threaded explicitly into
+        # `_make_reasoning_tool_executor` and `_register_handlers`. Do NOT
+        # reintroduce this assignment — see decisions.md D-012.
 
         logger.info(
             LogMessages.AGENT_STARTED.format(
@@ -149,7 +155,14 @@ class ReasoningReactAgent(BaseAgent):
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        self._handlers.reset()
+        # DECISION plan-2026-09-12T135914-45a654de/D-012
+        # A call-LOCAL AgentHandlers, built from `self.tools` (the copy with
+        # the `reason` pseudo-tool auto-registered — NOT the caller's
+        # original `tools` param), threaded explicitly into
+        # `_register_handlers` via `_standard_run`'s `handlers=` parameter.
+        # A fresh instance needs no `.reset()`. Do NOT reintroduce
+        # `self._handlers = AgentHandlers(...)` — see decisions.md D-012.
+        handlers = AgentHandlers(self.tools)
 
         # Build FSM from tool registry
         has_approval_tools = any(t.requires_approval for t in self.tools.list_tools())
@@ -175,10 +188,12 @@ class ReasoningReactAgent(BaseAgent):
             },
         )
 
-        return self._standard_run(task, fsm_def, context, "reasoning_react")
+        return self._standard_run(
+            task, fsm_def, context, "reasoning_react", handlers=handlers
+        )
 
     def _make_reasoning_tool_executor(
-        self,
+        self, handlers: AgentHandlers
     ) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create tool executor that intercepts 'reason' and invokes the reasoning engine.
 
@@ -187,7 +202,7 @@ class ReasoningReactAgent(BaseAgent):
         results under namespaced keys — all inside the POST_TRANSITION handler
         so the FSM pipeline processes them at the correct time.
         """
-        base_handler = self._handlers
+        base_handler = handlers
         reason_name = ReasoningIntegrationKeys.REASONING_TOOL_NAME
         engine = self._reasoning_engine
 
@@ -276,13 +291,27 @@ class ReasoningReactAgent(BaseAgent):
 
         return execute_tool_with_reasoning
 
-    def _register_handlers(self, api: API) -> None:
+    # DECISION plan-2026-09-12T135914-45a654de/D-012
+    # `handlers` is REQUIRED in practice: run() always passes its own
+    # call-local `AgentHandlers` explicitly via `_standard_run`'s `handlers=`
+    # parameter (mirrors react.py's D-014 guard) — this class's tools are
+    # never optional. Do NOT fall back to reading a `self._handlers`
+    # attribute here — none exists on this class. See decisions.md D-012.
+    def _register_handlers(
+        self, api: API, handlers: AgentHandlers | None = None
+    ) -> None:
         """Register agent handlers with the API."""
+        if handlers is None:
+            raise AgentError(
+                "ReasoningReactAgent._register_handlers called without a "
+                "handlers instance — this is a programming error, not a "
+                "runtime condition; run() must always pass one."
+            )
         self._register_tool_executor(
-            api, AgentStates.ACT, self._make_reasoning_tool_executor()
+            api, AgentStates.ACT, self._make_reasoning_tool_executor(handlers)
         )
 
-        self._register_iteration_limiter(api, self._handlers.check_iteration_limit)
+        self._register_iteration_limiter(api, handlers.check_iteration_limit)
 
         if self.hitl is not None and self.hitl.has_approval_policy:
             self._register_hitl_gate(api, make_hitl_checker(self.hitl))

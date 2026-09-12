@@ -63,7 +63,13 @@ class PlanExecuteAgent(BaseAgent):
         super().__init__(config, **api_kwargs)
         self.tools = tools
         self.max_replans = max_replans
-        self._handlers = AgentHandlers(tools) if tools is not None else None
+        # DECISION plan-2026-09-12T135914-45a654de/D-012
+        # No `self._handlers` here (matches react.py's D-014 pattern) — a
+        # per-instance AgentHandlers shared across concurrent run() calls is
+        # the D-004/D-014 race. Each call builds its own call-LOCAL
+        # AgentHandlers (see run() below), still legitimately `None` in
+        # tool-less mode. Do NOT reintroduce this assignment — see
+        # decisions.md D-012.
 
         tool_count = len(tools) if tools is not None else 0
         logger.info(
@@ -86,8 +92,12 @@ class PlanExecuteAgent(BaseAgent):
         """
         fsm_def = build_plan_execute_fsm(self.tools, task_description=task)
 
-        if self._handlers is not None:
-            self._handlers.reset()
+        # DECISION plan-2026-09-12T135914-45a654de/D-012
+        # A call-LOCAL AgentHandlers (or None in tool-less mode), threaded
+        # explicitly into `_register_handlers` via `_standard_run`'s
+        # `handlers=` parameter. A fresh instance needs no `.reset()`. Do
+        # NOT reintroduce `self._handlers = ...` — see decisions.md D-012.
+        handlers = AgentHandlers(self.tools) if self.tools is not None else None
 
         # Build initial context
         context = self._init_context(
@@ -113,14 +123,23 @@ class PlanExecuteAgent(BaseAgent):
             fsm_def,
             context,
             "plan_execute",
+            handlers=handlers,
             execution_evidence_keys=[ContextKeys.STEP_RESULTS],
         )
 
-    def _register_handlers(self, api: API) -> None:
+    # DECISION plan-2026-09-12T135914-45a654de/D-012
+    # `handlers` is legitimately `None` in tool-less mode — keep the
+    # `if handlers is not None:` conditional guard. Do NOT copy react.py's
+    # hard `AgentError`-on-`None` raise here (see decisions.md D-012 /
+    # plan.md invariant 9 — that guard is only correct where tools are
+    # mandatory).
+    def _register_handlers(
+        self, api: API, handlers: AgentHandlers | None = None
+    ) -> None:
         """Register agent handlers with the API."""
-        if self._handlers is not None:
+        if handlers is not None:
             self._register_tool_executor(
-                api, PlanExecuteStates.EXECUTE_STEP, self._handlers.execute_tool
+                api, PlanExecuteStates.EXECUTE_STEP, handlers.execute_tool
             )
 
         # Iteration limiter

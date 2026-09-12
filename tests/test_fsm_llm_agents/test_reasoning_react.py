@@ -161,15 +161,18 @@ class TestReasoningReactAgentPlaceholder:
 
 
 class TestReasoningReactAgentHandlerReset:
-    """Regression: handlers must be reset between consecutive run() calls."""
+    """Regression: each run() must get independent handler state — no shared
+    `AgentHandlers` instance across calls (decisions.md D-012, the D-014
+    race-fix pattern applied to this class; see also react.py's
+    ``TestReactAgentHandlersRace``-style regression)."""
 
-    def test_repeated_run_resets_iteration_counter(self):
-        """run() must call _handlers.reset() so _current_iteration starts at 0."""
+    def test_no_persistent_handlers_attribute(self):
+        """AgentHandlers is call-local (built inside run()), never stored on
+        self — the attribute must not exist post-construction or post-run."""
         try:
             from fsm_llm_agents.reasoning_react import ReasoningReactAgent
         except ImportError:
             pytest.skip("fsm_llm_reasoning not installed")
-        from unittest.mock import patch
 
         registry = ToolRegistry()
         registry.register_function(_dummy_tool, name="search", description="Search")
@@ -179,26 +182,57 @@ class TestReasoningReactAgentHandlerReset:
         except Exception:
             pytest.skip("Reasoning engine initialization failed")
 
-        # Simulate stale state from a previous run
-        agent._handlers._current_iteration = 5
+        assert not hasattr(agent, "_handlers")
 
-        # Patch reset to track it was called, then let it run normally
-        original_reset = agent._handlers.reset
-        reset_called = []
+        try:
+            agent.run("test task")
+        except Exception:
+            pass  # Expected — no LLM configured
 
-        def tracking_reset():
-            reset_called.append(True)
-            original_reset()
+        assert not hasattr(agent, "_handlers")
 
-        with patch.object(agent._handlers, "reset", side_effect=tracking_reset):
-            try:
-                agent.run("test task")
-            except Exception:
-                pass  # Expected — no LLM configured
+    def test_repeated_run_builds_fresh_handlers_each_call(self):
+        """Two consecutive run() calls each get their OWN AgentHandlers
+        instance starting at iteration 0 — proves the shared-mutable-slot
+        race this fix closes cannot reoccur (a stale `_current_iteration`
+        from a prior call can never leak into the next call's instance)."""
+        try:
+            from fsm_llm_agents import reasoning_react as rr_module
+        except ImportError:
+            pytest.skip("fsm_llm_reasoning not installed")
+        from unittest.mock import patch
 
-        assert len(reset_called) == 1, (
-            "reset() must be called exactly once at start of run()"
+        registry = ToolRegistry()
+        registry.register_function(_dummy_tool, name="search", description="Search")
+
+        try:
+            agent = rr_module.ReasoningReactAgent(tools=registry)
+        except Exception:
+            pytest.skip("Reasoning engine initialization failed")
+
+        created_instances = []
+        real_agent_handlers = rr_module.AgentHandlers
+
+        def tracking_ctor(registry_arg):
+            instance = real_agent_handlers(registry_arg)
+            created_instances.append(instance)
+            return instance
+
+        with patch.object(rr_module, "AgentHandlers", side_effect=tracking_ctor):
+            for _ in range(2):
+                try:
+                    agent.run("test task")
+                except Exception:
+                    pass  # Expected — no LLM configured
+
+        assert len(created_instances) == 2, (
+            "run() must build a new AgentHandlers instance every call"
         )
+        assert created_instances[0] is not created_instances[1]
+        # Simulate the first call's handlers having advanced state; the
+        # second call's instance must be unaffected (proves no shared slot).
+        created_instances[0]._current_iteration = 99
+        assert created_instances[1]._current_iteration == 0
 
 
 class TestReasoningReactAgentConfig:

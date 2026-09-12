@@ -97,14 +97,36 @@ class TestPlanExecuteAgentCreation:
         assert hasattr(agent, "run")
         assert callable(agent.run)
 
-    def test_handlers_created_with_tools(self):
+    def test_no_persistent_handlers_attribute(self):
+        """AgentHandlers is call-local (built inside run()), never stored on
+        self — see decisions.md D-012 (race fix mirroring react.py's D-014)."""
         registry = _make_registry()
         agent = PlanExecuteAgent(tools=registry)
-        assert agent._handlers is not None
+        assert not hasattr(agent, "_handlers")
 
-    def test_handlers_none_without_tools(self):
+    def test_register_handlers_wires_executor_when_handlers_present(self):
+        """`_register_handlers(api, handlers)` registers the tool executor
+        when a real AgentHandlers is passed in (tools-configured mode)."""
+        from unittest.mock import Mock
+
+        from fsm_llm_agents.handlers import AgentHandlers
+
+        registry = _make_registry()
+        agent = PlanExecuteAgent(tools=registry)
+        api = Mock()
+        handlers = AgentHandlers(registry)
+        agent._register_handlers(api, handlers)
+        assert api.register_handler.called
+
+    def test_register_handlers_skips_executor_when_handlers_none(self):
+        """`_register_handlers(api, None)` must not raise — tool-less mode
+        is a legitimate, expected value distinct from react.py's mandatory-
+        tools guard (see decisions.md D-012 / plan.md invariant 9)."""
+        from unittest.mock import Mock
+
         agent = PlanExecuteAgent()
-        assert agent._handlers is None
+        api = Mock()
+        agent._register_handlers(api, None)
 
     def test_stores_tools_reference(self):
         registry = _make_registry()

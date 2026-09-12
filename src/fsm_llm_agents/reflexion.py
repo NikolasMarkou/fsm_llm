@@ -80,7 +80,12 @@ class ReflexionAgent(BaseAgent):
         self.evaluation_fn = evaluation_fn
         self.max_reflections = max_reflections
         self.hitl = hitl
-        self._handlers = AgentHandlers(tools)
+        # DECISION plan-2026-09-12T135914-45a654de/D-012
+        # No `self._handlers` here (matches react.py's D-014 pattern) — a
+        # per-instance AgentHandlers shared across concurrent run() calls is
+        # the D-004/D-014 race. Each call builds and uses its own call-LOCAL
+        # AgentHandlers (see run() below). Do NOT reintroduce this
+        # assignment — see decisions.md D-012.
 
         logger.info(
             LogMessages.AGENT_STARTED.format(
@@ -100,7 +105,13 @@ class ReflexionAgent(BaseAgent):
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
-        self._handlers.reset()
+        # DECISION plan-2026-09-12T135914-45a654de/D-012
+        # A call-LOCAL AgentHandlers, threaded explicitly into
+        # `_register_handlers` via `_standard_run`'s `handlers=` parameter —
+        # see the fuller note in react.py's ReactAgent.run() (D-014). A fresh
+        # instance needs no `.reset()`. Do NOT reintroduce
+        # `self._handlers = AgentHandlers(...)` — see decisions.md D-012.
+        handlers = AgentHandlers(self.tools)
 
         fsm_def = build_reflexion_fsm(
             self.tools,
@@ -118,18 +129,32 @@ class ReflexionAgent(BaseAgent):
             },
         )
 
-        return self._standard_run(task, fsm_def, context, "reflexion")
+        return self._standard_run(
+            task, fsm_def, context, "reflexion", handlers=handlers
+        )
 
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
         """Handle HITL approval gates before each converse()."""
         self._handle_hitl_approval(api, conv_id)
 
-    def _register_handlers(self, api: API) -> None:
+    # DECISION plan-2026-09-12T135914-45a654de/D-012
+    # `handlers` is REQUIRED in practice: run() always passes its own
+    # call-local `AgentHandlers` explicitly via `_standard_run`'s `handlers=`
+    # parameter (mirrors react.py's D-014 guard). Do NOT fall back to
+    # reading a `self._handlers` attribute here — none exists on this class.
+    # See decisions.md D-012.
+    def _register_handlers(
+        self, api: API, handlers: AgentHandlers | None = None
+    ) -> None:
         """Register agent handlers with the API."""
-        self._register_tool_executor(
-            api, ReflexionStates.ACT, self._handlers.execute_tool
-        )
-        self._register_iteration_limiter(api, self._handlers.check_iteration_limit)
+        if handlers is None:
+            raise AgentError(
+                "ReflexionAgent._register_handlers called without a "
+                "handlers instance — this is a programming error, not a "
+                "runtime condition; run() must always pass one."
+            )
+        self._register_tool_executor(api, ReflexionStates.ACT, handlers.execute_tool)
+        self._register_iteration_limiter(api, handlers.check_iteration_limit)
 
         api.register_handler(
             api.create_handler(HandlerNames.REFLEXION_REFLECTOR)
