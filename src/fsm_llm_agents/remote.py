@@ -113,6 +113,18 @@ class AgentServer:
                 # cancellation (a deadline check inside the ReAct loop) would
                 # close this fully but is a materially larger change, out of
                 # scope for this plan.
+                #
+                # SCOPE: `AgentServer` wraps `agent: Any` -- the isolation
+                # above holds ONLY when `self._agent` is a `ReactAgent`/
+                # `ParallelReactAgent` (the two classes D-014 actually fixed).
+                # `ReflexionAgent`, `PlanExecuteAgent`, and
+                # `ReasoningReactAgent` still keep a single `self._handlers`
+                # reused across calls (`.reset()`, not rebuilt per call) --
+                # if `AgentServer` is ever pointed at one of those, this
+                # comment's isolation claim does NOT hold for it, and the
+                # original F9-shaped cross-request corruption (see
+                # decisions.md D-013/D-014) remains live. Named, deliberately
+                # out-of-scope residual; not silently fixed by D-014.
                 result = await asyncio.wait_for(
                     asyncio.to_thread(
                         self._agent.run,
