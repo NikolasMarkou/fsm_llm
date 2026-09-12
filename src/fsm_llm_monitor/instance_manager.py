@@ -397,7 +397,7 @@ def validate_preset_id(preset_id: str, base: Path) -> Path:
 def snapshot_from_api(
     api: API,
     conversation_id: str,
-    show_internal_keys: bool = True,
+    show_internal_keys: bool = False,
 ) -> ConversationSnapshot | None:
     """Build a ConversationSnapshot from a live API instance.
 

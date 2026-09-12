@@ -122,6 +122,14 @@ class MonitorBridge:
         """Get a snapshot of a specific conversation."""
         if self._api is None:
             return None
+        # DECISION plan-2026-09-12T135914-45a654de/D-017
+        # This call explicitly threads show_internal_keys through, but
+        # snapshot_from_api's own default is fail-CLOSED
+        # (show_internal_keys=False) precisely so a future third caller
+        # that forgets this parameter does not silently re-open finding 7
+        # (internal context keys leaking into the dashboard). Do NOT flip
+        # that default back to True "for convenience" -- see decisions.md
+        # D-017 / review-iter-1.md concern 5.
         return snapshot_from_api(
             self._api,
             conversation_id,
