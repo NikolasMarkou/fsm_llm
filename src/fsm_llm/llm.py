@@ -203,7 +203,9 @@ class LLMInterface(abc.ABC):
             "Override this method to support targeted field extraction."
         )
 
-    def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse:
+    def extract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
         """
         Extract free-form key/value data per a state's ``extraction_instructions``.
 
@@ -508,7 +510,9 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse:
+    def extract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
         """Extract free-form key/value data per a state's extraction_instructions.
 
         Interface contract (mirrors ``extract_field``'s error boundary):
@@ -550,7 +554,9 @@ class LiteLLMInterface(LLMInterface):
                 return DataExtractionResponse(extracted_data={})
 
             confidence = coerce_confidence(data.get("confidence", 1.0), 1.0)
-            return DataExtractionResponse(extracted_data=extracted, confidence=confidence)
+            return DataExtractionResponse(
+                extracted_data=extracted, confidence=confidence
+            )
 
         except LLMResponseError:
             raise

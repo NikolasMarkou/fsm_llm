@@ -284,9 +284,7 @@ def clean_context_keys(
             removed_keys.append(f"{full_key} ({reason})")
             log.debug(f"Context key '{full_key}' removed: {reason}")
 
-    cleaned = filter_context_tree(
-        data, MAX_CONTEXT_FILTER_DEPTH, should_drop, on_drop
-    )
+    cleaned = filter_context_tree(data, MAX_CONTEXT_FILTER_DEPTH, should_drop, on_drop)
 
     if warned_keys:
         log.warning(

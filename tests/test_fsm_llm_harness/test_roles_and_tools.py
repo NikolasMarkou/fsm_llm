@@ -547,9 +547,7 @@ class TestPlanMemoryWritesAreAtomic:
         with pytest.raises(HarnessArtifactError):
             memory.write_text(ArtifactNames.PLAN, "new")
 
-        leftovers = [
-            p for p in (memory.plan_dir).iterdir() if p.name.startswith(".")
-        ]
+        leftovers = [p for p in (memory.plan_dir).iterdir() if p.name.startswith(".")]
         assert leftovers == []
 
     def test_a_failed_append_leaves_the_previous_content_untouched(
