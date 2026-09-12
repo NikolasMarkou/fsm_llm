@@ -914,3 +914,68 @@ class TestApiKeyGate:
             "/api/dashboard/config", json={"name": "x", "panels": {}, "alerts": {}}
         )
         assert resp.status_code == 401
+
+    def test_correct_key_authenticates_via_compare_digest(self):
+        """D-016: the correct-key path now runs through hmac.compare_digest,
+        not `!=`. Behavior-preserving (still 200 for a correct key), but this
+        test pins that `compare_digest` is actually the mechanism used, so a
+        regression back to a plain `!=` comparison would be caught if this
+        spy is ever tightened to assert call counts."""
+        import fsm_llm_monitor.server as server_module
+
+        calls: list[tuple[str, str]] = []
+        original = server_module.hmac.compare_digest
+
+        def _spy(a: str, b: str) -> bool:
+            calls.append((a, b))
+            return original(a, b)
+
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        server_module.hmac.compare_digest = _spy
+        try:
+            client = TestClient(app)
+            resp = client.post(
+                "/api/dashboard/config",
+                json={"name": "x", "panels": {}, "alerts": {}},
+                headers={"Authorization": "Bearer s3cr3t"},
+            )
+            assert resp.status_code == 200
+            assert calls == [("s3cr3t", "s3cr3t")]
+        finally:
+            server_module.hmac.compare_digest = original
+
+    def test_reconfigure_without_api_key_warns_when_clearing_prior_key(self):
+        """D-016: re-calling configure() without api_key= after a key was
+        previously set logs a WARNING (mirroring the CORS-mutation warning),
+        since the key is silently cleared."""
+        import io
+
+        from fsm_llm.logging import logger
+
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        buf = io.StringIO()
+        sink_id = logger.add(buf, level="WARNING")
+        try:
+            configure(manager=InstanceManager())
+        finally:
+            logger.remove(sink_id)
+        output = buf.getvalue()
+        assert "previously configured API key is being cleared" in output
+
+    def test_first_configure_call_does_not_warn(self):
+        """D-016: the warning must not fire on the very first configure()
+        call in a process (nothing to clear yet)."""
+        import io
+
+        from fsm_llm.logging import logger
+
+        # Ensure a clean slate (no previously-set key) before the "first" call.
+        configure(manager=InstanceManager())
+        buf = io.StringIO()
+        sink_id = logger.add(buf, level="WARNING")
+        try:
+            configure(manager=InstanceManager())
+        finally:
+            logger.remove(sink_id)
+        output = buf.getvalue()
+        assert "previously configured API key is being cleared" not in output

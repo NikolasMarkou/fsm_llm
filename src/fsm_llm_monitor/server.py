@@ -9,6 +9,7 @@ and workflows.
 """
 
 import asyncio
+import hmac
 import json
 import os
 import time
@@ -151,11 +152,33 @@ def configure(
         <key>`` or ``X-API-Key`` header) to reach mutating REST routes. Falls
         back to the ``FSM_LLM_MONITOR_API_KEY`` env var when not given
         explicitly. Defaults to ``None`` (no auth — byte-identical to prior
-        behavior). Unlike ``cors_origins``, this is re-derived on every call
-        (see the D-008 comment on the ``_api_key`` global).
+        behavior). Unlike ``cors_origins``, this is re-derived on EVERY call
+        (see the D-008 comment on the ``_api_key`` global) — **calling
+        ``configure()`` again later (e.g. only to change ``cors_origins``)
+        without also re-passing ``api_key`` silently clears any previously
+        configured key** (falling through to the env var, or to ``None`` if
+        the env var is also unset). If you configure a key once, you must
+        re-pass it (or rely on the env var) on every subsequent ``configure()``
+        call in the same process, or auth will silently disable itself. A
+        WARNING is logged (D-016) when this specific case — a previously-set
+        key being cleared by a call that did not itself supply ``api_key`` —
+        is detected.
     """
     global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX, _api_key
-    _api_key = api_key if api_key is not None else (os.environ.get("FSM_LLM_MONITOR_API_KEY") or None)
+    new_api_key = api_key if api_key is not None else (os.environ.get("FSM_LLM_MONITOR_API_KEY") or None)
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-016: warn (rather than stay
+    # silent) when a previously-configured key is about to be cleared by a
+    # re-configure() call that did not itself pass api_key= — mirroring the
+    # existing CORS-mutation warning below. Guarded so it never fires on the
+    # first configure() call (nothing to clear yet) or when the caller
+    # explicitly re-supplies the same/a new key.
+    if api_key is None and _api_key is not None and new_api_key is None:
+        logger.warning(
+            "configure() called without api_key= and FSM_LLM_MONITOR_API_KEY "
+            "is unset; a previously configured API key is being cleared — "
+            "mutating routes will no longer require authentication."
+        )
+    _api_key = new_api_key
     if _requests_processed > 0:
         logger.warning(
             f"configure() called after server has processed {_requests_processed} "
@@ -242,7 +265,15 @@ def _require_api_key(request: Request) -> None:
         token = auth_header[len("bearer ") :].strip()
     if token is None:
         token = request.headers.get("x-api-key")
-    if token != _api_key:
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-016: use hmac.compare_digest
+    # instead of `!=` — plain string comparison short-circuits on the first
+    # differing byte, letting an attacker who can measure response-time
+    # differences across many requests narrow down the correct key
+    # character-by-character (a timing side-channel). `token is not None` is
+    # checked first because compare_digest requires both arguments to be
+    # str/bytes — `hmac.compare_digest(None, _api_key)` raises TypeError,
+    # it does not return False. See decisions.md D-016.
+    if token is None or not hmac.compare_digest(token, _api_key):
         raise HTTPException(status_code=401, detail="missing or invalid API key")
 
 
