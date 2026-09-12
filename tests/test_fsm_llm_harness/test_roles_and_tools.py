@@ -29,6 +29,7 @@ the one subprocess test executes ``cat`` on a file it just wrote.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -53,6 +54,7 @@ from fsm_llm_harness.constants import (
     Role,
 )
 from fsm_llm_harness.exceptions import (
+    HarnessArtifactError,
     HarnessConfinementError,
     HarnessError,
     HarnessOwnershipError,
@@ -500,6 +502,78 @@ class TestPlanMemoryOwnership:
         memory.write_text(ArtifactNames.LESSONS, "- a lesson [I:5]\n")
 
         assert (tmp_path / "plans" / ArtifactNames.LESSONS).exists()
+
+
+class TestPlanMemoryWritesAreAtomic:
+    """D-009 (plan-2026-09-12T135914-45a654de): torn-write regression.
+
+    Before this fix, ``PlanMemory.write_text``/``append_text`` delegated to
+    ``Workspace._write_resolved``/``_append_resolved`` -- a plain
+    ``Path.write_text``/``open("a")`` with no fsync-and-replace step. A crash
+    (or, here, an ``OSError`` monkeypatched into the write path) mid-write
+    left the target TRUNCATED, not merely missing the new content. Confirmed
+    failing against pre-fix code (an ``OSError`` raised from inside
+    ``Path.write_text``/``target.open("a")`` left a truncated file on disk)
+    before this fix landed; now the write goes through
+    ``_atomic.atomic_write_text``, so a failure never touches the target.
+    """
+
+    def test_a_failed_write_leaves_the_previous_content_untouched(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.PLAN_WRITER)
+        memory.write_text(ArtifactNames.PLAN, "the original, complete plan\n")
+
+        def crash(src, dst):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(os, "replace", crash)
+        with pytest.raises(HarnessArtifactError):
+            memory.write_text(ArtifactNames.PLAN, "TRUNCATED-REPLACEMENT")
+
+        assert (memory.plan_dir / ArtifactNames.PLAN).read_text() == (
+            "the original, complete plan\n"
+        )
+
+    def test_a_failed_write_leaves_no_temp_file_beside_the_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.PLAN_WRITER)
+        memory.write_text(ArtifactNames.PLAN, "original\n")
+
+        monkeypatch.setattr(
+            os, "replace", lambda src, dst: (_ for _ in ()).throw(OSError("boom"))
+        )
+        with pytest.raises(HarnessArtifactError):
+            memory.write_text(ArtifactNames.PLAN, "new")
+
+        leftovers = [
+            p for p in (memory.plan_dir).iterdir() if p.name.startswith(".")
+        ]
+        assert leftovers == []
+
+    def test_a_failed_append_leaves_the_previous_content_untouched(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.EXECUTOR)
+        memory.write_text(ArtifactNames.CHANGELOG, "line one\n")
+
+        monkeypatch.setattr(
+            os, "replace", lambda src, dst: (_ for _ in ()).throw(OSError("boom"))
+        )
+        with pytest.raises(HarnessArtifactError):
+            memory.append_text(ArtifactNames.CHANGELOG, "line two\n")
+
+        assert (memory.plan_dir / ArtifactNames.CHANGELOG).read_text() == "line one\n"
+
+    def test_a_successful_append_still_concatenates(self, tmp_path: Path) -> None:
+        memory = PlanMemory(tmp_path / "plans" / "plan-x", role=Role.EXECUTOR)
+        memory.write_text(ArtifactNames.CHANGELOG, "line one\n")
+        memory.append_text(ArtifactNames.CHANGELOG, "line two\n")
+
+        assert (memory.plan_dir / ArtifactNames.CHANGELOG).read_text() == (
+            "line one\nline two\n"
+        )
 
 
 # ---------------------------------------------------------------------------

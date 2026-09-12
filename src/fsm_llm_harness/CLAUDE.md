@@ -25,6 +25,10 @@ fsm_llm_harness/
 ├── harness.py          # HarnessAgent -- the driver. 6 state-entry handlers, the pre-step
 │                       #   gate, worker dispatch, the leash, Presentation Contracts,
 │                       #   state.md read/write, resume. (3,089 lines -- the biggest file)
+├── _atomic.py          # atomic_write_text -- the one fsync+os.replace primitive, moved out
+│                       #   of storage.py so tools.py can use it too without an import cycle
+│                       #   (storage.py imports PlanMemory from tools.py). A deliberate leaf:
+│                       #   imports nothing from storage.py or tools.py.
 ├── artifacts.py        # Pydantic models + Markdown (de)serializers for 15 artifact kinds,
 │                       #   the 9 decision entry-type schemas and the 6 Presentation Contracts
 ├── storage.py          # PlanDirectory: plan-id minting, atomic writes, LESSONS eviction,
@@ -151,9 +155,14 @@ atomicity, the path layout and the three size policies.
 **Atomicity is load-bearing, not belt-and-braces**: a torn `state.md` still
 PARSES, and a truncated Fix-Attempts section reads as a smaller
 `fix_attempt_count` -- i.e. a leash that resets itself on a crash. Writes go
-through a module-local `_atomic_write_text` that creates its temp file in
-`target.parent` (`os.replace` is atomic only within one filesystem) and
-`os.replace`s it into position.
+through `_atomic.atomic_write_text` (re-exported here as `_atomic_write_text`,
+which is what `tests/test_storage.py` still imports by that name) that creates
+its temp file in `target.parent` (`os.replace` is atomic only within one
+filesystem) and `os.replace`s it into position. `tools.PlanMemory.write_text`/
+`append_text` use the SAME primitive (plan-2026-09-12T135914-45a654de/D-009) --
+`_atomic.py` is a standalone leaf module for exactly this reason: `storage.py`
+imports `PlanMemory` from `tools.py`, so the primitive could not live in
+either module without a cycle.
 
 **Two read paths, on purpose.** `PlanMemory.read_text` -- the tool a ROLE calls
 -- keeps a 64 KB cap, because that cap bounds what an untrusted worker can pull

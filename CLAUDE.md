@@ -61,7 +61,7 @@ src/
 ├── fsm_llm_workflows/    # Workflow orchestration engine (9 files, incl. dependency resolver)
 ├── fsm_llm_agents/       # Agentic patterns -- 12 patterns + swarm, graph, MCP, A2A, SOPs, semantic tools + meta builder (49 files)
 ├── fsm_llm_monitor/      # Web-based monitoring dashboard (11 files, incl. OTEL exporter + static/)
-└── fsm_llm_harness/      # Iterative-planner protocol harness -- 6-state FSM, disk-derived gates, autonomy leash (14 files)
+└── fsm_llm_harness/      # Iterative-planner protocol harness -- 6-state FSM, disk-derived gates, autonomy leash (15 files)
 ```
 
 **Optional extras** (beyond core):

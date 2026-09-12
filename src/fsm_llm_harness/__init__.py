@@ -136,6 +136,7 @@ from .storage import (
 )
 from .tools import (
     COMMAND_ALLOWLIST,
+    DISK_DERIVED_COUNTS,
     PLAN_READ_TOOLS,
     PLAN_WRITE_TOOLS,
     READ_ONLY_TOOLS,
@@ -148,6 +149,10 @@ from .tools import (
     WorkspaceTools,
     build_plan_tools,
     build_workspace_tools,
+    count_gate_files,
+    derive_disk_counts,
+    gate_files,
+    has_bytes,
 )
 
 __all__ = [
@@ -282,4 +287,10 @@ __all__ = [
     "PlanMemory",
     "PlanTools",
     "build_plan_tools",
+    # Disk-derived gate values
+    "DISK_DERIVED_COUNTS",
+    "count_gate_files",
+    "derive_disk_counts",
+    "gate_files",
+    "has_bytes",
 ]

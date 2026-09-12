@@ -53,6 +53,7 @@ from fsm_llm.logging import logger
 from fsm_llm_agents.definitions import ToolResult
 from fsm_llm_agents.tools import ToolRegistry, tool
 
+from ._atomic import atomic_write_text
 from .constants import ArtifactNames, ContextKeys, Defaults
 from .exceptions import (
     HarnessConfinementError,
@@ -662,20 +663,22 @@ class Workspace:
     # DECISION plan-2026-09-12T065608-089d0ec7/D-006
     # `_write_resolved`/`_append_resolved` take an already-resolved `Path` and
     # do NO confinement check of their own. Do NOT call either from outside
-    # this module without first routing the path through `resolve()` (or
-    # `PlanMemory.authorise()`, which itself resolves via `PlanMemory.locate_path`
-    # -> `Workspace.resolve`) -- `resolve()` stays the ONE confinement
-    # chokepoint (D-032); these two exist only to let a caller that ALREADY
-    # holds a resolved `Path` (`PlanMemory.write_text`/`append_text`, via
-    # `authorise()`) write it without a second, redundant `resolve()` call.
-    # See decisions.md D-006.
+    # this module without first routing the path through `resolve()` --
+    # `resolve()` stays the ONE confinement chokepoint (D-032); these two
+    # exist only to let a caller that ALREADY holds a resolved `Path`
+    # (:meth:`write_text`/`append_text` below) write it without a second,
+    # redundant `resolve()` call.
+    # NOTE (plan-2026-09-12T135914-45a654de/D-009): `PlanMemory.write_text`/
+    # `append_text` no longer call these two methods -- they write through
+    # `_atomic.atomic_write_text` instead, so that plan-directory writes are
+    # atomic without making THIS class's (agent-facing, user-source-tree)
+    # writes atomic too (D-019 forbids that). Do not "restore" PlanMemory to
+    # calling these plain writers.
+    # See decisions.md D-006, D-009.
     def _write_resolved(self, target: Path, content: str) -> str:
         """Write already-resolved *target*, creating parent directories.
 
-        Interface contract (2 call sites: :meth:`write_text`, and
-        ``PlanMemory.write_text``, which passes the ``Path`` its own
-        ``authorise()`` already resolved instead of re-resolving via
-        :meth:`resolve`):
+        Interface contract (1 call site: :meth:`write_text`):
             - *target* MUST already be a resolved, confined absolute path;
               this method performs no confinement check.
             - Returns the workspace-root-relative path written.
@@ -694,8 +697,7 @@ class Workspace:
     def _append_resolved(self, target: Path, content: str) -> str:
         """Append to already-resolved *target*, creating it (and parents) if absent.
 
-        Interface contract (2 call sites: :meth:`append_text`, and
-        ``PlanMemory.append_text``, same rationale as :meth:`_write_resolved`):
+        Interface contract (1 call site: :meth:`append_text`):
             - *target* MUST already be a resolved, confined absolute path;
               this method performs no confinement check.
             - Returns the workspace-root-relative path appended to.
@@ -1055,15 +1057,40 @@ class PlanMemory:
 
     # -- writes ---------------------------------------------------------
 
+    # DECISION plan-2026-09-12T135914-45a654de/D-009
+    # `write_text`/`append_text` write through `atomic_write_text`
+    # (`_atomic.py`), NOT `self._workspace._write_resolved`/`_append_resolved`.
+    # Those two `Workspace` methods are the AGENT-facing, user-source-tree
+    # writer (D-019) -- do NOT route PlanMemory's plan-directory writes back
+    # through them, and do NOT "fix" `Workspace._write_resolved` itself to be
+    # atomic: a visible temp file appearing beside every edited file in the
+    # user's own repository is the exact side effect D-019 forbids. This class
+    # composes a `Workspace` only for confinement (`resolve`/`relative`), never
+    # for its plain-write behaviour, once a target has been authorised here.
+    # `append_text` is read-modify-atomic-write-back (matching
+    # `PlanDirectory.append_text`), which trades kernel-serialized O_APPEND
+    # concurrency for a small last-write-wins race window between concurrent
+    # appenders to the SAME artifact -- accepted because the harness's
+    # per-dispatch model has no genuine concurrent writers to one plan
+    # directory today. See decisions.md D-009.
     def write_text(self, path: str, content: str) -> str:
-        """Write an OWNED artifact, replacing it if it exists."""
+        """Write an OWNED artifact, replacing it if it exists (atomic)."""
         target = self.authorise(path)
-        return self._workspace._write_resolved(target, content)
+        atomic_write_text(target, content, artifact=path)
+        return self._workspace.relative(target)
 
     def append_text(self, path: str, content: str) -> str:
-        """Append to an OWNED artifact, creating it if absent."""
+        """Append to an OWNED artifact, creating it if absent (atomic).
+
+        Read-modify-write rather than a plain append: an interrupted append
+        (or a torn write from a concurrent writer) must never leave a reader
+        with a half-written artifact, so this reads the whole current
+        content and atomically rewrites the concatenation.
+        """
         target = self.authorise(path)
-        return self._workspace._append_resolved(target, content)
+        existing = target.read_text(encoding="utf-8") if target.exists() else ""
+        atomic_write_text(target, existing + content, artifact=path)
+        return self._workspace.relative(target)
 
 
 # ---------------------------------------------------------------------------

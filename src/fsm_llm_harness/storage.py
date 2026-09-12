@@ -34,7 +34,6 @@ from __future__ import annotations
 import os
 import re
 import secrets
-import tempfile
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +43,7 @@ from pydantic import BaseModel, ConfigDict
 
 from fsm_llm.logging import logger
 
+from ._atomic import atomic_write_text as _atomic_write_text
 from .artifacts import (
     ARTIFACT_MODELS,
     Artifact,
@@ -141,62 +141,13 @@ def mint_plan_id(*, now: datetime | None = None) -> str:
 # Atomic write
 # ---------------------------------------------------------------------------
 
-
-def _atomic_write_text(target: Path, content: str, *, artifact: str) -> Path:
-    """Write *content* to *target* atomically, or raise and change nothing.
-
-    Interface contract (2 call sites: :meth:`PlanDirectory.write_text` and
-    :meth:`PlanDirectory.append_text`):
-        - ``target`` must already be an AUTHORISED absolute path -- this
-          function performs no confinement or ownership check of its own.
-        - On success the file's content is exactly ``content``.  On failure the
-          file is untouched: a reader concurrent with either outcome sees the
-          old bytes or the new bytes, never a truncated blend.
-        - Leaves no temp file behind on either path.
-        - Raises :class:`HarnessArtifactError` (tagged ``artifact``) for any
-          ``OSError`` -- a full disk, a read-only mount, a vanished parent.
-    """
-    # DECISION plan-2026-07-21T191807-bf7ffe24/D-019
-    # The temp file MUST be created in `target.parent`, not in the system temp
-    # directory. `os.replace` is only atomic within one filesystem; across a
-    # mount boundary it degrades to copy-then-unlink, which reintroduces exactly
-    # the torn-write window this function exists to close -- and on many systems
-    # `/tmp` is a different filesystem (tmpfs) from a repository checkout.
-    # Do NOT "tidy" the `dir=` argument away, and do NOT reach for
-    # `tempfile.NamedTemporaryFile()` without it.
-    # The `finally` shape is `FileSessionStore.save`'s (session.py:151-173),
-    # copied deliberately: an `except OSError: raise` shape leaks the temp file
-    # on every non-OSError exit, and the existence check is what makes the
-    # cleanup a no-op after a successful `os.replace` consumed the temp name.
-    # See decisions.md D-019.
-    directory = target.parent
-    try:
-        directory.mkdir(parents=True, exist_ok=True)
-        handle_fd, tmp_name = tempfile.mkstemp(
-            dir=str(directory), prefix=f".{target.name}.", suffix=".tmp"
-        )
-    except OSError as exc:
-        raise HarnessArtifactError(
-            artifact, f"could not open a temp file beside '{target}'", cause=exc
-        ) from exc
-    try:
-        with os.fdopen(handle_fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_name, str(target))
-    except OSError as exc:
-        raise HarnessArtifactError(
-            artifact, f"could not be written to '{target}'", cause=exc
-        ) from exc
-    finally:
-        if os.path.exists(tmp_name):
-            try:
-                os.unlink(tmp_name)
-            except OSError:  # pragma: no cover - cleanup is best-effort
-                logger.debug(f"could not remove temp file {tmp_name}")
-    logger.debug(f"atomically wrote {target} ({len(content)} chars)")
-    return target
+# `_atomic_write_text` now lives in `._atomic` (imported above, aliased back
+# to this name) so that `tools.PlanMemory` can use the same primitive without
+# creating an import cycle (`storage` imports `PlanMemory` from `tools`).
+# Kept as a module-level name here -- do not delete this alias -- because
+# `tests/test_fsm_llm_harness/test_storage.py` imports it from this module by
+# name (`from fsm_llm_harness.storage import _atomic_write_text`).
+# See decisions.md D-009.
 
 
 # ---------------------------------------------------------------------------
@@ -719,19 +670,18 @@ class PlanDirectory:
               if the write itself fails.
         """
         # DECISION plan-2026-07-21T191807-bf7ffe24/D-019
-        # Do NOT replace these two lines with `PlanMemory.write_text`. That
-        # method is correct about WHO may write and WHERE, and wrong about HOW:
-        # it delegates to `Workspace.write_text`, a plain `Path.write_text`
-        # that truncates the target before writing a byte. A crash, a full
-        # disk or a killed process at that instant leaves a half-written
-        # artifact that still parses -- a gate then opens on a document nobody
-        # wrote. Splitting the operation into `authorise` (whose own contract
-        # promises it performs no write) plus `_atomic_write_text` keeps a
-        # single confinement/ownership implementation while making the write
-        # atomic. Do NOT "fix" this by making `Workspace.write_text` atomic
-        # instead: that class is the AGENT-facing tool surface, and its writes
-        # go to the user's source tree where a temp file appearing beside every
-        # edited file is a visible side effect. See decisions.md D-019.
+        # (UPDATED plan-2026-09-12T135914-45a654de/D-009: `PlanMemory.write_text`
+        # is now ALSO atomic, via the same `atomic_write_text` primitive -- see
+        # tools.py. This call is kept split into `authorise` (no write) +
+        # `_atomic_write_text` anyway, rather than calling `PlanMemory.write_text`
+        # directly, purely to keep this method's own return convention
+        # (`self._memory.locate(path)`, the memory-root-relative STRING form)
+        # rather than `PlanMemory.write_text`'s resolved-`Path`-relative form --
+        # not for atomicity, which both paths now have.)
+        # Do NOT "fix" this by making `Workspace.write_text` atomic instead:
+        # that class is the AGENT-facing tool surface, and its writes go to the
+        # user's source tree where a temp file appearing beside every edited
+        # file is a visible side effect. See decisions.md D-019, D-009.
         target = self._memory.authorise(path)
         _atomic_write_text(target, content, artifact=path)
         return self._memory.locate(path)
