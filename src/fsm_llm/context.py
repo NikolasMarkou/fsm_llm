@@ -16,6 +16,7 @@ from .constants import (
 )
 from .definitions import ResponseGenerationRequest
 from .logging import logger
+from .utilities import filter_context_tree
 
 
 class ContextCompactor:
@@ -171,9 +172,17 @@ class ContextCompactor:
 # provider-influenced data. The bound itself lives in constants.py so this
 # filter and prompts.py's `_filter_context_for_security` share ONE value
 # (D-011). See decisions.md D-010, D-011.
-
-# Sentinel: a container past MAX_CONTEXT_FILTER_DEPTH, which the caller drops.
-_TOO_DEEP = object()
+#
+# DECISION plan-2026-09-12T135914-45a654de/D-016
+# The depth-bounded dict/list/tuple recursion itself (byte-identical to
+# `fsm.py`'s walker) now lives in ONE shared place,
+# `utilities.filter_context_tree`. This call site supplies its OWN 5-reason
+# predicate and its OWN logging/`removed_keys`/`warned_keys` tracking via the
+# `should_drop`/`on_drop` closures below -- every behavior documented in this
+# function's docstring (None-stripping, forbidden-pattern check, WARNING
+# logging) is reproduced exactly as before, just relocated into the closures.
+# `fsm.py`'s call site does NOT get any of this richer policy (see its own
+# D-010 comment). See decisions.md D-016.
 
 
 def clean_context_keys(
@@ -211,106 +220,73 @@ def clean_context_keys(
     removed_keys: list[str] = []
     warned_keys: list[str] = []
 
-    def drop_too_deep(path: str) -> None:
-        removed_keys.append(f"{path} (nested deeper than max depth)")
-        log.warning(
-            f"Context value '{path}' dropped: nested deeper than "
-            f"{MAX_CONTEXT_FILTER_DEPTH} levels and cannot be security-filtered"
-        )
+    def should_drop(key: Any, value: Any, full_key: str) -> str | None:
+        """Return a removal reason, or ``None`` to keep ``key``.
 
-    def clean_value(value: Any, path: str, depth: int) -> Any:
-        """Recurse into containers; scalars pass through untouched at ANY depth
-        (they carry no keys to filter, so the falsy contract holds everywhere).
-        Returns ``_TOO_DEEP`` for a container past the bound."""
-        if not isinstance(value, (dict, list, tuple)):
-            return value
-        if depth > MAX_CONTEXT_FILTER_DEPTH:
-            return _TOO_DEEP
-        if isinstance(value, dict):
-            return clean_mapping(value, path, depth)
+        # DECISION plan-2026-07-19T191147-4b664252/D-017 [STALE]
+        # The `isinstance(key, str)` guard MUST stay ABOVE the emptiness
+        # check. It used to sit below it, so `if not key` fired first and
+        # `0`, `False`, `0.0` and `()` were destroyed as "empty key" --
+        # while the sibling filter in `prompts.py` KEPT them, so the two
+        # filters disagreed on exactly the falsy non-`str` keys. Do NOT
+        # "tidy" the emptiness check back to the top: `not key` is only a
+        # meaningful test for `str`, and D-010's recursion into arbitrary
+        # nested data is what makes int-keyed dicts reachable here.
+        #
+        # A non-`str` key is also logged at WARNING (not silently skipped):
+        # pre-fix, `b"password".startswith("_")` RAISED, and converting a
+        # loud failure into a silent pass-through is a fail-OPEN default
+        # inside a fail-CLOSED control. `bytes` keys in particular bypass
+        # every name check. Do NOT downgrade this to debug/remove it.
+        # See decisions.md D-017.
+        """
+        if not isinstance(key, str):
+            log.warning(
+                f"Context key {key!r} ({type(key).__name__}) skipped the "
+                "security name checks: only str keys can be matched "
+                "against internal prefixes and forbidden patterns"
+            )
+            if remove_none_values and value is None:
+                return "None value"
+            return None
 
-        # Lists/tuples are in scope: `{"users": [{"password": "x"}]}` is the
-        # same leak as `{"user": {"password": "x"}}` and must not survive it.
-        items = []
-        for index, item in enumerate(value):
-            element_path = f"{path}[{index}]"
-            cleaned_item = clean_value(item, element_path, depth + 1)
-            if cleaned_item is _TOO_DEEP:
-                drop_too_deep(element_path)
-                continue
-            items.append(cleaned_item)
-        return tuple(items) if isinstance(value, tuple) else items
+        # Check for empty-string keys
+        if not key:
+            return "empty key"
 
-    def clean_mapping(source: dict[str, Any], path: str, depth: int) -> dict[str, Any]:
-        """Apply the key filter to one mapping level, then recurse into values."""
-        cleaned: dict[str, Any] = {}
+        # Check for None values
+        if remove_none_values and value is None:
+            return "None value"
 
-        for key, value in source.items():
-            full_key = f"{path}.{key}" if path else str(key)
-            removal_reason = ""
+        # Check for internal prefix patterns
+        if has_internal_prefix(key):
+            return "internal key prefix"
 
-            # DECISION plan-2026-07-19T191147-4b664252/D-017 [STALE]
-            # The `isinstance(key, str)` guard MUST stay ABOVE the emptiness
-            # check. It used to sit below it, so `if not key` fired first and
-            # `0`, `False`, `0.0` and `()` were destroyed as "empty key" --
-            # while the sibling filter in `prompts.py` KEPT them, so the two
-            # filters disagreed on exactly the falsy non-`str` keys. Do NOT
-            # "tidy" the emptiness check back to the top: `not key` is only a
-            # meaningful test for `str`, and D-010's recursion into arbitrary
-            # nested data is what makes int-keyed dicts reachable here.
-            #
-            # A non-`str` key is also logged at WARNING (not silently skipped):
-            # pre-fix, `b"password".startswith("_")` RAISED, and converting a
-            # loud failure into a silent pass-through is a fail-OPEN default
-            # inside a fail-CLOSED control. `bytes` keys in particular bypass
-            # every name check. Do NOT downgrade this to debug/remove it.
-            # See decisions.md D-017.
-            if not isinstance(key, str):
-                log.warning(
-                    f"Context key {key!r} ({type(key).__name__}) skipped the "
-                    "security name checks: only str keys can be matched "
-                    "against internal prefixes and forbidden patterns"
-                )
-                if remove_none_values and value is None:
-                    removal_reason = "None value"
+        # Check for forbidden security patterns. `value` feeds layer 2
+        # (constants.py D-019), which decides the ambiguous
+        # `<qualifier>_key` shape on the VALUE's shape -- the NAME cannot
+        # separate `stripe_key` from `order_key`.
+        if is_forbidden_context_entry(key, value):
+            if strip_forbidden_keys:
+                return "forbidden security pattern"
+            warned_keys.append(full_key)
 
-            # Check for empty-string keys
-            elif not key:
-                removal_reason = "empty key"
+        return None
 
-            # Check for None values
-            elif remove_none_values and value is None:
-                removal_reason = "None value"
+    def on_drop(full_key: str, reason: str) -> None:
+        if reason == "too_deep":
+            removed_keys.append(f"{full_key} (nested deeper than max depth)")
+            log.warning(
+                f"Context value '{full_key}' dropped: nested deeper than "
+                f"{MAX_CONTEXT_FILTER_DEPTH} levels and cannot be security-filtered"
+            )
+        else:
+            removed_keys.append(f"{full_key} ({reason})")
+            log.debug(f"Context key '{full_key}' removed: {reason}")
 
-            # Check for internal prefix patterns
-            elif has_internal_prefix(key):
-                removal_reason = "internal key prefix"
-
-            # Check for forbidden security patterns. `value` feeds layer 2
-            # (constants.py D-019), which decides the ambiguous
-            # `<qualifier>_key` shape on the VALUE's shape -- the NAME cannot
-            # separate `stripe_key` from `order_key`.
-            elif is_forbidden_context_entry(key, value):
-                if strip_forbidden_keys:
-                    removal_reason = "forbidden security pattern"
-                else:
-                    warned_keys.append(full_key)
-
-            if removal_reason:
-                removed_keys.append(f"{full_key} ({removal_reason})")
-                log.debug(f"Context key '{full_key}' removed: {removal_reason}")
-                continue
-
-            cleaned_value = clean_value(value, full_key, depth + 1)
-            if cleaned_value is _TOO_DEEP:
-                drop_too_deep(full_key)
-                continue
-
-            cleaned[key] = cleaned_value
-
-        return cleaned
-
-    cleaned = clean_mapping(data, "", 0)
+    cleaned = filter_context_tree(
+        data, MAX_CONTEXT_FILTER_DEPTH, should_drop, on_drop
+    )
 
     if warned_keys:
         log.warning(

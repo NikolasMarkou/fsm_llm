@@ -16,6 +16,7 @@ import json
 import math
 import os
 import re
+from collections.abc import Callable
 from typing import Any
 
 from .definitions import FSMDefinition
@@ -105,6 +106,116 @@ def strip_think_and_fences(content: str) -> str:
     content = re.sub(r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE)
     content = re.sub(r"\n?```\s*$", "", content).strip()
     return content
+
+
+# --------------------------------------------------------------
+# Depth-bounded context-filter tree walker
+# --------------------------------------------------------------
+
+# Sentinel: a container past the caller-supplied max depth, which the caller
+# (this walker itself) drops. Module-private -- callers never see this value,
+# only the filtered result.
+_TOO_DEEP = object()
+
+
+def filter_context_tree(
+    source: dict[Any, Any],
+    max_depth: int,
+    should_drop: Callable[[Any, Any, str], str | None],
+    on_drop: Callable[[str, str], None] = lambda _path, _reason: None,
+) -> dict[Any, Any]:
+    """Recursively filter a mapping's keys, bounded at ``max_depth``.
+
+    # DECISION plan-2026-09-12T135914-45a654de/D-016
+    # This is the ONE shared depth-bounded recursion (dict/list/tuple, own
+    # ``_TOO_DEEP`` sentinel, fail-closed at the bound) previously
+    # hand-duplicated byte-identically between `fsm.py`'s
+    # `_strip_internal_value`/`_strip_internal_mapping` and `context.py`'s
+    # `clean_value`/`clean_mapping` closures. It does NOT change, weaken, or
+    # merge either caller's per-key policy -- see `fsm.py`'s own
+    # `# DECISION plan-2026-07-20T040150-876e7164/D-010` comment (kept in
+    # place at that call site) for why `fsm.py`'s predicate MUST stay a bare
+    # `isinstance(key, str) and has_internal_prefix(key)` check with a
+    # no-op `on_drop`: it feeds `API.get_data()`, a per-turn read accessor,
+    # and must never gain `context.py`'s None-stripping, forbidden-pattern
+    # check, or WARNING logging. `context.py`'s richer 5-reason predicate and
+    # its logging/`removed_keys`/`warned_keys` tracking are reproduced
+    # UNCHANGED inside its own `should_drop`/`on_drop` closures at its call
+    # site -- this walker only owns the recursion shape, never the policy.
+    # Do NOT widen `should_drop`'s contract to accept `None`,
+    # `remove_none_values`, or `is_forbidden_context_entry` as walker-level
+    # concepts -- that would be exactly the leak D-010 forbids. See
+    # decisions.md D-016 (and the historical D-010 it respects).
+
+    Contract:
+        - ``source``: the mapping to filter (rebuilt into a new dict; never
+          mutated in place).
+        - ``max_depth``: the caller's own depth bound (e.g.
+          ``MAX_CONTEXT_FILTER_DEPTH`` from ``constants.py`` for both current
+          callers, though the walker itself has no opinion on that constant).
+        - ``should_drop(key, value, full_key) -> reason | None``: called once
+          per key at every mapping level. Return a reason string to drop the
+          key (its value is never visited); return ``None`` to keep it (the
+          value is then recursed into if it is itself a container). The
+          predicate MAY have its own side effects (e.g. logging a warning for
+          a non-``str`` key, or recording a "kept but flagged" key) -- the
+          walker never inspects or requires anything beyond the return value.
+        - ``on_drop(full_key, reason)``: called for every drop, whether from
+          ``should_drop`` returning a reason or from the depth bound being
+          exceeded (in which case ``reason`` is the literal string
+          ``"too_deep"`` -- callers that want depth-drops to log/format
+          differently from a policy drop must check for this exact value).
+          Defaults to a no-op.
+        - Recursion mirrors the two original implementations exactly: a
+          dict value recurses at the SAME depth it was scheduled at; a
+          list/tuple's own elements each get one additional depth increment
+          beyond that (this asymmetry existed identically in both original
+          implementations and is preserved verbatim, not "fixed").
+        - Scalars pass through unchanged at any depth; only dict/list/tuple
+          containers are ever subject to the depth bound.
+        - Fail-closed at the bound: a container deeper than ``max_depth`` is
+          dropped, never returned unfiltered.
+        - Two call sites today: `fsm.py::_strip_internal_mapping` (silent,
+          bare-prefix predicate) and `context.py::clean_mapping` (5-reason
+          predicate, logging `on_drop`) -- a "same shape, different
+          behavior" extraction, not a policy merge.
+    """
+
+    def _filter_value(value: Any, path: str, depth: int) -> Any:
+        if not isinstance(value, (dict, list, tuple)):
+            return value
+        if depth > max_depth:
+            return _TOO_DEEP
+        if isinstance(value, dict):
+            return _filter_mapping(value, path, depth)
+        items = []
+        for index, item in enumerate(value):
+            element_path = f"{path}[{index}]"
+            filtered_item = _filter_value(item, element_path, depth + 1)
+            if filtered_item is _TOO_DEEP:
+                on_drop(element_path, "too_deep")
+                continue
+            items.append(filtered_item)
+        return tuple(items) if isinstance(value, tuple) else items
+
+    def _filter_mapping(
+        mapping: dict[Any, Any], path: str, depth: int
+    ) -> dict[Any, Any]:
+        result: dict[Any, Any] = {}
+        for key, value in mapping.items():
+            full_key = f"{path}.{key}" if path else str(key)
+            reason = should_drop(key, value, full_key)
+            if reason is not None:
+                on_drop(full_key, reason)
+                continue
+            filtered = _filter_value(value, full_key, depth + 1)
+            if filtered is _TOO_DEEP:
+                on_drop(full_key, "too_deep")
+                continue
+            result[key] = filtered
+        return result
+
+    return _filter_mapping(source, "", 0)
 
 
 # --------------------------------------------------------------

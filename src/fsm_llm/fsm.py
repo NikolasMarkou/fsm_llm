@@ -46,14 +46,11 @@ from .prompts import (
     ResponseGenerationPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator
-from .utilities import load_fsm_definition
+from .utilities import filter_context_tree, load_fsm_definition
 
 # --------------------------------------------------------------
 # Caller-visible context filter
 # --------------------------------------------------------------
-
-# Sentinel: a container past MAX_CONTEXT_FILTER_DEPTH, which the caller drops.
-_TOO_DEEP = object()
 
 
 # DECISION plan-2026-07-20T040150-876e7164/D-010 [STALE]
@@ -80,40 +77,26 @@ _TOO_DEEP = object()
 # What IS shared, and must stay shared, is `has_internal_prefix` and
 # `MAX_CONTEXT_FILTER_DEPTH` -- never re-declare either here.
 # See decisions.md D-010.
-def _strip_internal_value(value: Any, depth: int) -> Any:
-    """Filter one value; returns ``_TOO_DEEP`` for a container past the bound.
+#
+# DECISION plan-2026-09-12T135914-45a654de/D-016
+# The depth-bounded dict/list/tuple recursion itself (the part that was
+# byte-identical to `context.py`'s walker) now lives in ONE shared place,
+# `utilities.filter_context_tree`. This call site supplies ONLY the bare
+# predicate the D-010 comment above describes, plus a no-op `on_drop` -- it
+# does not, and must never, reference `None`, `remove_none_values`, or
+# `is_forbidden_context_entry`. See decisions.md D-016.
+def _strip_internal_mapping(source: dict[Any, Any]) -> dict[Any, Any]:
+    """Apply the internal-prefix drop at every level via the shared walker."""
 
-    Containers are rebuilt; scalars are returned unchanged at any depth (they
-    carry no keys to filter).
-    """
-    if not isinstance(value, (dict, list, tuple)):
-        return value
-    if depth > MAX_CONTEXT_FILTER_DEPTH:
-        return _TOO_DEEP
-    if isinstance(value, dict):
-        return _strip_internal_mapping(value, depth)
-
-    # Lists/tuples are in scope: `{"users": [{"_note": "x"}]}` is the same leak
-    # as `{"user": {"_note": "x"}}` and must not survive it.
-    items = [_strip_internal_value(item, depth + 1) for item in value]
-    kept = [item for item in items if item is not _TOO_DEEP]
-    return tuple(kept) if isinstance(value, tuple) else kept
-
-
-def _strip_internal_mapping(source: dict[Any, Any], depth: int) -> dict[Any, Any]:
-    """Apply the internal-prefix drop at one level, then recurse into values."""
-    result: dict[Any, Any] = {}
-    for key, value in source.items():
+    def _should_drop(key: Any, _value: Any, _full_key: str) -> str | None:
         # A non-`str` key carries no prefix to match and `has_internal_prefix`
-        # would raise on it (constants.py D-017), so it is kept -- its VALUE is
-        # still filtered.
+        # would raise on it (constants.py D-017), so it is kept -- its VALUE
+        # is still filtered.
         if isinstance(key, str) and has_internal_prefix(key):
-            continue
-        filtered = _strip_internal_value(value, depth + 1)
-        if filtered is _TOO_DEEP:
-            continue
-        result[key] = filtered
-    return result
+            return "internal key prefix"
+        return None
+
+    return filter_context_tree(source, MAX_CONTEXT_FILTER_DEPTH, _should_drop)
 
 
 # Return type of a read snapshot (see FSMManager._read_under_lock).
@@ -705,7 +688,7 @@ class FSMManager:
         # concurrent turn can neither tear nor resize mid-iteration (C1).
         return self._read_under_lock(
             conversation_id,
-            lambda inst: _strip_internal_mapping(inst.context.data, 0),
+            lambda inst: _strip_internal_mapping(inst.context.data),
         )
 
     @with_conversation_context
