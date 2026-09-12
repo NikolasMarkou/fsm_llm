@@ -111,11 +111,20 @@ Auto-generates JSON schema from type hints and docstrings.
 ### ToolRegistry
 
 ```python
-from fsm_llm_agents import ToolRegistry
+from fsm_llm_agents import ToolRegistry, ToolCall
+
 registry = ToolRegistry()
 registry.register(get_weather)
-result = registry.execute("get_weather", {"city": "Paris"})
+result = registry.execute(ToolCall(tool_name="get_weather", parameters={"city": "Paris"}))
+# -> ToolResult, never raises
 ```
+
+`execute()` always returns a `ToolResult`, even on a missing tool or a failing
+tool function -- failures come back as `ToolResult(success=False, error=...)`
+rather than an exception, since a failed tool call is expected, recoverable
+data for the agent loop, not a fatal error. Only `registry.get(name)` raises
+(`ToolNotFoundError`, on a missing tool name). `ToolValidationError` is part of
+the exception hierarchy below but currently has no call site in this package.
 
 ### Agents as Tools
 
@@ -280,8 +289,8 @@ Or use the CLI: `fsm-llm-meta`
 FSMError
 └── AgentError
     ├── ToolExecutionError
-    ├── ToolNotFoundError
-    ├── ToolValidationError
+    ├── ToolNotFoundError      # raised only by ToolRegistry.get(); execute() never raises
+    ├── ToolValidationError    # currently unused -- no call site in this package
     ├── BudgetExhaustedError
     ├── ApprovalDeniedError
     ├── AgentTimeoutError

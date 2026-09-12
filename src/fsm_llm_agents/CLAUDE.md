@@ -119,9 +119,14 @@ fsm_llm_agents/
 ### ToolRegistry (`tools.py`)
 
 - `register(tool_or_func)` -- Register @tool-decorated function or ToolDefinition
-- `execute(name, arguments)` → ToolResult
+- `execute(tool_call)` → `ToolResult` -- **never raises**; a missing tool, a
+  validation failure, or the tool function itself raising are all caught and
+  returned as `ToolResult(success=False, error=...)`, since callers (ReAct,
+  ReWOO, native-FC loops) treat a failed tool call as data to feed back into
+  the reasoning loop, not as a fatal error
+- `get(name)` → ToolDefinition -- the only method that raises `ToolNotFoundError`
+  (on a missing tool name)
 - `list_tools()` → list[ToolDefinition]
-- `get_tool(name)` → ToolDefinition
 - `get_json_schemas()` → list[dict] (for LLM function calling)
 - `register_agent(registry, agent, name, description)` -- Register another agent as a tool
 
@@ -184,8 +189,8 @@ pytest tests/test_fsm_llm_meta/    # 205 tests, 9 test files
 FSMError
 └── AgentError
     ├── ToolExecutionError
-    ├── ToolNotFoundError
-    ├── ToolValidationError
+    ├── ToolNotFoundError      # raised only by ToolRegistry.get(); execute() never raises (see "ToolRegistry" above)
+    ├── ToolValidationError    # currently unused -- no call site in this package; kept in the hierarchy, not dead-code-removed
     ├── BudgetExhaustedError
     ├── ApprovalDeniedError
     ├── AgentTimeoutError

@@ -14,7 +14,10 @@ Key capabilities:
 - **Event-driven execution** with external event listeners and timers
 - **Parallel execution** of independent workflow branches
 - **Validation** with reachability analysis and cycle detection
-- **Dependency resolution** -- topological sort for parallel execution waves
+- **Dependency resolution** -- `DependencyResolver`, a standalone topological-sort
+  utility for computing parallel execution waves from declared dependencies (not
+  currently wired into `ParallelStep`/`WorkflowEngine` -- see "Dependency
+  Resolution" below)
 - **Agent and conversation integration** — run FSM-LLM agents and conversations as workflow steps
 
 ## Installation
@@ -156,6 +159,12 @@ has_loops = workflow.has_cycles()
 
 ## Dependency Resolution
 
+**`DependencyResolver` is a standalone utility.** It is not currently wired into
+`ParallelStep` or `WorkflowEngine` -- computing waves and actually running a
+workflow through them are two separate steps you drive yourself. `ParallelStep`
+still runs the branches you list explicitly, and `WorkflowEngine` has no
+dependency-graph-aware execution path.
+
 ```python
 from fsm_llm_workflows import DependencyResolver
 
@@ -179,6 +188,10 @@ resolver = DependencyResolver.from_dict({
     "notify": ["process"],
 })
 ```
+
+The caller is responsible for turning `waves` into actual execution (e.g. by
+building a `ParallelStep` per wave); `DependencyResolver` itself only computes
+the ordering.
 
 ## Exception Hierarchy
 

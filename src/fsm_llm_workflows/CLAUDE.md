@@ -15,7 +15,7 @@ fsm_llm_workflows/
 ├── steps.py        # 11 WorkflowStep subclasses (all async execute(context) -> WorkflowStepResult)
 ├── definitions.py  # WorkflowDefinition with validation (reachability, cycles), WorkflowValidator
 ├── models.py       # WorkflowStatus enum, WorkflowEvent, WorkflowStepResult, WorkflowInstance, EventListener, WaitEventConfig
-├── dependency_resolver.py  # DependencyResolver -- topological sort for parallel execution waves (Kahn's algorithm)
+├── dependency_resolver.py  # DependencyResolver -- standalone topological-sort utility for parallel execution waves (Kahn's algorithm); NOT wired into ParallelStep/WorkflowEngine
 ├── exceptions.py   # WorkflowError -> 8 subtypes (Definition, Step, Instance, Timeout, Validation, State, Event, Resource)
 ├── __version__.py  # Imports from fsm_llm.__version__
 └── __init__.py     # 50 public exports
@@ -109,6 +109,11 @@ FSMError
 ## DependencyResolver (`dependency_resolver.py`)
 
 Resolves step dependencies into parallel execution waves using Kahn's algorithm (topological sort).
+
+**Standalone utility, not currently wired into `ParallelStep` or `WorkflowEngine`.**
+`resolve()` returns waves the caller must drive execution from itself (e.g. by
+constructing a `ParallelStep` per wave); neither `ParallelStep` nor
+`WorkflowEngine` consumes a `DependencyResolver` internally today.
 
 - Constructor: `DependencyResolver()`
 - `add_step(step_id, depends_on=[...])` → self (chainable)
