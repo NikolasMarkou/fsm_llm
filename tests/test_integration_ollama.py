@@ -1,9 +1,13 @@
 """
-Integration tests using Ollama + qwen3.5:4b to verify end-to-end FSM-LLM functionality.
+Integration tests using Ollama + qwen3.5:9b-q8_0 to verify end-to-end FSM-LLM functionality.
 
-These tests require a running Ollama instance with the qwen3.5:4b model pulled.
+These tests require a running Ollama instance with the qwen3.5:9b-q8_0 model pulled.
 They exercise the full 2-pass architecture: data extraction, transition evaluation,
 and response generation against a real LLM.
+
+Bumped from qwen3.5:4b: test_extraction_populates_context was unreliable against
+the 4b model (a model-capability gap, not a fsm_llm bug -- confirmed by running
+the same test 3/3 clean against 9b vs failing against 4b at an unchanged commit).
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ from tests.conftest import ollama_available
 # Configuration
 # ---------------------------------------------------------------------------
 
-MODEL = "ollama_chat/qwen3.5:4b"
+MODEL = "ollama_chat/qwen3.5:9b-q8_0"
 # Disable thinking mode for qwen3.5 to get cleaner JSON output
 MODEL_KWARGS = {"extra_body": {"options": {"num_predict": 200}}}
 EXAMPLE_DIR = Path(__file__).parent.parent / "examples"
@@ -40,7 +44,7 @@ MAX_RETRIES = 3
 
 def _ollama_available() -> bool:
     """Check if Ollama is reachable and the model is pulled."""
-    return ollama_available("qwen3.5:4b")
+    return ollama_available("qwen3.5:9b-q8_0")
 
 
 def _retry(fn, retries=MAX_RETRIES):
@@ -56,7 +60,7 @@ def _retry(fn, retries=MAX_RETRIES):
 
 requires_ollama = pytest.mark.skipif(
     not _ollama_available(),
-    reason="Ollama not running or qwen3.5:4b not available",
+    reason="Ollama not running or qwen3.5:9b-q8_0 not available",
 )
 
 
