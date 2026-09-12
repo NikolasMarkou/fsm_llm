@@ -12,7 +12,7 @@ FSM-LLM (v0.5.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (5,385 tests)
+make test           # pytest -v (5,418 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -261,25 +261,26 @@ including what is measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (5,385 collected)
-pytest tests/test_fsm_llm/            # Core package tests (1,305 tests)
-pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (112 tests)
-pytest tests/test_fsm_llm_workflows/  # Workflows tests (137 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (976 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (270 tests)
+pytest                                 # Run all tests (5,418 collected)
+pytest tests/test_fsm_llm/            # Core package tests (1,307 tests)
+pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (115 tests)
+pytest tests/test_fsm_llm_workflows/  # Workflows tests (151 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (977 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (283 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,977 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 5,315. The remaining 70 are three root-level files:
+# The 9 suites above sum to 5,348. The remaining 70 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (24)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
 
-Counts re-measured with `pytest --collect-only` at plan-2026-07-24-032ae337
-step 7; the step-7 full run is 5,355 passed / 28 skipped / 2 xfailed in ~250s.
+Counts re-measured with `pytest --collect-only` at
+plan-2026-09-12T065608-089d0ec7 step 11.1; the full run is 5,382 passed / 28
+skipped / 2 xfailed in ~263s.
 
 **Conventions**:
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios
