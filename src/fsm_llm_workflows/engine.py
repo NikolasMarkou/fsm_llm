@@ -832,7 +832,17 @@ class WorkflowEngine:
     async def cancel_workflow(
         self, instance_id: str, reason: str = "Cancelled by user"
     ) -> bool:
-        """Cancel a workflow instance."""
+        """Cancel a workflow instance.
+
+        :returns: ``True`` if this call transitioned the instance to
+            ``CANCELLED``. ``False`` covers three distinct cases the caller
+            cannot distinguish from the return value alone: the instance id
+            is unknown, or the instance had already reached a terminal
+            status (``COMPLETED``/``FAILED``/``CANCELLED``) by the time this
+            call acquired the per-instance lock (see D-015 -- a benign no-op,
+            not an error). Callers that need to tell these apart should
+            check ``get_workflow_status(instance_id)`` before/after.
+        """
         if instance_id not in self.workflow_instances:
             return False
 
