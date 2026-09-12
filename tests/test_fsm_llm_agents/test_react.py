@@ -2,10 +2,20 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.react module."""
 
+import threading
+
 import pytest
 
+from fsm_llm.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.llm import LLMInterface
 from fsm_llm_agents.definitions import AgentConfig
 from fsm_llm_agents.exceptions import AgentError
+from fsm_llm_agents.handlers import AgentHandlers
 from fsm_llm_agents.react import ReactAgent
 from fsm_llm_agents.tools import ToolRegistry
 
@@ -114,3 +124,109 @@ class TestReactAgentIntegration:
     def test_run_requires_llm(self):
         """ReactAgent.run() needs a real or mock LLM — skip in unit tests."""
         pytest.skip("Requires LLM interface — run with real_llm marker")
+
+
+class _DeterministicMockLLM(LLMInterface):
+    """Field-name-keyed mock LLM: every extract_field call's answer depends
+    ONLY on the requested field_name, never on call order/index.
+
+    This makes it safe to share a single instance across two CONCURRENT
+    conversations (as F9's regression test below needs): whichever thread
+    asks for a given field always gets the same deterministic answer,
+    unlike a call-index-based mock (see SequenceMockLLM in
+    test_bug_fixes.py), which would itself race under concurrent use.
+    """
+
+    def __init__(self) -> None:
+        self.model = "mock-model"
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        value = {
+            "tool_name": "noop",
+            "tool_input": {},
+            "reasoning": "call the tool",
+            "should_terminate": False,
+            "final_answer": "done",
+        }.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="mock field extraction",
+            is_valid=value is not None,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="ok", message_type="response", reasoning="mock response"
+        )
+
+
+class TestReactAgentConcurrentRuns:
+    """F9 regression: two overlapping run() calls on the SAME ReactAgent
+    instance (the AgentServer /invoke concurrency scenario, remote.py) must
+    not share an AgentHandlers instance, and must each execute their own
+    tool call and reach their own correct answer — see decisions.md D-004.
+    """
+
+    def test_concurrent_run_uses_isolated_handler_instances(self, monkeypatch):
+        registry = ToolRegistry()
+        registry.register_function(
+            lambda params: "noop-result", name="noop", description="No-op tool"
+        )
+
+        config = AgentConfig(max_iterations=3, model="mock/model")
+        agent = ReactAgent(
+            tools=registry, config=config, llm_interface=_DeterministicMockLLM()
+        )
+
+        # Warm up once, single-threaded, before installing the spy/barrier and
+        # spawning the concurrent pair below. This is NOT part of the F9
+        # regression being tested: pydantic's FSMDefinition model-build/
+        # validation is itself not thread-safe on first use (an unrelated,
+        # pre-existing library behavior), so the first-ever validation must
+        # happen single-threaded or two genuinely simultaneous first-time
+        # validations can raise spuriously. Every run() after this one hits
+        # the already-built validator.
+        agent.run("warm-up")
+
+        seen_ids: list[int] = []
+        seen_lock = threading.Lock()
+        barrier = threading.Barrier(2, timeout=10)
+        original_execute_tool = AgentHandlers.execute_tool
+
+        def spy_execute_tool(self, context):
+            with seen_lock:
+                seen_ids.append(id(self))
+            # Force both concurrent run() calls to be genuinely mid-flight
+            # inside execute_tool at the same time — the worst-case race
+            # window for shared _current_iteration/_consecutive_no_tool.
+            barrier.wait()
+            return original_execute_tool(self, context)
+
+        monkeypatch.setattr(AgentHandlers, "execute_tool", spy_execute_tool)
+
+        results: dict[str, object] = {}
+
+        def _run(key: str, task: str) -> None:
+            results[key] = agent.run(task)
+
+        t1 = threading.Thread(target=_run, args=("a", "Task A"))
+        t2 = threading.Thread(target=_run, args=("b", "Task B"))
+        t1.start()
+        t2.start()
+        t1.join(timeout=30)
+        t2.join(timeout=30)
+
+        assert not t1.is_alive() and not t2.is_alive()
+        assert len(seen_ids) == 2
+        assert seen_ids[0] != seen_ids[1], (
+            "both concurrent run() calls dispatched into the SAME "
+            "AgentHandlers instance — the F9 fix regressed"
+        )
+        assert results["a"].success is True
+        assert results["b"].success is True
+        assert len(results["a"].trace.tool_calls) == 1
+        assert len(results["b"].trace.tool_calls) == 1

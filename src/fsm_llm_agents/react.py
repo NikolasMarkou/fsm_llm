@@ -76,7 +76,19 @@ class ReactAgent(BaseAgent):
         task: str,
         initial_context: dict[str, Any] | None = None,
     ) -> AgentResult:
-        self._handlers.reset()
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-004
+        # Build a FRESH AgentHandlers per call instead of reusing/resetting the
+        # one from __init__. Two overlapping run() calls on the SAME agent
+        # instance (e.g. AgentServer's asyncio.to_thread dispatch, F9) used to
+        # share self._handlers's `_current_iteration`/`_consecutive_no_tool`
+        # counters, so one request's reset()/increments corrupted the other's.
+        # `_register_handlers` (called from `_standard_run` below) reads
+        # `self._handlers.execute_tool` etc. at call time and binds THOSE
+        # methods into the handler callbacks, so reassigning `self._handlers`
+        # here before `_standard_run` runs re-targets registration at this
+        # call's own fresh instance. Do NOT go back to `self._handlers.reset()`
+        # — that is exactly the shared-object bug. See decisions.md D-004.
+        self._handlers = AgentHandlers(self.tools)
 
         # The await_approval state must be built under the SAME predicate that
         # registers the runtime approval gate (see _hitl_active / _register_handlers).
@@ -116,7 +128,8 @@ class ReactAgent(BaseAgent):
             for token in agent.run_stream("What is 2+2?"):
                 print(token, end="", flush=True)
         """
-        self._handlers.reset()
+        # See D-004 note in run() above — fresh instance, not .reset().
+        self._handlers = AgentHandlers(self.tools)
         fsm_def = build_react_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],

@@ -94,6 +94,19 @@ class AgentServer:
             import asyncio
 
             try:
+                # F10 (plan-2026-09-12T065608-089d0ec7/D-004): asyncio.wait_for
+                # only detaches from this awaited future on timeout — the
+                # asyncio.to_thread executor thread keeps running
+                # self._agent.run to completion in the background, since
+                # Python threads cannot be forcibly cancelled. This is an
+                # accepted trade-off, not a bug: since F9's fix (fresh
+                # AgentHandlers per call, react.py/parallel_react.py) that
+                # orphaned thread can no longer corrupt a DIFFERENT request's
+                # counters — it just wastes CPU/LLM-call budget harmlessly
+                # until it finishes on its own, and its result is discarded.
+                # Cooperative cancellation (a deadline check inside the
+                # ReAct loop) would close this fully but is a materially
+                # larger change, out of scope for this plan.
                 result = await asyncio.wait_for(
                     asyncio.to_thread(
                         self._agent.run,

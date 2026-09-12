@@ -191,7 +191,13 @@ class ParallelReactAgent(BaseAgent):
         task: str,
         initial_context: dict[str, Any] | None = None,
     ) -> AgentResult:
-        self._handlers.reset()
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-004
+        # Fresh AgentHandlers per call, not .reset() on the shared instance —
+        # see the identical note in react.py's ReactAgent.run(). Two
+        # overlapping run() calls on the SAME agent (AgentServer's
+        # asyncio.to_thread dispatch) must not share
+        # `_current_iteration`/`_consecutive_no_tool` counters. See D-004.
+        self._handlers = AgentHandlers(self.tools)
         fsm_def = build_parallel_react_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
