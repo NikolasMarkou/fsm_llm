@@ -168,7 +168,32 @@ class TestReactAgentConcurrentRuns:
     """F9 regression: two overlapping run() calls on the SAME ReactAgent
     instance (the AgentServer /invoke concurrency scenario, remote.py) must
     not share an AgentHandlers instance, and must each execute their own
-    tool call and reach their own correct answer — see decisions.md D-004.
+    tool call and reach their own correct answer.
+
+    D-004's first fix (`self._handlers = AgentHandlers(...)` assigned in
+    run(), read back later by `_register_handlers`) did NOT close this race:
+    `_register_handlers` reads `self._handlers` well AFTER the assignment
+    line (after `build_react_fsm()`, `_init_context()`, and entry into
+    `base.py::_standard_run`), so two threads could each reassign
+    `self._handlers` before either's `_register_handlers` read it back — both
+    calls would then bind to whichever assignment landed last. D-014 replaced
+    this with a true call-local `handlers` variable threaded explicitly into
+    `_register_handlers` via `_standard_run`'s `handlers=` parameter, never
+    round-tripped through `self`. See decisions.md D-004/D-013/D-014.
+
+    This test's barrier straddles the ACTUAL vulnerable window: the gap
+    between `AgentHandlers` construction (the first line of `run()`) and its
+    use inside `_register_handlers` (reached only after `build_react_fsm()` +
+    `_init_context()` + entry into `_standard_run`). The prior version of this
+    test synchronized threads inside `execute_tool`, strictly AFTER that
+    window closes, so it could not detect the D-004 race (it passed 20/20
+    alone and only failed ~35% of the time under load — a scheduler lottery,
+    not a reliable reproduction). Patching `build_react_fsm` (called
+    immediately after handlers construction, before `_register_handlers` runs)
+    forces both threads to have already created/assigned their own handlers
+    before either proceeds — the exact interleaving needed to force D-004's
+    shared-instance collision, and the exact interleaving D-014's local
+    variable is immune to.
     """
 
     def test_concurrent_run_uses_isolated_handler_instances(self, monkeypatch):
@@ -195,15 +220,30 @@ class TestReactAgentConcurrentRuns:
         seen_ids: list[int] = []
         seen_lock = threading.Lock()
         barrier = threading.Barrier(2, timeout=10)
+
+        import fsm_llm_agents.react as react_module
+
+        original_build_react_fsm = react_module.build_react_fsm
+
+        def spy_build_react_fsm(*args, **kwargs):
+            # Both threads reach here only AFTER their own run()'s handlers
+            # construction/assignment line has already executed — this is
+            # the vulnerable window's far edge. Waiting on a 2-party barrier
+            # here forces BOTH threads to have completed that line before
+            # either is allowed to proceed into `_register_handlers`, which
+            # is the exact interleaving that exposes D-004's shared-instance
+            # collision (and that D-014's local variable cannot collide
+            # under, since no thread ever overwrites another's local).
+            barrier.wait()
+            return original_build_react_fsm(*args, **kwargs)
+
+        monkeypatch.setattr(react_module, "build_react_fsm", spy_build_react_fsm)
+
         original_execute_tool = AgentHandlers.execute_tool
 
         def spy_execute_tool(self, context):
             with seen_lock:
                 seen_ids.append(id(self))
-            # Force both concurrent run() calls to be genuinely mid-flight
-            # inside execute_tool at the same time — the worst-case race
-            # window for shared _current_iteration/_consecutive_no_tool.
-            barrier.wait()
             return original_execute_tool(self, context)
 
         monkeypatch.setattr(AgentHandlers, "execute_tool", spy_execute_tool)
@@ -224,7 +264,7 @@ class TestReactAgentConcurrentRuns:
         assert len(seen_ids) == 2
         assert seen_ids[0] != seen_ids[1], (
             "both concurrent run() calls dispatched into the SAME "
-            "AgentHandlers instance — the F9 fix regressed"
+            "AgentHandlers instance — the F9/D-014 fix regressed"
         )
         assert results["a"].success is True
         assert results["b"].success is True

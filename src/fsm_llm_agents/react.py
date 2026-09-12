@@ -63,7 +63,12 @@ class ReactAgent(BaseAgent):
         self.tools = tools
         self.hitl = hitl
         self.use_classification = use_classification
-        self._handlers = AgentHandlers(tools)
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-014
+        # No `self._handlers` here (and none is ever assigned anywhere in this
+        # class) — a per-instance AgentHandlers shared across concurrent
+        # run()/run_stream() calls is exactly the D-004/D-014 race. Each call
+        # builds and uses its own call-LOCAL AgentHandlers (see run()/
+        # run_stream() below). See decisions.md D-014.
 
         logger.info(
             LogMessages.AGENT_STARTED.format(
@@ -76,19 +81,21 @@ class ReactAgent(BaseAgent):
         task: str,
         initial_context: dict[str, Any] | None = None,
     ) -> AgentResult:
-        # DECISION plan-2026-09-12T065608-089d0ec7/D-004
-        # Build a FRESH AgentHandlers per call instead of reusing/resetting the
-        # one from __init__. Two overlapping run() calls on the SAME agent
-        # instance (e.g. AgentServer's asyncio.to_thread dispatch, F9) used to
-        # share self._handlers's `_current_iteration`/`_consecutive_no_tool`
-        # counters, so one request's reset()/increments corrupted the other's.
-        # `_register_handlers` (called from `_standard_run` below) reads
-        # `self._handlers.execute_tool` etc. at call time and binds THOSE
-        # methods into the handler callbacks, so reassigning `self._handlers`
-        # here before `_standard_run` runs re-targets registration at this
-        # call's own fresh instance. Do NOT go back to `self._handlers.reset()`
-        # — that is exactly the shared-object bug. See decisions.md D-004.
-        self._handlers = AgentHandlers(self.tools)
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-014 (supersedes D-004)
+        # A call-LOCAL AgentHandlers, threaded explicitly into
+        # `_register_handlers` via `_standard_run`'s `handlers=` parameter.
+        # D-004's fix (`self._handlers = AgentHandlers(...)` assigned here,
+        # read back later by `_register_handlers`) did NOT close the race:
+        # two concurrent run() calls on the SAME ReactAgent instance could
+        # each reassign `self._handlers` before either call's
+        # `_register_handlers` read it back, so whichever assignment landed
+        # LAST would win for BOTH calls — both runs would still bind to one
+        # shared AgentHandlers instance. `handlers` here is a plain local
+        # variable: it is never written to `self`, so no other thread's
+        # `run()` call can ever overwrite the reference this call is about
+        # to use. Do NOT reintroduce `self._handlers = AgentHandlers(...)`
+        # in this method — see decisions.md D-014.
+        handlers = AgentHandlers(self.tools)
 
         # The await_approval state must be built under the SAME predicate that
         # registers the runtime approval gate (see _hitl_active / _register_handlers).
@@ -109,7 +116,7 @@ class ReactAgent(BaseAgent):
             },
         )
 
-        return self._standard_run(task, fsm_def, context, "react")
+        return self._standard_run(task, fsm_def, context, "react", handlers=handlers)
 
     def run_stream(
         self,
@@ -128,8 +135,10 @@ class ReactAgent(BaseAgent):
             for token in agent.run_stream("What is 2+2?"):
                 print(token, end="", flush=True)
         """
-        # See D-004 note in run() above — fresh instance, not .reset().
-        self._handlers = AgentHandlers(self.tools)
+        # See D-014 note in run() above — call-local handlers, threaded
+        # explicitly through `_standard_run_stream`'s `handlers=` parameter,
+        # never assigned to `self._handlers`.
+        handlers = AgentHandlers(self.tools)
         fsm_def = build_react_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
@@ -145,7 +154,9 @@ class ReactAgent(BaseAgent):
                 "_max_iterations": self.config.max_iterations,
             },
         )
-        yield from self._standard_run_stream(task, fsm_def, context, "react")
+        yield from self._standard_run_stream(
+            task, fsm_def, context, "react", handlers=handlers
+        )
 
     @property
     def _hitl_active(self) -> bool:
@@ -166,10 +177,27 @@ class ReactAgent(BaseAgent):
         """Handle HITL approval gates before each converse()."""
         self._handle_hitl_approval(api, conv_id)
 
-    def _register_handlers(self, api: API) -> None:
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-014
+    # `handlers` is REQUIRED in practice: `run()`/`run_stream()` always pass
+    # their own call-local `AgentHandlers` explicitly via
+    # `_standard_run`/`_standard_run_stream`'s `handlers=` parameter. The
+    # `| None = None` default exists only so this override's signature stays
+    # compatible with `BaseAgent._register_handlers`'s narrower abstract
+    # signature (most other agent subclasses never pass `handlers` at all).
+    # Do NOT fall back to reading `self._handlers` here if `handlers` is
+    # None — that attribute no longer exists on this class specifically so
+    # this method cannot silently regress to the D-004 shared-mutable-slot
+    # bug. See decisions.md D-014.
+    def _register_handlers(self, api: API, handlers: AgentHandlers | None = None) -> None:
         """Register agent handlers with the API."""
-        self._register_tool_executor(api, AgentStates.ACT, self._handlers.execute_tool)
-        self._register_iteration_limiter(api, self._handlers.check_iteration_limit)
+        if handlers is None:
+            raise AgentError(
+                "ReactAgent._register_handlers called without a handlers "
+                "instance — this is a programming error, not a runtime "
+                "condition; run()/run_stream() must always pass one."
+            )
+        self._register_tool_executor(api, AgentStates.ACT, handlers.execute_tool)
+        self._register_iteration_limiter(api, handlers.check_iteration_limit)
 
         if self.use_classification:
             from fsm_llm.handlers import HandlerTiming
@@ -180,7 +208,7 @@ class ReactAgent(BaseAgent):
                 .at(HandlerTiming.CONTEXT_UPDATE)
                 .on_state(AgentStates.THINK)
                 .when_keys_updated(ContextKeys.TOOL_NAME, ContextKeys.SHOULD_TERMINATE)
-                .do(self._handlers.classification_tool_override)
+                .do(handlers.classification_tool_override)
             )
 
         if self._hitl_active:

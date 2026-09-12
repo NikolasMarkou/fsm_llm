@@ -184,20 +184,29 @@ class ParallelReactAgent(BaseAgent):
         super().__init__(config, **api_kwargs)
         self.tools = tools
         self.max_parallel = max_parallel
-        self._handlers = AgentHandlers(tools)
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-014
+        # No `self._handlers` here (and none is ever assigned anywhere in this
+        # class) — see the identical note in react.py's ReactAgent.__init__.
+        # A per-instance AgentHandlers shared across concurrent run() calls
+        # is the D-004/D-014 race; each call builds and uses its own
+        # call-LOCAL AgentHandlers (see run() below). See decisions.md D-014.
 
     def run(
         self,
         task: str,
         initial_context: dict[str, Any] | None = None,
     ) -> AgentResult:
-        # DECISION plan-2026-09-12T065608-089d0ec7/D-004
-        # Fresh AgentHandlers per call, not .reset() on the shared instance —
-        # see the identical note in react.py's ReactAgent.run(). Two
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-014 (supersedes D-004)
+        # A call-LOCAL AgentHandlers, threaded explicitly into
+        # `_register_handlers` via `_standard_run`'s `handlers=` parameter —
+        # see the identical, fuller note in react.py's ReactAgent.run(). Two
         # overlapping run() calls on the SAME agent (AgentServer's
-        # asyncio.to_thread dispatch) must not share
-        # `_current_iteration`/`_consecutive_no_tool` counters. See D-004.
-        self._handlers = AgentHandlers(self.tools)
+        # asyncio.to_thread dispatch) must never share one AgentHandlers
+        # instance; D-004's `self._handlers = AgentHandlers(...)` reassignment
+        # did not achieve that (both calls could still read back the SAME,
+        # most-recently-assigned instance). Do NOT reintroduce
+        # `self._handlers = AgentHandlers(...)` here. See decisions.md D-014.
+        handlers = AgentHandlers(self.tools)
         fsm_def = build_parallel_react_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
@@ -211,11 +220,24 @@ class ParallelReactAgent(BaseAgent):
                 "_max_iterations": self.config.max_iterations,
             },
         )
-        return self._standard_run(task, fsm_def, context, "parallel_react")
+        return self._standard_run(
+            task, fsm_def, context, "parallel_react", handlers=handlers
+        )
 
-    def _register_handlers(self, api: API) -> None:
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-014
+    # See the identical note on ReactAgent._register_handlers (react.py) —
+    # `handlers` is required in practice; the `| None = None` default only
+    # satisfies BaseAgent's narrower abstract signature. Do NOT fall back to
+    # `self._handlers` if `handlers` is None. See decisions.md D-014.
+    def _register_handlers(self, api: API, handlers: AgentHandlers | None = None) -> None:
+        if handlers is None:
+            raise AgentError(
+                "ParallelReactAgent._register_handlers called without a "
+                "handlers instance — this is a programming error, not a "
+                "runtime condition; run() must always pass one."
+            )
         self._register_tool_executor(api, "act", self._dispatch_parallel)
-        self._register_iteration_limiter(api, self._handlers.check_iteration_limit)
+        self._register_iteration_limiter(api, handlers.check_iteration_limit)
 
     def _normalize_calls(self, raw: Any) -> list[ToolCall]:
         """Coerce extracted ``tool_calls`` into a list of ToolCall objects."""

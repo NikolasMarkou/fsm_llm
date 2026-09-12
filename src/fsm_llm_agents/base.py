@@ -600,6 +600,7 @@ class BaseAgent(ABC):
         context: dict[str, Any],
         agent_type: str,
         max_iterations: int | None = None,
+        handlers: Any = None,
     ) -> Iterator[str]:
         """Streaming variant of ``_standard_run``.
 
@@ -608,10 +609,28 @@ class BaseAgent(ABC):
         ``response_instructions`` (think/act) yield nothing; the final answer
         state (conclude) streams its output. Yields raw text only — callers
         needing the structured ``AgentResult``/trace should use ``run()``.
+
+        ``handlers``: see ``_standard_run``'s docstring — an optional,
+        call-local handler-state object threaded straight through to
+        ``_register_handlers`` (never round-tripped through ``self``).
         """
         start_time = time.monotonic()
         api = self._create_api(fsm_def)
-        self._register_handlers(api)
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-014
+        # Do NOT collapse this to an unconditional `self._register_handlers(api,
+        # handlers)` — most subclasses' `_register_handlers(self, api)` override
+        # takes only one argument, and only react.py/parallel_react.py's
+        # override accepts (and requires) `handlers`. The abstract base
+        # signature is deliberately left at `(self, api)` (LSP: subclasses
+        # may only WIDEN with optional params, not the base), so this
+        # 2-argument call is only type-correct for the subclasses that
+        # actually declare it — hence the `type: ignore[call-arg]` below,
+        # guarded by the same `handlers is not None` runtime check those
+        # subclasses require. See decisions.md D-014.
+        if handlers is not None:
+            self._register_handlers(api, handlers)  # type: ignore[call-arg]
+        else:
+            self._register_handlers(api)
         self._register_lifecycle_handlers(api, agent_type)
 
         max_iters = max_iterations or self.config.max_iterations
@@ -642,15 +661,44 @@ class BaseAgent(ABC):
         max_iterations: int | None = None,
         extra_answer_keys: list[str] | None = None,
         execution_evidence_keys: list[str] | None = None,
+        handlers: Any = None,
     ) -> AgentResult:
         """Standard run() implementation shared by most agents.
 
         Handles API creation, handler registration, conversation loop,
         answer extraction, trace building, and error wrapping.
+
+        ``handlers``: optional, opaque, call-local handler-state object
+        (e.g. ``AgentHandlers``) created fresh by the caller's own ``run()``
+        and threaded straight through to ``_register_handlers`` as an
+        explicit parameter. Interface contract: when a subclass's ``run()``
+        passes ``handlers``, that subclass's ``_register_handlers`` override
+        MUST accept it as a second positional parameter (see
+        ``react.py``/``parallel_react.py``); subclasses that never pass
+        ``handlers`` (the default, ``None``) are unaffected and keep their
+        original ``_register_handlers(self, api)`` signature. This exists so
+        per-call handler state never has to round-trip through a ``self``
+        attribute between construction and use — see decisions.md D-014 for
+        why that round-trip was itself a data race (D-004's insufficient
+        first fix).
         """
         start_time = time.monotonic()
         api = self._create_api(fsm_def)
-        self._register_handlers(api)
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-014
+        # Do NOT collapse this to an unconditional `self._register_handlers(api,
+        # handlers)` — most subclasses' `_register_handlers(self, api)` override
+        # takes only one argument, and only react.py/parallel_react.py's
+        # override accepts (and requires) `handlers`. The abstract base
+        # signature is deliberately left at `(self, api)` (LSP: subclasses
+        # may only WIDEN with optional params, not the base), so this
+        # 2-argument call is only type-correct for the subclasses that
+        # actually declare it — hence the `type: ignore[call-arg]` below,
+        # guarded by the same `handlers is not None` runtime check those
+        # subclasses require. See decisions.md D-014.
+        if handlers is not None:
+            self._register_handlers(api, handlers)  # type: ignore[call-arg]
+        else:
+            self._register_handlers(api)
         self._register_lifecycle_handlers(api, agent_type)
 
         try:
@@ -792,5 +840,15 @@ class BaseAgent(ABC):
 
     @abstractmethod
     def _register_handlers(self, api: API) -> None:
-        """Register pattern-specific handlers. Implemented by each agent."""
+        """Register pattern-specific handlers. Implemented by each agent.
+
+        Most overrides keep exactly this ``(self, api)`` shape. A handful
+        of patterns that need call-local handler state (``react.py``,
+        ``parallel_react.py`` — see D-014) widen their OWN override with an
+        extra optional ``handlers`` parameter; adding an optional parameter
+        to an override is LSP-compatible (every caller of the narrower base
+        signature still works unchanged), so this abstract signature is
+        deliberately left unwidened — see ``_standard_run``'s docstring for
+        the full ``handlers=`` threading contract.
+        """
         ...
