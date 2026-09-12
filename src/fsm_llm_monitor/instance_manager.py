@@ -1560,6 +1560,23 @@ class InstanceManager:
         elif isinstance(inst, ManagedAgent):
             inst.cancel_event.set()
             inst.status = "cancelled"
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-007
+            # `agent.run()` has no cancellation hook (see base.py's `run()`
+            # abstract signature) so setting cancel_event cannot interrupt
+            # in-flight work — do NOT assume the background thread stops
+            # here. Bound our OWN wait instead: join with a short timeout so
+            # destroy_instance (called synchronously from an async FastAPI
+            # route) never blocks indefinitely, and log a warning if the
+            # thread is still alive after the timeout so the leak stays
+            # observable. True mid-run cancellation remains OUT OF SCOPE —
+            # see decisions.md D-007.
+            if inst.thread is not None and inst.thread.is_alive():
+                inst.thread.join(timeout=1.5)
+                if inst.thread.is_alive():
+                    logger.warning(
+                        f"Agent {instance_id} did not stop within timeout "
+                        "after cancellation; background thread still running"
+                    )
 
         self._emit_global_event(
             EVENT_INSTANCE_DESTROYED,

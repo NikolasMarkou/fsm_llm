@@ -2,7 +2,9 @@ from __future__ import annotations
 
 """Tests for fsm_llm_monitor.instance_manager."""
 
+import threading
 from typing import ClassVar
+from unittest import mock
 from unittest.mock import MagicMock
 
 from fsm_llm_monitor.constants import EVENT_INSTANCE_LAUNCHED
@@ -430,6 +432,80 @@ class TestDestroyInstance:
         mgr.destroy_instance("wf1")
         assert wf.status == "completed"
         assert mgr.get_instance("wf1") is None
+
+    def test_destroy_agent_joins_bounded_and_warns_if_still_alive(self):
+        """A never-returning agent thread must not hang destroy_instance."""
+        import time
+
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+
+        agent = ManagedAgent(instance_id="ag-hang")
+        never_returns = threading.Event()
+
+        def _hang() -> None:
+            # Never checks cancel_event; simulates agent.run() with no
+            # cancellation hook, blocked on e.g. an in-flight LLM call.
+            never_returns.wait()
+
+        thread = threading.Thread(target=_hang, daemon=True)
+        agent.thread = thread
+        thread.start()
+
+        from fsm_llm_monitor.collector import EventCollector
+
+        collector = EventCollector()
+        with mgr._lock:
+            mgr._instances["ag-hang"] = agent
+            mgr._collectors["ag-hang"] = collector
+
+        with mock.patch("fsm_llm_monitor.instance_manager.logger") as mock_logger:
+            start = time.monotonic()
+            mgr.destroy_instance("ag-hang")
+            elapsed = time.monotonic() - start
+
+        # Bounded: destroy_instance returns well within a few seconds, not
+        # indefinitely (the thread never returns).
+        assert elapsed < 5.0
+        assert agent.status == "cancelled"
+        assert agent.cancel_event.is_set()
+        assert thread.is_alive()
+        mock_logger.warning.assert_called_once()
+        assert "ag-hang" in mock_logger.warning.call_args[0][0]
+
+        # Cleanup: release the background thread so it doesn't leak past the
+        # test.
+        never_returns.set()
+        thread.join(timeout=2.0)
+
+    def test_destroy_agent_joins_quickly_when_thread_finishes(self):
+        """A thread that finishes promptly after cancellation is joined
+        without triggering the still-alive warning."""
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+
+        agent = ManagedAgent(instance_id="ag-quick")
+
+        def _quick() -> None:
+            agent.cancel_event.wait(timeout=2.0)
+
+        thread = threading.Thread(target=_quick, daemon=True)
+        agent.thread = thread
+        thread.start()
+
+        from fsm_llm_monitor.collector import EventCollector
+
+        collector = EventCollector()
+        with mgr._lock:
+            mgr._instances["ag-quick"] = agent
+            mgr._collectors["ag-quick"] = collector
+
+        with mock.patch("fsm_llm_monitor.instance_manager.logger") as mock_logger:
+            mgr.destroy_instance("ag-quick")
+
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
+        mock_logger.warning.assert_not_called()
 
 
 class TestActivitySnapshots:

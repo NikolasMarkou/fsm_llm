@@ -428,7 +428,13 @@ async def api_instance_destroy(instance_id: str) -> dict[str, str]:
     """Destroy a managed instance."""
     mgr = get_manager()
     try:
-        mgr.destroy_instance(instance_id)
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-007: destroy_instance can
+        # now block for up to its bounded agent-teardown join timeout (see
+        # instance_manager.py); keep it off the event loop the same way the
+        # launch routes already do, rather than shrinking the join timeout to
+        # sub-second (which would make the teardown warning fire on every
+        # merely-slow agent, not just a genuinely hung one).
+        await asyncio.to_thread(mgr.destroy_instance, instance_id)
         return {"status": "ok"}
     except KeyError as e:
         raise HTTPException(status_code=404, detail="instance not found") from e
