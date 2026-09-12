@@ -913,9 +913,10 @@ class MessagePipeline:
         # here; if a future LLMInterface subclass needs bulk extraction, it
         # implements `extract_bulk_data` (default raises NotImplementedError,
         # mirroring `extract_field`). See decisions.md D-015.
-        request = BulkExtractionRequest(system_prompt=prompt, user_message=user_message)
-
         try:
+            request = BulkExtractionRequest(
+                system_prompt=prompt, user_message=user_message
+            )
             response = self.llm_interface.extract_bulk_data(request)
             # Filter out None/empty values — extract_bulk_data returns the
             # extraction verbatim; this merge-time filtering is this

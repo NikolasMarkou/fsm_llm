@@ -1246,6 +1246,29 @@ class TestAdditiveBulkExtraction:
         assert "policy_number" not in resp.extracted_data
         llm.extract_bulk_data.assert_not_called()
 
+    def test_overlong_user_message_degrades_to_empty_dict(self):
+        """Regression (review-iter-1 concern 1 / D-017): BulkExtractionRequest
+        carries a pydantic max_length=10000 on user_message. Construction used
+        to happen OUTSIDE the try: block, so an over-length message raised
+        ValidationError out of the function instead of degrading to {} like
+        every other failure mode here. Must not raise."""
+        state = self._state_with_instruction_only_field()
+        fsm_def = _make_fsm_definition({"start": state})
+        llm = _make_mock_llm()
+        llm.extract_bulk_data = _mock_bulk_extract_data({"policy_number": "X"})
+
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        instance = _make_instance(current_state="start")
+
+        overlong_message = "y" * 10001
+
+        result = pipeline._bulk_extract_from_instructions(
+            instance, overlong_message, state, "conv-1"
+        )
+
+        assert result == {}
+        llm.extract_bulk_data.assert_not_called()
+
 
 class TestFieldTypeCoercionRejectsWrongTypes:
     """T6 / D-018: `list`/`dict` coercers must fail loudly like their 4 siblings.
