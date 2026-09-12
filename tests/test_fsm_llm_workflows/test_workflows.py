@@ -505,6 +505,69 @@ class TestSwitchStepTerminalRoute:
 
 
 # ----------------------------------------------------------------
+# D-013/D-018 narrowing: TimerStep/WaitForEventStep are unaffected by the
+# explicitly_terminal SwitchStep-only narrowing (completion-fix iter-1/step-7.1)
+# ----------------------------------------------------------------
+
+
+class TestTerminalNarrowingUnaffectedSteps:
+    """`_handle_successful_step`'s ``explicitly_terminal`` signal is scoped to
+    ``SwitchStep`` only (D-018). ``TimerStep``/``WaitForEventStep`` never set
+    ``next_state`` on their success result at all (falsy ``None``, not ``""``),
+    so they must keep reaching ``WorkflowStatus.WAITING`` exactly as before
+    D-013/D-018 touched the terminal-detection logic. Regression test for
+    review-iter-1.md concern 6's confirmation that these two step types are
+    safe.
+    """
+
+    async def test_timer_step_reaches_waiting(self):
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.engine import WorkflowEngine
+        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm_workflows.steps import TimerStep
+
+        timer = TimerStep(step_id="wait", name="Wait", delay_seconds=60, next_state="")
+        definition = WorkflowDefinition(
+            workflow_id="wf-timer-waiting",
+            name="TimerWaiting",
+            steps={"wait": timer},
+            initial_step_id="wait",
+        )
+
+        engine = WorkflowEngine()
+        engine.register_workflow(definition)
+        instance_id = await engine.start_workflow("wf-timer-waiting")
+
+        instance = engine.get_workflow_instance(instance_id)
+        assert instance.status == WorkflowStatus.WAITING
+
+    async def test_wait_for_event_step_reaches_waiting(self):
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.engine import WorkflowEngine
+        from fsm_llm_workflows.models import WaitEventConfig, WorkflowStatus
+        from fsm_llm_workflows.steps import WaitForEventStep
+
+        wait_step = WaitForEventStep(
+            step_id="wait",
+            name="Wait",
+            config=WaitEventConfig(event_type="approved", success_state=""),
+        )
+        definition = WorkflowDefinition(
+            workflow_id="wf-event-waiting",
+            name="EventWaiting",
+            steps={"wait": wait_step},
+            initial_step_id="wait",
+        )
+
+        engine = WorkflowEngine()
+        engine.register_workflow(definition)
+        instance_id = await engine.start_workflow("wf-event-waiting")
+
+        instance = engine.get_workflow_instance(instance_id)
+        assert instance.status == WorkflowStatus.WAITING
+
+
+# ----------------------------------------------------------------
 # WorkflowDefinition.serialize() round-trip (finding 11)
 # ----------------------------------------------------------------
 

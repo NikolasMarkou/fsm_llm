@@ -25,6 +25,7 @@ from .exceptions import (
     WorkflowStepError,
 )
 from .models import EventListener, WorkflowEvent, WorkflowInstance, WorkflowStatus
+from .steps import SwitchStep
 
 # Maximum recursion depth for workflow step execution to prevent infinite loops
 MAX_STEP_DEPTH = 20
@@ -376,7 +377,9 @@ class WorkflowEngine:
 
             # Handle the result
             if result.success:
-                await self._handle_successful_step(instance, result, _depth=_depth)
+                await self._handle_successful_step(
+                    instance, result, current_step, _depth=_depth
+                )
             else:
                 await self._handle_failed_step(instance, result, _depth=_depth)
 
@@ -400,24 +403,40 @@ class WorkflowEngine:
         return workflow_def.steps[step_id]
 
     async def _handle_successful_step(
-        self, instance: WorkflowInstance, result: Any, _depth: int = 0
+        self, instance: WorkflowInstance, result: Any, step: Any, _depth: int = 0
     ) -> None:
         """Handle a successful step execution."""
         if result.next_state:
             await self._transition_to_state(instance, result.next_state, _depth=_depth)
         else:
             # DECISION plan-2026-09-12T135914-45a654de/D-013
-            # A step (e.g. SwitchStep) can signal "this specific route is
-            # terminal" by returning next_state="" -- distinct from a step
-            # that has no next_state field at all (also falsy, e.g. a step
-            # awaiting an event/timer). Do NOT re-derive terminality from
-            # WorkflowDefinition.get_terminal_states() here: that is a static,
-            # WHOLE-STEP analysis (used for reachability warnings) and cannot
-            # see that only ONE of a SwitchStep's cases routes to "terminal".
-            # Passing the per-invocation signal through explicitly_terminal
-            # keeps get_terminal_states()'s existing semantics untouched for
-            # every other caller. See decisions.md D-013.
-            explicitly_terminal = result.next_state == ""
+            # A step can signal "this specific route is terminal" by
+            # returning next_state="" -- distinct from a step that has no
+            # next_state field at all (also falsy, e.g. a step awaiting an
+            # event/timer, whose model default is None). Do NOT re-derive
+            # terminality from WorkflowDefinition.get_terminal_states() here:
+            # that is a static, WHOLE-STEP analysis (used for reachability
+            # warnings) and cannot see that only ONE of a SwitchStep's cases
+            # routes to "terminal".
+            #
+            # DECISION plan-2026-09-12T135914-45a654de/D-018
+            # DELIBERATELY NARROWED to SwitchStep only (completion-fix
+            # iter-1/step-7.1). Do NOT widen this `isinstance` check to "any
+            # successful result with next_state == ''": ConversationStep.
+            # success_state and AgentStep.success_state BOTH default to ""
+            # as an *unset required-ish field*, not a documented "this route
+            # is terminal" convention the way SwitchStep.default_state's
+            # docstring explicitly states ("Use `""` for terminal"). Treating
+            # a ConversationStep/AgentStep author's forgotten success_state as
+            # "explicitly terminal" would silently complete a misconfigured
+            # workflow instead of falling through to the existing
+            # "has no transition and is not terminal" warning below --
+            # exactly the diagnostic the adversarial review flagged as an
+            # unintended blast-radius widening. See decisions.md D-018's
+            # completion-fix addendum.
+            explicitly_terminal = (
+                isinstance(step, SwitchStep) and result.next_state == ""
+            )
             await self._handle_step_without_transition(
                 instance, explicitly_terminal=explicitly_terminal
             )
