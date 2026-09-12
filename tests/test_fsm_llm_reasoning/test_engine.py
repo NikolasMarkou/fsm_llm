@@ -11,6 +11,8 @@ from fsm_llm_reasoning.definitions import (
     ReasoningStepType,
     ValidationResult,
 )
+from fsm_llm_reasoning.engine import ReasoningEngine
+from fsm_llm_reasoning.exceptions import ReasoningExecutionError
 from fsm_llm_reasoning.handlers import ReasoningHandlers
 from fsm_llm_reasoning.utilities import map_reasoning_type
 
@@ -136,6 +138,69 @@ class TestReasoningEngine:
         for val in expected_enum_values:
             assert val in actual_enum_values
         assert len(actual_enum_values) == len(expected_enum_values)
+
+
+class TestReasoningTypeFallback:
+    """F12 (D-009): the missing-FSM fallback is narrowed to ANALYTICAL-only.
+
+    Regression tests exercise ``_prepare_reasoning_execution`` directly on an
+    uninitialized ``ReasoningEngine`` (``object.__new__``, no LLM/API setup)
+    with a hand-built ``reasoning_fsms`` dict, so no real FSM loading or LLM
+    call is required.
+    """
+
+    @staticmethod
+    def _make_engine(reasoning_fsms: dict) -> ReasoningEngine:
+        engine = object.__new__(ReasoningEngine)
+        engine.reasoning_fsms = reasoning_fsms
+        return engine
+
+    def test_missing_type_falls_back_to_analytical_with_warning(self):
+        """Requested type missing + ANALYTICAL present -> falls back, warns."""
+        engine = self._make_engine(
+            {ReasoningType.ANALYTICAL: {"name": "analytical_fsm"}}
+        )
+        context = {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.CREATIVE.value}
+
+        # `fsm_llm.logging.logger` is loguru, not stdlib logging, so `caplog`
+        # cannot intercept it; assert on stderr output instead (loguru's
+        # default sink) to confirm the fallback warning is actually emitted.
+        from io import StringIO
+
+        from fsm_llm.logging import logger
+
+        buf = StringIO()
+        sink_id = logger.add(buf, level="WARNING")
+        try:
+            result = engine._prepare_reasoning_execution(context)
+        finally:
+            logger.remove(sink_id)
+
+        assert result[ContextKeys.REASONING_TYPE_SELECTED] == (
+            ReasoningType.ANALYTICAL.value
+        )
+        assert result[ContextKeys.REASONING_FSM_TO_PUSH] == {
+            "name": "analytical_fsm"
+        }
+        assert "Falling back to analytical reasoning" in buf.getvalue()
+
+    def test_missing_type_and_missing_analytical_raises(self):
+        """Requested type missing + ANALYTICAL also missing -> raises."""
+        engine = self._make_engine({})
+        context = {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.CREATIVE.value}
+
+        with pytest.raises(ReasoningExecutionError):
+            engine._prepare_reasoning_execution(context)
+
+    def test_missing_type_does_not_substitute_arbitrary_other_type(self):
+        """A non-ANALYTICAL type must never be silently substituted."""
+        engine = self._make_engine(
+            {ReasoningType.DEDUCTIVE: {"name": "deductive_fsm"}}
+        )
+        context = {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.CREATIVE.value}
+
+        with pytest.raises(ReasoningExecutionError):
+            engine._prepare_reasoning_execution(context)
 
 
 if __name__ == "__main__":

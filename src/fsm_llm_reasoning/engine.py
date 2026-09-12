@@ -301,15 +301,24 @@ class ReasoningEngine:
 
         if not fsm_def:
             logger.error(ErrorMessages.FSM_NOT_FOUND.format(name=reasoning_type.value))
-            # Fallback: try ANALYTICAL first, then any available type
-            for fallback_type in [ReasoningType.ANALYTICAL, *self.reasoning_fsms]:
-                fsm_def = self.reasoning_fsms.get(fallback_type)
-                if fsm_def:
-                    reasoning_type = fallback_type
-                    logger.warning(f"Falling back to {fallback_type.value} reasoning")
-                    break
-            if not fsm_def:
-                raise ReasoningExecutionError("No reasoning FSM definitions available")
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-009
+            # Fallback ONLY to ANALYTICAL, never to an arbitrary other loaded
+            # type. Do NOT restore the old `[ReasoningType.ANALYTICAL,
+            # *self.reasoning_fsms]` loop: silently substituting, say,
+            # "deductive" for a missing "creative" FSM would solve the
+            # caller's problem with the wrong reasoning strategy while only
+            # logging a warning — the caller has no structured signal that a
+            # different strategy was used. See decisions.md D-009.
+            fsm_def = self.reasoning_fsms.get(ReasoningType.ANALYTICAL)
+            if fsm_def:
+                reasoning_type = ReasoningType.ANALYTICAL
+                logger.warning(
+                    f"Falling back to {ReasoningType.ANALYTICAL.value} reasoning"
+                )
+            else:
+                raise ReasoningExecutionError(
+                    "No reasoning FSM definitions available"
+                )
 
         logger.info(LogMessages.STRATEGY_EXECUTING.format(type=reasoning_type.value))
 
