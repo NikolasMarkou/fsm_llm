@@ -120,7 +120,7 @@ class TestMagicNumberConstants:
             ContextKeys.RETRY_COUNT: 0,
         }
         result = ReasoningHandlers.validate_solution(context)
-        assert result[ContextKeys.SOLUTION_VALID] is False
+        assert result[ContextKeys.VALIDATION_RESULT] is False
 
 
 # ---------------------------------------------------------------------------

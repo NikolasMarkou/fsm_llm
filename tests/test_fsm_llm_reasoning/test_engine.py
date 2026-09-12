@@ -75,7 +75,7 @@ class TestReasoningHandlers:
 
         result = handlers.validate_solution(context)
 
-        assert result[ContextKeys.SOLUTION_VALID] is True
+        assert result[ContextKeys.VALIDATION_RESULT] is True
         assert result[ContextKeys.SOLUTION_CONFIDENCE] == 1.0
         assert result[ContextKeys.VALIDATION_CHECKS]["has_solution"] is True
         assert result[ContextKeys.VALIDATION_CHECKS]["has_insights"] is True

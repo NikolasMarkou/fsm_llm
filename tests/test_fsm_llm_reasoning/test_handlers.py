@@ -28,7 +28,7 @@ class TestValidateSolution:
         }
         result = ReasoningHandlers.validate_solution(ctx)
 
-        assert result[ContextKeys.SOLUTION_VALID] is True
+        assert result[ContextKeys.VALIDATION_RESULT] is True
         assert result[ContextKeys.SOLUTION_CONFIDENCE] == 1.0
         assert result[ContextKeys.VALIDATION_CHECKS]["has_solution"] is True
         assert result[ContextKeys.VALIDATION_CHECKS]["has_insights"] is True
@@ -42,7 +42,7 @@ class TestValidateSolution:
         }
         result = ReasoningHandlers.validate_solution(ctx)
 
-        assert result[ContextKeys.SOLUTION_VALID] is False
+        assert result[ContextKeys.VALIDATION_RESULT] is False
         assert result[ContextKeys.VALIDATION_CHECKS]["has_solution"] is False
 
     def test_simple_calculator_relaxed_validation(self):
@@ -54,7 +54,7 @@ class TestValidateSolution:
         }
         result = ReasoningHandlers.validate_solution(ctx)
 
-        assert result[ContextKeys.SOLUTION_VALID] is True
+        assert result[ContextKeys.VALIDATION_RESULT] is True
         assert result[ContextKeys.VALIDATION_CHECKS]["sufficient_detail"] is True
         assert (
             result[ContextKeys.VALIDATION_CHECKS]["has_insights"] is True

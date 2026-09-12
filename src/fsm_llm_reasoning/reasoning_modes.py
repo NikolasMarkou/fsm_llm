@@ -142,7 +142,7 @@ orchestrator_fsm = {
             "purpose": f"Check '{ContextKeys.VALIDATION_RESULT}' and retry if needed (max {Defaults.MAX_RETRIES} times)",
             "required_context_keys": [
                 ContextKeys.VALIDATION_RESULT,
-                ContextKeys.CONFIDENCE_LEVEL,
+                ContextKeys.SOLUTION_CONFIDENCE,
             ],
             "extraction_instructions": """
             Validate the proposed solution:
@@ -169,21 +169,9 @@ orchestrator_fsm = {
                             "logic": {
                                 "or": [
                                     {
-                                        "or": [
-                                            {
-                                                "==": [
-                                                    {
-                                                        "var": ContextKeys.VALIDATION_RESULT
-                                                    },
-                                                    True,
-                                                ]
-                                            },
-                                            {
-                                                "==": [
-                                                    {"var": ContextKeys.SOLUTION_VALID},
-                                                    True,
-                                                ]
-                                            },
+                                        "==": [
+                                            {"var": ContextKeys.VALIDATION_RESULT},
+                                            True,
                                         ]
                                     },
                                     {
@@ -207,21 +195,9 @@ orchestrator_fsm = {
                             "logic": {
                                 "and": [
                                     {
-                                        "and": [
-                                            {
-                                                "==": [
-                                                    {
-                                                        "var": ContextKeys.VALIDATION_RESULT
-                                                    },
-                                                    False,
-                                                ]
-                                            },
-                                            {
-                                                "==": [
-                                                    {"var": ContextKeys.SOLUTION_VALID},
-                                                    False,
-                                                ]
-                                            },
+                                        "==": [
+                                            {"var": ContextKeys.VALIDATION_RESULT},
+                                            False,
                                         ]
                                     },
                                     {

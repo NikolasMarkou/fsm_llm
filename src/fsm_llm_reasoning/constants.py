@@ -79,9 +79,13 @@ class ContextKeys:
     FINAL_SOLUTION = "final_solution"
 
     # Validation
+    # DECISION plan-2026-09-12T135914-45a654de/D-014
+    # SOLUTION_VALID/CONFIDENCE_LEVEL were retired as duplicate aliases of
+    # VALIDATION_RESULT/SOLUTION_CONFIDENCE respectively (finding 19). Do NOT
+    # re-add either alias to backfill "backward compatibility" -- no external
+    # consumer was found (git history, CLAUDE.md/docs, examples/reasoning/
+    # math_tutor all checked); see decisions.md D-007 (PLAN) and D-014 (EXECUTE).
     VALIDATION_RESULT = "validation_result"
-    CONFIDENCE_LEVEL = "confidence_level"
-    SOLUTION_VALID = "solution_valid"
     SOLUTION_CONFIDENCE = "solution_confidence"
     VALIDATION_CHECKS = "validation_checks"
 

@@ -86,7 +86,6 @@ class TestContextKeys:
 
     def test_validation_keys(self):
         assert ContextKeys.VALIDATION_RESULT == "validation_result"
-        assert ContextKeys.SOLUTION_VALID == "solution_valid"
         assert ContextKeys.SOLUTION_CONFIDENCE == "solution_confidence"
 
     def test_execution_control_keys(self):
