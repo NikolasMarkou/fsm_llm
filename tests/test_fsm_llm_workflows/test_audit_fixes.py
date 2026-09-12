@@ -465,9 +465,7 @@ class TestHandleStepExceptionTerminalGuard:
 
         class _RaisingStep(WorkflowStep):
             async def execute(self, context):
-                raise WorkflowTimeoutError(
-                    operation="step boom", timeout_seconds=1.0
-                )
+                raise WorkflowTimeoutError(operation="step boom", timeout_seconds=1.0)
 
         engine = WorkflowEngine()
         step = _RaisingStep(step_id="slow", name="Raising")

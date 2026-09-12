@@ -165,7 +165,11 @@ def configure(
         is detected.
     """
     global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX, _api_key
-    new_api_key = api_key if api_key is not None else (os.environ.get("FSM_LLM_MONITOR_API_KEY") or None)
+    new_api_key = (
+        api_key
+        if api_key is not None
+        else (os.environ.get("FSM_LLM_MONITOR_API_KEY") or None)
+    )
     # DECISION plan-2026-09-12T065608-089d0ec7/D-016: warn (rather than stay
     # silent) when a previously-configured key is about to be cleared by a
     # re-configure() call that did not itself pass api_key= — mirroring the
@@ -1252,6 +1256,7 @@ async def api_builder_delete(session_id: str) -> dict[str, Any]:
 
 
 # --- WebSocket for real-time updates ---
+
 
 # NOTE (F2 follow-up, D-008): the `/ws` endpoint is NOT gated by `_api_key`.
 # FastAPI's `Depends`/`dependencies=[...]` mechanism does not attach to

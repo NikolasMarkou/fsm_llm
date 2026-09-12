@@ -879,11 +879,23 @@ class TestApiKeyGate:
         configure(manager=InstanceManager(), api_key="s3cr3t")
         client = TestClient(app)
         cases = [
-            ("post", "/api/config", {"refresh_interval": 1.0, "max_events": 1000,
-                                      "max_log_lines": 5000, "log_level": "INFO",
-                                      "show_internal_keys": False,
-                                      "auto_scroll_logs": True}),
-            ("post", "/api/dashboard/config", {"name": "x", "panels": {}, "alerts": {}}),
+            (
+                "post",
+                "/api/config",
+                {
+                    "refresh_interval": 1.0,
+                    "max_events": 1000,
+                    "max_log_lines": 5000,
+                    "log_level": "INFO",
+                    "show_internal_keys": False,
+                    "auto_scroll_logs": True,
+                },
+            ),
+            (
+                "post",
+                "/api/dashboard/config",
+                {"name": "x", "panels": {}, "alerts": {}},
+            ),
             ("delete", "/api/dashboard/config", None),
             ("delete", "/api/instances/nonexistent", None),
             ("post", "/api/fsm/launch", {"preset_id": "does-not-exist"}),

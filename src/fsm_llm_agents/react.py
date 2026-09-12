@@ -188,7 +188,9 @@ class ReactAgent(BaseAgent):
     # None — that attribute no longer exists on this class specifically so
     # this method cannot silently regress to the D-004 shared-mutable-slot
     # bug. See decisions.md D-014.
-    def _register_handlers(self, api: API, handlers: AgentHandlers | None = None) -> None:
+    def _register_handlers(
+        self, api: API, handlers: AgentHandlers | None = None
+    ) -> None:
         """Register agent handlers with the API."""
         if handlers is None:
             raise AgentError(

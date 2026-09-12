@@ -179,9 +179,7 @@ class TestReasoningTypeFallback:
         assert result[ContextKeys.REASONING_TYPE_SELECTED] == (
             ReasoningType.ANALYTICAL.value
         )
-        assert result[ContextKeys.REASONING_FSM_TO_PUSH] == {
-            "name": "analytical_fsm"
-        }
+        assert result[ContextKeys.REASONING_FSM_TO_PUSH] == {"name": "analytical_fsm"}
         assert "Falling back to analytical reasoning" in buf.getvalue()
 
     def test_missing_type_and_missing_analytical_raises(self):
@@ -194,9 +192,7 @@ class TestReasoningTypeFallback:
 
     def test_missing_type_does_not_substitute_arbitrary_other_type(self):
         """A non-ANALYTICAL type must never be silently substituted."""
-        engine = self._make_engine(
-            {ReasoningType.DEDUCTIVE: {"name": "deductive_fsm"}}
-        )
+        engine = self._make_engine({ReasoningType.DEDUCTIVE: {"name": "deductive_fsm"}})
         context = {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.CREATIVE.value}
 
         with pytest.raises(ReasoningExecutionError):

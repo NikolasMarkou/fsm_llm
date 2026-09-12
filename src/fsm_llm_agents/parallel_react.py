@@ -229,7 +229,9 @@ class ParallelReactAgent(BaseAgent):
     # `handlers` is required in practice; the `| None = None` default only
     # satisfies BaseAgent's narrower abstract signature. Do NOT fall back to
     # `self._handlers` if `handlers` is None. See decisions.md D-014.
-    def _register_handlers(self, api: API, handlers: AgentHandlers | None = None) -> None:
+    def _register_handlers(
+        self, api: API, handlers: AgentHandlers | None = None
+    ) -> None:
         if handlers is None:
             raise AgentError(
                 "ParallelReactAgent._register_handlers called without a "

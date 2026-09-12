@@ -316,9 +316,7 @@ class ReasoningEngine:
                     f"Falling back to {ReasoningType.ANALYTICAL.value} reasoning"
                 )
             else:
-                raise ReasoningExecutionError(
-                    "No reasoning FSM definitions available"
-                )
+                raise ReasoningExecutionError("No reasoning FSM definitions available")
 
         logger.info(LogMessages.STRATEGY_EXECUTING.format(type=reasoning_type.value))
 
