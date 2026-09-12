@@ -324,6 +324,31 @@ class MessagePipeline:
             # case where the SAME handler invocation that produced the partial
             # merge is also what raises: process() now immediately restores the
             # pre-turn snapshot in that case. See D-002 in decisions.md.
+            #
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
+            # the two try/except blocks below are NOT symmetric in scope. The
+            # PRE_PROCESSING block (immediately below) is its OWN, separate
+            # try/except -- Pass 1 runs AFTER it, unwrapped, so a PRE_PROCESSING
+            # failure can only ever roll back state PRE_PROCESSING itself
+            # touched (nothing yet, structurally, since Pass 1 hasn't run).
+            # The POST_PROCESSING block further down is DELIBERATELY FOLDED
+            # INTO THE SAME try as Pass 2 (_execute_response_generation_pass) --
+            # one shared restore-on-exception block, not two. Do NOT split it
+            # into its own try/except "to match PRE_PROCESSING's shape": Pass 1
+            # (extraction + transition evaluation + the state transition itself)
+            # has ALREADY run and committed by the time POST_PROCESSING starts,
+            # so a POST_PROCESSING handler failure intentionally rolls back
+            # BOTH its own partial merge AND Pass 1's already-committed
+            # transition + extracted data -- the whole pre-turn snapshot, the
+            # same as a Pass-2 failure would. This is turn atomicity applied
+            # consistently: a half-turn (new state kept, response never
+            # generated) is not a better outcome than a whole-turn rollback,
+            # exactly the same reasoning D-002 already applied to
+            # POST_TRANSITION and PRE_PROCESSING. Pinned by
+            # TestPostProcessingHandlerFailureRollsBackTransition in
+            # tests/test_fsm_llm/test_pipeline_handler_contract.py. See D-017
+            # in decisions.md (this entry does not edit or replace D-002 --
+            # D-002's own text under-described this scope; D-017 clarifies it).
             try:
                 # Execute pre-processing handlers
                 self.execute_handlers(
@@ -352,6 +377,13 @@ class MessagePipeline:
 
             try:
                 # Execute post-processing handlers (after potential transition)
+                #
+                # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
+                # a failure here shares the except block below with Pass 2 --
+                # see the D-017 note above this method's PRE_PROCESSING try for
+                # the full rationale. A raise here rolls back Pass 1's
+                # already-committed transition too, not just this call's own
+                # partial merge.
                 self.execute_handlers(
                     instance,
                     HandlerTiming.POST_PROCESSING,
@@ -371,6 +403,10 @@ class MessagePipeline:
             except Exception:
                 # Restore the pre-turn in-memory state so the turn is atomic.
                 # Covers all handler-mutable fields, not just state+data (D-012).
+                # D-017: this ALSO undoes Pass 1's already-committed state
+                # transition + extracted data when the exception originated in
+                # POST_PROCESSING (see the D-017 comment above), not only when
+                # it originated in Pass 2.
                 instance.current_state = pre_turn_state
                 instance.context.data.clear()
                 instance.context.data.update(pre_turn_data)
@@ -434,6 +470,16 @@ class MessagePipeline:
             # Pass 1 stays unwrapped). See the comment in process() for the
             # full explanation; not repeated here to avoid drift between the
             # two copies.
+            #
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
+            # the two blocks below are NOT symmetric in scope -- see the D-017
+            # comment in process() (same file, above) for the full rationale.
+            # In short: PRE_PROCESSING (immediately below) is its own separate
+            # try/except; POST_PROCESSING (further down) is deliberately
+            # folded into the SAME try as Pass 2's streaming call
+            # (_stream_response_generation_pass), so a POST_PROCESSING
+            # handler failure here also rolls back Pass 1's already-committed
+            # transition + extracted data, not just its own partial merge.
             try:
                 # Execute pre-processing handlers
                 self.execute_handlers(
@@ -463,6 +509,10 @@ class MessagePipeline:
 
             try:
                 # Execute post-processing handlers
+                #
+                # D-017: a failure here shares the except block below with
+                # Pass 2's streaming call -- see the D-017 note above this
+                # method's PRE_PROCESSING try.
                 self.execute_handlers(
                     instance,
                     HandlerTiming.POST_PROCESSING,

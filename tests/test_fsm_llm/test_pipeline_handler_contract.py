@@ -34,6 +34,16 @@ pins a THIRD boundary: guarantee 2 also does NOT extend across a PRE_PROCESSING
 ``process_stream()`` now wrap those handler calls in the same turn-atomicity
 restore used for Pass 2. See the updated ``D-006`` comment in
 ``pipeline.py::execute_handlers`` for the full rationale.
+
+As of the D-002/D-017 completion-fix (step 1.1, same plan),
+``TestPostProcessingHandlerFailureRollsBackTransition`` pins a FOURTH,
+BROADER boundary the third one understated: POST_PROCESSING is wrapped
+INSIDE the SAME ``try`` as Pass 2 (``_execute_response_generation_pass``),
+not in its own separate block like PRE_PROCESSING is. So a POST_PROCESSING
+handler failure rolls back not just its own partial merge, but Pass 1's
+ALREADY-COMMITTED state transition and extracted data too -- the entire
+pre-turn snapshot, exactly like a Pass-2 failure would. See D-017 in
+decisions.md.
 """
 
 import pytest
@@ -635,3 +645,73 @@ class TestPreTransitionContextUpdateRollback:
         data = api.get_data(conv_id)
         assert data["audit_seen"] is True
         assert "finished" not in data
+
+
+# ----------------------------------------------------------------------
+# (h) POST_PROCESSING: a failure here rolls back Pass 1's ALREADY-COMMITTED
+#     transition too, not just its own partial merge (D-002/D-017)
+# ----------------------------------------------------------------------
+
+
+class TestPostProcessingHandlerFailureRollsBackTransition:
+    """Pins the concern-10 gap flagged by ``findings/review-iter-1.md``.
+
+    ``MessagePipeline.process()``/``process_stream()`` wrap POST_PROCESSING
+    INSIDE the same restore-on-exception block as Pass 2
+    (``_execute_response_generation_pass``) -- one ``try`` spans both, not two
+    separate ones. Pass 1 (extraction + transition evaluation + the state
+    transition itself) already ran and committed BEFORE this ``try`` even
+    starts, so when a POST_PROCESSING handler raises here, the restore
+    reverts the WHOLE pre-turn snapshot -- current_state included -- even
+    though Pass 1's transition had nothing to do with the failing handler and
+    was, on its own, a legitimate commit.
+
+    This is intended behavior, not a bug: turn atomicity ("a failed turn
+    leaves no trace") is the stronger, simpler invariant D-002 already chose
+    for PRE_PROCESSING, and POST_TRANSITION was rolled back on this same
+    reasoning even earlier (``TestPostTransitionHandlerFailure``). A state
+    transition that a later step in the SAME turn undoes via a raised
+    exception is exactly the case turn-atomicity exists to guard against --
+    a half-turn (new state kept, response never generated) is not an
+    improvement over a whole-turn rollback. See D-017 in decisions.md.
+    """
+
+    def test_post_processing_failure_rolls_back_the_transition(self):
+        api, conv_id = _make_transitioning_api(
+            [
+                _ExplodingHandler(
+                    "critical_post_processing",
+                    HandlerTiming.POST_PROCESSING,
+                    critical=True,
+                )
+            ]
+        )
+
+        with pytest.raises(HandlerExecutionError, match="critical_post_processing"):
+            api.converse("i am finished", conv_id)
+
+        # 1. The state transition Pass 1 already committed ("start" -> "done")
+        #    is undone -- not just the failing handler's own partial merge.
+        assert api.get_current_state(conv_id) == "start"
+
+        # 2. Data extracted during Pass 1 ("finished") is rolled back with it:
+        #    the WHOLE pre-turn snapshot is restored, not a scoped subset.
+        assert "finished" not in api.get_data(conv_id)
+
+    def test_non_critical_post_processing_failure_keeps_the_transition(self):
+        """Non-regression: the common ``"continue"`` case is unaffected.
+
+        A non-critical POST_PROCESSING handler raising under the default
+        ``handler_error_mode="continue"`` is swallowed by ``execute_handlers``
+        and never escapes to ``process()``'s restore-on-exception block, so
+        Pass 1's transition survives exactly as before this test existed.
+        """
+        api, conv_id = _make_transitioning_api(
+            [_ExplodingHandler("plain_post_processing", HandlerTiming.POST_PROCESSING)]
+        )
+
+        response = api.converse("i am finished", conv_id)
+
+        assert isinstance(response, str)
+        assert api.get_current_state(conv_id) == "done"
+        assert api.get_data(conv_id)["finished"] == "yes"
