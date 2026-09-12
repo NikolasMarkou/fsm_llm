@@ -490,3 +490,48 @@ class TestHandleStepExceptionTerminalGuard:
         # Status must remain CANCELLED (not overwritten to FAILED, and
         # certainly not masked by a WorkflowStateError).
         assert instance.status == WorkflowStatus.CANCELLED
+
+
+class TestFloatTimeoutSecondsEndToEnd:
+    """F7 regression: a sub-second workflow_timeout must report its real
+    float value (e.g. 0.5) in the raised WorkflowTimeoutError, not `0` from
+    a stale `int(...)` truncation in engine.py's `_timeout_seconds()`
+    helper. See decisions.md D-011."""
+
+    async def test_expired_deadline_reports_subsecond_float_timeout(self):
+        from datetime import datetime, timedelta, timezone
+
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm_workflows.steps import AutoTransitionStep, WorkflowStep
+
+        class _TerminalStep(WorkflowStep):
+            async def execute(self, context):
+                return None
+
+        engine = WorkflowEngine()
+        step = AutoTransitionStep(step_id="only", name="Only", next_state="term")
+        term_step = _TerminalStep(step_id="term", name="Term")
+        definition = WorkflowDefinition(
+            workflow_id="wf-float-timeout",
+            name="FloatTimeout",
+            steps={"only": step, "term": term_step},
+            initial_step_id="only",
+        )
+        engine.register_workflow(definition)
+
+        instance = WorkflowInstance(
+            instance_id="float-timeout-1",
+            workflow_id="wf-float-timeout",
+            current_step_id="only",
+            status=WorkflowStatus.RUNNING,
+            workflow_timeout=0.5,
+            deadline=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+        engine.workflow_instances[instance.instance_id] = instance
+
+        with pytest.raises(WorkflowTimeoutError) as exc_info:
+            await engine._execute_workflow_step(instance)
+
+        assert exc_info.value.timeout_seconds == 0.5
+        assert "0.5 seconds" in str(exc_info.value)

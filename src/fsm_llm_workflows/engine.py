@@ -284,12 +284,18 @@ class WorkflowEngine:
         # Report the configured workflow_timeout (not deadline-minus-created_at,
         # which is inflated by the construction-to-start gap). Fall back to the
         # deadline span only if the timeout was not recorded.
-        def _timeout_seconds() -> int:
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-011
+        # Do NOT re-introduce `int(...)` truncation here: a sub-second
+        # `workflow_timeout`/deadline span (e.g. 0.5s) would report as `0` in
+        # `WorkflowTimeoutError`'s message, which is actively misleading (the
+        # `asyncio.wait_for` call below already receives the correct float
+        # timeout — only this reporting helper was truncating). See D-011.
+        def _timeout_seconds() -> float:
             if instance.workflow_timeout is not None:
-                return int(instance.workflow_timeout)
+                return float(instance.workflow_timeout)
             if instance.deadline is not None:
-                return int((instance.deadline - instance.created_at).total_seconds())
-            return 0
+                return (instance.deadline - instance.created_at).total_seconds()
+            return 0.0
 
         # Check workflow-level timeout (cheap fast-path at the step boundary)
         if (

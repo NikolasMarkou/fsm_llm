@@ -63,7 +63,7 @@ class WorkflowTimeoutError(WorkflowError):
     def __init__(
         self,
         operation: str,
-        timeout_seconds: int,
+        timeout_seconds: float,
         details: dict[str, Any] | None = None,
     ):
         self.operation = operation
