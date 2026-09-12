@@ -492,6 +492,134 @@ class TestHandleStepExceptionTerminalGuard:
         assert instance.status == WorkflowStatus.CANCELLED
 
 
+class TestCancelWorkflowTerminalGuard:
+    """F5 completion-fix (step 4.1): cancel_workflow's own update_status
+    call must not raise WorkflowStateError when the instance is already
+    terminal by the time cancel_workflow acquires the per-instance lock --
+    the same terminal-transition hazard D-005 fixed for
+    _handle_step_exception, but left unguarded on cancel_workflow itself.
+    Reproduced by the iter-1 REFLECT reviewer as
+    `[True, WorkflowStateError("... completed -> cancelled")]`
+    (findings/review-iter-1.md concern 3).
+
+    Regression test for plan-2026-09-12T065608-089d0ec7 step 4.1 (D-015).
+    """
+
+    @staticmethod
+    def _make_instance(status, workflow_id="wf-cancel-terminal"):
+        from fsm_llm_workflows.models import WorkflowInstance
+
+        return WorkflowInstance(
+            instance_id="cancel-terminal-1",
+            workflow_id=workflow_id,
+            current_step_id="slow",
+            status=status,
+        )
+
+    async def test_cancel_already_completed_instance_returns_false_no_raise(self):
+        from fsm_llm_workflows.models import WorkflowStatus
+
+        engine = WorkflowEngine()
+        instance = self._make_instance(WorkflowStatus.COMPLETED)
+        engine.workflow_instances[instance.instance_id] = instance
+
+        # Before the fix, this raised WorkflowStateError from inside
+        # update_status (COMPLETED -> CANCELLED is not a valid transition).
+        result = await engine.cancel_workflow(instance.instance_id)
+
+        assert result is False
+        assert instance.status == WorkflowStatus.COMPLETED
+
+    async def test_cancel_already_cancelled_instance_returns_false_no_raise(self):
+        from fsm_llm_workflows.models import WorkflowStatus
+
+        engine = WorkflowEngine()
+        instance = self._make_instance(WorkflowStatus.CANCELLED)
+        engine.workflow_instances[instance.instance_id] = instance
+
+        result = await engine.cancel_workflow(instance.instance_id)
+
+        assert result is False
+        assert instance.status == WorkflowStatus.CANCELLED
+
+    async def test_cancel_already_failed_instance_returns_false_no_raise(self):
+        from fsm_llm_workflows.models import WorkflowStatus
+
+        engine = WorkflowEngine()
+        instance = self._make_instance(WorkflowStatus.FAILED)
+        engine.workflow_instances[instance.instance_id] = instance
+
+        result = await engine.cancel_workflow(instance.instance_id)
+
+        assert result is False
+        assert instance.status == WorkflowStatus.FAILED
+
+    async def test_concurrent_advance_completes_and_cancel_races_the_lock(self):
+        """Direct reproduction of the reviewer's finding: a step that
+        completes the instance (terminal, non-WAITING) races a concurrent
+        cancel_workflow() waiting on the same per-instance lock. Neither call
+        may ever raise, regardless of which one wins the lock race:
+
+        - if cancel_workflow wins first, RUNNING->CANCELLED is a valid
+          transition, so it succeeds normally (cancel_result True, counter
+          stays 0, advance_workflow's own is_active() guard then makes it a
+          clean no-op returning False);
+        - if advance_workflow wins first, it runs the step to completion
+          (COMPLETED) before cancel_workflow gets the lock, and this fix's
+          terminal guard makes cancel_workflow a no-op returning False
+          instead of raising WorkflowStateError (the reviewer's exact
+          repro).
+        """
+        from fsm_llm_workflows.definitions import WorkflowDefinition
+        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+
+        for _ in range(20):
+            counter: list = []
+            engine = WorkflowEngine()
+            step = TestInstanceLockConcurrency._build_counting_terminal_step(
+                "slow", counter
+            )
+            definition = WorkflowDefinition(
+                workflow_id="wf-cancel-vs-complete",
+                name="CancelVsComplete",
+                steps={"slow": step},
+                initial_step_id="slow",
+            )
+            engine.register_workflow(definition)
+
+            instance = WorkflowInstance(
+                instance_id="cancel-vs-complete-1",
+                workflow_id="wf-cancel-vs-complete",
+                current_step_id="slow",
+                status=WorkflowStatus.RUNNING,
+            )
+            engine.workflow_instances["cancel-vs-complete-1"] = instance
+
+            advance_result, cancel_result = await asyncio.gather(
+                engine.advance_workflow("cancel-vs-complete-1"),
+                engine.cancel_workflow("cancel-vs-complete-1"),
+                return_exceptions=True,
+            )
+
+            # Neither call may raise -- this is the exact hazard the
+            # reviewer reported ([True, WorkflowStateError(...)]).
+            assert not isinstance(advance_result, BaseException), advance_result
+            assert not isinstance(cancel_result, BaseException), cancel_result
+            assert len(counter) <= 1
+            assert instance.status in (
+                WorkflowStatus.COMPLETED,
+                WorkflowStatus.CANCELLED,
+            )
+            if instance.status == WorkflowStatus.COMPLETED:
+                # advance_workflow won the lock race and ran the step first.
+                assert cancel_result is False
+                assert len(counter) == 1
+            else:
+                # cancel_workflow won the lock race before the step ran.
+                assert cancel_result is True
+                assert len(counter) == 0
+
+
 class TestFloatTimeoutSecondsEndToEnd:
     """F7 regression: a sub-second workflow_timeout must report its real
     float value (e.g. 0.5) in the raised WorkflowTimeoutError, not `0` from

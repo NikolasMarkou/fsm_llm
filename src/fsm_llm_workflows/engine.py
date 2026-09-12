@@ -841,6 +841,28 @@ class WorkflowEngine:
         # F4: see advance_workflow's comment -- same per-instance lock,
         # held across the status mutation and resource cleanup.
         async with self._get_instance_lock(instance_id):
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-015
+            # Do NOT call update_status(CANCELLED, ...) unconditionally here.
+            # Since F4/D-003, this lock can be won only AFTER a concurrent
+            # in-flight step already finished and committed a terminal status
+            # (e.g. COMPLETED) for this same instance -- the step's own
+            # coroutine held the lock first and released it on completion,
+            # and this cancel_workflow call was simply waiting its turn.
+            # update_status(CANCELLED) on an already-terminal instance raises
+            # WorkflowStateError (terminal states map to an empty transition
+            # set in _VALID_STATUS_TRANSITIONS), which would propagate out of
+            # this `-> bool` API instead of the plain False it returns for
+            # every other "nothing to cancel" case (see the missing-instance
+            # early return above). Treat "cancel a workflow that already
+            # finished/failed/was cancelled by the time this call got the
+            # lock" as a benign no-op, mirroring D-005's terminal guard on
+            # _handle_step_exception. See decisions.md D-015.
+            if instance.is_terminal():
+                logger.debug(
+                    f"Instance {instance_id} already terminal "
+                    f"({instance.status.value}); cancel_workflow is a no-op"
+                )
+                return False
             instance.update_status(WorkflowStatus.CANCELLED)
             instance.context[_KEY_CANCELLATION_REASON] = reason
 
