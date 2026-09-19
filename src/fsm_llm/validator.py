@@ -413,6 +413,13 @@ class FSMValidator:
         stricter than `API.from_file`.
         """
         for state_id, state in self.states.items():
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-011
+            # Do NOT revert this (and the sibling `conditions` /
+            # `requires_context_keys` reads below) to `.get(k, [])`: pydantic
+            # `model_dump()` writes an explicit `None` for an absent Optional
+            # list, `.get(k, [])` then returns `None`, and the validator
+            # reports a dumped FSM INVALID that `API.from_file` loads fine.
+            # See decisions.md D-011.
             required_keys = state.get("required_context_keys") or []
 
             if not required_keys:

@@ -1489,6 +1489,13 @@ class MessagePipeline:
         # ground the value (LV-01: dict-wrapped junk came back with low/zero
         # confidence); treat it as "not extracted" regardless of the configured
         # threshold (which defaults can leave at 0.0). decisions.md D-002.
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-016
+        # Do NOT make this threshold-driven (`confidence <= threshold`): with
+        # the default threshold 0.0 it is the same rule, and an author-set
+        # threshold above 0 already rejects 0.0 below. Do NOT delete it either:
+        # it is what rejects LV-01 dict junk that comes back at confidence 0.
+        # Known cliff: a correct value the model scored exactly 0 is dropped
+        # while 0.05 is kept. See decisions.md D-016.
         if response.confidence == 0.0:
             return FieldExtractionResponse(
                 field_name=response.field_name,

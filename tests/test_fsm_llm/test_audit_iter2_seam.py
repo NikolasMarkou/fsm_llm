@@ -1954,3 +1954,55 @@ class TestValidationRulesAreTypedAtLoad:
     def test_a_set_of_allowed_values_is_accepted_by_the_model(self):
         # a set is not JSON-serialisable, so it can only arrive programmatically
         assert _config({"allowed_values": {"a", "b"}}).validation_rules
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 18 / LV2-05: accepted CF-02 x CF-04 stall pin, and anchor hygiene
+# ══════════════════════════════════════════════════════════════
+
+
+class TestBelowThresholdClassifierStallIsPinned:
+    """Accepted behaviour (iteration 3 owns the log line): a classifier below
+    its threshold on a gated key leaves the key unset, the gated transition
+    does not fire and no transition handler runs. Pins the stall so a later
+    change is a decision, not an accident."""
+
+    def _run(self, confidence: float):
+        with _ClassBulkProv(_classified_bulk_fsm(), "buy", confidence) as p:
+            fired: list[str] = []
+            for timing in (HandlerTiming.PRE_TRANSITION, HandlerTiming.POST_TRANSITION):
+                p.api.register_handler(
+                    p.api.create_handler(f"spy_{timing.name}")
+                    .at(timing)
+                    .do(lambda ctx, t=timing: fired.append(t.name) or {})
+                )
+            data = p.say("hmm maybe something", bulk={"intent": "buy"})
+            return data, p.api.get_current_state(p.cid), fired
+
+    def test_below_threshold_leaves_key_unset_state_put_and_no_handler(self):
+        data, state, fired = self._run(0.2)
+        assert "intent" not in data
+        assert state == "triage"
+        assert fired == []
+
+    def test_above_threshold_fires_the_transition_and_its_handlers(self):
+        """Vacuity guard: the spies do observe a real transition."""
+        data, state, fired = self._run(0.95)
+        assert data.get("intent") == "buy"
+        assert state == "shop"
+        assert fired == ["PRE_TRANSITION", "POST_TRANSITION"]
+
+
+class TestDecisionAnchorsArePlacedAndQualified:
+    _PLAN = "plan-2026-09-19T175721-21cd7f8e"
+
+    @pytest.mark.parametrize(
+        ("module", "decision"),
+        [("fsm_llm.pipeline", "D-016"), ("fsm_llm.validator", "D-011")],
+    )
+    def test_qualified_anchor_present(self, module, decision):
+        import importlib
+        import inspect
+
+        src = inspect.getsource(importlib.import_module(module))
+        assert f"# DECISION {self._PLAN}/{decision}" in src
