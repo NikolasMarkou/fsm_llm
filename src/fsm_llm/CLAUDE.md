@@ -26,7 +26,7 @@ fsm_llm/
 ├── runner.py               # Interactive CLI conversation runner
 ├── validator.py            # FSMValidator.validate() + validate_fsm_from_file()
 ├── visualizer.py           # visualize_fsm_ascii() + visualize_fsm_from_file() (full/compact/minimal styles)
-├── utilities.py            # extract_json_from_text(), load_fsm_definition(), load_fsm_from_file()
+├── utilities.py            # extract_json_from_text() (dict | None; non-object JSON -> None), load_fsm_definition(), load_fsm_from_file()
 ├── constants.py            # DEFAULT_LLM_MODEL, security patterns, INTERNAL_KEY_PREFIXES, ALLOWED_JSONLOGIC_OPERATIONS
 ├── session.py              # SessionStore ABC + FileSessionStore -- file-based session persistence with atomic writes
 ├── logging.py              # Loguru setup, enable_debug_logging(), disable_warnings()
@@ -47,10 +47,14 @@ fsm_llm/
   - Management: `update_context(conv_id, data)`, `cleanup_stale_conversations()`, `get_llm_interface()`, `close()`
 - **FSMManager** (`fsm.py`) -- Orchestration with per-conversation thread locks, LRU FSM cache (max 64)
   - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `resolve_state_definition(instance)`
+  - ERROR-timing handlers fire on `FSMError` (e.g. `LLMResponseError`) and on the streaming path via `_fire_error_handlers`; the `FSMError` is still re-raised unwrapped. KeyboardInterrupt/SystemExit/GeneratorExit run no handlers
 - **MessagePipeline** (`pipeline.py`) -- 2-pass engine
   - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition
   - Pass 2: response generation from new state -- skipped entirely when the state's `response_instructions` is empty (no response LLM call; used for intermediate agent states in tool-use loops)
   - `process_message(instance, conv_id, msg)`, `generate_initial_response(instance, conv_id)`
+  - Streaming (`process_message_stream`) uses a plain-text Pass-2 prompt (`build_response_prompt(..., plain_text_response=True)`) unless the state carries `_output_response_format`, so yielded tokens and stored history have no `{"message","reasoning"}` envelope
+  - `context_scope.read_keys` is enforced on the context shown in the Pass-2 prompt (turn, stream and greeting), not only on `request.context`
+  - A classifier error or fallback intent in `_resolve_ambiguous_transition` returns `None` (a stay, not a transition); the `Classifier` inherits `api_key`/`api_base`/`timeout` from the `LiteLLMInterface`
 - **HandlerSystem** (`handlers.py`) -- Event-driven hook execution
   - `register_handler(handler)`, `execute_handlers(timing, current_state, target_state, context, updated_keys)` → dict
   - Error modes: "continue" (skip failed) | "raise"
@@ -97,7 +101,7 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/  # 643 tests
+pytest tests/test_fsm_llm/  # 1,476 tests
 ```
 
 - Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`

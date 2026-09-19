@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed -- core (`fsm_llm`) audit remediation (plan-2026-09-19-21cd7f8e, iteration 1)
+
+Each fix was reproduced RED first and pinned in `tests/test_fsm_llm/test_audit_iter1_seam.py`
+(plus updated tests where a superseded contract was encoded). Decision ids refer to
+that plan's `decisions.md`.
+
+- **LV-01, typed field-extraction schema (D-001, D-002).** On Ollama models the
+  per-field extraction `response_format` now types `value` per `field_type`
+  (str `[string,null]`, int/float `[number,string,null]`, bool `[boolean,string,null]`,
+  list/dict/any analogous) instead of `"value": {}`, which made the model return
+  dict-wrapped junk. `_coerce_str` and `_coerce_bool` now raise on `dict`/`list`
+  input, so a str/bool field no longer stores the repr of a container as a valid
+  value (it fails extraction instead). Supersedes the D-018 "never raise" clause of
+  plan-2026-07-18T051819-80b0bd4d for those two coercers. A `confidence == 0.0`
+  extraction is no longer stored. **Behavior change**: `field_type="any"` on the
+  Ollama path can no longer yield an object; declare `field_type="dict"` for that.
+- **LV-04, plain-text streaming prompt (D-003).** `converse_stream` builds the
+  Pass-2 prompt with a plain-text response-format section
+  (`build_response_prompt(..., plain_text_response=True)`), so streamed tokens and
+  stored history no longer carry the `{"message","reasoning"}` envelope. The sync
+  path and terminal states with an output format keep the JSON prompt. **Behavior
+  change**: sync and stream Pass-2 prompts now differ.
+- **LV-03, bulk correction overwrite (D-004).** A later-turn correction returned by
+  the bulk extraction now overwrites an already-set key when the key is covered by
+  one of the state's own field configs, was not extracted this turn, is non-null and
+  differs, and the FSM is not agent-managed. Instruction-only keys and agent FSMs
+  keep skip-if-set. **Behavior change**: on non-agent FSMs a handler-set value for a
+  config-covered key can be overwritten by a bulk LLM value.
+- **CF-05, ERROR handlers (D-009).** `HandlerTiming.ERROR` handlers now fire on
+  `FSMError` (including `LLMResponseError`, the LLM-outage case) and on the streaming
+  path, via one `FSMManager._fire_error_handlers`. The `FSMError` is still re-raised
+  unwrapped; `KeyboardInterrupt`/`SystemExit`/`GeneratorExit` still run no handlers.
+  **Behavior change**: a critical ERROR handler failure now replaces the `FSMError`
+  as the raised exception.
+- **CF-01, context scope enforced in prompts (D-005).** `context_scope.read_keys` is
+  now applied to the context shown in the Pass-2 prompt on the turn, stream and
+  greeting paths (`build_response_prompt(..., context=...)`); it previously only
+  filtered `request.context`, which the LLM never read. Unscoped states are
+  byte-identical.
+- **CF-02, classification-owned keys (D-006).** Keys owned by a
+  `classification_extractions` entry are no longer also auto-minted as plain
+  `requires_context_keys` extraction configs, so a below-threshold classification can
+  no longer be bypassed by the plain extractor and one LLM call per turn is saved.
+- **CF-04, classifier stay is not a transition (D-007).** A classifier error or the
+  fallback intent no longer counts as a transition to the current state
+  (`_resolve_ambiguous_transition` returns `None`): no PRE/POST_TRANSITION handlers,
+  no post-transition re-extraction. Declared self-loops are unchanged.
+- **CF-03, classifier connection (D-008).** The `Classifier` now inherits
+  `api_key`, `api_base`, other litellm kwargs and `timeout` from the
+  `LiteLLMInterface` (`_classifier_connection_kwargs`), so proxy and self-hosted
+  users' classification goes to their endpoint. A per-config `model` on a different
+  model does not inherit the key.
+- **DH-01 / DH-19, linear-time parsing (D-010).** `extract_json_from_text` scans
+  code fences with `str.find` (was a cubic regex: 5000 spaces took about 80 s) and
+  `strip_think_and_fences` strips `<think>` blocks in one linear pass (was quadratic
+  on unclosed tags).
+- **DH-08 / LS-05, dict-or-None JSON (D-010).** `extract_json_from_text` now honours
+  its `dict | None` annotation: valid non-object JSON (`42`, `[1,2]`, `true`, `"hi"`)
+  returns `None` instead of the raw value. `Classifier.classify` raises
+  `ClassificationResponseError` (was `AttributeError`) on non-dict JSON, and
+  `LiteLLMInterface.extract_bulk_data` returns an empty response on non-dict JSON and
+  tries one `extract_json_from_text` recovery parse when `json.loads` fails.
+  **Behavior change**: a caller that relied on a list being returned now gets `None`.
+- **DH-02 / DH-03, null-safe validator and visualizer (D-011).** `validator.py` and
+  `visualizer.py` use `.get(k) or []` for `conditions`, `requires_context_keys` and
+  `required_context_keys`, so a `model_dump()`-ed FSM (explicit `null` Optionals)
+  validates and renders. Sibling sites in `fsm_llm_monitor/bridge.py` and
+  `fsm_llm_agents/meta_builders.py` got the same treatment.
+
 ### Added — new package: `fsm_llm_harness` (extra: `pip install fsm-llm[harness]`)
 
 An FSM-LLM-native emulation of the iterative-planner protocol: a 6-state
