@@ -1599,6 +1599,37 @@ class MessagePipeline:
     # Classification-based extraction
     # ----------------------------------------------------------
 
+    def _classifier_connection_kwargs(
+        self, config_model: str | None = None
+    ) -> dict[str, Any]:
+        """Connection settings the classifier must inherit from the LLM interface.
+
+        Contract: ``config_model`` is a per-config model override (or ``None``).
+        Returns ``dict(interface.kwargs)`` (``api_key``, ``api_base``, ...) plus
+        ``timeout``, to be spread into ``Classifier(...)``. Never raises: an
+        interface lacking the attributes (``Mock(spec=LLMInterface)``, a custom
+        interface) contributes ``{}``. Returns ``{}`` when ``config_model``
+        differs from the interface's model, so a key is never sent to another
+        provider. The key is never logged.
+        """
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-008: guarded getattr, NOT
+        # passing the interface to Classifier (it calls litellm.completion
+        # directly) and NOT unconditional attribute access (the pipeline is
+        # LLM-interface-agnostic; a bare interface must yield {}). Do NOT
+        # inherit for a config `model` that differs from the interface's: that
+        # would send the interface's api_key/api_base to a different provider.
+        llm = self.llm_interface
+        if config_model and config_model != getattr(llm, "model", None):
+            return {}
+        connection: dict[str, Any] = {}
+        kwargs = getattr(llm, "kwargs", None)
+        if isinstance(kwargs, dict):
+            connection.update(kwargs)
+        timeout = getattr(llm, "timeout", None)
+        if isinstance(timeout, int | float) and not isinstance(timeout, bool):
+            connection["timeout"] = timeout
+        return connection
+
     def _execute_classification_extractions(
         self,
         current_state: State,
@@ -1665,6 +1696,7 @@ class MessagePipeline:
                     schema=schema,
                     model=effective_model,
                     config=prompt_config,
+                    **self._classifier_connection_kwargs(config.model),
                 )
 
                 result: ClassificationResult = classifier.classify(user_message)
@@ -1780,6 +1812,7 @@ class MessagePipeline:
         classifier = Classifier(
             schema=schema,
             model=model,
+            **self._classifier_connection_kwargs(),
         )
 
         try:

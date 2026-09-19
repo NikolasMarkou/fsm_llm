@@ -1174,3 +1174,130 @@ class TestStayIsNotATransition:
         assert h.run() == "hub"
         assert (h.pre, h.post) == (1, 1)
         assert "<transition_info>" in h.response_prompts[-1]
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 9 / CF-03: the classifier inherits endpoint, key and timeout
+# ══════════════════════════════════════════════════════════════
+
+
+class _ConnectionHarness:
+    """`API.converse` with the REAL Classifier and a spying
+    ``fsm_llm.classification.completion``; records every classifier call's
+    kwargs. The Pass-1/Pass-2 LLM (``fsm_llm.llm.completion``) is faked."""
+
+    def __init__(self, fsm: dict, intent: str, **api_kwargs):
+        self.fsm = fsm
+        self.intent = intent
+        self.api_kwargs = api_kwargs
+        self.classifier_calls: list[dict] = []
+
+    def _classifier_completion(self, **kwargs):
+        self.classifier_calls.append(kwargs)
+        return _fake_response(
+            json.dumps({"reasoning": "r", "intent": self.intent, "confidence": 0.95})
+        )
+
+    def _llm_completion(self, **kwargs):
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def run(self):
+        with (
+            patch("fsm_llm.llm.completion", side_effect=self._llm_completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+            patch(
+                "fsm_llm.classification.completion",
+                side_effect=self._classifier_completion,
+            ),
+            patch(
+                "fsm_llm.classification.get_supported_openai_params",
+                return_value=[],
+            ),
+        ):
+            api = API.from_definition(self.fsm, **self.api_kwargs)
+            cid, _ = api.start_conversation()
+            api.converse("I would like to buy a phone", cid)
+            return api.get_data(cid), api.get_current_state(cid)
+
+
+_PROXY = {
+    "model": "gpt-4o",
+    "api_key": "sk-proxy-secret",
+    "api_base": "http://proxy:4000",
+    "timeout": 7,
+}
+
+
+def _classified_fsm_with_model(model: str | None) -> dict:
+    fsm = _classified_fsm()
+    if model is not None:
+        fsm["states"]["triage"]["classification_extractions"][0]["model"] = model
+    return fsm
+
+
+class TestClassifierInheritsConnection:
+    def test_classification_extraction_gets_key_base_and_timeout(self):
+        h = _ConnectionHarness(_classified_fsm(), "buy", **_PROXY)
+        _, state = h.run()
+        assert state == "shop"  # vacuity guard: the real classifier ran
+        assert len(h.classifier_calls) == 1
+        call = h.classifier_calls[0]
+        assert call["api_key"] == "sk-proxy-secret"
+        assert call["api_base"] == "http://proxy:4000"
+        assert call["timeout"] == 7
+        assert call["model"] == "gpt-4o"
+
+    def test_ambiguous_transition_resolution_gets_key_base_and_timeout(self):
+        h = _ConnectionHarness(_ambiguous_fsm(), "billing", **_PROXY)
+        _, state = h.run()
+        assert state == "billing"  # vacuity guard: classifier chose the target
+        assert len(h.classifier_calls) == 1
+        call = h.classifier_calls[0]
+        assert call["api_key"] == "sk-proxy-secret"
+        assert call["api_base"] == "http://proxy:4000"
+        assert call["timeout"] == 7
+
+    def test_default_timeout_still_bounded_without_explicit_timeout(self):
+        h = _ConnectionHarness(_classified_fsm(), "buy", model="gpt-4o", api_key="k")
+        h.run()
+        # LiteLLMInterface's own default (120.0) is inherited, never unbounded
+        assert h.classifier_calls[0]["timeout"] == 120.0
+
+    def test_same_model_config_override_keeps_connection(self):
+        h = _ConnectionHarness(_classified_fsm_with_model("gpt-4o"), "buy", **_PROXY)
+        h.run()
+        assert h.classifier_calls[0]["api_key"] == "sk-proxy-secret"
+
+    def test_other_provider_config_model_does_not_receive_the_key(self):
+        h = _ConnectionHarness(
+            _classified_fsm_with_model("anthropic/claude-3-haiku"), "buy", **_PROXY
+        )
+        h.run()
+        call = h.classifier_calls[0]
+        assert call["model"] == "anthropic/claude-3-haiku"
+        assert "api_key" not in call
+        assert "api_base" not in call
+
+    def test_helper_tolerates_interfaces_without_attributes(self):
+        from fsm_llm.llm import LLMInterface
+        from fsm_llm.pipeline import MessagePipeline
+
+        def _helper(llm, model=None):
+            pipe = MessagePipeline.__new__(MessagePipeline)
+            pipe.llm_interface = llm
+            return pipe._classifier_connection_kwargs(model)
+
+        class _Bare:
+            pass
+
+        assert _helper(_Bare()) == {}
+        assert _helper(MagicMock(spec=LLMInterface)) == {}
+        # a MagicMock (non-dict kwargs, non-number timeout) contributes nothing
+        assert _helper(MagicMock()) == {}
+        # bool is not a timeout
+        bare = _Bare()
+        bare.timeout = True  # type: ignore[attr-defined]
+        assert _helper(bare) == {}
