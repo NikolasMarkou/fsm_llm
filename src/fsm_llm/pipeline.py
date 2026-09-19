@@ -1277,8 +1277,22 @@ class MessagePipeline:
                 existing = instance.context.data
                 agent_managed = CONTEXT_KEY_AGENT_TRACE in existing
                 prov = instance.context.metadata.get(_PROVENANCE_KEY, {})
+                # DECISION plan-2026-09-19T175721-21cd7f8e/D-019: a
+                # classification-owned key absent because the classifier was
+                # below threshold must stay absent (ra02: bulk "buy" bypassed
+                # the 0.7 gate). Do NOT apply this to agent FSMs: with
+                # use_classification=True `tool_name` is classification-owned
+                # AND relies on this fill when the classifier declines.
+                owned = (
+                    set()
+                    if agent_managed
+                    else {
+                        c.field_name
+                        for c in (current_state.classification_extractions or [])
+                    }
+                )
                 for key, value in bulk_data.items():
-                    if value is None or key in extracted_data:
+                    if value is None or key in extracted_data or key in owned:
                         continue
                     cfg = cfg_by_name.get(key)
                     if cfg is not None:

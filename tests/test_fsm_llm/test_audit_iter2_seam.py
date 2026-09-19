@@ -1249,3 +1249,89 @@ class TestBulkExtractionIsSanitizedAndFiltered:
         assert data.get("topic") == "cats"
         assert data.get("nickname") == "bo"
         assert data.get("agent_trace") == []
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 10 / D-019: classification ownership holds on the bulk pass
+# ══════════════════════════════════════════════════════════════
+
+
+class _ClassBulkProv(_BulkProv):
+    """``_BulkProv`` with the REAL Classifier over a scripted
+    ``fsm_llm.classification.completion`` (fixed intent and confidence)."""
+
+    def __init__(
+        self,
+        fsm: dict,
+        intent: str,
+        confidence: float,
+        initial_context: dict | None = None,
+    ):
+        super().__init__(fsm, initial_context)
+        self.intent, self.confidence = intent, confidence
+
+    def _classifier_completion(self, **kwargs):
+        return _fake_response(
+            json.dumps(
+                {
+                    "reasoning": "r",
+                    "intent": self.intent,
+                    "confidence": self.confidence,
+                    "entities": {},
+                }
+            )
+        )
+
+    def __enter__(self):
+        self._stack.enter_context(
+            patch(
+                "fsm_llm.classification.completion",
+                side_effect=self._classifier_completion,
+            )
+        )
+        self._stack.enter_context(
+            patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
+        )
+        return super().__enter__()
+
+
+def _classified_bulk_fsm() -> dict:
+    """ra02: `intent` is classification-owned (threshold 0.7) and gates the only
+    transition; the state also has `extraction_instructions` (bulk pass runs)."""
+    fsm = _classified_fsm()
+    fsm["states"]["triage"]["extraction_instructions"] = (
+        "Extract the intent the user expresses and any topic."
+    )
+    return fsm
+
+
+class TestBulkPassRespectsClassificationOwnership:
+    def test_bulk_cannot_fill_a_classifier_owned_key_below_threshold(self):
+        with _ClassBulkProv(_classified_bulk_fsm(), "buy", 0.2) as p:
+            data = p.say("hmm maybe something", bulk={"intent": "buy"})
+            state = p.api.get_current_state(p.cid)
+        assert "intent" not in data
+        assert state == "triage"
+
+    def test_ordinary_bulk_keys_still_added_next_to_a_classifier_owned_key(self):
+        with _ClassBulkProv(_classified_bulk_fsm(), "buy", 0.2) as p:
+            data = p.say("hmm maybe something", bulk={"intent": "buy", "topic": "cats"})
+        assert data.get("topic") == "cats"
+        assert "intent" not in data
+
+    def test_classifier_above_threshold_still_transitions(self):
+        """Vacuity guard: the classification path itself is intact."""
+        with _ClassBulkProv(_classified_bulk_fsm(), "buy", 0.95) as p:
+            data = p.say("I want to buy a phone", bulk={"topic": "phones"})
+            state = p.api.get_current_state(p.cid)
+        assert data.get("intent") == "buy"
+        assert state == "shop"
+
+    def test_agent_fsm_keeps_the_bulk_fill_for_a_classification_owned_key(self):
+        """Agent FSMs (`use_classification=True`) rely on the bulk fill when the
+        classifier is below threshold; the `agent_trace` marker keeps it."""
+        with _ClassBulkProv(
+            _classified_bulk_fsm(), "buy", 0.2, initial_context={"agent_trace": []}
+        ) as p:
+            data = p.say("hmm maybe something", bulk={"intent": "buy"})
+        assert data.get("intent") == "buy"
