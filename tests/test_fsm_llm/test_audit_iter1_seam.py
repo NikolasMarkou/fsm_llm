@@ -557,3 +557,196 @@ class TestBulkCorrectionOverwrite:
             [(None, {"favorite_color": "red"})], presets={"favorite_color": "blue"}
         )
         assert snaps[0][0]["favorite_color"] == "red"
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 5 / CF-05: ERROR handlers fire for FSMError and on the stream (D-009)
+# ══════════════════════════════════════════════════════════════
+
+
+class _ErrorHandlerHarness:
+    """`API` over a completion that fails on demand; records ERROR handler calls.
+
+    ``fail`` is one of: ``"sync"`` (the non-stream call raises), ``"first"``
+    (the stream call raises before any chunk), ``"mid"`` (the stream yields one
+    chunk then raises), ``None`` (healthy).
+    """
+
+    def __init__(self, fail: str | None, exc: BaseException | None = None):
+        self._mode = fail
+        self.fail: str | None = None  # armed by ``start`` (greeting must succeed)
+        self.exc = exc if exc is not None else RuntimeError("provider down")
+        self.error_ctxs: list[dict] = []
+        self.handler_raises: BaseException | None = None
+
+    def _completion(self, **kwargs):
+        if kwargs.get("stream"):
+            if self.fail == "first":
+                raise self.exc
+            if self.fail == "mid":
+
+                def _gen():
+                    yield _stream_chunk("partial")
+                    raise self.exc
+
+                return _gen()
+            return iter([_stream_chunk("ok")])
+        if self.fail == "sync":
+            raise self.exc
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def _on_error(self, ctx):
+        self.error_ctxs.append(dict(ctx))
+        if self.handler_raises is not None:
+            raise self.handler_raises
+        return {}
+
+    def start(self, api):
+        """Start the conversation on a healthy LLM, then arm the failure."""
+        cid, _ = api.start_conversation()
+        self.fail = self._mode
+        return cid
+
+    def make_api(self):
+        from fsm_llm.handlers import HandlerTiming
+
+        api = API.from_definition(_greeter_fsm(False), model="gpt-4o", api_key="test")
+        builder = api.create_handler("err_spy").at(HandlerTiming.ERROR)
+        if self.handler_raises is not None:
+            builder = builder.critical()
+        api.register_handler(builder.do(self._on_error))
+        return api
+
+    def patches(self):
+        return (
+            patch("fsm_llm.llm.completion", side_effect=self._completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        )
+
+
+class TestErrorHandlersFireForFSMErrorAndStream:
+    """ERROR handlers run for LLMResponseError and on the stream path only."""
+
+    def test_converse_llm_outage_fires_error_handler_once_and_reraises_fsmerror(self):
+        from fsm_llm.definitions import FSMError, LLMResponseError
+
+        h = _ErrorHandlerHarness("sync")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(FSMError) as ei:
+                api.converse("hi", cid)
+        assert isinstance(ei.value, LLMResponseError)
+        assert len(h.error_ctxs) == 1
+        assert "provider down" in h.error_ctxs[0]["_error"]
+        assert "_traceback" in h.error_ctxs[0]
+
+    def test_converse_failure_still_rolls_back_the_user_message(self):
+        from fsm_llm.definitions import FSMError
+
+        h = _ErrorHandlerHarness("sync")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            before = len(api.get_conversation_history(cid))
+            with pytest.raises(FSMError):
+                api.converse("hi", cid)
+            assert len(api.get_conversation_history(cid)) == before
+
+    def test_critical_handler_failure_replaces_fsmerror_with_original_as_cause(self):
+        from fsm_llm.definitions import LLMResponseError
+        from fsm_llm.handlers import HandlerExecutionError
+
+        h = _ErrorHandlerHarness("sync")
+        h.handler_raises = ValueError("handler exploded")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(HandlerExecutionError) as ei:
+                api.converse("hi", cid)
+        assert "handler exploded" in str(ei.value)
+        assert isinstance(ei.value.__cause__, LLMResponseError)
+
+    def test_stream_failure_at_first_token_fires_error_handler(self):
+        from fsm_llm.definitions import FSMError
+
+        h = _ErrorHandlerHarness("first")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(FSMError):
+                list(api.converse_stream("hi", cid))
+        assert len(h.error_ctxs) == 1
+        assert "provider down" in h.error_ctxs[0]["_error"]
+
+    def test_stream_failure_mid_stream_fires_error_handler(self):
+        h = _ErrorHandlerHarness("mid")
+        p1, p2 = h.patches()
+        got: list[str] = []
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            try:
+                for tok in api.converse_stream("hi", cid):
+                    got.append(tok)
+            except Exception:
+                pass
+        assert got[:1] == ["partial"]
+        assert len(h.error_ctxs) == 1
+
+    def test_stream_critical_handler_failure_replaces_error_with_cause(self):
+        from fsm_llm.handlers import HandlerExecutionError
+
+        h = _ErrorHandlerHarness("first")
+        h.handler_raises = ValueError("handler exploded")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(HandlerExecutionError) as ei:
+                list(api.converse_stream("hi", cid))
+        assert ei.value.__cause__ is not None
+
+    @pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit])
+    def test_interrupts_fire_no_error_handler_sync_and_stream(self, exc_type):
+        h = _ErrorHandlerHarness("sync", exc=exc_type())
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(exc_type):
+                api.converse("hi", cid)
+            h.fail = "first"
+            with pytest.raises(exc_type):
+                list(api.converse_stream("hi", cid))
+        assert h.error_ctxs == []
+
+    def test_generator_close_fires_no_error_handler_and_releases_lock(self):
+        h = _ErrorHandlerHarness(None)
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            gen = api.converse_stream("hi", cid)
+            next(gen)
+            gen.close()
+            # lock released: a following turn is accepted, not "already processed"
+            assert api.converse("again", cid)
+        assert h.error_ctxs == []
+
+    def test_healthy_turns_fire_no_error_handler(self):
+        h = _ErrorHandlerHarness(None)
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            api.converse("hi", cid)
+            list(api.converse_stream("hi again", cid))
+        assert h.error_ctxs == []

@@ -489,8 +489,13 @@ class FSMManager:
                     yield from self._pipeline.process_stream(
                         instance, message, conversation_id
                     )
-                except FSMError:
+                except FSMError as e:
                     self._rollback_user_message(instance, message, log)
+                    # DECISION plan-2026-09-19T175721-21cd7f8e/D-009
+                    # ERROR handlers run here too (they used to never run on the
+                    # stream path). GeneratorExit / KeyboardInterrupt / SystemExit
+                    # are separate arms below and deliberately fire nothing.
+                    self._fire_error_handlers(instance, conversation_id, e, log)
                     raise
                 except GeneratorExit:
                     # Consumer abandoned the iterator before Pass 2 finished
@@ -509,6 +514,7 @@ class FSMManager:
                     raise
                 except Exception as e:
                     self._rollback_user_message(instance, message, log)
+                    self._fire_error_handlers(instance, conversation_id, e, log)
                     raise FSMError(f"Failed to process message: {e!s}") from e
             finally:
                 conv_lock.release()
@@ -533,8 +539,15 @@ class FSMManager:
         try:
             return self._pipeline.process(instance, message, conversation_id)
 
-        except FSMError:
+        except FSMError as e:
             self._rollback_user_message(instance, message, log)
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-009
+            # An FSMError (notably LLMResponseError, the wrapped provider outage)
+            # fires the ERROR-timing handlers like any other failure, then is
+            # re-raised UNWRAPPED. Do NOT restore the bare rollback-and-raise: it
+            # made ERROR handlers unreachable for the main real failure while
+            # docs/handlers.md promises "ERROR -- On any exception".
+            self._fire_error_handlers(instance, conversation_id, e, log)
             raise
         except (KeyboardInterrupt, SystemExit):
             # DECISION plan-2026-07-18T162030-a02151fe/D-014 [STALE]
@@ -553,47 +566,66 @@ class FSMManager:
         except Exception as e:
             log.error(f"Error processing message: {e!s}\n{traceback.format_exc()}")
             self._rollback_user_message(instance, message, log)
-
-            try:
-                self._pipeline.execute_handlers(
-                    instance,
-                    HandlerTiming.ERROR,
-                    conversation_id,
-                    current_state=instance.current_state,
-                    error_context={
-                        "_error": str(e),
-                        "_traceback": traceback.format_exc(),
-                    },
-                )
-            except Exception as handler_err:
-                # DECISION plan-2026-07-20T040150-876e7164/D-009 [STALE]
-                # The HANDLER exception wins; the failure being unwound becomes
-                # its `__cause__`. This is the same shape (and the same rule) as
-                # `_cleanup_after_failed_start` 150 lines above, which chains
-                # `raise cleanup_err from original` for a structurally identical
-                # unwind-time handler pass.
-                # Do NOT restore the `log.warning(...)`-and-continue swallow that
-                # used to be here. Its stated justification was that promoting the
-                # reporter's own failure destroys the diagnosis of the failure
-                # being reported — that is FALSE for `raise X from Y`, which keeps
-                # BOTH: `handler_err` reaches the caller (a `critical=True`
-                # handler always raising is a package-wide contract) and `e`
-                # survives as `handler_err.__cause__`, printed in any default
-                # traceback. The `log.error` below states both failures explicitly
-                # as well, because a traceback is not guaranteed to reach the
-                # operator.
-                # Do NOT narrow this to `getattr(handler, "critical", False)`:
-                # whatever escapes `execute_handlers` has ALREADY passed through
-                # the handler system's swallow decision (a non-critical handler
-                # under "continue" never reaches here).
-                log.error(
-                    "ERROR-timing handler failed while unwinding a failed "
-                    f"process_message: {handler_err} "
-                    f"(original failure being unwound: {e!s})"
-                )
-                raise handler_err from e
-
+            self._fire_error_handlers(instance, conversation_id, e, log)
             raise FSMError(f"Failed to process message: {e!s}") from e
+
+    def _fire_error_handlers(
+        self,
+        instance: FSMInstance,
+        conversation_id: str,
+        exc: BaseException,
+        log: Any,
+    ) -> None:
+        """Run the ERROR-timing handlers for ``exc`` (called from an ``except`` arm).
+
+        Contract: call only from inside an ``except Exception`` / ``except
+        FSMError`` arm, after ``_rollback_user_message``, on the thread that
+        already holds this conversation's ``conv_lock``. Takes no lock of its own
+        (``HandlerSystem`` does its own locking), so the ``_lock -> conv_lock``
+        order is untouched. Never call it for ``KeyboardInterrupt`` /
+        ``SystemExit`` / ``GeneratorExit``. Returns ``None`` when the handlers
+        ran (or none are registered); if an ERROR handler raises, that exception
+        is raised chained ``from exc`` and REPLACES ``exc`` as what the caller
+        sees. The caller re-raises ``exc`` itself when this returns.
+        """
+        try:
+            self._pipeline.execute_handlers(
+                instance,
+                HandlerTiming.ERROR,
+                conversation_id,
+                current_state=instance.current_state,
+                error_context={
+                    "_error": str(exc),
+                    "_traceback": traceback.format_exc(),
+                },
+            )
+        except Exception as handler_err:
+            # DECISION plan-2026-07-20T040150-876e7164/D-009 [STALE]
+            # The HANDLER exception wins; the failure being unwound becomes
+            # its `__cause__`. This is the same shape (and the same rule) as
+            # `_cleanup_after_failed_start` 150 lines above, which chains
+            # `raise cleanup_err from original` for a structurally identical
+            # unwind-time handler pass.
+            # Do NOT restore the `log.warning(...)`-and-continue swallow that
+            # used to be here. Its stated justification was that promoting the
+            # reporter's own failure destroys the diagnosis of the failure
+            # being reported — that is FALSE for `raise X from Y`, which keeps
+            # BOTH: `handler_err` reaches the caller (a `critical=True`
+            # handler always raising is a package-wide contract) and `exc`
+            # survives as `handler_err.__cause__`, printed in any default
+            # traceback. The `log.error` below states both failures explicitly
+            # as well, because a traceback is not guaranteed to reach the
+            # operator.
+            # Do NOT narrow this to `getattr(handler, "critical", False)`:
+            # whatever escapes `execute_handlers` has ALREADY passed through
+            # the handler system's swallow decision (a non-critical handler
+            # under "continue" never reaches here).
+            log.error(
+                "ERROR-timing handler failed while unwinding a failed "
+                f"process_message: {handler_err} "
+                f"(original failure being unwound: {exc!s})"
+            )
+            raise handler_err from exc
 
     @staticmethod
     def _rollback_user_message(instance: FSMInstance, message: str, log: Any) -> None:
