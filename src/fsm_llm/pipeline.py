@@ -26,6 +26,7 @@ from .constants import (
     CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+    is_forbidden_context_entry,
 )
 from .context import clean_context_keys
 from .definitions import (
@@ -972,10 +973,13 @@ class MessagePipeline:
         """
         log = logger.bind(conversation_id=conversation_id)
 
+        safe_message = self.data_extraction_prompt_builder._sanitize_text_for_prompt(
+            user_message
+        )
         prompt = (
             f"Extract information from the user's message.\n\n"
             f"Instructions: {state.extraction_instructions}\n\n"
-            f"User message: {user_message}\n\n"
+            f"User message: {safe_message}\n\n"
             f'Respond with JSON: {{"extracted_data": {{"key": "value", ...}}, '
             f'"confidence": 0.95, "reasoning": "..."}}\n\n'
             f"Only include keys for information actually present in the "
@@ -1002,10 +1006,21 @@ class MessagePipeline:
             # Filter out None/empty values — extract_bulk_data returns the
             # extraction verbatim; this merge-time filtering is this
             # caller's own concern, not the LLM interface's.
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-019: this channel
+            # is steerable by user text, so it may never plant the agent
+            # marker or a secret-named key (both call sites read this
+            # return). Do NOT exempt declared names: a declared field has
+            # the per-field channel, and an exemption would re-open the
+            # no-config fallback. `is_admin`-style undeclared gate keys are
+            # NOT closed here (LV2-04, deferred).
             return {
                 k: v
                 for k, v in response.extracted_data.items()
-                if v is not None and v != "" and v != {}
+                if v is not None
+                and v != ""
+                and v != {}
+                and k != CONTEXT_KEY_AGENT_TRACE
+                and not is_forbidden_context_entry(k, v)
             }
         except Exception as e:
             log.warning(f"Bulk extraction fallback failed: {e}")
