@@ -242,6 +242,20 @@ def less(a: Any, b: Any, *args: Any) -> bool:
     return bool(result) and less(b, *args)
 
 
+def _numeric_equal(a: Any, b: Any) -> bool:
+    """True when both sides are ``float()``-able and equal (``1`` and ``"1.0"``).
+
+    Interface contract: ``a``/``b`` any values; never raises (an uncoercible
+    side is simply not numerically equal). Used only by ``<=``/``>=`` so they
+    agree with the numeric coercion ``<``/``>`` already apply (D-023);
+    ``soft_equals`` is deliberately untouched.
+    """
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return False
+
+
 def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
     """
     Implement the '<=' operator with type coercion and chaining support.
@@ -266,11 +280,11 @@ def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
         True
 
     Note:
-        Uses combination of less() and soft_equals() for evaluation.
+        Uses less(), soft_equals() and numeric equality (``1 <= "1.0"`` is True).
         Supports the same type coercion as the less() function.
     """
     # Check if a <= b (either a < b or a == b)
-    primary_result = less(a, b) or soft_equals(a, b)
+    primary_result = less(a, b) or soft_equals(a, b) or _numeric_equal(a, b)
 
     # If no additional args or primary comparison fails, return result
     if not args or not primary_result:
@@ -290,7 +304,7 @@ def greater(a: Any, b: Any, *args: Any) -> bool:
 
 def greater_or_equal(a: Any, b: Any, *args: Any) -> bool:
     """Implement '>=' with chaining support (a >= b >= c)."""
-    result = less(b, a) or soft_equals(a, b)
+    result = less(b, a) or soft_equals(a, b) or _numeric_equal(a, b)
     if not args or not result:
         return result
     return result and greater_or_equal(b, *args)

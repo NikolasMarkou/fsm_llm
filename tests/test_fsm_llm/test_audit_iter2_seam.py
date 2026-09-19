@@ -15,6 +15,7 @@ import pytest
 
 from fsm_llm import API, FileSessionStore
 from fsm_llm.definitions import BulkExtractionRequest, FieldExtractionRequest
+from fsm_llm.expressions import evaluate_logic
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.ollama import is_ollama_model
@@ -1822,3 +1823,58 @@ class TestBulkExtractionUncoercibleConfidence:
         assert out.confidence == 0.4
         out = _bulk('{"extracted_data": {"a": 1}, "confidence": 7}')
         assert out.confidence == 1.0
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 16 / DH-09: <= and >= agree with equality on numeric strings
+# ══════════════════════════════════════════════════════════════
+
+
+def _level_gate_fsm(op: str) -> dict:
+    fsm = _gate_fsm()
+    gate = fsm["states"]["gate"]
+    gate["required_context_keys"] = ["level"]
+    cond = gate["transitions"][0]["conditions"][0]
+    cond["requires_context_keys"] = ["level"]
+    cond["logic"] = (
+        {op: [{"var": "level"}, 2]} if op == ">=" else {op: [2, {"var": "level"}]}
+    )
+    return fsm
+
+
+class TestNumericStringInequalityAgreesWithEquality:
+    @pytest.mark.parametrize(
+        "logic",
+        [
+            {"<=": [1, "1.0"]},
+            {">=": ["2", 2]},
+            {"<=": ["1.0", 1]},
+            {">=": [2, "2.0"]},
+            {"<=": [1, "1.0", 2]},
+        ],
+    )
+    def test_numeric_string_equal_pair_satisfies_the_inclusive_operator(self, logic):
+        assert evaluate_logic(logic) is True
+
+    @pytest.mark.parametrize(
+        "logic",
+        [
+            {"<=": ["abc", 1]},
+            {">=": [None, 1]},
+            {"<=": [2, "1.0"]},
+            {">=": [1, "1.5"]},
+            {"<=": ["abc", "abd"]},
+        ],
+    )
+    def test_non_numeric_and_unequal_pairs_keep_their_old_result(self, logic):
+        expected = {"<=": ["abc", "abd"]} == logic
+        assert evaluate_logic(logic) is expected
+
+    def test_equality_operator_is_untouched(self):
+        assert evaluate_logic({"==": [1, "1.0"]}) is False
+
+    @pytest.mark.parametrize("op", [">=", "<="])
+    def test_transition_condition_fires_through_converse(self, op):
+        with _Prov(_level_gate_fsm(op)) as p:
+            p.turn(field={"level": "2.0"})
+            assert p.api.get_current_state(p.cid) == "admin"
