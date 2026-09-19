@@ -7,17 +7,22 @@ step; harness helpers are reused from the iteration-1 seam file.
 
 from __future__ import annotations
 
+import json
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
 
+from fsm_llm import API, FileSessionStore
 from fsm_llm.definitions import FieldExtractionRequest
+from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.ollama import is_ollama_model
 from tests.test_fsm_llm.test_audit_iter1_seam import (
     _ambiguous_fsm,
     _classified_fsm,
     _ConnectionHarness,
+    _correction_fsm,
     _fake_response,
 )
 
@@ -145,3 +150,365 @@ class TestClassifierIgnoresReservedInterfaceKwargs:
             "api_base": "b",
             "timeout": 5,
         }
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 3 / D-015: provenance-only overwrite + bulk-value coercion
+# ══════════════════════════════════════════════════════════════
+
+
+class _Prov:
+    """Scripted ``API`` session: per-field replies by field name, bulk reply dict.
+
+    ``field`` maps a field name to the value its per-field extractor returns
+    (absent name means "no value"); ``bulk`` is the bulk ``extracted_data``.
+    """
+
+    def __init__(self, fsm: dict, store=None):
+        self.fsm = fsm
+        self.store = store
+        self.field: dict = {}
+        self.bulk: dict = {}
+        self.context_updates: list[list[str]] = []
+        self._stack = ExitStack()
+
+    def _completion(self, **kwargs):
+        system = kwargs["messages"][0]["content"]
+        if '"extracted_data"' in system:
+            return _fake_response(
+                json.dumps({"extracted_data": self.bulk, "confidence": 0.9})
+            )
+        if kwargs.get("response_format") is not None:
+            for name, value in self.field.items():
+                if f"Extract the field '{name}'" in system:
+                    return _fake_response(
+                        json.dumps(
+                            {"field_name": name, "value": value, "confidence": 0.9}
+                        )
+                    )
+            return _fake_response(
+                json.dumps({"field_name": "x", "value": None, "confidence": 0.0})
+            )
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def __enter__(self):
+        self._stack.enter_context(
+            patch("fsm_llm.llm.completion", side_effect=self._completion)
+        )
+        self._stack.enter_context(
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            )
+        )
+        self.api = self.make_api()
+        self.cid, _ = self.api.start_conversation()
+        return self
+
+    def __exit__(self, *exc):
+        self._stack.close()
+
+    def make_api(self) -> API:
+        api = API.from_definition(
+            self.fsm, model="gpt-4o", api_key="test", session_store=self.store
+        )
+        api.register_handler(
+            api.create_handler("ctx_spy")
+            .at(HandlerTiming.CONTEXT_UPDATE)
+            .do(lambda ctx: self.context_updates.append(sorted(ctx.keys())) or {})
+        )
+        return api
+
+    def turn(self, field: dict | None = None, bulk: dict | None = None) -> dict:
+        self.field, self.bulk = field or {}, bulk or {}
+        self.api.converse("hello", self.cid)
+        return dict(self.api.get_data(self.cid))
+
+
+def _str_color_fsm() -> dict:
+    """repro2/repro3: `favorite_color` is a declared `str` config, `nickname`
+    is named only in `extraction_instructions`."""
+    fsm = _correction_fsm()
+    fsm["states"]["profile"]["field_extractions"] = [
+        {
+            "field_name": "favorite_color",
+            "field_type": "str",
+            "extraction_instructions": "the color",
+            "required": True,
+        }
+    ]
+    return fsm
+
+
+def _typed_fsm() -> dict:
+    """ra01: int and bool configs; a gate fires on ``years_old == 25`` (int)."""
+    return {
+        "name": "Typed",
+        "description": "typed drift seam",
+        "version": "4.1",
+        "initial_state": "s",
+        "persona": "x",
+        "states": {
+            "s": {
+                "id": "s",
+                "description": "d",
+                "purpose": "collect",
+                "extraction_instructions": "Extract years_old and is_subscribed.",
+                "field_extractions": [
+                    {
+                        "field_name": "years_old",
+                        "field_type": "int",
+                        "extraction_instructions": "age",
+                        "required": True,
+                    },
+                    {
+                        "field_name": "is_subscribed",
+                        "field_type": "bool",
+                        "extraction_instructions": "sub",
+                        "required": True,
+                    },
+                ],
+                "response_instructions": "Reply.",
+                "transitions": [
+                    {
+                        "target_state": "adult",
+                        "description": "years_old is 25",
+                        "priority": 200,
+                        "conditions": [
+                            {
+                                "description": "a",
+                                "requires_context_keys": ["years_old"],
+                                "logic": {"==": [{"var": "years_old"}, 25]},
+                            }
+                        ],
+                    },
+                ],
+            },
+            "adult": {
+                "id": "adult",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "ok",
+                "transitions": [],
+            },
+        },
+    }
+
+
+def _gate_fsm() -> dict:
+    """repro5: a transition gated on ``is_verified == True``; the bulk pass has
+    instructions but no per-field config beyond the auto-minted gate key."""
+    return {
+        "name": "Gate",
+        "description": "gate flip seam",
+        "version": "4.1",
+        "initial_state": "gate",
+        "persona": "x",
+        "states": {
+            "gate": {
+                "id": "gate",
+                "description": "d",
+                "purpose": "verify",
+                "extraction_instructions": "Extract the user's stated details.",
+                "response_instructions": "Reply.",
+                "transitions": [
+                    {
+                        "target_state": "admin",
+                        "description": "verified users only",
+                        "priority": 200,
+                        "conditions": [
+                            {
+                                "description": "verified",
+                                "requires_context_keys": ["is_verified"],
+                                "logic": {"==": [{"var": "is_verified"}, True]},
+                            }
+                        ],
+                    }
+                ],
+            },
+            "admin": {
+                "id": "admin",
+                "description": "d",
+                "purpose": "admin",
+                "response_instructions": "Admin area.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestProvenanceOnlyOverwrite:
+    """A bulk value may replace a stored key only while the key still holds
+    exactly what the pipeline itself extracted (D-015)."""
+
+    def test_handler_seeded_gate_value_is_not_flipped(self):
+        """repro5: RED on HEAD, is_verified False -> True and the gate opens."""
+        with _Prov(_gate_fsm()) as p:
+            p.api.update_context(p.cid, {"is_verified": False})
+            data = p.turn(bulk={"is_verified": True})
+            assert data["is_verified"] is False
+            assert p.api.get_current_state(p.cid) == "gate"
+
+    def test_start_handler_seeded_gate_value_is_not_flipped(self):
+        fsm = _gate_fsm()
+        with _Prov(fsm) as p:
+            p.api.register_handler(
+                p.api.create_handler("seed")
+                .at(HandlerTiming.START_CONVERSATION)
+                .do(lambda ctx: {"is_verified": False})
+            )
+            cid, _ = p.api.start_conversation()
+            p.cid = cid
+            assert p.api.get_data(cid)["is_verified"] is False
+            p.turn(bulk={"is_verified": True})
+            assert p.api.get_data(cid)["is_verified"] is False
+            assert p.api.get_current_state(cid) == "gate"
+
+    def test_pipeline_extracted_value_can_be_corrected_repeatedly(self):
+        """Vacuity guard: provenance keeps LV-03 alive, and it is re-recorded
+        after each landed correction."""
+        with _Prov(_correction_fsm()) as p:
+            assert p.turn({"favorite_color": "blue"})["favorite_color"] == "blue"
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "red"
+            assert p.turn(bulk={"favorite_color": "teal"})["favorite_color"] == "teal"
+
+    def test_update_context_value_is_not_overwritten(self):
+        with _Prov(_correction_fsm()) as p:
+            p.turn({"favorite_color": "blue"})
+            p.api.update_context(p.cid, {"favorite_color": "teal"})
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "teal"
+
+    def test_handler_edit_of_an_extracted_value_fails_closed(self):
+        with _Prov(_correction_fsm()) as p:
+            fired: list[int] = []
+
+            def _edit(ctx):
+                # one-shot: a handler that rewrote the key every turn would
+                # mask the overwrite this test looks for
+                if "favorite_color" in ctx and not fired:
+                    fired.append(1)
+                    return {"favorite_color": "HANDLER"}
+                return {}
+
+            p.api.register_handler(
+                p.api.create_handler("edit").at(HandlerTiming.CONTEXT_UPDATE).do(_edit)
+            )
+            assert p.turn({"favorite_color": "blue"})["favorite_color"] == "HANDLER"
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == (
+                "HANDLER"
+            )
+
+    def test_rolled_back_extraction_leaves_no_provenance(self):
+        """A CONTEXT_UPDATE failure pops the committed key; the same value
+        later written by the application must not be overwritable."""
+        with _Prov(_correction_fsm()) as p:
+            armed = {"on": True}
+
+            def _boom(ctx):
+                if armed["on"]:
+                    raise RuntimeError("handler failed")
+                return {}
+
+            p.api.register_handler(
+                p.api.create_handler("boom")
+                .at(HandlerTiming.CONTEXT_UPDATE)
+                .critical()
+                .do(_boom)
+            )
+            with pytest.raises(Exception):
+                p.turn({"favorite_color": "blue"})
+            assert "favorite_color" not in p.api.get_data(p.cid)
+            armed["on"] = False
+            p.api.update_context(p.cid, {"favorite_color": "blue"})
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "blue"
+
+    def test_restore_session_fails_closed(self, tmp_path):
+        """Provenance is not persisted: after a restore a bulk value does not
+        overwrite a restored key (D-015 fail-closed)."""
+        store = FileSessionStore(str(tmp_path))
+        with _Prov(_correction_fsm(), store=store) as p:
+            assert p.turn({"favorite_color": "blue"})["favorite_color"] == "blue"
+            p.api.save_session(p.cid)
+            saved_cid = p.cid
+            p.api = p.make_api()
+            restored = p.api.restore_session(saved_cid)
+            assert restored is not None
+            p.cid = restored[0]
+            assert p.api.get_data(p.cid)["favorite_color"] == "blue"
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "blue"
+
+    def test_agent_managed_fsm_never_overwrites_even_pipeline_values(self):
+        with _Prov(_correction_fsm()) as p:
+            p.turn({"favorite_color": "blue"})
+            p.api.update_context(p.cid, {"agent_trace": []})
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "blue"
+
+
+class TestBulkValueIsCoercedAndValidated:
+    """A bulk value for a config-covered key goes through the same typed
+    validation as a per-field value; containers never land in scalar keys."""
+
+    def test_bulk_dict_does_not_replace_a_str_value(self):
+        """repro2 turn 3: RED on HEAD, a dict is stored in the `str` field."""
+        with _Prov(_str_color_fsm()) as p:
+            p.turn({"favorite_color": "blue"})
+            data = p.turn(bulk={"favorite_color": {"blue": "blue"}})
+            assert data["favorite_color"] == "blue"
+            assert isinstance(data["favorite_color"], str)
+
+    @pytest.mark.parametrize("bad", [{"a": 1}, ["blue"]])
+    def test_bulk_container_is_not_added_for_an_absent_str_key(self, bad):
+        """repro3 R3a: RED on HEAD, the container is stored."""
+        with _Prov(_str_color_fsm()) as p:
+            data = p.turn(bulk={"favorite_color": bad})
+            assert "favorite_color" not in data
+
+    def test_bulk_dict_is_not_added_for_an_any_typed_gate_key(self):
+        """The auto-minted config for a `requires_context_keys` entry is
+        `field_type="any"`, which has no coercer; the dict is still refused."""
+        with _Prov(_correction_fsm()) as p:
+            data = p.turn(bulk={"favorite_color": {"a": 1}})
+            assert "favorite_color" not in data
+            p.turn({"favorite_color": "blue"})
+            assert p.turn(bulk={"favorite_color": {"a": 1}})["favorite_color"] == "blue"
+
+    def test_bulk_dict_is_accepted_for_a_dict_typed_key(self):
+        """Vacuity guard: the dict refusal is type-driven, not blanket."""
+        fsm = _str_color_fsm()
+        fsm["states"]["profile"]["field_extractions"][0]["field_type"] = "dict"
+        with _Prov(fsm) as p:
+            data = p.turn(bulk={"favorite_color": {"a": 1}})
+            assert data["favorite_color"] == {"a": 1}
+
+    def test_typed_values_are_not_replaced_by_string_spellings(self):
+        """ra01: RED on HEAD, int 24 -> '24' and bool True -> 'true'."""
+        with _Prov(_typed_fsm()) as p:
+            data = p.turn({"years_old": 24, "is_subscribed": True})
+            assert data["years_old"] == 24 and data["is_subscribed"] is True
+            data = p.turn(bulk={"years_old": "24", "is_subscribed": "true"})
+            assert data["years_old"] == 24 and type(data["years_old"]) is int
+            assert data["is_subscribed"] is True
+            assert p.api.get_current_state(p.cid) == "s"
+
+    def test_typed_correction_lands_as_the_typed_value(self):
+        with _Prov(_typed_fsm()) as p:
+            p.turn({"years_old": 24})
+            data = p.turn(bulk={"years_old": "25"})
+            assert data["years_old"] == 25 and type(data["years_old"]) is int
+            assert p.api.get_current_state(p.cid) == "adult"
+
+    def test_uncoercible_bulk_value_is_skipped(self):
+        with _Prov(_typed_fsm()) as p:
+            data = p.turn(bulk={"years_old": "abc"})
+            assert "years_old" not in data
+            p.turn({"years_old": 24})
+            assert p.turn(bulk={"years_old": "abc"})["years_old"] == 24
+
+    def test_instruction_only_key_keeps_raw_skip_if_set(self):
+        """Vacuity guard: instruction-only keys are still added raw and never
+        overwritten (no config, so no type information)."""
+        with _Prov(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"nickname": "PRESET"})
+            assert p.turn(bulk={"nickname": "BULK"})["nickname"] == "PRESET"
+        with _Prov(_correction_fsm()) as p:
+            assert p.turn(bulk={"nickname": "Bee"})["nickname"] == "Bee"

@@ -562,12 +562,14 @@ class TestBulkCorrectionOverwrite:
         )
         assert snaps[0][0]["favorite_color"] == "blue"
 
-    def test_non_agent_handler_set_config_key_is_overwritable(self):
-        """Documents the D-004 trade-off: same setup minus agent_trace."""
+    def test_non_agent_handler_set_config_key_is_not_overwritable(self):
+        """D-015 supersedes the D-004 trade-off: a value the pipeline did not
+        extract itself (handler / update_context) is never overwritten."""
         snaps = _CorrectionHarness().run(
             [(None, {"favorite_color": "red"})], presets={"favorite_color": "blue"}
         )
-        assert snaps[0][0]["favorite_color"] == "red"
+        assert snaps[0][0]["favorite_color"] == "blue"
+        assert snaps[0][1] == 0
 
 
 # ══════════════════════════════════════════════════════════════

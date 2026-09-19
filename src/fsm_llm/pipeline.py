@@ -13,6 +13,7 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 """
 
 import copy
+import hashlib
 import json
 import time
 from collections.abc import Callable, Iterator
@@ -146,6 +147,35 @@ _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
 # Keyword names `Classifier.__init__` binds itself; an interface kwarg with one
 # of these names must never be spread into `Classifier(...)`.
 _CLASSIFIER_BOUND_NAMES = frozenset({"schema", "model", "config"})
+
+# `context.metadata` key holding {context key: _value_digest(value)} for every
+# value the pipeline itself extracted (never the values). D-015.
+_PROVENANCE_KEY = "_pipeline_extracted"
+
+
+def _value_digest(value: Any) -> str:
+    """Short stable digest of a context value, for provenance comparison.
+
+    Args:
+        value: any context value (JSON-native, or anything ``str()``-able).
+
+    Returns:
+        First 16 hex chars of the sha256 of the value's sorted-key JSON; a
+        ``repr`` fallback covers keys that cannot be sorted. Never raises for
+        ordinary values.
+    """
+    try:
+        payload = json.dumps(value, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        payload = repr(value)
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def _record_provenance(instance: FSMInstance, committed: dict[str, Any]) -> None:
+    """Record that the pipeline itself extracted ``committed`` (digests only)."""
+    prov = instance.context.metadata.setdefault(_PROVENANCE_KEY, {})
+    for key, value in committed.items():
+        prov[key] = _value_digest(value)
 
 
 class MessagePipeline:
@@ -826,6 +856,10 @@ class MessagePipeline:
                         else:
                             instance.context.data.pop(key, None)
                     raise
+                # DECISION plan-2026-09-19T175721-21cd7f8e/D-015: recorded only
+                # after the handlers succeeded, so a rollback leaves no stale
+                # provenance; a handler edit of a key fails the digest compare.
+                _record_provenance(instance, committed)
 
         # Step 3: Transition Evaluation and Execution
         transition_occurred, previous_state = (
@@ -871,6 +905,8 @@ class MessagePipeline:
                         )
                         if post_data:
                             instance.context.update(post_data)
+                            # DECISION plan-2026-09-19T175721-21cd7f8e/D-015
+                            _record_provenance(instance, post_data)
                             extraction_response.extracted_data.update(post_data)
                             self.execute_handlers(
                                 instance,
@@ -1093,14 +1129,14 @@ class MessagePipeline:
 
         extracted_data: dict[str, Any] = {}
         confidences: list[float] = []
-        config_names: set[str] = set()
+        cfg_by_name: dict[str, FieldExtractionConfig] = {}
 
         # --- Field extractions ---
         if has_field_configs:
             # Skip fields already set in context (e.g. by handlers). The names
             # are captured first: the additive bulk pass below needs the
-            # config-covered set, not the filtered one (D-004).
-            config_names = {c.field_name for c in all_configs}
+            # config-covered set, not the filtered one (D-004, D-015).
+            cfg_by_name = {c.field_name: c for c in all_configs}
             existing = instance.context.data
             all_configs = [c for c in all_configs if existing.get(c.field_name) is None]
             results = self._execute_field_extractions(
@@ -1187,25 +1223,24 @@ class MessagePipeline:
                     extracted_data.update(retry_class_data)
 
         # --- Additive bulk extraction for instruction-only fields ---
-        # DECISION plan-2026-09-19T175721-21cd7f8e/D-004 [supersedes
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-015 [supersedes
+        # plan-2026-09-19T175721-21cd7f8e/D-004's overwrite condition and
         # plan_2026-05-30_26c9510a/D-001 "merge ONLY keys still absent"]:
-        # fields named only in extraction_instructions (not in
-        # required_context_keys or any transition condition's
-        # requires_context_keys) never get a FieldExtractionConfig, so the
-        # per-field passes above silently miss them (~50% extraction on
-        # multi-field states). The bulk pass is best-effort and stays
-        # non-destructive to per-field, handler and classifier results, with
-        # ONE exception: it is the only channel for a later-turn correction
-        # of a key the per-field pass skips because it is already set, so a
-        # config-covered key may be overwritten (see `may_overwrite`).
-        # Do NOT widen this to "overwrite any existing key": instruction-only
-        # keys are handler-set by contract (TestAdditiveBulkExtraction), and
-        # agent FSMs keep handler-set state in config-covered keys (they carry
-        # `agent_trace`, the marker _execute_extraction_and_transition_pass
-        # uses). Do NOT replace it with per-field re-extraction every turn:
-        # 1+ LLM call per field per turn. See decisions.md D-004. The
-        # early-return fallback above (no configs at all) is unchanged and
-        # keeps skip-if-set.
+        # fields named only in extraction_instructions never get a
+        # FieldExtractionConfig, so the per-field passes silently miss them
+        # (~50% extraction on multi-field states); this best-effort bulk pass
+        # adds them. It is also the only channel for a later-turn correction
+        # (LV-03), so a config-covered key may be overwritten, but ONLY while
+        # it still holds exactly what the pipeline extracted (digest recorded
+        # at the two commit sites). Do NOT go back to D-004's `key in
+        # config_names` rule: it let one bulk turn flip a handler-seeded gate
+        # value (repro5). A config-covered bulk value is coerced/validated
+        # first (never a dict in a str key, never 24 -> "24"); instruction-only
+        # keys stay raw and skip-if-set. Agent FSMs (`agent_trace`) keep
+        # handler-set state in config-covered keys, so they never overwrite.
+        # Do NOT re-extract per field every turn (1+ LLM call per field per
+        # turn). Provenance is not persisted: fail closed after restore. See
+        # decisions.md D-015. The no-config fallback above keeps skip-if-set.
         if has_extraction_instructions and (
             has_field_configs or has_classification_configs
         ):
@@ -1215,22 +1250,35 @@ class MessagePipeline:
             if bulk_data:
                 existing = instance.context.data
                 agent_managed = CONTEXT_KEY_AGENT_TRACE in existing
-
-                def may_overwrite(key: str, new: Any) -> bool:
-                    return (
-                        not agent_managed
-                        and key in config_names
-                        and existing.get(key) is not None
-                        and new != existing[key]
-                    )
-
+                prov = instance.context.metadata.get(_PROVENANCE_KEY, {})
                 for key, value in bulk_data.items():
                     if value is None or key in extracted_data:
                         continue
-                    if existing.get(key) is None:
+                    cfg = cfg_by_name.get(key)
+                    if cfg is not None:
+                        checked = self._validate_field_extraction(
+                            FieldExtractionResponse(
+                                field_name=key, value=value, confidence=1.0
+                            ),
+                            cfg,
+                        )
+                        value = checked.value
+                        if (
+                            not checked.is_valid
+                            or value is None
+                            or (isinstance(value, dict) and cfg.field_type != "dict")
+                        ):
+                            continue
+                    current = existing.get(key)
+                    if current is None:
                         extracted_data[key] = value
                         log.debug(f"Bulk extraction added missing field: {key}")
-                    elif may_overwrite(key, value):
+                    elif (
+                        cfg is not None
+                        and not agent_managed
+                        and str(value).strip().lower() != str(current).strip().lower()
+                        and prov.get(key) == _value_digest(current)
+                    ):
                         extracted_data[key] = value
                         log.debug(f"Bulk extraction corrected field: {key}")
 
