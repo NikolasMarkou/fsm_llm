@@ -1034,3 +1034,143 @@ class TestClassificationOwnedKeyIsNotPlainExtracted:
         assert len(h.plain_calls) == 1
         assert data.get("intent") == "buy"
         assert state == "shop"
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 8 / CF-04: "stay" (classifier error / fallback intent) is not a transition
+# ══════════════════════════════════════════════════════════════
+
+
+def _ambiguous_fsm(self_loop: bool = False) -> dict:
+    """`hub` has two unconditional, equal-priority exits (AMBIGUOUS), or a single
+    declared unconditional self-loop (DETERMINISTIC, target == current state)."""
+
+    def _target(name: str, description: str) -> dict:
+        return {"target_state": name, "description": description, "priority": 100}
+
+    if self_loop:
+        gated = _target("billing", "billing, gated on a key that is never set")
+        gated["conditions"] = [
+            {
+                "description": "go set",
+                "requires_context_keys": ["go"],
+                "logic": {"==": [{"var": "go"}, True]},
+            }
+        ]
+        transitions = [_target("hub", "declared self-loop"), gated]
+    else:
+        transitions = [
+            _target("billing", "user asks about billing"),
+            _target("support", "user needs tech support"),
+        ]
+    states = {
+        "hub": {
+            "id": "hub",
+            "description": "hub",
+            "purpose": "route",
+            "response_instructions": "Reply briefly.",
+            "transitions": transitions,
+        },
+    }
+    for name in ("billing",) if self_loop else ("billing", "support"):
+        states[name] = {
+            "id": name,
+            "description": name,
+            "purpose": name,
+            "response_instructions": f"Handle {name}.",
+            "transitions": [],
+        }
+    return {
+        "name": "HubBot",
+        "description": "ambiguous transition seam",
+        "version": "4.1",
+        "initial_state": "hub",
+        "persona": "Concise.",
+        "states": states,
+    }
+
+
+class _StayHarness:
+    """`API.converse` with a scripted (or raising) classifier, transition
+    handlers counting their calls, and the Pass-2 system prompt captured."""
+
+    def __init__(self, fsm: dict, intent: str | None, confidence: float = 0.95):
+        self.fsm = fsm
+        self.intent = intent  # None -> the classifier raises
+        self.confidence = confidence
+        self.pre = 0
+        self.post = 0
+        self.response_prompts: list[str] = []
+
+    def _completion(self, **kwargs):
+        if kwargs.get("response_format") is None:
+            self.response_prompts.append(kwargs["messages"][0]["content"])
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def run(self):
+        from fsm_llm.definitions import ClassificationResult
+        from fsm_llm.handlers import HandlerTiming
+
+        classifier = MagicMock()
+        if self.intent is None:
+            classifier.classify.side_effect = RuntimeError("classifier down")
+        else:
+            classifier.classify.return_value = ClassificationResult(
+                reasoning="r", intent=self.intent, confidence=self.confidence
+            )
+
+        def _pre(ctx):
+            self.pre += 1
+            return {}
+
+        def _post(ctx):
+            self.post += 1
+            return {}
+
+        with (
+            patch("fsm_llm.llm.completion", side_effect=self._completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+            patch("fsm_llm.pipeline.Classifier", return_value=classifier),
+        ):
+            api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
+            api.create_handler("pre", HandlerTiming.PRE_TRANSITION, _pre)
+            api.create_handler("post", HandlerTiming.POST_TRANSITION, _post)
+            cid, _ = api.start_conversation()
+            self.response_prompts.clear()
+            api.converse("I have a question", cid)
+            return api.get_current_state(cid)
+
+
+class TestStayIsNotATransition:
+    def test_classifier_error_is_not_a_transition(self):
+        h = _StayHarness(_ambiguous_fsm(), intent=None)
+        assert h.run() == "hub"
+        assert (h.pre, h.post) == (0, 0)
+        assert "<transition_info>" not in h.response_prompts[-1]
+
+    def test_fallback_intent_is_not_a_transition(self):
+        from fsm_llm.constants import TRANSITION_CLASSIFICATION_FALLBACK_INTENT
+
+        h = _StayHarness(
+            _ambiguous_fsm(), intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT
+        )
+        assert h.run() == "hub"
+        assert (h.pre, h.post) == (0, 0)
+        assert "<transition_info>" not in h.response_prompts[-1]
+
+    def test_classifier_selecting_a_real_target_still_transitions(self):
+        """Vacuity guard: the ambiguous path is reached and still transitions."""
+        h = _StayHarness(_ambiguous_fsm(), intent="billing")
+        assert h.run() == "billing"
+        assert (h.pre, h.post) == (1, 1)
+        assert "<transition_info>" in h.response_prompts[-1]
+
+    def test_declared_explicit_self_loop_still_fires_handlers(self):
+        """Pins D-007: a DECLARED self-loop is design, not a "stay"."""
+        h = _StayHarness(_ambiguous_fsm(self_loop=True), intent="billing")
+        assert h.run() == "hub"
+        assert (h.pre, h.post) == (1, 1)
+        assert "<transition_info>" in h.response_prompts[-1]

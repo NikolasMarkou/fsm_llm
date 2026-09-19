@@ -1579,7 +1579,11 @@ class MessagePipeline:
             target_state = self._resolve_ambiguous_transition(
                 evaluation, user_message, extraction_response, instance, conversation_id
             )
-            log.info(f"LLM-assisted transition selected: {target_state}")
+            log.info(
+                f"LLM-assisted transition selected: {target_state}"
+                if target_state
+                else "LLM-assisted resolution selected no transition (stay)"
+            )
 
         elif evaluation.result_type == TransitionEvaluationResult.BLOCKED:
             log.warning(f"Transitions blocked: {evaluation.blocked_reason}")
@@ -1742,12 +1746,17 @@ class MessagePipeline:
         extraction_response: DataExtractionResponse,
         instance: FSMInstance,
         conversation_id: str,
-    ) -> str:
+    ) -> str | None:
         """Resolve ambiguous transition using classification.
 
         Classification is always-on for ambiguous transitions. Builds a
         ClassificationSchema from available transition options and uses
         the Classifier to make a structured, confidence-scored decision.
+
+        Returns the selected target state id, or ``None`` when no transition
+        should happen (classifier failure, or the fallback intent). The caller
+        treats any truthy return as a transition, so "stay" must be ``None``
+        and never ``instance.current_state``.
         """
         log = logger.bind(conversation_id=conversation_id)
         log.debug(
@@ -1784,7 +1793,13 @@ class MessagePipeline:
                 "error": str(e),
                 "fallback": True,
             }
-            return instance.current_state
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-007: "stay" is None,
+            # not instance.current_state. Returning the current state made the
+            # caller run PRE/POST_TRANSITION handlers and tell Pass 2 a
+            # transition occurred. Do NOT "fix" this with a
+            # `target != current_state` guard at the caller: declared explicit
+            # self-loops are design and must keep firing.
+            return None
 
         log.debug(
             f"Classification result: intent={result.intent}, "
@@ -1807,7 +1822,9 @@ class MessagePipeline:
             log.info(
                 "Classification returned fallback intent — staying in current state"
             )
-            return instance.current_state
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-007: None, not the
+            # current state (see the classifier-failure return above).
+            return None
 
         # Validate the classified intent is a valid target state
         valid_targets = {opt.target_state for opt in evaluation.available_options}
