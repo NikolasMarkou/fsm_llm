@@ -1065,10 +1065,14 @@ class MessagePipeline:
 
         extracted_data: dict[str, Any] = {}
         confidences: list[float] = []
+        config_names: set[str] = set()
 
         # --- Field extractions ---
         if has_field_configs:
-            # Skip fields already set in context (e.g. by handlers)
+            # Skip fields already set in context (e.g. by handlers). The names
+            # are captured first: the additive bulk pass below needs the
+            # config-covered set, not the filtered one (D-004).
+            config_names = {c.field_name for c in all_configs}
             existing = instance.context.data
             all_configs = [c for c in all_configs if existing.get(c.field_name) is None]
             results = self._execute_field_extractions(
@@ -1155,15 +1159,25 @@ class MessagePipeline:
                     extracted_data.update(retry_class_data)
 
         # --- Additive bulk extraction for instruction-only fields ---
-        # DECISION plan_2026-05-30_26c9510a/D-001 [STALE]: fields named only in
-        # extraction_instructions (not in required_context_keys or any
-        # transition condition's requires_context_keys) never get a
-        # FieldExtractionConfig, so the per-field passes above silently miss
-        # them (~50% extraction on multi-field states). Run a best-effort
-        # bulk pass and merge ONLY keys still absent — non-destructive to
-        # per-field, handler, and classifier results. The early-return
-        # fallback above (no configs at all) is unchanged; this covers the
-        # has-configs case it could never reach.
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-004 [supersedes
+        # plan_2026-05-30_26c9510a/D-001 "merge ONLY keys still absent"]:
+        # fields named only in extraction_instructions (not in
+        # required_context_keys or any transition condition's
+        # requires_context_keys) never get a FieldExtractionConfig, so the
+        # per-field passes above silently miss them (~50% extraction on
+        # multi-field states). The bulk pass is best-effort and stays
+        # non-destructive to per-field, handler and classifier results, with
+        # ONE exception: it is the only channel for a later-turn correction
+        # of a key the per-field pass skips because it is already set, so a
+        # config-covered key may be overwritten (see `may_overwrite`).
+        # Do NOT widen this to "overwrite any existing key": instruction-only
+        # keys are handler-set by contract (TestAdditiveBulkExtraction), and
+        # agent FSMs keep handler-set state in config-covered keys (they carry
+        # `agent_trace`, the marker _execute_extraction_and_transition_pass
+        # uses). Do NOT replace it with per-field re-extraction every turn:
+        # 1+ LLM call per field per turn. See decisions.md D-004. The
+        # early-return fallback above (no configs at all) is unchanged and
+        # keeps skip-if-set.
         if has_extraction_instructions and (
             has_field_configs or has_classification_configs
         ):
@@ -1172,14 +1186,25 @@ class MessagePipeline:
             )
             if bulk_data:
                 existing = instance.context.data
+                agent_managed = CONTEXT_KEY_AGENT_TRACE in existing
+
+                def may_overwrite(key: str, new: Any) -> bool:
+                    return (
+                        not agent_managed
+                        and key in config_names
+                        and existing.get(key) is not None
+                        and new != existing[key]
+                    )
+
                 for key, value in bulk_data.items():
-                    if (
-                        value is not None
-                        and key not in extracted_data
-                        and existing.get(key) is None
-                    ):
+                    if value is None or key in extracted_data:
+                        continue
+                    if existing.get(key) is None:
                         extracted_data[key] = value
                         log.debug(f"Bulk extraction added missing field: {key}")
+                    elif may_overwrite(key, value):
+                        extracted_data[key] = value
+                        log.debug(f"Bulk extraction corrected field: {key}")
 
         # Build final response — check all sources for missing required fields
         all_required_names: list[str] = []

@@ -385,3 +385,175 @@ class TestStreamPromptIsPlainText:
         assert b._build_response_format_section() == b._build_response_format_section(
             plain_text=False
         )
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 4 / LV-03: bulk-extraction correction overwrite (D-004)
+# ══════════════════════════════════════════════════════════════
+
+
+def _correction_fsm() -> dict:
+    """One collecting state: `favorite_color` has a config (required key),
+    `nickname` is named only in extraction_instructions. No transitions."""
+    return {
+        "name": "CorrectionBot",
+        "description": "bulk correction seam",
+        "version": "4.1",
+        "initial_state": "profile",
+        "persona": "Concise.",
+        "states": {
+            "profile": {
+                "id": "profile",
+                "description": "collect color",
+                "purpose": "Learn favorite color",
+                "required_context_keys": ["favorite_color"],
+                "extraction_instructions": (
+                    "Extract favorite_color (one word) and nickname."
+                ),
+                "response_instructions": "Reply in one short sentence.",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "sentinel, never true",
+                        "priority": 10,
+                        "conditions": [
+                            {
+                                "description": "sentinel",
+                                "requires_context_keys": ["favorite_color"],
+                                "logic": {"==": [{"var": "favorite_color"}, "__x__"]},
+                            }
+                        ],
+                    },
+                    {
+                        "target_state": "profile",
+                        "description": "keep chatting",
+                        "priority": 100,
+                    },
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "end",
+                "purpose": "end",
+                "response_instructions": "Say goodbye.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class _CorrectionHarness:
+    """`API.converse` over a fake completion with scripted per-turn outputs.
+
+    Per turn: ``field`` is what the per-field extractor returns (``None`` means
+    "no value"), ``bulk`` is the bulk `extracted_data` dict.
+    """
+
+    def __init__(self, fsm: dict | None = None):
+        self.fsm = fsm or _correction_fsm()
+        self.field: object = None
+        self.bulk: dict = {}
+        self.context_updates: list[list[str]] = []
+
+    def _completion(self, **kwargs):
+        system = kwargs["messages"][0]["content"]
+        if '"extracted_data"' in system:
+            return _fake_response(
+                json.dumps({"extracted_data": self.bulk, "confidence": 0.9})
+            )
+        if kwargs.get("response_format") is not None:
+            return _fake_response(
+                json.dumps(
+                    {
+                        "field_name": "favorite_color",
+                        "value": self.field,
+                        "confidence": 0.9 if self.field is not None else 0.0,
+                    }
+                )
+            )
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def run(self, script, presets: dict | None = None):
+        """script: list of (field, bulk) per turn. Returns (api, cid) data per turn."""
+        from fsm_llm.handlers import HandlerTiming
+
+        snapshots = []
+        with (
+            patch("fsm_llm.llm.completion", side_effect=self._completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
+            api.register_handler(
+                api.create_handler("ctx_spy")
+                .at(HandlerTiming.CONTEXT_UPDATE)
+                .do(lambda ctx: self.context_updates.append(sorted(ctx.keys())) or {})
+            )
+            cid, _ = api.start_conversation()
+            if presets:
+                api.update_context(cid, presets)
+            for i, (field, bulk) in enumerate(script):
+                self.field, self.bulk = field, bulk
+                before = len(self.context_updates)
+                api.converse(f"turn {i}", cid)
+                snapshots.append(
+                    (dict(api.get_data(cid)), len(self.context_updates) - before)
+                )
+        return snapshots
+
+
+class TestBulkCorrectionOverwrite:
+    """A later-turn correction of a config-covered key reaches `get_data`."""
+
+    def test_config_covered_key_is_corrected_with_one_context_update(self):
+        snaps = _CorrectionHarness().run(
+            [("blue", {}), (None, {"favorite_color": "red"})]
+        )
+        assert snaps[0][0]["favorite_color"] == "blue"
+        assert snaps[1][0]["favorite_color"] == "red"
+        assert snaps[1][1] == 1
+
+    def test_identical_bulk_value_is_a_no_op(self):
+        snaps = _CorrectionHarness().run(
+            [("blue", {}), (None, {"favorite_color": "blue"})]
+        )
+        assert snaps[1][0]["favorite_color"] == "blue"
+        assert snaps[1][1] == 0
+
+    def test_null_bulk_value_does_not_clear(self):
+        snaps = _CorrectionHarness().run(
+            [("blue", {}), (None, {"favorite_color": None})]
+        )
+        assert snaps[1][0]["favorite_color"] == "blue"
+        assert snaps[1][1] == 0
+
+    def test_same_turn_per_field_value_wins_over_bulk(self):
+        snaps = _CorrectionHarness().run([("blue", {"favorite_color": "red"})])
+        assert snaps[0][0]["favorite_color"] == "blue"
+
+    def test_instruction_only_key_is_not_overwritten(self):
+        snaps = _CorrectionHarness().run(
+            [("blue", {"nickname": "BULK"})], presets={"nickname": "PRESET"}
+        )
+        assert snaps[0][0]["nickname"] == "PRESET"
+
+    def test_instruction_only_key_is_still_added_when_absent(self):
+        """Vacuity guard: the additive pass itself is alive."""
+        snaps = _CorrectionHarness().run([("blue", {"nickname": "Bee"})])
+        assert snaps[0][0]["nickname"] == "Bee"
+
+    def test_agent_fsm_never_overwrites_a_handler_set_key(self):
+        snaps = _CorrectionHarness().run(
+            [(None, {"favorite_color": "red"})],
+            presets={"favorite_color": "blue", "agent_trace": []},
+        )
+        assert snaps[0][0]["favorite_color"] == "blue"
+
+    def test_non_agent_handler_set_config_key_is_overwritable(self):
+        """Documents the D-004 trade-off: same setup minus agent_trace."""
+        snaps = _CorrectionHarness().run(
+            [(None, {"favorite_color": "red"})], presets={"favorite_color": "blue"}
+        )
+        assert snaps[0][0]["favorite_color"] == "red"
