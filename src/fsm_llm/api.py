@@ -1228,7 +1228,20 @@ class API:
         if self._session_store is None:
             raise FSMError("No session store configured")
 
-        current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+        # Validation and the D-014 idle refresh go through the top-of-stack
+        # resolver; the state itself is read from the ROOT frame.
+        self._get_current_fsm_conversation_id(conversation_id)
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-022
+        # Save the ROOT frame, not the top of the stack. A stacked save used to
+        # write the CHILD's state and data under the root id, so restore_session
+        # (which rebuilds only the root FSM and ignores stack_depth) hit a state
+        # that does not exist in the root definition and auto-save then
+        # overwrote the last good session. Do NOT "fix" this by saving the child
+        # under the child id: restore has no path that rebuilds stacks.
+        with self._stack_lock:
+            current_fsm_id = self.conversation_stacks[conversation_id][
+                0
+            ].conversation_id
         state = SessionState(
             conversation_id=conversation_id,
             fsm_id=self.fsm_id,

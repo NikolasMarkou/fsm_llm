@@ -1574,3 +1574,94 @@ class TestEmptyReplyIsRetriedOnce:
             with patch("fsm_llm.llm.completion", side_effect=flaky):
                 _, greeting = p.api.start_conversation()
         assert greeting == _APOLOGY
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 13 / CF-07: a stacked save_session stores the ROOT frame
+# ══════════════════════════════════════════════════════════════
+
+
+def _child_fsm() -> dict:
+    """A one-state sub-FSM whose only state id does not exist in the root."""
+    return {
+        "name": "ChildBot",
+        "description": "sub-FSM for the stacked-save seam",
+        "version": "4.1",
+        "initial_state": "child_only",
+        "persona": "x",
+        "states": {
+            "child_only": {
+                "id": "child_only",
+                "description": "child state",
+                "purpose": "child work",
+                "response_instructions": "Reply briefly.",
+                "transitions": [
+                    {
+                        "target_state": "child_done",
+                        "description": "sentinel, never true",
+                        "priority": 10,
+                        "conditions": [
+                            {
+                                "description": "sentinel",
+                                "requires_context_keys": ["__never__"],
+                                "logic": {"==": [{"var": "__never__"}, 1]},
+                            }
+                        ],
+                    },
+                    {
+                        "target_state": "child_only",
+                        "description": "stay",
+                        "priority": 100,
+                    },
+                ],
+            },
+            "child_done": {
+                "id": "child_done",
+                "description": "end",
+                "purpose": "end",
+                "response_instructions": "Bye.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestStackedSaveSessionStoresTheRoot:
+    def _stacked(self, p):
+        p.api.update_context(p.cid, {"root_marker": "R"})
+        p.api.push_fsm(p.cid, _child_fsm(), inherit_context=False)
+        p.api.update_context(p.cid, {"child_marker": "C"})
+        p.api.converse("hello", p.cid)  # auto-save fires while stacked
+
+    def test_saved_session_holds_root_state_and_data(self, tmp_path):
+        store = FileSessionStore(str(tmp_path))
+        with _Prov(_correction_fsm(), store=store) as p:
+            self._stacked(p)
+            assert p.api.get_current_state(p.cid) == "child_only"
+            saved = p.api.load_session(p.cid)
+        assert saved.current_state == "profile"
+        assert saved.context_data.get("root_marker") == "R"
+        assert "child_marker" not in saved.context_data
+        assert saved.stack_depth == 2
+
+    def test_stacked_session_restores_on_a_fresh_api(self, tmp_path):
+        store = FileSessionStore(str(tmp_path))
+        with _Prov(_correction_fsm(), store=store) as p:
+            self._stacked(p)
+            saved_cid = p.cid
+            p.api = p.make_api()
+            restored = p.api.restore_session(saved_cid)
+            assert restored is not None
+            new_cid = restored[0]
+            assert p.api.get_current_state(new_cid) == "profile"
+            assert p.api.get_data(new_cid)["root_marker"] == "R"
+
+    def test_unstacked_session_is_unchanged(self, tmp_path):
+        store = FileSessionStore(str(tmp_path))
+        with _Prov(_correction_fsm(), store=store) as p:
+            p.api.update_context(p.cid, {"root_marker": "R"})
+            p.api.converse("hello", p.cid)
+            saved = p.api.load_session(p.cid)
+        assert saved.current_state == "profile"
+        assert saved.context_data.get("root_marker") == "R"
+        assert saved.stack_depth == 1
