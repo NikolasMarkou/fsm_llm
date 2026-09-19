@@ -70,15 +70,29 @@ def _coerce_float(v: Any) -> float:
     return v if isinstance(v, float) else float(v)
 
 
+# DECISION plan-2026-09-19T175721-21cd7f8e/D-002
+# `_coerce_str`/`_coerce_bool` DO raise `TypeError` on a dict or list. This supersedes
+# the last clause of plan-2026-07-18T051819-80b0bd4d/D-018 (below), which said they
+# "deliberately do NOT raise". Do NOT restore total `str(v)`/`bool(v)` on containers:
+# live (LV-01) qwen3.5:9b returned `{"blue": "blue"}` for a str field, `str()` turned
+# it into the "valid" value `"{'blue': 'blue'}"`, and `bool({...})` is True for any
+# non-empty object, so junk was stored and drove gated transitions. D-018's premise
+# ("coercion failed is not a reachable outcome") held for scalars only. The raise
+# reuses the already-wired `except (ValueError, TypeError, json.JSONDecodeError)` in
+# `_validate_field_extraction` (no sentinel, no new exception type). See decisions.md D-002.
 def _coerce_bool(v: Any) -> bool:
     if isinstance(v, bool):
         return v
     if isinstance(v, str):
         return v.lower() in ("true", "1", "yes")
+    if isinstance(v, (dict, list)):
+        raise TypeError(f"expected bool, got {type(v).__name__}")
     return bool(v)
 
 
 def _coerce_str(v: Any) -> str:
+    if isinstance(v, (dict, list)):
+        raise TypeError(f"expected str, got {type(v).__name__}")
     return v if isinstance(v, str) else str(v)
 
 
@@ -92,6 +106,7 @@ def _coerce_str(v: Any) -> str:
 # wrong-typed value written straight into FSM context. Raising here reuses that
 # ALREADY-WIRED error protocol — do not invent a new exception type, a sentinel return,
 # or a second validation path. This makes `list`/`dict` behave like their 4 siblings.
+# [SUPERSEDED by plan-2026-09-19T175721-21cd7f8e/D-002, above, for dict/list input:]
 # `_coerce_str`/`_coerce_bool` deliberately do NOT raise: `str()`/`bool()` are TOTAL, so
 # "coercion failed" is not a reachable outcome for them, not a missing guard.
 # `None` never reaches any coercer (the call site returns early on a None value).
@@ -1314,6 +1329,20 @@ class MessagePipeline:
                 reasoning="Model echoed field name instead of extracting a value",
                 is_valid=False,
                 validation_error="Extracted value matches field name (model confusion)",
+            )
+
+        # A self-reported confidence of exactly 0.0 means the model could not
+        # ground the value (LV-01: dict-wrapped junk came back with low/zero
+        # confidence); treat it as "not extracted" regardless of the configured
+        # threshold (which defaults can leave at 0.0). decisions.md D-002.
+        if response.confidence == 0.0:
+            return FieldExtractionResponse(
+                field_name=response.field_name,
+                value=response.value,
+                confidence=0.0,
+                reasoning=response.reasoning,
+                is_valid=False,
+                validation_error="Model reported zero confidence in the value",
             )
 
         # Confidence threshold check

@@ -8,6 +8,7 @@ import pytest
 
 from fsm_llm.ollama import (
     EXTRACTION_JSON_SCHEMA,
+    FIELD_EXTRACTION_JSON_SCHEMA,
     TRANSITION_JSON_SCHEMA,
     apply_ollama_params,
     build_ollama_response_format,
@@ -106,6 +107,48 @@ class TestBuildOllamaResponseFormat:
 
     def test_unknown_call_type_returns_none(self):
         assert build_ollama_response_format("unknown") is None
+
+
+class TestFieldExtractionValueTypes:
+    """LV-01: the `value` TYPE (not a description) steers the model."""
+
+    @staticmethod
+    def _value_type(field_type):
+        fmt = build_ollama_response_format("field_extraction", field_type)
+        assert fmt is not None
+        return fmt["json_schema"]["schema"]["properties"]["value"]["type"]
+
+    @pytest.mark.parametrize("field_type", [None, "any", "str", "int", "float"])
+    def test_scalar_types_exclude_object(self, field_type):
+        assert "object" not in self._value_type(field_type)
+
+    @pytest.mark.parametrize("field_type", ["bool", "list"])
+    def test_bool_and_list_exclude_object(self, field_type):
+        assert "object" not in self._value_type(field_type)
+
+    def test_dict_includes_object(self):
+        assert "object" in self._value_type("dict")
+
+    def test_every_type_allows_null(self):
+        for ft in (None, "any", "str", "int", "float", "bool", "list", "dict"):
+            assert "null" in self._value_type(ft)
+
+    def test_unknown_field_type_falls_back_to_default_union(self):
+        assert self._value_type("weird") == self._value_type(None)
+
+    def test_default_has_no_empty_value_schema(self):
+        assert FIELD_EXTRACTION_JSON_SCHEMA["properties"]["value"] != {}
+
+    def test_field_type_ignored_for_other_call_types(self):
+        fmt = build_ollama_response_format("data_extraction", "str")
+        assert fmt is not None
+        assert fmt["json_schema"]["schema"] is EXTRACTION_JSON_SCHEMA
+
+    def test_typed_formats_do_not_alias_the_shared_constant(self):
+        fmt = build_ollama_response_format("field_extraction", "dict")
+        assert fmt is not None
+        fmt["json_schema"]["schema"]["properties"]["value"]["type"].append("x")
+        assert "x" not in self._value_type("dict")
 
 
 # ------------------------------------------------------------------

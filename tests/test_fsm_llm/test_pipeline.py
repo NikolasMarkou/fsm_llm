@@ -1355,11 +1355,20 @@ class TestFieldTypeCoercionRejectsWrongTypes:
         assert resp.is_valid is True
         assert resp.value == expected
 
-    def test_str_and_bool_stay_total_by_design(self):
-        """Not a third instance of the defect: str()/bool() cannot fail, so they
-        have nothing to raise. Pinned so nobody 'propagates' the T6 fix to them."""
-        assert self._validate("str", [1, 2]).is_valid is True
-        assert self._validate("bool", [1, 2]).is_valid is True
+    def test_str_and_bool_reject_containers_but_stay_total_for_scalars(self):
+        """SUPERSEDED (plan-2026-09-19T175721-21cd7f8e/D-002): this used to pin
+        that str()/bool() are total, so a dict/list "coerced" to a repr string or
+        True and was stored (LV-01). Containers now fail like int/float; scalars
+        still coerce."""
+        for field_type in ("str", "bool"):
+            for bad in ([1, 2], {"blue": "blue"}, {}, []):
+                resp = self._validate(field_type, bad)
+                assert resp.is_valid is False
+                assert field_type in (resp.validation_error or "")
+        assert self._validate("str", 5).value == "5"
+        assert self._validate("str", 2.5).value == "2.5"
+        assert self._validate("bool", 1).value is True
+        assert self._validate("bool", "no").value is False
 
     def test_int_and_float_already_failed_loudly(self):
         """The shape T6 brings list/dict into line with. Pinned as the reference."""

@@ -491,7 +491,17 @@ class LiteLLMInterface(LLMInterface):
                 {"role": "user", "content": request.user_message},
             ]
 
-            response = self._make_llm_call(messages, "field_extraction")
+            # Ollama only: a field-typed grammar so the model cannot wrap the
+            # answer in an object (LV-01, decisions.md D-001). Other providers
+            # keep the generic `json_object` format.
+            typed_format = (
+                build_ollama_response_format("field_extraction", request.field_type)
+                if is_ollama_model(self.model)
+                else None
+            )
+            response = self._make_llm_call(
+                messages, "field_extraction", response_format=typed_format
+            )
             response_time = time.time() - start_time
 
             logger.debug(

@@ -18,6 +18,7 @@ calls ``litellm.completion()`` directly) apply the same fixes:
 - ``json_schema`` response format with explicit schema
 """
 
+import copy
 import json
 
 from .logging import logger
@@ -55,13 +56,37 @@ TRANSITION_JSON_SCHEMA: dict = {
     "required": ["selected_transition"],
 }
 
+# DECISION plan-2026-09-19T175721-21cd7f8e/D-001
+# The `value` schema MUST carry a TYPE; do NOT restore `"value": {}` ("any type").
+# The schema is sent as an Ollama grammar AND pasted into the user message
+# (`prepare_ollama_messages`), and qwen3.5:9b reads `"value": {}` as "an object goes
+# here", returning dict-wrapped junk (`{'blue': 'blue'}`, `{'full_name_missing': True}`)
+# that is truthy, passes `is not None` gates and drives transitions (LV-01, measured
+# live). A schema `description` is NOT model-visible over `ollama_chat` (LESSONS
+# L154-156), so only the TYPE can steer; a global union was rejected because a
+# `dict` field must still accept objects, and unwrapping a dict is guesswork on data
+# the model invented. See decisions.md D-001.
+#
+# Per-field_type `value` type unions. Every union includes "null" (ungrounded ->
+# unset) and "string" (models quote numbers/booleans); only `dict` allows "object".
+_VALUE_TYPES_ANY: list[str] = ["string", "number", "boolean", "array", "null"]
+_VALUE_TYPES_BY_FIELD_TYPE: dict[str, list[str]] = {
+    "str": ["string", "null"],
+    "int": ["number", "string", "null"],
+    "float": ["number", "string", "null"],
+    "bool": ["boolean", "string", "null"],
+    "list": ["array", "string", "null"],
+    "dict": ["object", "string", "null"],
+    "any": _VALUE_TYPES_ANY,
+}
+
 FIELD_EXTRACTION_JSON_SCHEMA: dict = {
     "type": "object",
     "properties": {
         "field_name": {
             "type": "string",
         },
-        "value": {},  # Any type
+        "value": {"type": list(_VALUE_TYPES_ANY)},  # default: `any`, no object
         "confidence": {
             "type": "number",
         },
@@ -202,17 +227,34 @@ def prepare_ollama_messages(
     return messages
 
 
-def build_ollama_response_format(call_type: str) -> dict | None:
+def build_ollama_response_format(
+    call_type: str, field_type: str | None = None
+) -> dict | None:
     """Build a ``json_schema`` response format for the given call type.
 
-    Returns ``None`` if *call_type* has no associated schema (e.g.
-    ``response_generation``).
+    Args:
+        call_type: ``"data_extraction"``, ``"transition_decision"`` or
+            ``"field_extraction"``.
+        field_type: Only read for ``"field_extraction"``: the declared
+            ``FieldExtractionConfig.field_type`` selects the ``value`` type union
+            (see ``_VALUE_TYPES_BY_FIELD_TYPE``). ``None`` or an unknown type
+            gives the ``any`` union (no object). Ignored for other call types.
+
+    Returns:
+        A ``response_format`` dict, or ``None`` if *call_type* has no
+        associated schema (e.g. ``response_generation``). A typed
+        ``field_extraction`` schema is a fresh copy, never the shared constant.
     """
     entry = _CALL_TYPE_SCHEMAS.get(call_type)
     if entry is None:
         return None
 
     schema, name = entry
+    if call_type == "field_extraction" and field_type in _VALUE_TYPES_BY_FIELD_TYPE:
+        schema = copy.deepcopy(schema)
+        schema["properties"]["value"] = {
+            "type": list(_VALUE_TYPES_BY_FIELD_TYPE[field_type])
+        }
     return {
         "type": "json_schema",
         "json_schema": {
