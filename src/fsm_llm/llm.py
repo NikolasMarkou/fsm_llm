@@ -605,7 +605,13 @@ class LiteLLMInterface(LLMInterface):
             if not isinstance(extracted, dict):
                 return DataExtractionResponse(extracted_data={})
 
-            confidence = coerce_confidence(data.get("confidence", 1.0), 1.0)
+            try:
+                confidence = coerce_confidence(data.get("confidence", 1.0), 1.0)
+            except (TypeError, ValueError):
+                # An uncoercible score (`"high"`, `null`, `{...}`) must not
+                # discard the extracted data: fall back to the field default
+                # (D-023). The signal is lost, the data is not.
+                confidence = 1.0
             return DataExtractionResponse(
                 extracted_data=extracted, confidence=confidence
             )

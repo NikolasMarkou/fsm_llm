@@ -14,7 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from fsm_llm import API, FileSessionStore
-from fsm_llm.definitions import FieldExtractionRequest
+from fsm_llm.definitions import BulkExtractionRequest, FieldExtractionRequest
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.ollama import is_ollama_model
@@ -1790,3 +1790,35 @@ class TestZeroHandlerTurnSkipsHandlerCopies:
             p.api.register_handler(handler)
             assert hs.handlers_at(HandlerTiming.PRE_PROCESSING) == []
             assert hs.handlers_at(HandlerTiming.POST_PROCESSING) == [handler]
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 15 / LS-05 remainder: an uncoercible bulk confidence is 1.0
+# ══════════════════════════════════════════════════════════════
+
+
+def _bulk(reply: str):
+    req = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+    with (
+        patch("fsm_llm.llm.completion") as mock_comp,
+        patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            return_value=["response_format"],
+        ),
+    ):
+        mock_comp.return_value = _fake_response(reply)
+        return LiteLLMInterface(model="gpt-4o", api_key="k").extract_bulk_data(req)
+
+
+class TestBulkExtractionUncoercibleConfidence:
+    @pytest.mark.parametrize("bad", ['"high"', "null", '{"x": 1}', '"0.9x"'])
+    def test_uncoercible_confidence_keeps_the_data_at_default(self, bad):
+        out = _bulk(f'{{"extracted_data": {{"a": 1}}, "confidence": {bad}}}')
+        assert out.extracted_data == {"a": 1}
+        assert out.confidence == 1.0
+
+    def test_numeric_confidence_is_still_honoured_and_clamped(self):
+        out = _bulk('{"extracted_data": {"a": 1}, "confidence": 0.4}')
+        assert out.confidence == 0.4
+        out = _bulk('{"extracted_data": {"a": 1}, "confidence": 7}')
+        assert out.confidence == 1.0
