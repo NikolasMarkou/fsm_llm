@@ -418,14 +418,25 @@ class BasePromptBuilder:
         }
         return key_mappings.get(key, key.replace("_", " "))
 
-    def _build_enhanced_context_section(self, instance: FSMInstance) -> list[str]:
-        """Build enhanced context section with security filtering."""
-        if not instance.context.data:
+    def _build_enhanced_context_section(
+        self, instance: FSMInstance, context: dict[str, Any] | None = None
+    ) -> list[str]:
+        """Build enhanced context section with security filtering.
+
+        ``context`` is an optional pre-scoped view of the context (the
+        pipeline passes ``context_scope.read_keys``-filtered data). ``None``
+        means the full ``instance.context.data``, so callers that do not scope
+        get a byte-identical section. The security filter still runs on
+        whatever is passed, so a secret-named key inside ``read_keys`` is
+        dropped.
+        """
+        data = instance.context.data if context is None else context
+        if not data:
             return []
 
         # Filter for security FIRST, then cap. Capping first would let filtered-out
         # secret keys consume budget slots and evict legitimate ones.
-        user_context = self._filter_context_for_security(instance.context.data)
+        user_context = self._filter_context_for_security(data)
         user_context = self._limit_context_by_key_count(user_context)
 
         if not user_context:
@@ -907,6 +918,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         previous_state: str | None = None,
         user_message: str = "",
         plain_text_response: bool = False,
+        context: dict[str, Any] | None = None,
     ) -> str:
         """
         Build comprehensive system prompt for response generation.
@@ -924,6 +936,9 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
                 sets this so the yielded tokens and the stored history are the
                 same plain text. Default ``False`` keeps the JSON envelope, so
                 the synchronous prompt is unchanged.
+            context: Optional context view to render in ``<current_context>``
+                (already scoped by ``context_scope.read_keys``). ``None`` uses
+                the full ``instance.context.data``.
 
         Returns:
             System prompt focused on response generation
@@ -961,8 +976,8 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         if self.config.include_conversation_history:
             sections.extend(self._build_enhanced_history_section(instance))
 
-        # Current context data
-        sections.extend(self._build_enhanced_context_section(instance))
+        # Current context data (scoped view when the pipeline supplies one)
+        sections.extend(self._build_enhanced_context_section(instance, context))
 
         # Response format
         sections.extend(self._build_response_format_section(plain_text_response))

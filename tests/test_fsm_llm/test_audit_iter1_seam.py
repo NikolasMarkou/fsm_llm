@@ -750,3 +750,132 @@ class TestErrorHandlersFireForFSMErrorAndStream:
             api.converse("hi", cid)
             list(api.converse_stream("hi again", cid))
         assert h.error_ctxs == []
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 6 / CF-01: context_scope.read_keys reaches the Pass-2 prompt (D-005)
+# ══════════════════════════════════════════════════════════════
+
+HIDDEN = "HIDDEN-VALUE-7431"
+SHOWN = "SHOWN-VALUE-2208"
+SECRET = "SECRET-TOKEN-9917"
+
+
+def _scoped_fsm(read_keys: list[str] | None, with_scope: bool = True) -> dict:
+    fsm = _greeter_fsm(False)
+    if with_scope:
+        fsm["states"]["chat"]["context_scope"] = {"read_keys": read_keys}
+    return fsm
+
+
+class _ScopeHarness:
+    """Capture the Pass-2 system prompt at the sync, stream and greeting sites."""
+
+    def __init__(self, fsm: dict, context: dict | None = None):
+        self.fsm = fsm
+        self.context = context if context is not None else {}
+        self.calls: list[dict] = []
+
+    def _fake(self, **kwargs):
+        self.calls.append(kwargs)
+        if kwargs.get("stream"):
+            return iter([_stream_chunk("ok")])
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def _patches(self):
+        return (
+            patch("fsm_llm.llm.completion", side_effect=self._fake),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        )
+
+    def prompt(self, site: str) -> str:
+        p1, p2 = self._patches()
+        with p1, p2:
+            api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
+            cid, _ = api.start_conversation(initial_context=dict(self.context))
+            greeting = self.calls[-1]["messages"][0]["content"]
+            if site == "greeting":
+                return greeting
+            self.calls.clear()
+            if site == "stream":
+                list(api.converse_stream("Hi there", cid))
+                matching = [c for c in self.calls if c.get("stream")]
+            else:
+                api.converse("Hi there", cid)
+                matching = [c for c in self.calls if not c.get("stream")]
+            return matching[-1]["messages"][0]["content"]
+
+
+_SITES = ["sync", "stream", "greeting"]
+
+
+class TestContextScopeReachesPass2Prompt:
+    @pytest.mark.parametrize("site", _SITES)
+    def test_key_outside_read_keys_is_absent_from_prompt(self, site):
+        h = _ScopeHarness(_scoped_fsm(["shown"]), {"shown": SHOWN, "hidden": HIDDEN})
+        prompt = h.prompt(site)
+        assert HIDDEN not in prompt
+        assert SHOWN in prompt
+
+    @pytest.mark.parametrize("site", _SITES)
+    def test_unscoped_state_still_shows_every_key(self, site):
+        h = _ScopeHarness(
+            _scoped_fsm(None, with_scope=False),
+            {"shown": SHOWN, "hidden": HIDDEN},
+        )
+        prompt = h.prompt(site)
+        assert HIDDEN in prompt
+        assert SHOWN in prompt
+
+    @pytest.mark.parametrize("site", _SITES)
+    def test_scope_without_read_keys_is_unscoped(self, site):
+        h = _ScopeHarness(_scoped_fsm([]), {"shown": SHOWN, "hidden": HIDDEN})
+        prompt = h.prompt(site)
+        assert HIDDEN in prompt
+
+    @pytest.mark.parametrize("site", _SITES)
+    def test_secret_named_key_inside_read_keys_is_still_dropped(self, site):
+        h = _ScopeHarness(
+            _scoped_fsm(["shown", "api_token"]),
+            {"shown": SHOWN, "api_token": SECRET, "hidden": HIDDEN},
+        )
+        prompt = h.prompt(site)
+        assert SECRET not in prompt
+        assert HIDDEN not in prompt
+        assert SHOWN in prompt
+
+    @pytest.mark.parametrize("site", _SITES)
+    def test_read_keys_naming_absent_keys_do_not_break_the_prompt(self, site):
+        h = _ScopeHarness(_scoped_fsm(["not_yet_set"]), {"hidden": HIDDEN})
+        prompt = h.prompt(site)
+        assert HIDDEN not in prompt
+
+    def test_builder_context_arg_is_optional_and_defaults_to_none(self):
+        import inspect
+
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        param = inspect.signature(
+            ResponseGenerationPromptBuilder.build_response_prompt
+        ).parameters["context"]
+        assert param.default is None
+
+    def test_unscoped_prompt_is_byte_identical_to_pre_change(self):
+        """Hash recorded on the unfixed tree (step-6 RED run), unscoped state."""
+        import hashlib
+
+        h = _ScopeHarness(
+            _scoped_fsm(None, with_scope=False),
+            {"shown": SHOWN, "hidden": HIDDEN},
+        )
+        digests = {
+            site: hashlib.sha256(h.prompt(site).encode()).hexdigest() for site in _SITES
+        }
+        assert digests == {
+            "sync": "cc5623b3329c5a3b0fddcc4ce98b2f3d3c2d81e8b940608bb23f7f52c8d4daef",
+            "stream": "78aecf1510e608bda9d92841f341592b163724ffbaabf689d85e641ddb84721c",
+            "greeting": "ee5972fd140e18804a4f6faf7221cc08e51be3aafdf4a0ac42caec98430c410e",
+        }

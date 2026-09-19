@@ -606,6 +606,9 @@ class MessagePipeline:
             previous_state=previous_state,
             user_message=user_message,
             plain_text_response=output_response_format is None,
+            context=self._apply_context_scope(
+                instance.context.data, current_state, conversation_id
+            ),
         )
 
         context_for_llm = self._apply_context_scope(
@@ -713,13 +716,20 @@ class MessagePipeline:
             transition_occurred=False,
             previous_state=None,
             user_message="",
+            context=self._apply_context_scope(
+                instance.context.data, current_state, conversation_id
+            ),
         )
 
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
             user_message="",
             extracted_data={},
-            context=instance.context.get_user_visible_data(),
+            context=self._apply_context_scope(
+                instance.context.get_user_visible_data(),
+                current_state,
+                conversation_id,
+            ),
             transition_occurred=False,
             previous_state=None,
         )
@@ -1954,6 +1964,13 @@ class MessagePipeline:
             transition_occurred=transition_occurred,
             previous_state=previous_state,
             user_message=user_message,
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-005: scope the
+            # PROMPT, not only request.context (llm.py never reads it). Do NOT
+            # revert to full instance.context.data: read_keys would then
+            # promise scoping the prompt never delivered (hidden values leaked).
+            context=self._apply_context_scope(
+                instance.context.data, current_state, conversation_id
+            ),
         )
 
         # Apply context scoping if the state defines read_keys
