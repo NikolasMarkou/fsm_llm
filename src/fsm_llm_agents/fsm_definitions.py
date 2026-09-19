@@ -324,6 +324,37 @@ def build_adapt_fsm(
     }
 
 
+def _tool_selection_field_extractions(
+    think_instructions: str, *, include_tool_name: bool = True
+) -> list[dict[str, Any]]:
+    """Typed ``field_extractions`` for a think state's tool selection.
+
+    Contract: ``think_instructions`` is the state's ``extraction_instructions``;
+    returns raw dicts for ``State(field_extractions=...)``: ``tool_name`` as
+    ``str`` (omitted when ``include_tool_name`` is False, i.e. the classifier
+    owns it) and ``tool_input`` as ``dict``. Never raises.
+
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-024
+    Do NOT drop these and rely on the auto-minted config from
+    ``required_context_keys``: that config is ``field_type="any"``, whose grammar
+    (D-001) excludes ``object``, and on qwen3.5:9b-q8_0 the model then returns
+    null for both keys so no tool ever runs (live s15 A/B: 0/3 vs 3/3 with these
+    configs). Do NOT widen the ``any`` union to admit ``object`` (1/3 live, and it
+    reopens LV-01 for every auto-minted key). See decisions.md D-024.
+    """
+    fields = [("tool_input", "dict")]
+    if include_tool_name:
+        fields.insert(0, ("tool_name", "str"))
+    return [
+        {
+            "field_name": name,
+            "field_type": field_type,
+            "extraction_instructions": f"Extract the '{name}' field. {think_instructions}",
+        }
+        for name, field_type in fields
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Reflexion FSM
 # ---------------------------------------------------------------------------
@@ -360,15 +391,18 @@ def build_reflexion_fsm(
         "Use your episodic memory to avoid repeating past mistakes."
     )
 
+    think_instructions = build_think_extraction_instructions(
+        registry, task_description=task_description
+    )
+
     states: dict[str, Any] = {
         "think": {
             "id": "think",
             "description": "Reason about the task and select the next tool to use",
             "purpose": "Analyze the task, episodic memory, and previous observations",
             "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
-            "extraction_instructions": build_think_extraction_instructions(
-                registry, task_description=task_description
-            ),
+            "extraction_instructions": think_instructions,
+            "field_extractions": _tool_selection_field_extractions(think_instructions),
             "response_instructions": "",
             "transitions": [
                 {
@@ -764,13 +798,17 @@ def build_react_fsm(
         }
     )
 
+    think_instructions = build_think_extraction_instructions(
+        registry, task_description=task_description
+    )
     think_state: dict[str, Any] = {
         "id": "think",
         "description": "Reason about the task and select the next tool to use",
         "purpose": "Analyze the task and previous observations to decide the next action",
         "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
-        "extraction_instructions": build_think_extraction_instructions(
-            registry, task_description=task_description
+        "extraction_instructions": think_instructions,
+        "field_extractions": _tool_selection_field_extractions(
+            think_instructions, include_tool_name=not use_classification
         ),
         "response_instructions": "",
         "transitions": think_transitions,

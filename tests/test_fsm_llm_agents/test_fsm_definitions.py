@@ -2,11 +2,14 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.fsm_definitions module."""
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import FSMDefinition, State
+from fsm_llm.ollama import build_ollama_response_format
+from fsm_llm.pipeline import MessagePipeline
 from fsm_llm_agents.fsm_definitions import (
     build_orchestrator_fsm,
     build_plan_execute_fsm,
     build_react_fsm,
+    build_reflexion_fsm,
     build_rewoo_fsm,
 )
 from fsm_llm_agents.tools import ToolRegistry
@@ -140,3 +143,60 @@ class TestPlanningStatesRequiredContextKeys:
         plan_all_state = fsm["states"]["plan_all"]
         assert "plan_blueprint" in plan_all_state["required_context_keys"]
         FSMDefinition(**fsm)
+
+
+def _think_configs(fsm: dict) -> dict:
+    """Per-field configs the pipeline derives for the think state, by name."""
+    state = State(**fsm["states"]["think"])
+    return {
+        c.field_name: c for c in MessagePipeline._build_field_configs_from_state(state)
+    }
+
+
+def _value_types(cfg) -> set[str]:
+    rf = build_ollama_response_format("field_extraction", cfg.field_type)
+    return set(rf["json_schema"]["schema"]["properties"]["value"]["type"])
+
+
+class TestThinkStateToolSelectionTypes:
+    """RA-01b (D-024): under the auto-minted ``any`` grammar (no ``object``) the
+    9b model returned null for tool_name/tool_input and no tool ever ran (live
+    s15 A/B, 0/3). The think state declares both keys explicitly: tool_name as
+    ``str``, tool_input as ``dict`` (its grammar admits an object)."""
+
+    def test_react_declares_typed_tool_selection_fields(self):
+        cfgs = _think_configs(build_react_fsm(_make_registry("search")))
+        assert cfgs["tool_name"].field_type == "str"
+        assert cfgs["tool_input"].field_type == "dict"
+        assert cfgs["should_terminate"].field_type == "any"
+        assert "object" in _value_types(cfgs["tool_input"])
+        assert "object" not in _value_types(cfgs["tool_name"])
+
+    def test_reflexion_declares_typed_tool_selection_fields(self):
+        cfgs = _think_configs(build_reflexion_fsm(_make_registry("search")))
+        assert cfgs["tool_name"].field_type == "str"
+        assert cfgs["tool_input"].field_type == "dict"
+        assert "object" in _value_types(cfgs["tool_input"])
+
+    def test_explicit_configs_carry_the_think_instructions(self):
+        fsm = build_react_fsm(_make_registry("search"))
+        think = fsm["states"]["think"]
+        cfgs = _think_configs(fsm)
+        for key in ("tool_name", "tool_input"):
+            assert think["extraction_instructions"] in cfgs[key].extraction_instructions
+            assert key in cfgs[key].extraction_instructions
+
+    def test_classification_owned_tool_name_is_not_redeclared(self):
+        # use_classification: tool_name belongs to the classifier (D-006); an
+        # explicit config would make the plain extractor fill it again.
+        fsm = build_react_fsm(_make_registry("search"), use_classification=True)
+        names = [fc["field_name"] for fc in fsm["states"]["think"]["field_extractions"]]
+        assert names == ["tool_input"]
+        assert "tool_name" not in _think_configs(fsm)
+
+    def test_fsms_stay_valid_definitions(self):
+        FSMDefinition(**build_react_fsm(_make_registry("search")))
+        FSMDefinition(
+            **build_react_fsm(_make_registry("search"), use_classification=True)
+        )
+        FSMDefinition(**build_reflexion_fsm(_make_registry("search")))

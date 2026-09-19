@@ -148,11 +148,17 @@ class _RespondLLM(LLMInterface):
         self.model = "mock-model"
         self._answer = answer
         self._think = 0
+        self._seen: set[str] = set()
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         fname = request.field_name
-        if fname == ContextKeys.TOOL_NAME:
+        # A think turn starts at the first field extracted after the previous
+        # turn: a repeated name marks the next turn. Independent of the field
+        # order, which the explicit tool_name/tool_input configs changed (D-024).
+        if not self._seen or fname in self._seen:
             self._think += 1
+            self._seen = set()
+        self._seen.add(fname)
         if self._think <= 1:
             mapping = {
                 ContextKeys.TOOL_NAME: "respond",
