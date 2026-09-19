@@ -413,7 +413,7 @@ class FSMValidator:
         stricter than `API.from_file`.
         """
         for state_id, state in self.states.items():
-            required_keys = state.get("required_context_keys", [])
+            required_keys = state.get("required_context_keys") or []
 
             if not required_keys:
                 continue  # No required keys to validate
@@ -421,8 +421,8 @@ class FSMValidator:
             # Collect every key name any transition condition actually gates on
             gated_keys: set[str] = set()
             for transition in state.get("transitions", []):
-                for condition in transition.get("conditions", []):
-                    gated_keys.update(condition.get("requires_context_keys", []))
+                for condition in transition.get("conditions") or []:
+                    gated_keys.update(condition.get("requires_context_keys") or [])
 
             ungated = [key for key in required_keys if key not in gated_keys]
             if not ungated:
@@ -490,7 +490,7 @@ class FSMValidator:
                 )
                 if not isinstance(transition, dict):
                     continue
-                conditions = transition.get("conditions", [])
+                conditions = transition.get("conditions") or []
                 if not isinstance(conditions, list):
                     continue
                 for c_idx, condition in enumerate(conditions):

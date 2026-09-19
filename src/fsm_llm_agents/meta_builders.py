@@ -480,7 +480,7 @@ class FSMBuilder(ArtifactBuilder):
                 )
 
             for t in state["transitions"]:
-                cond_count = len(t.get("conditions", []))
+                cond_count = len(t.get("conditions") or [])
                 cond_str = f" ({cond_count} conditions)" if cond_count else ""
                 parts.append(
                     f"    -> {t['target_state']}: {t['description']}{cond_str}"

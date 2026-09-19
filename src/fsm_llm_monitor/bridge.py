@@ -180,7 +180,7 @@ def _fsm_dict_to_snapshot(data: dict[str, Any]) -> FSMSnapshot:
         transitions_raw = state_def.get("transitions", [])
         transitions = []
         for t in transitions_raw:
-            conditions = t.get("conditions", [])
+            conditions = t.get("conditions") or []
             transitions.append(
                 TransitionInfo(
                     target_state=t.get("target_state", ""),

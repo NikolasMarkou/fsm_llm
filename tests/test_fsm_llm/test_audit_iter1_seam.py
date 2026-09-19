@@ -1528,3 +1528,125 @@ class TestDictOnlyJsonContract:
             pytest.raises(LLMResponseError),
         ):
             llm.extract_bulk_data(request)
+
+
+# ---------------------------------------------------------------------------
+# Step 12: DH-02 + DH-03 -- a dumped FSMDefinition validates and renders
+# ---------------------------------------------------------------------------
+
+
+def _dumped_fsm_with_required_keys() -> dict:
+    """model_dump() writes explicit None for absent Optional containers."""
+    from fsm_llm.definitions import FSMDefinition
+
+    definition = FSMDefinition(
+        **{
+            "name": "Dumped",
+            "description": "dump round trip",
+            "initial_state": "start",
+            "persona": "helper",
+            "states": {
+                "start": {
+                    "id": "start",
+                    "description": "collect",
+                    "purpose": "collect name",
+                    "required_context_keys": ["name"],
+                    "transitions": [
+                        {
+                            "target_state": "done",
+                            "description": "have name",
+                            "conditions": [
+                                {
+                                    "description": "name set",
+                                    "requires_context_keys": ["name"],
+                                    "logic": {"has_context": "name"},
+                                }
+                            ],
+                        },
+                        {"target_state": "done", "description": "bare"},
+                    ],
+                },
+                "done": {
+                    "id": "done",
+                    "description": "end",
+                    "purpose": "finish",
+                    "transitions": [],
+                },
+            },
+        }
+    )
+    return definition.model_dump()
+
+
+class TestNullSafeValidatorAndVisualizer:
+    def test_dump_carries_explicit_nulls(self):
+        dumped = _dumped_fsm_with_required_keys()
+        start = dumped["states"]["start"]
+        bare = start["transitions"][1]
+        # Guards the premise: the dump has None (not absent) somewhere.
+        nulls = [
+            start.get("required_context_keys") is None,
+            dumped["states"]["done"].get("required_context_keys") is None,
+            bare.get("conditions") is None,
+        ]
+        assert any(nulls)
+
+    def test_dumped_fsm_validates_from_file(self, tmp_path):
+        from fsm_llm.validator import validate_fsm_from_file
+
+        path = tmp_path / "dumped.json"
+        path.write_text(json.dumps(_dumped_fsm_with_required_keys()))
+        result = validate_fsm_from_file(str(path))
+        assert result.is_valid, result.errors
+
+    def test_explicit_null_containers_validate(self, tmp_path):
+        from fsm_llm.validator import validate_fsm_from_file
+
+        data = _dumped_fsm_with_required_keys()
+        for state in data["states"].values():
+            state["required_context_keys"] = None
+            for t in state["transitions"]:
+                t["conditions"] = None
+        path = tmp_path / "nulls.json"
+        path.write_text(json.dumps(data))
+        result = validate_fsm_from_file(str(path))
+        assert result.is_valid, result.errors
+
+    def test_null_requires_context_keys_in_condition_validates(self, tmp_path):
+        from fsm_llm.validator import validate_fsm_from_file
+
+        data = _dumped_fsm_with_required_keys()
+        data["states"]["start"]["transitions"][0]["conditions"][0][
+            "requires_context_keys"
+        ] = None
+        path = tmp_path / "condnull.json"
+        path.write_text(json.dumps(data))
+        result = validate_fsm_from_file(str(path))
+        assert result.is_valid, result.errors
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_dumped_fsm_renders_in_every_style(self, tmp_path, style):
+        from fsm_llm.visualizer import visualize_fsm_from_file
+
+        path = tmp_path / "dumped.json"
+        path.write_text(json.dumps(_dumped_fsm_with_required_keys()))
+        out = visualize_fsm_from_file(str(path), style)
+        assert "Could not generate diagram" not in out
+        assert "start" in out
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_explicit_null_containers_render(self, tmp_path, style):
+        from fsm_llm.visualizer import visualize_fsm_from_file
+
+        data = _dumped_fsm_with_required_keys()
+        for state in data["states"].values():
+            state["required_context_keys"] = None
+            for t in state["transitions"]:
+                t["conditions"] = None
+        data["states"]["start"]["transitions"][0]["conditions"] = [
+            {"description": "c", "requires_context_keys": None, "logic": {}}
+        ]
+        path = tmp_path / "nulls.json"
+        path.write_text(json.dumps(data))
+        out = visualize_fsm_from_file(str(path), style)
+        assert "Could not generate diagram" not in out

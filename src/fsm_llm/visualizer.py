@@ -581,7 +581,7 @@ def create_states_section(
                 lines.append(_states_box_row(vertical, " " * len(label) + line))
 
         # Add required context keys if any
-        required_keys = state.get("required_context_keys", [])
+        required_keys = state.get("required_context_keys") or []
         if required_keys:
             key_str = ", ".join(required_keys)
             lines.append(
@@ -694,7 +694,7 @@ def build_graph_representation(
 ) -> tuple[dict[str, list], dict[str, dict[str, Any]]]:
     """Build a representation of the graph structure and analyze state metrics."""
     graph = {}
-    state_metrics = {}
+    state_metrics: dict[str, dict[str, Any]] = {}
 
     # First pass: build the basic graph
     for state_id, state in states.items():
@@ -703,11 +703,9 @@ def build_graph_representation(
             target = transition.get("target_state", "")
             desc = transition.get("description", "")
             # Extract required context keys if available
-            required_keys = []
-            if transition.get("conditions"):
-                for condition in transition.get("conditions", []):
-                    if condition.get("requires_context_keys"):
-                        required_keys.extend(condition.get("requires_context_keys", []))
+            required_keys: list[str] = []
+            for condition in transition.get("conditions") or []:
+                required_keys.extend(condition.get("requires_context_keys") or [])
 
             # Add this transition to the targets list
             targets.append((target, desc, required_keys))
@@ -718,7 +716,7 @@ def build_graph_representation(
         state_metrics[state_id] = {
             "outbound": len(targets),
             "inbound": 0,
-            "required_keys": state.get("required_context_keys", []),
+            "required_keys": state.get("required_context_keys") or [],
             "is_terminal": len(targets) == 0,
             "depth": 0,  # Will be calculated in the next pass
         }
@@ -1268,7 +1266,7 @@ def create_state_boxes(
                 )
 
         # Add required context keys
-        required_keys = state_data.get("required_context_keys", [])
+        required_keys = state_data.get("required_context_keys") or []
         if required_keys:
             box.append(
                 f"{style['vertical']}".ljust(box_width - 1) + f"{style['vertical']}"
