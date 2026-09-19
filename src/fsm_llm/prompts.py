@@ -1080,8 +1080,17 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         if not extracted_data:
             return []
 
+        # LS-02: same security filter as <current_context>, so a declared
+        # `password` field extracted this turn is not echoed to Pass 2.
+        # `default=str` keeps a datetime/Decimal from dropping the section.
+        # (`build_refinement_prompt` has no caller in src/; its
+        # `previous_extraction` half is dead code and is not built.)
+        data = self._filter_context_for_security(extracted_data)
+        if not data:
+            return []
+
         try:
-            data_json = json.dumps(extracted_data, indent=1, separators=(",", ": "))
+            data_json = json.dumps(data, indent=1, separators=(",", ": "), default=str)
             safe_data_json = self._escape_cdata(data_json)
             return [
                 "<extracted_data><![CDATA[",

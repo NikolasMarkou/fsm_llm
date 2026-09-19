@@ -1040,3 +1040,89 @@ class TestCamelCaseSecretKeys:
     def test_camel_case_secret_never_reaches_the_pass2_prompt(self):
         spy = _PromptSpy("hi", initial_context={"newPassword": "S3CRETVALUE-42x"})
         assert "S3CRETVALUE-42x" not in spy.prompt
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 8 / LS-02: extracted_data goes through the security filter
+# ══════════════════════════════════════════════════════════════
+
+
+class _PromptProv(_Prov):
+    """``_Prov`` that also records every non-extraction (Pass-2) system prompt."""
+
+    def __init__(self, fsm: dict):
+        super().__init__(fsm)
+        self.pass2_prompts: list[str] = []
+
+    def _completion(self, **kwargs):
+        system = kwargs["messages"][0]["content"]
+        if "<response_generation>" in system:
+            self.pass2_prompts.append(system)
+        return super()._completion(**kwargs)
+
+
+def _declared_secret_fsm() -> dict:
+    """`password` is a DECLARED per-field extraction; `favorite_color` is benign."""
+    fsm = _correction_fsm()
+    fsm["states"]["profile"]["field_extractions"] = [
+        {
+            "field_name": "favorite_color",
+            "field_type": "str",
+            "extraction_instructions": "the color",
+            "required": True,
+        },
+        {
+            "field_name": "password",
+            "field_type": "str",
+            "extraction_instructions": "the password",
+            "required": False,
+        },
+    ]
+    return fsm
+
+
+class TestExtractedDataSectionIsFiltered:
+    def test_declared_secret_field_never_reaches_the_pass2_prompt(self):
+        with _PromptProv(_declared_secret_fsm()) as p:
+            data = p.turn(
+                field={"favorite_color": "blue", "password": "S3CRET-hunter2"}
+            )
+        # the declared field still lands in the conversation data (per-field
+        # channel keeps working) ...
+        assert data.get("favorite_color") == "blue"
+        # ... but it is not echoed into the response-generation prompt
+        assert p.pass2_prompts
+        assert all("S3CRET-hunter2" not in s for s in p.pass2_prompts)
+
+    def test_benign_extracted_data_prompt_is_byte_identical_to_pre_change(self):
+        """Hash recorded on the unfixed tree (step-8 RED run)."""
+        import hashlib
+
+        with _PromptProv(_declared_secret_fsm()) as p:
+            p.turn(field={"favorite_color": "blue"})
+        section = p.pass2_prompts[-1]
+        assert '"favorite_color": "blue"' in section
+        digest = hashlib.sha256(section.encode()).hexdigest()
+        assert (
+            digest == "b43a45f016f0bcc680c59d78bd1cd05d5fd17b3f90ff4ec44765ac693df1ec2b"
+        )
+
+    def test_datetime_value_no_longer_drops_the_extracted_data_section(self):
+        import datetime
+
+        from fsm_llm.definitions import FSMContext, FSMDefinition, FSMInstance
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        fsm = FSMDefinition(**_correction_fsm())
+        state = fsm.states["profile"]
+        instance = FSMInstance(
+            fsm_id="t", current_state="profile", context=FSMContext()
+        )
+        prompt = ResponseGenerationPromptBuilder().build_response_prompt(
+            instance=instance,
+            state=state,
+            fsm_definition=fsm,
+            extracted_data={"when": datetime.datetime(2026, 1, 2, 3, 4, 5)},
+        )
+        assert "<extracted_data>" in prompt
+        assert "2026-01-02 03:04:05" in prompt
