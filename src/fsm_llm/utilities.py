@@ -391,7 +391,8 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
     try:
         parsed = json.loads(text.strip())
         return parsed if isinstance(parsed, dict) else None
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
+        # RecursionError: a deeply nested payload is undecodable, not fatal
         pass
 
     # Strategy 2: Extract from code blocks
@@ -402,6 +403,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
     # position and is O(n^2) (50,000 spaces took minutes) on provider text. The
     # body is everything between the opener (plus an optional `json` tag) and the
     # next fence, stripped; identical to the regex's group(1).strip().
+    scan_text = text
     fence_open = text.find("```")
     if fence_open != -1:
         body_start = fence_open + 3
@@ -417,13 +419,16 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                 # an undecodable fence and falls through to Strategy 3.
                 if isinstance(result, dict):
                     return result
-            except json.JSONDecodeError:
+                # RA-04: the brace scan resumes AFTER the fence, otherwise it
+                # would return the object inside a fenced array (`[{"a":1}]`).
+                scan_text = text[fence_close + 3 :]
+            except (json.JSONDecodeError, RecursionError):
                 logger.debug("Code block JSON parsing failed")
 
     # Strategy 3: Find balanced JSON objects
     try:
         # Find all potential JSON start positions
-        brace_positions = [m.start() for m in re.finditer(r"\{", text)]
+        brace_positions = [m.start() for m in re.finditer(r"\{", scan_text)]
 
         # DECISION plan-2026-07-19T191147-4b664252/D-002 [STALE]
         # The closing partner of every `{` is precomputed ONCE, innermost-first,
@@ -445,7 +450,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         #      classified as string content and dropped. Probe that regresses:
         #        'x " {"a":1} " y'  ->  must return {'a': 1}, not None.
         # See decisions.md D-002.
-        closing_index = _match_brace_partners(text, brace_positions)
+        closing_index = _match_brace_partners(scan_text, brace_positions)
 
         skip_until = -1
         # DECISION plan-2026-07-18T162030-a02151fe/D-023 [STALE]
@@ -478,7 +483,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                 continue  # Never balances before end of text — try next start
 
             # Found complete JSON object
-            json_str = text[start_pos : end_pos + 1]
+            json_str = scan_text[start_pos : end_pos + 1]
             try:
                 brace_result: dict[str, Any] = json.loads(json_str)
                 logger.debug(
