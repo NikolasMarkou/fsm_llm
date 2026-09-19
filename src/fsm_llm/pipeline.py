@@ -251,6 +251,17 @@ class MessagePipeline:
 
         def merge_delta(delta: dict[str, Any]) -> None:
             """Apply a handler delta dict to the instance context (None = delete)."""
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-018
+            # An ERROR handler runs after the turn was rolled back; merging its
+            # returned dict would write into that rolled-back state (RA-07).
+            # update_context is the supported write path. Do NOT re-enable.
+            if timing is HandlerTiming.ERROR:
+                if delta:
+                    logger.debug(
+                        f"ERROR handler delta not merged (turn rolled back): "
+                        f"{sorted(delta)}"
+                    )
+                return
             for key, value in delta.items():
                 if value is None:
                     instance.context.data.pop(key, None)

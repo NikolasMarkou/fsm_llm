@@ -512,3 +512,354 @@ class TestBulkValueIsCoercedAndValidated:
             assert p.turn(bulk={"nickname": "BULK"})["nickname"] == "PRESET"
         with _Prov(_correction_fsm()) as p:
             assert p.turn(bulk={"nickname": "Bee"})["nickname"] == "Bee"
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 4 / D-018: re-entrancy guard + ERROR-handler no-merge
+# ══════════════════════════════════════════════════════════════
+
+
+def _reentry_fsm() -> dict:
+    """repro1: one loopable state so a turn does Pass 2 only."""
+    return {
+        "name": "Reentry",
+        "description": "d",
+        "initial_state": "chat",
+        "persona": "p",
+        "states": {
+            "chat": {
+                "id": "chat",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "Reply.",
+                "transitions": [
+                    {"target_state": "chat", "description": "stay", "priority": 100},
+                    {"target_state": "done", "description": "bye", "priority": 1},
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "Bye.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+def _collect_fsm() -> dict:
+    """ra05: Pass 1 commits `name` and moves a -> b, Pass 2 can then fail."""
+    return {
+        "name": "Collect",
+        "description": "d",
+        "initial_state": "a",
+        "persona": "p",
+        "states": {
+            "a": {
+                "id": "a",
+                "description": "d",
+                "purpose": "collect",
+                "response_instructions": "Reply.",
+                "field_extractions": [
+                    {
+                        "field_name": "name",
+                        "field_type": "str",
+                        "extraction_instructions": "n",
+                        "required": True,
+                    }
+                ],
+                "transitions": [
+                    {
+                        "target_state": "b",
+                        "description": "have name",
+                        "priority": 1,
+                        "conditions": [
+                            {
+                                "description": "n",
+                                "requires_context_keys": ["name"],
+                                "logic": {"!=": [{"var": "name"}, None]},
+                            }
+                        ],
+                    }
+                ],
+            },
+            "b": {
+                "id": "b",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "Reply b.",
+                "transitions": [
+                    {"target_state": "b", "description": "loop", "priority": 100},
+                    {
+                        "target_state": "z",
+                        "description": "end",
+                        "priority": 1,
+                        "conditions": [
+                            {
+                                "description": "never",
+                                "requires_context_keys": ["zzz"],
+                                "logic": {"==": [{"var": "zzz"}, 1]},
+                            }
+                        ],
+                    },
+                ],
+            },
+            "z": {
+                "id": "z",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "bye",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class _Provider:
+    """Scripted provider with an outage switch and a call counter.
+
+    ``fail_pass2`` fails only the non-extraction, non-stream generation call, so
+    a Pass 1 extraction can commit before Pass 2 dies; ``fail_stream`` fails the
+    streaming call. ``down`` fails everything.
+    """
+
+    def __init__(self):
+        self.calls = 0
+        self.down = False
+        self.fail_pass2 = False
+        self.fail_stream = False
+        self.name_value = "Bob"
+
+    def completion(self, **kwargs):
+        self.calls += 1
+        if self.down:
+            raise RuntimeError("provider down")
+        if kwargs.get("stream"):
+            if self.fail_stream:
+                raise RuntimeError("stream provider down")
+            return iter(_stream_chunks(["Hel", "lo"]))
+        system = kwargs["messages"][0]["content"]
+        if kwargs.get("response_format") is not None:
+            return _fake_response(
+                json.dumps(
+                    {"field_name": "name", "value": self.name_value, "confidence": 0.9}
+                )
+            )
+        if self.fail_pass2 and "Extract" not in system[:300]:
+            raise RuntimeError("provider down")
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+
+def _stream_chunks(parts):
+    from unittest.mock import MagicMock
+
+    out = []
+    for p in parts:
+        c = MagicMock()
+        c.choices = [MagicMock()]
+        c.choices[0].delta.content = p
+        c.choices[0].delta.reasoning_content = None
+        c.choices[0].finish_reason = None
+        out.append(c)
+    return out
+
+
+class _Session:
+    def __init__(self, fsm: dict):
+        self.fsm = fsm
+        self.provider = _Provider()
+        self._stack = ExitStack()
+
+    def __enter__(self):
+        self._stack.enter_context(
+            patch("fsm_llm.llm.completion", side_effect=self.provider.completion)
+        )
+        self._stack.enter_context(
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            )
+        )
+        self.api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
+        self.cid, _ = self.api.start_conversation()
+        return self
+
+    def __exit__(self, *exc):
+        self._stack.close()
+
+    def on(self, timing, fn, name="h"):
+        self.api.register_handler(self.api.create_handler(name).at(timing).do(fn))
+
+
+class TestSameConversationReentrancyIsBounded:
+    def test_error_handler_reentering_converse_does_not_recurse(self):
+        """repro1 port: RED on HEAD, the ERROR handler recursed 99 deep."""
+        from fsm_llm.definitions import FSMError
+
+        depth = {"n": 0, "max": 0}
+        raised: list[BaseException] = []
+        with _Session(_reentry_fsm()) as s:
+
+            def on_error(ctx):
+                depth["n"] += 1
+                depth["max"] = max(depth["max"], depth["n"])
+                try:
+                    s.api.converse("sorry, retrying", s.cid)
+                except FSMError as e:
+                    raised.append(e)
+                finally:
+                    depth["n"] -= 1
+                return {}
+
+            s.on(HandlerTiming.ERROR, on_error)
+            s.provider.down = True
+            with pytest.raises(FSMError):
+                s.api.converse("hello", s.cid)
+            assert depth["max"] == 1
+            assert s.provider.calls <= 2
+            assert len(raised) == 1
+            assert "already being processed" in str(raised[0])
+
+    def test_error_handler_reentering_converse_stream_does_not_recurse(self):
+        from fsm_llm.definitions import FSMError
+
+        depth = {"max": 0, "n": 0}
+        with _Session(_reentry_fsm()) as s:
+
+            def on_error(ctx):
+                depth["n"] += 1
+                depth["max"] = max(depth["max"], depth["n"])
+                try:
+                    list(s.api.converse_stream("retry", s.cid))
+                except FSMError:
+                    pass
+                finally:
+                    depth["n"] -= 1
+                return {}
+
+            s.on(HandlerTiming.ERROR, on_error)
+            s.provider.fail_stream = True
+            with pytest.raises(FSMError):
+                list(s.api.converse_stream("hello", s.cid))
+            assert depth["max"] == 1
+            assert s.provider.calls <= 2
+
+    def test_pre_processing_handler_calling_converse_raises_not_nests(self):
+        from fsm_llm.definitions import FSMError
+
+        seen: list[BaseException] = []
+        with _Session(_reentry_fsm()) as s:
+            armed = {"on": False}
+
+            def pre(ctx):
+                if armed["on"]:
+                    try:
+                        s.api.converse("nested", s.cid)
+                    except FSMError as e:
+                        seen.append(e)
+                return {}
+
+            s.on(HandlerTiming.PRE_PROCESSING, pre)
+            armed["on"] = True
+            s.api.converse("hello", s.cid)
+            assert len(seen) == 1
+            assert "already being processed" in str(seen[0])
+            # the nested call never ran: its message is nowhere in the history
+            users = [
+                m["user"] for m in s.api.get_conversation_history(s.cid) if "user" in m
+            ]
+            assert users == ["hello"]
+
+    def test_error_handler_can_still_write_via_update_context(self):
+        from fsm_llm.definitions import FSMError
+
+        with _Session(_reentry_fsm()) as s:
+            s.on(
+                HandlerTiming.ERROR,
+                lambda ctx: s.api.update_context(s.cid, {"error_seen": True}) or {},
+            )
+            s.provider.down = True
+            with pytest.raises(FSMError):
+                s.api.converse("hello", s.cid)
+            assert s.api.get_data(s.cid).get("error_seen") is True
+
+    def test_guard_is_released_after_a_failed_turn(self):
+        from fsm_llm.definitions import FSMError
+
+        with _Session(_reentry_fsm()) as s:
+            s.provider.down = True
+            with pytest.raises(FSMError):
+                s.api.converse("hello", s.cid)
+            s.provider.down = False
+            assert s.api.converse("again", s.cid)
+
+    def test_abandoned_stream_releases_the_guard(self):
+        with _Session(_reentry_fsm()) as s:
+            gen = s.api.converse_stream("hello", s.cid)
+            next(gen)
+            gen.close()
+            assert s.api.converse("after close", s.cid)
+            gen2 = s.api.converse_stream("hello", s.cid)
+            next(gen2)
+            del gen2  # CPython closes an unreferenced generator
+            assert s.api.converse("after del", s.cid)
+
+    def test_never_iterated_stream_does_not_hold_the_guard(self):
+        with _Session(_reentry_fsm()) as s:
+            _unused = s.api.converse_stream("hello", s.cid)
+            assert s.api.converse("meanwhile", s.cid)
+            del _unused
+
+    def test_converse_between_stream_iterations_raises(self):
+        """Documented D-018 cost: an open stream owns its conversation."""
+        from fsm_llm.definitions import FSMError
+
+        with _Session(_reentry_fsm()) as s:
+            gen = s.api.converse_stream("hello", s.cid)
+            next(gen)
+            with pytest.raises(FSMError, match="already being processed"):
+                s.api.converse("interleaved", s.cid)
+            gen.close()
+
+
+class TestErrorHandlerReturnIsNotMerged:
+    def test_returned_delta_from_error_handler_is_dropped_sync_and_stream(self):
+        """ra05 port: Pass-2 failure after a committed Pass 1."""
+        from fsm_llm.definitions import FSMError
+
+        fired: list[int] = []
+        with _Session(_collect_fsm()) as s:
+
+            def on_error(ctx):
+                fired.append(1)
+                return {"handler_marker": "set-by-ERROR-handler"}
+
+            s.on(HandlerTiming.ERROR, on_error)
+            s.provider.fail_pass2 = True
+            with pytest.raises(FSMError):
+                s.api.converse("I am Bob", s.cid)
+            assert len(fired) == 1
+            data = s.api.get_data(s.cid)
+            assert "handler_marker" not in data
+            # the turn was rolled back: nothing from Pass 1 survived
+            assert "name" not in data
+            assert s.api.get_current_state(s.cid) == "a"
+
+            fired.clear()
+            s.provider.fail_pass2 = False
+            s.provider.fail_stream = True
+            # advance to b first so the stream turn has a non-terminal state
+            s.api.converse("I am Bob", s.cid)
+            assert s.api.get_current_state(s.cid) == "b"
+            with pytest.raises(FSMError):
+                list(s.api.converse_stream("hi again", s.cid))
+            assert len(fired) == 1
+            assert "handler_marker" not in s.api.get_data(s.cid)
+
+    def test_non_error_handler_delta_is_still_merged(self):
+        """Vacuity guard: only ERROR timing stopped merging."""
+        with _Session(_reentry_fsm()) as s:
+            s.on(HandlerTiming.PRE_PROCESSING, lambda ctx: {"pre_marker": 1})
+            s.api.converse("hello", s.cid)
+            assert s.api.get_data(s.cid).get("pre_marker") == 1

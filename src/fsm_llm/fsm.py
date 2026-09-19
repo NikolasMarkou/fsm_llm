@@ -140,6 +140,10 @@ class FSMManager:
         self._lock = threading.Lock()
         # Per-conversation locks to prevent concurrent mutations on the same instance
         self._conversation_locks: dict[str, threading.RLock] = {}
+        # Conversation ids with a turn in flight (D-018 re-entrancy guard). Added
+        # under ``_lock`` after ``conv_lock`` is acquired; discarded WITHOUT any
+        # lock in the ``finally`` (a lone ``set.discard`` is atomic under the GIL).
+        self._active_turns: set[str] = set()
 
         # Cache and instance management
         self.fsm_cache: OrderedDict[str, FSMDefinition] = OrderedDict()
@@ -408,6 +412,32 @@ class FSMManager:
     # Message processing
     # ----------------------------------------------------------
 
+    def _enter_turn(self, conversation_id: str, conv_lock: threading.RLock) -> None:
+        """Claim ``conversation_id`` for one turn; caller holds ``self._lock``.
+
+        Contract: raises ``FSMError`` when a turn is already in flight for this
+        conversation on ANY thread (same-thread re-entry included, which the RLock
+        alone would let through) or when ``conv_lock`` is held elsewhere. On
+        success ``conv_lock`` is held and the id is in ``_active_turns``; the
+        caller MUST release both in a ``finally`` (``_active_turns.discard`` first,
+        taking no lock, then ``conv_lock.release()``).
+        """
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-018
+        # Turn-level guard, not an ERROR-handler flag: a handler at ANY timing that
+        # calls converse() on its own conversation nested one turn per call (99
+        # provider calls for one user turn in repro1), and conv_lock is an RLock so
+        # the owning thread always re-acquires it. Do NOT make conv_lock a plain
+        # Lock (readers and update_context legitimately re-enter it) and do NOT
+        # take ``_lock`` in the release path: that would nest ``_lock`` under
+        # ``conv_lock`` and invert the hard ``_lock -> conv_lock`` order.
+        if conversation_id in self._active_turns:
+            raise FSMError(f"Conversation {conversation_id} is already being processed")
+        if not conv_lock.acquire(blocking=False):
+            raise FSMError(
+                f"Conversation {conversation_id} is already being processed by another thread"
+            )
+        self._active_turns.add(conversation_id)
+
     @with_conversation_context
     def process_message(
         self, conversation_id: str, message: str, log: Any = None
@@ -421,13 +451,11 @@ class FSMManager:
             if conversation_id not in self.instances:
                 raise FSMError(f"Conversation {conversation_id} not found")
             conv_lock = self._conversation_locks[conversation_id]
-            if not conv_lock.acquire(blocking=False):
-                raise FSMError(
-                    f"Conversation {conversation_id} is already being processed by another thread"
-                )
+            self._enter_turn(conversation_id, conv_lock)
         try:
             return self._process_message_locked(conversation_id, message, log)
         finally:
+            self._active_turns.discard(conversation_id)
             conv_lock.release()
 
     @with_conversation_context
@@ -473,10 +501,7 @@ class FSMManager:
                 if conversation_id not in self.instances:
                     raise FSMError(f"Conversation {conversation_id} not found")
                 conv_lock = self._conversation_locks[conversation_id]
-                if not conv_lock.acquire(blocking=False):
-                    raise FSMError(
-                        f"Conversation {conversation_id} is already being processed by another thread"
-                    )
+                self._enter_turn(conversation_id, conv_lock)
             try:
                 instance = self.instances[conversation_id]
                 current_state = self.resolve_state_definition(instance, conversation_id)
@@ -517,6 +542,7 @@ class FSMManager:
                     self._fire_error_handlers(instance, conversation_id, e, log)
                     raise FSMError(f"Failed to process message: {e!s}") from e
             finally:
+                self._active_turns.discard(conversation_id)
                 conv_lock.release()
 
         return _stream()
