@@ -5,6 +5,7 @@ Tool registry for agent tool management.
 """
 
 import inspect
+import json
 import threading
 import time
 import typing
@@ -32,13 +33,30 @@ def normalize_tool_input(raw: Any) -> dict[str, Any]:
     """Normalize tool input to a dict.
 
     Handles string, dict, None, and other types by wrapping non-dict values
-    in ``{"input": value}``.
+    in ``{"input": value}``. A string whose stripped text starts with ``{`` and
+    decodes to a JSON object is returned as that dict.
     """
     if raw is None:
         return {}
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, str):
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-017: the core ``any`` union
+        # (string/number/boolean/array/null, no ``object``, D-001) is what the
+        # auto-minted ``tool_input`` field is held to on Ollama, so a JSON-object
+        # tool input can only arrive as a JSON-encoded string. Decode it here, at
+        # the single consumer seam. Do NOT add ``object`` back to the ``any``
+        # union in core (reopens LV-01 for every auto-minted key) and do NOT wrap
+        # the decoded text as ``{"input": raw}`` (kwargs tools then fail with
+        # ``unexpected keyword argument 'input'``). Non-object JSON and invalid
+        # JSON keep the ``{"input": raw}`` fallback. See decisions.md D-017.
+        if raw.lstrip().startswith("{"):
+            try:
+                parsed = json.loads(raw)
+            except (ValueError, RecursionError):
+                parsed = None
+            if isinstance(parsed, dict):
+                return parsed
         return {"input": raw}
     return {"input": str(raw)}
 

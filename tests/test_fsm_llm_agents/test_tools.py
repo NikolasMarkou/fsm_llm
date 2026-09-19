@@ -11,7 +11,7 @@ import pytest
 
 from fsm_llm_agents.definitions import ToolCall, ToolDefinition
 from fsm_llm_agents.exceptions import ToolNotFoundError
-from fsm_llm_agents.tools import ToolRegistry, tool
+from fsm_llm_agents.tools import ToolRegistry, normalize_tool_input, tool
 
 
 def _add(params):
@@ -729,3 +729,62 @@ class TestSemanticToolRegistryConcurrency:
             worker.join(timeout=10)
             assert not worker.is_alive(), f"deadlock in {call!r}"
             assert errors == [], f"{call!r} raised {errors!r}"
+
+
+class TestNormalizeToolInput:
+    """RA-01 / D-017: the typed ``any`` grammar can only carry an object as a JSON string."""
+
+    def test_json_object_string_becomes_dict(self):
+        assert normalize_tool_input('{"query": "cats", "limit": 3}') == {
+            "query": "cats",
+            "limit": 3,
+        }
+
+    def test_json_object_string_with_surrounding_whitespace(self):
+        assert normalize_tool_input('  \n{"query": "cats"}\n ') == {"query": "cats"}
+
+    def test_empty_json_object_string_is_empty_dict(self):
+        assert normalize_tool_input("{}") == {}
+
+    def test_malformed_json_keeps_input_wrapper(self):
+        raw = '{"query": "cats", '
+        assert normalize_tool_input(raw) == {"input": raw}
+
+    def test_json_array_string_keeps_input_wrapper(self):
+        raw = '["cats", "dogs"]'
+        assert normalize_tool_input(raw) == {"input": raw}
+
+    def test_bare_word_keeps_input_wrapper(self):
+        assert normalize_tool_input("cats") == {"input": "cats"}
+
+    def test_empty_string_keeps_input_wrapper(self):
+        assert normalize_tool_input("") == {"input": ""}
+
+    def test_none_dict_and_int_unchanged(self):
+        d = {"a": 1}
+        assert normalize_tool_input(None) == {}
+        assert normalize_tool_input(d) is d
+        assert normalize_tool_input(42) == {"input": "42"}
+
+    def test_ra06_kwargs_tool_called_through_agent_handler(self):
+        """Port of repro ra06: a kwargs tool driven by the grammar-forced JSON string."""
+        from fsm_llm_agents.constants import ContextKeys
+        from fsm_llm_agents.handlers import AgentHandlers
+
+        seen: dict = {}
+
+        def search(query: str, limit: int = 5):
+            seen["kwargs"] = {"query": query, "limit": limit}
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register_function(search, name="search", description="search")
+        out = AgentHandlers(registry).execute_tool(
+            {
+                ContextKeys.TOOL_NAME: "search",
+                ContextKeys.TOOL_INPUT: '{"query": "cats", "limit": 3}',
+                ContextKeys.TASK: "cats",
+            }
+        )
+        assert out[ContextKeys.TOOL_STATUS] == "success", out
+        assert seen["kwargs"] == {"query": "cats", "limit": 3}
