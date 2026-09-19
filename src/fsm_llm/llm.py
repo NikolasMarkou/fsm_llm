@@ -375,9 +375,30 @@ class LiteLLMInterface(LLMInterface):
             logger.debug(f"Response generation completed in {response_time:.2f}s")
 
             # Parse response for response generation
-            return self._parse_response_generation_response(
+            parsed = self._parse_response_generation_response(
                 response, structured=request.response_format is not None
             )
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-020: the apology means
+            # the model produced nothing usable (live: `{"message": ""}` on a
+            # greeting, 1/18). Retry ONCE and return that result whatever it is:
+            # no loop, and an error on the retry keeps the first apology instead
+            # of failing the turn. Do NOT retry on any other outcome.
+            if parsed.message == _GENERIC_FALLBACK_MESSAGE:
+                logger.warning(
+                    "Response generation yielded no usable text; retrying once"
+                )
+                try:
+                    return self._parse_response_generation_response(
+                        self._make_llm_call(
+                            messages,
+                            "response_generation",
+                            response_format=request.response_format,
+                        ),
+                        structured=request.response_format is not None,
+                    )
+                except Exception as retry_error:
+                    logger.warning(f"Response generation retry failed: {retry_error!s}")
+            return parsed
 
         except LLMResponseError:
             raise

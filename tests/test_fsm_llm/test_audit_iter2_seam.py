@@ -1516,3 +1516,61 @@ class TestStructuredTerminalReplyIsNotTheApology:
             streamed = "".join(p.api.converse_stream("I love otters.", cid))
             assert p.api.get_current_state(cid) == "done"
         assert json.loads(streamed) == _ANIMAL_JSON
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 12 / LV2-02 (D-020): an apology-producing reply is retried ONCE
+# ══════════════════════════════════════════════════════════════
+
+_EMPTY = json.dumps({"message": "", "reasoning": ""})
+_GOOD = json.dumps({"message": "Welcome! What is your favorite animal?"})
+
+
+class TestEmptyReplyIsRetriedOnce:
+    def test_empty_greeting_then_good_reply_returns_the_good_reply(self):
+        with _ReplyProv([_EMPTY, _GOOD]) as p:
+            cid, greeting = p.api.start_conversation()
+            history = p.api.get_conversation_history(cid)
+        assert greeting == "Welcome! What is your favorite animal?"
+        assert p.pass2_calls == 2
+        assert all(_APOLOGY not in m.get("system", "") for m in history)
+
+    def test_two_consecutive_empties_return_the_apology_after_exactly_two_calls(self):
+        with _ReplyProv([_EMPTY, _EMPTY, _GOOD]) as p:
+            _, greeting = p.api.start_conversation()
+        assert greeting == _APOLOGY
+        assert p.pass2_calls == 2  # one retry, no loop; the third reply is unused
+
+    def test_empty_reply_on_a_later_turn_is_retried_through_converse(self):
+        with _ReplyProv([_GOOD, _EMPTY, "Otters it is."]) as p:
+            cid, _ = p.api.start_conversation()
+            before = p.pass2_calls
+            reply = p.api.converse("I love otters.", cid)
+            history = p.api.get_conversation_history(cid)
+        assert reply == "Otters it is."
+        assert p.pass2_calls - before == 2
+        assert all(_APOLOGY not in m.get("system", "") for m in history)
+
+    def test_normal_reply_makes_exactly_one_call(self):
+        with _ReplyProv([_GOOD]) as p:
+            _, greeting = p.api.start_conversation()
+        assert greeting == "Welcome! What is your favorite animal?"
+        assert p.pass2_calls == 1
+
+    def test_provider_error_on_the_retry_keeps_the_first_apology(self):
+        """The retry must not turn a shown apology into a failed turn."""
+        with _ReplyProv([_EMPTY]) as p:
+            real = p._completion
+            state = {"n": 0}
+
+            def flaky(**kwargs):
+                if kwargs["messages"][0]["content"].startswith("Extract"):
+                    return real(**kwargs)
+                state["n"] += 1
+                if state["n"] == 2:
+                    raise RuntimeError("provider down")
+                return real(**kwargs)
+
+            with patch("fsm_llm.llm.completion", side_effect=flaky):
+                _, greeting = p.api.start_conversation()
+        assert greeting == _APOLOGY
