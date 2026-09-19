@@ -879,3 +879,158 @@ class TestContextScopeReachesPass2Prompt:
             "stream": "78aecf1510e608bda9d92841f341592b163724ffbaabf689d85e641ddb84721c",
             "greeting": "ee5972fd140e18804a4f6faf7221cc08e51be3aafdf4a0ac42caec98430c410e",
         }
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 7 / CF-02: classification-owned key is not plain-extracted
+# ══════════════════════════════════════════════════════════════
+
+
+def _classified_fsm(explicit_field_extraction: bool = False, topic: bool = False):
+    """`intent` is owned by classification_extractions and gates the only
+    transition. ``topic`` adds an ordinary required key (vacuity guard)."""
+    state: dict = {
+        "id": "triage",
+        "description": "classify intent",
+        "purpose": "route",
+        "response_instructions": "Reply briefly.",
+        "classification_extractions": [
+            {
+                "field_name": "intent",
+                "intents": [
+                    {"name": "buy", "description": "wants to purchase"},
+                    {"name": "browse", "description": "just looking"},
+                ],
+                "fallback_intent": "browse",
+                "confidence_threshold": 0.7,
+                "required": False,
+            }
+        ],
+        "transitions": [
+            {
+                "target_state": "shop",
+                "description": "buying",
+                "conditions": [
+                    {
+                        "description": "intent is buy",
+                        "requires_context_keys": ["intent"],
+                        "logic": {"==": [{"var": "intent"}, "buy"]},
+                    }
+                ],
+            }
+        ],
+    }
+    if topic:
+        state["required_context_keys"] = ["topic"]
+    if explicit_field_extraction:
+        state["field_extractions"] = [
+            {
+                "field_name": "intent",
+                "field_type": "str",
+                "extraction_instructions": "Explicit intent extraction.",
+                "required": False,
+            }
+        ]
+    return {
+        "name": "ClassifiedBot",
+        "description": "classification ownership seam",
+        "version": "4.1",
+        "initial_state": "triage",
+        "persona": "Concise.",
+        "states": {
+            "triage": state,
+            "shop": {
+                "id": "shop",
+                "description": "shop",
+                "purpose": "shop",
+                "response_instructions": "Help shop.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class _ClassifiedHarness:
+    """`API.converse` with a scripted classifier and a spying fake completion.
+
+    ``plain_calls`` records the system prompt of every per-field extraction
+    call (the ones that carry a ``response_format`` and name a field).
+    """
+
+    def __init__(self, fsm: dict, intent: str, confidence: float, plain_value="buy"):
+        self.fsm = fsm
+        self.intent = intent
+        self.confidence = confidence
+        self.plain_value = plain_value
+        self.plain_calls: list[str] = []
+
+    def _completion(self, **kwargs):
+        system = kwargs["messages"][0]["content"]
+        if kwargs.get("response_format") is not None:
+            self.plain_calls.append(system)
+            return _fake_response(
+                json.dumps(
+                    {"field_name": "x", "value": self.plain_value, "confidence": 0.95}
+                )
+            )
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def run(self):
+        from fsm_llm.definitions import ClassificationResult
+
+        classifier = MagicMock()
+        classifier.classify.return_value = ClassificationResult(
+            reasoning="r", intent=self.intent, confidence=self.confidence
+        )
+        with (
+            patch("fsm_llm.llm.completion", side_effect=self._completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+            patch("fsm_llm.pipeline.Classifier", return_value=classifier),
+        ):
+            api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
+            cid, _ = api.start_conversation()
+            api.converse("I would like to buy a phone", cid)
+            return api.get_data(cid), api.get_current_state(cid)
+
+
+class TestClassificationOwnedKeyIsNotPlainExtracted:
+    def test_no_plain_extract_call_for_classification_key(self):
+        h = _ClassifiedHarness(_classified_fsm(), "buy", 0.95)
+        data, state = h.run()
+        assert h.plain_calls == []
+        assert data.get("intent") == "buy"
+        assert state == "shop"
+
+    def test_below_threshold_classification_leaves_key_unset_and_gate_closed(self):
+        h = _ClassifiedHarness(_classified_fsm(), "buy", 0.2)
+        data, state = h.run()
+        assert h.plain_calls == []
+        assert "intent" not in data
+        assert state == "triage"
+
+    def test_fallback_intent_is_still_stored(self):
+        h = _ClassifiedHarness(_classified_fsm(), "browse", 0.1)
+        data, state = h.run()
+        assert data.get("intent") == "browse"
+        assert state == "triage"
+
+    def test_ordinary_required_key_is_still_plain_extracted(self):
+        """Vacuity guard: the exclusion is per-key, not a disabled extractor."""
+        h = _ClassifiedHarness(_classified_fsm(topic=True), "buy", 0.95, "phones")
+        data, _ = h.run()
+        assert len(h.plain_calls) == 1
+        assert "'topic'" in h.plain_calls[0]
+        assert "'intent'" not in h.plain_calls[0]
+        assert data.get("topic") == "phones"
+
+    def test_explicit_field_extraction_with_same_name_still_wins(self):
+        h = _ClassifiedHarness(
+            _classified_fsm(explicit_field_extraction=True), "buy", 0.2
+        )
+        data, state = h.run()
+        assert len(h.plain_calls) == 1
+        assert data.get("intent") == "buy"
+        assert state == "shop"

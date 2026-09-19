@@ -987,6 +987,20 @@ class MessagePipeline:
                                 if key not in all_required_keys:
                                     all_required_keys.append(key)
 
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-006: a key owned by a
+        # classification_extractions entry is NOT auto-minted as a plain
+        # extraction. Minting it let the plain extractor fill a key the
+        # classifier had just rejected below its confidence threshold (the
+        # gated transition then fired anyway) and cost one wasted LLM call per
+        # turn. Do NOT gate this in the transition evaluator (wrong layer).
+        # Explicit ``field_extractions`` with the same name still win below.
+        classification_owned = {
+            c.field_name for c in (state.classification_extractions or [])
+        }
+        all_required_keys = [
+            k for k in all_required_keys if k not in classification_owned
+        ]
+
         # Auto-convert required keys → one config per key
         if all_required_keys:
             instructions = (
