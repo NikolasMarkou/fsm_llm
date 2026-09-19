@@ -1335,3 +1335,184 @@ class TestBulkPassRespectsClassificationOwnership:
         ) as p:
             data = p.say("hmm maybe something", bulk={"intent": "buy"})
         assert data.get("intent") == "buy"
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 11 / LV2-01 (D-020): a schema-valid structured terminal reply that has no
+# `message`/`reasoning` key is the reply, not the apology
+# ══════════════════════════════════════════════════════════════
+
+_ANIMAL_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "Answer",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "animal": {"type": "string"},
+                "fun_fact": {"type": "string"},
+            },
+            "required": ["animal", "fun_fact"],
+        },
+    },
+}
+_MESSAGE_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "Answer",
+        "schema": {
+            "type": "object",
+            "properties": {"message": {"type": "string"}, "mood": {"type": "string"}},
+            "required": ["message"],
+        },
+    },
+}
+_APOLOGY = "I'm sorry, I couldn't generate a proper response. Please try again."
+
+
+def _terminal_fsm() -> dict:
+    return {
+        "name": "Fmt",
+        "description": "terminal format",
+        "version": "4.1",
+        "initial_state": "ask",
+        "persona": "Concise.",
+        "states": {
+            "ask": {
+                "id": "ask",
+                "description": "ask topic",
+                "purpose": "Learn the favorite animal",
+                "required_context_keys": ["animal"],
+                "extraction_instructions": "Extract animal (string).",
+                "response_instructions": "Ask for their favorite animal.",
+                "field_extractions": [
+                    {
+                        "field_name": "animal",
+                        "field_type": "str",
+                        "extraction_instructions": "the animal",
+                        "required": True,
+                    }
+                ],
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "animal known",
+                        "priority": 0,
+                        "conditions": [
+                            {
+                                "description": "animal",
+                                "requires_context_keys": ["animal"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "end",
+                "purpose": "Summarise",
+                "response_instructions": "State the animal and one fun fact.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class _ReplyProv:
+    """Scripted provider: field extraction gets ``otters``; a Pass-2 call
+    consumes the next item of ``replies`` (the last one repeats). Records the
+    number of non-extraction calls in ``pass2_calls``."""
+
+    def __init__(self, replies, stream_parts=None):
+        self.replies = list(replies)
+        self.stream_parts = stream_parts
+        self.pass2_calls = 0
+        self._stack = ExitStack()
+
+    def _completion(self, **kwargs):
+        rf = kwargs.get("response_format")
+        if kwargs.get("stream"):
+            return iter(_stream_chunks(self.stream_parts or ["x"]))
+        system = kwargs["messages"][0]["content"]
+        if "Extract the field 'animal'" in system:
+            return _fake_response(
+                json.dumps(
+                    {"field_name": "animal", "value": "otters", "confidence": 0.9}
+                )
+            )
+        if '"extracted_data"' in system:
+            return _fake_response(json.dumps({"extracted_data": {}, "confidence": 0.9}))
+        del rf
+        self.pass2_calls += 1
+        i = min(self.pass2_calls - 1, len(self.replies) - 1)
+        return _fake_response(self.replies[i])
+
+    def __enter__(self):
+        self._stack.enter_context(
+            patch("fsm_llm.llm.completion", side_effect=self._completion)
+        )
+        self._stack.enter_context(
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            )
+        )
+        self.api = API.from_definition(_terminal_fsm(), model="gpt-4o", api_key="test")
+        return self
+
+    def __exit__(self, *exc):
+        self._stack.close()
+
+    def to_done(self, schema):
+        self.cid, greeting = self.api.start_conversation(
+            {"_output_response_format": schema} if schema else None
+        )
+        self.greeting = greeting
+        self.calls_after_start = self.pass2_calls
+        reply = self.api.converse("I love otters.", self.cid)
+        assert self.api.get_current_state(self.cid) == "done"
+        return reply
+
+
+_ANIMAL_JSON = {"animal": "otters", "fun_fact": "Otters hold hands when they sleep."}
+
+
+class TestStructuredTerminalReplyIsNotTheApology:
+    def test_schema_without_message_key_returns_the_json(self):
+        with _ReplyProv(["ask", json.dumps(_ANIMAL_JSON)]) as p:
+            reply = p.to_done(_ANIMAL_SCHEMA)
+            history = p.api.get_conversation_history(p.cid)
+        assert reply != _APOLOGY
+        assert json.loads(reply) == _ANIMAL_JSON
+        assert json.loads(history[-1]["system"]) == _ANIMAL_JSON
+
+    def test_schema_with_message_key_still_returns_the_message_string(self):
+        body = json.dumps({"message": "Otters are great.", "mood": "warm"})
+        with _ReplyProv(["ask", body]) as p:
+            reply = p.to_done(_MESSAGE_SCHEMA)
+        assert reply == "Otters are great."
+
+    def test_no_schema_unstructured_json_reply_still_degrades_as_before(self):
+        """Without a requested schema nothing changed: a `{"animal": ...}` reply
+        on an ordinary terminal state is still the apology."""
+        with _ReplyProv(["ask", json.dumps(_ANIMAL_JSON)]) as p:
+            reply = p.to_done(None)
+        assert reply == _APOLOGY
+
+    def test_reply_over_the_5000_char_cap_degrades_as_before(self):
+        """Documented limit: the JSON text may not exceed the `message` cap."""
+        big = json.dumps({"animal": "otters", "fun_fact": "x" * 5200})
+        with _ReplyProv(["ask", big]) as p:
+            reply = p.to_done(_ANIMAL_SCHEMA)
+        assert reply == _APOLOGY
+
+    def test_stream_twin_yields_the_raw_json_unchanged(self):
+        """No code change on the stream path: raw deltas are yielded verbatim."""
+        raw = json.dumps(_ANIMAL_JSON)
+        with _ReplyProv(["ask"], stream_parts=[raw[:10], raw[10:]]) as p:
+            cid, _ = p.api.start_conversation(
+                {"_output_response_format": _ANIMAL_SCHEMA}
+            )
+            streamed = "".join(p.api.converse_stream("I love otters.", cid))
+            assert p.api.get_current_state(cid) == "done"
+        assert json.loads(streamed) == _ANIMAL_JSON

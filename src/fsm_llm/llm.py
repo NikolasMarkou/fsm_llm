@@ -375,7 +375,9 @@ class LiteLLMInterface(LLMInterface):
             logger.debug(f"Response generation completed in {response_time:.2f}s")
 
             # Parse response for response generation
-            return self._parse_response_generation_response(response)
+            return self._parse_response_generation_response(
+                response, structured=request.response_format is not None
+            )
 
         except LLMResponseError:
             raise
@@ -864,12 +866,14 @@ class LiteLLMInterface(LLMInterface):
         return lines[-1] if lines else None
 
     def _parse_response_generation_response(
-        self, response
+        self, response, structured: bool = False
     ) -> ResponseGenerationResponse:
         """
         Parse LLM response for response generation.
 
         Handles both structured JSON and unstructured text responses.
+        ``structured`` is True when the caller sent a ``response_format``; a
+        JSON object with no ``message`` key is then the reply itself.
         """
         content = response.choices[0].message.content
 
@@ -888,6 +892,22 @@ class LiteLLMInterface(LLMInterface):
                 if not isinstance(message, str) or not message.strip():
                     message = data.get("reasoning")
                 if not isinstance(message, str) or not message.strip():
+                    # DECISION plan-2026-09-19T175721-21cd7f8e/D-020: a caller-
+                    # requested schema without a `message` key makes the JSON
+                    # text the reply. Do NOT unwrap it in the pipeline (it never
+                    # sees the raw content) and do NOT apply this when no schema
+                    # was sent: that is the D-022 shape ambiguity. Over the
+                    # 5000-char cap it degrades to the ladder below.
+                    as_text = json.dumps(data, ensure_ascii=False, default=str)
+                    if (
+                        structured
+                        and data
+                        and "message" not in data
+                        and len(as_text) <= _RESPONSE_MESSAGE_MAX_LEN
+                    ):
+                        return ResponseGenerationResponse(
+                            message=as_text, message_type="response"
+                        )
                     raise ValueError("No usable message or reasoning in response")
                 return ResponseGenerationResponse(
                     message=message[:_RESPONSE_MESSAGE_MAX_LEN],
@@ -993,6 +1013,8 @@ class LiteLLMInterface(LLMInterface):
         # strictly worse than showing an obviously-wrong one. Closing this needs a
         # DIFFERENT SIGNAL entirely: schema provenance, or a response-format flag
         # recording that structured output was requested for this call.
+        # That signal now exists for the structured branch (`structured`, D-020),
+        # but this raw-text rung is still schema-blind.
         # See decisions.md D-022.
         #
         # Reuses this class's own `_looks_like_json` and the module's
