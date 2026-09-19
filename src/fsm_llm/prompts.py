@@ -195,6 +195,9 @@ class BasePromptBuilder:
             lambda m: (
                 m.group(0)
                 if m.group(1).lower() in self._SAFE_TAGS
+                # LS-01: `[^>]*` in the pattern also swallows a nested `<`, so
+                # `<b </task>` matched as ONE "safe" tag and passed raw.
+                and "<" not in m.group(0)[1:]
                 else html.escape(m.group(0))
             ),
             flat,

@@ -1558,6 +1558,9 @@ def _token_value_is_credential(value: object, name: str = "") -> bool:
     return _looks_like_credential_value(value, name)
 
 
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
 def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     """Return True if this context ENTRY must never reach an LLM prompt.
 
@@ -1598,6 +1601,16 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
 
     if any(pattern.match(key) for pattern in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
         return True
+
+    # LS-06: camelCase names (`newPassword`, `clientSecret`) carry no `_`
+    # boundary for the layer-1 patterns. Exact `str` only: `.sub` on a hostile
+    # `str` subclass would dispatch to its overrides (D-006 polarity).
+    if type(key) is str:
+        snake_key = _CAMEL_BOUNDARY.sub("_", key)
+        if snake_key != key and any(
+            pattern.match(snake_key) for pattern in COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+        ):
+            return True
 
     # DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE] -- the TOKEN referral is
     # tested FIRST, and deliberately: a name matching both shapes (`foo_key_token`)
