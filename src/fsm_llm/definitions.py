@@ -317,7 +317,34 @@ class FieldExtractionConfig(BaseModel):
                     f"Unknown validation_rules keys: {sorted(unknown)}. "
                     f"Allowed: {sorted(self._ALLOWED_VALIDATION_RULE_KEYS)}"
                 )
+            self._check_validation_rule_types(self.validation_rules)
         return self
+
+    @staticmethod
+    def _check_validation_rule_types(rules: dict[str, Any]) -> None:
+        """Type-check the rules the extractor compares against at runtime.
+
+        Raises ``ValueError`` naming the offending key, so a bad rule fails at
+        load instead of as a ``TypeError`` on the first extraction turn (D-023).
+        ``min_value``/``max_value`` stay ``float()``-coerced at use and are not
+        checked here.
+        """
+        for key in ("min_length", "max_length"):
+            v = rules.get(key)
+            if key in rules and (not isinstance(v, int) or isinstance(v, bool)):
+                raise ValueError(f"validation_rules {key!r} must be an int, got {v!r}")
+        allowed = rules.get("allowed_values")
+        if "allowed_values" in rules and not isinstance(allowed, (list, tuple, set)):
+            raise ValueError(
+                f"validation_rules 'allowed_values' must be a list, got {allowed!r}"
+            )
+        if "pattern" in rules:
+            try:
+                re.compile(rules["pattern"])
+            except (re.error, TypeError) as e:
+                raise ValueError(
+                    f"validation_rules 'pattern' must be a valid regex string: {e}"
+                ) from e
 
 
 class FieldExtractionRequest(BaseModel):

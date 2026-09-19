@@ -14,7 +14,11 @@ from unittest.mock import patch
 import pytest
 
 from fsm_llm import API, FileSessionStore
-from fsm_llm.definitions import BulkExtractionRequest, FieldExtractionRequest
+from fsm_llm.definitions import (
+    BulkExtractionRequest,
+    FieldExtractionConfig,
+    FieldExtractionRequest,
+)
 from fsm_llm.expressions import evaluate_logic
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface
@@ -1878,3 +1882,75 @@ class TestNumericStringInequalityAgreesWithEquality:
         with _Prov(_level_gate_fsm(op)) as p:
             p.turn(field={"level": "2.0"})
             assert p.api.get_current_state(p.cid) == "admin"
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 17 / DH-10: validation_rules values are type-checked at load
+# ══════════════════════════════════════════════════════════════
+
+
+def _rules_fsm(rules: dict | None) -> dict:
+    fsm = _typed_fsm()
+    cfg = fsm["states"]["s"]["field_extractions"][0]
+    if rules is not None:
+        cfg["validation_rules"] = rules
+    return fsm
+
+
+_BAD_RULES = [
+    {"min_length": "abc"},
+    {"max_length": "3"},
+    {"min_length": 2.5},
+    {"min_length": True},
+    {"allowed_values": 5},
+    {"allowed_values": "abc"},
+    {"pattern": "["},
+    {"pattern": 5},
+]
+
+_GOOD_RULES = [
+    None,
+    {},
+    {"min_length": 1, "max_length": 10},
+    {"allowed_values": ["a", "b"]},
+    {"allowed_values": ("a", "b")},
+    {"pattern": r"^[a-z]+$"},
+    {"min_value": 0, "max_value": "100"},
+]
+
+
+def _config(rules) -> FieldExtractionConfig:
+    return FieldExtractionConfig(
+        field_name="years_old",
+        field_type="int",
+        extraction_instructions="age",
+        validation_rules=rules,
+    )
+
+
+class TestValidationRulesAreTypedAtLoad:
+    @pytest.mark.parametrize("rules", _BAD_RULES)
+    def test_bad_rule_value_raises_on_the_config_model(self, rules):
+        with pytest.raises(ValueError):
+            _config(rules)
+
+    @pytest.mark.parametrize("rules", _BAD_RULES)
+    def test_bad_rule_value_fails_fsm_load(self, rules):
+        with pytest.raises(Exception, match=next(iter(rules))):
+            API.from_definition(_rules_fsm(rules), model="gpt-4o", api_key="k")
+
+    @pytest.mark.parametrize("rules", _BAD_RULES)
+    def test_validator_and_loader_agree_on_a_bad_rule(self, rules):
+        from fsm_llm.validator import FSMValidator
+
+        result = FSMValidator(_rules_fsm(rules)).validate()
+        assert result.is_valid is False
+
+    @pytest.mark.parametrize("rules", _GOOD_RULES)
+    def test_valid_and_absent_rules_load_as_before(self, rules):
+        API.from_definition(_rules_fsm(rules), model="gpt-4o", api_key="k")
+        assert _config(rules).validation_rules == rules
+
+    def test_a_set_of_allowed_values_is_accepted_by_the_model(self):
+        # a set is not JSON-serialisable, so it can only arrive programmatically
+        assert _config({"allowed_values": {"a", "b"}}).validation_rules
