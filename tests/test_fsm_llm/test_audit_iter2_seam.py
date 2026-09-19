@@ -1665,3 +1665,128 @@ class TestStackedSaveSessionStoresTheRoot:
         assert saved.current_state == "profile"
         assert saved.context_data.get("root_marker") == "R"
         assert saved.stack_depth == 1
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 14 / DH-07 + EF-03: zero-handler timings skip the context deep-copy
+# ══════════════════════════════════════════════════════════════
+
+
+def _three_field_advance_fsm() -> dict:
+    fields = ["alpha", "beta", "gamma"]
+    return {
+        "name": "ThreeField",
+        "description": "advance-turn deepcopy seam",
+        "version": "4.1",
+        "initial_state": "collect",
+        "persona": "x",
+        "states": {
+            "collect": {
+                "id": "collect",
+                "description": "collect three fields",
+                "purpose": "collect",
+                "required_context_keys": fields,
+                "field_extractions": [
+                    {
+                        "field_name": f,
+                        "field_type": "str",
+                        "extraction_instructions": f"the {f}",
+                        "required": True,
+                    }
+                    for f in fields
+                ],
+                "response_instructions": "Reply briefly.",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "all collected",
+                        "priority": 10,
+                        "conditions": [
+                            {
+                                "description": "all present",
+                                "requires_context_keys": fields,
+                                "logic": {"!=": [{"var": "alpha"}, None]},
+                            }
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "end",
+                "purpose": "end",
+                "response_instructions": "Bye.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class _DeepcopyCounter:
+    """Counts TOP-LEVEL ``copy.deepcopy`` calls (the recursive internals of one
+    call re-enter the patched module global and are not counted)."""
+
+    def __init__(self):
+        import copy
+
+        self._real = copy.deepcopy
+        self.count = 0
+        self._depth = 0
+
+    def __call__(self, obj, memo=None, _nil=[]):  # noqa: B006
+        if self._depth == 0:
+            self.count += 1
+        self._depth += 1
+        try:
+            return self._real(obj, memo) if memo is not None else self._real(obj)
+        finally:
+            self._depth -= 1
+
+
+class TestZeroHandlerTurnSkipsHandlerCopies:
+    def test_advance_turn_deepcopy_count_drops_with_no_handlers(self):
+        counter = _DeepcopyCounter()
+        with _Prov(_three_field_advance_fsm()) as p:
+            # _Prov registers a CONTEXT_UPDATE spy; drop it so the FSM has
+            # genuinely zero handlers.
+            p.api.fsm_manager.handler_system.handlers.clear()
+            p.field = {"alpha": "a", "beta": "b", "gamma": "c"}
+            with patch("copy.deepcopy", counter):
+                p.api.converse("a b c", p.cid)
+            assert p.api.get_current_state(p.cid) == "done"
+        # Baseline before the fix: 14 (10 handler-timing/transition copies plus
+        # the D-012 pre-turn snapshots). The snapshots must remain.
+        assert 1 <= counter.count <= 5, counter.count
+
+    def test_non_copyable_value_no_longer_breaks_start_conversation(self):
+        import threading
+
+        with _Prov(_correction_fsm()) as p:
+            p.api.fsm_manager.handler_system.handlers.clear()
+            cid, _ = p.api.start_conversation({"lock": threading.Lock()})
+            assert p.api.get_current_state(cid) == "profile"
+
+    def test_registered_handler_still_runs_and_sees_context(self):
+        seen: list[dict] = []
+        with _Prov(_correction_fsm()) as p:
+            p.api.register_handler(
+                p.api.create_handler("pre")
+                .at(HandlerTiming.PRE_PROCESSING)
+                .do(lambda ctx: seen.append(dict(ctx)) or {"from_handler": 1})
+            )
+            p.api.converse("hello", p.cid)
+            assert seen
+            assert p.api.get_data(p.cid).get("from_handler") == 1
+
+    def test_handlers_at_filters_by_timing(self):
+        with _Prov(_correction_fsm()) as p:
+            hs = p.api.fsm_manager.handler_system
+            assert hs.handlers_at(HandlerTiming.PRE_PROCESSING) == []
+            handler = (
+                p.api.create_handler("only_post")
+                .at(HandlerTiming.POST_PROCESSING)
+                .do(lambda ctx: {})
+            )
+            p.api.register_handler(handler)
+            assert hs.handlers_at(HandlerTiming.PRE_PROCESSING) == []
+            assert hs.handlers_at(HandlerTiming.POST_PROCESSING) == [handler]

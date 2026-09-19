@@ -245,6 +245,14 @@ class MessagePipeline:
         the delta dict back into the instance. A handler returning a key with
         value ``None`` requests deletion of that key.
         """
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-022
+        # Zero handlers at this timing: nothing can read or return a delta, so
+        # skip the deep copy (14 -> ~4 copies on a zero-handler advance turn, and
+        # a non-copyable context value no longer crashes a handler timing). Do NOT
+        # extend this to the D-012 pre-turn snapshots below: rollback needs them.
+        # A Mock(spec=HandlerSystem) returns a truthy Mock here and keeps the path.
+        if not self.handler_system.handlers_at(timing):
+            return
         context = copy.deepcopy(instance.context.data)
 
         if error_context:

@@ -290,6 +290,20 @@ class HandlerSystem:
         # Maintain sorted order by priority after adding new handler
         self.handlers.sort(key=lambda h: getattr(h, "priority", 100))
 
+    def handlers_at(self, timing: HandlerTiming) -> list[FSMHandler]:
+        """Return the registered handlers that subscribe to ``timing``.
+
+        Contract: pure and cheap (no ``should_execute`` call, no copying);
+        returns a new list in priority order. A handler with no ``timings``
+        attribute, or ``timings is None``, subscribes to every timing. An empty
+        result means ``execute_handlers`` would do nothing at this timing.
+        """
+        return [
+            h
+            for h in self.handlers
+            if not hasattr(h, "timings") or h.timings is None or timing in h.timings
+        ]
+
     def execute_handlers(
         self,
         timing: HandlerTiming,
@@ -320,15 +334,8 @@ class HandlerSystem:
         updated_context = copy.deepcopy(context)
         output_context = {}
 
-        # Pre-filter handlers to optimize performance by avoiding unnecessary should_execute calls
-        potential_handlers = [
-            h
-            for h in self.handlers
-            if not hasattr(h, "timings") or h.timings is None or timing in h.timings
-        ]
-
         # Execute applicable handlers in priority order (lower priority numbers first)
-        for handler in potential_handlers:
+        for handler in self.handlers_at(timing):
             handler_name = getattr(handler, "name", handler.__class__.__name__)
 
             try:
