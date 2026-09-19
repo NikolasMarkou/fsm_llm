@@ -9,13 +9,20 @@ one per plan step.
 from __future__ import annotations
 
 import json
+import time
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fsm_llm.api import API
-from fsm_llm.definitions import FieldExtractionRequest
+from fsm_llm.definitions import (
+    BulkExtractionRequest,
+    FieldExtractionRequest,
+    LLMResponseError,
+)
 from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.utilities import extract_json_from_text, strip_think_and_fences
 
 OLLAMA_MODEL = "ollama_chat/qwen3.5:9b-q8_0"
 
@@ -1301,3 +1308,129 @@ class TestClassifierInheritsConnection:
         bare = _Bare()
         bare.timeout = True  # type: ignore[attr-defined]
         assert _helper(bare) == {}
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 10 / DH-01 + DH-19: linear-time fence and think handling
+# ══════════════════════════════════════════════════════════════
+
+# The corpora below were captured from the ORIGINAL regex implementations, so
+# they pin behavior equality across the rewrite. The `[1, 2]` fenced-list row is
+# deliberately absent: step 11 changes that contract (dict-only) on purpose.
+_STRIP_CORPUS: list[tuple[str, str]] = [
+    ('```json\n{"a": 1}\n```', '{"a": 1}'),
+    ('```\n{"a": 1}\n```', '{"a": 1}'),
+    ('```json{"a": 1}```', '{"a": 1}'),
+    ('  ```json  \n\n {"a": 1}  \n```  \n', '{"a": 1}'),
+    ('{"a": 1}\n```', '{"a": 1}'),
+    ('```json\n{"a": 1}', '{"a": 1}'),
+    ('<think>reason {"x":2}</think>{"a": 1}', '{"a": 1}'),
+    ('<think>a</think>b<think>c</think>{"a": 1}', 'b{"a": 1}'),
+    ('<think>a<think>b</think>c</think>{"a": 1}', 'c</think>{"a": 1}'),
+    ('<think>unterminated {"a": 1}', '<think>unterminated {"a": 1}'),
+    ('{"a": 1}<think>unterminated', '{"a": 1}<think>unterminated'),
+    ('<think>a</think>\n```json\n{"a": 1}\n```', '{"a": 1}'),
+    ('```\n```json\n{"a": 1}\n```\n```', '{"a": 1}'),
+    ('text\n```json\n{"a": 1}\n```\nmore', 'text\n{"a": 1}\nmore'),
+    ('```json\r\n{"a": 1}\r\n```\r\n', '{"a": 1}'),
+    ("````\nx\n````", "`\nx\n`"),
+    ("```jsonx\ny```", "x\ny"),
+    ("```json\n\n\n```json\n{}\n```", "{}"),
+    ("<think></think>```json```", ""),
+    ("", ""),
+    ("```", ""),
+    ("\n```\n", ""),
+    ("a\n```\n\n```\nb", "a\nb"),
+    ('```json\n```\n```json\n{"z":1}\n```', '{"z":1}'),
+    ('<think>a</think></think>{"a": 1}', '</think>{"a": 1}'),
+    ('<THINK>a</THINK>{"a":1}', '<THINK>a</THINK>{"a":1}'),
+    ("```json ```", ""),
+    ('x```json\n{"a":1}\n```y', 'x```json\n{"a":1}\ny'),
+    ('  \n```json\n{"a":1}\n```\n\n\n', '{"a":1}'),
+    ('``` \xa0 \n{"a":1}\u2003```', '{"a":1}'),
+]
+
+_EXTRACT_CORPUS: list[tuple[str, dict[str, Any] | None]] = [
+    ('```json\n{"a": 1}\n```', {"a": 1}),
+    ('Here:\n```json\n{"a": 1}\n```\nThanks', {"a": 1}),
+    ('```{"a": 1}```', {"a": 1}),
+    ('```json{"a":1}```', {"a": 1}),
+    ('```jsonx{"a":1}```', {"a": 1}),
+    ('```json\n{"a": 1}', {"a": 1}),
+    ('```\nnot json\n``` then {"b": 2}', {"b": 2}),
+    ('```json\n{"a": 1}\n``` and ```json\n{"b": 2}\n```', {"a": 1}),
+    ('```json\n{bad}\n``` {"c": 3}', {"c": 3}),
+    ('````\n{"a":1}\n````', {"a": 1}),
+    ('```\n```{"a":1}', {"a": 1}),
+    ('no fence {"a": 1} here', {"a": 1}),
+    ('```json   \n  \n {"a": 1} \n  \n```', {"a": 1}),
+    ('``` {"k": "v"} ```', {"k": "v"}),
+]
+
+
+_LINEAR_N = 50_000
+_LINEAR_BUDGET_S = 1.0
+
+
+def _elapsed(fn, arg: str) -> float:
+    start = time.perf_counter()
+    fn(arg)
+    return time.perf_counter() - start
+
+
+class TestLinearFenceAndThink:
+    @pytest.mark.parametrize(("text", "expected"), _STRIP_CORPUS)
+    def test_strip_think_and_fences_matches_old_outputs(self, text, expected):
+        assert strip_think_and_fences(text) == expected
+
+    @pytest.mark.parametrize(("text", "expected"), _EXTRACT_CORPUS)
+    def test_extract_json_from_text_matches_old_outputs(self, text, expected):
+        assert extract_json_from_text(text) == expected
+
+    def test_extract_json_unclosed_fence_then_spaces_is_linear(self):
+        text = "```json" + " " * _LINEAR_N
+        start = time.perf_counter()
+        assert extract_json_from_text(text) is None
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S
+
+    def test_extract_json_unclosed_fence_then_newlines_is_linear(self):
+        text = "```" + "\n" * _LINEAR_N
+        start = time.perf_counter()
+        assert extract_json_from_text(text) is None
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S
+
+    def test_strip_think_repeated_unterminated_open_tags_is_linear(self):
+        text = "<think>a" * _LINEAR_N
+        start = time.perf_counter()
+        assert strip_think_and_fences(text) == text
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S
+
+    def test_strip_think_many_closed_blocks_is_linear(self):
+        text = "<think>a</think>b" * _LINEAR_N
+        start = time.perf_counter()
+        assert strip_think_and_fences(text) == "b" * _LINEAR_N
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "x```" + " " * _LINEAR_N + "x",
+            "```" + "\n" * _LINEAR_N,
+            "``` " * _LINEAR_N,
+            "\n```x" * _LINEAR_N,
+        ],
+        ids=["ws-run", "fence-newlines", "fence-space-repeat", "newline-fence-repeat"],
+    )
+    def test_strip_fence_shapes_are_linear(self, text):
+        assert _elapsed(strip_think_and_fences, text) < _LINEAR_BUDGET_S
+
+    def test_extract_bulk_data_hostile_think_reply_is_bounded(self):
+        """The shared stripper is reached from extract_bulk_data on the real seam."""
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        hostile = "<think>a" * _LINEAR_N
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with patch("fsm_llm.llm.completion", return_value=_fake_response(hostile)):
+            start = time.perf_counter()
+            with pytest.raises(LLMResponseError):
+                llm.extract_bulk_data(request)
+            assert time.perf_counter() - start < _LINEAR_BUDGET_S

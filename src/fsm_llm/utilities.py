@@ -82,6 +82,38 @@ def _resolve_reasoning_trace(message: Any) -> str | None:
 # --------------------------------------------------------------
 
 
+def _remove_think_blocks(content: str) -> str:
+    """Remove every ``<think>...</think>`` span in one linear pass.
+
+    Contract: takes any ``str``; returns it with each lazily-matched,
+    non-overlapping ``<think>...</think>`` span (newlines included) removed.
+    An opening tag with no closing tag after it is left in place, as are all
+    later opening tags (none of them can have a closer either). Never raises.
+
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-010
+    # Do NOT restore ``re.sub(r"<think>.*?</think>", "", ..., re.DOTALL)``:
+    # on ``"<think>a" * n`` every opening tag scans to the end of the string
+    # looking for a closer that does not exist, so it is O(n^2) (50,000 tags
+    # took minutes) on text that arrives straight from the provider while the
+    # caller holds the per-conversation lock. Once ONE opener has no closer no
+    # later opener can have one, so the scan stops there. See decisions.md D-010.
+    """
+    open_tag, close_tag = "<think>", "</think>"
+    parts: list[str] = []
+    pos = 0
+    while True:
+        start = content.find(open_tag, pos)
+        if start == -1:
+            break
+        end = content.find(close_tag, start + len(open_tag))
+        if end == -1:
+            break
+        parts.append(content[pos:start])
+        pos = end + len(close_tag)
+    parts.append(content[pos:])
+    return "".join(parts)
+
+
 def strip_think_and_fences(content: str) -> str:
     """Strip a ``<think>...</think>`` block, then any surrounding code fence.
 
@@ -102,7 +134,7 @@ def strip_think_and_fences(content: str) -> str:
           can never re-diverge — the three regex operations were previously
           byte-identical, hand-duplicated in both places.
     """
-    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    content = _remove_think_blocks(content).strip()
     content = re.sub(r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE)
     content = re.sub(r"\n?```\s*$", "", content).strip()
     return content
@@ -351,15 +383,27 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         pass
 
     # Strategy 2: Extract from code blocks
-    json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
-    if json_match:
-        try:
-            json_str = json_match.group(1).strip()
-            logger.debug("Found JSON in code block")
-            result: dict[str, Any] = json.loads(json_str)
-            return result
-        except json.JSONDecodeError:
-            logger.debug("Code block JSON parsing failed")
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-010
+    # The first fenced block is located with two `str.find` calls, NOT the regex
+    # ``` ```(?:json)?\s*([\s\S]*?)\s*``` ```: with an unclosed fence followed by a
+    # long whitespace run that pattern retries `\s*```` from every lazy-group
+    # position and is O(n^2) (50,000 spaces took minutes) on provider text. The
+    # body is everything between the opener (plus an optional `json` tag) and the
+    # next fence, stripped; identical to the regex's group(1).strip().
+    fence_open = text.find("```")
+    if fence_open != -1:
+        body_start = fence_open + 3
+        if text.startswith("json", body_start):
+            body_start += 4
+        fence_close = text.find("```", body_start)
+        if fence_close != -1:
+            try:
+                json_str = text[body_start:fence_close].strip()
+                logger.debug("Found JSON in code block")
+                result: dict[str, Any] = json.loads(json_str)
+                return result
+            except json.JSONDecodeError:
+                logger.debug("Code block JSON parsing failed")
 
     # Strategy 3: Find balanced JSON objects
     try:
