@@ -143,6 +143,10 @@ _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
     # "any" — no coercion, not in dispatch dict
 }
 
+# Keyword names `Classifier.__init__` binds itself; an interface kwarg with one
+# of these names must never be spread into `Classifier(...)`.
+_CLASSIFIER_BOUND_NAMES = frozenset({"schema", "model", "config"})
+
 
 class MessagePipeline:
     """2-pass message processing pipeline.
@@ -1606,11 +1610,13 @@ class MessagePipeline:
 
         Contract: ``config_model`` is a per-config model override (or ``None``).
         Returns ``dict(interface.kwargs)`` (``api_key``, ``api_base``, ...) plus
-        ``timeout``, to be spread into ``Classifier(...)``. Never raises: an
-        interface lacking the attributes (``Mock(spec=LLMInterface)``, a custom
-        interface) contributes ``{}``. Returns ``{}`` when ``config_model``
-        differs from the interface's model, so a key is never sent to another
-        provider. The key is never logged.
+        ``timeout``, to be spread into ``Classifier(...)``, minus the names
+        ``Classifier.__init__`` binds itself (``schema``, ``model``,
+        ``config``). An interface lacking the attributes
+        (``Mock(spec=LLMInterface)``, a custom interface) contributes ``{}``.
+        Returns ``{}`` when ``config_model`` differs from the interface's
+        model, so a key is never sent to another provider. The key is never
+        logged.
         """
         # DECISION plan-2026-09-19T175721-21cd7f8e/D-008: guarded getattr, NOT
         # passing the interface to Classifier (it calls litellm.completion
@@ -1624,7 +1630,14 @@ class MessagePipeline:
         connection: dict[str, Any] = {}
         kwargs = getattr(llm, "kwargs", None)
         if isinstance(kwargs, dict):
-            connection.update(kwargs)
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-021: drop the names
+            # Classifier binds itself; spreading them is a TypeError that the
+            # extraction path swallows (silent classification skip). Do NOT
+            # widen this to a filter on "known good" keys: litellm accepts
+            # arbitrary provider kwargs.
+            connection.update(
+                {k: v for k, v in kwargs.items() if k not in _CLASSIFIER_BOUND_NAMES}
+            )
         timeout = getattr(llm, "timeout", None)
         if isinstance(timeout, int | float) and not isinstance(timeout, bool):
             connection["timeout"] = timeout

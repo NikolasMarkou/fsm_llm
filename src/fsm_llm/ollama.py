@@ -116,8 +116,19 @@ _CALL_TYPE_SCHEMAS: dict[str, tuple[dict, str]] = {
 
 
 def is_ollama_model(model: str) -> bool:
-    """Check if the model string targets an Ollama backend."""
-    return "ollama" in model.lower()
+    """Check if the model string targets an Ollama backend.
+
+    Contract: ``model`` is a litellm model string. Returns ``True`` only for
+    the ``ollama/`` and ``ollama_chat/`` provider prefixes (case-insensitive);
+    a name that merely contains "ollama" (``openai/my-ollama-proxy``) is
+    ``False``. Never raises for a ``str``.
+    """
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-021: exact provider prefix,
+    # NOT a substring test. A substring match handed the typed json_schema
+    # grammar, /nothink and forced temperature 0 to any provider whose model
+    # name contained "ollama". Do NOT revert; an Ollama server fronted as
+    # `openai/<model>` needs an explicit opt-in instead.
+    return model.lower().startswith(("ollama/", "ollama_chat/"))
 
 
 # ------------------------------------------------------------------
