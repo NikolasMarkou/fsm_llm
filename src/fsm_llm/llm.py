@@ -535,7 +535,12 @@ class LiteLLMInterface(LLMInterface):
               an EMPTY ``DataExtractionResponse`` — this is "the model found
               nothing", not a failure, so it is NOT raised as
               ``LLMResponseError``.
-            - Any actual failure (malformed JSON, transport/parsing error)
+            - Non-object JSON (``[1, 2]``, ``null``, ``42``) is the same
+              "found nothing" case and resolves to an empty response.
+            - When ``json.loads`` fails on the stripped text, the shared
+              ``extract_json_from_text`` ladder is tried ONCE (prose around a
+              JSON object, e.g. ``Sure! {"a": 1}``) before giving up.
+            - Any actual failure (unparseable text, transport/parsing error)
               raises ``LLMResponseError``, wrapping the underlying cause.
             - Filtering of ``None``/empty-string/empty-dict values out of
               ``extracted_data`` is the CALLER's job (``pipeline.py``'s merge
@@ -553,10 +558,24 @@ class LiteLLMInterface(LLMInterface):
 
             if isinstance(content, str):
                 content = strip_think_and_fences(content)
-                data = json.loads(content)
+                try:
+                    data = json.loads(content)
+                except json.JSONDecodeError:
+                    # One recovery rung (D-010): prose around a JSON object.
+                    # `extract_json_from_text` returns a dict or None, so a
+                    # None means there is genuinely nothing parseable and the
+                    # original decode error is raised below as before.
+                    data = extract_json_from_text(content)
+                    if data is None:
+                        raise
             elif isinstance(content, dict):
                 data = content
             else:
+                return DataExtractionResponse(extracted_data={})
+
+            if not isinstance(data, dict):
+                # Valid JSON that is not an object (`[1,2]`, `null`, `42`):
+                # "the model found nothing", per the contract above.
                 return DataExtractionResponse(extracted_data={})
 
             extracted = data.get("extracted_data", data)

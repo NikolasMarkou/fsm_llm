@@ -16,9 +16,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.api import API
+from fsm_llm.classification import Classifier
 from fsm_llm.definitions import (
     BulkExtractionRequest,
+    ClassificationResponseError,
+    ClassificationSchema,
     FieldExtractionRequest,
+    IntentDefinition,
     LLMResponseError,
 )
 from fsm_llm.llm import LiteLLMInterface
@@ -1434,3 +1438,93 @@ class TestLinearFenceAndThink:
             with pytest.raises(LLMResponseError):
                 llm.extract_bulk_data(request)
             assert time.perf_counter() - start < _LINEAR_BUDGET_S
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 11 / DH-08 + LS-05: dict-only JSON contract
+# ══════════════════════════════════════════════════════════════
+
+
+def _classifier() -> Classifier:
+    schema = ClassificationSchema(
+        intents=[
+            IntentDefinition(name="buy", description="wants to buy"),
+            IntentDefinition(name="browse", description="just looking"),
+        ],
+        fallback_intent="browse",
+    )
+    return Classifier(schema, model="gpt-4o")
+
+
+class TestDictOnlyJsonContract:
+    @pytest.mark.parametrize(
+        "text",
+        ["42", "[1,2]", "true", '"hi"', "```json\n[1,2]\n```", "3.5", "[]"],
+        ids=["int", "list", "bool", "string", "fenced-list", "float", "empty-list"],
+    )
+    def test_non_dict_json_returns_none(self, text):
+        assert extract_json_from_text(text) is None
+
+    def test_top_level_array_of_objects_is_not_recovered(self):
+        """D-010: no fall-through into the interior of a valid non-object."""
+        assert extract_json_from_text('[{"a": 1}]') is None
+
+    def test_first_object_still_wins(self):
+        assert extract_json_from_text('{"a":1} {"b":2}') == {"a": 1}
+
+    def test_fenced_non_dict_falls_through_to_brace_scan(self):
+        text = '```json\n[1,2]\n``` then {"a": 1}'
+        assert extract_json_from_text(text) == {"a": 1}
+
+    @pytest.mark.parametrize("content", ["42", "[1,2]", "true"])
+    def test_classify_non_dict_json_raises_classification_error(self, content):
+        clf = _classifier()
+        with (
+            patch(
+                "fsm_llm.classification.completion",
+                return_value=_fake_response(content),
+            ),
+            patch(
+                "fsm_llm.classification.get_supported_openai_params",
+                return_value=[],
+            ),
+            pytest.raises(ClassificationResponseError),
+        ):
+            clf.classify("I want a phone")
+
+    @pytest.mark.parametrize("content", ["[1,2]", "null", "42", "true", '"hi"'])
+    def test_extract_bulk_data_non_dict_json_returns_empty(self, content):
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with patch("fsm_llm.llm.completion", return_value=_fake_response(content)):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {}
+
+    def test_extract_bulk_data_recovers_embedded_object(self):
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with patch(
+            "fsm_llm.llm.completion",
+            return_value=_fake_response('Sure! {"a": 1}'),
+        ):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {"a": 1}
+
+    def test_extract_bulk_data_recovers_wrapped_extracted_data(self):
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        reply = 'Here you go: {"extracted_data": {"name": "Ann"}, "confidence": 0.5}'
+        with patch("fsm_llm.llm.completion", return_value=_fake_response(reply)):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {"name": "Ann"}
+        assert result.confidence == 0.5
+
+    @pytest.mark.parametrize("content", ["no json at all", ""])
+    def test_extract_bulk_data_unparseable_still_raises(self, content):
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with (
+            patch("fsm_llm.llm.completion", return_value=_fake_response(content)),
+            pytest.raises(LLMResponseError),
+        ):
+            llm.extract_bulk_data(request)

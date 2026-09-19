@@ -368,7 +368,11 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         text: Text potentially containing JSON data
 
     Returns:
-        Extracted JSON dictionary or None if extraction fails
+        Extracted JSON object (always a ``dict``) or ``None`` if extraction
+        fails. A JSON value that is not an object (``42``, ``[1, 2]``,
+        ``true``, ``"hi"``, ``null``) is NOT an extraction result and yields
+        ``None``; callers may rely on ``isinstance(result, dict)`` without a
+        further check.
     """
     if not isinstance(text, str) or not text.strip():
         return None
@@ -376,9 +380,17 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
     logger.debug("Attempting enhanced JSON extraction from text")
 
     # Strategy 1: Direct JSON parsing
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-010
+    # A text that parses cleanly to a non-object returns None immediately; it
+    # does NOT fall through to the brace scan. Falling through would recover
+    # the first object inside a top-level array (`[{"a":1}]` -> `{"a":1}`), a
+    # "recover more" change that would reach fsm_llm_harness/hardening.py,
+    # whose documented contract is that a top-level array is not a payload.
+    # Do NOT return the list/scalar either: the `dict | None` annotation was a
+    # lie and Classifier._parse_single died on it with AttributeError.
     try:
-        parsed: dict[str, Any] = json.loads(text.strip())
-        return parsed
+        parsed = json.loads(text.strip())
+        return parsed if isinstance(parsed, dict) else None
     except json.JSONDecodeError:
         pass
 
@@ -400,8 +412,11 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
             try:
                 json_str = text[body_start:fence_close].strip()
                 logger.debug("Found JSON in code block")
-                result: dict[str, Any] = json.loads(json_str)
-                return result
+                result = json.loads(json_str)
+                # D-010: a fenced non-object (`[1,2]`) is treated exactly like
+                # an undecodable fence and falls through to Strategy 3.
+                if isinstance(result, dict):
+                    return result
             except json.JSONDecodeError:
                 logger.debug("Code block JSON parsing failed")
 
