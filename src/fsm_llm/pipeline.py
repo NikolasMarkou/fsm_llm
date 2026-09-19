@@ -583,22 +583,6 @@ class MessagePipeline:
 
         fsm_def = self.fsm_resolver(instance.fsm_id)
 
-        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
-            instance=instance,
-            state=current_state,
-            fsm_definition=fsm_def,
-            extracted_data=extraction_response.extracted_data,
-            transition_occurred=transition_occurred,
-            previous_state=previous_state,
-            user_message=user_message,
-        )
-
-        context_for_llm = self._apply_context_scope(
-            instance.context.get_user_visible_data(),
-            current_state,
-            conversation_id,
-        )
-
         # Only enforce structured output format on terminal states (no
         # outgoing transitions).  Applying it on intermediate states forces
         # the model to produce JSON when the prompt asks for free-form text,
@@ -608,6 +592,27 @@ class MessagePipeline:
             output_response_format = instance.context.data.get(
                 "_output_response_format"
             )
+
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-003: stream plain text
+        # unless the terminal state carries a structured output format.  The
+        # sync prompt (JSON envelope) is unchanged; the stream yields and
+        # persists raw deltas, so the envelope must never be requested here.
+        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
+            instance=instance,
+            state=current_state,
+            fsm_definition=fsm_def,
+            extracted_data=extraction_response.extracted_data,
+            transition_occurred=transition_occurred,
+            previous_state=previous_state,
+            user_message=user_message,
+            plain_text_response=output_response_format is None,
+        )
+
+        context_for_llm = self._apply_context_scope(
+            instance.context.get_user_visible_data(),
+            current_state,
+            conversation_id,
+        )
 
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,

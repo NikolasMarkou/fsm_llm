@@ -906,6 +906,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         transition_occurred: bool = False,
         previous_state: str | None = None,
         user_message: str = "",
+        plain_text_response: bool = False,
     ) -> str:
         """
         Build comprehensive system prompt for response generation.
@@ -918,6 +919,11 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             transition_occurred: Whether a state transition occurred
             previous_state: Previous state if transition occurred
             user_message: Original user message
+            plain_text_response: Ask for plain user-facing text instead of the
+                ``{"message", "reasoning"}`` JSON envelope. The streaming path
+                sets this so the yielded tokens and the stored history are the
+                same plain text. Default ``False`` keeps the JSON envelope, so
+                the synchronous prompt is unchanged.
 
         Returns:
             System prompt focused on response generation
@@ -959,7 +965,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         sections.extend(self._build_enhanced_context_section(instance))
 
         # Response format
-        sections.extend(self._build_response_format_section())
+        sections.extend(self._build_response_format_section(plain_text_response))
 
         # Guidelines
         if self.config.enable_response_guidelines:
@@ -1069,8 +1075,34 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             logger.warning(f"Failed to serialize extracted data: {e}")
             return []
 
-    def _build_response_format_section(self) -> list[str]:
-        """Build response format section."""
+    def _build_response_format_section(self, plain_text: bool = False) -> list[str]:
+        """Build response format section.
+
+        ``plain_text=True`` replaces the JSON envelope with a plain-text
+        instruction (streaming path, see ``build_response_prompt``).
+        """
+        if plain_text:
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-003: the streaming
+            # path yields raw deltas and persists their concatenation, so a
+            # prompt that demands the {"message","reasoning"} envelope leaks it
+            # to the user and into history (live: it then taught the model to
+            # answer in envelopes). Do NOT "fix" this by stripping the envelope
+            # from the token stream (holds back tokens, breaks time-to-first-
+            # token) or by unwrapping only at persist time (the user still sees
+            # it); that unwrap is the recorded fallback if the model ignores
+            # this instruction. The sync prompt below is deliberately unchanged.
+            return [
+                "<response_format>",
+                "Respond with plain text only: the natural, user-facing reply.",
+                "",
+                "Important:",
+                "\t- Do NOT use JSON, curly braces, or markdown code fences",
+                "\t- Do NOT include your reasoning or any field names",
+                "\t- Acknowledge new information when appropriate",
+                "\t- Guide toward the current state's purpose when needed",
+                "</response_format>",
+                "",
+            ]
         return self._build_response_format(
             json_schema="""
             {
