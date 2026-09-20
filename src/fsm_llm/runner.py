@@ -196,14 +196,21 @@ def main(fsm_path, max_history_size, max_message_length):
 
                 # Log the current state and context
                 data = fsm.get_data(conversation_id)
-                logger.debug(f"Context data: {json.dumps(_redact_context(data))}")
+                # default=str, matching logging.py:90's own _record_to_json:
+                # a handler-stored non-JSON-native value (datetime, set, ...)
+                # must not crash the CLI's debug/dump logging path.
+                logger.debug(
+                    f"Context data: {json.dumps(_redact_context(data), default=str)}"
+                )
 
             except Exception as e:
                 logger.exception(e)
                 return -1
 
         data = fsm.get_data(conversation_id)
-        logger.info(f"Data: \n{json.dumps(_redact_context(data), indent=3)}")
+        logger.info(
+            f"Data: \n{json.dumps(_redact_context(data), indent=3, default=str)}"
+        )
     finally:
         # Clean up when done — always runs even on exception
         fsm.end_conversation(conversation_id)

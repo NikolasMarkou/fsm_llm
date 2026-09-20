@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -262,3 +263,61 @@ class TestRedactContextNonStringKeys:
             logger.remove(sink_id)
 
         assert not any("Log-redaction skipped" in r["message"] for r in records)
+
+
+class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
+    """A handler storing a `datetime` (or other non-JSON-native value) via
+    `update_context` must not crash the CLI's debug/dump JSON logging path
+    (item 4 / plan step 8). `json.dumps` has no fallback for a `datetime`
+    object and raises `TypeError: Object of type datetime is not JSON
+    serializable` by default -- `logging.py:90`'s own `_record_to_json`
+    already guards this with `default=str`; `runner.py`'s two CLI-path call
+    sites (the per-turn debug dump and the final data dump) did not.
+
+    Driven through the public `runner.main()` CLI entry point (mocked
+    `API`), not the private `json.dumps` call directly, per this codebase's
+    "every new regression test drives the public path" convention.
+    """
+
+    def _run_with_context(self, per_turn_data, final_data):
+        mock_api = MagicMock()
+        mock_api.start_conversation.return_value = ("conv-1", "Hello!")
+        mock_api.has_conversation_ended.side_effect = [False, True]
+        mock_api.converse.return_value = "Response"
+        # First get_data() call happens inside the turn loop (the per-turn
+        # debug dump); the second happens after the loop exits (the final
+        # data dump) -- see runner.py's main().
+        mock_api.get_data.side_effect = [per_turn_data, final_data]
+
+        env = {"LLM_MODEL": "test-model"}
+        with patch.dict(os.environ, env, clear=True):
+            with patch("fsm_llm.runner.dotenv.load_dotenv"):
+                with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
+                    with patch("fsm_llm.runner.setup_file_logging"):
+                        with patch("builtins.input", return_value="hi"):
+                            from fsm_llm.runner import main
+
+                            return main("/tmp/t.json", 5, 1000)
+
+    def test_datetime_in_final_dump_does_not_crash_the_cli(self):
+        """RED (pre-fix): the final dump (outside the per-turn try/except)
+        raised an uncaught TypeError all the way out of main(). GREEN
+        (post-fix): main() returns 0, no exception."""
+        result = self._run_with_context(
+            per_turn_data={"turn": 1},
+            final_data={"turn": 1, "seen_at": datetime.now(timezone.utc)},
+        )
+        assert result == 0
+
+    def test_datetime_in_per_turn_dump_does_not_crash_the_cli(self):
+        """The per-turn debug dump (line ~199) is inside a broad
+        `except Exception` that swallows the crash into `return -1` even
+        pre-fix -- still wrong (a serialization bug is not a converse
+        failure) but not an uncaught crash. Post-fix it must return 0, not
+        -1, proving the per-turn site is genuinely fixed rather than merely
+        caught by the surrounding handler."""
+        result = self._run_with_context(
+            per_turn_data={"turn": 1, "seen_at": datetime.now(timezone.utc)},
+            final_data={"turn": 1},
+        )
+        assert result == 0
