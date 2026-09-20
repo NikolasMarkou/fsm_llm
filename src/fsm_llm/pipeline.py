@@ -669,6 +669,7 @@ class MessagePipeline:
             context=self._apply_context_scope(
                 instance.context.data, current_state, conversation_id
             ),
+            rejected_corrections=extraction_response.rejected_corrections,
         )
 
         context_for_llm = self._apply_context_scope(
@@ -2180,6 +2181,7 @@ class MessagePipeline:
             context=self._apply_context_scope(
                 instance.context.data, current_state, conversation_id
             ),
+            rejected_corrections=extraction_response.rejected_corrections,
         )
 
         # Apply context scoping if the state defines read_keys

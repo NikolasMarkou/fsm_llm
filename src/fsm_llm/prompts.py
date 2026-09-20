@@ -929,6 +929,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         user_message: str = "",
         plain_text_response: bool = False,
         context: dict[str, Any] | None = None,
+        rejected_corrections: dict[str, Any] | None = None,
     ) -> str:
         """
         Build comprehensive system prompt for response generation.
@@ -949,6 +950,9 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             context: Optional context view to render in ``<current_context>``
                 (already scoped by ``context_scope.read_keys``). ``None`` uses
                 the full ``instance.context.data``.
+            rejected_corrections: Values the user asked for that the extraction
+                step refused to apply (D-032). ``None`` or empty adds nothing, so
+                a turn without a rejection builds the same prompt as before.
 
         Returns:
             System prompt focused on response generation
@@ -981,6 +985,12 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         # Extracted data context
         if self.config.include_extracted_data and extracted_data:
             sections.extend(self._build_extracted_data_section(extracted_data))
+
+        # Refused corrections (empty on every benign turn: no bytes added)
+        if rejected_corrections:
+            sections.extend(
+                self._build_rejected_corrections_section(rejected_corrections)
+            )
 
         # Conversation history
         if self.config.include_conversation_history:
@@ -1108,6 +1118,38 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         except (TypeError, ValueError, OverflowError) as e:
             logger.warning(f"Failed to serialize extracted data: {e}")
             return []
+
+    def _build_rejected_corrections_section(
+        self, rejected_corrections: dict[str, Any]
+    ) -> list[str]:
+        """Build the ``<rejected_corrections>`` block.
+
+        DECISION plan-2026-09-19T175721-21cd7f8e/D-032: when the user asked for
+        a change the store refused (provenance rule, D-015), Pass 2 is told so
+        and the stored value stands; otherwise the reply says "updated" about
+        data that never changed (LV3-01). Do NOT emit it for values the user
+        did not ask for (the pipeline only passes grounded ones), and keep the
+        same security filter and CDATA escaping as ``<extracted_data>``.
+        """
+        data = self._filter_context_for_security(rejected_corrections)
+        if not data:
+            return []
+        try:
+            data_json = json.dumps(data, indent=1, separators=(",", ": "), default=str)
+        except (TypeError, ValueError, OverflowError) as e:
+            logger.warning(f"Failed to serialize rejected corrections: {e}")
+            return []
+        return [
+            "<rejected_corrections>",
+            "The user asked for these values but they were NOT applied; the "
+            "stored value stands. Tell the user the value was not changed and do "
+            "not claim it was updated.",
+            "<![CDATA[",
+            self._escape_cdata(data_json),
+            "]]>",
+            "</rejected_corrections>",
+            "",
+        ]
 
     def _build_response_format_section(self, plain_text: bool = False) -> list[str]:
         """Build response format section.

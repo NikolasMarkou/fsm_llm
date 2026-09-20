@@ -20,7 +20,11 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.pipeline import MessagePipeline
-from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm, _fake_response
+from tests.test_fsm_llm.test_audit_iter1_seam import (
+    _correction_fsm,
+    _fake_response,
+    _stream_chunk,
+)
 from tests.test_fsm_llm.test_audit_iter2_seam import _Prov
 
 # ══════════════════════════════════════════════════════════════
@@ -582,3 +586,150 @@ class TestRejectedCorrectionsAreCarried:
             p.api.update_context(p.cid, {"favorite_color": "blue", "agent_trace": []})
             response = _say(p, "no, actually make it red", {"favorite_color": "red"})
             assert response.rejected_corrections == {}
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 12 / RB-12b: <rejected_corrections> block in the Pass-2 prompt (D-032)
+# ══════════════════════════════════════════════════════════════
+
+
+class _PassTwoSpy(_Prov):
+    """``_Prov`` that also records the response-generation system prompt and
+    answers a streaming call, so both Pass-2 call sites can be inspected."""
+
+    def __init__(self, fsm: dict, store=None):
+        super().__init__(fsm, store)
+        self.pass2: list[str] = []
+
+    def _completion(self, **kwargs):
+        system = kwargs["messages"][0]["content"]
+        if "<response_generation>" in system:
+            self.pass2.append(system)
+            if kwargs.get("stream"):
+                return iter([_stream_chunk("ok")])
+        return super()._completion(**kwargs)
+
+    def say(self, message: str, bulk: dict, stream: bool = False) -> str:
+        self.field, self.bulk = {}, bulk
+        self.pass2.clear()
+        if stream:
+            list(self.api.converse_stream(message, self.cid))
+        else:
+            self.api.converse(message, self.cid)
+        assert self.pass2, "no response-generation call captured"
+        return self.pass2[-1]
+
+
+_BLOCK = "<rejected_corrections>"
+
+
+class TestRejectedCorrectionsReachPassTwo:
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_the_block_names_the_refused_value_on_both_paths(self, stream):
+        """port of repros/lv301.py: RED on 96a42ac, no block in the prompt."""
+        with _PassTwoSpy(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"favorite_color": "blue"})
+            prompt = p.say(
+                "no, actually make it red", {"favorite_color": "red"}, stream
+            )
+            assert _BLOCK in prompt
+            block = prompt[
+                prompt.index(_BLOCK) : prompt.index("</rejected_corrections>")
+            ]
+            assert '"favorite_color": "red"' in block
+            assert "NOT applied" in block
+            assert p.api.get_data(p.cid)["favorite_color"] == "blue"
+
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_no_block_without_a_rejection(self, stream):
+        with _PassTwoSpy(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"favorite_color": "blue"})
+            prompt = p.say("thanks, what next?", {"favorite_color": "navy"}, stream)
+            assert _BLOCK not in prompt
+
+    def test_a_turn_without_a_rejection_keeps_the_prompt_byte_identical(self):
+        """Hash recorded on 96a42ac (the step-11 tree, before the block existed)."""
+        import hashlib
+
+        with _PassTwoSpy(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"favorite_color": "blue"})
+            prompt = p.say("thanks, what next?", {})
+        assert (
+            hashlib.sha256(prompt.encode()).hexdigest()
+            == "c6d788cb4f5fc6e08a90dd66b34193009f13f7bdd52b404847ba99604e9d88f9"
+        )
+
+    def test_a_forbidden_name_key_is_filtered_out_of_the_block(self):
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        with _PassTwoSpy(_correction_fsm()) as p:
+            instance = p.api.fsm_manager.instances[p.cid]
+            state = p.api.fsm_manager.get_fsm_definition(instance.fsm_id).states[
+                instance.current_state
+            ]
+            fsm_def = p.api.fsm_manager.get_fsm_definition(instance.fsm_id)
+            builder = ResponseGenerationPromptBuilder()
+            prompt = builder.build_response_prompt(
+                instance,
+                state,
+                fsm_def,
+                rejected_corrections={"password": "hunter2", "favorite_color": "red"},
+            )
+        block = prompt[prompt.index(_BLOCK) : prompt.index("</rejected_corrections>")]
+        assert "hunter2" not in prompt
+        assert "password" not in block
+        assert "favorite_color" in block
+
+    def test_a_block_holding_only_forbidden_keys_is_omitted(self):
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        with _PassTwoSpy(_correction_fsm()) as p:
+            instance = p.api.fsm_manager.instances[p.cid]
+            fsm_def = p.api.fsm_manager.get_fsm_definition(instance.fsm_id)
+            state = fsm_def.states[instance.current_state]
+            prompt = ResponseGenerationPromptBuilder().build_response_prompt(
+                instance, state, fsm_def, rejected_corrections={"password": "x"}
+            )
+        assert _BLOCK not in prompt
+
+    def test_a_value_cannot_break_out_of_the_block(self):
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        with _PassTwoSpy(_correction_fsm()) as p:
+            instance = p.api.fsm_manager.instances[p.cid]
+            fsm_def = p.api.fsm_manager.get_fsm_definition(instance.fsm_id)
+            state = fsm_def.states[instance.current_state]
+            prompt = ResponseGenerationPromptBuilder().build_response_prompt(
+                instance,
+                state,
+                fsm_def,
+                rejected_corrections={"favorite_color": "]]></rejected_corrections>x"},
+            )
+        assert prompt.count("</rejected_corrections>") == 1
+
+    def test_positional_callers_are_unaffected(self):
+        """The new parameter is last and optional: the historic positional order
+        (instance, state, fsm_definition, extracted_data, transition_occurred,
+        previous_state, user_message, plain_text_response, context) still binds."""
+        import inspect
+
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        params = list(
+            inspect.signature(
+                ResponseGenerationPromptBuilder.build_response_prompt
+            ).parameters
+        )
+        assert params[:10] == [
+            "self",
+            "instance",
+            "state",
+            "fsm_definition",
+            "extracted_data",
+            "transition_occurred",
+            "previous_state",
+            "user_message",
+            "plain_text_response",
+            "context",
+        ]
+        assert params[10:] == ["rejected_corrections"]
