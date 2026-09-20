@@ -3,7 +3,14 @@ from __future__ import annotations
 """Tests for fsm_llm_agents.evaluator_optimizer module."""
 
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.llm import LLMInterface
 from fsm_llm_agents.constants import ContextKeys, Defaults, EvalOptStates, HandlerNames
 from fsm_llm_agents.definitions import AgentConfig, EvaluationResult
 from fsm_llm_agents.evaluator_optimizer import EvaluatorOptimizerAgent
@@ -352,3 +359,62 @@ class TestEvalOptHandlers:
         agent = EvaluatorOptimizerAgent(evaluation_fn=_always_pass)
         answer = agent._extract_answer({}, ["", ""])
         assert "could not" in answer.lower()
+
+
+class _PoemLLM(LLMInterface):
+    """Scripted model: extracts ``generated_output`` (or nothing) and never
+    sets ``final_answer``, which is what the live runs showed (LV4-04)."""
+
+    def __init__(self, generated: str | None) -> None:
+        self.model = "mock-model"
+        self.generated = generated
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        value = self.generated if request.field_name == "generated_output" else None
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="mock",
+            is_valid=value is not None,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="ok", message_type="response", reasoning="mock"
+        )
+
+
+class TestGeneratedOutputCountsAsAnAnswer:
+    """LV4-04 / D-036: an evaluator-passed run with a non-empty
+    ``generated_output`` and no ``final_answer`` is a success."""
+
+    def _run(self, generated: str | None):
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=_always_pass,
+            config=AgentConfig(max_iterations=10, timeout_seconds=30.0),
+            llm_interface=_PoemLLM(generated),
+        )
+        return agent.run("Write a haiku about autumn")
+
+    def test_a_non_empty_generated_output_is_a_success(self):
+        result = self._run("Crimson leaves descend, whispering to the cold earth.")
+        assert result.final_context.get(ContextKeys.FINAL_ANSWER) is None
+        assert result.success is True
+        assert "Crimson leaves" in result.answer
+
+    def test_an_empty_generated_output_is_still_a_failure(self):
+        # An empty output never leaves ``generate`` (budget error), so the
+        # empty case is pinned at the completion check ``run()`` delegates to.
+        from fsm_llm_agents.definitions import AgentTrace
+
+        trace = AgentTrace(tool_calls=[], total_iterations=1)
+        keys = [ContextKeys.GENERATED_OUTPUT]
+        assert not EvaluatorOptimizerAgent._completion_is_real(
+            {ContextKeys.GENERATED_OUTPUT: "  "}, trace, keys
+        )
+        assert EvaluatorOptimizerAgent._completion_is_real(
+            {ContextKeys.GENERATED_OUTPUT: "a poem"}, trace, keys
+        )
