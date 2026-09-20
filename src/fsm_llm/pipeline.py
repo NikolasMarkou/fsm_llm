@@ -53,6 +53,7 @@ from .definitions import (
 from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
 from .llm import LLMInterface
 from .logging import logger
+from .ollama import is_ollama_model
 from .prompts import (
     ClassificationPromptConfig,
     DataExtractionPromptBuilder,
@@ -1244,10 +1245,21 @@ class MessagePipeline:
             # are captured first: the additive bulk pass below needs the
             # config-covered set, not the filtered one (D-004, D-015).
             cfg_by_name = {c.field_name: c for c in all_configs}
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-035: identical null
+            # extractions are memoised ONLY on Ollama (temperature 0, so an
+            # identical prompt returns an identical result and a retry is
+            # pure waste). Elsewhere a retry is a deliberate resample: do NOT
+            # widen this to every provider, and do NOT memoise a success. The
+            # `isinstance(str)` test is load-bearing: a Mock interface's
+            # `.model` is truthy and must not enable it.
+            model = getattr(self.llm_interface, "model", None)
+            memo: dict[tuple[str, str], FieldExtractionResponse] | None = (
+                {} if isinstance(model, str) and is_ollama_model(model) else None
+            )
             existing = instance.context.data
             all_configs = [c for c in all_configs if existing.get(c.field_name) is None]
             results = self._execute_field_extractions(
-                instance, user_message, all_configs, conversation_id
+                instance, user_message, all_configs, conversation_id, memo
             )
             for result in results:
                 if result.is_valid and result.value is not None:
@@ -1312,7 +1324,11 @@ class MessagePipeline:
 
                 if missing_field_configs:
                     retry_results = self._execute_field_extractions(
-                        instance, user_message, missing_field_configs, conversation_id
+                        instance,
+                        user_message,
+                        missing_field_configs,
+                        conversation_id,
+                        memo,
                     )
                     for result in retry_results:
                         if result.is_valid and result.value is not None:
@@ -1462,6 +1478,7 @@ class MessagePipeline:
         user_message: str,
         field_configs: list[FieldExtractionConfig],
         conversation_id: str,
+        memo: dict[tuple[str, str], FieldExtractionResponse] | None = None,
     ) -> list[FieldExtractionResponse]:
         """Execute targeted field extractions for a list of configs.
 
@@ -1471,6 +1488,10 @@ class MessagePipeline:
         Previously extracted values are added to the dynamic context
         for subsequent extractions, enabling dependent field extraction
         (e.g., tool_input can see that tool_name was already extracted).
+
+        ``memo`` (D-035, ``None`` = disabled) maps ``(field_name, built prompt
+        + "|" + message)`` to a previous NULL result; it is only ever handed an
+        Ollama interface's dict by ``_execute_data_extraction``.
         """
         log = logger.bind(conversation_id=conversation_id)
         results: list[FieldExtractionResponse] = []
@@ -1523,9 +1544,18 @@ class MessagePipeline:
                 validation_rules=field_config.validation_rules,
             )
 
-            # Call LLM
+            # Call LLM (or reuse an identical null, D-035)
+            memo_key = (
+                field_config.field_name,
+                f"{system_prompt}|{user_message}",
+            )
             try:
-                response = self.llm_interface.extract_field(request)
+                if memo is not None and memo_key in memo:
+                    response = memo[memo_key]
+                else:
+                    response = self.llm_interface.extract_field(request)
+                    if memo is not None and response.value is None:
+                        memo[memo_key] = response
             except Exception as e:
                 log.warning(
                     f"Field extraction failed for '{field_config.field_name}': {e}"

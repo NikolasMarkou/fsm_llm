@@ -1264,3 +1264,175 @@ class TestBackEdgeReExtraction:
         assert p.api.get_current_state(p.cid) == "profile"
         assert kinds.count("bulk") == 1
         assert data["favorite_color"] == "red"  # the one bulk pass corrects it
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 15 / RB-09: Ollama-only memo of identical null field extractions
+# ══════════════════════════════════════════════════════════════
+
+
+def _memo_fsm(retries: int) -> dict:
+    """One state, three required keys (all per-field), transition reads ``k1``."""
+    return {
+        "name": "F",
+        "description": "d",
+        "version": "4.1",
+        "initial_state": "a",
+        "persona": "p",
+        "states": {
+            "a": {
+                "id": "a",
+                "description": "d",
+                "purpose": "p",
+                "required_context_keys": ["k1", "k2", "k3"],
+                "extraction_retries": retries,
+                "response_instructions": "Reply.",
+                "transitions": [
+                    {
+                        "target_state": "b",
+                        "description": "x",
+                        "priority": 1,
+                        "conditions": [
+                            {
+                                "description": "n",
+                                "requires_context_keys": ["k1"],
+                                "logic": {"has_context": "k1"},
+                            }
+                        ],
+                    }
+                ],
+            },
+            "b": {
+                "id": "b",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "r",
+                "transitions": [],
+            },
+        },
+    }
+
+
+def _field_calls(model: str, retries: int, succeed: str | None = None):
+    """(calls, unique prompts) of per-field provider calls for one turn."""
+    prompts: list[str] = []
+
+    def comp(**kw):
+        system = kw["messages"][0]["content"]
+        if kw.get("response_format") is not None and "Extract the field" in system:
+            prompts.append(system)
+            if succeed and f"'{succeed}'" in system:
+                return _fake_response(
+                    json.dumps({"field_name": succeed, "value": "v", "confidence": 0.9})
+                )
+            return _fake_response(
+                json.dumps({"field_name": "x", "value": None, "confidence": 0.0})
+            )
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    with (
+        patch("fsm_llm.llm.completion", side_effect=comp),
+        patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            return_value=["response_format"],
+        ),
+    ):
+        from fsm_llm import API
+
+        api = API.from_definition(_memo_fsm(retries), model=model, api_key="x")
+        cid, _ = api.start_conversation()
+        api.converse("hello", cid)
+    return len(prompts), len(set(prompts))
+
+
+class TestOllamaNullExtractionMemo:
+    def test_three_null_keys_cost_one_call_each_on_ollama(self):
+        # RED on HEAD: 12 calls (1 + 3 retries) for 3 unique prompts
+        assert _field_calls("ollama_chat/qwen3.5:9b", 3) == (3, 3)
+
+    def test_the_default_single_retry_no_longer_doubles_a_null_field(self):
+        assert _field_calls("ollama_chat/qwen3.5:9b", 1) == (3, 3)
+
+    def test_one_success_still_retries_the_others_once_with_the_new_context(self):
+        # first pass 3 calls; retry 1 re-asks k2 and k3 with a different prompt
+        # (k1 is no longer in the dynamic context); retry 2 and 3 hit the memo
+        assert _field_calls("ollama_chat/qwen3.5:9b", 3, succeed="k1") == (5, 5)
+
+    def test_a_non_ollama_provider_keeps_every_retry_as_a_resample(self):
+        assert _field_calls("gpt-4o", 3) == (12, 3)
+        assert _field_calls("gpt-4o", 3, succeed="k1") == (9, 5)
+
+    def test_a_lookalike_model_name_is_not_treated_as_ollama(self):
+        assert _field_calls("openai/my-ollama-proxy", 3) == (12, 3)
+
+    def test_an_interface_whose_model_is_not_a_str_disables_the_memo(self):
+        from unittest.mock import Mock
+
+        from fsm_llm import API
+        from fsm_llm.definitions import (
+            FieldExtractionResponse,
+            ResponseGenerationResponse,
+        )
+        from fsm_llm.llm import LLMInterface
+
+        class _Scripted(LLMInterface):
+            def __init__(self):
+                self.model = Mock()  # truthy, not a str
+                self.field_calls = 0
+
+            def generate_response(self, request):
+                return ResponseGenerationResponse(message="ok")
+
+            def extract_field(self, request):
+                self.field_calls += 1
+                return FieldExtractionResponse(
+                    field_name=request.field_name, value=None, confidence=0.0
+                )
+
+            def extract_bulk_data(self, request):
+                from fsm_llm.definitions import DataExtractionResponse
+
+                return DataExtractionResponse(extracted_data={}, confidence=0.0)
+
+        llm = _Scripted()
+        api = API.from_definition(_memo_fsm(3), llm_interface=llm)
+        cid, _ = api.start_conversation()
+        api.converse("hello", cid)
+        assert llm.field_calls == 12
+
+    def test_a_successful_result_is_never_served_from_the_memo(self):
+        # k1 succeeds with the same prompt text on every call; each extraction
+        # must reach the provider (values are not memoised, only nulls).
+        seen: list[str] = []
+
+        def comp(**kw):
+            system = kw["messages"][0]["content"]
+            if kw.get("response_format") is not None and "Extract the field" in system:
+                seen.append(system)
+                return _fake_response(
+                    json.dumps(
+                        {
+                            "field_name": "k1",
+                            "value": f"v{len(seen)}",
+                            "confidence": 0.9,
+                        }
+                    )
+                )
+            return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+        fsm = _memo_fsm(0)
+        fsm["states"]["a"]["required_context_keys"] = ["k1"]
+        with (
+            patch("fsm_llm.llm.completion", side_effect=comp),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            from fsm_llm import API
+
+            api = API.from_definition(fsm, model="ollama_chat/q", api_key="x")
+            cid, _ = api.start_conversation()
+            api.converse("hello", cid)
+        assert api.get_data(cid)["k1"] == "v1"
+        assert len(seen) == 1
