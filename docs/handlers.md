@@ -54,6 +54,19 @@ Good for resource cleanup, saving summaries, releasing locks.
 ### ERROR -- On any exception
 Good for graceful recovery, fallback responses, error logging.
 
+ERROR handlers fire on any `FSMError` (including `LLMResponseError`, the LLM-outage case)
+and on the streaming path; the `FSMError` is still re-raised to the caller. They run after
+the turn has been rolled back, so:
+
+- **The dict an ERROR handler returns is not merged** into the conversation (it is
+  dropped and debug-logged). Use `api.update_context(conversation_id, {...})` to write
+  context from an ERROR handler.
+- **Re-entering the same conversation raises.** Calling `converse` or `converse_stream`
+  on the conversation whose turn is in flight (from any handler timing, or between
+  `next()` calls of an open stream) raises `FSMError` ("already being processed")
+  instead of nesting. `update_context` and the read methods stay allowed.
+- `KeyboardInterrupt`, `SystemExit` and `GeneratorExit` run no handlers.
+
 ## HandlerBuilder Reference
 
 The fluent API returned by `api.create_handler(name)`:
@@ -80,6 +93,9 @@ The fluent API returned by `api.create_handler(name)`:
 The `HandlerSystem` has an `error_mode`:
 - **`"continue"`** (default) -- Log error, skip failed handler, continue with others
 - **`"raise"`** -- Stop execution, propagate exception
+
+When no handler subscribes to a timing, the pipeline skips that timing entirely (no
+context deep-copy, no call), so an FSM without handlers pays nothing for the hook points.
 
 Handlers marked `critical=True` always raise regardless of error mode. There are two ways to mark
 one -- a `BaseHandler` subclass, or `.critical()` on the fluent builder:

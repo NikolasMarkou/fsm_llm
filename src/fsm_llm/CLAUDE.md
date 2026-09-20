@@ -48,12 +48,17 @@ fsm_llm/
 - **FSMManager** (`fsm.py`) -- Orchestration with per-conversation thread locks, LRU FSM cache (max 64)
   - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `resolve_state_definition(instance)`
   - ERROR-timing handlers fire on `FSMError` (e.g. `LLMResponseError`) and on the streaming path via `_fire_error_handlers`; the `FSMError` is still re-raised unwrapped. KeyboardInterrupt/SystemExit/GeneratorExit run no handlers
+  - Re-entrancy guard (`_active_turns`, `_enter_turn`): a same-conversation `converse`/`converse_stream` from a handler (or between `next()` calls of an open stream) while a turn is in flight raises `FSMError`; `update_context` stays allowed
+  - `save_session` on a stacked conversation saves the ROOT frame's state, data, history and working memory (not the sub-FSM's)
 - **MessagePipeline** (`pipeline.py`) -- 2-pass engine
   - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition
   - Pass 2: response generation from new state -- skipped entirely when the state's `response_instructions` is empty (no response LLM call; used for intermediate agent states in tool-use loops)
   - `process_message(instance, conv_id, msg)`, `generate_initial_response(instance, conv_id)`
   - Streaming (`process_message_stream`) uses a plain-text Pass-2 prompt (`build_response_prompt(..., plain_text_response=True)`) unless the state carries `_output_response_format`, so yielded tokens and stored history have no `{"message","reasoning"}` envelope
   - `context_scope.read_keys` is enforced on the context shown in the Pass-2 prompt (turn, stream and greeting), not only on `request.context`
+  - Bulk extraction pass provenance: `context.metadata["_pipeline_extracted"]` holds a digest per key the pipeline extracted; the bulk pass overwrites a stored key only if it is config-covered, the FSM is not agent-managed and the stored value still matches the digest (handler-set, `update_context` and post-`restore_session` values are never overwritten). Bulk values for config-covered keys are coerced/validated like per-field values. The bulk prompt sanitizes user text; the bulk result drops `agent_trace` and forbidden-name keys; it never fills a classification-owned key on a non-agent FSM
+  - `execute_handlers` returns immediately when no handler subscribes to the timing (`HandlerSystem.handlers_at`), skipping the context deep-copies (a zero-handler advance turn: 14 -> 4 copies); the pre-turn rollback snapshots are unaffected
+  - An ERROR-timing handler's returned dict is NOT merged (the turn was rolled back); `update_context` is the supported write path
   - A classifier error or fallback intent in `_resolve_ambiguous_transition` returns `None` (a stay, not a transition); the `Classifier` inherits `api_key`/`api_base`/`timeout` from the `LiteLLMInterface`
 - **HandlerSystem** (`handlers.py`) -- Event-driven hook execution
   - `register_handler(handler)`, `execute_handlers(timing, current_state, target_state, context, updated_keys)` → dict
@@ -101,7 +106,7 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/  # 1,476 tests
+pytest tests/test_fsm_llm/  # 1,633 tests
 ```
 
 - Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`

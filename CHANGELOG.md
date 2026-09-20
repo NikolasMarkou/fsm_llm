@@ -76,6 +76,178 @@ that plan's `decisions.md`.
   validates and renders. Sibling sites in `fsm_llm_monitor/bridge.py` and
   `fsm_llm_agents/meta_builders.py` got the same treatment.
 
+### Fixed -- core (`fsm_llm`) and agents audit remediation (plan-2026-09-19-21cd7f8e, iteration 2)
+
+Iteration 2 fixes the defects the iteration-1 review and the re-audit found in
+iteration 1's own changes, plus the live-proven and small localised backlog items.
+Each fix was reproduced RED first and pinned in
+`tests/test_fsm_llm/test_audit_iter2_seam.py` (plus updated tests where a superseded
+contract was encoded). Decision ids refer to that plan's `decisions.md` (D-014..D-025).
+
+- **LS-18 / RA-05, Ollama detection by prefix (D-021, e768178).** `is_ollama_model`
+  matches only the `ollama/` and `ollama_chat/` prefixes (case-insensitive). A model
+  such as `azure/gpt-4o-not-ollama` no longer gets the Ollama `json_schema` grammar
+  and forced temperature 0. The classifier's connection kwargs now drop `schema`,
+  `model` and `config`, so a `config` kwarg no longer raises `TypeError` in both
+  classification paths.
+- **Bulk pass provenance and coercion (D-015, 8e178fd).** The bulk pass overwrites a
+  stored key only when the stored value is still exactly what the pipeline extracted
+  (a sha256 digest of the value is recorded in `context.metadata` at the two Pass-1
+  commit sites), so a handler-seeded gate value is never flipped (reviewer repro5:
+  `is_verified` False -> True). Bulk values for config-covered keys go through the
+  same coercion and validation as per-field values, so a dict no longer lands in a
+  `str` key and `24` stays an int instead of becoming `'24'` (RA-02).
+- **Re-entrancy guard and ERROR handler merge (D-018, b3431f3).** A same-conversation
+  `converse` or `converse_stream` called from inside a handler while a turn is in
+  flight raises `FSMError` instead of nesting (reviewer repro1: depth 99 and 99
+  provider calls for one user turn, now depth 1). An ERROR handler's returned dict is
+  no longer merged into the conversation whose turn was just rolled back (RA-07).
+- **RA-01, kwargs tool called with `input=` (D-017, 3f96567).**
+  `normalize_tool_input` json-decodes a string `tool_input` that is a JSON object, so
+  a keyword-argument tool is called with its arguments instead of `input=`.
+- **RA-01b, ReAct tool never ran on the Ollama grammar (D-024, d22a0f2).** The
+  react and reflexion think states declare `tool_name` (`str`) and `tool_input`
+  (`dict`) as explicit `field_extractions`. Live on `ollama_chat/qwen3.5:9b-q8_0`
+  (n=3): tool ran 3/3, versus 0/3 under the auto-minted `any` grammar.
+- **RA-04 / RA-06, JSON extraction (d4ec278).** `extract_json_from_text` resumes the
+  brace scan after a fenced non-object, so a fenced array's interior object is no
+  longer returned, and Strategy 1 and 2 tolerate `RecursionError` on deeply nested
+  input instead of raising.
+- **LS-01 / LS-06, sanitizer and forbidden names (b674384).** The prompt sanitizer no
+  longer passes an unterminated safe tag that swallowed a closing tag (`<b </task>`).
+  `is_forbidden_context_entry` also tests the snake-cased form of camelCase key names
+  (`apiKey`, `authToken`, ...). Benign prompts are byte-identical; the change for
+  non-benign input is not measured by `scripts/eval.py`.
+- **LS-02, `extracted_data` prompt section (5d964ec).** The Pass-2 `extracted_data`
+  section goes through the security filter, so a declared secret-named field is not
+  echoed, and a `datetime` value no longer drops the whole section. Benign data
+  renders byte-identically.
+- **CF-06, bulk-pass prompt and result filtering (D-019, b5e06b5).** The bulk
+  extraction prompt sanitizes user text, and the bulk result drops the `agent_trace`
+  marker and forbidden-name keys on both call sites. The sanitization of non-benign
+  text is not measured by `scripts/eval.py`.
+- **RA-03, classification-owned keys on the bulk pass (D-019, da4eea4).** The
+  additive bulk pass no longer fills a key owned by a `classification_extractions`
+  entry on a non-agent FSM, so a below-threshold classifier cannot be bypassed by
+  bulk extraction. Agent FSMs keep the bulk fill.
+- **LV2-01, structured terminal reply (D-020, 3d440ec).** A schema-valid JSON reply to
+  a requested `response_format` that has no `message` key is the reply (verbatim JSON
+  text in the response and history) instead of the generic apology. Replies over the
+  5000-character cap still degrade; behaviour without a schema is unchanged.
+- **LV2-02, empty greeting (D-020, 3edf412).** A Pass-2 reply that would be the
+  generic apology (for example an empty `message`) is retried once and the retry
+  result is returned; an error on the retry keeps the first apology. Normal replies
+  make one call.
+- **CF-07, stacked `save_session` (D-022, 6b924f7).** `save_session` on a stacked
+  conversation saves the root frame's state, data, history and working memory, so
+  `restore_session` no longer meets a sub-FSM state that does not exist in the root
+  definition. Unstacked saves are unchanged.
+- **DH-07 / EF-03, zero-handler turns (D-022, 470ba14).** `execute_handlers` returns
+  immediately when no handler subscribes to the timing (new
+  `HandlerSystem.handlers_at`), so a zero-handler advance turn drops from 14 to 4
+  context deep-copies and a non-copyable context value no longer crashes handler
+  timings. The pre-turn rollback snapshots are untouched.
+- **LS-05 remainder, bulk confidence (D-023, 8099e54).** `extract_bulk_data` keeps the
+  extracted data when the model's confidence cannot be coerced (`"high"`, `null`, an
+  object); the confidence falls back to 1.0 instead of failing the whole bulk pass.
+- **DH-09, `<=` and `>=` on numeric strings (D-023, d3d2b2a).** `1 <= "1.0"` and
+  `"2.0" >= 2` are true (they previously fell back to string ordering).
+  `==` and soft equals are unchanged.
+- **DH-10, `validation_rules` typing (D-023, 896fc13).** `min_length` and
+  `max_length` must be int, `allowed_values` a list, `pattern` a compilable regex
+  string; a bad rule fails at FSM load and in `fsm-llm-validate` instead of as a
+  `TypeError` on the first extraction turn.
+- **LV2-05, anchors and pin (D-011, D-016, 0bab5a5).** Qualified DECISION anchors for the
+  exact-0.0 confidence rejection (D-016) and the null-safe validator reads (D-011),
+  and a seam test pinning the accepted below-threshold classifier stall. Comments and
+  tests only.
+
+### Changed -- public contract (iteration 1 and 2)
+
+- **Bulk overwrite is provenance-gated (D-015).** Supersedes iteration 1's D-004
+  overwrite rule. A later-turn correction returned by the bulk pass replaces a stored
+  key only when the key is config-covered, the FSM is not agent-managed and the
+  stored value is still exactly the value the pipeline extracted. A handler-set or
+  `update_context`-written value for a config-covered key is never overwritten by the
+  bulk pass (iteration 1 allowed it). After `restore_session` there is no recorded
+  provenance (it is not persisted), so corrections fall back to skip-if-set until the
+  pipeline re-extracts the key. A correction that changes only letter case or
+  whitespace counts as no change.
+- **Exact-0.0 confidence is rejected (D-016).** A per-field extraction the model
+  reports at `confidence` exactly `0.0` is not stored, whatever
+  `confidence_threshold` is. There is no knob to accept a 0.0-confidence value.
+- **Re-entrant `converse` raises (D-018).** Calling `converse` or `converse_stream`
+  on a conversation from inside a handler (or between `next()` calls of an open
+  stream) while a turn is in flight raises `FSMError`. `update_context` stays
+  allowed.
+- **ERROR handler return value is not merged (D-018).** The dict an ERROR-timing
+  handler returns is dropped (debug-logged). `update_context` is the supported write
+  path for an ERROR handler.
+- **Forbidden-name keys are not captured by the bulk pass (D-019).** An
+  instruction-only field whose name matches a forbidden pattern (`password`,
+  `api_key`, ...) is no longer captured by the bulk pass; declare it in
+  `field_extractions` or `required_context_keys` to capture it.
+- **Ollama detection by prefix (D-021).** `is_ollama_model` is true only for
+  `ollama/...` and `ollama_chat/...`; a model that merely contains "ollama" in its
+  name (a proxy route) now takes the non-Ollama path.
+- **Bad `validation_rules` are rejected at load (D-023).** An FSM definition whose
+  `validation_rules` carries a wrongly-typed value (`min_length: "abc"`,
+  `allowed_values: 5`, `pattern: "["`) now raises `ValueError` when loaded, where it
+  previously loaded and failed on the first extraction turn. `<=` and `>=` now agree
+  with `==` on numeric strings.
+- **`extract_json_from_text` returns `dict | None`.** It is exported in
+  `fsm_llm.__all__`; valid non-object JSON (`42`, `[1,2]`, `true`, `"hi"`) now returns
+  `None` where it returned the raw value (iteration 1, D-010).
+- **`_build_response_format_section` takes a positional parameter.** The method on
+  `ResponseGenerationPromptBuilder` gained `plain_text` (iteration 1, D-003). A
+  subclass that overrides it with the old zero-argument signature now raises
+  `TypeError` when the base calls it.
+- **LV-01 re-extraction cost.** A required field that stays unset (null,
+  zero-confidence or a rejected container value) is re-asked every turn, and
+  `extraction_retries` multiplies that by `(1 + retries)` per field per turn. One
+  agent test went from 34 to 152 provider calls. Retries against Ollama are
+  byte-identical (temperature is forced to 0).
+- **React and reflexion extraction contract (D-024).** The think state extracts
+  `tool_name` and `tool_input` through explicit typed configs; extraction order
+  changed (`should_terminate` now precedes them). `tool_input` can still come back as
+  an empty `{}`; the tool layer fills required parameters from the task text.
+- **Structured terminal reply and greeting retry (D-020).** A terminal state with an
+  output schema returns the schema JSON as the reply; an apology-producing Pass-2
+  reply is retried once, so one turn can make at most one extra LLM call, and only
+  on a turn that would otherwise have shown the apology.
+- **Stacked `save_session` and zero-handler turns (D-022).** `save_session` on a
+  stacked conversation saves the root frame (a session saved while stacked used to
+  record the sub-FSM state). Turns with no handler for a timing skip the handler
+  deep-copies.
+
+### Known limitations -- after iteration 2
+
+- **LV2-04, undeclared gate key.** A key a transition reads but no field declares can
+  still be added by a steered bulk value or by the per-field channel (live s13:
+  `is_admin` opened, 1/1). Provenance narrows but does not close CF-06.
+- **LV2-05, low-confidence classification stall.** A classification below the state's
+  `confidence_threshold` keeps the stale fallback intent and does not transition
+  (live s7: three turns end in `triage`). The behaviour is pinned by a seam test, not
+  changed.
+- **LV3-01, reply and data contradict.** When a correction of a handler-set key is
+  rejected, the Pass-2 reply can still claim the correction was applied while the
+  stored data is unchanged (live s14, 2/2 looks). The data is safe; the reply is not.
+- **`tool_input` quality after D-024.** The tool now runs live, but `tool_input` is
+  often `{}` and parameter quality is not fixed. Reflexion is not measured live.
+- **Prompt-content changes are not measured by `scripts/eval.py`.** The sanitizer
+  (LS-01), the secret-name filter (LS-06), the `extracted_data` filter (LS-02) and the
+  bulk-prompt sanitizer (CF-06) change prompt content only for non-benign input;
+  benign prompts are byte-identical (hash test). The 95.3% eval baseline stays stale
+  and must be re-run before it is trusted.
+- **Live evidence is n=1 to n=3 on one model** (`ollama_chat/qwen3.5:9b-q8_0`, 106
+  calls). The LV2-02 retry was not exercised live (0 empty greetings in 18 starts);
+  it is proven offline only. Non-Ollama providers and non-`any` union types are not
+  measured.
+- **Deferred to iteration 3:** the efficiency batch (identical retries, filter
+  caches), LV2-03 (form back-edge correction), provenance persistence across
+  `restore_session`, and LV3-02/LV3-03 (`<information_still_needed>` listing a filled
+  key; `agent_trace` visible in per-field extraction prompts).
+
 ### Added — new package: `fsm_llm_harness` (extra: `pip install fsm-llm[harness]`)
 
 An FSM-LLM-native emulation of the iterative-planner protocol: a 6-state
