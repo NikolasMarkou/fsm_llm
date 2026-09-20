@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-20
+
+Core-engine audit release (4 audit-fix loops over `src/fsm_llm`, each verified live on
+`ollama_chat/qwen3.5:9b-q8_0` and adversarially reviewed). **Read before upgrading:**
+several behaviours changed on purpose (see "Changed -- public contract" below) --
+notably the ERROR-handler and re-entrancy contract, provenance-gated bulk corrections,
+`extract_json_from_text` returning `dict | None`, the `fsm_id` hash of
+`API.from_definition(FSMDefinition(...))` (now carries `handler_only_keys: []`), extra
+LLM calls on back-edge revisits and on an Ollama null-extraction memo hit/miss, and a
+wider prompt sanitizer. The `scripts/eval.py` 95.3% health baseline was **not re-measured**
+against these prompt-content changes and is stale. See "Known limitations" for what is
+not fixed.
+
 ### Fixed -- core (`fsm_llm`) audit remediation (plan-2026-09-19-21cd7f8e, iteration 1)
 
 Each fix was reproduced RED first and pinned in `tests/test_fsm_llm/test_audit_iter1_seam.py`
@@ -1090,6 +1103,7 @@ examples, signatures, and the 2-pass core contract are unchanged. New optional
 - 7 examples (basic, intermediate, advanced)
 - Comprehensive documentation
 
+[0.6.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.2.1...v0.3.0

@@ -5,7 +5,7 @@ EXPLORE / PLAN / EXECUTE / REFLECT / PIVOT / CLOSE machine whose hard gates are
 JsonLogic `TransitionCondition` terms, whose memory is a directory of Markdown
 artifacts on disk, and whose autonomy leash halts at exactly 2 fix attempts.
 
-- **Version**: 0.5.0 (synced from fsm_llm)
+- **Version**: 0.6.0 (synced from fsm_llm)
 - **Extra deps**: none of its own; the extra pulls `fsm-llm[agents]` because the
   package imports `fsm_llm_agents`
 - **Install**: `pip install fsm-llm[harness]`

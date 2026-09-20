@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-FSM-LLM (v0.5.0) is a Python framework for building stateful conversational AI by combining LLMs with Finite State Machines. It uses a **2-pass architecture**: Pass 1 extracts data + evaluates transitions, Pass 2 generates the response from the final state.
+FSM-LLM (v0.6.0) is a Python framework for building stateful conversational AI by combining LLMs with Finite State Machines. It uses a **2-pass architecture**: Pass 1 extracts data + evaluates transitions, Pass 2 generates the response from the final state.
 
 - **License**: GPL-3.0-or-later
 - **Python**: 3.10, 3.11, 3.12
