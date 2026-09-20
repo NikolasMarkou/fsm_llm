@@ -11,6 +11,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from loguru import logger
 
 from fsm_llm import FileSessionStore
 from fsm_llm.definitions import (
@@ -26,7 +27,11 @@ from tests.test_fsm_llm.test_audit_iter1_seam import (
     _fake_response,
     _stream_chunk,
 )
-from tests.test_fsm_llm.test_audit_iter2_seam import _Prov
+from tests.test_fsm_llm.test_audit_iter2_seam import (
+    _ClassBulkProv,
+    _classified_bulk_fsm,
+    _Prov,
+)
 
 # ══════════════════════════════════════════════════════════════
 # Step 2 / RB-01: uncoercible confidence at the field-extraction rungs
@@ -1436,3 +1441,35 @@ class TestOllamaNullExtractionMemo:
             api.converse("hello", cid)
         assert api.get_data(cid)["k1"] == "v1"
         assert len(seen) == 1
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 18 / LV2-05: a discarded below-threshold classification is logged
+# ══════════════════════════════════════════════════════════════
+
+
+class TestBelowThresholdClassificationWarns:
+    def _warnings_for(self, confidence: float) -> list[str]:
+        records: list[str] = []
+        sink = logger.add(
+            lambda m: records.append(m.record["message"]), level="WARNING"
+        )
+        # logging.py calls logger.disable("fsm_llm") at import; without enable the
+        # sink sees nothing and the negative case would pass for the wrong reason.
+        logger.enable("fsm_llm")
+        try:
+            with _ClassBulkProv(_classified_bulk_fsm(), "buy", confidence) as p:
+                p.say("hmm maybe something", bulk={"intent": "buy"})
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+        return [r for r in records if "below threshold" in r]
+
+    def test_one_warning_names_field_intent_confidence_and_threshold(self):
+        found = self._warnings_for(0.2)
+        assert len(found) == 1
+        for token in ("intent", "buy", "0.20", "0.7"):
+            assert token in found[0]
+
+    def test_no_warning_for_an_above_threshold_classification(self):
+        assert self._warnings_for(0.95) == []

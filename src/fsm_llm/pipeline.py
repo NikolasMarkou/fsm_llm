@@ -1959,10 +1959,14 @@ class MessagePipeline:
 
                 # Skip low confidence
                 if result.confidence < config.confidence_threshold:
-                    log.debug(
+                    # LV2-05 (D-037): an accepted stall (D-016), now visible: a
+                    # gated key left unset here holds the state with no other trace.
+                    log.warning(
                         f"Classification extraction '{config.field_name}': "
-                        f"confidence {result.confidence:.2f} below threshold "
-                        f"{config.confidence_threshold}, skipping"
+                        f"intent '{result.intent}' at confidence "
+                        f"{result.confidence:.2f} is below threshold "
+                        f"{config.confidence_threshold}, discarded; the key stays "
+                        "unset and a transition gated on it will not fire"
                     )
                     continue
 
