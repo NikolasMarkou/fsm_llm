@@ -1025,3 +1025,185 @@ class TestBrokenLockInvariantFailsLoud:
         finally:
             manager._conversation_locks[conv_id] = threading.RLock()
             api.close()
+
+
+# ══════════════════════════════════════════════════════════════
+# G2 — ``save_session`` composes a ``SessionState`` from 3+1
+#       SEPARATELY locked reads (``get_conversation_state`` /
+#       ``get_conversation_data`` / ``get_conversation_history``, each
+#       its own ``_read_under_lock`` acquire/release, plus a
+#       working-memory/provenance read under the structurally
+#       different ``fsm_manager._lock``). A concurrent turn landing
+#       between any two of those reads can produce a TORN snapshot:
+#       state from turn N paired with data from turn N+1. This
+#       section pins that reproduction -- RED against the current
+#       4-separate-reads implementation. See findings/residual-
+#       findings-verify.md item 1 (plan-2026-09-20T114608-a8e47b88).
+# ══════════════════════════════════════════════════════════════
+
+
+def _torn_snapshot_fsm() -> dict:
+    """Two states; ``advance`` is both the transition gate AND the tell.
+
+    ``start`` -> ``done`` fires, in the SAME pipeline turn, the instant
+    ``advance`` is extracted into context -- so ``current_state == "start"``
+    and ``"advance" in context_data`` can never legitimately coexist in any
+    single-threaded read of one instance. A ``save_session`` snapshot
+    showing that exact combination is proof of tearing across two
+    separately-locked reads, not just "stale data" (which alone would not
+    distinguish a race from an unlucky-but-valid before/after read).
+    """
+    return {
+        "name": "torn_snapshot_fsm",
+        "description": "2-state FSM whose gate key IS the tear detector",
+        "version": "4.1",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "Waiting for the advance signal",
+                "purpose": "Collect the advance flag",
+                "required_context_keys": ["advance"],
+                "response_instructions": "Acknowledge",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "advance flag present",
+                        "priority": 100,
+                        "conditions": [
+                            {
+                                "description": "advance flag present",
+                                "requires_context_keys": ["advance"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "Terminal state",
+                "purpose": "Say goodbye",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestSaveSessionTornSnapshot:
+    """G2 -- ``API.save_session`` must not tear across a concurrent turn.
+
+    The barrier is installed INSIDE the race window as it exists in the
+    CURRENT ``save_session`` (api.py ~1246-1255): it wraps
+    ``FSMManager.get_conversation_state`` -- the FIRST of ``save_session``'s
+    ``SessionState(...)`` kwargs, evaluated first because Python evaluates
+    keyword arguments left-to-right -- so the concurrent turn runs and FULLY
+    COMPLETES in the gap between that read's ``conv_lock`` release and the
+    NEXT read (``get_conversation_data``) acquiring it. Per LESSONS.md's own
+    gotcha, a ``threading.Barrier`` placed anywhere else (e.g. after
+    ``save_session`` returns, or a bare ``time.sleep``) would not straddle
+    this window and would not discriminate a torn read from a clean one.
+    """
+
+    WAIT_TIMEOUT = 10.0
+
+    def _make_api(self, tmp_path):
+        llm = MockLLM2Interface(extraction_data={"advance": "yes"})
+        store = FileSessionStore(tmp_path)
+        api = API.from_definition(
+            _torn_snapshot_fsm(), llm_interface=llm, session_store=store
+        )
+        return api, store
+
+    def test_concurrent_turn_during_save_session_is_not_torn(self, tmp_path):
+        api, store = self._make_api(tmp_path)
+        conv_id, _ = api.start_conversation()
+        try:
+            assert api.get_current_state(conv_id) == "start"
+            assert "advance" not in api.get_data(conv_id)
+
+            original_get_state = api.fsm_manager.get_conversation_state
+            # Rendezvous: save_session's FIRST locked read blocks here until
+            # the concurrent turn thread arrives, so the turn provably runs
+            # (and finishes) inside the gap before save_session's SECOND
+            # locked read. No sleep required.
+            window_open = threading.Barrier(2, timeout=self.WAIT_TIMEOUT)
+            turn_done = threading.Event()
+            # ``converse()`` auto-saves the session itself (api.py ~450-455)
+            # whenever a session store is configured, so the concurrent
+            # turn's own ``converse()`` call re-enters this SAME patched
+            # method for its own (unrelated, and by then correct) auto-save.
+            # Only the very FIRST call -- guaranteed to be the explicit
+            # ``api.save_session(conv_id)`` call under test below, since the
+            # concurrent thread has not even reached ``converse()`` until
+            # AFTER that first call clears the barrier -- straddles the race
+            # window; a re-entrant second call must pass straight through
+            # or it would deadlock on a barrier nobody else is waiting on.
+            pause_armed = threading.Event()
+            pause_armed.set()
+
+            def paused_get_conversation_state(*args, **kwargs):
+                # The real (unmodified) read happens FIRST, under its own
+                # conv_lock acquire/release -- exactly what current
+                # save_session does today. The pause below is inserted AFTER
+                # that lock is released, straddling the actual gap between
+                # save_session's separate reads.
+                result = original_get_state(*args, **kwargs)
+                if pause_armed.is_set():
+                    pause_armed.clear()
+                    window_open.wait(timeout=self.WAIT_TIMEOUT)
+                    assert turn_done.wait(timeout=self.WAIT_TIMEOUT), (
+                        "concurrent turn did not complete inside the "
+                        "get_conversation_state -> get_conversation_data window"
+                    )
+                return result
+
+            api.fsm_manager.get_conversation_state = paused_get_conversation_state
+
+            errors: list[BaseException] = []
+
+            def do_concurrent_turn():
+                try:
+                    window_open.wait(timeout=self.WAIT_TIMEOUT)
+                    api.converse("please advance", conv_id)
+                except BaseException as exc:  # surfaced via `errors`, not raised here
+                    errors.append(exc)
+                finally:
+                    turn_done.set()
+
+            turn_thread = threading.Thread(
+                target=do_concurrent_turn, name="save-session-race-turn"
+            )
+            turn_thread.start()
+            try:
+                api.save_session(conv_id)
+            finally:
+                turn_thread.join(timeout=self.WAIT_TIMEOUT)
+                api.fsm_manager.get_conversation_state = original_get_state
+
+            assert not turn_thread.is_alive(), (
+                "concurrent turn thread hung -- interleaving is not deterministic"
+            )
+            assert errors == [], f"concurrent turn raised: {errors}"
+
+            # The concurrent turn transitioned start -> done and set "advance".
+            assert api.get_current_state(conv_id) == "done"
+            assert api.get_data(conv_id)["advance"] == "yes"
+
+            persisted = store.load(conv_id)
+            assert persisted is not None, "save_session did not persist a session"
+
+            # The tear: state captured BEFORE the concurrent turn (still
+            # "start") paired with data captured AFTER it (already carrying
+            # "advance"). By this FSM's own invariant that combination can
+            # never occur in a single consistent snapshot of one instance.
+            assert not (
+                persisted.current_state == "start"
+                and "advance" in persisted.context_data
+            ), (
+                "torn snapshot: save_session paired pre-transition state "
+                f"({persisted.current_state!r}) with post-transition data "
+                f"({persisted.context_data!r})"
+            )
+        finally:
+            api.close()
+            api.close()
