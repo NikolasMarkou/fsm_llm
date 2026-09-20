@@ -1257,7 +1257,18 @@ class MessagePipeline:
                 {} if isinstance(model, str) and is_ollama_model(model) else None
             )
             existing = instance.context.data
-            all_configs = [c for c in all_configs if existing.get(c.field_name) is None]
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-046: for an agent FSM an
+            # EMPTY list/dict counts as unset. A builder seeds `[]` so a
+            # has_context gate can pass (plan_execute `plan_steps`); without this
+            # the seed hides the key from extraction. Non-agent FSMs keep "empty
+            # is set": do NOT widen this to every FSM (D-036 rejected that).
+            agent_managed = CONTEXT_KEY_AGENT_TRACE in existing
+            all_configs = [
+                c
+                for c in all_configs
+                if existing.get(c.field_name) is None
+                or (agent_managed and existing[c.field_name] in ([], {}))
+            ]
             results = self._execute_field_extractions(
                 instance, user_message, all_configs, conversation_id, memo
             )

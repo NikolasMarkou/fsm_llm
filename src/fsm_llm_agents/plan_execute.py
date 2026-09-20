@@ -105,12 +105,17 @@ class PlanExecuteAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.OBSERVATIONS: [],
-                # DECISION plan-2026-09-19T175721-21cd7f8e/D-036: no
-                # `PLAN_STEPS: []` seed. The pipeline's skip-if-set filter reads
-                # `[]` as "already set", so the plan was never extracted (0
-                # field_extraction calls live) while the has_context gate passed
-                # and the answer claimed a search that never ran. Do NOT restore
-                # the seed; every reader uses `context.get(PLAN_STEPS, [])`.
+                # DECISION plan-2026-09-19T175721-21cd7f8e/D-046: the `[]` seed
+                # is the ONLY exit of the `plan` state. Its one transition is
+                # `has_context: plan_steps`, which is key EXISTENCE, so when the
+                # model cannot produce a plan an unseeded run loops on `plan`
+                # and raises BudgetExhaustedError after 36 wasted asks instead of
+                # ending as `success=False`. Do NOT remove it (iteration 3 did,
+                # D-036). The seed is still extractable: the pipeline's
+                # skip-if-set filter reads an empty container as unset for
+                # agent-managed FSMs (D-046 in pipeline.py), so the plan is
+                # asked for. Readers keep using `context.get(PLAN_STEPS, [])`.
+                ContextKeys.PLAN_STEPS: [],
                 ContextKeys.CURRENT_STEP_INDEX: 0,
                 ContextKeys.STEP_RESULTS: [],
                 ContextKeys.ALL_STEPS_COMPLETE: False,

@@ -447,3 +447,47 @@ class TestPlanIsExtractedThroughTheAgentPath:
         assert result.final_context["plan_steps"] == _PlanScriptedLLM.PLAN
         # the executor walked the extracted plan, it did not finish at once
         assert result.final_context["current_step_index"] == len(_PlanScriptedLLM.PLAN)
+
+
+class _NullPlanLLM(_PlanScriptedLLM):
+    """The model can never produce a plan: every extraction returns null."""
+
+    def extract_field(self, request):
+        self.asked.append(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=None,
+            confidence=0.0,
+            reasoning="mock",
+            is_valid=False,
+        )
+
+
+class TestUnplannableTaskEndsAsAFailedResult:
+    """D-046: the `plan_steps: []` seed is the only exit of the `plan` state's
+    key-existence transition, so an unplannable task must end as a normal
+    `success=False` result and not raise BudgetExhaustedError."""
+
+    def test_run_returns_a_failed_result_after_a_bounded_number_of_asks(self):
+        llm = _NullPlanLLM()
+        agent = PlanExecuteAgent(
+            tools=_make_registry(),
+            config=AgentConfig(max_iterations=6, timeout_seconds=30.0),
+            llm_interface=llm,
+        )
+        result = agent.run("Find the capital of France")
+        assert result.success is False
+        # HEAD (no seed): 36 asks then BudgetExhaustedError; measured with the
+        # seed and the empty-as-unset filter: exactly 1 ask
+        assert llm.asked.count("plan_steps") == 1
+
+    def test_a_scripted_plan_is_still_extracted_and_walked(self):
+        """GUARD: the empty seed must not hide a plan the model can produce."""
+        llm = _PlanScriptedLLM()
+        agent = PlanExecuteAgent(
+            tools=_make_registry(),
+            config=AgentConfig(max_iterations=12, timeout_seconds=30.0),
+            llm_interface=llm,
+        )
+        result = agent.run("Find the capital of France")
+        assert result.final_context["plan_steps"] == _PlanScriptedLLM.PLAN
