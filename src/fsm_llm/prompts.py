@@ -159,13 +159,23 @@ class BasePromptBuilder:
     # on the same input. This regex runs on user-controlled message text, so
     # that is a denial-of-service shape, not just a slow path. See D-026.
     #
-    # DECISION plan-2026-09-19T175721-21cd7f8e/D-029
-    # The attribute tail is `[^<>]*`, NOT `[^>]*`. With `[^>]*` every `<a`
-    # of `<a<a<a...` scans to the end of the text before failing, so the
-    # sanitizer is quadratic on user text (10k chars 2.5 s per prompt). Do not
-    # widen it back: `<b </task>` is still escaped, because the closing tag then
-    # matches on its own. See D-029 (RB-06) in decisions.md.
-    _TAG_PATTERN = re.compile(r"<(?:\s*/)?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^<>]*)?/?>")
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-047
+    # The tail is an ALTERNATION with two arms, and both are load-bearing:
+    #   `[^>]{0,256}/?>`  a tag closed within 256 characters (nested `<` allowed,
+    #                     so `</original_input <b>` is one escaped match);
+    #   `[^>]{257}`       an OVERFLOWING tail matched WITHOUT its `>`, so a
+    #                     padded closer (`</task` + 300 characters + `>`) is still
+    #                     escaped instead of leaking raw.
+    # The bound exists because an unbounded `[^>]*` scans to end-of-text for
+    # every `<a` of `<a<a<a...` (quadratic on user text, 10k chars 2.5 s per
+    # prompt, D-029). Do NOT go back to `[^<>]*` (iteration 3: a closer with a
+    # nested `<` matched only its inner `<b>` and reached Pass 2 raw), do NOT use
+    # the bounded arm alone (a padded closer regresses), and do NOT drop the
+    # D-038 guard in the substitution below: it stays load-bearing for a safe
+    # tag whose tail holds a second `<`. See D-047 in decisions.md.
+    _TAG_PATTERN = re.compile(
+        r"<(?:\s*/)?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]{0,256}/?>|[^>]{257})"
+    )
 
     def __init__(self, config: BasePromptConfig | None = None):
         """Initialize with configuration."""
@@ -207,9 +217,9 @@ class BasePromptBuilder:
                 # `<`. Before this guard `<b </task>` matched as ONE safe `<b>`
                 # tag (the attribute tail swallowed the nested `<`) and a hostile
                 # `</task>` reached the prompt unescaped. The pattern is now
-                # `[^<>]*` (D-029) so this looks redundant: it is not, keep it as
-                # the second line of defence for a future pattern edit. Do NOT
-                # replace it with a parser (rewrite of a hot filter, D-038).
+                # bounded `[^>]{0,256}` (D-047), which still swallows a nested
+                # `<`, so this guard is load-bearing again. Do NOT replace it
+                # with a parser (rewrite of a hot filter, D-038).
                 and "<" not in m.group(0)[1:]
                 else html.escape(m.group(0))
             ),

@@ -193,14 +193,21 @@ class TestTagSanitizerIsLinear:
         start = time.perf_counter()
         out = builder._sanitize_text_for_prompt("<a" * 10000)
         elapsed = time.perf_counter() - start
-        assert out == "<a" * 10000
+        # D-047 trade-off (a): the bounded-tail pattern escapes an overflowing
+        # `<a...` chunk, so the exact output is no longer the input. What
+        # matters: fast, no raw structural closing tag, nothing lost.
+        import html
+
         assert elapsed < 0.5
+        assert "</" not in out
+        assert html.unescape(out) == "<a" * 10000
 
     def test_nested_open_angle_still_escapes_the_closing_tag(self):
         from fsm_llm.prompts import DataExtractionPromptBuilder
 
         builder = DataExtractionPromptBuilder()
-        assert builder._sanitize_text_for_prompt("<b </task>") == "<b &lt;/task&gt;"
+        # D-047: the whole nested tag is escaped again (the pre-D-029 result)
+        assert builder._sanitize_text_for_prompt("<b </task>") == "&lt;b &lt;/task&gt;"
 
     def test_safe_formatting_tag_is_untouched(self):
         from fsm_llm.prompts import DataExtractionPromptBuilder
