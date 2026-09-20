@@ -70,11 +70,13 @@ Or pick what you need:
 ```json
 {
   "name": "GreetingBot",
+  "description": "Greets the user, learns their name, then says goodbye",
   "initial_state": "greeting",
   "persona": "A friendly assistant",
   "states": {
     "greeting": {
       "id": "greeting",
+      "description": "Greet the user and collect their name",
       "purpose": "Greet the user and ask their name",
       "extraction_instructions": "Extract the user's name if provided",
       "response_instructions": "Greet the user warmly and ask for their name if not yet known",
@@ -82,12 +84,19 @@ Or pick what you need:
         {
           "target_state": "farewell",
           "description": "User wants to end the conversation",
-          "conditions": [{"description": "User said goodbye", "logic": {"has_context": "wants_to_leave"}}]
+          "conditions": [
+            {
+              "description": "User said goodbye",
+              "requires_context_keys": ["wants_to_leave"],
+              "logic": {"has_context": "wants_to_leave"}
+            }
+          ]
         }
       ]
     },
     "farewell": {
       "id": "farewell",
+      "description": "Say goodbye",
       "purpose": "Say goodbye",
       "response_instructions": "Say a warm goodbye using the user's name if known"
     }
@@ -114,8 +123,20 @@ print(response)
 
 ```bash
 export OPENAI_API_KEY="your-key-here"
+export LLM_MODEL="openai/gpt-4o-mini"   # required by the CLI
 fsm-llm --fsm greeting.json
 ```
+
+**Environment variables** read by the `fsm-llm` command (the `API` class reads only `LLM_MODEL`, as the fallback for its `model` argument, then the package default `ollama_chat/qwen3.5:4b`):
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `LLM_MODEL` | none, **required** | litellm model id; `fsm-llm` exits with `Missing required environment variable: LLM_MODEL` without it |
+| `LLM_TEMPERATURE` | `0.5` | sampling temperature (Ollama models force `0` on structured calls) |
+| `LLM_MAX_TOKENS` | `1000` | max tokens per LLM call |
+| `FSM_PATH` | none | not usable with the `fsm-llm` command: `--fsm` is checked first and is mandatory |
+
+Provider keys (`OPENAI_API_KEY`, ...) are read by litellm. A `.env` file is looked up relative to the installed package, not your working directory, so prefer `export`.
 
 ## 2-Pass Architecture
 
@@ -137,10 +158,14 @@ LLM-backed intent classification: single-intent, multi-intent, hierarchical two-
 ```python
 from fsm_llm import Classifier, ClassificationSchema, IntentDefinition
 
-schema = ClassificationSchema(intents=[
-    IntentDefinition(name="billing", description="Billing and payment questions"),
-    IntentDefinition(name="technical", description="Technical support issues"),
-])
+schema = ClassificationSchema(
+    intents=[
+        IntentDefinition(name="billing", description="Billing and payment questions"),
+        IntentDefinition(name="technical", description="Technical support issues"),
+        IntentDefinition(name="other", description="Anything else"),
+    ],
+    fallback_intent="other",  # required, and must be one of the intents
+)
 classifier = Classifier(schema=schema, model="openai/gpt-4o-mini")
 result = classifier.classify("I can't log in to my account")
 ```

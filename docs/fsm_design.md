@@ -14,6 +14,7 @@ Each state should have one clear purpose:
 {
   "collect_email": {
     "id": "collect_email",
+    "description": "Collect the user's email address",
     "purpose": "Collect and validate user's email address",
     "extraction_instructions": "Extract the user's email address",
     "response_instructions": "Ask for email, or confirm the one provided",
@@ -35,7 +36,11 @@ Make conditions explicit with JsonLogic:
     {
       "target_state": "vip_service",
       "description": "High-value customer",
-      "conditions": [{"logic": {">": [{"var": "lifetime_value"}, 1000]}}]
+      "conditions": [{
+        "description": "Lifetime value above 1000",
+        "requires_context_keys": ["lifetime_value"],
+        "logic": {">": [{"var": "lifetime_value"}, 1000]}
+      }]
     },
     {"target_state": "standard_service", "description": "Default path"}
   ]
@@ -75,6 +80,8 @@ Write purposes that guide natural conversation:
 }
 ```
 
+With no `conditions`, both transitions are ambiguous and the LLM picks between them from the descriptions. To make "Identity verified" deterministic, give it a condition with `requires_context_keys` and a `logic`.
+
 ### The Collector -- Gathering Information
 
 ```json
@@ -83,10 +90,23 @@ Write purposes that guide natural conversation:
     "purpose": "Collect complete shipping address",
     "extraction_instructions": "Extract street, city, state, and zip code",
     "required_context_keys": ["street", "city", "state", "zip"],
-    "transitions": [{"target_state": "confirm_address", "description": "All fields collected"}]
+    "transitions": [{
+      "target_state": "confirm_address",
+      "description": "All fields collected",
+      "conditions": [{
+        "description": "Every address field is present",
+        "requires_context_keys": ["street", "city", "state", "zip"],
+        "logic": {"and": [
+          {"has_context": "street"}, {"has_context": "city"},
+          {"has_context": "state"}, {"has_context": "zip"}
+        ]}
+      }]
+    }]
   }
 }
 ```
+
+The condition is what holds the state until the address is complete; `required_context_keys` alone only asks the pipeline to extract those keys.
 
 ### The Router -- Directing to Specialized Flows
 
@@ -132,11 +152,11 @@ Write purposes that guide natural conversation:
 
 ## Context Management
 
-**Required vs optional**: Use `required_context_keys` for mandatory data -- the state won't transition until all keys are present.
+**Required vs optional**: `required_context_keys` lists the data a state should extract; it does **not** block a transition (an unconditional transition fires even when a listed key is missing). To hold a state until data exists, give the transition a condition with `requires_context_keys` and a `logic` such as `{"has_context": "email"}`; `fsm-llm-validate` warns about a required key no condition gates on.
 
 **Progressive building**: Collect information gradually across states rather than all at once.
 
-**Context scope**: Use `context_scope` to restrict which keys a state can read/write.
+**Context scope**: `context_scope.read_keys` restricts which context keys a state's prompts see. `write_keys` is advisory: it is not enforced and not validated.
 
 ## FSM Stacking Patterns
 
@@ -153,7 +173,7 @@ FSM stacking (`push_fsm`/`pop_fsm`) enables modular, composable design.
 1. Keep child FSMs self-contained -- they should work independently
 2. Define clear context contracts via `context_to_pass` and `shared_context_keys`
 3. Design terminal states (no outgoing transitions) to trigger `pop_fsm`
-4. Choose merge strategies: `"update"` (overwrite parent) or `"preserve"` (only add new keys)
+4. Choose merge strategies: `"update"` (overwrite parent) or `"preserve"` (only add new keys). Only keys named in `shared_context_keys` (or given as `return_context` / `context_to_return`) come back, whatever the strategy; a child's other extracted data is dropped on pop.
 
 ```python
 api.push_fsm(conv_id, "address_form.json",

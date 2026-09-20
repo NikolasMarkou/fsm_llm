@@ -51,11 +51,14 @@ api.register_handler(
 ### END_CONVERSATION -- Conversation ends
 Good for resource cleanup, saving summaries, releasing locks.
 
-### ERROR -- On any exception
+### ERROR -- On an exception while processing a message
 Good for graceful recovery, fallback responses, error logging.
 
 ERROR handlers fire on any `FSMError` (including `LLMResponseError`, the LLM-outage case)
-and on the streaming path; the `FSMError` is still re-raised to the caller. They run after
+raised while `converse` or `converse_stream` processes a message; the `FSMError` is still
+re-raised to the caller. They do **not** fire for a failure inside `start_conversation`
+(for example the LLM being down during the greeting). The handler context carries the
+usual keys plus `_error` (the message) and `_traceback`. They run after
 the turn has been rolled back, so:
 
 - **The dict an ERROR handler returns is not merged** into the conversation (it is

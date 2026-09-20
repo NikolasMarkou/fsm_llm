@@ -219,6 +219,7 @@ including what is measured and what is not.
 ```json
 {
   "name": "MyBot",
+  "description": "What this FSM does",
   "initial_state": "start",
   "persona": "A friendly assistant",
   "states": {
@@ -232,10 +233,11 @@ including what is measured and what is not.
       "classification_extractions": [
         {
           "field_name": "user_intent",
-          "schema": {
-            "intents": [{"name": "buy", "description": "User wants to purchase"}],
-            "fallback_intent": "browse"
-          },
+          "intents": [
+            {"name": "buy", "description": "User wants to purchase"},
+            {"name": "browse", "description": "User is just looking"}
+          ],
+          "fallback_intent": "browse",
           "confidence_threshold": 0.7
         }
       ],
@@ -253,10 +255,18 @@ including what is measured and what is not.
           ]
         }
       ]
+    },
+    "next": {
+      "id": "next",
+      "description": "Terminal state",
+      "purpose": "Wrap up the conversation",
+      "response_instructions": "Say goodbye"
     }
   }
 }
 ```
+
+`required_context_keys` only tells the pipeline which keys to extract; it never blocks a transition. Gate a transition with a condition (`requires_context_keys` + `logic`). `intents` / `fallback_intent` sit directly on the `classification_extractions` entry (no nested `schema`), at least two intents, and `fallback_intent` is one of them.
 
 ## Testing
 

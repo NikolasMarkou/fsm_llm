@@ -32,6 +32,18 @@ export OPENAI_API_KEY="your-api-key-here"
 echo "OPENAI_API_KEY=your-api-key-here" > .env
 ```
 
+Environment variables used by the library and the `fsm-llm` command:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `LLM_MODEL` | none | litellm model id. **Required by the `fsm-llm` CLI**; the `API` class uses it when no `model=` is passed, then falls back to `ollama_chat/qwen3.5:4b` |
+| `LLM_TEMPERATURE` | `0.5` | CLI only |
+| `LLM_MAX_TOKENS` | `1000` | CLI only |
+| `FSM_PATH` | none | not usable with `fsm-llm`: `--fsm` is checked first and is mandatory |
+| `OPENAI_API_KEY` etc. | none | provider keys, read by litellm |
+
+A `.env` file is looked up relative to the installed package, not your working directory, so prefer `export` for the CLI.
+
 ## 3. Your First Bot
 
 Create `hello_bot.py`:
@@ -41,23 +53,32 @@ from fsm_llm import API
 
 greeting_fsm = {
     "name": "friendly_greeter",
+    "description": "Greets the user, learns their name, then says goodbye",
     "initial_state": "welcome",
     "states": {
         "welcome": {
             "id": "welcome",
+            "description": "Greet the user and collect their name",
             "purpose": "Greet the user warmly and ask for their name",
+            "extraction_instructions": "Extract the user's name.",
             "response_instructions": "Warmly greet the user and ask for their name.",
+            "required_context_keys": ["name"],
             "transitions": [{
                 "target_state": "personalized",
-                "description": "After user provides their name"
+                "description": "Once the user has given their name",
+                "conditions": [{
+                    "description": "The name has been extracted",
+                    "requires_context_keys": ["name"],
+                    "logic": {"has_context": "name"}
+                }]
             }]
         },
         "personalized": {
             "id": "personalized",
+            "description": "Talk to the user by name",
             "purpose": "Give a personalized response using their name",
-            "extraction_instructions": "Extract the user's name.",
+            "extraction_instructions": "Extract how the user says they are doing, as mood_reply.",
             "response_instructions": "Use their name and ask how they're doing.",
-            "required_context_keys": ["name"],
             "transitions": [{
                 "target_state": "farewell",
                 "description": "After user responds about their day"
@@ -65,6 +86,7 @@ greeting_fsm = {
         },
         "farewell": {
             "id": "farewell",
+            "description": "Say goodbye",
             "purpose": "Wish them well and say goodbye",
             "response_instructions": "Wish them well using their name and say goodbye.",
             "transitions": []
@@ -86,6 +108,12 @@ print(f"\nCollected data: {api.get_data(conv_id)}")
 
 Run it: `python hello_bot.py`
 
+> **Gating**: `required_context_keys` only tells the pipeline which keys to extract in a
+> state; it never blocks a transition. The `welcome -> personalized` move is held back by
+> the transition **condition** (`requires_context_keys` plus a `has_context` rule), so the
+> bot keeps asking until a name has been extracted. A transition with no conditions fires
+> on the first message.
+
 ## 4. Add a Handler
 
 Handlers add custom logic at 8 lifecycle points:
@@ -96,7 +124,9 @@ from fsm_llm import API, HandlerTiming
 api = API.from_definition(greeting_fsm, model="gpt-4o-mini")
 
 def detect_mood(context):
-    response = str(context.get("_user_input", "")).lower()
+    # Handlers see the context DATA (extracted keys plus a few "_" keys such as
+    # _conversation_id), not the raw user message: read an extracted key.
+    response = str(context.get("mood_reply", "")).lower()
     positive = ["good", "great", "wonderful", "amazing"]
     negative = ["bad", "terrible", "awful", "stressed"]
     if any(w in response for w in positive):
@@ -160,7 +190,7 @@ python examples/intermediate/book_recommendation/run.py  # Multi-branch conversa
 ### Useful Commands
 
 ```bash
-fsm-llm --fsm your_fsm.json           # Run any FSM interactively
+fsm-llm --fsm your_fsm.json           # Run any FSM interactively (needs LLM_MODEL set)
 fsm-llm-validate --fsm your_fsm.json  # Validate FSM structure
 fsm-llm-visualize --fsm your_fsm.json # ASCII visualization
 fsm-llm-monitor                       # Launch monitoring dashboard
@@ -168,7 +198,7 @@ fsm-llm-monitor                       # Launch monitoring dashboard
 
 ### Common Patterns
 
-**Information gathering** -- Use `required_context_keys` to stay in a state until data is collected.
+**Information gathering** -- Use `required_context_keys` to have the data extracted, and a transition condition (`requires_context_keys` + `has_context`) to stay in the state until it is collected.
 
 **Branching logic** -- Multiple transitions with conditions route to different states.
 

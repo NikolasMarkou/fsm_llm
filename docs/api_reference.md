@@ -80,11 +80,14 @@ response = api.push_fsm(conv_id, new_fsm,
     context_to_pass={"step": "details"},
     shared_context_keys=["user_id"],
     preserve_history=True, inherit_context=True)
+# push_fsm returns the sub-FSM's first message (a str), not an id. All calls take the ROOT id.
 response = api.pop_fsm(conv_id,
     context_to_return={"complete": True},
     merge_strategy=ContextMergeStrategy.UPDATE)  # or "preserve"
+# pop_fsm returns a resume message. Only the child's values for shared_context_keys plus
+# return_context / context_to_return are merged back; the strategy only arbitrates collisions.
 api.get_stack_depth(conv_id)           # -> int
-api.get_sub_conversation_id(conv_id)   # -> str
+api.get_sub_conversation_id(conv_id)   # -> str, an internal id for extensions; other API calls reject it
 ```
 
 ### Handler Registration
@@ -126,7 +129,13 @@ class LLMInterface(ABC):
     @abstractmethod
     def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse: ...
 
+    # The base class raises NotImplementedError; implement it for per-field extraction.
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse: ...
+
+    # Same default: needed for states with extraction_instructions and no per-field schema.
+    # Without it the pipeline logs "Bulk extraction fallback failed" and extracts
+    # nothing for that free-text instruction.
+    def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse: ...
 
     def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]: ...
 ```
@@ -166,7 +175,10 @@ Built into core -- no separate install needed.
 from fsm_llm import Classifier, ClassificationSchema, IntentDefinition, IntentRouter
 
 schema = ClassificationSchema(
-    intents=[IntentDefinition(name="billing", description="Billing questions")],
+    intents=[  # at least two intents; fallback_intent must be one of them
+        IntentDefinition(name="billing", description="Billing questions"),
+        IntentDefinition(name="general", description="Anything else"),
+    ],
     fallback_intent="general",
 )
 classifier = Classifier(schema, model="gpt-4o-mini")
@@ -177,8 +189,18 @@ result = classifier.classify("Where is my invoice?")
 result = classifier.classify_multi("Check order and update billing")
 
 # Hierarchical (two-stage domain -> intent, for >15 intents)
-from fsm_llm import HierarchicalClassifier
-h_classifier = HierarchicalClassifier(domains=[...], model="gpt-4o-mini")
+from fsm_llm import HierarchicalClassifier, HierarchicalSchema
+h_schema = HierarchicalSchema(
+    domain_schema=ClassificationSchema(
+        intents=[
+            IntentDefinition(name="billing", description="Billing domain"),
+            IntentDefinition(name="support", description="Support domain"),
+        ],
+        fallback_intent="support",
+    ),
+    intent_schemas={"billing": schema, "support": schema},  # one schema per domain
+)
+h_classifier = HierarchicalClassifier(h_schema, model="gpt-4o-mini")
 
 # Intent routing
 router = IntentRouter(schema)

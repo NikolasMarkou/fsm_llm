@@ -130,21 +130,21 @@ class FSMContext:
     working_memory: WorkingMemory  # Named buffers (core, scratch, environment, reasoning)
 ```
 
-Special keys (prefixed with `_`): `_conversation_id`, `_current_state`, `_previous_state`, `_timestamp`, `_user_input`.
+Special keys (prefixed with `_`): `_conversation_id`, `_conversation_start`, `_fsm_id`, `_timestamp`, and, once a transition has happened, `_current_state`, `_previous_state`, `_transition_timestamp`. ERROR handlers additionally see `_error` and `_traceback`. The raw user message is not in the context, so handlers see extracted keys only.
 
 ### Context in Stacked FSMs
 
 On `push_fsm`: parent context optionally inherited/passed to child.
-On `pop_fsm`: child context merged back via strategy:
-- **UPDATE** -- Child context overwrites parent
-- **PRESERVE** -- Only new keys added to parent
+On `pop_fsm`: only what was declared is merged back into the parent, the child's other keys are dropped: the child's values for `shared_context_keys`, plus the `return_context` given to `push_fsm` and the `context_to_return` given to `pop_fsm`. The merge strategy only decides collisions on those keys:
+- **UPDATE** -- Returned value overwrites the parent's
+- **PRESERVE** -- Only keys the parent does not have yet are added
 
 ## Handler Execution Pipeline
 
 ```
 START_CONVERSATION → [per message: PRE_PROCESSING → extract → CONTEXT_UPDATE
 → evaluate → PRE_TRANSITION → transition → POST_TRANSITION → POST_PROCESSING
-→ generate response] → END_CONVERSATION. ERROR on any exception.
+→ generate response] → END_CONVERSATION. ERROR on an exception raised while processing a message (`converse` / `converse_stream`; not for a failure inside `start_conversation`).
 ```
 
 Priority ordering (lower first). Error modes: `"continue"` (log + skip) or `"raise"` (propagate). Critical handlers always raise.
@@ -293,6 +293,9 @@ class CustomLLM(LLMInterface):
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         ...
+
+    def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse:
+        ...  # needed by states with extraction_instructions; the base class raises NotImplementedError
 ```
 
 ### Custom Handlers

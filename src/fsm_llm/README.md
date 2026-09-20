@@ -35,11 +35,13 @@ pip install fsm-llm[dev]
 ```json
 {
   "name": "Greeter",
+  "description": "Greets the user, learns their name, then says goodbye",
   "initial_state": "greeting",
   "persona": "A friendly assistant",
   "states": {
     "greeting": {
       "id": "greeting",
+      "description": "Welcome the user and collect their name",
       "purpose": "Welcome and ask their name",
       "extraction_instructions": "Extract the user's name if provided",
       "response_instructions": "Greet warmly, ask for name if not given",
@@ -53,6 +55,7 @@ pip install fsm-llm[dev]
     },
     "farewell": {
       "id": "farewell",
+      "description": "Thank the user and end the conversation",
       "purpose": "Thank the user and end conversation",
       "response_instructions": "Say a personalized goodbye using their name",
       "transitions": []
@@ -81,8 +84,11 @@ api.close()
 
 ```bash
 export OPENAI_API_KEY=your-key
+export LLM_MODEL=openai/gpt-4o-mini   # required by the CLI
 fsm-llm --fsm greeter.json
 ```
+
+The CLI reads `LLM_MODEL` (required), `LLM_TEMPERATURE` (default `0.5`) and `LLM_MAX_TOKENS` (default `1000`). `FSM_PATH` has no effect on the `fsm-llm` command, because `--fsm` is checked first. Provider keys such as `OPENAI_API_KEY` are read by litellm. The `API` class reads only `LLM_MODEL`, as the fallback for its `model` argument.
 
 ## Architecture
 
@@ -125,9 +131,14 @@ for chunk in api.converse_stream("user message", conv_id):
 
 api.end_conversation(conv_id)
 
-# FSM stacking (sub-conversations)
-sub_conv_id = api.push_fsm(conv_id, sub_fsm_definition)
-response = api.pop_fsm(sub_conv_id, merge_strategy=ContextMergeStrategy.UPDATE)
+# FSM stacking (sub-conversations). Every call takes the ROOT conversation id.
+greeting = api.push_fsm(conv_id, sub_fsm_definition, shared_context_keys=["address"])
+# ... converse() now talks to the sub-FSM ...
+response = api.pop_fsm(conv_id, merge_strategy=ContextMergeStrategy.UPDATE)
+# push_fsm returns the sub-FSM's first message (a str), not an id. pop_fsm returns a
+# resume message and merges back ONLY the child values of keys named in
+# shared_context_keys plus the explicit return_context /
+# context_to_return values; the merge strategy only decides collisions on those keys.
 
 # State queries
 state = api.get_current_state(conv_id)
@@ -168,7 +179,7 @@ schema = ClassificationSchema(
         IntentDefinition(name="buy", description="User wants to purchase"),
         IntentDefinition(name="browse", description="User is browsing"),
     ],
-    fallback_intent="browse",
+    fallback_intent="browse",  # required, and must be one of the intents
 )
 classifier = Classifier(schema, model="gpt-4o-mini")
 result = classifier.classify("I'd like to buy the red shoes")
@@ -206,7 +217,11 @@ for chunk in llm.generate_response_stream(request):
 class CustomLLM(LLMInterface):
     def generate_response(self, request): ...
     def extract_field(self, request): ...
+    def extract_bulk_data(self, request): ...  # needed by states with extraction_instructions
     def generate_response_stream(self, request): ...  # Optional
+# Without extract_bulk_data the base class raises NotImplementedError, the pipeline logs
+# "Bulk extraction fallback failed" and extracts nothing for that state's free-text
+# instructions (per-field extraction through extract_field still works).
 ```
 
 ### Session Persistence
@@ -239,11 +254,11 @@ new_conv_id, restored = api.restore_session(conv_id)  # resume the conversation
 
 States support:
 - `extraction_instructions` / `response_instructions` — LLM prompts for each pass. An empty `response_instructions` skips Pass 2 entirely (no response LLM call) — useful for intermediate agent states in tool-use loops.
-- `required_context_keys` — keys that must exist before leaving the state
+- `required_context_keys` — keys the pipeline should extract in this state. This does **not** block a transition: to hold a state until a key exists, give the transition a condition with `requires_context_keys` and a `logic` such as `{"has_context": "name"}`
 - `field_extractions` — targeted single-field extraction with validation rules
 - `classification_extractions` — intent classification with confidence thresholds
 - `transitions` — conditions with JsonLogic, priority ordering, and LLM descriptions
-- `context_scope` — read/write key filtering per state
+- `context_scope` — `read_keys` filters what the prompts of that state see; `write_keys` is advisory and is not enforced
 
 ## Exception Hierarchy
 
