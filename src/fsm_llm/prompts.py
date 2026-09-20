@@ -202,8 +202,14 @@ class BasePromptBuilder:
             lambda m: (
                 m.group(0)
                 if m.group(1).lower() in self._SAFE_TAGS
-                # LS-01: `[^>]*` in the pattern also swallows a nested `<`, so
-                # `<b </task>` matched as ONE "safe" tag and passed raw.
+                # DECISION plan-2026-09-19T175721-21cd7f8e/D-038
+                # A whitelisted tag is kept raw ONLY if its text holds no second
+                # `<`. Before this guard `<b </task>` matched as ONE safe `<b>`
+                # tag (the attribute tail swallowed the nested `<`) and a hostile
+                # `</task>` reached the prompt unescaped. The pattern is now
+                # `[^<>]*` (D-029) so this looks redundant: it is not, keep it as
+                # the second line of defence for a future pattern edit. Do NOT
+                # replace it with a parser (rewrite of a hot filter, D-038).
                 and "<" not in m.group(0)[1:]
                 else html.escape(m.group(0))
             ),
@@ -1097,11 +1103,14 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         if not extracted_data:
             return []
 
-        # LS-02: same security filter as <current_context>, so a declared
-        # `password` field extracted this turn is not echoed to Pass 2.
-        # `default=str` keeps a datetime/Decimal from dropping the section.
-        # (`build_refinement_prompt` has no caller in src/; its
-        # `previous_extraction` half is dead code and is not built.)
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-039
+        # Filter with the SAME security filter as <current_context>: a declared
+        # `password` field extracted this turn must not be echoed to Pass 2.
+        # Do NOT "simplify" by passing `extracted_data` through unfiltered (it is
+        # shown even outside `read_keys`, D-005, but never unfiltered), and keep
+        # `default=str` on the dumps below: without it one datetime/Decimal value
+        # raises and drops the whole section. (`build_refinement_prompt` has no
+        # caller in src/; its `previous_extraction` half is dead code.)
         data = self._filter_context_for_security(extracted_data)
         if not data:
             return []

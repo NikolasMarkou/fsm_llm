@@ -1602,9 +1602,13 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     if any(pattern.match(key) for pattern in COMPILED_FORBIDDEN_CONTEXT_PATTERNS):
         return True
 
-    # LS-06: camelCase names (`newPassword`, `clientSecret`) carry no `_`
-    # boundary for the layer-1 patterns. Exact `str` only: `.sub` on a hostile
-    # `str` subclass would dispatch to its overrides (D-006 polarity).
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-040
+    # camelCase names (`newPassword`, `clientSecret`) carry no `_` boundary for
+    # the layer-1 patterns, so they are re-tested in snake_case form. Do NOT
+    # widen the patterns to plain substrings instead (that strips `tokenizer`,
+    # `secretary`, `keyboardLayout`); `dbpassword`/`mysecret` stay open by
+    # design. Exact `str` only: `.sub` on a hostile `str` subclass would
+    # dispatch to its overrides (D-006 polarity).
     if type(key) is str:
         snake_key = _CAMEL_BOUNDARY.sub("_", key)
         if snake_key != key and any(
