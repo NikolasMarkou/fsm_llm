@@ -22,6 +22,7 @@ import pytest
 from loguru import logger
 
 from fsm_llm.visualizer import (
+    ICONS,
     build_graph_representation,
     create_state_boxes,
     generate_enhanced_ascii_diagram,
@@ -1194,4 +1195,117 @@ class TestStateDiagramBoxTruncationIsVisibleAndUnambiguous:
         assert any("…" in row for row in rows), (
             "content was shortened with no ellipsis marker in the STATE "
             "DIAGRAM section:\n" + "\n".join(rows)
+        )
+
+
+# ==================================================================
+# D-007 / review-iter-1.md WARNING 4: create_states_section's icon-budget
+# branch (visualizer.py ~569) never got the D-033/D-002 _fit() fix either.
+# ==================================================================
+
+
+class TestStatesSectionIconBudgetTruncationIsVisible:
+    """The icon-budget branch of ``create_states_section`` pre-sliced
+    ``state_line`` with a bare ``state_line[:body]`` BEFORE ``_states_box_row``'s
+    own ``_fit()`` call ever saw it -- by the time ``_fit`` ran, the content was
+    already exactly ``width`` chars long, so ``_fit`` was a no-op. This branch
+    only fires when a state carries an icon (``required_context_keys`` triggers
+    the ``*`` input icon here), so ``TestTruncationIsVisibleAndUnambiguous``'s
+    icon-less fixture never exercised it, and Success Criterion 2 was not met
+    for every state shape.
+    """
+
+    _A = "checkout_payment_authorization_pending_manual_review_ALPHA"
+    _B = "checkout_payment_authorization_pending_manual_review_BRAVO"
+
+    def _same_prefix_fsm_with_icons(self):
+        return {
+            "name": "IconBudgetAmbiguityFSM",
+            "initial_state": "start",
+            "states": {
+                "start": {
+                    "id": "start",
+                    "description": "d",
+                    "purpose": "p",
+                    "transitions": [
+                        {"target_state": self._A, "description": "to alpha"},
+                        {"target_state": self._B, "description": "to bravo"},
+                    ],
+                },
+                self._A: {
+                    "id": self._A,
+                    "description": "d",
+                    "purpose": "p",
+                    "required_context_keys": ["some_key"],
+                    "transitions": [],
+                },
+                self._B: {
+                    "id": self._B,
+                    "description": "d",
+                    "purpose": "p",
+                    "required_context_keys": ["some_key"],
+                    "transitions": [],
+                },
+            },
+        }
+
+    def _states_section_rows(self, output):
+        """The STATES-section content rows for A/B. A/B have no outgoing
+        transitions, so they render as TERMINAL states whose box vertical
+        glyph is ``"┃"`` nested inside the section's own ``"│ "`` border --
+        distinct from the TRANSITIONS section's plain ``"│ "`` rows and from
+        ``create_state_boxes``' STATE DIAGRAM rows (which start with a bare
+        ``"┃ "``, no section border, and are a different renderer)."""
+        return [
+            line
+            for line in output.splitlines()
+            if line.startswith("│ ┃") and "review" in line
+        ]
+
+    def test_two_same_prefix_icon_carrying_states_do_not_render_identically(self):
+        """The defect, stated directly: under the bare pre-slice both ids
+        became the identical row ``"checkout_..._review_ *"`` -- the icon
+        survived but BOTH the distinguishing suffix and the ellipsis did not."""
+        output = visualize_fsm_ascii(self._same_prefix_fsm_with_icons(), style="full")
+        rows = self._states_section_rows(output)
+        assert len(rows) == 2, (
+            "expected exactly 2 STATES-section id rows, got "
+            f"{len(rows)}:\n" + "\n".join(output.splitlines())
+        )
+        assert rows[0] != rows[1], (
+            "the two icon-carrying states' STATES-section rows are byte-"
+            f"identical -- the reader cannot tell them apart:\n"
+            f"{rows[0]!r}\n{rows[1]!r}"
+        )
+
+    def test_both_distinguishing_suffixes_survive(self):
+        """Stronger than 'the rows differ': the part that actually tells the
+        two states apart must be present in the row itself."""
+        output = visualize_fsm_ascii(self._same_prefix_fsm_with_icons(), style="full")
+        rows = self._states_section_rows(output)
+        assert len(rows) == 2
+        assert any("ALPHA" in row for row in rows), (
+            "ALPHA appears in neither STATES-section row:\n" + "\n".join(rows)
+        )
+        assert any("BRAVO" in row for row in rows), (
+            "BRAVO appears in neither STATES-section row:\n" + "\n".join(rows)
+        )
+
+    def test_the_icon_still_renders(self):
+        """Regression guard: the fix reserves room for the icon and must not
+        drop it while making the distinguishing suffix visible."""
+        output = visualize_fsm_ascii(self._same_prefix_fsm_with_icons(), style="full")
+        rows = self._states_section_rows(output)
+        assert len(rows) == 2
+        for row in rows:
+            assert ICONS["input"] in row, f"input icon missing from row:\n{row!r}"
+
+    def test_shortening_leaves_a_visible_marker(self):
+        """A truncation the reader cannot see is a truncation the reader will
+        mistake for the whole id."""
+        output = visualize_fsm_ascii(self._same_prefix_fsm_with_icons(), style="full")
+        rows = self._states_section_rows(output)
+        assert any("…" in row for row in rows), (
+            "content was shortened with no ellipsis marker in the STATES "
+            "section icon-budget branch:\n" + "\n".join(rows)
         )

@@ -149,6 +149,9 @@ def _states_box_row(vertical: str, content: str) -> str:
     # slice, and do NOT let callers pre-pad `content`. See decisions.md D-022.
     # D-033: `_fit` replaces the bare `[:width]` slice so an over-long id is
     # shortened VISIBLY and keeps its tail. The padding contract is unchanged.
+    # D-002 (plan-a8e47b88): `create_state_boxes` now routes through `_fit` too.
+    # D-007 (plan-a8e47b88): the sibling icon-budget branch in
+    # `create_states_section` (line ~569, at the time of this note) also fixed.
     width = _STATES_BOX_INNER_WIDTH
     return "│ " + vertical + _fit(content, width).ljust(width) + vertical + " │"
 
@@ -566,7 +569,17 @@ def create_states_section(
             icon_str = " " + " ".join(icons)
             # Make sure we don't exceed the box width
             body = width - len(icon_str)
-            state_line = state_line[:body].ljust(body) + icon_str
+            # DECISION plan-2026-09-20T114608-a8e47b88/D-007
+            # A bare `state_line[:body]` here truncates BEFORE `_states_box_row`'s
+            # own `_fit()` call ever sees this string: by the time `_fit` runs, the
+            # content is already exactly `width` chars, so `_fit` is a no-op. That
+            # silently reproduces D-033's byte-identical-row bug for any long-
+            # shared-prefix state that ALSO carries an icon (required_keys/
+            # branching/merge) -- the D-002 fix at `create_state_boxes` did not
+            # cover this sibling site. Route through `_fit` here too, reserving
+            # `body` chars for the state-id text so the trailing icon still fits.
+            # Do NOT go back to a bare slice. See decisions.md D-007.
+            state_line = _fit(state_line, body).ljust(body) + icon_str
 
         lines.append(_states_box_row(vertical, state_line))
 
