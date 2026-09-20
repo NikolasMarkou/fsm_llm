@@ -164,3 +164,34 @@ class TestFencedExampleDoesNotHideOrLeakAnObject:
     def test_reply_with_only_a_fenced_array_does_not_leak_its_message(self):
         message = _generate('```json\n[{"message": "leak"}]\n```')
         assert message != "leak"
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 5 / RB-06: the tag sanitizer is linear on `<a<a<a...`
+# ══════════════════════════════════════════════════════════════
+
+
+class TestTagSanitizerIsLinear:
+    def test_repeated_open_angle_finishes_fast(self):
+        import time
+
+        from fsm_llm.prompts import DataExtractionPromptBuilder
+
+        builder = DataExtractionPromptBuilder()
+        start = time.perf_counter()
+        out = builder._sanitize_text_for_prompt("<a" * 10000)
+        elapsed = time.perf_counter() - start
+        assert out == "<a" * 10000
+        assert elapsed < 0.5
+
+    def test_nested_open_angle_still_escapes_the_closing_tag(self):
+        from fsm_llm.prompts import DataExtractionPromptBuilder
+
+        builder = DataExtractionPromptBuilder()
+        assert builder._sanitize_text_for_prompt("<b </task>") == "<b &lt;/task&gt;"
+
+    def test_safe_formatting_tag_is_untouched(self):
+        from fsm_llm.prompts import DataExtractionPromptBuilder
+
+        builder = DataExtractionPromptBuilder()
+        assert builder._sanitize_text_for_prompt("<b>bold</b>") == "<b>bold</b>"

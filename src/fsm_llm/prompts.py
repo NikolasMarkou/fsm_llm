@@ -158,7 +158,14 @@ class BasePromptBuilder:
     # a long run of spaces backtracks quadratically — measured 3229ms vs 1.8ms
     # on the same input. This regex runs on user-controlled message text, so
     # that is a denial-of-service shape, not just a slow path. See D-026.
-    _TAG_PATTERN = re.compile(r"<(?:\s*/)?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]*)?/?>")
+    #
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-029
+    # The attribute tail is `[^<>]*`, NOT `[^>]*`. With `[^>]*` every `<a`
+    # of `<a<a<a...` scans to the end of the text before failing, so the
+    # sanitizer is quadratic on user text (10k chars 2.5 s per prompt). Do not
+    # widen it back: `<b </task>` is still escaped, because the closing tag then
+    # matches on its own. See D-029 (RB-06) in decisions.md.
+    _TAG_PATTERN = re.compile(r"<(?:\s*/)?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^<>]*)?/?>")
 
     def __init__(self, config: BasePromptConfig | None = None):
         """Initialize with configuration."""
