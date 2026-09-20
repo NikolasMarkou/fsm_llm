@@ -1024,3 +1024,243 @@ class TestHandlerOnlyKeys:
         result = validate_fsm_from_file(str(path))
         assert result.is_valid
         assert not result.errors
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 14 / RB-08: back-edge re-extraction (D-034)
+# ══════════════════════════════════════════════════════════════
+
+
+def _back_edge_fsm(name_extra_required: list[str] | None = None) -> dict:
+    """port of repros/back_edge.py: `name` -> `email` -> back to `name`.
+
+    ``name_extra_required`` adds required keys to `name` that the user never
+    supplies (the still-null case the call budget is stated for)."""
+
+    def _cond(key: str, logic: dict) -> dict:
+        return {"description": key, "requires_context_keys": [key], "logic": logic}
+
+    return {
+        "name": "Form",
+        "description": "back edge",
+        "version": "4.1",
+        "initial_state": "name",
+        "persona": "Concise.",
+        "states": {
+            "name": {
+                "id": "name",
+                "description": "collect name",
+                "purpose": "collect name",
+                "extraction_instructions": "Extract the user's full name.",
+                "required_context_keys": ["full_name", *(name_extra_required or [])],
+                "response_instructions": "Ask for name.",
+                "transitions": [
+                    {
+                        "target_state": "email",
+                        "description": "have name",
+                        "priority": 100,
+                        "conditions": [
+                            _cond("full_name", {"has_context": "full_name"})
+                        ],
+                    }
+                ],
+            },
+            "email": {
+                "id": "email",
+                "description": "collect email",
+                "purpose": "collect email",
+                "extraction_instructions": (
+                    "Extract the email and whether the user wants to change "
+                    "their name (wants_name_change)."
+                ),
+                "required_context_keys": ["email"],
+                "response_instructions": "Ask for email.",
+                "transitions": [
+                    {
+                        "target_state": "name",
+                        "description": "user wants to go back",
+                        "priority": 10,
+                        "conditions": [
+                            _cond(
+                                "wants_name_change",
+                                {"==": [{"var": "wants_name_change"}, True]},
+                            )
+                        ],
+                    },
+                    {
+                        "target_state": "done",
+                        "description": "have email",
+                        "priority": 100,
+                        "conditions": [_cond("email", {"has_context": "email"})],
+                    },
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "end",
+                "purpose": "end",
+                "response_instructions": "Done.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class _EdgeProv(_Prov):
+    """``_Prov`` that records the kind of every Pass-1 provider call per turn."""
+
+    def __init__(self, fsm: dict, store=None):
+        super().__init__(fsm, store)
+        self.kinds: list[str] = []
+
+    def _completion(self, **kwargs):
+        system = kwargs["messages"][0]["content"]
+        if '"extracted_data"' in system:
+            self.kinds.append("bulk")
+        elif kwargs.get("response_format") is not None:
+            self.kinds.append("field")
+        return super()._completion(**kwargs)
+
+    def say(self, message: str, field: dict, bulk: dict) -> list[str]:
+        """One turn; returns the Pass-1 call kinds it made."""
+        self.field, self.bulk = field, bulk
+        self.kinds.clear()
+        self.api.converse(message, self.cid)
+        return list(self.kinds)
+
+    def reach_email(self, name: str = "Alice Smith") -> None:
+        kinds = self.say(f"I'm {name}", {"full_name": name}, {})
+        assert self.api.get_current_state(self.cid) == "email"
+        # a forward hop into a state with nothing pre-filled costs no bulk call
+        # beyond the one the source state's own extraction makes
+        assert kinds.count("bulk") == 1
+
+
+_BACK_TURN = "wait, change my name, it's Bob Jones"
+_BACK_FIELD = {"wants_name_change": True}
+_BACK_BULK = {"full_name": "Bob Jones", "wants_name_change": True}
+
+
+class TestBackEdgeReExtraction:
+    def test_a_same_message_correction_on_a_back_edge_lands(self):
+        """port of repros/back_edge.py: RED on 0086e60, `Alice Smith` stays."""
+        with _EdgeProv(_back_edge_fsm()) as p:
+            p.reach_email()
+            p.say(_BACK_TURN, _BACK_FIELD, _BACK_BULK)
+            assert p.api.get_current_state(p.cid) == "name"
+            assert p.api.get_data(p.cid)["full_name"] == "Bob Jones"
+
+    def test_the_back_edge_turn_costs_exactly_one_extra_bulk_call(self):
+        """Call budget (D-034): +1 bulk on the back-edge turn. The pre-change
+        turn made 1 bulk + 3 field calls (wants_name_change, email, email
+        retry); the measured extra is exactly one bulk call."""
+        with _EdgeProv(_back_edge_fsm()) as p:
+            p.reach_email()
+            kinds = p.say(_BACK_TURN, _BACK_FIELD, _BACK_BULK)
+        assert kinds.count("bulk") == 2
+        assert kinds.count("field") == 3
+        assert len(kinds) == 5
+
+    def test_a_bare_go_back_with_a_null_extraction_keeps_the_stored_value(self):
+        with _EdgeProv(_back_edge_fsm()) as p:
+            p.reach_email()
+            p.say("go back", _BACK_FIELD, {"wants_name_change": True})
+            assert p.api.get_current_state(p.cid) == "name"
+            assert p.api.get_data(p.cid)["full_name"] == "Alice Smith"
+
+    def test_an_agent_managed_fsm_makes_no_extra_call(self):
+        with _EdgeProv(_back_edge_fsm()) as p:
+            p.reach_email()
+            p.api.update_context(p.cid, {"agent_trace": []})
+            kinds = p.say(_BACK_TURN, _BACK_FIELD, _BACK_BULK)
+            assert p.api.get_current_state(p.cid) == "name"
+            assert p.api.get_data(p.cid)["full_name"] == "Alice Smith"
+        assert kinds.count("bulk") == 1
+
+    def test_a_forward_hop_into_a_state_with_nothing_prefilled_makes_no_extra_call(
+        self,
+    ):
+        with _EdgeProv(_back_edge_fsm()) as p:
+            kinds = p.say("I'm Alice Smith", {"full_name": "Alice Smith"}, {})
+            assert p.api.get_current_state(p.cid) == "email"
+        assert kinds.count("bulk") == 1
+
+    def test_a_handler_seeded_target_key_makes_no_extra_call_and_is_kept(self):
+        """No provenance, so the trigger does not fire: D-015 still refuses to
+        let LLM text overwrite a handler-seeded value (repro5 shape)."""
+        with _EdgeProv(_back_edge_fsm()) as p:
+            p.api.update_context(p.cid, {"full_name": "Alice Smith"})
+            p.say("hello", {}, {})
+            assert p.api.get_current_state(p.cid) == "email"
+            kinds = p.say(_BACK_TURN, _BACK_FIELD, _BACK_BULK)
+            assert p.api.get_current_state(p.cid) == "name"
+            assert p.api.get_data(p.cid)["full_name"] == "Alice Smith"
+        assert kinds.count("bulk") == 1
+
+    def test_still_null_required_keys_cost_at_most_one_extra_call_each(self):
+        """STOP IF bound: 1 bulk + one per still-null required key. `nickname`
+        is required in `name` and never supplied. Pre-change the turn made
+        1 bulk + 4 field calls (wants_name_change, email, email retry, and the
+        post-transition nickname ask); the re-run replaces that ask by the
+        state's own pass (nickname + its 1 retry), so the extras are 1 bulk and
+        1 retry."""
+        with _EdgeProv(_back_edge_fsm(["nickname"])) as p:
+            p.say("I'm Alice Smith", {"full_name": "Alice Smith"}, {})
+            assert p.api.get_current_state(p.cid) == "email"
+            kinds = p.say(_BACK_TURN, _BACK_FIELD, _BACK_BULK)
+            assert p.api.get_data(p.cid)["full_name"] == "Bob Jones"
+        assert kinds.count("bulk") == 2
+        assert kinds.count("field") == 5
+        assert len(kinds) == 7  # pre-change 5; extra = 1 bulk + 1 per null key
+
+    def test_the_correction_reaches_the_context_update_handlers(self):
+        seen: list[dict] = []
+        with _EdgeProv(_back_edge_fsm()) as p:
+            p.api.register_handler(
+                p.api.create_handler("watch_name")
+                .at(HandlerTiming.CONTEXT_UPDATE)
+                .on_context_update("full_name")
+                .do(lambda ctx: seen.append(dict(ctx)) or {})
+            )
+            p.reach_email()
+            before = len(seen)
+            p.say(_BACK_TURN, _BACK_FIELD, _BACK_BULK)
+        assert len(seen) == before + 1
+        assert seen[-1]["full_name"] == "Bob Jones"
+
+    def test_a_refused_correction_on_the_back_edge_is_carried_to_pass_two(self):
+        """The re-run refuses to overwrite a value a CONTEXT_UPDATE handler
+        edited (digest mismatch, D-015). The refusal must land on the TURN's
+        response, and `last_extraction_response` must stay the turn's."""
+        with _EdgeProv(_back_edge_fsm()) as p:
+            p.api.register_handler(
+                p.api.create_handler("shout")
+                .at(HandlerTiming.CONTEXT_UPDATE)
+                .on_context_update("full_name")
+                .do(lambda ctx: {"full_name": str(ctx["full_name"]).upper()})
+            )
+            p.reach_email()
+            assert p.api.get_data(p.cid)["full_name"] == "ALICE SMITH"
+            p.say(_BACK_TURN, _BACK_FIELD, _BACK_BULK)
+            data = p.api.get_data(p.cid)
+            last = p.api.fsm_manager.instances[p.cid].last_extraction_response
+        assert data["full_name"] == "ALICE SMITH"
+        assert last is not None
+        assert last.rejected_corrections == {"full_name": "Bob Jones"}
+        assert last.extracted_data.get("wants_name_change") is True
+
+    def test_a_self_loop_is_not_a_revisit_and_costs_no_extra_call(self):
+        """A transition back into the SAME state (the correction FSM's
+        "keep chatting" edge) must not re-run extraction: the state's own
+        Pass-1 extraction just ran, and the bulk would overwrite the same-turn
+        per-field value. RED variant (first cut of step 14, no self-loop
+        guard) turned the iteration-1 pin
+        `test_same_turn_per_field_value_wins_over_bulk` red."""
+        with _EdgeProv(_correction_fsm()) as p:
+            p.field, p.bulk = {"favorite_color": "blue"}, {}
+            p.api.converse("blue", p.cid)
+            kinds = p.say("hello", {}, {"favorite_color": "red"})
+            data = p.api.get_data(p.cid)
+        assert p.api.get_current_state(p.cid) == "profile"
+        assert kinds.count("bulk") == 1
+        assert data["favorite_color"] == "red"  # the one bulk pass corrects it

@@ -919,20 +919,58 @@ class MessagePipeline:
                 if c.field_name not in instance.context.data
                 or instance.context.data.get(c.field_name) is None
             ]
-            if missing_configs:
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-034: a transition into
+            # a state whose own keys the pipeline already filled (a back edge)
+            # re-runs the target's whole Pass-1 extraction, so a correction in
+            # THIS message reaches the D-015 bulk path (LV2-03). The trigger is
+            # DATA (a config-covered key that is set AND has provenance), not
+            # graph shape. Do NOT clear the target's keys on a "backward" edge:
+            # "go back" alone would erase them, and a DFS back edge also fires
+            # for every agent loop. Do NOT relax the provenance requirement:
+            # that reopens repro5 (handler-seeded gate value). States that own
+            # classification_extractions are excluded so the call budget stays
+            # 1 bulk + 1 retry per still-null required key. A self-loop is not a
+            # revisit (the state's own extraction just ran on this message; a
+            # re-run would let the bulk overwrite a same-turn per-field value
+            # and cost +1 call on every chatty turn). The re-run replaces the
+            # missing-key ask below (it already covers those keys), so no
+            # per-field call is duplicated.
+            prov_now = instance.context.metadata.get(_PROVENANCE_KEY, {})
+            revisit = (
+                previous_state != instance.current_state
+                and bool(new_state.extraction_instructions)
+                and not new_state.classification_extractions
+                and any(
+                    c.field_name in prov_now
+                    and instance.context.data.get(c.field_name) is not None
+                    for c in new_configs
+                )
+            )
+            if revisit or missing_configs:
                 log.debug(
                     f"Post-transition extraction in "
                     f"'{instance.current_state}' for "
-                    f"{[c.field_name for c in missing_configs]}"
+                    f"{'re-run' if revisit else [c.field_name for c in missing_configs]}"
                 )
                 try:
-                    post_results = self._execute_field_extractions(
-                        instance, user_message, missing_configs, conversation_id
-                    )
                     post_data: dict[str, Any] = {}
-                    for result in post_results:
-                        if result.is_valid and result.value is not None:
-                            post_data[result.field_name] = result.value
+                    if revisit:
+                        again = self._execute_data_extraction(
+                            instance, user_message, conversation_id
+                        )
+                        post_data = dict(again.extracted_data)
+                        extraction_response.rejected_corrections.update(
+                            again.rejected_corrections
+                        )
+                        # the re-run overwrote the turn's response on the instance
+                        instance.last_extraction_response = extraction_response
+                    else:
+                        post_results = self._execute_field_extractions(
+                            instance, user_message, missing_configs, conversation_id
+                        )
+                        for result in post_results:
+                            if result.is_valid and result.value is not None:
+                                post_data[result.field_name] = result.value
 
                     if post_data:
                         post_data = self._clean_empty_context_keys(
