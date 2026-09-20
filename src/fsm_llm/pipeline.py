@@ -251,7 +251,13 @@ class MessagePipeline:
         # a non-copyable context value no longer crashes a handler timing). Do NOT
         # extend this to the D-012 pre-turn snapshots below: rollback needs them.
         # A Mock(spec=HandlerSystem) returns a truthy Mock here and keeps the path.
-        if not self.handler_system.handlers_at(timing):
+        #
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-029
+        # `handlers_at` is an OPTIONAL fast-path hook, not part of the public
+        # `handler_system=` seam: a duck-typed system with only
+        # `execute_handlers` must keep working. Do NOT call it unguarded (RB-11).
+        handlers_at = getattr(self.handler_system, "handlers_at", None)
+        if callable(handlers_at) and not handlers_at(timing):
             return
         context = copy.deepcopy(instance.context.data)
 

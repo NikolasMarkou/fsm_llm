@@ -195,3 +195,117 @@ class TestTagSanitizerIsLinear:
 
         builder = DataExtractionPromptBuilder()
         assert builder._sanitize_text_for_prompt("<b>bold</b>") == "<b>bold</b>"
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 6 / RB-11: ``handlers_at`` is an optional fast-path hook
+# ══════════════════════════════════════════════════════════════
+
+_DUCK_FSM = {
+    "name": "S",
+    "description": "d",
+    "version": "4.1",
+    "initial_state": "a",
+    "persona": "p",
+    "states": {
+        "a": {
+            "id": "a",
+            "description": "d",
+            "purpose": "p",
+            "response_instructions": "r",
+            "transitions": [
+                {
+                    "target_state": "b",
+                    "description": "never",
+                    "conditions": [
+                        {"description": "never", "logic": {"==": [1, 2]}},
+                    ],
+                }
+            ],
+        },
+        "b": {
+            "id": "b",
+            "description": "d",
+            "purpose": "p",
+            "response_instructions": "r",
+            "transitions": [],
+        },
+    },
+}
+
+
+class _DuckHandlerSystem:
+    """A handler system with only ``execute_handlers`` (no ``handlers_at``)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def register_handler(self, handler):
+        pass
+
+    def close(self):
+        pass
+
+    def execute_handlers(
+        self,
+        timing,
+        current_state,
+        target_state,
+        context,
+        updated_keys=None,
+        error_context=None,
+    ):
+        self.calls += 1
+        return {}
+
+
+def _manager_with(handler_system):
+    from fsm_llm.definitions import FSMDefinition
+    from fsm_llm.fsm import FSMManager
+
+    definition = FSMDefinition(**_DUCK_FSM)
+    with (
+        patch(
+            "fsm_llm.llm.completion",
+            return_value=_fake_response(json.dumps({"message": "ok"})),
+        ),
+        patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            return_value=["response_format"],
+        ),
+    ):
+        llm = LiteLLMInterface(model="gpt-4o", api_key="x")
+        manager = FSMManager(
+            fsm_loader=lambda fid: definition,
+            llm_interface=llm,
+            handler_system=handler_system,
+        )
+        cid, _ = manager.start_conversation("S")
+        response = manager.process_message(cid, "hello")
+    return response
+
+
+class TestHandlersAtIsOptional:
+    def test_duck_typed_handler_system_starts_and_converses(self):
+        duck = _DuckHandlerSystem()
+        response = _manager_with(duck)
+        assert response == "ok"
+        assert duck.calls > 0
+
+    def test_a_spec_mock_handler_system_keeps_the_old_path(self):
+        from unittest.mock import Mock
+
+        from fsm_llm.handlers import HandlerSystem
+
+        system = Mock(spec=HandlerSystem)
+        system.execute_handlers.return_value = {}
+        response = _manager_with(system)
+        assert response == "ok"
+        assert system.execute_handlers.call_count > 0
+
+    def test_a_non_callable_handlers_at_takes_the_old_path(self):
+        duck = _DuckHandlerSystem()
+        duck.handlers_at = None  # type: ignore[attr-defined]
+        response = _manager_with(duck)
+        assert response == "ok"
+        assert duck.calls > 0
