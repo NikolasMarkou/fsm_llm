@@ -321,3 +321,64 @@ class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
             final_data={"turn": 1},
         )
         assert result == 0
+
+    def test_secret_bearing_object_gets_safe_placeholder_not_repr(self):
+        """D-014/D-015 / review-iter-2.md WARNING 4 regression: `default=str`
+        stringifies an arbitrary object via `repr()`, so a secret-bearing
+        object under a benign key used to reach persisted logs verbatim --
+        on the CLI's own redaction path. Post-fix (`_json_default`), only a
+        type-name placeholder is logged, and one WARNING is emitted."""
+        from fsm_llm.logging import logger
+
+        class Creds:
+            """Stand-in for a caller's custom object whose repr leaks a
+            secret field value -- exactly what `_json_default` must not
+            call."""
+
+            def __init__(self, api_key: str):
+                self.api_key = api_key
+
+            def __repr__(self) -> str:
+                return f"Creds(api_key={self.api_key!r})"
+
+        secret = "sk-live-SUPERSECRET"  # test fixture, not a real credential
+        creds = Creds(secret)
+
+        records: list = []
+        logger.enable("fsm_llm")
+        # level="DEBUG" (not "WARNING"): the assertions below need to see
+        # the actual logged JSON dump line too, not just the WARNING.
+        sink_id = logger.add(lambda m: records.append(m.record), level="DEBUG")
+        try:
+            result = self._run_with_context(
+                per_turn_data={"turn": 1},
+                final_data={"session": creds, "note": "hi"},
+            )
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        assert result == 0
+
+        # The secret's raw value, and the object's own repr(), must never
+        # appear in any captured log line -- this is the leak the fix closes.
+        for record in records:
+            message = str(record["message"])
+            assert secret not in message
+            assert "Creds(api_key=" not in message
+
+        # The type-name placeholder DOES reach the final dump line.
+        assert any(
+            "<non-serializable: Creds>" in str(r["message"]) for r in records
+        )
+
+        # Exactly one WARNING fired for the one non-serializable object.
+        warnings = [
+            r
+            for r in records
+            if r["level"].name == "WARNING" and "non-JSON-native" in str(r["message"])
+        ]
+        assert len(warnings) == 1, (
+            f"expected exactly 1 non-JSON-native WARNING, got "
+            f"{len(warnings)}: {[str(r['message']) for r in records]}"
+        )

@@ -90,6 +90,35 @@ def _redact_context(data: dict) -> dict:
     return _redact_mapping(data, 0)
 
 
+# DECISION plan-2026-09-20T114608-a8e47b88/D-014
+# `json.dumps(..., default=...)` on the two log sites below MUST use this
+# callable, never the bare builtin `str`. `default=str` calls `str(obj)`,
+# which for an arbitrary object falls back to `repr(obj)` -- so a
+# secret-bearing object under a benign key (e.g. `Creds(api_key='sk-...')`)
+# would serialize its field values verbatim into `logs/`, on the exact
+# path whose entire purpose (`_redact_context`/`_redact_mapping` above) is
+# to prevent that. Do NOT "simplify" this back to `default=str` even though
+# it is one token shorter -- this function returns only the object's TYPE
+# NAME, never its value, mirroring `_redact_mapping`'s own established
+# WARNING-on-non-str-key pattern two functions above ("a `bytes` key here
+# means a secret is about to be written to a log verbatim. Do NOT downgrade
+# to debug."). See decisions.md D-014/D-015.
+def _json_default(obj: object) -> str:
+    """Safe ``json.dumps(default=...)`` fallback for a non-JSON-native
+    context value (e.g. ``datetime``, or a caller's custom object).
+
+    Returns a type-name placeholder and WARNs once per call -- never
+    ``str(obj)``/``repr(obj)``, since that would leak the object's own
+    field values (this is the CLI's redaction path).
+    """
+    logger.warning(
+        "Log-serialization fallback used for a non-JSON-native context "
+        f"value of type {type(obj).__name__!r}: only the type name is "
+        "logged, not its str()/repr() (which could leak a secret field)."
+    )
+    return f"<non-serializable: {type(obj).__name__}>"
+
+
 # --------------------------------------------------------------
 
 
@@ -196,11 +225,14 @@ def main(fsm_path, max_history_size, max_message_length):
 
                 # Log the current state and context
                 data = fsm.get_data(conversation_id)
-                # default=str, matching logging.py:90's own _record_to_json:
-                # a handler-stored non-JSON-native value (datetime, set, ...)
-                # must not crash the CLI's debug/dump logging path.
+                # default=_json_default (D-014), matching logging.py:90's own
+                # _record_to_json: a handler-stored non-JSON-native value
+                # (datetime, set, ...) must not crash the CLI's debug/dump
+                # logging path -- but the fallback must never str()/repr()
+                # the object (see _json_default's own docstring/D-014).
                 logger.debug(
-                    f"Context data: {json.dumps(_redact_context(data), default=str)}"
+                    "Context data: "
+                    f"{json.dumps(_redact_context(data), default=_json_default)}"
                 )
 
             except Exception as e:
@@ -209,7 +241,8 @@ def main(fsm_path, max_history_size, max_message_length):
 
         data = fsm.get_data(conversation_id)
         logger.info(
-            f"Data: \n{json.dumps(_redact_context(data), indent=3, default=str)}"
+            "Data: \n"
+            f"{json.dumps(_redact_context(data), indent=3, default=_json_default)}"
         )
     finally:
         # Clean up when done — always runs even on exception
