@@ -309,3 +309,53 @@ class TestHandlersAtIsOptional:
         response = _manager_with(duck)
         assert response == "ok"
         assert duck.calls > 0
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 7 / LS-09: an inline code fence in prose is not corrupted
+# ══════════════════════════════════════════════════════════════
+
+_PROSE_WITH_FENCE = "Use:\n```python\nprint(1)\n```\nok"
+
+
+class TestInlineCodeFenceIsKept:
+    def test_inline_fence_in_prose_keeps_its_text(self):
+        from fsm_llm.utilities import strip_think_and_fences
+
+        assert strip_think_and_fences(_PROSE_WITH_FENCE) == _PROSE_WITH_FENCE
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ('```json\n{"a": 1}\n```', '{"a": 1}'),
+            ('```\n{"a": 1}\n```', '{"a": 1}'),
+            ('<think>x</think>```json\n{"a": 1}\n```', '{"a": 1}'),
+        ],
+    )
+    def test_a_reply_that_starts_with_a_fence_is_still_stripped(self, text, expected):
+        from fsm_llm.utilities import strip_think_and_fences
+
+        assert strip_think_and_fences(text) == expected
+
+    def test_field_extraction_of_prose_with_a_fence_keeps_the_fence(self):
+        response = _extract_field(_PROSE_WITH_FENCE)
+        assert "```python" in str(response.value)
+
+    def test_json_inside_a_mid_text_fence_is_still_recovered(self):
+        """D-030: fences in mid-text are not stripped, extract_json_from_text finds the JSON."""
+        from fsm_llm.definitions import BulkExtractionRequest
+
+        wrapped = 'text\n```json\n{"message": "hi"}\n```\nmore'
+        assert _generate(wrapped) == "hi"
+        assert _generate(wrapped, _STRUCTURED_FORMAT) == "hi"
+        field = _extract_field(
+            'text\n```json\n{"value": "Bob", "confidence": 0.9}\n```\nmore'
+        )
+        assert (field.value, field.confidence) == ("Bob", 0.9)
+        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
+        request = BulkExtractionRequest(system_prompt="e", user_message="hi")
+        with patch(
+            "fsm_llm.llm.completion",
+            return_value=_fake_response('text\n```json\n{"name": "Bob"}\n```\nmore'),
+        ):
+            assert llm.extract_bulk_data(request).extracted_data == {"name": "Bob"}

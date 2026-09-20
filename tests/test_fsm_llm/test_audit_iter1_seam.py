@@ -1321,8 +1321,10 @@ class TestClassifierInheritsConnection:
 # ══════════════════════════════════════════════════════════════
 
 # The corpora below were captured from the ORIGINAL regex implementations, so
-# they pin behavior equality across the rewrite. The `[1, 2]` fenced-list row is
-# deliberately absent: step 11 changes that contract (dict-only) on purpose.
+# they pin behavior equality across the rewrite, EXCEPT the six `_STRIP_CORPUS`
+# rows annotated `D-030`: those pin the D-030 semantics (only a fence at the
+# START of the reply is stripped; a fence inside prose is kept). The `[1, 2]`
+# fenced-list row is deliberately absent: step 11 changes that contract (dict-only) on purpose.
 _STRIP_CORPUS: list[tuple[str, str]] = [
     ('```json\n{"a": 1}\n```', '{"a": 1}'),
     ('```\n{"a": 1}\n```', '{"a": 1}'),
@@ -1336,22 +1338,28 @@ _STRIP_CORPUS: list[tuple[str, str]] = [
     ('<think>unterminated {"a": 1}', '<think>unterminated {"a": 1}'),
     ('{"a": 1}<think>unterminated', '{"a": 1}<think>unterminated'),
     ('<think>a</think>\n```json\n{"a": 1}\n```', '{"a": 1}'),
-    ('```\n```json\n{"a": 1}\n```\n```', '{"a": 1}'),
-    ('text\n```json\n{"a": 1}\n```\nmore', 'text\n{"a": 1}\nmore'),
+    # D-030: was '{"a": 1}'
+    ('```\n```json\n{"a": 1}\n```\n```', '```json\n{"a": 1}\n```'),
+    # D-030: was 'text\n{"a": 1}\nmore'
+    ('text\n```json\n{"a": 1}\n```\nmore', 'text\n```json\n{"a": 1}\n```\nmore'),
     ('```json\r\n{"a": 1}\r\n```\r\n', '{"a": 1}'),
     ("````\nx\n````", "`\nx\n`"),
     ("```jsonx\ny```", "x\ny"),
-    ("```json\n\n\n```json\n{}\n```", "{}"),
+    # D-030: was '{}'
+    ("```json\n\n\n```json\n{}\n```", "```json\n{}"),
     ("<think></think>```json```", ""),
     ("", ""),
     ("```", ""),
     ("\n```\n", ""),
-    ("a\n```\n\n```\nb", "a\nb"),
-    ('```json\n```\n```json\n{"z":1}\n```', '{"z":1}'),
+    # D-030: was 'a\nb'
+    ("a\n```\n\n```\nb", "a\n```\n\n```\nb"),
+    # D-030: was '{"z":1}'
+    ('```json\n```\n```json\n{"z":1}\n```', '```\n```json\n{"z":1}'),
     ('<think>a</think></think>{"a": 1}', '</think>{"a": 1}'),
     ('<THINK>a</THINK>{"a":1}', '<THINK>a</THINK>{"a":1}'),
     ("```json ```", ""),
-    ('x```json\n{"a":1}\n```y', 'x```json\n{"a":1}\ny'),
+    # D-030: was 'x```json\n{"a":1}\ny'
+    ('x```json\n{"a":1}\n```y', 'x```json\n{"a":1}\n```y'),
     ('  \n```json\n{"a":1}\n```\n\n\n', '{"a":1}'),
     ('``` \xa0 \n{"a":1}\u2003```', '{"a":1}'),
 ]
@@ -1387,6 +1395,7 @@ def _elapsed(fn, arg: str) -> float:
 class TestLinearFenceAndThink:
     @pytest.mark.parametrize(("text", "expected"), _STRIP_CORPUS)
     def test_strip_think_and_fences_matches_old_outputs(self, text, expected):
+        """The corpus pins the D-030 semantics: only a leading fence is stripped."""
         assert strip_think_and_fences(text) == expected
 
     @pytest.mark.parametrize(("text", "expected"), _EXTRACT_CORPUS)

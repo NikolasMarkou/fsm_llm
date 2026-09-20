@@ -135,7 +135,11 @@ def strip_think_and_fences(content: str) -> str:
           byte-identical, hand-duplicated in both places.
     """
     content = _remove_think_blocks(content).strip()
-    content = re.sub(r"^```(?:json)?\s*\n?", "", content, flags=re.MULTILINE)
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-030
+    # No re.MULTILINE: only a fence that STARTS the reply is a wrapper. With
+    # `^` matching at every line, an inline code fence in prose
+    # ('Use:\n```python\nprint(1)\n```') lost its markers. Do NOT re-add it (LS-09).
+    content = re.sub(r"^```(?:json)?\s*\n?", "", content)
     content = re.sub(r"\n?```\s*$", "", content).strip()
     return content
 
