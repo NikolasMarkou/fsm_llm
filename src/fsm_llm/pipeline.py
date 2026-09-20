@@ -181,6 +181,20 @@ def _record_provenance(instance: FSMInstance, committed: dict[str, Any]) -> None
         prov[key] = _value_digest(value)
 
 
+class _BulkFailed(dict):
+    """Empty marker returned by ``_bulk_extract_from_instructions`` when the
+    bulk call raised. It compares equal to ``{}`` and is falsy, so every caller
+    and the two pinned private call shapes still see "nothing extracted"; the
+    two ``_execute_data_extraction`` call sites read ``isinstance`` first.
+
+    DECISION plan-2026-09-19T175721-21cd7f8e/D-050
+    Do NOT return ``(dict, bool)`` or add an out-parameter (both break the
+    pinned 4-argument spy signatures), do NOT stash the flag on
+    ``context.metadata`` (it is serialised into the session file) and do NOT
+    encode it as a key inside ``rejected_corrections`` (braids two meanings).
+    """
+
+
 class MessagePipeline:
     """2-pass message processing pipeline.
 
@@ -672,6 +686,7 @@ class MessagePipeline:
                 instance.context.data, current_state, conversation_id
             ),
             rejected_corrections=extraction_response.rejected_corrections,
+            extraction_failed=extraction_response.extraction_failed,
         )
 
         context_for_llm = self._apply_context_scope(
@@ -964,6 +979,7 @@ class MessagePipeline:
                         extraction_response.rejected_corrections.update(
                             again.rejected_corrections
                         )
+                        extraction_response.extraction_failed |= again.extraction_failed
                         # the re-run overwrote the turn's response on the instance
                         instance.last_extraction_response = extraction_response
                     else:
@@ -1090,6 +1106,9 @@ class MessagePipeline:
             }
         except Exception as e:
             log.warning(f"Bulk extraction fallback failed: {e}")
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-050: a failed call is
+            # not "nothing to extract"; see _BulkFailed.
+            return _BulkFailed()
 
         return {}
 
@@ -1203,6 +1222,7 @@ class MessagePipeline:
 
         has_extraction_instructions = bool(current_state.extraction_instructions)
 
+        bulk_failed = False
         if not has_field_configs and not has_classification_configs:
             if has_extraction_instructions:
                 # Fallback: bulk extraction for states with instructions
@@ -1215,6 +1235,7 @@ class MessagePipeline:
                 bulk_data = self._bulk_extract_from_instructions(
                     instance, user_message, current_state, conversation_id
                 )
+                bulk_failed = isinstance(bulk_data, _BulkFailed)
                 # Don't overwrite values already set in context (e.g. by
                 # handlers) — bulk extraction is best-effort for NEW data.
                 if bulk_data:
@@ -1231,7 +1252,9 @@ class MessagePipeline:
                     return response
 
             log.debug("No fields or classifications to extract for this state")
-            response = DataExtractionResponse(extracted_data={}, confidence=1.0)
+            response = DataExtractionResponse(
+                extracted_data={}, confidence=1.0, extraction_failed=bulk_failed
+            )
             instance.last_extraction_response = response
             return response
 
@@ -1390,6 +1413,7 @@ class MessagePipeline:
             bulk_data = self._bulk_extract_from_instructions(
                 instance, user_message, current_state, conversation_id
             )
+            bulk_failed = isinstance(bulk_data, _BulkFailed)
             if bulk_data:
                 existing = instance.context.data
                 agent_managed = CONTEXT_KEY_AGENT_TRACE in existing
@@ -1486,6 +1510,7 @@ class MessagePipeline:
                 for name in all_required_names
             ),
             rejected_corrections=rejected,
+            extraction_failed=bulk_failed,
         )
         instance.last_extraction_response = response
 
@@ -2305,6 +2330,7 @@ class MessagePipeline:
                 instance.context.data, current_state, conversation_id
             ),
             rejected_corrections=extraction_response.rejected_corrections,
+            extraction_failed=extraction_response.extraction_failed,
         )
 
         # Apply context scoping if the state defines read_keys

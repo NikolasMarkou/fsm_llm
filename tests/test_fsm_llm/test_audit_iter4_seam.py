@@ -320,3 +320,168 @@ class TestGroundingIsAWholeTokenTest:
         rejected, block = _grounded(message, value)
         assert rejected == {}
         assert block is False
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 6 / D-050: a failed bulk extraction is surfaced to Pass 2
+# ══════════════════════════════════════════════════════════════
+
+_FAILED_LINE = "re-extraction of the user's latest message failed"
+
+
+def _failing_bulk_spy_class():
+    """A ``_EdgeProv`` that records every Pass-2 system prompt and raises on
+    the bulk ``data_extraction`` calls whose 1-based index within the turn is
+    in ``fail_bulk`` (an empty set never fails)."""
+    from tests.test_fsm_llm.test_audit_iter3_seam import _EdgeProv, _stream_chunk
+
+    class _FailingBulk(_EdgeProv):
+        def __init__(self, fsm, store=None):
+            super().__init__(fsm, store)
+            self.pass2: list[str] = []
+            self.fail_bulk: set[int] = set()
+            self._bulk_calls = 0
+
+        def _completion(self, **kwargs):
+            system = kwargs["messages"][0]["content"]
+            if "<response_generation>" in system:
+                self.pass2.append(system)
+                if kwargs.get("stream"):
+                    return iter([_stream_chunk("ok")])
+            elif '"extracted_data"' in system:
+                self._bulk_calls += 1
+                if self._bulk_calls in self.fail_bulk:
+                    raise RuntimeError("provider down")
+            return super()._completion(**kwargs)
+
+        def turn_say(self, message, field, bulk, fail=(), stream=False):
+            self.fail_bulk, self._bulk_calls = set(fail), 0
+            self.pass2.clear()
+            if stream:
+                self.field, self.bulk = field, bulk
+                list(self.api.converse_stream(message, self.cid))
+            else:
+                self.say(message, field, bulk)
+            assert self.pass2, "no response-generation call captured"
+            return self.pass2[-1]
+
+    return _FailingBulk
+
+
+def _no_config_fsm() -> dict:
+    """One state with extraction instructions and NO declared keys: the
+    no-config bulk fallback pass."""
+    from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
+
+    fsm = _correction_fsm()
+    del fsm["states"]["profile"]["required_context_keys"]
+    return fsm
+
+
+class TestFailedBulkIsSurfacedToPassTwo:
+    def test_the_response_field_defaults_to_false(self):
+        """GUARD."""
+        from fsm_llm.definitions import DataExtractionResponse
+
+        assert DataExtractionResponse().extraction_failed is False
+
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_an_ordinary_turn_with_a_failed_bulk_call_says_so_once(self, stream):
+        from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
+
+        with _failing_bulk_spy_class()(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"favorite_color": "blue"})
+            prompt = p.turn_say(
+                "no, actually make it red", {}, {}, fail={1}, stream=stream
+            )
+            assert prompt.count(_FAILED_LINE) == 1
+            assert p.api.get_data(p.cid)["favorite_color"] == "blue"
+
+    def test_the_no_config_fallback_pass_says_so(self):
+        with _failing_bulk_spy_class()(_no_config_fsm()) as p:
+            prompt = p.turn_say("call me Bobby", {}, {"nickname": "Bobby"}, fail={1})
+            assert prompt.count(_FAILED_LINE) == 1
+            assert "nickname" not in p.api.get_data(p.cid)
+
+    def test_the_back_edge_rerun_failure_says_so_and_keeps_the_stored_value(self):
+        """LV5-01: the email turn's own bulk call succeeds, the re-run in `name`
+        raises; the reply must not claim the name was updated."""
+        from tests.test_fsm_llm.test_audit_iter3_seam import (
+            _BACK_BULK,
+            _BACK_FIELD,
+            _BACK_TURN,
+            _back_edge_fsm,
+        )
+
+        with _failing_bulk_spy_class()(_back_edge_fsm()) as p:
+            p.reach_email()
+            prompt = p.turn_say(_BACK_TURN, _BACK_FIELD, _BACK_BULK, fail={2})
+            assert p.api.get_current_state(p.cid) == "name"
+            assert p.api.get_data(p.cid)["full_name"] == "Alice Smith"
+            assert prompt.count(_FAILED_LINE) == 1
+
+    def test_no_failure_gives_no_line_and_the_benign_prompt_hash_is_unchanged(self):
+        """GUARD: the hash is the iteration-3 one (recorded before the block
+        existed), so a turn without a failure adds no byte."""
+        import hashlib
+
+        from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
+
+        with _failing_bulk_spy_class()(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"favorite_color": "blue"})
+            prompt = p.turn_say("thanks, what next?", {}, {})
+        assert _FAILED_LINE not in prompt
+        assert (
+            hashlib.sha256(prompt.encode()).hexdigest()
+            == "c6d788cb4f5fc6e08a90dd66b34193009f13f7bdd52b404847ba99604e9d88f9"
+        )
+
+    def test_a_failed_bulk_and_a_refused_correction_render_both(self):
+        """The prompt builder renders the failure line AND the refused block
+        when both hold (the builder-level combination; a single scripted turn
+        cannot refuse a value in one bulk call and fail in another)."""
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
+        from tests.test_fsm_llm.test_audit_iter3_seam import _PassTwoSpy
+
+        with _PassTwoSpy(_correction_fsm()) as p:
+            instance = p.api.fsm_manager.instances[p.cid]
+            fsm_def = p.api.fsm_manager.get_fsm_definition(instance.fsm_id)
+            state = fsm_def.states[instance.current_state]
+            builder = ResponseGenerationPromptBuilder()
+            both = builder.build_response_prompt(
+                instance,
+                state,
+                fsm_def,
+                rejected_corrections={"favorite_color": "red"},
+                extraction_failed=True,
+            )
+            only_failed = builder.build_response_prompt(
+                instance,
+                state,
+                fsm_def,
+                rejected_corrections={"password": "x"},
+                extraction_failed=True,
+            )
+        assert both.count(_FAILED_LINE) == 1
+        assert '"favorite_color": "red"' in both
+        assert "<rejected_corrections>" in both
+        assert only_failed.count(_FAILED_LINE) == 1
+        assert "<rejected_corrections>" not in only_failed
+
+    def test_the_two_pinned_private_call_shapes_are_unchanged(self):
+        """GUARD: the helper is still called with 4 positional arguments and a
+        failure still compares equal to the empty dict."""
+        from unittest.mock import MagicMock
+
+        from fsm_llm.pipeline import MessagePipeline
+
+        pipe = MessagePipeline.__new__(MessagePipeline)
+        pipe.data_extraction_prompt_builder = MagicMock()
+        pipe.data_extraction_prompt_builder._sanitize_text_for_prompt.return_value = "x"
+        pipe.llm_interface = MagicMock()
+        pipe.llm_interface.extract_bulk_data.side_effect = RuntimeError("down")
+        state = MagicMock(extraction_instructions="anything")
+        out = pipe._bulk_extract_from_instructions(MagicMock(), "hi", state, "cid")
+        assert out == {}
+        assert not out

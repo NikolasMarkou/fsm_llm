@@ -946,6 +946,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         plain_text_response: bool = False,
         context: dict[str, Any] | None = None,
         rejected_corrections: dict[str, Any] | None = None,
+        extraction_failed: bool = False,
     ) -> str:
         """
         Build comprehensive system prompt for response generation.
@@ -969,6 +970,9 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             rejected_corrections: Values the user asked for that the extraction
                 step refused to apply (D-032). ``None`` or empty adds nothing, so
                 a turn without a rejection builds the same prompt as before.
+            extraction_failed: The bulk extraction call of this turn raised
+                (D-050); adds one plain line saying a restated or corrected
+                value may not have been stored. ``False`` adds nothing.
 
         Returns:
             System prompt focused on response generation
@@ -1003,9 +1007,11 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             sections.extend(self._build_extracted_data_section(extracted_data))
 
         # Refused corrections (empty on every benign turn: no bytes added)
-        if rejected_corrections:
+        if rejected_corrections or extraction_failed:
             sections.extend(
-                self._build_rejected_corrections_section(rejected_corrections)
+                self._build_rejected_corrections_section(
+                    rejected_corrections or {}, extraction_failed
+                )
             )
 
         # Conversation history
@@ -1139,7 +1145,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             return []
 
     def _build_rejected_corrections_section(
-        self, rejected_corrections: dict[str, Any]
+        self, rejected_corrections: dict[str, Any], extraction_failed: bool = False
     ) -> list[str]:
         """Build the ``<rejected_corrections>`` block.
 
@@ -1149,16 +1155,33 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         data that never changed (LV3-01). Do NOT emit it for values the user
         did not ask for (the pipeline only passes grounded ones), and keep the
         same security filter and CDATA escaping as ``<extracted_data>``.
+
+        D-050: ``extraction_failed`` adds ONE plain line (before the block, if
+        any) because the automatic re-extraction of the user's latest message
+        raised and a restated value may not have been stored; it is worded
+        "may not", not "was not", since a per-field call of the same turn can
+        have succeeded.
         """
+        notice = (
+            [
+                "The automatic re-extraction of the user's latest message failed, "
+                "so a value the user restated or corrected may NOT have been "
+                "stored; do not claim it was updated.",
+                "",
+            ]
+            if extraction_failed
+            else []
+        )
         data = self._filter_context_for_security(rejected_corrections)
         if not data:
-            return []
+            return notice
         try:
             data_json = json.dumps(data, indent=1, separators=(",", ": "), default=str)
         except (TypeError, ValueError, OverflowError) as e:
             logger.warning(f"Failed to serialize rejected corrections: {e}")
-            return []
+            return notice
         return [
+            *notice,
             "<rejected_corrections>",
             "The user asked for these values but they were NOT applied; the "
             "stored value stands. Tell the user the value was not changed and do "

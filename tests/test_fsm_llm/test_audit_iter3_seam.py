@@ -745,7 +745,9 @@ class TestRejectedCorrectionsReachPassTwo:
             "plain_text_response",
             "context",
         ]
-        assert params[10:] == ["rejected_corrections"]
+        # D-050: the signature gained a last optional parameter; the intent
+        # (positional callers unaffected) still holds
+        assert params[10:] == ["rejected_corrections", "extraction_failed"]
 
 
 # ══════════════════════════════════════════════════════════════

@@ -140,6 +140,14 @@ class DataExtractionResponse(BaseModel):
         ),
     )
 
+    extraction_failed: bool = Field(
+        default=False,
+        description=(
+            "True when the bulk extraction call of this turn raised, so a value "
+            "the user restated may not have been stored (D-050)"
+        ),
+    )
+
 
 # --------------------------------------------------------------
 # Response Generation Models (Pass 2)
