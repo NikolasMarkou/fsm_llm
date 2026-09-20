@@ -451,9 +451,21 @@ class LiteLLMInterface(LLMInterface):
             reasoning_parts: list[str] = []
             last_delta = None
             for chunk in response:
-                if not (hasattr(chunk, "choices") and chunk.choices):
+                # DECISION plan-2026-09-20T114608-a8e47b88/D-022
+                # `getattr(chunk, "choices", None)` replaces
+                # `hasattr(chunk, "choices") and chunk.choices` -- a "not
+                # falsy" check either way, so an ABSENT attribute (getattr's
+                # None default) and a PRESENT-but-falsy one (`None`/`[]`)
+                # both `continue` identically to before. Safe here because
+                # nothing downstream distinguishes "attribute missing" from
+                # "attribute present but falsy" -- see decisions.md D-022 for
+                # the ONE flagged call site (llm.py content check) where that
+                # distinction IS load-bearing and was deliberately left as
+                # `hasattr()`.
+                choices = getattr(chunk, "choices", None)
+                if not choices:
                     continue
-                delta = getattr(chunk.choices[0], "delta", None)
+                delta = getattr(choices[0], "delta", None)
                 if delta is None:
                     continue
                 last_delta = delta
@@ -776,15 +788,41 @@ class LiteLLMInterface(LLMInterface):
         # Make the API call
         response = completion(**call_params)
 
-        # Validate response structure
-        if not response or not hasattr(response, "choices") or not response.choices:
+        # Validate response structure. D-022: `getattr(response, "choices", None)`
+        # replaces `hasattr(response, "choices") and response.choices` -- see the
+        # streaming loop above for why this "not falsy" shape is safe to convert.
+        choices = getattr(response, "choices", None) if response else None
+        if not choices:
             raise LLMResponseError("Invalid response structure from LLM")
 
-        choice = response.choices[0]
-        if not hasattr(choice, "message") or not hasattr(choice.message, "content"):
+        choice = choices[0]
+        # D-022: `getattr(choice, "message", None) is not None` replaces
+        # `hasattr(choice, "message")` -- safe, since a `message` attribute
+        # present-but-`None` falls through to the SAME raise via the `content`
+        # check below either way (`hasattr(None, "content")` is `False`).
+        #
+        # The SECOND check is deliberately LEFT as `hasattr()`, not converted.
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-022
+        # `hasattr(choice.message, "content")` checks only that the `content`
+        # ATTRIBUTE EXISTS, regardless of its value -- and a real litellm
+        # `Message` legitimately carries `content=None` for an Ollama
+        # reasoning-only reply (H3, `test_make_llm_call_recovers_from_none_content`).
+        # `getattr(choice.message, "content", None) is not None` CANNOT
+        # replicate this: it cannot distinguish "attribute absent" from
+        # "attribute present, value None" (both collapse to the same `None`),
+        # so it would raise "Response missing message content" for that
+        # legitimate None-content case, before `_extract_content_from_thinking`
+        # ever runs -- a real regression, not a style nit. Confirmed empirically
+        # (not just reasoned): temporarily forcing this conversion during EXECUTE
+        # made `test_make_llm_call_recovers_from_none_content` fail. This is the
+        # `hasattr()` call D-003 already reserved: "falls back to a documented
+        # exception... only if that test cannot be made to pass." See decisions.md
+        # D-022 (this call site) and D-003 (the original judgment call).
+        message = getattr(choice, "message", None)
+        if message is None or not hasattr(message, "content"):
             raise LLMResponseError("Response missing message content")
 
-        content = choice.message.content
+        content = message.content
         if not content:
             # H3: `content` is falsy — empty string OR None. Ollama reasoning-
             # only replies arrive as content=None (not ""), so this must fire

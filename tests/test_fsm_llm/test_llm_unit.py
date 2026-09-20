@@ -144,6 +144,100 @@ class TestMakeLLMCall:
         assert "response_format" not in call_kwargs
 
 
+# ==================================================================
+# D-022 / D-003: llm.py's hasattr() structural-presence checks (choices,
+# message) converted to getattr(obj, x, None)-style checks; one (the
+# choice.message.content check) deliberately left as hasattr() -- see the
+# D-022 comment at the call site in llm.py for why.
+# ==================================================================
+
+
+class TestStructuralPresenceChecks:
+    """Proves the getattr-based conversion is behaviorally identical to the
+    old hasattr() checks for a GENUINELY MISSING attribute (not just a
+    None-valued one), and that the ONE call site deliberately left as
+    hasattr() is load-bearing, with an encoded regression for exactly the
+    case a naive conversion would have broken.
+    """
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    def test_response_missing_choices_attribute_entirely_raises(
+        self, mock_params, mock_completion
+    ):
+        """A DIFFERENT shape than `test_invalid_response_structure_raises`
+        above (which uses `MagicMock(choices=[])` -- attribute PRESENT,
+        value empty): here `choices` does not exist on the response object
+        AT ALL, the exact case the plan's own D-003 falsification signal
+        asks for."""
+        mock_completion.return_value = SimpleNamespace()  # no `.choices` at all
+
+        llm = LiteLLMInterface(model="test-model")
+        with pytest.raises(LLMResponseError, match="Invalid response"):
+            llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    def test_choice_missing_message_attribute_entirely_raises(
+        self, mock_params, mock_completion
+    ):
+        mock_completion.return_value = SimpleNamespace(choices=[SimpleNamespace()])
+
+        llm = LiteLLMInterface(model="test-model")
+        with pytest.raises(LLMResponseError, match="missing message content"):
+            llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    def test_message_missing_content_attribute_entirely_raises(
+        self, mock_params, mock_completion
+    ):
+        """The ONE hasattr() call deliberately left unconverted (D-022):
+        confirm it still correctly detects a GENUINELY missing `content`
+        attribute -- a different case than the next test's None-valued one."""
+        mock_completion.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace())]
+        )
+
+        llm = LiteLLMInterface(model="test-model")
+        with pytest.raises(LLMResponseError, match="missing message content"):
+            llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
+
+    @patch("fsm_llm.llm.completion")
+    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    def test_message_content_present_but_none_does_not_raise_missing_content(
+        self, mock_params, mock_completion
+    ):
+        """D-022's own falsification evidence, encoded as a permanent
+        regression test. `content` PRESENT with value `None` (e.g. an
+        Ollama reasoning-only reply, H3) must reach the empty-content path
+        below, NOT the "missing message content" raise this check guards.
+
+        A naive `getattr(message, "content", None) is not None` conversion
+        of THIS ONE check cannot distinguish "attribute absent" from
+        "attribute present, value None" (both collapse to the same `None`)
+        and WOULD raise "missing message content" here -- confirmed
+        empirically during EXECUTE by temporarily forcing that exact
+        conversion and watching this test (and the pre-existing real-litellm
+        ``test_make_llm_call_recovers_from_none_content``) go RED. This test
+        must stay GREEN against the real (deliberately-unconverted)
+        implementation.
+        """
+        mock_completion.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=None))]
+        )
+
+        llm = LiteLLMInterface(model="test-model")
+        # No reasoning trace to recover from either (no reasoning_content/
+        # thinking/thinking_blocks attrs) -> falls all the way through to
+        # the SEPARATE "LLM returned empty content" raise, never "missing
+        # message content". The two errors mean different things
+        # (structurally absent vs. genuinely empty) and this distinction is
+        # exactly what the unconverted hasattr() check preserves.
+        with pytest.raises(LLMResponseError, match="empty content"):
+            llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
+
+
 class TestOllamaLLMCallParams:
     """Test Ollama-specific parameter handling in _make_llm_call."""
 
