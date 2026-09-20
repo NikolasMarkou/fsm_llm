@@ -814,6 +814,21 @@ class FSMDefinition(BaseModel):
         None, description="Conversation persona for response generation", max_length=500
     )
 
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-033: opt-in and FSM-wide. The
+    # default stays empty because a default-closed rule (auto-minting every
+    # key a transition reads) would freeze 36 of 49 shipped example FSMs. The
+    # pipeline consults it at three filters (bulk return, per-field configs,
+    # post-transition configs). A listed key that is also a
+    # classification_extractions field is NOT covered (classification writes
+    # are a separate channel).
+    handler_only_keys: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Context keys only handlers, update_context and initial_context may "
+            "write; never extracted from user text (opt-in, default empty)"
+        ),
+    )
+
     @model_validator(mode="after")
     def validate_fsm_structure(self) -> FSMDefinition:
         """Comprehensive FSM validation for improved 2-pass architecture."""

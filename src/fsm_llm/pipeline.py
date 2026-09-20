@@ -904,7 +904,15 @@ class MessagePipeline:
         is_agent_fsm = CONTEXT_KEY_AGENT_TRACE in instance.context.data
         if transition_occurred and not is_agent_fsm:
             new_state = self.get_state(instance, conversation_id)
-            new_configs = self._build_field_configs_from_state(new_state)
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-033: the target state
+            # may read a handler-only key (`gate` reads `is_admin`); the
+            # post-transition pass must not ask the extractor for it either.
+            handler_only = self._handler_only_keys(instance)
+            new_configs = [
+                c
+                for c in self._build_field_configs_from_state(new_state)
+                if c.field_name not in handler_only
+            ]
             missing_configs = [
                 c
                 for c in new_configs
@@ -1027,7 +1035,9 @@ class MessagePipeline:
             # return). Do NOT exempt declared names: a declared field has
             # the per-field channel, and an exemption would re-open the
             # no-config fallback. `is_admin`-style undeclared gate keys are
-            # NOT closed here (LV2-04, deferred).
+            # closed ONLY when the author lists them in `handler_only_keys`
+            # (D-033, opt-in; LV2-04 stays the default).
+            handler_only = self._handler_only_keys(instance)
             return {
                 k: v
                 for k, v in response.extracted_data.items()
@@ -1035,12 +1045,21 @@ class MessagePipeline:
                 and v != ""
                 and v != {}
                 and k != CONTEXT_KEY_AGENT_TRACE
+                and k not in handler_only
                 and not is_forbidden_context_entry(k, v)
             }
         except Exception as e:
             log.warning(f"Bulk extraction fallback failed: {e}")
 
         return {}
+
+    def _handler_only_keys(self, instance: FSMInstance) -> frozenset[str]:
+        """Keys the FSM author reserved for handlers (D-033).
+
+        Resolved per instance through ``fsm_resolver`` so a stacked child uses
+        its own list, not the root's. Returns an empty set for the default.
+        """
+        return frozenset(self.fsm_resolver(instance.fsm_id).handler_only_keys)
 
     @staticmethod
     def _build_field_configs_from_state(state: State) -> list[FieldExtractionConfig]:
@@ -1128,8 +1147,16 @@ class MessagePipeline:
 
         current_state = self.get_state(instance, conversation_id)
 
-        # Build unified field configs
-        all_configs = self._build_field_configs_from_state(current_state)
+        # Build unified field configs. DECISION
+        # plan-2026-09-19T175721-21cd7f8e/D-033: a `handler_only_keys` name
+        # gets no config even when a transition reads it; a key the LLM may
+        # not write must not be minted into a per-field extraction.
+        handler_only = self._handler_only_keys(instance)
+        all_configs = [
+            c
+            for c in self._build_field_configs_from_state(current_state)
+            if c.field_name not in handler_only
+        ]
 
         has_field_configs = bool(all_configs)
         has_classification_configs = bool(current_state.classification_extractions)
