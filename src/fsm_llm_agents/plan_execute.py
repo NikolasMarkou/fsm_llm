@@ -105,7 +105,12 @@ class PlanExecuteAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.OBSERVATIONS: [],
-                ContextKeys.PLAN_STEPS: [],
+                # DECISION plan-2026-09-19T175721-21cd7f8e/D-036: no
+                # `PLAN_STEPS: []` seed. The pipeline's skip-if-set filter reads
+                # `[]` as "already set", so the plan was never extracted (0
+                # field_extraction calls live) while the has_context gate passed
+                # and the answer claimed a search that never ran. Do NOT restore
+                # the seed; every reader uses `context.get(PLAN_STEPS, [])`.
                 ContextKeys.CURRENT_STEP_INDEX: 0,
                 ContextKeys.STEP_RESULTS: [],
                 ContextKeys.ALL_STEPS_COMPLETE: False,

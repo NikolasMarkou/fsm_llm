@@ -2,9 +2,16 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.plan_execute module and Plan-Execute FSM definition."""
 
+from typing import ClassVar
+
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import (
+    FieldExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationResponse,
+)
+from fsm_llm.llm import LLMInterface
 from fsm_llm_agents.constants import (
     ContextKeys,
     Defaults,
@@ -388,3 +395,55 @@ class TestPlanExecuteAgentIntegration:
     def test_run_requires_llm(self):
         """PlanExecuteAgent.run() needs a real or mock LLM -- skip in unit tests."""
         pytest.skip("Requires LLM interface -- run with real_llm marker")
+
+
+# ---------------------------------------------------------------------------
+# LV4-01 / D-036: the plan is extracted, not skipped as "already set"
+# ---------------------------------------------------------------------------
+
+
+class _PlanScriptedLLM(LLMInterface):
+    """Scripted LLM: the plan comes ONLY from a ``plan_steps`` field extraction."""
+
+    PLAN: ClassVar[list[str]] = [
+        "Search for the capital of France",
+        "State it in one sentence",
+    ]
+
+    def __init__(self) -> None:
+        self.model = "mock-model"
+        self.asked: list[str] = []
+
+    def extract_field(self, request):
+        self.asked.append(request.field_name)
+        value = self.PLAN if request.field_name == "plan_steps" else None
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="mock",
+            is_valid=value is not None,
+        )
+
+    def generate_response(self, request):
+        return ResponseGenerationResponse(
+            message="ok", message_type="response", reasoning="mock"
+        )
+
+
+class TestPlanIsExtractedThroughTheAgentPath:
+    def test_run_extracts_a_non_empty_plan_instead_of_skipping_the_seed(self):
+        llm = _PlanScriptedLLM()
+        agent = PlanExecuteAgent(
+            tools=_make_registry(),
+            config=AgentConfig(max_iterations=12, timeout_seconds=30.0),
+            llm_interface=llm,
+        )
+        result = agent.run("Find the capital of France")
+
+        # RED on the seeded `plan_steps: []`: the skip-if-set filter treats
+        # the empty list as set, so no extraction is ever asked.
+        assert "plan_steps" in llm.asked
+        assert result.final_context["plan_steps"] == _PlanScriptedLLM.PLAN
+        # the executor walked the extracted plan, it did not finish at once
+        assert result.final_context["current_step_index"] == len(_PlanScriptedLLM.PLAN)
