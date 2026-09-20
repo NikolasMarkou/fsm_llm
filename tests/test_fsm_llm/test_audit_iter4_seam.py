@@ -978,3 +978,123 @@ class TestOverflowArmLeavesBenignProseAlone:
         assert _sanitize("x<y " + "p" * 300).startswith("x&lt;y ")
         spaced = "< task " + "p" * 300 + ">"
         assert _sanitize(spaced) == spaced
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 6.1 / D-032 (final review concern 3): <rejected_corrections> honours
+# context_scope.read_keys
+# ══════════════════════════════════════════════════════════════
+
+
+def _scoped_fsm(read_keys: list[str] | None) -> dict:
+    """One state whose bulk pass may refuse `risk_score` and `nickname` (both
+    seeded into the context, neither declared as a field); `read_keys` is the
+    state's context_scope (None = no scope at all)."""
+    state = {
+        "id": "triage",
+        "description": "d",
+        "purpose": "p",
+        "extraction_instructions": "extract issue",
+        "field_extractions": [
+            {
+                "field_name": "issue",
+                "field_type": "str",
+                "extraction_instructions": "the issue",
+            }
+        ],
+        "response_instructions": "reply",
+        "transitions": [
+            {
+                "target_state": "done",
+                "description": "t",
+                "priority": 1,
+                "conditions": [
+                    {
+                        "description": "c",
+                        "logic": {"==": [{"var": "x"}, "never"]},
+                    }
+                ],
+            }
+        ],
+    }
+    if read_keys is not None:
+        state["context_scope"] = {"read_keys": read_keys}
+    return {
+        "name": "Scoped",
+        "description": "d",
+        "version": "4.1",
+        "initial_state": "triage",
+        "persona": "p",
+        "states": {
+            "triage": state,
+            "done": {
+                "id": "done",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "r",
+                "transitions": [],
+            },
+        },
+    }
+
+
+_SCOPE_MESSAGE = "I was charged twice, call me Bobby, the refund policy please"
+
+
+def _scoped_turn(read_keys: list[str] | None, stream: bool = False) -> str:
+    from tests.test_fsm_llm.test_audit_iter3_seam import _PassTwoSpy
+
+    with _PassTwoSpy(_scoped_fsm(read_keys)) as p:
+        p.api.update_context(p.cid, {"risk_score": "high", "nickname": "Rob"})
+        return p.say(
+            _SCOPE_MESSAGE, {"risk_score": "refund", "nickname": "Bobby"}, stream
+        )
+
+
+class TestRejectedCorrectionsHonourReadKeys:
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_a_key_outside_read_keys_never_reaches_pass_two(self, stream):
+        """RED on 9ee4fa4: `risk_score` is hidden from <current_context> but the
+        refused value still sat in <rejected_corrections>."""
+        prompt = _scoped_turn(["issue"], stream)
+        assert "risk_score" not in prompt
+        assert "nickname" not in prompt
+        assert "<rejected_corrections>" not in prompt
+
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_only_the_in_scope_key_is_listed(self, stream):
+        prompt = _scoped_turn(["issue", "nickname"], stream)
+        block = prompt[
+            prompt.index("<rejected_corrections>") : prompt.index(
+                "</rejected_corrections>"
+            )
+        ]
+        assert '"nickname": "Bobby"' in block
+        assert "risk_score" not in prompt
+
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_a_state_without_a_scope_lists_every_rejected_key(self, stream):
+        """GUARD: green on HEAD and after."""
+        prompt = _scoped_turn(None, stream)
+        block = prompt[
+            prompt.index("<rejected_corrections>") : prompt.index(
+                "</rejected_corrections>"
+            )
+        ]
+        assert '"risk_score": "refund"' in block
+        assert '"nickname": "Bobby"' in block
+
+    def test_the_stored_values_are_untouched_by_the_scoping(self):
+        """GUARD: scoping only changes what Pass 2 SEES."""
+        from tests.test_fsm_llm.test_audit_iter3_seam import _PassTwoSpy
+
+        with _PassTwoSpy(_scoped_fsm(["issue"])) as p:
+            p.api.update_context(p.cid, {"risk_score": "high", "nickname": "Rob"})
+            p.say(_SCOPE_MESSAGE, {"risk_score": "refund", "nickname": "Bobby"})
+            data = p.api.get_data(p.cid)
+            rejected = p.api.fsm_manager.instances[
+                p.cid
+            ].last_extraction_response.rejected_corrections
+        assert data["risk_score"] == "high"
+        assert data["nickname"] == "Rob"
+        assert set(rejected) == {"risk_score", "nickname"}

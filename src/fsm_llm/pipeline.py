@@ -685,7 +685,13 @@ class MessagePipeline:
             context=self._apply_context_scope(
                 instance.context.data, current_state, conversation_id
             ),
-            rejected_corrections=extraction_response.rejected_corrections,
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-032
+            # read_keys scopes THIS channel too: a refused value is a context
+            # value. Do NOT pass the raw dict (final review concern 3): the key
+            # the state hides from <current_context> then leaks here.
+            rejected_corrections=self._apply_context_scope(
+                extraction_response.rejected_corrections, current_state, conversation_id
+            ),
             extraction_failed=extraction_response.extraction_failed,
         )
 
@@ -2351,7 +2357,13 @@ class MessagePipeline:
             context=self._apply_context_scope(
                 instance.context.data, current_state, conversation_id
             ),
-            rejected_corrections=extraction_response.rejected_corrections,
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-032
+            # read_keys scopes THIS channel too: a refused value is a context
+            # value. Do NOT pass the raw dict (final review concern 3): the key
+            # the state hides from <current_context> then leaks here.
+            rejected_corrections=self._apply_context_scope(
+                extraction_response.rejected_corrections, current_state, conversation_id
+            ),
             extraction_failed=extraction_response.extraction_failed,
         )
 

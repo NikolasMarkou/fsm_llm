@@ -287,6 +287,13 @@ Decision ids refer to that plan's `decisions.md`.
   the new pattern against the pre-D-029 pattern on every string of length up to 6.
   Three tests that pinned the weakened iteration 3 output were rewritten with
   annotations, and the reversed-ordering payloads were added.
+- **`<rejected_corrections>` honours `context_scope.read_keys` (D-032, final review
+  concern 3).** The refused-value block bypassed the scope that hides a key from
+  `<current_context>`, so a value the state hides (widened in iteration 4 to every
+  instruction-only key) still reached the Pass-2 prompt. The rejected dict is now
+  filtered through the same scope on the turn and stream paths; a state without a
+  scope, and the stored data, are unchanged. A block whose keys are all out of scope
+  is omitted.
 - **`plan_execute` on an unplannable task ends normally again (D-046, 4ecbfce).**
   Iteration 3 removed the `plan_steps: []` seed, so a task the model cannot plan raised
   `BudgetExhaustedError` after 36 wasted model calls. The seed is restored (it is the
