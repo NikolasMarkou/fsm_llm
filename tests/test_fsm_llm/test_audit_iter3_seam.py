@@ -143,3 +143,24 @@ class TestStructuredReplyWithReasoningKey:
     def test_unstructured_reasoning_only_reply_still_returns_the_reasoning(self):
         body = json.dumps({"reasoning": "because x"})
         assert _generate(body, None) == "because x"
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 4 / RB-10: fence-span skip and Strategy 3/4 parity
+# ══════════════════════════════════════════════════════════════
+
+
+class TestFencedExampleDoesNotHideOrLeakAnObject:
+    def test_reply_with_an_object_before_a_fenced_example(self):
+        # The provider wraps its envelope in prose and then shows a fenced
+        # schema example. The object BEFORE the fence must be parsed whole:
+        # the regex fallback would cut its escaped-quote message at the `\\`.
+        content = (
+            'Here you go: {"message": "say \\"hi\\" now"}\n'
+            'Schema example:\n```json\n[{"a": 1}]\n```\nHope this helps.'
+        )
+        assert _generate(content) == 'say "hi" now'
+
+    def test_reply_with_only_a_fenced_array_does_not_leak_its_message(self):
+        message = _generate('```json\n[{"message": "leak"}]\n```')
+        assert message != "leak"

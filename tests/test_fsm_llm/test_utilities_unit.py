@@ -253,6 +253,56 @@ class TestExtractJsonFromText:
         assert result.get("confidence") == pytest.approx(0.7)
 
 
+class TestExtractJsonFenceSpanSkip:
+    """RB-10 (D-029): a fenced non-object is blanked, not truncated to.
+
+    The brace scan and the regex fallback must read the SAME string, with the
+    fence span skipped in place so an object BEFORE the fence is still found.
+    """
+
+    def test_object_before_a_fenced_array_is_found(self):
+        text = (
+            'The answer is {"name": "Bob", "age": 3}.\n'
+            'Example of the schema:\n```json\n[{"a": 1}]\n```\n'
+        )
+        assert extract_json_from_text(text) == {"name": "Bob", "age": 3}
+
+    def test_object_after_a_fenced_array_is_still_found(self):
+        assert extract_json_from_text('```json\n[1, 2]\n```\n{"b": 2}') == {"b": 2}
+
+    def test_object_before_a_fenced_scalar_is_found(self):
+        text = '{"message": "hi"}\n```\n42\n```\ntrailing'
+        assert extract_json_from_text(text) == {"message": "hi"}
+
+    def test_two_adjacent_fences_skip_the_first_only(self):
+        text = '```json\n[1]\n```\n```json\n{"a": 1}\n```'
+        assert extract_json_from_text(text) == {"a": 1}
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            '```json\n[{"a":1}]\n```',
+            '```json\n[{"message":"leak"}]\n```',
+        ],
+    )
+    def test_a_fenced_array_interior_is_never_recovered(self, text):
+        assert extract_json_from_text(text) is None
+
+    def test_strategies_three_and_four_read_the_same_string(self):
+        """No Frankenstein dict: `message` from the fenced array's interior
+        merged with `intent`/`confidence` from the earlier object."""
+        text = 'x {"intent":"buy","confidence":0.9} y\n```\n[{"message":"m"}]\n```'
+        assert extract_json_from_text(text) == {"intent": "buy", "confidence": 0.9}
+
+    def test_harness_payload_contract_for_a_fenced_array(self):
+        from fsm_llm_harness.hardening import parse_json_payload
+
+        assert parse_json_payload('```json\n[{"a":1}]\n```') is None
+
+    def test_a_hundred_thousand_open_brackets_do_not_raise(self):
+        assert extract_json_from_text("[" * 100000) is None
+
+
 # ==================================================================
 # load_fsm_from_file
 # ==================================================================

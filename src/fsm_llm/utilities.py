@@ -419,9 +419,19 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                 # an undecodable fence and falls through to Strategy 3.
                 if isinstance(result, dict):
                     return result
-                # RA-04: the brace scan resumes AFTER the fence, otherwise it
+                # RA-04: the fenced span is skipped, otherwise the brace scan
                 # would return the object inside a fenced array (`[{"a":1}]`).
-                scan_text = text[fence_close + 3 :]
+                # DECISION plan-2026-09-19T175721-21cd7f8e/D-029
+                # The span is BLANKED in place (positions preserved), not cut
+                # off with `text[fence_close + 3:]`: truncation lost an object
+                # BEFORE the fence. Strategy 4 reads this same string (set
+                # below); do NOT let it read the original `text`, that merged
+                # keys from the fenced array with an earlier object.
+                scan_text = (
+                    text[:fence_open]
+                    + " " * (fence_close + 3 - fence_open)
+                    + text[fence_close + 3 :]
+                )
             except (json.JSONDecodeError, RecursionError):
                 logger.debug("Code block JSON parsing failed")
 
@@ -498,6 +508,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         logger.debug(f"Error during balanced brace JSON extraction: {e}")
 
     # Strategy 4: Extract key-value pairs using regex (fallback)
+    text = scan_text  # same string as Strategy 3 (D-029)
     try:
         # Patterns for simple string values
         string_patterns = [
