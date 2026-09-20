@@ -49,10 +49,22 @@ class SessionState(BaseModel):
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     stack_depth: int = 1
     # Optional carrier for a conversation's WorkingMemory. When populated the
-    # shape is {"buffers": {name: {k: v}}, "hidden_buffers": [name, ...]}. The
-    # flat context_data does NOT carry WorkingMemory, so it is persisted here.
-    # Default None keeps old session files (written before this field existed)
-    # loadable unchanged.
+    # shape is {"buffers": {name: {k: v}, ..., "_hidden_buffers": [name, ...]},
+    # "hidden_buffers": [name, ...]}. "buffers" is WorkingMemory.to_dict()'s
+    # OWN return verbatim (D-021, memory.py), which since D-021 embeds a
+    # "_hidden_buffers" list INSIDE that dict alongside the real buffer-name
+    # keys (never a buffer's own contents itself -- see memory.py D-026,
+    # which makes that name unusable as a real buffer name). The outer
+    # sibling "hidden_buffers" key (api.py's save_session) carries the exact
+    # same list explicitly, so the two are redundant on this specific path
+    # (api.py always passes hidden_buffers= explicitly to
+    # WorkingMemory.from_dict on restore, so the embedded copy inside
+    # "buffers" is read but never relied on here) -- see decisions.md D-021
+    # for why the embedded key exists at all (a DIFFERENT caller,
+    # fsm_llm_agents/memory_persistence.py, has no sibling key and depends on
+    # it). The flat context_data does NOT carry WorkingMemory, so it is
+    # persisted here. Default None keeps old session files (written before
+    # this field existed) loadable unchanged.
     working_memory: dict[str, Any] | None = None
     saved_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
