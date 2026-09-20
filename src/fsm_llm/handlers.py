@@ -331,18 +331,49 @@ class HandlerSystem:
         :return: Dictionary containing all context updates from executed handlers
         :rtype: dict[str, Any]
         """
-        updated_context = copy.deepcopy(context)
-        output_context = {}
+        output_context: dict[str, Any] = {}
+        candidates = self.handlers_at(timing)
+        if not candidates:
+            return output_context
+
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-020
+        # `copy.deepcopy(context)` used to run unconditionally, before checking
+        # whether ANY handler at this timing would actually pass its own
+        # `should_execute()` filter for the current state/target/updated_keys.
+        # `should_execute()` never mutates `context` -- confirmed by reading
+        # both implementations in this module, not assumed: `BaseHandler`'s
+        # default always returns `False` without touching `context`, and
+        # `LambdaHandler.should_execute` (the only other implementation here)
+        # only ever READS `context` -- directly (`required_keys`/`updated_keys`
+        # membership checks) and through user-supplied `condition_lambdas`,
+        # which this system's documented contract treats as pure predicates,
+        # same as every other condition check in that method. It is therefore
+        # safe to probe every candidate's `should_execute()` against the
+        # UNCOPIED `context` until the FIRST one that will actually run is
+        # found, and pay for the deep copy exactly once, only then. Every
+        # handler probed before that point still sees the same original
+        # `context` a zero-registered-handler timing already skips entirely
+        # via the `candidates` guard above (which complements, and does not
+        # replace, the caller-side D-022 optimization in
+        # `MessagePipeline.execute_handlers`, `pipeline.py`). Do NOT
+        # deep-copy per-candidate inside this probe loop -- that would
+        # reintroduce the exact cost removed here, just paid earlier and
+        # more often.
+        updated_context: dict[str, Any] | None = None
 
         # Execute applicable handlers in priority order (lower priority numbers first)
-        for handler in self.handlers_at(timing):
+        for handler in candidates:
             handler_name = getattr(handler, "name", handler.__class__.__name__)
+            probe_context = context if updated_context is None else updated_context
 
             try:
                 # Check if this handler should execute based on current conditions
                 if handler.should_execute(
-                    timing, current_state, target_state, updated_context, updated_keys
+                    timing, current_state, target_state, probe_context, updated_keys
                 ):
+                    if updated_context is None:
+                        updated_context = copy.deepcopy(context)
+
                     logger.debug(f"Executing handler {handler_name} at {timing.name}")
 
                     # Execute the handler with optional timeout

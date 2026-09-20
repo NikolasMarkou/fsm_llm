@@ -5,6 +5,9 @@ Tests cover: HandlerSystem, HandlerBuilder, LambdaHandler, BaseHandler,
 HandlerExecutionError, priority ordering, context cascading, and metadata tracking.
 """
 
+import copy
+from unittest.mock import patch
+
 import pytest
 
 from fsm_llm.handlers import (
@@ -214,6 +217,100 @@ class TestHandlerSystemExecuteEmpty:
         hs.register_handler(NeverRunHandler(name="never"))
         result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert result == {}
+
+
+# ══════════════════════════════════════════════════════════════
+# 5b. execute_handlers — deferred deep-copy (D-020)
+# ══════════════════════════════════════════════════════════════
+
+
+class TestExecuteHandlersDeepCopyDeferral:
+    """D-020 / fresh-audit-sweep.md finding. ``execute_handlers`` used to
+    ``copy.deepcopy(context)`` unconditionally, BEFORE checking whether any
+    registered handler at this timing would actually pass its own
+    ``should_execute()`` filter for the current state/target. ``should_execute``
+    never mutates ``context`` (confirmed by reading ``BaseHandler``'s default
+    and ``LambdaHandler``'s implementation -- both read-only), so the copy can
+    be deferred until the first handler confirmed to run, or skipped
+    entirely when none will.
+    """
+
+    def test_deep_copy_skipped_when_no_handler_passes_should_execute(self):
+        """The plan's exact scenario: 2+ registered handlers, none of which
+        pass ``should_execute`` for the current state."""
+        hs = HandlerSystem()
+        hs.register_handler(NeverRunHandler(name="never1", priority=10))
+        hs.register_handler(NeverRunHandler(name="never2", priority=20))
+
+        with patch("fsm_llm.handlers.copy.deepcopy", wraps=copy.deepcopy) as spy:
+            result = hs.execute_handlers(
+                HandlerTiming.PRE_PROCESSING, "s1", None, {"existing": True}
+            )
+
+        assert result == {}, "behavior changed for the no-match case"
+        assert spy.call_count == 0, (
+            f"copy.deepcopy was called {spy.call_count} time(s) even though "
+            "no registered handler at this timing would ever run"
+        )
+
+    def test_zero_registered_handlers_also_skips_deep_copy(self):
+        """A DIFFERENT code path than the test above: no handler registered
+        at this timing AT ALL (the pre-existing early-return `candidates`
+        guard), vs. handlers registered but all failing their own filter."""
+        hs = HandlerSystem()
+
+        with patch("fsm_llm.handlers.copy.deepcopy", wraps=copy.deepcopy) as spy:
+            result = hs.execute_handlers(
+                HandlerTiming.PRE_PROCESSING, "s1", None, {"existing": True}
+            )
+
+        assert result == {}
+        assert spy.call_count == 0
+
+    def test_deep_copy_happens_exactly_once_when_a_handler_will_run(self):
+        """Control: when SOME handler passes, the deep copy must still
+        happen -- exactly once, not once per probed candidate (which would
+        silently reintroduce the removed cost under a different shape)."""
+        hs = HandlerSystem()
+        hs.register_handler(NeverRunHandler(name="never", priority=10))
+        hs.register_handler(AlwaysRunHandler(name="runs", priority=20, result={"x": 1}))
+
+        with patch("fsm_llm.handlers.copy.deepcopy", wraps=copy.deepcopy) as spy:
+            result = hs.execute_handlers(
+                HandlerTiming.PRE_PROCESSING, "s1", None, {"existing": True}
+            )
+
+        assert result == {"x": 1}
+        assert spy.call_count == 1, (
+            f"copy.deepcopy was called {spy.call_count} time(s), expected exactly 1"
+        )
+
+    def test_should_execute_sees_cascaded_updates_from_earlier_handler(self):
+        """Self-check for the refactor itself (not just the plan's own
+        stated scenario): a LATER handler's OWN ``should_execute()`` probe --
+        not just its ``execute()`` body, which the pre-existing
+        ``TestContextCascading`` class already covers -- must still see
+        updates merged by an EARLIER handler. This exercises the
+        `probe_context` hand-off from the original, uncopied `context` to
+        the lazily-created `updated_context`; a bug that left the probe
+        pinned to the stale original `context` would make ``gated`` below
+        never run, and this test would catch it where the simpler
+        no-should_execute-filter cascading tests would not.
+        """
+        hs = HandlerSystem()
+        hs.register_handler(
+            create_handler("setter").with_priority(10).do(lambda ctx: {"flag": True})
+        )
+        hs.register_handler(
+            create_handler("gated")
+            .with_priority(20)
+            .when_context_has("flag")
+            .do(lambda ctx: {"saw_flag": ctx.get("flag")})
+        )
+
+        result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
+        assert result["flag"] is True
+        assert result["saw_flag"] is True
 
 
 # ══════════════════════════════════════════════════════════════
