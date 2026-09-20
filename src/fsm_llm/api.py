@@ -1243,44 +1243,49 @@ class API:
             current_fsm_id = self.conversation_stacks[conversation_id][
                 0
             ].conversation_id
+
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-005
+        # ONE atomic read (state + data + history + working memory +
+        # provenance) instead of 4 separately-locked reads: a concurrent turn
+        # used to be able to land in the gap between two of those reads and
+        # persist a torn snapshot (e.g. pre-transition state paired with
+        # post-transition data -- G2). Do NOT decompose this back into
+        # individual get_conversation_state/get_conversation_data/
+        # get_conversation_history/working-memory-reach-in calls -- that
+        # reintroduces the exact race this closes. See decisions.md D-005 and
+        # `FSMManager.get_conversation_snapshot`'s docstring.
+        snapshot = self.fsm_manager.get_conversation_snapshot(current_fsm_id)
+
         state = SessionState(
             conversation_id=conversation_id,
             fsm_id=self.fsm_id,
-            current_state=self.fsm_manager.get_conversation_state(current_fsm_id),
-            context_data=self.fsm_manager.get_conversation_data(current_fsm_id),
-            conversation_history=self.fsm_manager.get_conversation_history(
-                current_fsm_id
-            ),
+            current_state=snapshot["current_state"],
+            context_data=snapshot["context_data"],
+            conversation_history=snapshot["conversation_history"],
+            # get_stack_depth is intentionally OUTSIDE the atomic snapshot: it
+            # is structural (which FSMs are pushed), not turn-mutated per
+            # message, and reads API.conversation_stacks under a different
+            # lock (_stack_lock) -- folding it in would not close any tear and
+            # would only pull an unrelated lock into the hold. See plan.md's
+            # explicit scope note.
             stack_depth=self.get_stack_depth(conversation_id),
         )
 
         # H10: the flat context_data does not carry WorkingMemory, so persist it
-        # separately. Read the live instance's WorkingMemory reference under
-        # _lock (consistent with the _replay_history reach-in); to_dict() is
-        # itself internally lock-guarded. hidden_buffers are carried explicitly so
-        # a custom hidden-buffer set survives the round-trip (D-032 downgrade).
-        with self.fsm_manager._lock:
-            instance = self.fsm_manager.instances.get(current_fsm_id)
-            wm_obj = instance.context.working_memory if instance is not None else None
-            # DECISION plan-2026-09-19T175721-21cd7f8e/D-031: persist the D-015
-            # provenance digests so a correction still lands after a restart
-            # (RB-05: iteration 2 failed closed and every restored key was
-            # frozen with no log). Digests are JSON-native strings. Do NOT
-            # re-seed provenance for keys the file never carried: a value the
-            # store has no digest for stays handler-seeded (never overwritten).
-            prov = (
-                dict(instance.context.metadata.get(_PROVENANCE_KEY) or {})
-                if instance is not None
-                else {}
-            )
-        if prov:
-            state.metadata["pipeline_extracted"] = prov
-        if wm_obj is not None and hasattr(wm_obj, "to_dict"):
+        # separately. hidden_buffers are carried explicitly so a custom
+        # hidden-buffer set survives the round-trip (D-032 downgrade).
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-031: persist the D-015
+        # provenance digests so a correction still lands after a restart
+        # (RB-05: iteration 2 failed closed and every restored key was
+        # frozen with no log). Digests are JSON-native strings. Do NOT
+        # re-seed provenance for keys the file never carried: a value the
+        # store has no digest for stays handler-seeded (never overwritten).
+        if snapshot["provenance"]:
+            state.metadata["pipeline_extracted"] = snapshot["provenance"]
+        if snapshot["working_memory"] is not None:
             state.working_memory = {
-                "buffers": wm_obj.to_dict(),
-                "hidden_buffers": sorted(
-                    getattr(wm_obj, "_hidden_buffers", frozenset())
-                ),
+                "buffers": snapshot["working_memory"],
+                "hidden_buffers": snapshot["hidden_buffers"],
             }
 
         self._session_store.save(conversation_id, state)

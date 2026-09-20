@@ -39,7 +39,7 @@ from .handlers import HandlerSystem, HandlerTiming
 # --------------------------------------------------------------
 from .llm import LLMInterface
 from .logging import logger, with_conversation_context
-from .pipeline import MessagePipeline
+from .pipeline import _PROVENANCE_KEY, MessagePipeline
 from .prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
@@ -815,6 +815,75 @@ class FSMManager:
             conversation_id,
             lambda inst: inst.context.conversation.get_recent(),
         )
+
+    # DECISION plan-2026-09-20T114608-a8e47b88/D-005
+    @with_conversation_context
+    def get_conversation_snapshot(
+        self, conversation_id: str, log: Any = None
+    ) -> dict[str, Any]:
+        """Get one point-in-time-consistent read of everything ``save_session``
+        needs, under a SINGLE ``_read_under_lock`` hold.
+
+        Interface contract:
+          - Parameters: ``conversation_id`` (an active conversation).
+          - Returns: a dict with keys ``current_state`` (str),
+            ``context_data`` (internal-key-filtered, see
+            ``get_conversation_data``), ``conversation_history`` (see
+            ``get_conversation_history``), ``working_memory`` (the buffer
+            dict from ``WorkingMemory.to_dict()``, or ``None`` if the
+            conversation has no working memory configured),
+            ``hidden_buffers`` (sorted list of hidden buffer names, ``[]``
+            if none/none configured), and ``provenance`` (a shallow copy of
+            ``context.metadata[_PROVENANCE_KEY]``, ``{}`` if absent).
+          - Failure: same as ``_read_under_lock`` (``FSMError`` for an
+            unknown conversation or a missing per-conversation lock).
+
+        Atomicity guarantee (why this method exists -- G2): every field
+        above is read from the SAME ``FSMInstance`` while holding its
+        ``conv_lock`` for the entire snapshot, so a concurrent turn can
+        neither complete nor partially mutate the instance between two of
+        these reads. Composing the equivalent result from separate calls
+        (``get_conversation_state`` + ``get_conversation_data`` + ...) each
+        acquire and release ``conv_lock`` independently, leaving a gap a
+        concurrent turn can land in and produce a torn combination -- e.g.
+        pre-transition state paired with post-transition data. See
+        decisions.md D-005 (this plan) / `_read_under_lock`'s own D-005
+        (plan-2026-07-21T045419-9925aa3a) for the underlying lock-order
+        invariant this method reuses unchanged.
+
+        Deliberately EXCLUDES stack depth: ``API.get_stack_depth`` reads
+        ``API.conversation_stacks`` under a *different* lock
+        (``API._stack_lock``), a structural property (which FSMs are
+        pushed) that does not change within a single turn's Pass-1/Pass-2
+        commit, so folding it in here would not close any tear and would
+        only pull an unrelated lock into this hold. It stays a separate,
+        non-atomic call, by design -- see plan.md's explicit scope note.
+        """
+
+        def _snapshot(inst: FSMInstance) -> dict[str, Any]:
+            wm_obj = inst.context.working_memory
+            working_memory: dict[str, dict[str, Any]] | None = None
+            hidden_buffers: list[str] = []
+            # WorkingMemory guards its own buffers with its OWN internal
+            # lock (memory.py, independent of `_lock`/`conv_lock`), so
+            # calling `to_dict()` here -- already inside `conv_lock` -- does
+            # not nest under/invert either FSMManager lock. See plan.md
+            # Assumptions.
+            if wm_obj is not None and hasattr(wm_obj, "to_dict"):
+                working_memory = wm_obj.to_dict()
+                hidden_buffers = sorted(
+                    getattr(wm_obj, "_hidden_buffers", frozenset())
+                )
+            return {
+                "current_state": inst.current_state,
+                "context_data": _strip_internal_mapping(inst.context.data),
+                "conversation_history": inst.context.conversation.get_recent(),
+                "working_memory": working_memory,
+                "hidden_buffers": hidden_buffers,
+                "provenance": dict(inst.context.metadata.get(_PROVENANCE_KEY) or {}),
+            }
+
+        return self._read_under_lock(conversation_id, _snapshot)
 
     @with_conversation_context
     def update_conversation_context(

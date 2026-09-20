@@ -1092,16 +1092,20 @@ def _torn_snapshot_fsm() -> dict:
 class TestSaveSessionTornSnapshot:
     """G2 -- ``API.save_session`` must not tear across a concurrent turn.
 
-    The barrier is installed INSIDE the race window as it exists in the
-    CURRENT ``save_session`` (api.py ~1246-1255): it wraps
-    ``FSMManager.get_conversation_state`` -- the FIRST of ``save_session``'s
-    ``SessionState(...)`` kwargs, evaluated first because Python evaluates
-    keyword arguments left-to-right -- so the concurrent turn runs and FULLY
-    COMPLETES in the gap between that read's ``conv_lock`` release and the
-    NEXT read (``get_conversation_data``) acquiring it. Per LESSONS.md's own
-    gotcha, a ``threading.Barrier`` placed anywhere else (e.g. after
-    ``save_session`` returns, or a bare ``time.sleep``) would not straddle
-    this window and would not discriminate a torn read from a clean one.
+    Post-fix (plan-2026-09-20T114608-a8e47b88/D-005), ``save_session`` reads
+    state + data + history + working memory + provenance in ONE atomic
+    ``FSMManager.get_conversation_snapshot`` call, so there is no longer a
+    gap BETWEEN separate reads for a concurrent turn to land in. The barrier
+    now wraps that single read instead: the real snapshot runs FIRST
+    (uncontended -- the concurrent thread is still parked on the barrier),
+    THEN the pause lets the concurrent turn run and FULLY COMPLETE before
+    ``save_session`` is allowed to persist. This proves the read this
+    ``save_session`` call captured is never mutated out from under it after
+    the fact -- the property a torn multi-read composition would have
+    violated. Per LESSONS.md's own gotcha, a ``threading.Barrier`` placed
+    anywhere else (e.g. after ``save_session`` returns, or a bare
+    ``time.sleep``) would not straddle a meaningful window and would not
+    discriminate a torn read from a clean one.
     """
 
     WAIT_TIMEOUT = 10.0
@@ -1121,11 +1125,11 @@ class TestSaveSessionTornSnapshot:
             assert api.get_current_state(conv_id) == "start"
             assert "advance" not in api.get_data(conv_id)
 
-            original_get_state = api.fsm_manager.get_conversation_state
-            # Rendezvous: save_session's FIRST locked read blocks here until
-            # the concurrent turn thread arrives, so the turn provably runs
-            # (and finishes) inside the gap before save_session's SECOND
-            # locked read. No sleep required.
+            original_get_state = api.fsm_manager.get_conversation_snapshot
+            # Rendezvous: save_session's ONE atomic locked read blocks here
+            # until the concurrent turn thread arrives, so the turn provably
+            # runs (and finishes) AFTER that read already captured its
+            # point-in-time snapshot. No sleep required.
             window_open = threading.Barrier(2, timeout=self.WAIT_TIMEOUT)
             turn_done = threading.Event()
             # ``converse()`` auto-saves the session itself (api.py ~450-455)
@@ -1142,22 +1146,23 @@ class TestSaveSessionTornSnapshot:
             pause_armed.set()
 
             def paused_get_conversation_state(*args, **kwargs):
-                # The real (unmodified) read happens FIRST, under its own
-                # conv_lock acquire/release -- exactly what current
-                # save_session does today. The pause below is inserted AFTER
-                # that lock is released, straddling the actual gap between
-                # save_session's separate reads.
+                # The real (unmodified) atomic snapshot read happens FIRST,
+                # under its own single conv_lock acquire/release -- exactly
+                # what the fixed save_session does today. The pause below is
+                # inserted AFTER that lock is released, so the concurrent
+                # turn's mutation can only ever land AFTER this snapshot was
+                # already captured -- proving it is never torn mid-read.
                 result = original_get_state(*args, **kwargs)
                 if pause_armed.is_set():
                     pause_armed.clear()
                     window_open.wait(timeout=self.WAIT_TIMEOUT)
                     assert turn_done.wait(timeout=self.WAIT_TIMEOUT), (
-                        "concurrent turn did not complete inside the "
-                        "get_conversation_state -> get_conversation_data window"
+                        "concurrent turn did not complete after "
+                        "get_conversation_snapshot's atomic read returned"
                     )
                 return result
 
-            api.fsm_manager.get_conversation_state = paused_get_conversation_state
+            api.fsm_manager.get_conversation_snapshot = paused_get_conversation_state
 
             errors: list[BaseException] = []
 
@@ -1178,7 +1183,7 @@ class TestSaveSessionTornSnapshot:
                 api.save_session(conv_id)
             finally:
                 turn_thread.join(timeout=self.WAIT_TIMEOUT)
-                api.fsm_manager.get_conversation_state = original_get_state
+                api.fsm_manager.get_conversation_snapshot = original_get_state
 
             assert not turn_thread.is_alive(), (
                 "concurrent turn thread hung -- interleaving is not deterministic"
