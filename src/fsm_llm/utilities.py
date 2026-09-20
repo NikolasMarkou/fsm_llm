@@ -139,9 +139,17 @@ def strip_think_and_fences(content: str) -> str:
     # No re.MULTILINE: only a fence that STARTS the reply is a wrapper. With
     # `^` matching at every line, an inline code fence in prose
     # ('Use:\n```python\nprint(1)\n```') lost its markers. Do NOT re-add it (LS-09).
-    content = re.sub(r"^```(?:json)?\s*\n?", "", content)
-    content = re.sub(r"\n?```\s*$", "", content).strip()
-    return content
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-048
+    # The CLOSING fence is stripped only after a leading fence was stripped: a
+    # reply that does not start with a fence is not a fenced wrapper, so a
+    # trailing fence is content ('Here:\n```py\nx\n```' keeps both). Do NOT
+    # strip it unconditionally, and do NOT count fences to decide (a heuristic
+    # where the start-of-reply test is structural). Trade-off: a stray closing
+    # fence alone ('{"a": 1}\n```') is kept here; extract_json_from_text recovers.
+    stripped = re.sub(r"^```(?:json)?\s*\n?", "", content)
+    if stripped != content:
+        stripped = re.sub(r"\n?```\s*$", "", stripped)
+    return stripped.strip()
 
 
 # --------------------------------------------------------------

@@ -168,3 +168,93 @@ class TestEmptyContainerIsSetForNonAgentFsms:
             api.converse("hello", cid)
         asked = [p for p in prompts if "Extract the field 'favorite_color'" in p]
         assert asked == []
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 4 / D-048: a closing fence is stripped only after a leading strip
+# ══════════════════════════════════════════════════════════════
+
+
+class TestClosingFenceNeedsALeadingFence:
+    def test_prose_ending_in_a_code_block_keeps_both_fences(self):
+        from fsm_llm.utilities import strip_think_and_fences
+
+        text = "Here is the code:\n```python\nprint(1)\n```"
+        assert strip_think_and_fences(text) == text
+        assert strip_think_and_fences(text).count("```") == 2
+
+    def test_two_fenced_blocks_in_prose_keep_all_four_markers(self):
+        from fsm_llm.utilities import strip_think_and_fences
+
+        text = "Two blocks:\n```py\na\n```\nand\n```py\nb\n```"
+        assert strip_think_and_fences(text).count("```") == 4
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            '```json\n{"a": 1}\n```',
+            '<think>reason</think>\n```json\n{"a": 1}\n```',
+        ],
+    )
+    def test_a_fully_fenced_reply_is_still_unwrapped(self, text):
+        """GUARD: green on HEAD and after."""
+        from fsm_llm.utilities import strip_think_and_fences
+
+        assert strip_think_and_fences(text) == '{"a": 1}'
+
+    def test_a_stray_closing_fence_is_kept_by_the_helper(self):
+        """D-048 trade-off: was `{"a": 1}` (the one authorised corpus rewrite)."""
+        from fsm_llm.utilities import strip_think_and_fences
+
+        assert strip_think_and_fences('{"a": 1}\n```') == '{"a": 1}\n```'
+
+    def test_a_stray_closing_fence_still_yields_the_object_through_extract_field(
+        self,
+    ):
+        """GUARD: the JSON ladder recovers the object; the trade-off costs nothing."""
+        from unittest.mock import patch
+
+        from fsm_llm.definitions import FieldExtractionRequest
+        from fsm_llm.llm import LiteLLMInterface
+        from tests.test_fsm_llm.test_audit_iter1_seam import _fake_response
+
+        req = FieldExtractionRequest(
+            system_prompt="extract",
+            user_message="hi",
+            field_name="a",
+            field_type="int",
+        )
+        with (
+            patch(
+                "fsm_llm.llm.completion",
+                return_value=_fake_response('{"a": 1}\n```'),
+            ),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            out = LiteLLMInterface(model="gpt-4o", api_key="k").extract_field(req)
+        assert out.value == 1
+
+    def test_a_stray_closing_fence_still_yields_the_object_through_bulk(self):
+        """GUARD: same, through extract_bulk_data."""
+        from unittest.mock import patch
+
+        from fsm_llm.definitions import BulkExtractionRequest
+        from fsm_llm.llm import LiteLLMInterface
+        from tests.test_fsm_llm.test_audit_iter1_seam import _fake_response
+
+        req = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with (
+            patch(
+                "fsm_llm.llm.completion",
+                return_value=_fake_response('{"a": 1}\n```'),
+            ),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            out = LiteLLMInterface(model="gpt-4o", api_key="k").extract_bulk_data(req)
+        assert out.extracted_data == {"a": 1}

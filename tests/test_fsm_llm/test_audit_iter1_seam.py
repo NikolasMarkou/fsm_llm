@@ -1322,7 +1322,7 @@ class TestClassifierInheritsConnection:
 
 # The corpora below were captured from the ORIGINAL regex implementations, so
 # they pin behavior equality across the rewrite, EXCEPT the six `_STRIP_CORPUS`
-# rows annotated `D-030`: those pin the D-030 semantics (only a fence at the
+# rows annotated `D-030` and the one annotated `D-048`: those pin the D-030 semantics (only a fence at the
 # START of the reply is stripped; a fence inside prose is kept). The `[1, 2]`
 # fenced-list row is deliberately absent: step 11 changes that contract (dict-only) on purpose.
 _STRIP_CORPUS: list[tuple[str, str]] = [
@@ -1330,7 +1330,9 @@ _STRIP_CORPUS: list[tuple[str, str]] = [
     ('```\n{"a": 1}\n```', '{"a": 1}'),
     ('```json{"a": 1}```', '{"a": 1}'),
     ('  ```json  \n\n {"a": 1}  \n```  \n', '{"a": 1}'),
-    ('{"a": 1}\n```', '{"a": 1}'),
+    # D-048 trade-off: was '{"a": 1}' (a stray closing fence without a leading
+    # fence is now kept; extract_json_from_text still recovers the object)
+    ('{"a": 1}\n```', '{"a": 1}\n```'),
     ('```json\n{"a": 1}', '{"a": 1}'),
     ('<think>reason {"x":2}</think>{"a": 1}', '{"a": 1}'),
     ('<think>a</think>b<think>c</think>{"a": 1}', 'b{"a": 1}'),
