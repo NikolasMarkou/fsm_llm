@@ -379,9 +379,7 @@ class TestRobustFSMDefinitionProcessing:
         NOT keep the old fsm_id -- the id has to track the file's CONTENT,
         not its path.
         """
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(complete_simple_fsm_dict, f, indent=2)
             temp_path = f.name
 
@@ -415,9 +413,7 @@ class TestRobustFSMDefinitionProcessing:
         fsm_def_from_dict = FSMDefinition(**complete_simple_fsm_dict)
         _, fsm_id_from_object = API.process_fsm_definition(fsm_def_from_dict)
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(complete_simple_fsm_dict, f, indent=2)
             temp_path = f.name
         try:

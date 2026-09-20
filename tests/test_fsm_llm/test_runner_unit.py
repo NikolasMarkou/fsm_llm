@@ -368,9 +368,7 @@ class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
             assert "Creds(api_key=" not in message
 
         # The type-name placeholder DOES reach the final dump line.
-        assert any(
-            "<non-serializable: Creds>" in str(r["message"]) for r in records
-        )
+        assert any("<non-serializable: Creds>" in str(r["message"]) for r in records)
 
         # Exactly one WARNING fired for the one non-serializable object.
         warnings = [
