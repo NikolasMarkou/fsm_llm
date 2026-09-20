@@ -195,6 +195,7 @@ class FSMValidator:
         # Stage 2-3: Enhanced validation
         self._validate_terminal_states()
         self._validate_required_context_keys()
+        self._validate_handler_only_keys()
         self._validate_unknown_keys()
 
         # Stage 4-6: Analysis (won't affect validity but provides insights)
@@ -445,6 +446,51 @@ class FSMValidator:
                     f"State '{state_id}' declares required_context_keys {ungated} "
                     f"that no transition condition gates on "
                     f"(conditions require {sorted(gated_keys)})"
+                )
+
+    def _validate_handler_only_keys(self):
+        """D-051: warn when a ``handler_only_keys`` entry protects nothing.
+
+        A security control whose failure mode is silence: a typo in the list
+        is accepted and guards no key. Two WARNINGs (never errors, so the
+        validator stays no stricter than ``API.from_file``): a listed key no
+        state references (it may still be set by a handler), and a listed key
+        that is a ``classification_extractions`` field name (the
+        classification channel is not covered by the list).
+
+        "References" is deliberately generous (``json.dumps`` of each
+        condition's ``logic``) so the rule warns less, not more. It only
+        runs for a non-empty list.
+        """
+        listed = self.fsm_data.get("handler_only_keys") or []
+        if not listed:
+            return
+        referenced: set[str] = set()
+        classified: set[str] = set()
+        blob = []
+        for state in self.states.values():
+            referenced.update(state.get("required_context_keys") or [])
+            for fe in state.get("field_extractions") or []:
+                referenced.add(fe.get("field_name"))
+            for ce in state.get("classification_extractions") or []:
+                classified.add(ce.get("field_name"))
+            for transition in state.get("transitions") or []:
+                for cond in transition.get("conditions") or []:
+                    referenced.update(cond.get("requires_context_keys") or [])
+                    blob.append(json.dumps(cond.get("logic") or {}, default=str))
+        referenced |= classified
+        logic_text = "\n".join(blob)
+        for key in listed:
+            if key in classified:
+                self.result.add_warning(
+                    f"handler_only_keys lists '{key}', a classification_extractions "
+                    "field name: classification writes are not covered by the list"
+                )
+            elif key not in referenced and f'"{key}"' not in logic_text:
+                self.result.add_warning(
+                    f"handler_only_keys lists '{key}' but no state references it "
+                    "(unless a handler sets it, the entry protects nothing; "
+                    "check for a typo)"
                 )
 
     def _validate_unknown_keys(self):

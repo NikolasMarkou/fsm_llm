@@ -485,3 +485,116 @@ class TestFailedBulkIsSurfacedToPassTwo:
         out = pipe._bulk_extract_from_instructions(MagicMock(), "hi", state, "cid")
         assert out == {}
         assert not out
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 7 / D-051: fsm-llm-validate warns about a useless handler_only_keys entry
+# ══════════════════════════════════════════════════════════════
+
+
+def _handler_only_warnings(fsm: dict) -> list[str]:
+    from fsm_llm.validator import FSMValidator
+
+    result = FSMValidator(fsm).validate()
+    assert result.is_valid, result.errors
+    return [w for w in result.warnings if "handler_only_keys" in w]
+
+
+def _fsm_with_handler_only(keys: list[str]) -> dict:
+    from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
+
+    fsm = _correction_fsm()
+    fsm["handler_only_keys"] = keys
+    return fsm
+
+
+class TestHandlerOnlyKeysValidatorWarnings:
+    def test_a_key_no_state_references_gets_one_warning_naming_it(self):
+        warnings = _handler_only_warnings(_fsm_with_handler_only(["is_admn"]))
+        assert len(warnings) == 1
+        assert "is_admn" in warnings[0]
+
+    def test_a_classification_field_name_gets_one_warning_about_the_channel(self):
+        fsm = _fsm_with_handler_only(["user_intent"])
+        fsm["states"]["profile"]["classification_extractions"] = [
+            {
+                "field_name": "user_intent",
+                "intents": [
+                    {"name": "buy", "description": "User wants to purchase"},
+                    {"name": "browse", "description": "User is just looking"},
+                ],
+                "fallback_intent": "browse",
+            }
+        ]
+        warnings = _handler_only_warnings(fsm)
+        assert len(warnings) == 1
+        assert "user_intent" in warnings[0]
+        assert "classification" in warnings[0]
+
+    def test_a_key_in_required_context_keys_only_gets_none(self):
+        """GUARD."""
+        assert _handler_only_warnings(_fsm_with_handler_only(["favorite_color"])) == []
+
+    def test_a_key_in_a_condition_logic_only_gets_none(self):
+        """GUARD."""
+        fsm = _fsm_with_handler_only(["is_admin"])
+        fsm["states"]["profile"]["transitions"][0]["conditions"].append(
+            {
+                "description": "admin only",
+                "logic": {"==": [{"var": "is_admin"}, True]},
+            }
+        )
+        assert _handler_only_warnings(fsm) == []
+
+    def test_a_key_referenced_by_another_state_only_gets_none(self):
+        """GUARD."""
+        fsm = _fsm_with_handler_only(["ticket_id"])
+        fsm["states"]["done"]["required_context_keys"] = ["ticket_id"]
+        assert _handler_only_warnings(fsm) == []
+
+    def test_a_key_in_field_extractions_only_gets_none(self):
+        """GUARD."""
+        fsm = _fsm_with_handler_only(["region"])
+        fsm["states"]["profile"]["field_extractions"] = [
+            {
+                "field_name": "region",
+                "field_type": "str",
+                "extraction_instructions": "the region",
+            }
+        ]
+        assert _handler_only_warnings(fsm) == []
+
+    def test_an_empty_list_gives_no_warning(self):
+        """GUARD."""
+        assert _handler_only_warnings(_fsm_with_handler_only([])) == []
+
+    def test_no_shipped_example_or_agent_builder_fsm_gets_a_new_warning(self):
+        """GUARD: no shipped FSM lists handler_only_keys, so the rule never runs."""
+        import json
+        from pathlib import Path
+
+        from fsm_llm.validator import FSMValidator
+        from fsm_llm_agents.fsm_definitions import (
+            build_plan_execute_fsm,
+            build_react_fsm,
+        )
+
+        root = Path(__file__).resolve().parents[2]
+        checked = 0
+        for path in sorted((root / "examples").rglob("*.json")):
+            try:
+                data = json.loads(path.read_text())
+            except ValueError:
+                continue
+            if not (isinstance(data, dict) and "states" in data):
+                continue
+            assert not data.get("handler_only_keys"), path
+            result = FSMValidator(data).validate()
+            assert [w for w in result.warnings if "handler_only_keys" in w] == [], path
+            checked += 1
+        assert checked >= 10
+        from fsm_llm_agents.tools import ToolRegistry
+
+        for fsm in (build_react_fsm(ToolRegistry()), build_plan_execute_fsm()):
+            result = FSMValidator(fsm).validate()
+            assert [w for w in result.warnings if "handler_only_keys" in w] == []
