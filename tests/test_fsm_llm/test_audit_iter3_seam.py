@@ -7,6 +7,7 @@ step; harness helpers are reused from the iteration-1 seam file.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -14,6 +15,7 @@ import pytest
 from fsm_llm.definitions import (
     FieldExtractionConfig,
     FieldExtractionRequest,
+    ResponseGenerationRequest,
 )
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.pipeline import MessagePipeline
@@ -90,3 +92,54 @@ class TestFieldExtractionUncoercibleConfidence:
             'Sure: {"field_name": "name", "value": "Bob", "confidence": 0.7} ok'
         )
         assert (out.value, out.confidence) == ("Bob", 0.7)
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 3 / RB-02: a structured reply with a `reasoning` key
+# ══════════════════════════════════════════════════════════════
+
+_STRUCTURED_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {"name": "reply", "schema": {"type": "object"}},
+}
+
+
+def _generate(content: str, response_format=None):
+    req = ResponseGenerationRequest(
+        system_prompt="s",
+        user_message="u",
+        extracted_data={},
+        context={},
+        transition_occurred=False,
+        previous_state=None,
+        response_format=response_format,
+    )
+    with (
+        patch("fsm_llm.llm.completion") as mock_comp,
+        patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            return_value=["response_format"],
+        ),
+    ):
+        mock_comp.return_value = _fake_response(content)
+        out = LiteLLMInterface(model="gpt-4o", api_key="k").generate_response(req)
+    return out.message
+
+
+class TestStructuredReplyWithReasoningKey:
+    def test_answer_plus_reasoning_returns_the_json_text(self):
+        body = json.dumps({"answer": "42", "reasoning": "because 6x7"})
+        message = _generate(body, _STRUCTURED_FORMAT)
+        assert json.loads(message) == {"answer": "42", "reasoning": "because 6x7"}
+
+    def test_answer_only_is_unchanged(self):
+        body = json.dumps({"answer": "42"})
+        assert json.loads(_generate(body, _STRUCTURED_FORMAT)) == {"answer": "42"}
+
+    def test_schema_with_message_key_still_returns_the_message(self):
+        body = json.dumps({"message": "hi there", "reasoning": "polite"})
+        assert _generate(body, _STRUCTURED_FORMAT) == "hi there"
+
+    def test_unstructured_reasoning_only_reply_still_returns_the_reasoning(self):
+        body = json.dumps({"reasoning": "because x"})
+        assert _generate(body, None) == "because x"

@@ -917,7 +917,13 @@ class LiteLLMInterface(LLMInterface):
 
                 message = data.get("message")
                 if not isinstance(message, str) or not message.strip():
-                    message = data.get("reasoning")
+                    # DECISION plan-2026-09-19T175721-21cd7f8e/D-028
+                    # A structured reply with no `message` key is the caller's
+                    # own schema: its `reasoning` field is part of the answer.
+                    # Do NOT fall back to `reasoning` here, the D-020 branch
+                    # below returns the whole JSON verbatim. See decisions.md.
+                    if not (structured and "message" not in data):
+                        message = data.get("reasoning")
                 if not isinstance(message, str) or not message.strip():
                     # DECISION plan-2026-09-19T175721-21cd7f8e/D-020: a caller-
                     # requested schema without a `message` key makes the JSON
