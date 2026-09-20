@@ -632,6 +632,88 @@ class TestStreamEmptyContentGuard:
         assert out == ["Hel", "lo"]
 
 
+class TestStreamMalformedChunksSkipped:
+    """D-022 (iter-3) / review-iter-3.md WARNING 3.
+
+    D-022 converted the streaming loop's ``chunk.choices`` guard from
+    ``hasattr(chunk, "choices") and chunk.choices`` to
+    ``getattr(chunk, "choices", None)`` (then ``if not choices: continue``),
+    and cached ``choices[0]`` into a local instead of re-reading
+    ``chunk.choices[0]``. Every pre-existing streaming fixture
+    (``_stream_chunk``) always builds a non-empty ``choices`` list, so this
+    is the ONE D-022 call site with zero coverage of the branch it actually
+    changed. These tests exercise both malformed shapes the conversion is
+    claimed to handle identically to the old ``hasattr()`` form: a chunk
+    missing ``.choices`` entirely, and one with ``choices=[]``.
+    """
+
+    @staticmethod
+    def _request():
+        return ResponseGenerationRequest(
+            system_prompt="You are a helpful assistant",
+            user_message="hi",
+            extracted_data={},
+            context={},
+            transition_occurred=False,
+        )
+
+    def _stream(self, chunks):
+        return patch("fsm_llm.llm.completion", return_value=iter(chunks)), patch(
+            "fsm_llm.llm.get_supported_openai_params", return_value=[]
+        )
+
+    def test_chunk_missing_choices_attribute_entirely_is_skipped(self):
+        """A chunk object with NO ``.choices`` attribute at all -- e.g. a
+        provider's heartbeat/keep-alive frame -- must be skipped, not raise
+        an ``AttributeError``, and must not swallow later real content."""
+        chunks = [
+            SimpleNamespace(),  # no `choices` attribute whatsoever
+            _stream_chunk(content="Hello"),
+        ]
+        completion_patch, params_patch = self._stream(chunks)
+        llm = LiteLLMInterface(model="test-model")
+
+        with completion_patch, params_patch:
+            out = list(llm.generate_response_stream(self._request()))
+
+        assert out == ["Hello"], f"malformed chunk was not skipped cleanly: {out}"
+
+    def test_chunk_with_empty_choices_list_is_skipped(self):
+        """A chunk that DOES carry ``.choices`` but as an empty list --
+        distinct from the attribute-missing case above, since ``getattr``
+        returns the (falsy) empty list rather than the ``None`` default."""
+        chunks = [
+            SimpleNamespace(choices=[]),
+            _stream_chunk(content="Hello"),
+        ]
+        completion_patch, params_patch = self._stream(chunks)
+        llm = LiteLLMInterface(model="test-model")
+
+        with completion_patch, params_patch:
+            out = list(llm.generate_response_stream(self._request()))
+
+        assert out == ["Hello"], f"empty-choices chunk was not skipped cleanly: {out}"
+
+    def test_both_malformed_shapes_interleaved_with_real_content(self):
+        """Combined regression: interleaved missing/empty malformed chunks
+        among real content chunks must not lose or duplicate any content --
+        the shape that would catch a `choices[0]` caching mistake touching
+        the wrong index after a skipped chunk."""
+        chunks = [
+            SimpleNamespace(),
+            _stream_chunk(content="Hel"),
+            SimpleNamespace(choices=[]),
+            _stream_chunk(content="lo"),
+        ]
+        completion_patch, params_patch = self._stream(chunks)
+        llm = LiteLLMInterface(model="test-model")
+
+        with completion_patch, params_patch:
+            out = list(llm.generate_response_stream(self._request()))
+
+        assert out == ["Hel", "lo"]
+
+
 def _real_delta_chunk(content, reasoning_content=None):
     """One streaming chunk wrapping a REAL litellm ``Delta``.
 
