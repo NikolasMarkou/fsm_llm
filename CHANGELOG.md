@@ -162,16 +162,119 @@ contract was encoded). Decision ids refer to that plan's `decisions.md` (D-014..
   and a seam test pinning the accepted below-threshold classifier stall. Comments and
   tests only.
 
-### Changed -- public contract (iteration 1 and 2)
+### Fixed -- core (`fsm_llm`) and agents audit remediation (plan-2026-09-19-21cd7f8e, iteration 3)
+
+Fix-of-a-fix items from the iteration-2 review and a fresh re-audit (RB-01..RB-12),
+two agent-pattern fixes with live proof, and first-touch docs that load. Each fix was
+reproduced RED first and pinned in `tests/test_fsm_llm/test_audit_iter3_seam.py` (or
+the agent test files). Decision ids refer to that plan's `decisions.md`.
+
+- **RB-01, uncoercible confidence (D-028, 0a5c59b).** A per-field extraction whose
+  `confidence` cannot be coerced (`"high"`, `null`, an object, `"95%"`) keeps the
+  returned value at confidence 0.5 at both field-extraction rungs, instead of falling
+  to the unstructured rung and storing the raw JSON text as the field value.
+- **RB-02, structured reply without `message` (D-028, a9dd46f).** A reply to a
+  requested `response_format` whose object has no `message` key but has a `reasoning`
+  key reaches the user as the JSON text, not as the reasoning alone.
+- **RB-10, JSON before a fenced example (D-029, 05744ec).** `extract_json_from_text`
+  skips a fenced non-object by blanking its span in place (length-preserving), so an
+  object that appears BEFORE a fenced example is found again, the fenced interior is
+  never recovered, and Strategy 3 and Strategy 4 read the same string.
+- **RB-06, quadratic tag sanitizer (D-029, eb63863).** The prompt tag sanitizer's
+  attribute tail excludes `<`, so `<a<a<a...` is linear (10k characters: 2.5 s to
+  under 0.5 s) and an unterminated `<b ` can no longer swallow text; its closing tags
+  stay escaped.
+- **RB-11, duck-typed handler system (D-029, 44f89ae).** `handlers_at` is an optional
+  fast-path hook, so a `handler_system` that only implements `execute_handlers` starts
+  and converses again.
+- **LS-09, inline fences kept (D-030, b126340).** `strip_think_and_fences` strips a
+  code fence only at the START of the reply, so an inline fence in prose keeps its
+  markers. JSON in a mid-text fence is still recovered by `extract_json_from_text`.
+- **LS-03 / LS-04 / RB-03, plain-text rung (D-030, b1eac34).** The plain-text rung
+  strips `<think>` blocks first and replaces brace-shaped text by the message or
+  apology only when it parses as JSON, so `{name}, welcome! ...` and `{1, 2, 3}` reach
+  the user after one provider call and a think-prefixed reply is no longer shown raw.
+- **RB-05, provenance survives a restart (D-031, b2e2144).** `save_session` persists
+  the provenance digests in `SessionState.metadata["pipeline_extracted"]` and
+  `restore_session` re-seeds them, so a correction lands after a restart while a
+  handler-seeded or `update_context` value is still never overwritten. An old session
+  file restores an empty map.
+- **RB-12a, refused corrections are reported (D-032, 96a42ac).** A bulk correction the
+  provenance rule refuses and the user's message contains is carried on
+  `DataExtractionResponse.rejected_corrections` (default `{}`); the stored value is
+  unchanged. Ungrounded, landed and agent-managed cases report nothing.
+- **RB-12b, reply is told (D-032, 8ee02e3).** `build_response_prompt` takes an optional
+  last `rejected_corrections` argument and both Pass-2 call sites pass it, so the reply
+  is told the requested value was NOT applied. A turn without a rejection builds a
+  byte-identical prompt (hash pinned).
+- **RB-07, opt-in `handler_only_keys` (D-033, 0086e60).** New `FSMDefinition` field
+  (default `[]`, behaviour unchanged): a listed gate key is dropped from the bulk
+  return, the per-field configs and the post-transition configs, so user text cannot
+  write it. A handler write, `update_context` and `initial_context` still work; a
+  stacked child uses its own list.
+- **RB-08, back-edge correction (D-034, D-042, 765dda1).** A transition into a
+  different state whose own config-covered key is already set with provenance re-runs
+  the target state's Pass-1 extraction, so a same-message correction lands
+  ("wait, change my name, it's Bob Jones"). A bare "go back", a self-loop, an
+  agent-managed FSM, a handler-seeded key, a forward hop into an empty state and a
+  state that owns `classification_extractions` make no extra call and keep the stored
+  value.
+- **RB-09, memoised identical null extractions (D-035, 1332ac9).** On an Ollama model
+  (exact `ollama/` or `ollama_chat/` prefix, temperature 0) an identical null per-field
+  extraction is memoised within one extraction call, keyed on field name plus the built
+  prompt and message: 3 null keys at `extraction_retries=3` cost 3 provider calls
+  instead of 12. Non-Ollama providers, exceptions and successful results are never
+  memoised.
+- **LV4-04, evaluator_optimizer success (D-036, 2571213).** `EvaluatorOptimizerAgent.run`
+  passes `generated_output` as an extra answer key, so a run whose final context holds
+  a non-empty `generated_output` and no `final_answer` reports `success=True` instead
+  of reading as a prose fallback. An empty output still fails.
+- **LV4-01, plan_execute plans (D-036, 4b93236).** `PlanExecuteAgent` no longer seeds
+  `plan_steps` with an empty list, so the pipeline's skip-if-set filter stops reading
+  `[]` as already set and the plan is extracted (live A/B on `qwen3.5:9b-q8_0`: a
+  non-empty plan 3/3 under both the seed-removal and an empty-as-unset variant; the
+  smaller change shipped). `success` stays False on those runs, see Known limitations.
+- **LV2-05, below-threshold classification is visible (D-037, b44d223).** A
+  classification result discarded for being below its `confidence_threshold` is a
+  WARNING naming field, intent, confidence and threshold instead of a debug line.
+  Behaviour is unchanged.
+- **First-touch docs load (D-037, 6a349c7).** The FSM snippets in `README.md`,
+  `docs/quickstart.md`, `src/fsm_llm/README.md` and `CLAUDE.md` now pass the loader
+  (`description` is required at FSM, state and condition level; classification
+  `schema` shape), and `tests/test_fsm_llm/test_docs_snippets.py` loads each one. False
+  claims corrected: `required_context_keys` never blocks a transition, handlers do not
+  see `_user_input`, `push_fsm` returns the greeting, `pop_fsm` takes the root id and
+  merges only declared keys, ERROR handlers skip `start_conversation`, `write_keys` is
+  advisory, a custom `LLMInterface` needs `extract_bulk_data`, the CLI needs
+  `LLM_MODEL`.
+- **Anchors (D-038, D-039, D-040, 636d7e9).** The inline LS-01, LS-02 and LS-06
+  comments in `prompts.py` and `constants.py` became qualified DECISION anchors naming
+  the constraint and the rejected alternative. Comment-only.
+
+Not done in iteration 3:
+
+- **RB-04, normalising CONTEXT_UPDATE handler (D-041, declined).** Recording the
+  digest of the post-handler value cannot tell a normalisation (`blue` -> `BLUE`) from
+  an authoritative override (`blue` -> `HANDLER`) and would let a later bulk turn
+  overwrite a value a handler deliberately replaced. Provenance keeps recording the
+  PRE-handler value (fail closed). The step-9 patch is kept as reference only.
+- **GD-22, validator warning for a condition on a key nothing extracts (D-037,
+  discarded by its own gate).** The prototype added warnings on 12 of 55 shipped FSMs
+  (keys a handler or the engine sets) and was about 30 lines against the 15-line cap.
+  Deferred: a silent-for-handler-keys warning needs a declared list of those keys on
+  the FSM, a schema change.
+
+### Changed -- public contract (iterations 1 to 3)
 
 - **Bulk overwrite is provenance-gated (D-015).** Supersedes iteration 1's D-004
   overwrite rule. A later-turn correction returned by the bulk pass replaces a stored
   key only when the key is config-covered, the FSM is not agent-managed and the
   stored value is still exactly the value the pipeline extracted. A handler-set or
   `update_context`-written value for a config-covered key is never overwritten by the
-  bulk pass (iteration 1 allowed it). After `restore_session` there is no recorded
-  provenance (it is not persisted), so corrections fall back to skip-if-set until the
-  pipeline re-extracts the key. A correction that changes only letter case or
+  bulk pass (iteration 1 allowed it). Iteration 3 (D-031) persists the
+  provenance across `save_session`/`restore_session`; a session file from before that
+  has none, so corrections fall back to skip-if-set until the pipeline re-extracts the
+  key. A correction that changes only letter case or
   whitespace counts as no change.
 - **Exact-0.0 confidence is rejected (D-016).** A per-field extraction the model
   reports at `confidence` exactly `0.0` is not stored, whatever
@@ -204,7 +307,8 @@ contract was encoded). Decision ids refer to that plan's `decisions.md` (D-014..
   `TypeError` when the base calls it.
 - **LV-01 re-extraction cost.** A required field that stays unset (null,
   zero-confidence or a rejected container value) is re-asked every turn, and
-  `extraction_retries` multiplies that by `(1 + retries)` per field per turn. One
+  `extraction_retries` makes each such field cost up to `1 + retries` extra provider
+  round-trips per turn (wording corrected in iteration 3, D-027). One
   agent test went from 34 to 152 provider calls. Retries against Ollama are
   byte-identical (temperature is forced to 0).
 - **React and reflexion extraction contract (D-024).** The think state extracts
@@ -220,7 +324,50 @@ contract was encoded). Decision ids refer to that plan's `decisions.md` (D-014..
   record the sub-FSM state). Turns with no handler for a timing skip the handler
   deep-copies.
 
-### Known limitations -- after iteration 2
+- **`handlers_at` is an optional hook (D-029).** `execute_handlers` reads it with a
+  guarded `getattr`; a duck-typed `handler_system` without it works and keeps the
+  handler deep-copies (it just does not get the zero-handler shortcut).
+- **`extract_json_from_text` fence handling (D-029, D-030).** A fenced non-object is
+  skipped by blanking its span in place (length-preserving), not by truncating the
+  text before it; `strip_think_and_fences` strips a fence only at the start of the
+  reply. Six iteration-1 corpus rows in `test_audit_iter1_seam.py` were rewritten to
+  the D-030 semantics.
+- **Uncoercible confidence keeps the value (D-028).** A per-field `confidence` that
+  cannot be coerced now means "value kept at 0.5", not "failed extraction".
+- **Brace-shaped prose is no longer replaced (D-030).** The plain-text rung decides by
+  parseability, not text shape. Trade-off: a malformed brace envelope such as
+  `{"message": hi}` (no recoverable JSON) is now shown as text instead of the generic
+  apology. `<think>` in STREAMED replies still passes through raw (buffering would
+  break time-to-first-token).
+- **Provenance is persisted (D-031).** Supersedes the D-015 clause "not persisted":
+  the digest map is stored in `SessionState.metadata["pipeline_extracted"]`, exposed as
+  `_pipeline_extracted` in `FSMManager.get_complete_conversation()['metadata']` and
+  written to the session file (digests, not values; same trust domain as
+  `context_data`). A session file without the key restores an empty map and fails
+  closed.
+- **`handler_only_keys` is a new `FSMDefinition` field (D-033).** `model_dump()` emits
+  `handler_only_keys: []` for every FSM, so a snapshot that compares a dumped
+  definition exactly must expect the new key.
+- **Rejected corrections reach Pass 2 (D-032).** `DataExtractionResponse` gained
+  `rejected_corrections` (default `{}`) and `build_response_prompt` a last optional
+  argument; a turn with no rejection is byte-identical. A caller that subclasses or
+  wraps `build_response_prompt` positionally is unaffected.
+- **Retry-cost wording corrected (D-027, review note 11).** A required field that
+  stays unset costs up to `1 + extraction_retries` extra provider round-trips per
+  field per turn (the "LV-01 re-extraction cost" bullet above is corrected in place);
+  on Ollama the identical retries
+  are now collapsed by the null memo (D-035).
+- **Extra calls (D-034, D-042, D-035).** A transition into a different, already-filled
+  state costs +1 bulk call (+1 retry per still-null required key; measured 4 -> 5
+  provider calls on the back-edge turn, 5 -> 7 with one required null key) and the
+  same call fires on a revisit that changes nothing (live: +1 call per return to
+  `confirm`). On Ollama a null key at `extraction_retries=3` drops from 1+3 calls to 1.
+- **`plan_execute` seed removed (D-036).** `plan_steps` is no longer pre-seeded with
+  `[]` in the initial context; readers already use `context.get(PLAN_STEPS, [])`.
+- **`evaluator_optimizer` success (D-036).** `AgentResult.success` is true when
+  `generated_output` is non-empty; see the LV5-02 limitation.
+
+### Known limitations -- iteration 2 list (current status in the iteration 3 list below)
 
 - **LV2-04, undeclared gate key.** A key a transition reads but no field declares can
   still be added by a steered bulk value or by the per-field channel (live s13:
@@ -247,6 +394,94 @@ contract was encoded). Decision ids refer to that plan's `decisions.md` (D-014..
   caches), LV2-03 (form back-edge correction), provenance persistence across
   `restore_session`, and LV3-02/LV3-03 (`<information_still_needed>` listing a filled
   key; `agent_trace` visible in per-field extraction prompts).
+
+### Known limitations -- after iteration 3
+
+Live evidence: `ollama_chat/qwen3.5:9b-q8_0` only, 1 to 3 looks per scenario at
+temperature 0.3 to 0.5, about 282 calls against a 250-call budget; 15 of 32 records
+ran at 10 to 20 times normal latency from unrelated load on the shared Ollama (the
+scripts' own 280/300 s alarms fired inside in-flight calls, not provider timeouts).
+No rate carries a significance claim.
+
+- **`handler_only_keys` is opt-in (LV2-04 stays the default).** Without the list a
+  key a transition reads can still be set by a steered value (live control arm:
+  `is_admin` opened). With it, the per-field closure held 2/2 looks; the bulk-output
+  filter was not exercised live (the model never returned `is_admin` in the bulk
+  pass). Only listed keys are covered: an unlisted gate key stays writable and a
+  classification-owned key is not covered. Say "closable per FSM for the listed
+  keys", not "LV2-04 closed".
+- **A normalising CONTEXT_UPDATE handler disables corrections on that key (D-041).**
+  Provenance records the pre-handler value, so a same-timing handler edit of an
+  extracted key blocks later LLM overwrites of it; the reply is told the change was
+  not applied.
+- **LV5-01, a failed back-edge re-extraction is silent to Pass 2.** If the RB-08
+  re-extraction call errors, `_bulk_extract_from_instructions` returns `{}` (a failed
+  bulk is indistinguishable from "nothing to extract"), the store keeps the old value
+  and the reply can still say it was updated (live: store `Jane Doe`, reply "I've
+  updated your name to Janet Doe"). Live 2 of 3 looks landed the correction; the
+  third failed on a script alarm and its re-run crashed. Same class as LV3-01 on a
+  different path.
+- **LV3-01, reply and data contradict: measured 0/8 after the rejected-corrections
+  block (was 2/4).** Not significant at this n (Wilson upper bound about 32%); only 4
+  of 8 replies say the value was not changed, the rest merely restate it.
+- **LV5-03, `<rejected_corrections>` lists config-covered keys only.** An
+  instruction-only key that already holds a value (`region` in the live fixture) is
+  refused by skip-if-set and never reported, so the reply is not told (0/8 replies
+  happened to claim it).
+- **LV5-04, a bare "Yes" after the back edge does not flip `user_confirmation`** while
+  the reply says confirmed: a stale set key is only correctable by the bulk path,
+  which returns `{}` for a bare affirmation. Pre-existing shape of D-015.
+- **LV2-05, low-confidence classification stall** is unchanged (three turns end in
+  `triage`); it is now a visible WARNING (live: one line per stalled turn).
+- **LV2-10 / LV4-08, history summary is never injected** into the prompt (the history
+  cap is not measured against `scripts/eval.py`); CF-08 turn atomicity and LS-10 are
+  deferred with it. **LV3-02 / LV3-03**: `<information_still_needed>` can list a
+  filled key and `agent_trace` can be visible in per-field extraction prompts.
+- **rewoo, maker_checker and debate fail at base too** (LV4-02/03/05): the extractor
+  is fed the literal message "Continue." and the model reports it does not contain the
+  plan. The typed-config recipe of D-024 does not transfer; a fix needs the plan
+  produced in a call whose input is the task. Not run in the iteration-3 live block.
+- **plan_execute plans but does not execute (LV5-07, carried forward from LV4-01).** The plan is extracted (6/6 live
+  runs, non-empty `plan_steps`), but the model narrates "I've completed the search"
+  and never calls the search tool (no tool output in any prompt, no tool-execution
+  log), so `success` is False. Final `success` is UNMEASURED in this block: 6/6 runs
+  ended on the 250 s agent timeout or the script alarm at 25 to 60 s per call.
+- **LV5-02, `EvaluatorOptimizerAgent` `success=True` after the refinement cap even
+  though the evaluator never passed the output.** `evaluator_optimizer.py:207-208`
+  forces `evaluation_passed=True` at the cap (pre-existing design); since
+  `generated_output` became an answer key (LV4-04) that reads as `success=True`.
+  `success` means "produced a non-empty output"; `max_iterations_reached` in the
+  context is the only signal. Live run 1: evaluator `passed False`, `refinement_count`
+  2, `success True`. Needs an owner decision.
+- **LV5-05, `evaluation_result` (a dict set by a handler) appears in the evaluator
+  agent's Pass-2 `<current_context>`.** Handler-set, not extracted, so the no-dict-in-
+  extraction rule is not violated; it is a dict-valued key in a prompt block.
+- **LV5-08, literal backslash-n in extracted multi-line values.** Field
+  extraction of a multi-line value can store a literal backslash-n (live n=1: the
+  evaluator counted one line and the loop spent both refinements; not reproduced in the
+  other two runs). The parse does not unescape.
+- **`tool_input` quality (D-024).** The tool runs live (3/3, no crash), but `tool_input`
+  is `{}` 3/3 and the tool receives the whole task sentence as `query`; parameter
+  quality is not fixed. Reflexion is not measured live.
+- **Accepted, not fixed (D-027).** `<=`/`>=` agree with numeric strings while `==` does
+  not (review note 12); a classification-owned key above threshold blocks correction
+  (the classifier is the owner, note 9); bulk values validate at a fixed confidence 1.0
+  (note 8); a truncated or malformed brace envelope shows as text (D-030). Also
+  deferred: object-typed `output_schema` fields, reasoning-mode mapping keys, GD-05
+  code half (`find_dotenv(usecwd=True)`, default model), GD-16 (CLI output via the
+  logger), GD-13..GD-25 beyond the doc items fixed in step 20.
+- **Prompt-content changes are not measured by `scripts/eval.py`, and its 95.3%
+  baseline is stale.** The sanitizer (LS-01), the secret-name filter (LS-06), the
+  `extracted_data` filter (LS-02), the bulk-prompt sanitizer (CF-06), the
+  `<rejected_corrections>` block (only for turns with a rejection), the plain-text
+  stream prompt and the RB-06 tag pattern change prompt content; benign prompts are
+  byte-identical (hash tests). Re-run the eval suite before trusting the baseline.
+- **Not measured live.** RB-01 non-numeric confidence, RB-03 `<think>` prefix, RB-10
+  fences, RB-05 restore-then-correct and RB-06 had no live exposure (0 of 247 raw calls
+  carried `<think>`, a fence or a non-numeric confidence). The memo (RB-09) fired twice,
+  both null-to-null, so a stale null masking a non-null resample is not observed, not
+  excluded. Non-Ollama providers, non-`any`/`str` union types and the false-positive
+  rate of the rejected-correction grounding test at scale are not measured.
 
 ### Added — new package: `fsm_llm_harness` (extra: `pip install fsm-llm[harness]`)
 

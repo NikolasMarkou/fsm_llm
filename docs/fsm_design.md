@@ -158,6 +158,10 @@ The condition is what holds the state until the address is complete; `required_c
 
 **Context scope**: `context_scope.read_keys` restricts which context keys a state's prompts see. `write_keys` is advisory: it is not enforced and not validated.
 
+**Gate keys the user must not set**: a key a transition condition reads (`is_admin`, `is_verified`) can be written by a steered extraction unless you list it in the FSM-level `handler_only_keys`. Listed keys are dropped from every LLM extraction channel and stay writable by handlers, `update_context` and `initial_context`. It is opt-in and covers only the listed keys (an unlisted gate key, or one owned by a `classification_extractions` entry, is not protected).
+
+**Corrections**: a later-turn value the LLM returns for an already-set key replaces it only when the pipeline extracted that key itself (handler-set and `update_context` values are never overwritten). A refused correction leaves the stored value in place, and the Pass-2 prompt then carries a `<rejected_corrections>` block so the reply does not claim the change was made. A handler that normalises an extracted value on `CONTEXT_UPDATE` (`blue` -> `BLUE`) counts as a handler edit and turns later corrections of that key off (the stored value stands and the reply is told so).
+
 ## FSM Stacking Patterns
 
 FSM stacking (`push_fsm`/`pop_fsm`) enables modular, composable design.

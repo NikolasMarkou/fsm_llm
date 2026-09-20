@@ -61,6 +61,8 @@ state = api.load_session(session_id)                   # -> SessionState | None 
 new_conv_id, state = api.restore_session(session_id)   # -> (conv_id, SessionState) | None  (resume)
 ```
 
+`save_session` also stores the pipeline's extraction provenance (one digest per extracted key, not the values) in `SessionState.metadata["pipeline_extracted"]`, and `restore_session` re-seeds it, so a later-turn correction still lands after a restart. A handler-set or `update_context` value has no digest and is never overwritten. The map is also visible (as `_pipeline_extracted`) in `FSMManager.get_complete_conversation()['metadata']` and in the session file. A session file without the key restores an empty map.
+
 ### State & Data Queries
 
 ```python
@@ -139,6 +141,10 @@ class LLMInterface(ABC):
 
     def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]: ...
 ```
+
+`DataExtractionResponse` (the `extract_bulk_data` return) carries `rejected_corrections: dict[str, Any]` (default `{}`): a bulk value for an already-set key that the provenance rule refused and that the user's message contains. The stored value is unchanged; the pipeline hands the dict to the Pass-2 prompt as a `<rejected_corrections>` block so the reply says the change was not applied. A custom `LLMInterface` never needs to set it.
+
+`FSMDefinition.handler_only_keys: list[str]` (default `[]`, opt-in): keys a user message can never write. They are dropped from the bulk return, the per-field configs and the post-transition configs; a handler write, `update_context` and `initial_context` still work. Only listed keys are covered: an unlisted gate key stays writable and a classification-owned key is not covered. A stacked child FSM uses its own list.
 
 `LiteLLMInterface` is the built-in implementation supporting 100+ providers via litellm; it implements `generate_response_stream` (the Pass-2 streaming path behind `API.converse_stream`).
 

@@ -56,11 +56,15 @@ fsm_llm/
   - `process_message(instance, conv_id, msg)`, `generate_initial_response(instance, conv_id)`
   - Streaming (`process_message_stream`) uses a plain-text Pass-2 prompt (`build_response_prompt(..., plain_text_response=True)`) unless the state carries `_output_response_format`, so yielded tokens and stored history have no `{"message","reasoning"}` envelope
   - `context_scope.read_keys` is enforced on the context shown in the Pass-2 prompt (turn, stream and greeting), not only on `request.context`
-  - Bulk extraction pass provenance: `context.metadata["_pipeline_extracted"]` holds a digest per key the pipeline extracted; the bulk pass overwrites a stored key only if it is config-covered, the FSM is not agent-managed and the stored value still matches the digest (handler-set, `update_context` and post-`restore_session` values are never overwritten). Bulk values for config-covered keys are coerced/validated like per-field values. The bulk prompt sanitizes user text; the bulk result drops `agent_trace` and forbidden-name keys; it never fills a classification-owned key on a non-agent FSM
-  - `execute_handlers` returns immediately when no handler subscribes to the timing (`HandlerSystem.handlers_at`), skipping the context deep-copies (a zero-handler advance turn: 14 -> 4 copies); the pre-turn rollback snapshots are unaffected
+  - Bulk extraction pass provenance: `context.metadata["_pipeline_extracted"]` holds a digest per key the pipeline extracted; the bulk pass overwrites a stored key only if it is config-covered, the FSM is not agent-managed and the stored value still matches the digest (handler-set and `update_context` values are never overwritten, including a value a same-timing CONTEXT_UPDATE handler edited; the digests are persisted in `SessionState.metadata["pipeline_extracted"]` by `save_session` and re-seeded by `restore_session`, so a correction lands after a restart, and an old session file restores an empty map). A correction the rule refuses and the user's message contains is carried on `DataExtractionResponse.rejected_corrections` (default `{}`) and shown to Pass 2 as a `<rejected_corrections>` block (`build_response_prompt`'s optional last argument), so the reply says the change was not applied; a turn with no rejection builds a byte-identical prompt. Bulk values for config-covered keys are coerced/validated like per-field values. The bulk prompt sanitizes user text; the bulk result drops `agent_trace` and forbidden-name keys; it never fills a classification-owned key on a non-agent FSM
+  - `execute_handlers` returns immediately when no handler subscribes to the timing (`HandlerSystem.handlers_at`), skipping the context deep-copies (a zero-handler advance turn: 14 -> 4 copies); the pre-turn rollback snapshots are unaffected. `handlers_at` is an optional fast-path hook read with a guarded `getattr`: a duck-typed `handler_system` with only `execute_handlers` still works
+  - `FSMDefinition.handler_only_keys` (opt-in, default `[]`): a listed gate key is dropped from the bulk return, the per-field configs and the post-transition configs, so user text cannot write it; handler writes, `update_context` and `initial_context` still work; a stacked child uses its own list. Only listed keys are covered (an unlisted gate key stays writable, a classification-owned key is not covered)
+  - Back-edge re-extraction: a transition into a DIFFERENT state whose own config-covered key is already set with provenance re-runs the target state's Pass-1 extraction, so a same-message correction lands; a self-loop, an agent-managed FSM, a handler-seeded key, a forward hop into an empty state and a state that owns `classification_extractions` do not (+1 bulk call on a back edge into a filled state, +1 retry per still-null required key)
+  - On Ollama (`ollama/` or `ollama_chat/` prefix, temperature 0) an identical null per-field extraction is memoised within one extraction call (keyed on field name plus the built prompt and message); successes, exceptions and other providers are never memoised
+  - A classification result discarded for being below its `confidence_threshold` is a WARNING naming field, intent, confidence and threshold; behaviour is unchanged (the gated key stays unset)
   - An ERROR-timing handler's returned dict is NOT merged (the turn was rolled back); `update_context` is the supported write path
   - A classifier error or fallback intent in `_resolve_ambiguous_transition` returns `None` (a stay, not a transition); the `Classifier` inherits `api_key`/`api_base`/`timeout` from the `LiteLLMInterface`
-- **HandlerSystem** (`handlers.py`) -- Event-driven hook execution
+- **HandlerSystem** (`handlers.py`) -- Event-driven hook execution; `handlers_at(timing)` is the optional subscription probe the pipeline uses to skip empty timings
   - `register_handler(handler)`, `execute_handlers(timing, current_state, target_state, context, updated_keys)` → dict
   - Error modes: "continue" (skip failed) | "raise"
 - **HandlerBuilder** (`handlers.py`) -- Fluent API: `.at(timing)` → `.on_state(id)` → `.when(lambda)`/`.when_context_has()`/`.when_keys_updated()` (+ shorthands `.on_state_entry()`, `.on_state_exit()`, `.on_context_update()`, `.with_priority()`) → `.do(lambda)` → `BaseHandler`
@@ -70,6 +74,7 @@ fsm_llm/
 - **IntentRouter** -- `route(msg)` → dispatches to handler functions by intent
 - **TransitionEvaluator** (`transition_evaluator.py`) -- Returns DETERMINISTIC | AMBIGUOUS | BLOCKED with confidence scores
 - **LiteLLMInterface** (`llm.py`) -- `generate_response(request)`, `extract_field(request)`, `generate_response_stream(request)` → `Iterator[str]` via litellm (100+ providers). Supports `response_format` for schema-enforced JSON output
+  - Reply parsing: an uncoercible `confidence` (`"high"`, null, object) keeps the returned value at confidence 0.5; a structured reply with no `message` but a `reasoning` key reaches the user as the JSON text; the plain-text rung strips `<think>` blocks first and replaces brace-shaped text only when it parses as JSON; `strip_think_and_fences` strips a fence only at the start of the reply, and `extract_json_from_text` skips a fenced non-object by blanking its span (so JSON before a fenced example is found)
 - **WorkingMemory** (`memory.py`) -- `get/set/delete(buffer, key)`, `get_all_data()`, `search(query)`, `get_buffer()`, `clear_buffer()`, `list_buffers()`, `has_buffer()`, `create_buffer()`, `to_scoped_view()`, `update_buffer()`, `import_flat_data()`, `to_dict()`, `from_dict()`
 - **SessionStore** (`session.py`) -- ABC for session persistence: `save(id, state)`, `load(id)`, `delete(id) -> bool`, `list_sessions()`, `exists(id)`
 - **FileSessionStore** (`session.py`) -- File-based implementation with JSON files and atomic writes (temp file + rename). Path-traversal protection via session ID validation
@@ -78,7 +83,7 @@ fsm_llm/
 
 ## Core Models (definitions.py)
 
-- **FSMDefinition**: name, description, states dict, initial_state, version="4.1", persona. Validates reachability + terminal states
+- **FSMDefinition**: name, description, states dict, initial_state, version="4.1", persona, handler_only_keys (list, default `[]`; `model_dump` emits it). Validates reachability + terminal states
 - **State**: id, description, purpose, extraction_instructions, response_instructions, transitions, required_context_keys, field_extractions, classification_extractions, context_scope
 - **Transition**: target_state, description, conditions list, priority (0-1000)
 - **TransitionCondition**: description, requires_context_keys, logic (JsonLogic dict), evaluation_priority
@@ -106,7 +111,7 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/  # 1,633 tests
+pytest tests/test_fsm_llm/  # 1,745 tests
 ```
 
 - Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`

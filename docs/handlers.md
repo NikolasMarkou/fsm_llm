@@ -99,6 +99,9 @@ The `HandlerSystem` has an `error_mode`:
 
 When no handler subscribes to a timing, the pipeline skips that timing entirely (no
 context deep-copy, no call), so an FSM without handlers pays nothing for the hook points.
+The subscription check (`HandlerSystem.handlers_at`) is an optional fast-path hook: a
+duck-typed `handler_system` that only implements `execute_handlers` still works, it just
+skips the shortcut.
 
 Handlers marked `critical=True` always raise regardless of error mode. There are two ways to mark
 one -- a `BaseHandler` subclass, or `.critical()` on the fluent builder:
