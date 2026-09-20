@@ -12,7 +12,7 @@ FSM-LLM (v0.5.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (5,908 tests)
+make test           # pytest -v (5,970 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -271,17 +271,17 @@ including what is measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (5,908 collected)
-pytest tests/test_fsm_llm/            # Core package tests (1,745 tests)
+pytest                                 # Run all tests (5,970 collected)
+pytest tests/test_fsm_llm/            # Core package tests (1,805 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (115 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (159 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (1,001 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (1,003 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (299 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,981 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 5,838. The remaining 70 are three root-level files:
+# The 9 suites above sum to 5,900. The remaining 70 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (24)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
@@ -289,17 +289,16 @@ pytest -m integration                 # Integration tests only
 ```
 
 Collected counts re-measured with `pytest --collect-only -q | tail -1` at
-plan-2026-09-19-21cd7f8e iteration 3 step 24 (docs/count reconciliation after the
+plan-2026-09-19-21cd7f8e iteration 4 step 10 (docs/count reconciliation after the
 last test-adding step). The passing figures are per-group runs at that step, not one
-combined run: core + regression + examples + packaging + harness bench 2,124 passed /
-2 skipped / 2 xfailed (one run over those five paths), monitor 299, meta 213,
-workflows 159, reasoning 115, agents 990 passed / 9 skipped (2 tests deselected: the
+combined run: core + regression + examples + packaging + harness bench 2,184 passed /
+2 skipped / 2 xfailed (one run over those five paths, no deselect), monitor 299, meta 213,
+workflows 159, reasoning 115, agents 992 passed / 9 skipped (2 tests deselected: the
 `TestReasoningReactAgentHandlerReset` class and `test_no_persistent_handlers_attribute`),
 harness 1,964 passed / 17 skipped (environment-dependent; excludes the 12
 live-Ollama integration tests, which self-skip without a live Ollama instance).
 The older combined full run (plan-2026-09-12-45a654de step 4.1) was 5,422 passed /
-28 skipped / 2 xfailed in ~400s and predates the iteration-1, iteration-2 and
-iteration-3 tests.
+28 skipped / 2 xfailed in ~400s and predates the iteration-1 to iteration-4 tests.
 
 **Conventions**:
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios

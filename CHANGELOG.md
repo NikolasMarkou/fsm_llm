@@ -183,7 +183,9 @@ the agent test files). Decision ids refer to that plan's `decisions.md`.
 - **RB-06, quadratic tag sanitizer (D-029, eb63863).** The prompt tag sanitizer's
   attribute tail excludes `<`, so `<a<a<a...` is linear (10k characters: 2.5 s to
   under 0.5 s) and an unterminated `<b ` can no longer swallow text; its closing tags
-  stay escaped.
+  stay escaped. (Iteration 4 found this change also stopped escaping a closing tag with
+  a nested `<`, `</original_input <b>`; restored under D-047, see the iteration 4
+  section.)
 - **RB-11, duck-typed handler system (D-029, 44f89ae).** `handlers_at` is an optional
   fast-path hook, so a `handler_system` that only implements `execute_handlers` starts
   and converses again.
@@ -229,7 +231,8 @@ the agent test files). Decision ids refer to that plan's `decisions.md`.
   passes `generated_output` as an extra answer key, so a run whose final context holds
   a non-empty `generated_output` and no `final_answer` reports `success=True` instead
   of reading as a prose fallback. An empty output still fails.
-- **LV4-01, plan_execute plans (D-036, 4b93236).** `PlanExecuteAgent` no longer seeds
+- **LV4-01, plan_execute plans (D-036, 4b93236; the seed removal was REVERSED in
+  iteration 4, D-046).** `PlanExecuteAgent` no longer seeds
   `plan_steps` with an empty list, so the pipeline's skip-if-set filter stops reading
   `[]` as already set and the plan is extracted (live A/B on `qwen3.5:9b-q8_0`: a
   non-empty plan 3/3 under both the seed-removal and an empty-as-unset variant; the
@@ -264,7 +267,89 @@ Not done in iteration 3:
   Deferred: a silent-for-handler-keys warning needs a declared list of those keys on
   the FSM, a schema change.
 
-### Changed -- public contract (iterations 1 to 3)
+### Fixed -- core (`fsm_llm`) and agents audit remediation (plan-2026-09-19-21cd7f8e, iteration 4, final loop)
+
+The final loop repairs what iterations 1 to 3 introduced and closes the small gaps their
+live runs and reviews proved; no feature was added. Each fix was reproduced RED first and
+pinned in `tests/test_fsm_llm/test_audit_iter4_seam.py` (or the agent test files).
+Decision ids refer to that plan's `decisions.md`.
+
+- **Sanitizer nested-`<` bypass restored (D-047, d7f1679).** Iteration 3's
+  denial-of-service fix (RB-06) silently stopped escaping a closing tag with a nested
+  `<` (`</original_input <b>`, `</user_message <i>`, `</task <b>`), so a hostile user
+  message could close the prompt's own wrapper tag and inject instructions. The tag
+  tail is now `(?:[^>]{0,256}/?>|[^>]{257})`: a tag with a nested `<` or a tail longer
+  than 256 characters (a padded closer) is escaped again, and the scan stays linear
+  (`"<a" * 10000` and `"<" + "a" * 100000` each under 0.5 s). A differential test pins
+  the new pattern against the pre-D-029 pattern on every string of length up to 6.
+  Three tests that pinned the weakened iteration 3 output were rewritten with
+  annotations, and the reversed-ordering payloads were added.
+- **`plan_execute` on an unplannable task ends normally again (D-046, 4ecbfce).**
+  Iteration 3 removed the `plan_steps: []` seed, so a task the model cannot plan raised
+  `BudgetExhaustedError` after 36 wasted model calls. The seed is restored (it is the
+  only exit of the `plan` state) and the pipeline's skip-if-set filter reads an empty
+  list or dict as unset for agent-managed FSMs only, so the seeded plan is still
+  extracted: the task returns `AgentResult(success=False)` after 1 `plan_steps` ask.
+  A non-agent FSM that seeds `[]` for a config-covered key is unchanged.
+- **A reply that ends in a code block keeps its closing fence (D-048, f736c86).**
+  `strip_think_and_fences` strips the closing fence only when a leading fence was
+  stripped; a fully fenced JSON reply is still unwrapped, and `extract_field` and
+  `extract_bulk_data` still recover an object followed by a stray closing fence. One
+  annotated `_STRIP_CORPUS` row was rewritten (a lone stray closing fence is now kept
+  by the helper).
+- **The "not applied" note needs a whole-token match (D-049, 007a405).** The grounding
+  test for `rejected_corrections` was a raw substring, so `bored now` grounded `red`
+  and `1500 items` grounded `500`. It now requires a whole token of at least 3
+  characters; `make it red` and `make it red.` still ground.
+- **A failed bulk extraction is surfaced to Pass 2 (D-050, 07afae1; LV5-01).** When the
+  bulk extraction call raises, the reply used to claim an update the store never made.
+  `DataExtractionResponse` gains `extraction_failed: bool = False` and
+  `build_response_prompt` gains a last optional parameter `extraction_failed`, which
+  adds one plain line saying a restated value may not have been stored. A turn without a
+  failure builds a byte-identical prompt. One annotated iteration 3 test that pinned the
+  exact signature tail was rewritten.
+- **`fsm-llm-validate` warns about a `handler_only_keys` entry that protects nothing
+  (D-051, ed39590).** One WARNING for a listed key no state references (a likely typo)
+  and one for a listed key that is a `classification_extractions` field name (the
+  classification channel is not covered). Warnings only, silent for an empty list, zero
+  new warnings on every shipped example and agent builder.
+- **An instruction-only key is reported when a correction is refused (D-052, 1b53d7c;
+  LV5-03).** A bulk value for a key with no field config that already holds a different
+  value is now listed in `rejected_corrections` under the same grounding test, for
+  non-agent FSMs only; the stored value is still never overwritten. The change is net
+  minus one source line, inside the plan's 10-line gate.
+- **Docs-snippet coverage extended (D-052, ea49e53, test only).** The docs-snippet test
+  also scans `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md` and
+  `docs/handlers.md`; none carries a full FSM (`"initial_state"`) today, so they add no
+  case and the guard still requires the four first-touch files to contribute. `docs/fsm_design.md`
+  carries no full FSM (no `"initial_state"` block), only fragments, and fragments are
+  NOT loaded by the test: a wrong fragment there is not caught.
+- **LV6-01, an applied correction listed as rejected (D-052, 2da48c4).** Introduced by
+  the LV5-03 change above (1b53d7c) and found by the live audit, fixed inside this run:
+  on a back-edge turn the confirm state's refusal was merged into
+  `rejected_corrections` and never pruned, although the target state's re-extraction
+  then applied the value, so Pass 2 was told the opposite of the store (3/3 live looks;
+  0/3 in iteration 3). After the re-extraction an entry is dropped when the stored
+  value now equals it under the same trimmed, case-insensitive comparison as the merge
+  point; a value a handler edited or that never landed stays listed. One live look after
+  the fix showed no block (n=1, an observation, not a rate).
+
+Regressions found and fixed inside this run (stated plainly):
+
+- **Iteration 3 introduced two regressions, both found by the iteration 3 adversarial
+  review and fixed in iteration 4.** (1) The sanitizer nested-`<` bypass: the RB-06 fix
+  stopped escaping a closing tag with a nested `<` (introduced in iteration 3 at
+  eb63863, fixed at d7f1679). (2) The `plan_execute` exception: the LV4-01 seed removal
+  made an unplannable task raise `BudgetExhaustedError` after 36 model calls instead of
+  returning `success=False` (introduced at 4b93236, fixed at 4ecbfce).
+- **Iteration 4 introduced one regression, LV6-01, found by the live audit and fixed
+  inside the same iteration.** Introduced by the LV5-03 change (1b53d7c), fixed at
+  2da48c4. The live audit found it by reading the raw prompts of the back-edge turn; the
+  check booleans (5/5 in all three looks) did not see it. The offline suite did not
+  either, because no test built a state whose key is config-covered only in the target
+  state.
+
+### Changed -- public contract (iterations 1 to 4)
 
 - **Bulk overwrite is provenance-gated (D-015).** Supersedes iteration 1's D-004
   overwrite rule. A later-turn correction returned by the bulk pass replaces a stored
@@ -362,10 +447,30 @@ Not done in iteration 3:
   provider calls on the back-edge turn, 5 -> 7 with one required null key) and the
   same call fires on a revisit that changes nothing (live: +1 call per return to
   `confirm`). On Ollama a null key at `extraction_retries=3` drops from 1+3 calls to 1.
-- **`plan_execute` seed removed (D-036).** `plan_steps` is no longer pre-seeded with
-  `[]` in the initial context; readers already use `context.get(PLAN_STEPS, [])`.
+- **`plan_execute` seed removed (D-036), then restored in iteration 4 (D-046).**
+  Iteration 3 stopped pre-seeding `plan_steps` with `[]`; that made an unplannable task
+  raise `BudgetExhaustedError`, so the seed is back (see the iteration 4 section).
 - **`evaluator_optimizer` success (D-036).** `AgentResult.success` is true when
   `generated_output` is non-empty; see the LV5-02 limitation.
+- **Iteration 4 (final loop) contract changes.**
+  - The prompt sanitizer escapes a `<name` opener or closer whose tail contains a
+    nested `<` or is longer than 256 characters (a prompt-content change for hostile
+    input only; benign prompts are byte-identical, hash test).
+  - `strip_think_and_fences` strips the closing fence only after a leading fence was
+    stripped (a reply that ends in a code block keeps its fence).
+  - Rejected-correction grounding is a whole-token match with a 3-character floor. The
+    named cost: a real correction to a 1 or 2 character value (`US`, `EU`, `42`) never
+    produces the `<rejected_corrections>` block, and a differently formatted value
+    (`1,000` for `1000`) does not ground.
+  - `DataExtractionResponse.extraction_failed: bool = False` (new public field) and
+    `build_response_prompt(..., extraction_failed=False)` (new optional last parameter;
+    positional callers are unaffected).
+  - `fsm-llm-validate` emits two new WARNINGs for `handler_only_keys` (never errors).
+  - `PlanExecuteAgent` seeds `plan_steps: []` again (D-046).
+  - `fsm_id` change on upgrade: `API.from_definition(FSMDefinition(...))` derives its
+    `fsm_id` from `model_dump()`, which now carries `handler_only_keys: []`, so the id
+    of an FSM built that way differs from the id the previous release computed
+    (`restore_session` does not compare `fsm_id`, see the limitations).
 
 ### Known limitations -- iteration 2 list (current status in the iteration 3 list below)
 
@@ -395,6 +500,62 @@ Not done in iteration 3:
   `restore_session`, and LV3-02/LV3-03 (`<information_still_needed>` listing a filled
   key; `agent_trace` visible in per-field extraction prompts).
 
+### Known limitations -- after iteration 4 (final loop; supersedes the iteration 3 list where it differs)
+
+Live evidence: `ollama_chat/qwen3.5:9b-q8_0` only, 1 to 4 looks per scenario, 173 calls
+against a target of about 150 and a hard stop of 180, box idle-checked before the run.
+Every rate is a look count, not a significance claim. Resolved since the iteration 3
+list: LV5-01 (D-050) and LV5-03 (D-052) are fixed offline; the sanitizer bypass, the
+`plan_execute` exception and LV6-01 are fixed (see the regression list above).
+
+- **The `scripts/eval.py` baseline (95.3%, N=3 median, Run 006) was NOT re-measured
+  against four iterations of prompt-content changes and is STALE. This is a release
+  gate.** The prompt-content changes since that baseline are: the tag sanitizer
+  (LS-01, restored in D-047), the bulk-prompt sanitising (CF-06), the `extracted_data`
+  filter (LS-02, nested-dict security filtering), the plain-text stream prompt, and
+  the `<rejected_corrections>` block and the extraction-failed line (each only on a turn
+  with a rejection or a failure). Benign prompts are byte-identical (hash tests), but no
+  gate available in this run observes prompt effects at eval scale (the fast gates mock
+  the LLM). Re-run the eval suite before trusting the baseline.
+- **The live audit found LV6-01 that the check booleans missed.** All three back-edge
+  looks scored 5/5 while the raw Pass-2 prompt carried a wrong `<rejected_corrections>`
+  block. Read raw `calls[]`, not `summary.checks`.
+- **`EvaluatorOptimizerAgent` `success` after the refinement cap (LV5-02, concern 6,
+  D-052).** `success=True` even though the evaluator never passed the output;
+  `max_iterations_reached` in the final context is the only signal. It needs an owner
+  decision on a public contract and was not changed in a final loop.
+- **RB-04 declined (D-041).** A normalising CONTEXT_UPDATE handler on an extracted key
+  still disables later LLM corrections of that key.
+- **`restore_session` does not compare `fsm_id`** (concern 11): a session file can be
+  restored onto a different FSM definition without error.
+- **RB-08 fires on any transition into a filled state (concern 9)**, not only on back
+  edges: +1 bulk call per return to a filled state (live: `confirm`), even when nothing
+  changes. The name and cost are accepted for now.
+- **`handler_only_keys` is opt-in.** LV2-04 stays the default for FSMs that do not
+  declare it; only listed keys are covered and a classification-owned key is not (the
+  validator now warns about that overlap). The bulk-output filter on a listed key was
+  never exercised live (the model did not return the key in a bulk pass).
+- **The grounding floor is 3 characters (D-049).** A real correction to a value of 1 or
+  2 characters never produces the block, so the reply may still claim the change was
+  made; the false-positive rate on real forms is unmeasured. The intended live
+  true-positive of the instruction-only report (D-052) was not observed: the s14 value
+  `US` is under the floor, so live s14 does not exercise it.
+- **Not observed live:** the D-050 extraction-failed line (no bulk call errored while
+  Pass 2 could still run), the D-046 unplannable-task branch (the live task was
+  plannable), the RB-08 cost on real forms, non-Ollama providers.
+- **plan_execute plans but does not execute (LV5-07) is unchanged:** the plan was
+  extracted 4/4 live runs and the model narrated instead of calling the tool 4/4;
+  `success` was never True, and the honest `completed with no execution evidence`
+  WARNING was logged. Three of the four runs were truncated by the harness call cap.
+- **LV6-02 / LV6-03 (low, info):** the bulk pass can store a model-invented key
+  (`intent: jailbreak_attempt`); the low-confidence classification WARNING count depends
+  on the classifier, so "exactly two WARNINGs" is not a property of the code.
+- **The unchanged items of the iteration 3 list stay open:** LV3-01 (reply/data
+  contradiction, measured 0/10 cumulative on s14, not significant), LV5-04, LV2-05,
+  LV2-10/LV4-08, LV3-02/LV3-03, rewoo/maker_checker/debate at base, LV5-05, LV5-08,
+  `tool_input` quality, and the accepted items of D-027 and D-052 (the `0.5` unscored
+  confidence literal duplicated in `llm.py`, the 303-line `_execute_data_extraction`).
+
 ### Known limitations -- after iteration 3
 
 Live evidence: `ollama_chat/qwen3.5:9b-q8_0` only, 1 to 3 looks per scenario at
@@ -414,7 +575,8 @@ No rate carries a significance claim.
   Provenance records the pre-handler value, so a same-timing handler edit of an
   extracted key blocks later LLM overwrites of it; the reply is told the change was
   not applied.
-- **LV5-01, a failed back-edge re-extraction is silent to Pass 2.** If the RB-08
+- **LV5-01, a failed back-edge re-extraction is silent to Pass 2 (FIXED in iteration 4,
+  D-050; the text below is the iteration 3 state).** If the RB-08
   re-extraction call errors, `_bulk_extract_from_instructions` returns `{}` (a failed
   bulk is indistinguishable from "nothing to extract"), the store keeps the old value
   and the reply can still say it was updated (live: store `Jane Doe`, reply "I've
@@ -424,7 +586,8 @@ No rate carries a significance claim.
 - **LV3-01, reply and data contradict: measured 0/8 after the rejected-corrections
   block (was 2/4).** Not significant at this n (Wilson upper bound about 32%); only 4
   of 8 replies say the value was not changed, the rest merely restate it.
-- **LV5-03, `<rejected_corrections>` lists config-covered keys only.** An
+- **LV5-03, `<rejected_corrections>` lists config-covered keys only (FIXED in
+  iteration 4, D-052; the text below is the iteration 3 state).** An
   instruction-only key that already holds a value (`region` in the live fixture) is
   refused by skip-if-set and never reported, so the reply is not told (0/8 replies
   happened to claim it).
