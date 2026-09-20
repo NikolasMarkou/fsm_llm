@@ -598,3 +598,76 @@ class TestHandlerOnlyKeysValidatorWarnings:
         for fsm in (build_react_fsm(ToolRegistry()), build_plan_execute_fsm()):
             result = FSMValidator(fsm).validate()
             assert [w for w in result.warnings if "handler_only_keys" in w] == []
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 8a / LV5-03: an instruction-only key is reported under the same test
+# ══════════════════════════════════════════════════════════════
+
+
+def _instruction_only(message: str, bulk: dict, seed: dict, agent: bool = False):
+    """One real ``converse`` turn on the correction FSM, where ``nickname`` is
+    named only in extraction_instructions. Returns (rejected corrections,
+    stored data after the turn, whether the Pass-2 prompt carries the block)."""
+    from tests.test_fsm_llm.test_audit_iter3_seam import _correction_fsm, _PassTwoSpy
+
+    with _PassTwoSpy(_correction_fsm()) as p:
+        p.api.update_context(
+            p.cid,
+            {
+                "favorite_color": "blue",
+                **seed,
+                **({"agent_trace": []} if agent else {}),
+            },
+        )
+        prompt = p.say(message, bulk)
+        response = p.api.fsm_manager.instances[p.cid].last_extraction_response
+        return (
+            dict(response.rejected_corrections),
+            p.api.get_data(p.cid),
+            "<rejected_corrections>" in prompt,
+        )
+
+
+class TestInstructionOnlyKeyIsReported:
+    def test_a_grounded_refused_instruction_only_value_is_reported(self):
+        rejected, data, block = _instruction_only(
+            "no, call me Bobby", {"nickname": "Bobby"}, {"nickname": "Rob"}
+        )
+        assert rejected == {"nickname": "Bobby"}
+        assert block is True
+        assert data["nickname"] == "Rob"
+
+    def test_an_ungrounded_instruction_only_value_gives_none(self):
+        """GUARD: green on HEAD and after."""
+        rejected, data, block = _instruction_only(
+            "thanks", {"nickname": "Bobby"}, {"nickname": "Rob"}
+        )
+        assert rejected == {}
+        assert block is False
+        assert data["nickname"] == "Rob"
+
+    def test_an_agent_managed_fsm_gives_none(self):
+        """GUARD: green on HEAD and after."""
+        rejected, data, _ = _instruction_only(
+            "no, call me Bobby", {"nickname": "Bobby"}, {"nickname": "Rob"}, agent=True
+        )
+        assert rejected == {}
+        assert data["nickname"] == "Rob"
+
+    def test_a_value_that_lands_gives_none(self):
+        """GUARD: green on HEAD and after."""
+        rejected, data, block = _instruction_only(
+            "call me Bobby", {"nickname": "Bobby"}, {}
+        )
+        assert rejected == {}
+        assert block is False
+        assert data["nickname"] == "Bobby"
+
+    def test_the_same_value_restated_gives_none(self):
+        """GUARD: green on HEAD and after."""
+        rejected, _, block = _instruction_only(
+            "yes it is Rob", {"nickname": "rob"}, {"nickname": "Rob"}
+        )
+        assert rejected == {}
+        assert block is False

@@ -1455,11 +1455,14 @@ class MessagePipeline:
                         extracted_data[key] = value
                         log.debug(f"Bulk extraction added missing field: {key}")
                     elif (
-                        cfg is not None
-                        and not agent_managed
+                        not agent_managed
                         and str(value).strip().lower() != str(current).strip().lower()
                     ):
-                        if prov.get(key) == _value_digest(current):
+                        # DECISION plan-2026-09-19T175721-21cd7f8e/D-052 (4):
+                        # an instruction-only key (no config) is never
+                        # corrected (skip-if-set) but IS reported below under
+                        # the same grounding test. Do NOT correct it here.
+                        if cfg is not None and prov.get(key) == _value_digest(current):
                             extracted_data[key] = value
                             log.debug(f"Bulk extraction corrected field: {key}")
                         else:
