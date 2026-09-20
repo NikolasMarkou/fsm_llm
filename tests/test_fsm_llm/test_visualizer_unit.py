@@ -24,6 +24,7 @@ from loguru import logger
 from fsm_llm.visualizer import (
     ICONS,
     build_graph_representation,
+    create_fancy_header,
     create_state_boxes,
     generate_enhanced_ascii_diagram,
     main_cli,
@@ -762,6 +763,77 @@ class TestWholeRenderBoxAlignment:
         assert {len(line) for line in section} == {62}, "\n".join(
             f"{len(line):>3} {line}" for line in section
         )
+
+
+# ------------------------------------------------------------------
+# D-019 / fresh-audit-sweep.md finding #12: create_fancy_header computed its
+# own width from `max(60, len(name) + 10)`, growing wider than every sibling
+# 60-col section box (METADATA/STATES/TRANSITIONS/PERSONA) for a name over
+# ~50 chars -- and never truncated a name that still did not fit.
+# ------------------------------------------------------------------
+
+
+class TestFancyHeaderBoxWidth:
+    def test_header_box_width_matches_section_boxes_for_a_long_name(self):
+        """The exact scenario plan.md names: a 54-char FSM name."""
+        name = "x" * 54
+        assert len(name) == 54
+        data = {
+            "name": name,
+            "initial_state": "only",
+            "states": {"only": {"id": "only", "description": "d", "transitions": []}},
+        }
+        output = visualize_fsm_ascii(data, style="full")
+
+        boxes = _bordered_boxes(output)
+        header_box = next((box for box in boxes if box[0].startswith("╭")), None)
+        assert header_box is not None, "no header box found in the render"
+
+        header_width = len(header_box[0])
+        assert header_width == _SECTION_WIDTH, (
+            f"header box is {header_width} chars wide against sibling section "
+            f"boxes' {_SECTION_WIDTH}-char border:\n"
+            + "\n".join(f"{len(x):>4} {x}" for x in header_box)
+        )
+        for line in header_box:
+            assert len(line) == _SECTION_WIDTH, (
+                f"ragged header box, widths={sorted({len(x) for x in header_box})}:\n"
+                + "\n".join(f"{len(x):>4} {x}" for x in header_box)
+            )
+
+        # Vacuity guard: confirm a METADATA-shaped box (also 62 chars) is
+        # present too, so this test is genuinely comparing two boxes, not
+        # trivially passing because only the header box exists.
+        section_boxes = [
+            b for b in boxes if len(b[0]) == _SECTION_WIDTH and b is not header_box
+        ]
+        assert section_boxes, "no sibling section box found to compare against"
+
+    def test_header_elides_a_name_too_long_to_fit_rather_than_growing(self):
+        """A DIFFERENT code path than the width-cap alone: a name still too
+        long for the capped 60-col box (unlike the 54-char case above, which
+        fits inside 58 once padding is subtracted) must be shortened via
+        `_fit()`, not silently overflow `.center()` (which never truncates).
+        """
+        long_name = "y" * 200
+        lines = create_fancy_header(long_name)
+
+        assert len(lines[0]) == 62, f"top border is {len(lines[0])} chars, not 62"
+        assert len(lines[1]) == 62, f"name row is {len(lines[1])} chars, not 62"
+        assert "…" in lines[1], (
+            f"a 200-char name was not visibly shortened: {lines[1]!r}"
+        )
+        assert long_name not in lines[1], (
+            "the full 200-char name still appears verbatim -- not elided at all"
+        )
+
+    def test_a_short_name_is_unaffected(self):
+        """Over-correction guard: a normal-length name must not be elided or
+        otherwise changed by the width cap."""
+        lines = create_fancy_header("MyFSM")
+        assert len(lines[0]) == 62
+        assert "MyFSM" in lines[1]
+        assert "…" not in lines[1]
 
 
 # ------------------------------------------------------------------

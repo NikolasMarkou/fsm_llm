@@ -392,10 +392,21 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
 
 def create_fancy_header(name: str) -> list[str]:
     """Create a fancy header for the FSM visualization."""
-    width = max(60, len(name) + 10)
+    # DECISION plan-2026-09-20T114608-a8e47b88/D-019
+    # Width used to grow with the name (`max(60, len(name) + 10)`), while every
+    # sibling top-level box (METADATA/STATES/TRANSITIONS/PERSONA, all built via
+    # `_section_box_row`) is hard-coded to 60 -- so an FSM name over ~50 chars
+    # rendered a header box WIDER than every box below it, and `.center(width)`
+    # never shortens, so a name that did not fit was never truncated either. Do
+    # NOT let this box's width vary with content again: cap it to 60 like its
+    # siblings, and elide an over-long name through `_fit()` (the same helper
+    # D-033/D-002/D-007 use for exactly this failure shape) instead of growing
+    # the box. See decisions.md D-019.
+    width = 60
+    display_name = _fit(name, width - 2)
     lines = [
         "╭" + "─" * width + "╮",
-        "│" + f" {name} ".center(width) + "│",
+        "│" + f" {display_name} ".center(width) + "│",
         "│" + "FINITE STATE MACHINE VISUALIZATION".center(width) + "│",
         "╰" + "─" * width + "╯",
         "",
