@@ -1060,3 +1060,138 @@ class TestTruncationIsVisibleAndUnambiguous:
         assert fitted.startswith("HEAD")
         assert fitted.endswith("TAIL")
         assert "…" in fitted
+
+
+# ==================================================================
+# D-002 / fresh-audit-sweep.md finding #1: create_state_boxes never got the
+# D-033 ellipsis fix
+# ==================================================================
+
+# A common prefix long enough that BOTH the "┃ " lead-in and the trailing
+# " (TERMINAL)" label survive a bare `[: box_width - 1]` == 59-character head
+# slice before the divergent tail (ALPHA/BRAVO) is ever reached. box_width is
+# capped at 60 (visualizer.py:1218) no matter how long the state id itself is.
+_STATE_DIAGRAM_PREFIX = (
+    "checkout_payment_authorization_pending_manual_review_workflow_stage_"
+)
+_STATE_DIAGRAM_A = _STATE_DIAGRAM_PREFIX + "ALPHA"
+_STATE_DIAGRAM_B = _STATE_DIAGRAM_PREFIX + "BRAVO"
+
+
+def _state_diagram_prefix_collision_fsm_data():
+    """Two TERMINAL states sharing a >60-char prefix, diverging only past the
+    old bare ``[: box_width - 1]`` cutoff -- the exact shape
+    ``findings/fresh-audit-sweep.md`` finding #1 describes for
+    ``create_state_boxes``.
+    """
+    return {
+        "name": "StateDiagramPrefixCollisionFSM",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "d",
+                "purpose": "p",
+                "transitions": [
+                    {"target_state": _STATE_DIAGRAM_A, "description": "to alpha"},
+                    {"target_state": _STATE_DIAGRAM_B, "description": "to bravo"},
+                ],
+            },
+            _STATE_DIAGRAM_A: {
+                "id": _STATE_DIAGRAM_A,
+                "description": "d",
+                "purpose": "p",
+                "transitions": [],
+            },
+            _STATE_DIAGRAM_B: {
+                "id": _STATE_DIAGRAM_B,
+                "description": "d",
+                "purpose": "p",
+                "transitions": [],
+            },
+        },
+    }
+
+
+def _state_diagram_rows(output):
+    """Return the two states' own id rows from the STATE DIAGRAM section.
+
+    Both A and B are TERMINAL (no outgoing transitions), so their box rows
+    start with the terminal style's vertical glyph (``"┃ "``), not the
+    default ``"│ "`` -- the STATES-section content filter
+    ``TestTruncationIsVisibleAndUnambiguous`` uses would not select these
+    rows at all; this is a genuinely different renderer (``create_state_boxes``,
+    not ``create_states_section``).
+    """
+    return [
+        line
+        for line in output.splitlines()
+        if line.startswith("┃ ") and "checkout_payment" in line
+    ]
+
+
+class TestStateDiagramBoxTruncationIsVisibleAndUnambiguous:
+    """D-002 / fresh-audit-sweep.md finding #1. ``create_state_boxes`` (used
+    only by the STATE DIAGRAM section of ``--style full`` output, via
+    ``generate_enhanced_ascii_diagram``) never received D-033's ``_fit()``
+    truncation fix, even though the D-022 comment at ``visualizer.py:147``
+    names it as the mirror site. Drives the PUBLIC ``fsm-llm-visualize`` CLI
+    entry point (``main_cli``) end to end -- not a private helper -- per the
+    plan's requirement that this reproduce through the real console script.
+    """
+
+    def _render_full_style(self, tmp_path):
+        path = tmp_path / "prefix_collision.json"
+        path.write_text(
+            json.dumps(_state_diagram_prefix_collision_fsm_data()), encoding="utf-8"
+        )
+        with _cli_capture() as buffer:
+            with patch.object(
+                sys,
+                "argv",
+                ["fsm-llm-visualize", "--fsm", str(path), "--style", "full"],
+            ):
+                with pytest.raises(SystemExit) as exc_info:
+                    main_cli()
+        assert exc_info.value.code == 0
+        return buffer.getvalue()
+
+    def test_two_same_prefix_states_do_not_render_identically(self, tmp_path):
+        """The defect, stated directly. Under the old bare head slice both ids
+        became the identical row ``"┃ checkout_payment_...ow_stage_work┃"``
+        and the STATE DIAGRAM showed one node where the FSM has two."""
+        output = self._render_full_style(tmp_path)
+        rows = _state_diagram_rows(output)
+        assert len(rows) == 2, (
+            "expected exactly 2 state-id rows in the STATE DIAGRAM section, "
+            f"got {len(rows)}:\n" + "\n".join(output.splitlines())
+        )
+        assert rows[0] != rows[1], (
+            "the two states' STATE DIAGRAM rows are byte-identical -- the "
+            f"reader cannot tell them apart:\n{rows[0]!r}\n{rows[1]!r}"
+        )
+
+    def test_both_distinguishing_suffixes_survive(self, tmp_path):
+        """Stronger than 'the rows differ': the part that actually tells the
+        two states apart must be present IN THE ROW ITSELF, not merely
+        somewhere else in the document (e.g. the untruncated "Connections:"
+        list, which always carries the full id and would pass vacuously)."""
+        output = self._render_full_style(tmp_path)
+        rows = _state_diagram_rows(output)
+        assert len(rows) == 2
+        assert any("ALPHA" in row for row in rows), (
+            f"ALPHA appears in neither STATE DIAGRAM row:\n" + "\n".join(rows)
+        )
+        assert any("BRAVO" in row for row in rows), (
+            f"BRAVO appears in neither STATE DIAGRAM row:\n" + "\n".join(rows)
+        )
+
+    def test_shortening_leaves_a_visible_marker(self, tmp_path):
+        """A truncation the reader cannot see is a truncation the reader will
+        mistake for the whole id."""
+        output = self._render_full_style(tmp_path)
+        rows = _state_diagram_rows(output)
+        assert any("…" in row for row in rows), (
+            "content was shortened with no ellipsis marker in the STATE "
+            "DIAGRAM section:\n" + "\n".join(rows)
+        )
