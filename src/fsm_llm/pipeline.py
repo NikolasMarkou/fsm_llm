@@ -15,6 +15,7 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 import copy
 import hashlib
 import json
+import re
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -1446,8 +1447,20 @@ class MessagePipeline:
                             # Do NOT report every differing bulk value: an
                             # ungrounded one ("navy" after "thanks") would put
                             # a phantom correction in the prompt.
+                            # DECISION plan-2026-09-19T175721-21cd7f8e/D-049
+                            # The value must be a WHOLE token of the message and
+                            # at least 3 characters: a substring test let `red`
+                            # ground on "bored now" and `500` on "1500 items".
+                            # Do NOT use plain `in` again, and do NOT use `\b`
+                            # (a value like `c++` ends in a non-word character;
+                            # lookarounds work for it). Cost: a real 1-2
+                            # character correction (`US`, `42`) never produces
+                            # the block, the quiet pre-D-032 behaviour.
                             needle = str(value).strip().lower()
-                            if needle and needle in user_message.lower():
+                            if len(needle) >= 3 and re.search(
+                                rf"(?<!\w){re.escape(needle)}(?!\w)",
+                                user_message.lower(),
+                            ):
                                 rejected[key] = value
                                 log.debug(f"Bulk correction rejected: {key}")
 

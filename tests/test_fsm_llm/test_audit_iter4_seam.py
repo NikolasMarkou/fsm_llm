@@ -258,3 +258,65 @@ class TestClosingFenceNeedsALeadingFence:
         ):
             out = LiteLLMInterface(model="gpt-4o", api_key="k").extract_bulk_data(req)
         assert out.extracted_data == {"a": 1}
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 5 / D-049: a bulk value grounds a correction only as a whole token
+# ══════════════════════════════════════════════════════════════
+
+
+def _grounded(message: str, value: str) -> tuple[dict, bool]:
+    """One real ``converse`` turn: the bulk pass proposes ``value`` for a key
+    a handler already holds as ``blue``. Returns the rejected corrections the
+    turn recorded and whether the Pass-2 prompt carries the block."""
+    from tests.test_fsm_llm.test_audit_iter3_seam import _correction_fsm, _PassTwoSpy
+
+    with _PassTwoSpy(_correction_fsm()) as p:
+        p.api.update_context(p.cid, {"favorite_color": "blue"})
+        prompt = p.say(message, {"favorite_color": value})
+        response = p.api.fsm_manager.instances[p.cid].last_extraction_response
+        assert p.api.get_data(p.cid)["favorite_color"] == "blue"
+        return dict(response.rejected_corrections), "<rejected_corrections>" in prompt
+
+
+class TestGroundingIsAWholeTokenTest:
+    @pytest.mark.parametrize(
+        ("message", "value"),
+        [
+            ("bored now", "red"),
+            ("my creditcard is fine", "red"),
+            ("my creditcard is fine", "credit"),
+            ("I read the terms and agree", "red"),
+            ("I have 1500 items", "500"),
+        ],
+    )
+    def test_a_value_inside_an_unrelated_word_grounds_nothing(self, message, value):
+        rejected, block = _grounded(message, value)
+        assert rejected == {}
+        assert block is False
+
+    @pytest.mark.parametrize(
+        ("message", "value"),
+        [
+            ("no, actually make it red", "red"),
+            ("make it red.", "red"),
+            ("make it 500", "500"),
+            ("Make it RED!", "red"),
+        ],
+    )
+    def test_a_whole_token_still_grounds_the_correction(self, message, value):
+        """GUARD: green on HEAD and after."""
+        rejected, block = _grounded(message, value)
+        assert rejected == {"favorite_color": value}
+        assert block is True
+
+    @pytest.mark.parametrize(
+        ("message", "value"),
+        [("make it 5", "5"), ("it is 42", "42"), ("we are in the US", "US")],
+    )
+    def test_a_value_shorter_than_three_characters_never_grounds(self, message, value):
+        """The accepted cost of D-049: a real 1-2 character correction
+        produces no block."""
+        rejected, block = _grounded(message, value)
+        assert rejected == {}
+        assert block is False
