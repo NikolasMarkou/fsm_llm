@@ -525,3 +525,60 @@ class TestProvenanceIsPersisted:
             assert set(prov) == {"favorite_color"}
             assert all(isinstance(v, str) for v in prov.values())
             json.dumps(saved.metadata)
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 11 / RB-12a: rejected corrections are carried on the extraction response
+# ══════════════════════════════════════════════════════════════
+
+
+def _say(p: _Prov, message: str, bulk: dict | None = None):
+    """One real ``converse`` turn with a scripted bulk reply and a chosen
+    user message; returns the response object the extraction step produced."""
+    p.field, p.bulk = {}, bulk or {}
+    p.api.converse(message, p.cid)
+    instance = p.api.fsm_manager.instances[p.cid]
+    return instance.last_extraction_response
+
+
+class TestRejectedCorrectionsAreCarried:
+    def test_a_grounded_correction_of_a_handler_seeded_value_is_reported(self):
+        """port of repros/lv301.py (data level): RED on 05744ec-era HEAD, the
+        field does not exist on DataExtractionResponse."""
+        with _Prov(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"favorite_color": "blue"})
+            response = _say(p, "no, actually make it red", {"favorite_color": "red"})
+            assert response.rejected_corrections == {"favorite_color": "red"}
+            assert p.api.get_data(p.cid)["favorite_color"] == "blue"
+
+    def test_an_ungrounded_bulk_value_is_not_reported(self):
+        with _Prov(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"favorite_color": "blue"})
+            response = _say(p, "thanks, what next?", {"favorite_color": "navy"})
+            assert response.rejected_corrections == {}
+            assert p.api.get_data(p.cid)["favorite_color"] == "blue"
+
+    def test_a_correction_that_lands_is_not_reported(self):
+        with _Prov(_correction_fsm()) as p:
+            assert p.turn({"favorite_color": "blue"})["favorite_color"] == "blue"
+            response = _say(p, "actually make it red", {"favorite_color": "red"})
+            assert response.rejected_corrections == {}
+            assert p.api.get_data(p.cid)["favorite_color"] == "red"
+
+    def test_the_same_value_restated_is_not_a_rejection(self):
+        with _Prov(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"favorite_color": "blue"})
+            response = _say(p, "yes it is Blue", {"favorite_color": "blue"})
+            assert response.rejected_corrections == {}
+
+    def test_the_default_is_empty_on_an_ordinary_turn(self):
+        with _Prov(_correction_fsm()) as p:
+            p.turn({"favorite_color": "blue"})
+            response = p.api.fsm_manager.instances[p.cid].last_extraction_response
+            assert response.rejected_corrections == {}
+
+    def test_an_agent_managed_fsm_reports_nothing(self):
+        with _Prov(_correction_fsm()) as p:
+            p.api.update_context(p.cid, {"favorite_color": "blue", "agent_trace": []})
+            response = _say(p, "no, actually make it red", {"favorite_color": "red"})
+            assert response.rejected_corrections == {}

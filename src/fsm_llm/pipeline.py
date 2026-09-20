@@ -1168,6 +1168,7 @@ class MessagePipeline:
             return response
 
         extracted_data: dict[str, Any] = {}
+        rejected: dict[str, Any] = {}
         confidences: list[float] = []
         cfg_by_name: dict[str, FieldExtractionConfig] = {}
 
@@ -1339,10 +1340,23 @@ class MessagePipeline:
                         cfg is not None
                         and not agent_managed
                         and str(value).strip().lower() != str(current).strip().lower()
-                        and prov.get(key) == _value_digest(current)
                     ):
-                        extracted_data[key] = value
-                        log.debug(f"Bulk extraction corrected field: {key}")
+                        if prov.get(key) == _value_digest(current):
+                            extracted_data[key] = value
+                            log.debug(f"Bulk extraction corrected field: {key}")
+                        else:
+                            # DECISION plan-2026-09-19T175721-21cd7f8e/D-032:
+                            # a refused overwrite (handler-set, update_context
+                            # or unpersisted value, D-015) that the USER asked
+                            # for is carried to Pass 2 so the reply does not
+                            # claim a change the store never made (LV3-01).
+                            # Do NOT report every differing bulk value: an
+                            # ungrounded one ("navy" after "thanks") would put
+                            # a phantom correction in the prompt.
+                            needle = str(value).strip().lower()
+                            if needle and needle in user_message.lower():
+                                rejected[key] = value
+                                log.debug(f"Bulk correction rejected: {key}")
 
         # Build final response — check all sources for missing required fields
         all_required_names: list[str] = []
@@ -1365,6 +1379,7 @@ class MessagePipeline:
                 name not in extracted_data and name not in instance.context.data
                 for name in all_required_names
             ),
+            rejected_corrections=rejected,
         )
         instance.last_extraction_response = response
 

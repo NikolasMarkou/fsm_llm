@@ -131,6 +131,15 @@ class DataExtractionResponse(BaseModel):
         description="Whether additional information is needed from the user",
     )
 
+    rejected_corrections: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Values the bulk extraction proposed for an already-stored key that "
+            "the provenance rule refused to apply and that the user's message "
+            "contains (D-032); empty on every other turn"
+        ),
+    )
+
 
 # --------------------------------------------------------------
 # Response Generation Models (Pass 2)
