@@ -1279,8 +1279,16 @@ class MessagePipeline:
         # keys stay raw and skip-if-set. Agent FSMs (`agent_trace`) keep
         # handler-set state in config-covered keys, so they never overwrite.
         # Do NOT re-extract per field every turn (1+ LLM call per field per
-        # turn). Provenance is not persisted: fail closed after restore. See
-        # decisions.md D-015. The no-config fallback above keeps skip-if-set.
+        # turn). Provenance is persisted by save_session and re-seeded by
+        # restore_session as JSON-native digests (D-031 supersedes clause (3)
+        # "not persisted"): a file without it restores an empty map and fails
+        # closed, and the digest is still compared to the stored value, so a
+        # handler-seeded or update_context value is never overwritten. Bulk
+        # values validate at a fixed confidence 1.0, a classification-owned key
+        # is not correctable, and the digest map is visible in
+        # get_complete_conversation()['metadata'] and the session file (same
+        # trust domain as context_data). See decisions.md D-015, D-031. The
+        # no-config fallback above keeps skip-if-set.
         if has_extraction_instructions and (
             has_field_configs or has_classification_configs
         ):

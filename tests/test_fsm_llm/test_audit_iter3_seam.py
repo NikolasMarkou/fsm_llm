@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from fsm_llm import FileSessionStore
 from fsm_llm.definitions import (
     FieldExtractionConfig,
     FieldExtractionRequest,
@@ -19,7 +20,8 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.pipeline import MessagePipeline
-from tests.test_fsm_llm.test_audit_iter1_seam import _fake_response
+from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm, _fake_response
+from tests.test_fsm_llm.test_audit_iter2_seam import _Prov
 
 # ══════════════════════════════════════════════════════════════
 # Step 2 / RB-01: uncoercible confidence at the field-extraction rungs
@@ -435,3 +437,91 @@ class TestPlainTextRungParsesBeforeReplacing:
         _, message = _generate_counted('[{"message": "leak"}]')
         assert "leak" not in message
         assert message
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 10 / RB-05: provenance survives save_session / restore_session (D-031)
+# ══════════════════════════════════════════════════════════════
+
+
+def _restore_on_fresh_api(p: _Prov):
+    """Save the live conversation, then restore it on a second ``API``."""
+    p.api.save_session(p.cid)
+    saved_cid = p.cid
+    p.api = p.make_api()
+    restored = p.api.restore_session(saved_cid)
+    assert restored is not None
+    p.cid = restored[0]
+
+
+class TestProvenanceIsPersisted:
+    def test_a_correction_lands_after_restore_session(self, tmp_path):
+        """port of repros/restore_prov.py: RED on b1eac34, the value stays 'blue'."""
+        with _Prov(_correction_fsm(), store=FileSessionStore(str(tmp_path))) as p:
+            assert p.turn({"favorite_color": "blue"})["favorite_color"] == "blue"
+            _restore_on_fresh_api(p)
+            assert p.api.get_data(p.cid)["favorite_color"] == "blue"
+            assert p.turn(bulk={"favorite_color": "green"})["favorite_color"] == "green"
+
+    def test_the_restored_correction_can_be_corrected_again(self, tmp_path):
+        with _Prov(_correction_fsm(), store=FileSessionStore(str(tmp_path))) as p:
+            p.turn({"favorite_color": "blue"})
+            _restore_on_fresh_api(p)
+            p.turn(bulk={"favorite_color": "green"})
+            assert p.turn(bulk={"favorite_color": "teal"})["favorite_color"] == "teal"
+
+    def test_a_handler_seeded_value_is_still_not_corrected_after_restore(
+        self, tmp_path
+    ):
+        with _Prov(_correction_fsm(), store=FileSessionStore(str(tmp_path))) as p:
+            p.api.update_context(p.cid, {"favorite_color": "teal"})
+            _restore_on_fresh_api(p)
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "teal"
+
+    def test_a_value_changed_after_the_save_is_not_corrected_either(self, tmp_path):
+        """The digest is compared to the stored value, so an application edit
+        after restore still freezes the key."""
+        with _Prov(_correction_fsm(), store=FileSessionStore(str(tmp_path))) as p:
+            p.turn({"favorite_color": "blue"})
+            _restore_on_fresh_api(p)
+            p.api.update_context(p.cid, {"favorite_color": "teal"})
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "teal"
+
+    def test_an_old_session_file_without_provenance_restores_empty(self, tmp_path):
+        store = FileSessionStore(str(tmp_path))
+        with _Prov(_correction_fsm(), store=store) as p:
+            p.turn({"favorite_color": "blue"})
+            p.api.save_session(p.cid)
+            saved = store.load(p.cid)
+            assert saved is not None
+            assert "pipeline_extracted" in saved.metadata
+            saved.metadata.pop("pipeline_extracted")  # a pre-iteration-3 file
+            store.save(p.cid, saved)
+            saved_cid = p.cid
+            p.api = p.make_api()
+            restored = p.api.restore_session(saved_cid)
+            assert restored is not None
+            p.cid = restored[0]
+            instance = p.api.fsm_manager.instances[p.cid]
+            assert not instance.context.metadata.get("_pipeline_extracted")
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "blue"
+
+    def test_a_session_with_no_extracted_keys_writes_no_provenance(self, tmp_path):
+        store = FileSessionStore(str(tmp_path))
+        with _Prov(_correction_fsm(), store=store) as p:
+            p.api.save_session(p.cid)
+            saved = store.load(p.cid)
+            assert saved is not None
+            assert "pipeline_extracted" not in saved.metadata
+
+    def test_the_saved_digests_are_json_native(self, tmp_path):
+        store = FileSessionStore(str(tmp_path))
+        with _Prov(_correction_fsm(), store=store) as p:
+            p.turn({"favorite_color": "blue"})
+            p.api.save_session(p.cid)
+            saved = store.load(p.cid)
+            assert saved is not None
+            prov = saved.metadata["pipeline_extracted"]
+            assert set(prov) == {"favorite_color"}
+            assert all(isinstance(v, str) for v in prov.values())
+            json.dumps(saved.metadata)

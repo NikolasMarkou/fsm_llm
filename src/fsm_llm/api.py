@@ -115,6 +115,7 @@ from .handlers import (
 )
 from .llm import LiteLLMInterface, LLMInterface
 from .logging import handle_conversation_errors, logger
+from .pipeline import _PROVENANCE_KEY
 from .prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
@@ -1261,6 +1262,19 @@ class API:
         with self.fsm_manager._lock:
             instance = self.fsm_manager.instances.get(current_fsm_id)
             wm_obj = instance.context.working_memory if instance is not None else None
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-031: persist the D-015
+            # provenance digests so a correction still lands after a restart
+            # (RB-05: iteration 2 failed closed and every restored key was
+            # frozen with no log). Digests are JSON-native strings. Do NOT
+            # re-seed provenance for keys the file never carried: a value the
+            # store has no digest for stays handler-seeded (never overwritten).
+            prov = (
+                dict(instance.context.metadata.get(_PROVENANCE_KEY) or {})
+                if instance is not None
+                else {}
+            )
+        if prov:
+            state.metadata["pipeline_extracted"] = prov
         if wm_obj is not None and hasattr(wm_obj, "to_dict"):
             state.working_memory = {
                 "buffers": wm_obj.to_dict(),
@@ -1336,6 +1350,13 @@ class API:
 
         def _replay_and_restore_wm() -> None:
             self._replay_history(current_fsm_id, state.conversation_history)
+            # D-031: re-seed provenance; an old file has no key -> empty map
+            saved_prov = state.metadata.get("pipeline_extracted")
+            if isinstance(saved_prov, dict) and saved_prov:
+                with self.fsm_manager._lock:
+                    prov_instance = self.fsm_manager.instances.get(current_fsm_id)
+                if prov_instance is not None:
+                    prov_instance.context.metadata[_PROVENANCE_KEY] = dict(saved_prov)
             if state.working_memory:
                 # Single definition (not duplicated across the if/else arms):
                 # duplicating the hidden_buffers carry risks fixing one arm and

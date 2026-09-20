@@ -427,9 +427,11 @@ class TestProvenanceOnlyOverwrite:
             p.api.update_context(p.cid, {"favorite_color": "blue"})
             assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "blue"
 
-    def test_restore_session_fails_closed(self, tmp_path):
-        """Provenance is not persisted: after a restore a bulk value does not
-        overwrite a restored key (D-015 fail-closed)."""
+    def test_restore_session_persists_provenance(self, tmp_path):
+        """D-031 (iteration 3, was ``test_restore_session_fails_closed``):
+        provenance is persisted, so after a restore a bulk value DOES correct a
+        key the pipeline extracted (a handler-seeded key stays frozen: see
+        ``TestProvenanceIsPersisted`` in the iteration-3 seam file)."""
         store = FileSessionStore(str(tmp_path))
         with _Prov(_correction_fsm(), store=store) as p:
             assert p.turn({"favorite_color": "blue"})["favorite_color"] == "blue"
@@ -440,7 +442,7 @@ class TestProvenanceOnlyOverwrite:
             assert restored is not None
             p.cid = restored[0]
             assert p.api.get_data(p.cid)["favorite_color"] == "blue"
-            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "blue"
+            assert p.turn(bulk={"favorite_color": "red"})["favorite_color"] == "red"
 
     def test_agent_managed_fsm_never_overwrites_even_pipeline_values(self):
         with _Prov(_correction_fsm()) as p:
