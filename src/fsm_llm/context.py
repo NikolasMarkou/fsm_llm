@@ -64,6 +64,12 @@ class ContextCompactor:
         Intended as a ``PRE_PROCESSING`` handler callback.  Returns a dict
         with ``None`` values for every transient key present in *context*,
         which the handler system interprets as deletion.
+
+        The actual deletion (and, since D-018, the matching provenance
+        digest cleanup) happens in ``MessagePipeline.execute_handlers``'s
+        ``merge_delta`` (``pipeline.py``) -- this method only returns the
+        delta dict, it never touches ``context.data``/``context.metadata``
+        directly. See decisions.md D-018.
         """
         removals = {key: None for key in self.transient_keys if key in context}
         if removals:
@@ -76,6 +82,10 @@ class ContextCompactor:
         Intended as a ``POST_TRANSITION`` handler callback.  Reads
         ``_current_state`` (set by the pipeline on every transition) to
         determine which keys to prune.
+
+        See ``compact()``'s docstring above: the actual deletion (and, since
+        D-018, the matching provenance digest cleanup) happens in
+        ``pipeline.py``'s ``merge_delta``, not here.
         """
         target = context.get("_current_state", "")
         keys_to_clear = self.prune_on_entry.get(target, set())

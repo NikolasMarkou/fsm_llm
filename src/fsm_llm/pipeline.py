@@ -293,9 +293,28 @@ class MessagePipeline:
                         f"{sorted(delta)}"
                     )
                 return
+            # DECISION plan-2026-09-20T114608-a8e47b88/D-018
+            # This is the ONE place a handler-returned `None` deletes a
+            # context key -- `ContextCompactor.compact`/`prune` included.
+            # Those two only ever see `instance.context.data` (a plain dict,
+            # via this method's own `context` variable above); they cannot
+            # reach `.metadata` themselves and never delete anything
+            # directly, so the fix cannot live inside them without changing
+            # their public `context: dict[str, Any]` signature. Every
+            # None-delta deletion, from ANY handler, passes through here --
+            # do NOT special-case `ContextCompactor` with a second deletion
+            # site; that would leave the exact same stale-digest gap for
+            # every other handler using this same convention. A deleted
+            # key's provenance digest must go with it or a pruned
+            # low-entropy value's digest can outlive its plaintext in a
+            # persisted session file (findings/residual-findings-verify.md
+            # #8). See decisions.md D-018.
             for key, value in delta.items():
                 if value is None:
                     instance.context.data.pop(key, None)
+                    prov = instance.context.metadata.get(_PROVENANCE_KEY)
+                    if prov is not None:
+                        prov.pop(key, None)
                 else:
                     instance.context.data[key] = value
 

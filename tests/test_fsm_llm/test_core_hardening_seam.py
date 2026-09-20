@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.api import API
+from fsm_llm.context import ContextCompactor
 from fsm_llm.definitions import FieldExtractionConfig, FSMError, LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
@@ -1502,5 +1503,223 @@ class TestSaveSessionRaisesOnVanishedInstance:
 
             with pytest.raises(FSMError, match=conv_id):
                 api.save_session(conv_id)
+        finally:
+            api.close()
+
+
+def _prune_provenance_fsm() -> dict:
+    """Two states; ``email`` and ``advance`` are both extracted (and both get
+    real provenance recorded, D-015) in the SAME turn that transitions
+    ``start`` -> ``done``. A ``ContextCompactor.prune`` handler is registered
+    (by the test, not the fixture) to delete ``email`` on entry to ``done``.
+    """
+    return {
+        "name": "prune_provenance_fsm",
+        "description": "2-state FSM whose entry-state prunes an extracted key",
+        "version": "4.1",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "Collects an email and the advance signal",
+                "purpose": "Collect email and advance flag",
+                "required_context_keys": ["advance", "email"],
+                "response_instructions": "Acknowledge",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "advance flag present",
+                        "priority": 100,
+                        "conditions": [
+                            {
+                                "description": "advance flag present",
+                                "requires_context_keys": ["advance"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "Terminal state",
+                "purpose": "Say goodbye",
+                "transitions": [],
+            },
+        },
+    }
+
+
+def _prune_provenance_fsm_nonterminal_middle() -> dict:
+    """Three states, for ``compact()`` (PRE_PROCESSING fires every turn,
+    regardless of state) -- unlike ``_prune_provenance_fsm()``'s ``done``,
+    ``middle`` is deliberately NON-terminal (it carries a transitions list
+    whose condition never fires in this test) so a SECOND turn is legal:
+    ``has_conversation_ended``/``_process_message_locked`` reject a turn
+    once ``current_state.transitions`` is empty (``fsm.py:733``,
+    ``fsm.py:559``), so the two-state ``done``-terminal fixture cannot be
+    reused here.
+    """
+    return {
+        "name": "prune_provenance_fsm_nonterminal_middle",
+        "description": "3-state FSM; middle stays open for a second turn",
+        "version": "4.1",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "Collects an email and the advance signal",
+                "purpose": "Collect email and advance flag",
+                "required_context_keys": ["advance", "email"],
+                "response_instructions": "Acknowledge",
+                "transitions": [
+                    {
+                        "target_state": "middle",
+                        "description": "advance flag present",
+                        "priority": 100,
+                        "conditions": [
+                            {
+                                "description": "advance flag present",
+                                "requires_context_keys": ["advance"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "middle": {
+                "id": "middle",
+                "description": "Open state; never auto-transitions in this test",
+                "purpose": "Stay put for a second turn",
+                "response_instructions": "Acknowledge",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "never fires -- requires an unset key",
+                        "priority": 100,
+                        "conditions": [
+                            {
+                                "description": "finish flag present",
+                                "requires_context_keys": ["finish"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "Terminal state",
+                "purpose": "Say goodbye",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestContextCompactorPruneClearsProvenance:
+    """D-018 / findings/residual-findings-verify.md finding #8.
+
+    ``ContextCompactor.prune`` (and ``.compact``) delete a plaintext context
+    key via the same None-delta convention every handler uses, but the
+    matching provenance digest in ``context.metadata[_PROVENANCE_KEY]`` used
+    to survive -- a pruned low-entropy value's digest could outlive its
+    plaintext in a persisted session file, trivially reversible via a small
+    lookup table (the whole point of hashing it in the first place).
+    """
+
+    def _make_api(self, tmp_path):
+        llm = MockLLM2Interface(
+            extraction_data={"advance": "yes", "email": "user@example.com"}
+        )
+        store = FileSessionStore(tmp_path)
+        compactor = ContextCompactor(prune_on_entry={"done": {"email"}})
+        api = API.from_definition(
+            _prune_provenance_fsm(), llm_interface=llm, session_store=store
+        )
+        api.register_handler(
+            api.create_handler("pruner")
+            .at(HandlerTiming.POST_TRANSITION)
+            .do(compactor.prune)
+        )
+        return api, store
+
+    def test_prune_deletes_matching_provenance_digest(self, tmp_path):
+        api, store = self._make_api(tmp_path)
+        conv_id, _ = api.start_conversation()
+        try:
+            api.converse("please advance", conv_id)
+
+            assert api.get_current_state(conv_id) == "done"
+            data = api.get_data(conv_id)
+            assert "email" not in data, "prune did not remove the plaintext key"
+            assert data.get("advance") == "yes"
+
+            instance = api.fsm_manager.instances[conv_id]
+            prov = instance.context.metadata.get(_PROVENANCE_KEY) or {}
+            assert "email" not in prov, (
+                "provenance digest for a pruned key outlived its plaintext "
+                f"in live instance metadata: {prov!r}"
+            )
+            assert "advance" in prov, (
+                "surviving key's provenance was wrongly cleared too: "
+                f"{prov!r}"
+            )
+
+            # The persisted-file half of the same claim: a pruned key's
+            # digest must not reach `SessionState.metadata["pipeline_extracted"]`
+            # either (api.py:1308), not just the live in-memory instance.
+            api.save_session(conv_id)
+            persisted = store.load(conv_id)
+            assert persisted is not None, "save_session did not persist a session"
+            persisted_prov = persisted.metadata.get("pipeline_extracted") or {}
+            assert "email" not in persisted_prov, (
+                "pruned key's provenance digest survived into the persisted "
+                f"session file: {persisted_prov!r}"
+            )
+            assert "advance" in persisted_prov
+        finally:
+            api.close()
+
+    def test_compact_also_clears_provenance(self, tmp_path):
+        """Same claim, via ``compact()`` (PRE_PROCESSING, transient_keys) --
+        a DIFFERENT code path than ``prune()`` (POST_TRANSITION,
+        prune_on_entry) through the SAME ``merge_delta`` chokepoint. Both
+        must be covered: a fix scoped to only one of the two callbacks (or
+        to POST_TRANSITION timing specifically) would leave this path
+        broken.
+        """
+        llm = MockLLM2Interface(
+            extraction_data={"advance": "yes", "email": "user@example.com"}
+        )
+        store = FileSessionStore(tmp_path)
+        compactor = ContextCompactor(transient_keys={"email"})
+        api = API.from_definition(
+            _prune_provenance_fsm_nonterminal_middle(),
+            llm_interface=llm,
+            session_store=store,
+        )
+        api.register_handler(
+            api.create_handler("compactor")
+            .at(HandlerTiming.PRE_PROCESSING)
+            .do(compactor.compact)
+        )
+        conv_id, _ = api.start_conversation()
+        try:
+            # Turn 1: extracts both fields (email/advance), transitions
+            # "start" -> "middle" (non-terminal, so a second turn is legal).
+            api.converse("please advance", conv_id)
+            assert api.get_current_state(conv_id) == "middle"
+            instance = api.fsm_manager.instances[conv_id]
+            assert "email" in (instance.context.metadata.get(_PROVENANCE_KEY) or {})
+
+            # Turn 2 (still "middle", no field configs there to re-extract
+            # "email"): compact() fires at PRE_PROCESSING and clears the
+            # transient "email" key before this turn's own (empty)
+            # extraction pass runs.
+            api.converse("anything", conv_id)
+
+            assert "email" not in api.get_data(conv_id)
+            prov = instance.context.metadata.get(_PROVENANCE_KEY) or {}
+            assert "email" not in prov, (
+                f"compact()'s deletion left a stale provenance digest: {prov!r}"
+            )
         finally:
             api.close()
