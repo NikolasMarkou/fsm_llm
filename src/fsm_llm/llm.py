@@ -1089,7 +1089,17 @@ class LiteLLMInterface(LLMInterface):
                 # coerce_confidence maps NaN/±inf → default (1.0) and clamps to
                 # [0,1]; a `{...}`/`null` still raises TypeError/ValueError for
                 # the ladder below (D-001, utilities.py).
-                confidence = coerce_confidence(data.get("confidence", 1.0), 1.0)
+                try:
+                    confidence = coerce_confidence(data.get("confidence", 1.0), 1.0)
+                except (TypeError, ValueError):
+                    # DECISION plan-2026-09-19T175721-21cd7f8e/D-028
+                    # An unreadable score keeps the value the model returned at
+                    # 0.5 ("not scored"). Do NOT let it raise: the ladder then
+                    # reaches the unstructured rung, which stores the WHOLE JSON
+                    # TEXT as a valid str/any value. Do NOT default to 1.0 (it
+                    # would bypass an author `confidence_threshold`) or 0.0
+                    # (D-016 drops exact 0.0). See decisions.md D-028.
+                    confidence = 0.5
                 # D-020: `reasoning` carries max_length=5000 here too
                 # (definitions.py:347) — same trapdoor class as
                 # ResponseGenerationResponse.reasoning.
@@ -1128,7 +1138,14 @@ class LiteLLMInterface(LLMInterface):
                     # ValidationError — both would otherwise escape the ladder from
                     # this rung just as the unguarded construction did. NaN/±inf
                     # is now mapped to the 0.95 default first (D-001, utilities.py).
-                    confidence = coerce_confidence(data.get("confidence", 0.95), 0.95)
+                    try:
+                        confidence = coerce_confidence(
+                            data.get("confidence", 0.95), 0.95
+                        )
+                    except (TypeError, ValueError):
+                        # DECISION plan-2026-09-19T175721-21cd7f8e/D-028
+                        # Same rule as the primary rung: keep the value, 0.5.
+                        confidence = 0.5
                     reasoning = _safe_str(data.get("reasoning"))  # D-020
                     if value is not None:
                         logger.debug("Extracted field JSON via fallback")
