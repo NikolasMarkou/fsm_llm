@@ -112,7 +112,7 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/  # 1,805 tests
+pytest tests/test_fsm_llm/  # 1,831 tests
 ```
 
 - Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`
@@ -140,5 +140,5 @@ FSMError (base for all core exceptions)
 - Logging: `from fsm_llm.logging import logger`
 - Models: Pydantic v2 BaseModel with model_validator for complex validation
 - Exports: Single `__all__` list in `__init__.py` -- no dynamic extend/append
-- Security: Internal key prefixes stripped by clean_context_keys(). XML tag sanitization in prompts (`_TAG_PATTERN` in `prompts.py`: an opener/closer tail is `[^>]{0,256}/?>` or a 257-character overflow, so a closing tag with a nested `<` or a padded tail is escaped without a quadratic scan, D-047)
+- Security: Internal key prefixes stripped by clean_context_keys(). XML tag sanitization in prompts (`_TAG_PATTERN` in `prompts.py`: an opener/closer tail is `[^>]{0,256}/?>` or, as a zero-width lookahead, a 257-character overflow, so a closing tag with a nested `<` or a padded tail is escaped, only its `<` and name, without a quadratic scan and without touching the prose after it; `latency < threshold` stays raw, D-047)
 - Thread safety: Per-conversation RLocks in FSMManager

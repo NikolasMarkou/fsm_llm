@@ -194,8 +194,11 @@ class TestTagSanitizerIsLinear:
         out = builder._sanitize_text_for_prompt("<a" * 10000)
         elapsed = time.perf_counter() - start
         # D-047 trade-off (a): the bounded-tail pattern escapes an overflowing
-        # `<a...` chunk, so the exact output is no longer the input. What
+        # `<a...` opener, so the exact output is no longer the input. What
         # matters: fast, no raw structural closing tag, nothing lost.
+        # D-047 amendment (final review concern 1): the overflow arm is now a
+        # zero-width lookahead, so only each `<a` is escaped, not a 260-char
+        # chunk after it; the assertions below hold unchanged.
         import html
 
         assert elapsed < 0.5

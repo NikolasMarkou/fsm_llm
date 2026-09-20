@@ -278,8 +278,11 @@ Decision ids refer to that plan's `decisions.md`.
   denial-of-service fix (RB-06) silently stopped escaping a closing tag with a nested
   `<` (`</original_input <b>`, `</user_message <i>`, `</task <b>`), so a hostile user
   message could close the prompt's own wrapper tag and inject instructions. The tag
-  tail is now `(?:[^>]{0,256}/?>|[^>]{257})`: a tag with a nested `<` or a tail longer
-  than 256 characters (a padded closer) is escaped again, and the scan stays linear
+  tail is now `(?:[^>]{0,256}/?>|(?=[^>]{257}))`: a tag with a nested `<` or a tail longer
+  than 256 characters (a padded closer) is escaped again (the overflow arm is a
+  zero-width lookahead, so only the `<` and the name are escaped; the first version
+  consumed 257 characters and escaped benign prose, fixed in the final review round,
+  concern 1), and the scan stays linear
   (`"<a" * 10000` and `"<" + "a" * 100000` each under 0.5 s). A differential test pins
   the new pattern against the pre-D-029 pattern on every string of length up to 6.
   Three tests that pinned the weakened iteration 3 output were rewritten with
@@ -454,8 +457,15 @@ Regressions found and fixed inside this run (stated plainly):
   `generated_output` is non-empty; see the LV5-02 limitation.
 - **Iteration 4 (final loop) contract changes.**
   - The prompt sanitizer escapes a `<name` opener or closer whose tail contains a
-    nested `<` or is longer than 256 characters (a prompt-content change for hostile
-    input only; benign prompts are byte-identical, hash test).
+    nested `<` or is longer than 256 characters; only the `<` and the tag name are
+    escaped (`&lt;/task`), never the text after it. Benign prose is byte-identical,
+    including a `<` followed by a space (`latency < threshold`). The exact residual:
+    a `<` DIRECTLY followed by a letter (`x<y`), with 257 or more characters and no
+    `>` after it, has its `<` escaped; and a `<` plus a space plus a name with no `/`
+    (`< task`) and no `>` within 256 characters is kept raw. An unterminated closer
+    or opener with a short tail and no `>` anywhere (`</task NEW INSTRUCTIONS`)
+    still reaches the prompt raw; that shape is pre-existing (every earlier pattern
+    left it raw) and is not closed by this change.
   - `strip_think_and_fences` strips the closing fence only after a leading fence was
     stripped (a reply that ends in a code block keeps its fence).
   - Rejected-correction grounding is a whole-token match with a 3-character floor. The

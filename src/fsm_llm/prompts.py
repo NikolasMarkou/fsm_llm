@@ -163,9 +163,17 @@ class BasePromptBuilder:
     # The tail is an ALTERNATION with two arms, and both are load-bearing:
     #   `[^>]{0,256}/?>`  a tag closed within 256 characters (nested `<` allowed,
     #                     so `</original_input <b>` is one escaped match);
-    #   `[^>]{257}`       an OVERFLOWING tail matched WITHOUT its `>`, so a
-    #                     padded closer (`</task` + 300 characters + `>`) is still
-    #                     escaped instead of leaking raw.
+    #   `(?=[^>]{257})`   an OVERFLOWING tail seen by a ZERO-WIDTH lookahead, so
+    #                     a padded closer (`</task` + 300 characters + `>`) is
+    #                     still escaped, and only the `<` plus its name is
+    #                     matched, never the 257 characters after it.
+    # AMENDMENT (final review concern 1): the overflow arm first CONSUMED those
+    # 257 characters (`[^>]{257}`), so up to 260 characters of benign prose that
+    # merely held `<` and a letter, with no `>` anywhere, were HTML-escaped and
+    # cut off mid-sentence. Do NOT consume the tail again. Separately, a `<` and
+    # whitespace before a name with no `/` (`latency < threshold`) is a
+    # comparison, and an overflow-only match of that shape is kept raw in
+    # `_sanitize_text_for_prompt`; a closer (`< /task`) is not exempt.
     # The bound exists because an unbounded `[^>]*` scans to end-of-text for
     # every `<a` of `<a<a<a...` (quadratic on user text, 10k chars 2.5 s per
     # prompt, D-029). Do NOT go back to `[^<>]*` (iteration 3: a closer with a
@@ -174,7 +182,7 @@ class BasePromptBuilder:
     # D-038 guard in the substitution below: it stays load-bearing for a safe
     # tag whose tail holds a second `<`. See D-047 in decisions.md.
     _TAG_PATTERN = re.compile(
-        r"<(?:\s*/)?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]{0,256}/?>|[^>]{257})"
+        r"<(?:\s*/)?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]{0,256}/?>|(?=[^>]{257}))"
     )
 
     def __init__(self, config: BasePromptConfig | None = None):
@@ -211,16 +219,25 @@ class BasePromptBuilder:
         return self._TAG_PATTERN.sub(
             lambda m: (
                 m.group(0)
-                if m.group(1).lower() in self._SAFE_TAGS
-                # DECISION plan-2026-09-19T175721-21cd7f8e/D-038
-                # A whitelisted tag is kept raw ONLY if its text holds no second
-                # `<`. Before this guard `<b </task>` matched as ONE safe `<b>`
-                # tag (the attribute tail swallowed the nested `<`) and a hostile
-                # `</task>` reached the prompt unescaped. The pattern is now
-                # bounded `[^>]{0,256}` (D-047), which still swallows a nested
-                # `<`, so this guard is load-bearing again. Do NOT replace it
-                # with a parser (rewrite of a hot filter, D-038).
-                and "<" not in m.group(0)[1:]
+                if (
+                    # D-047 amendment: an overflow-only match holds no `>`; with
+                    # a space after `<` and no `/` it is a comparison, not a tag
+                    ">" not in m.group(0)
+                    and m.group(0)[1:2].isspace()
+                    and "/" not in m.group(0)
+                )
+                or (
+                    m.group(1).lower() in self._SAFE_TAGS
+                    # DECISION plan-2026-09-19T175721-21cd7f8e/D-038
+                    # A whitelisted tag is kept raw ONLY if its text holds no
+                    # second `<`. Before this guard `<b </task>` matched as ONE
+                    # safe `<b>` tag (the attribute tail swallowed the nested `<`)
+                    # and a hostile `</task>` reached the prompt unescaped. The
+                    # pattern is bounded `[^>]{0,256}` (D-047), which still
+                    # swallows a nested `<`, so this guard is load-bearing again.
+                    # Do NOT replace it with a parser (rewrite of a hot filter).
+                    and "<" not in m.group(0)[1:]
+                )
                 else html.escape(m.group(0))
             ),
             flat,
