@@ -1180,10 +1180,10 @@ class TestStateDiagramBoxTruncationIsVisibleAndUnambiguous:
         rows = _state_diagram_rows(output)
         assert len(rows) == 2
         assert any("ALPHA" in row for row in rows), (
-            f"ALPHA appears in neither STATE DIAGRAM row:\n" + "\n".join(rows)
+            "ALPHA appears in neither STATE DIAGRAM row:\n" + "\n".join(rows)
         )
         assert any("BRAVO" in row for row in rows), (
-            f"BRAVO appears in neither STATE DIAGRAM row:\n" + "\n".join(rows)
+            "BRAVO appears in neither STATE DIAGRAM row:\n" + "\n".join(rows)
         )
 
     def test_shortening_leaves_a_visible_marker(self, tmp_path):

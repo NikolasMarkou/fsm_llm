@@ -1234,10 +1234,20 @@ def create_state_boxes(
         )
 
         # State ID with state type (truncate to fit box width)
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-002
+        # This was the one sibling call site D-022's own comment (above,
+        # `_states_box_row`) named but did not migrate: a bare
+        # `[: box_width - 1]` head slice, no ellipsis, no tail preservation. Two
+        # TERMINAL/INITIAL states sharing a >60-char prefix rendered
+        # byte-identical rows here in the STATE DIAGRAM section of
+        # `--style full` output, even though `_fit` had already fixed the
+        # exact same defect for `create_states_section`/`create_transitions_section`
+        # (D-033). Routing through `_fit` completes that sweep; it does not
+        # reverse D-033. Do NOT go back to a bare slice here. See decisions.md D-002.
         box.append(
-            f"{style['vertical']} {state_id}{state_type_str}"[: box_width - 1].ljust(
-                box_width - 1
-            )
+            _fit(
+                f"{style['vertical']} {state_id}{state_type_str}", box_width - 1
+            ).ljust(box_width - 1)
             + f"{style['vertical']}"
         )
 
