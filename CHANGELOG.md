@@ -7,6 +7,136 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Second-layer core-engine audit (`plans/plan-2026-09-20T114608-a8e47b88`, 4 audit-fix
+iterations, each with its own regression tests and adversarial review, building on the
+0.6.0 audit release below). 9 items re-verified from that release's own "Known
+limitations" list still reproduced; 1 genuinely new correctness bug and 8 smaller gaps
+were found by an independent fresh sweep of `src/fsm_llm/`. Every one of the 10 items
+shipped with a regression test that reproduces the defect pre-fix and closes it
+post-fix (or, for one mechanical refactor, an equivalence proof both ways). Adversarial
+review ran at the end of every iteration and found real, reproduced problems each time
+(2 findings iteration 1, 5 iteration 2, 5 iteration 3, plus one the verifier itself
+found in iteration 3) -- every one caught and closed inside that same iteration's
+completion-fix, per this repo's own established audit practice. A live-Ollama
+regression pass (`ollama_chat/qwen3.5:9b-q8_0`, 27 calls across 2 of the 5
+pre-registered scenarios) found no regression in the sanitizer/`rejected_corrections`
+code paths this plan does not touch. Full suite: 6,091 tests collected (was 6,035),
+zero regressions; `ruff`/`mypy` clean across all 6 packages throughout.
+
+### Fixed
+
+- **`save_session` torn snapshot (D-005, D-009; `f9166f8`, `6c22714`).**
+  `FSMManager.get_conversation_snapshot` now reads state, internal-key-stripped data,
+  history, the working-memory dict and provenance metadata inside ONE
+  `_read_under_lock` hold; `api.py`'s `save_session` calls it instead of composing from
+  4 separately-locked reads. A concurrent turn landing in the gap between those reads
+  could previously persist pre-transition state paired with post-transition data.
+  `get_stack_depth` deliberately stays outside the snapshot (a separate, non-atomic
+  call): it is structural and `restore_session` ignores a session file's persisted
+  `stack_depth` entirely, so a torn pairing there is never read back.
+- **Visualizer truncation-ellipsis sweep completed (D-002, D-007; `ae83494`,
+  `cd26435`).** `create_state_boxes`'s STATE DIAGRAM row and `create_states_section`'s
+  icon-carrying row -- the sibling call site an earlier decision's own comment named
+  but never migrated -- now both route through the existing `_fit()` helper. Two
+  states sharing a long common prefix previously rendered byte-identical rows with no
+  truncation marker in `--style full` output; they now render distinguishably with a
+  middle-ellipsis marker, matching every other bordered row in the module.
+- **`restore_session`'s `fsm_id` mismatch is now observable, and `fsm_id` is
+  content-derived (D-011, D-016; `44ad994`, `e5a1415`).** `restore_session` logs a
+  `logger.warning(...)` (does not hard-fail, since `fsm_id` legitimately drifts across
+  additive schema upgrades) when `state.fsm_id != self.fsm_id`. `fsm_id` is now one
+  content hash of the parsed FSM definition (`fsm_{name}_{hash(model_dump())}`),
+  computed once after the dict / `FSMDefinition` / file construction paths converge --
+  replacing three separate per-branch hash inputs, one of which (the file path) carried
+  no content hash at all. This closes both the silent-restore-under-a-different-FSM gap
+  on `API.from_file`/the CLI path (the documented primary entry point -- exactly the
+  gap the 0.6.0 "Known limitations" list below named as `restore_session does not
+  compare fsm_id`) and a false-positive-mismatch-noise bug where the identical FSM
+  produced different ids depending on how it was constructed or loaded.
+- **`runner.py`'s CLI JSON logging survives a non-JSON-native context value (D-014,
+  D-015; `0e95801`, `c9f920d`).** Both `json.dumps(...)` call sites now pass
+  `default=_json_default`, a callable that emits a `<non-serializable: TypeName>`
+  placeholder and logs one WARNING -- never `str(obj)`/`repr(obj)` -- mirroring
+  `_redact_mapping`'s existing non-str-key WARNING pattern. A handler storing a
+  `datetime` (or any non-JSON-native value) no longer crashes the CLI's debug/dump
+  logging path; a secret-bearing object under a benign key no longer leaks its repr
+  into persisted logs on the very redaction path meant to protect it.
+- **`enable_debug_logging()` no longer duplicates log lines (D-013, D-015; `0eb3be7`,
+  `07b58f1`).** It now registers its stderr handler in `logging.py`'s existing
+  `_stream_handler_ids` dict, mirroring `setup_logging()`'s own registration, so a
+  later `setup_logging(sink="stderr", format="human")` call no longer adds a second
+  handler and every subsequent log line no longer prints twice. `src/fsm_llm/CLAUDE.md`'s
+  file map corrected (`enable_debug_logging`/`disable_warnings` live in `__init__.py`,
+  not `logging.py`). Three scope edges are now documented: the `fsm_llm` logger is
+  disabled by default, a `level=` request is silently dropped on the short-circuit
+  path, and the dedup covers only the exact `(stderr, human, context=False)` triple.
+- **A deleted context key's provenance digest no longer outlives its plaintext (D-018,
+  D-024; `8d4c05e`, `8bf5f18`).** `MessagePipeline`'s `merge_delta` -- the one place a
+  handler's `None`-delta convention actually deletes a context key -- now also pops the
+  matching entry from `context.metadata`'s provenance map, for any handler at any
+  non-ERROR timing (not just `ContextCompactor.compact`/`prune`, which never had a path
+  to `context.metadata` themselves). A completion-fix closed a gap this same fix
+  introduced: `_execute_state_transition`'s POST_TRANSITION rollback now snapshots and
+  restores `context.metadata` alongside `context.data`, so a handler-chain failure
+  after a provenance-clearing deletion no longer leaves the plaintext restored with its
+  digest permanently gone.
+- **`create_fancy_header`'s box width now matches every sibling section box (D-019;
+  `ab155a6`).** Capped to a fixed 60 columns (was `max(60, len(name) + 10)`), with the
+  FSM name routed through `_fit()`. An FSM name over roughly 50 characters previously
+  rendered a header box strictly wider than every box below it, with no truncation
+  guard of any kind.
+- **`execute_handlers` defers its context deep-copy (D-020, D-025; `7dfc60c`,
+  `2154af2`).** `HandlerSystem.execute_handlers` now deep-copies `context` only once
+  the first handler whose `should_execute()` passes is found, instead of
+  unconditionally before the loop -- zero deep copies when no registered handler at a
+  timing will run. A completion-fix hoisted the copy back above the per-handler
+  execution `try:` (a regression the deferral itself introduced): a non-deep-copyable
+  context value now raises a loud, correctly-attributed `TypeError` again in both error
+  modes, instead of being silently swallowed in the default `error_mode="continue"` or
+  misattributed to a handler that never actually ran in `error_mode="raise"`.
+- **`WorkingMemory.to_dict()`/`from_dict()` round-trip `_hidden_buffers` symmetrically
+  (D-021, D-026; `1a1c2f6`, `5eff8f5`, `47c081b`).** `to_dict()` now folds
+  `_hidden_buffers` into its own flat return; `from_dict()` reads it from there by
+  default, with an explicit kwarg still overriding. This closes a real gap in
+  `fsm_llm_agents/memory_persistence.py`'s `save_working_memory`/`load_working_memory`,
+  which call neither method with a `hidden_buffers` kwarg, so a custom hidden-buffer
+  set previously reset to the default on every file-backed reload. **Fix, not a new
+  behavior change to work around:** the reserved name `"_hidden_buffers"` is now
+  rejected with `ValueError` at every buffer-creation entry point (`set`,
+  `create_buffer`, `update_buffer`/`import_flat_data`, the constructor); previously a
+  buffer literally named `_hidden_buffers` -- reachable from LLM-chosen input via
+  `fsm_llm_agents/memory_tools.py`'s `remember(buffer=...)` tool -- had its entire
+  contents silently destroyed by `to_dict()`'s unconditional overwrite of that key.
+- **`llm.py`'s structural-presence `hasattr()` checks converted to `getattr()` (D-003,
+  D-022; `80417cd`, `0881317`).** 3 of the 4 flagged sites (the streaming loop's
+  `chunk.choices`; `_make_llm_call`'s `response.choices` and `choice.message`)
+  converted to `getattr(obj, "x", None)`-style checks, proven behaviorally identical to
+  their pre-conversion form for a genuinely missing (not just `None`-valued) attribute.
+  The 4th (`choice.message.content`) is deliberately kept as `hasattr()` -- a
+  documented exception, not an oversight: it must distinguish "attribute absent" from
+  "attribute present with value `None`" (the H3 Ollama reasoning-only-reply recovery
+  path needs exactly that distinction, and `getattr(x, "content", None) is not None`
+  cannot make it), confirmed empirically by temporarily forcing the conversion and
+  watching a real litellm-object-driven pre-existing test fail.
+
+### Known limitations
+
+- **7 items re-confirmed WONTFIX this plan, unchanged from the "Known limitations"
+  list under 0.6.0 below** (`decisions.md` D-004 of `plan-2026-09-20T114608-a8e47b88`
+  documents the reasoning for each): `handler_only_keys` stays opt-in (LV2-04); the
+  Pass-1 half-committed-turn design (CF-08) and the CONTEXT_UPDATE-provenance decline
+  (RB-04) still need their own superseding design, not a mechanical audit fix; the
+  history-cap recall (LV2-10) and the developer-text newline-flattening (LS-10) are
+  prompt-content changes gated on the still-stale `scripts/eval.py` baseline
+  (re-running it is out of this plan's scope); RB-08's per-transition extra-call cost
+  stays a documented-not-capped trade-off; and `EvaluatorOptimizerAgent.success` after
+  the refinement cap is out of this package's scope (`fsm_llm_agents`).
+- **The `scripts/eval.py` 95.3% baseline (N=3 median, Run 006) is now stale against
+  five audit iterations of prompt-adjacent and core-engine changes**, not just the four
+  the 0.6.0 entry below named -- this plan's own `context.py`/`pipeline.py` provenance
+  fix touches the same handler-execution path a prompt-content change would. Still not
+  re-measured; still a release gate before the baseline can be trusted.
+
 ## [0.6.0] - 2026-09-20
 
 Core-engine audit release (4 audit-fix loops over `src/fsm_llm`, each verified live on
