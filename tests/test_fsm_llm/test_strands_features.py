@@ -21,6 +21,7 @@ from fsm_llm import (
 )
 from fsm_llm.definitions import ResponseGenerationRequest, ResponseGenerationResponse
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.logging import logger as _fsm_logger
 from fsm_llm.memory import BUFFER_METADATA, DEFAULT_HIDDEN_BUFFERS
 
 # ================================================================
@@ -805,3 +806,103 @@ class TestSessionRestoreRoundTrip:
             all_data = restored_wm.get_all_data()
             assert "token" not in all_data
             assert "name" in all_data
+
+
+class TestRestoreSessionFsmIdMismatch:
+    """restore_session must WARNING-log (not hard-fail) when a restored
+    session's ``fsm_id`` does not match the restoring API instance's own
+    ``fsm_id`` (item 3 / D-011).
+
+    Two distinct FSM definitions can legitimately share a state name (both
+    of ``_minimal_fsm_dict``'s two variants below use "start"/"end") while
+    still being different FSMs -- ``process_fsm_definition`` hashes the
+    whole definition dict, including ``name``, so a differing ``name`` alone
+    is enough to produce a different ``fsm_id`` without any state-shape
+    difference. That is exactly the collision `restore_session` cannot see
+    from ``current_state`` validation alone.
+    """
+
+    @staticmethod
+    def _advance_and_save(store, fsm_name):
+        api = API(
+            fsm_definition=_minimal_fsm_dict(fsm_name),
+            llm_interface=MockLLM(),
+            session_store=store,
+        )
+        conv_id, _ = api.start_conversation()
+        api.converse("go", conv_id)
+        assert api.get_current_state(conv_id) == "end"
+        api.save_session(conv_id)
+        return api, conv_id
+
+    def test_mismatched_fsm_id_warns_but_still_restores(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            api_a, conv_id = self._advance_and_save(store, "fsm-a")
+
+            api_b = API(
+                fsm_definition=_minimal_fsm_dict("fsm-b"),
+                llm_interface=MockLLM(),
+                session_store=store,
+            )
+            # Distinct FSMs (different fsm_id) that happen to share the
+            # "start"/"end" state names -- the exact collision this test
+            # targets.
+            assert api_a.fsm_id != api_b.fsm_id
+
+            # The library disables its own logger namespace at import time
+            # (`logging.py`'s `logger.disable("fsm_llm")`); without
+            # re-enabling it here the sink below would collect nothing and
+            # the assertion below would pass for the wrong reason.
+            _fsm_logger.enable("fsm_llm")
+            records: list[dict] = []
+            sink_id = _fsm_logger.add(
+                lambda message: records.append(message.record), level="WARNING"
+            )
+            try:
+                result = api_b.restore_session(conv_id)
+            finally:
+                _fsm_logger.remove(sink_id)
+                _fsm_logger.disable("fsm_llm")
+
+            # Restore must still succeed -- fsm_id drift is not a hard-fail.
+            assert result is not None
+            rid, _restored_state = result
+            assert api_b.get_current_state(rid) == "end"
+
+            warnings = [r for r in records if r["level"].name == "WARNING"]
+            assert len(warnings) == 1, (
+                f"expected exactly 1 fsm_id-mismatch WARNING, got "
+                f"{len(warnings)}: {[str(r['message']) for r in records]}"
+            )
+            msg = str(warnings[0]["message"])
+            assert "fsm_id" in msg
+            assert api_a.fsm_id in msg
+            assert api_b.fsm_id in msg
+
+    def test_matched_fsm_id_does_not_warn(self):
+        """Control: same fsm_id round-trip fires no mismatch warning."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            api, conv_id = self._advance_and_save(store, "test")
+
+            api2 = API(
+                fsm_definition=_minimal_fsm_dict("test"),
+                llm_interface=MockLLM(),
+                session_store=store,
+            )
+            assert api.fsm_id == api2.fsm_id
+
+            _fsm_logger.enable("fsm_llm")
+            records: list[dict] = []
+            sink_id = _fsm_logger.add(
+                lambda message: records.append(message.record), level="WARNING"
+            )
+            try:
+                result = api2.restore_session(conv_id)
+            finally:
+                _fsm_logger.remove(sink_id)
+                _fsm_logger.disable("fsm_llm")
+
+            assert result is not None
+            assert not any("fsm_id" in str(r["message"]) for r in records)

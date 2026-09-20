@@ -1334,6 +1334,24 @@ class API:
         if state is None:
             return None
 
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-011
+        # A saved session's fsm_id legitimately drifts across additive schema
+        # upgrades (e.g. handler_only_keys: [] added to model_dump(), see
+        # CHANGELOG precedent) -- so this is a WARNING, not a hard-fail. Do
+        # NOT raise here: `set_conversation_state` below already guards the
+        # case that actually matters (a saved current_state that does not
+        # exist in THIS fsm_id's definition), and two definitions can share a
+        # state name (e.g. both have "start") without being the same FSM, so
+        # a mismatch can restore "successfully" onto semantically different
+        # states. This log is the operator-visible signal for that case.
+        if state.fsm_id != self.fsm_id:
+            logger.warning(
+                f"restore_session: saved session '{session_id}' was recorded "
+                f"under fsm_id='{state.fsm_id}' but this API instance is "
+                f"fsm_id='{self.fsm_id}' -- restoring anyway; verify this is "
+                "the intended FSM definition."
+            )
+
         # Start conversation with saved context. H9: _suppress_start=True skips
         # the START_CONVERSATION handlers and the Pass-2 greeting so a resume
         # does not re-fire start-of-conversation side effects.
