@@ -2287,8 +2287,26 @@ class MessagePipeline:
             target_state=target_state,
         )
 
-        # Deep-copy full context for rollback if POST_TRANSITION handlers fail
+        # Deep-copy full context for rollback if POST_TRANSITION handlers fail.
+        #
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-024
+        # Snapshot AND restore instance.context.metadata alongside
+        # instance.context.data, mirroring the turn-atomicity rollback pattern
+        # already used correctly at the pre_turn_* sites (search
+        # `pre_turn_metadata` in this file: pipeline.py:475-479/521-526/
+        # 606-611/647-652 all clear()+update() data AND metadata together from
+        # one pre-captured deepcopy pair). Before D-018, `merge_delta` never
+        # touched `metadata`, so a data-only snapshot here was safe -- D-018
+        # made `merge_delta` ALSO pop a deleted key's provenance digest out of
+        # `context.metadata[_PROVENANCE_KEY]` on a None-delta deletion. So a
+        # POST_TRANSITION handler chain where an earlier handler deletes a
+        # provenanced key (clearing its digest) and a LATER handler at the
+        # same timing raises left the plaintext key restored on rollback but
+        # its digest permanently gone -- data and metadata desynced. Do NOT
+        # snapshot `data` only "because metadata isn't touched here" -- that
+        # premise is no longer true. See decisions.md D-024.
         old_context_snapshot = copy.deepcopy(instance.context.data)
+        old_metadata_snapshot = copy.deepcopy(instance.context.metadata)
 
         instance.current_state = target_state
         instance.context.data.update(
@@ -2314,6 +2332,8 @@ class MessagePipeline:
             instance.current_state = old_state
             instance.context.data.clear()
             instance.context.data.update(old_context_snapshot)
+            instance.context.metadata.clear()
+            instance.context.metadata.update(old_metadata_snapshot)
             raise
 
         log.info(f"State transition executed: {old_state} -> {target_state}")

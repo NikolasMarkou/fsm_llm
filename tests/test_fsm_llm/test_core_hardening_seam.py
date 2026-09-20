@@ -1659,8 +1659,7 @@ class TestContextCompactorPruneClearsProvenance:
                 f"in live instance metadata: {prov!r}"
             )
             assert "advance" in prov, (
-                "surviving key's provenance was wrongly cleared too: "
-                f"{prov!r}"
+                f"surviving key's provenance was wrongly cleared too: {prov!r}"
             )
 
             # The persisted-file half of the same claim: a pruned key's
@@ -1721,5 +1720,91 @@ class TestContextCompactorPruneClearsProvenance:
             assert "email" not in prov, (
                 f"compact()'s deletion left a stale provenance digest: {prov!r}"
             )
+        finally:
+            api.close()
+
+
+class TestPostTransitionRollbackRestoresMetadata:
+    """D-024 (iter-3 completion-fix) / verifier's own live-repro finding.
+
+    D-018 made ``merge_delta`` ALSO pop a deleted key's provenance digest out
+    of ``context.metadata[_PROVENANCE_KEY]`` on a None-delta deletion (the
+    fix in ``TestContextCompactorPruneClearsProvenance`` above). But
+    ``_execute_state_transition``'s POST_TRANSITION rollback
+    (``pipeline.py``) snapshotted and restored ONLY ``context.data``, never
+    ``context.metadata`` -- a gap D-018's OWN fix introduced (pre-D-018,
+    ``merge_delta`` never touched metadata, so the data-only snapshot was
+    safe).
+
+    Reproduces the verifier's exact scenario: a POST_TRANSITION handler chain
+    where an EARLIER handler deletes a provenanced key (clearing its digest
+    via ``merge_delta``) and a LATER handler at the SAME timing raises. Before
+    D-024's fix, the rollback restored the plaintext key but left its
+    provenance digest permanently gone -- data and metadata desynced. After
+    the fix, both come back together (or would both stay gone together --
+    the invariant is that they can never desync).
+    """
+
+    def _make_api(self):
+        llm = MockLLM2Interface(
+            extraction_data={"advance": "yes", "email": "user@example.com"}
+        )
+        api = API.from_definition(_prune_provenance_fsm(), llm_interface=llm)
+        # Priority 10 (runs FIRST): deletes "email" via the standard
+        # None-delta convention -- the same convention
+        # ContextCompactor.prune uses (D-018's fix site), but here a plain
+        # lambda handler so this test does not depend on ContextCompactor at
+        # all.
+        api.register_handler(
+            create_handler("deleter")
+            .at(HandlerTiming.POST_TRANSITION)
+            .with_priority(10)
+            .do(lambda ctx: {"email": None})
+        )
+        # Priority 20 (runs SECOND, AFTER the deletion already landed):
+        # always raises, critical=True so it propagates and forces
+        # _execute_state_transition's rollback to fire.
+        api.register_handler(
+            _ExplodingHandler(
+                "exploder",
+                HandlerTiming.POST_TRANSITION,
+                priority=20,
+                critical=True,
+            )
+        )
+        return api
+
+    def test_rollback_restores_both_plaintext_and_provenance_digest_together(self):
+        api = self._make_api()
+        conv_id, _ = api.start_conversation()
+        try:
+            with pytest.raises(HandlerExecutionError, match="exploder"):
+                api.converse("please advance", conv_id)
+
+            # 1. The state transition never completed -- rolled back to "start".
+            assert api.get_current_state(conv_id) == "start"
+
+            instance = api.fsm_manager.instances[conv_id]
+            data = instance.context.data
+            prov = instance.context.metadata.get(_PROVENANCE_KEY) or {}
+
+            # 2. The deleter's None-delta deletion of "email" is fully undone
+            #    by the rollback: plaintext AND digest are BOTH back. Before
+            #    D-024, this next assertion is exactly where the bug showed:
+            #    "email" was back in `data` but permanently missing from
+            #    `prov` -- a desync a caller could never observe just by
+            #    checking `get_data()`.
+            assert "email" in data, "plaintext key was not restored by rollback"
+            assert data["email"] == "user@example.com"
+            assert "email" in prov, (
+                "provenance digest for a deleted-then-rolled-back key stayed "
+                f"gone after rollback -- data/metadata desync: {prov!r}"
+            )
+
+            # 3. The sibling key (never touched by the deleter) is unaffected
+            #    -- this is a targeted restore of the real pre-POST_TRANSITION
+            #    snapshot, not some broader accidental side effect.
+            assert data.get("advance") == "yes"
+            assert "advance" in prov
         finally:
             api.close()
