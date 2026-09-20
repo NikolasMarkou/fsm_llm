@@ -671,3 +671,181 @@ class TestInstructionOnlyKeyIsReported:
         )
         assert rejected == {}
         assert block is False
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 8.1 / LV6-01: a back-edge turn must not list an APPLIED value as rejected
+# ══════════════════════════════════════════════════════════════
+
+
+def _confirm_fsm() -> dict:
+    """`collect_name` owns a `user_name` config; `confirm` names user_name only in
+    its extraction_instructions (no config) and has a back edge to
+    `collect_name`. Live shape: findings/live-iter4/s2_backedge.py."""
+
+    def _cond(key: str, logic: dict) -> dict:
+        return {"description": key, "requires_context_keys": [key], "logic": logic}
+
+    return {
+        "name": "Confirm",
+        "description": "LV6-01",
+        "version": "4.1",
+        "initial_state": "collect_name",
+        "persona": "Concise.",
+        "states": {
+            "collect_name": {
+                "id": "collect_name",
+                "description": "collect name",
+                "purpose": "collect name",
+                "extraction_instructions": "Extract the user's name (user_name).",
+                "required_context_keys": ["user_name"],
+                "response_instructions": "Ask for the name.",
+                "transitions": [
+                    {
+                        "target_state": "confirm",
+                        "description": "have name",
+                        "priority": 100,
+                        "conditions": [
+                            _cond("user_name", {"has_context": "user_name"})
+                        ],
+                    }
+                ],
+            },
+            "confirm": {
+                "id": "confirm",
+                "description": "confirm the name",
+                "purpose": "confirm",
+                "extraction_instructions": (
+                    "Extract the user's name (user_name) and whether they want "
+                    "to change it (wants_change)."
+                ),
+                "required_context_keys": ["wants_change"],
+                "response_instructions": "Confirm the name.",
+                "transitions": [
+                    {
+                        "target_state": "collect_name",
+                        "description": "change requested",
+                        "priority": 10,
+                        "conditions": [
+                            _cond(
+                                "wants_change", {"==": [{"var": "wants_change"}, True]}
+                            )
+                        ],
+                    },
+                    {
+                        "target_state": "done",
+                        "description": "confirmed",
+                        "priority": 100,
+                        "conditions": [
+                            _cond("confirmed", {"has_context": "confirmed"})
+                        ],
+                    },
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "end",
+                "purpose": "end",
+                "response_instructions": "Done.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+def _confirm_turn(
+    bulks: list[dict],
+    message: str = "No, my name is actually Janet Doe.",
+    wants_change: bool = True,
+    agent: bool = False,
+    shout: bool = False,
+):
+    """t1 stores `Jane Doe` and lands in `confirm`; t2 is one real ``converse``
+    whose bulk passes return ``bulks`` in order (the last one repeats).
+    Returns (stored data, last response's rejected corrections, Pass-2 prompt)."""
+    from fsm_llm.handlers import HandlerTiming
+    from tests.test_fsm_llm.test_audit_iter3_seam import _PassTwoSpy
+
+    class _Seq(_PassTwoSpy):
+        def __init__(self, fsm):
+            super().__init__(fsm)
+            self.queue: list[dict] = []
+
+        def _completion(self, **kwargs):
+            if '"extracted_data"' in kwargs["messages"][0]["content"] and self.queue:
+                self.bulk = self.queue.pop(0) if len(self.queue) > 1 else self.queue[0]
+            return super()._completion(**kwargs)
+
+    with _Seq(_confirm_fsm()) as p:
+        if shout:
+            p.api.register_handler(
+                p.api.create_handler("shout")
+                .at(HandlerTiming.CONTEXT_UPDATE)
+                .on_context_update("user_name")
+                .do(lambda ctx: {"user_name": str(ctx["user_name"]).upper()})
+            )
+        p.field, p.bulk = {"user_name": "Jane Doe"}, {}
+        p.api.converse("Jane Doe", p.cid)
+        assert p.api.get_current_state(p.cid) == "confirm"
+        if agent:
+            p.api.update_context(p.cid, {"agent_trace": []})
+        p.field, p.queue, p.pass2 = {"wants_change": wants_change}, list(bulks), []
+        p.api.converse(message, p.cid)
+        rejected = dict(
+            p.api.fsm_manager.instances[
+                p.cid
+            ].last_extraction_response.rejected_corrections
+        )
+        return p.api.get_data(p.cid), rejected, p.pass2[-1]
+
+
+_JANET = {"user_name": "Janet Doe", "wants_change": True}
+
+
+class TestBackEdgeDoesNotListAnAppliedValueAsRejected:
+    def test_an_applied_back_edge_correction_is_not_reported_rejected(self):
+        """RED on ea49e53: the confirm-state bulk refuses `Janet Doe` (no config
+        there), the back edge's re-extraction then APPLIES it, and the stale
+        entry told Pass 2 the stored value was not changed."""
+        data, rejected, prompt = _confirm_turn([_JANET])
+        assert data["user_name"] == "Janet Doe"
+        assert rejected == {}
+        assert "<rejected_corrections>" not in prompt
+
+    def test_the_comparison_is_case_insensitive_like_the_merge_point(self):
+        data, rejected, prompt = _confirm_turn(
+            [_JANET, {"user_name": "janet doe", "wants_change": True}]
+        )
+        assert data["user_name"] == "janet doe"
+        assert rejected == {}
+        assert "<rejected_corrections>" not in prompt
+
+    def test_a_genuinely_refused_value_stays_listed(self):
+        """GUARD: a CONTEXT_UPDATE handler edited the stored value, so the
+        re-extraction's digest check refuses the overwrite; stored differs."""
+        data, rejected, prompt = _confirm_turn([_JANET], shout=True)
+        assert data["user_name"] == "JANE DOE"
+        assert rejected == {"user_name": "Janet Doe"}
+        assert "<rejected_corrections>" in prompt
+
+    def test_a_value_that_never_landed_stays_listed(self):
+        """GUARD: the re-extraction returns nothing, so the old name stands."""
+        data, rejected, prompt = _confirm_turn([_JANET, {"wants_change": True}])
+        assert data["user_name"] == "Jane Doe"
+        assert rejected == {"user_name": "Janet Doe"}
+        assert "<rejected_corrections>" in prompt
+
+    def test_a_turn_without_a_back_edge_is_unchanged(self):
+        """GUARD: no transition, so the refusal is reported as before."""
+        data, rejected, prompt = _confirm_turn(
+            [{"user_name": "Janet Doe", "wants_change": False}], wants_change=False
+        )
+        assert data["user_name"] == "Jane Doe"
+        assert rejected == {"user_name": "Janet Doe"}
+        assert "<rejected_corrections>" in prompt
+
+    def test_an_agent_managed_fsm_reports_none(self):
+        """GUARD: green on HEAD and after."""
+        _, rejected, prompt = _confirm_turn([_JANET], agent=True)
+        assert rejected == {}
+        assert "<rejected_corrections>" not in prompt

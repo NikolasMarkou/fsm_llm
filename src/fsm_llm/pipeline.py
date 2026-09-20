@@ -1006,6 +1006,23 @@ class MessagePipeline:
                                 current_state=instance.current_state,
                                 updated_keys=set(post_data.keys()),
                             )
+                    # DECISION plan-2026-09-19T175721-21cd7f8e/D-052 (LV6-01):
+                    # the source state's bulk may have refused a value that
+                    # this re-extraction just APPLIED (no config there, one
+                    # here); Pass 2 must not be told it was not changed. Drop
+                    # an entry only when the STORED value now equals it under
+                    # the merge point's own comparison. Do NOT drop by key: a
+                    # value a handler edited (or that never landed) is still
+                    # genuinely rejected and stays listed.
+                    rej = extraction_response.rejected_corrections
+                    for key in [
+                        k
+                        for k, v in rej.items()
+                        if k in instance.context.data
+                        and str(v).strip().lower()
+                        == str(instance.context.data[k]).strip().lower()
+                    ]:
+                        del rej[key]
                 except HandlerExecutionError:
                     # DECISION plan-2026-07-18T051819-80b0bd4d/D-012 [STALE]: a handler failure that
                     # escaped MessagePipeline.execute_handlers must propagate REGARDLESS
@@ -1462,6 +1479,8 @@ class MessagePipeline:
                         # an instruction-only key (no config) is never
                         # corrected (skip-if-set) but IS reported below under
                         # the same grounding test. Do NOT correct it here.
+                        # LV6-01: a back edge that then applies the value
+                        # prunes this entry (~line 1009).
                         if cfg is not None and prov.get(key) == _value_digest(current):
                             extracted_data[key] = value
                             log.debug(f"Bulk extraction corrected field: {key}")
