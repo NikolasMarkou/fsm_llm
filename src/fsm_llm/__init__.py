@@ -398,7 +398,16 @@ def quick_start(fsm_file: str, model: str | None = None) -> API:
 
 
 def enable_debug_logging():
-    """Enable debug logging for development."""
+    """Enable debug logging for development.
+
+    Note: the dedup against a later ``setup_logging()`` call (D-013) only
+    covers the EXACT ``(stderr, human, context=False)`` triple this handler
+    registers itself under. A ``setup_logging()`` call requesting a
+    different format (e.g. ``FSM_LLM_LOG_FORMAT=json``) or ``context=True``
+    on the same stderr sink still registers as a distinct handler and still
+    duplicates log lines -- by design, since those are legitimately
+    different handler shapes, not a dedup gap.
+    """
     from .constants import LOG_FORMAT_HUMAN, LOG_SINK_STDERR
     from .logging import (
         _library_handler_ids,

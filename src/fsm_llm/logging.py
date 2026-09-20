@@ -136,7 +136,13 @@ def setup_logging(
             Always included in JSON format.
 
     Returns:
-        Handler ID (can be used with logger.remove() to unregister).
+        Handler ID (can be used with logger.remove() to unregister), or
+        -1 if a handler for the same (sink, format, context) already
+        exists and was left untouched. Note: when that -1 short-circuit
+        fires because ``enable_debug_logging()`` already registered a
+        matching stream handler, this call's ``level`` argument is
+        silently NOT applied -- the pre-existing DEBUG handler survives
+        unchanged rather than being replaced or adjusted.
 
     Example:
         # Human-readable to stderr (development)
