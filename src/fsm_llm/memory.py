@@ -91,8 +91,18 @@ class WorkingMemory:
                 (``get_all_data``, ``to_scoped_view``) and ``search``.
                 Hidden buffers carry orchestration metadata that should
                 not appear in LLM prompts.  Defaults to ``{"metadata"}``.
+
+        Raises:
+            ValueError: If ``"_hidden_buffers"`` (the reserved key, D-026)
+                appears in *buffers*.
         """
         buffer_names = buffers or DEFAULT_BUFFERS
+        if self._HIDDEN_BUFFERS_DICT_KEY in buffer_names:
+            raise ValueError(
+                f"{self._HIDDEN_BUFFERS_DICT_KEY!r} is a reserved WorkingMemory "
+                "key (used by to_dict()/from_dict() to carry the hidden-buffer "
+                "set) and cannot be passed as a buffer name"
+            )
         # DECISION plan-2026-07-19T191147-4b664252/D-007 [STALE]: single NON-REENTRANT lock guarding
         # every read and write of `_buffers`. Acquisitions must NEVER nest: a public
         # method that needs another's body calls the lock-free `_*_locked()` twin
@@ -141,10 +151,15 @@ class WorkingMemory:
             buffer: Buffer name.
             key: Key to store.
             value: Value to store.
+
+        Raises:
+            ValueError: If *buffer* is the reserved name ``"_hidden_buffers"``
+                (see ``to_dict()``/``from_dict()``, D-026).
         """
         with self._lock:
-            if buffer not in self._buffers:
-                self._buffers[buffer] = {}
+            is_new = buffer not in self._buffers
+            self._create_buffer_locked(buffer)
+            if is_new:
                 logger.debug(f"Working memory: created buffer '{buffer}'")
             self._buffers[buffer][key] = value
 
@@ -211,10 +226,44 @@ class WorkingMemory:
         """Create a new empty buffer.
 
         No-op if the buffer already exists.
+
+        Raises:
+            ValueError: If *name* is the reserved name ``"_hidden_buffers"``
+                (see ``to_dict()``/``from_dict()``, D-026).
         """
         with self._lock:
-            if name not in self._buffers:
-                self._buffers[name] = {}
+            self._create_buffer_locked(name)
+
+    # DECISION plan-2026-09-20T114608-a8e47b88/D-026
+    # Single buffer-creation chokepoint for `set()`, `create_buffer()` and
+    # `_update_buffer_locked()` (hence `update_buffer()`/`import_flat_data()`
+    # too) -- those four call sites each used to inline their own
+    # `if name not in self._buffers: self._buffers[name] = {}` copy. Centralizing
+    # means the D-026 reserved-name guard below is written and tested ONCE,
+    # not kept in lockstep across 3-4 near-duplicate sites (review-iter-3
+    # WARNING 1: `to_dict()` unconditionally overwrites
+    # `result["_hidden_buffers"]`, so a buffer literally named that --
+    # reachable from LLM-chosen input via `fsm_llm_agents/memory_tools.py`'s
+    # `remember(buffer=...)`, which calls `WorkingMemory.set()` with a
+    # free-form string -- had its entire contents silently destroyed on the
+    # next serialization). Rejecting the name HERE, at every buffer-creation
+    # boundary, closes the hole at its root instead of warning-after-the-fact
+    # at `to_dict()` time (the data would already be gone by then). This is
+    # the WRITE boundary only -- `from_dict()`'s read-side interpretation of
+    # an embedded `"_hidden_buffers"` key in a pre-D-021 persisted dict is a
+    # SEPARATE, intentional design point (D-021) and is not touched here.
+    # See decisions.md D-026.
+    def _create_buffer_locked(self, name: str) -> None:
+        """Create ``name`` if absent. Caller MUST already hold ``self._lock``."""
+        if name == self._HIDDEN_BUFFERS_DICT_KEY:
+            raise ValueError(
+                f"{name!r} is a reserved WorkingMemory key (used by to_dict()/"
+                "from_dict() to carry the hidden-buffer set) and cannot be "
+                "used as a buffer name -- writing to it would be silently "
+                "destroyed by the next to_dict() call"
+            )
+        if name not in self._buffers:
+            self._buffers[name] = {}
 
     # ------------------------------------------------------------------
     # Aggregate views
@@ -438,9 +487,12 @@ class WorkingMemory:
 
         Caller MUST already hold ``self._lock``. Exists so :meth:`import_flat_data`
         can reuse the merge without re-acquiring the non-reentrant lock.
+
+        Raises:
+            ValueError: If *buffer* is the reserved name ``"_hidden_buffers"``
+                (see ``_create_buffer_locked``, D-026).
         """
-        if buffer not in self._buffers:
-            self._buffers[buffer] = {}
+        self._create_buffer_locked(buffer)
         self._buffers[buffer].update(data)
 
     def import_flat_data(
@@ -474,10 +526,19 @@ class WorkingMemory:
             names) so ``from_dict()`` can round-trip a custom
             ``hidden_buffers`` set without the caller hand-carrying it as a
             separate value. ``"_hidden_buffers"`` is not itself a buffer
-            name; a buffer genuinely named that (not a name any code in
-            this codebase creates) would collide and lose its hidden-set
-            membership on the round trip -- a documented, accepted edge
-            case, not silently mismatched (D-021).
+            name and CANNOT become one: ``set()``/``create_buffer()``/
+            ``update_buffer()``/``import_flat_data()``/``__init__`` all
+            funnel buffer creation through ``_create_buffer_locked()``,
+            which raises ``ValueError`` if a caller tries to use that
+            reserved name (D-026). Before D-026, a buffer literally named
+            ``"_hidden_buffers"`` was silently overwritten here -- not
+            merely "losing hidden-set membership" as this docstring
+            previously (and incorrectly) understated, but having its
+            ENTIRE CONTENTS destroyed, since this line assigns over
+            whatever ``result["_hidden_buffers"]`` already held. D-026
+            closes that at the write boundary, so this method can no longer
+            observe the collision at all -- see decisions.md D-021's
+            append-only correction and D-026 for the fix.
         """
         # DECISION plan-2026-09-20T114608-a8e47b88/D-021
         # `to_dict()` used to return ONLY the buffer dict; `from_dict()`

@@ -390,6 +390,61 @@ class TestWorkingMemoryHiddenBuffersRoundTrip:
         assert "_hidden_buffers" in d, "from_dict mutated the caller's dict"
 
 
+class TestWorkingMemoryReservedBufferNameRejected:
+    """D-026 (iter-3 completion-fix) / review-iter-3.md WARNING 1.
+
+    ``"_hidden_buffers"`` is the one key ``to_dict()`` embeds that is NOT a
+    buffer name (D-021). Before D-026, a buffer literally named that --
+    reachable from LLM-chosen input via
+    ``fsm_llm_agents/memory_tools.py``'s ``remember(buffer=...)`` tool, which
+    passes a free-form string straight into ``WorkingMemory.set()`` -- had
+    its ENTIRE CONTENTS silently destroyed the next time ``to_dict()`` ran
+    (``result["_hidden_buffers"] = hidden`` unconditionally overwrote it).
+    Every buffer-creation entry point now rejects the name outright instead.
+    """
+
+    def test_set_rejects_the_reserved_name(self):
+        memory = WorkingMemory()
+        with pytest.raises(ValueError, match="_hidden_buffers"):
+            memory.set("_hidden_buffers", "x", 1)
+
+    def test_create_buffer_rejects_the_reserved_name(self):
+        memory = WorkingMemory()
+        with pytest.raises(ValueError, match="_hidden_buffers"):
+            memory.create_buffer("_hidden_buffers")
+
+    def test_update_buffer_rejects_the_reserved_name(self):
+        memory = WorkingMemory()
+        with pytest.raises(ValueError, match="_hidden_buffers"):
+            memory.update_buffer("_hidden_buffers", {"x": 1})
+
+    def test_import_flat_data_rejects_the_reserved_name(self):
+        memory = WorkingMemory()
+        with pytest.raises(ValueError, match="_hidden_buffers"):
+            memory.import_flat_data({"x": 1}, target_buffer="_hidden_buffers")
+
+    def test_constructor_rejects_the_reserved_name(self):
+        with pytest.raises(ValueError, match="_hidden_buffers"):
+            WorkingMemory(buffers=["core", "_hidden_buffers"])
+
+    def test_rejection_leaves_no_partial_buffer_and_no_data_loss_on_to_dict(self):
+        """The regression this whole decision exists to close: attempting
+        the reserved name must never reach a state where to_dict() would
+        silently destroy something. Confirm the buffer was never created at
+        all, and a sibling legitimate buffer's data survives to_dict()
+        untouched."""
+        memory = WorkingMemory()
+        memory.set(BUFFER_CORE, "name", "Alice")
+
+        with pytest.raises(ValueError):
+            memory.set("_hidden_buffers", "x", 1)
+
+        assert "_hidden_buffers" not in memory.list_buffers()
+        d = memory.to_dict()
+        assert d[BUFFER_CORE] == {"name": "Alice"}
+        assert d["_hidden_buffers"] == sorted(DEFAULT_HIDDEN_BUFFERS)
+
+
 class TestWorkingMemoryLen:
     """Test __len__ and __repr__."""
 
