@@ -359,3 +359,79 @@ class TestInlineCodeFenceIsKept:
             return_value=_fake_response('text\n```json\n{"name": "Bob"}\n```\nmore'),
         ):
             assert llm.extract_bulk_data(request).extracted_data == {"name": "Bob"}
+
+
+# ══════════════════════════════════════════════════════════════
+# Step 8 / LS-03 + LS-04 (D-030, RB-03): the plain-text rung
+# ══════════════════════════════════════════════════════════════
+
+
+def _generate_counted(content: str):
+    """Return ``(provider_call_count, message)`` for an unstructured reply."""
+    req = ResponseGenerationRequest(
+        system_prompt="s",
+        user_message="u",
+        extracted_data={},
+        context={},
+        transition_occurred=False,
+        previous_state=None,
+    )
+    with (
+        patch("fsm_llm.llm.completion") as mock_comp,
+        patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            return_value=["response_format"],
+        ),
+    ):
+        mock_comp.return_value = _fake_response(content)
+        out = LiteLLMInterface(model="gpt-4o", api_key="k").generate_response(req)
+    return mock_comp.call_count, out.message
+
+
+class TestPlainTextRungParsesBeforeReplacing:
+    @pytest.mark.parametrize(
+        "text",
+        ["{name}, welcome! Your code is {code}", "{1, 2, 3}"],
+    )
+    def test_brace_shaped_prose_reaches_the_user_after_one_call(self, text):
+        assert _generate_counted(text) == (1, text)
+
+    def test_think_prefixed_prose_is_stripped(self):
+        assert _generate_counted("<think>plan it</think>Hello there") == (
+            1,
+            "Hello there",
+        )
+
+    def test_think_block_only_reply_is_not_emptied(self):
+        # `... or content`: a reply that is only a think block stays as it was
+        _, message = _generate_counted("<think>only</think>")
+        assert message == "<think>only</think>"
+
+    def test_a_parseable_object_without_message_still_gets_the_apology(self):
+        # D-022 accepted case, unchanged: the reply is an envelope by shape AND parse
+        _, message = _generate_counted('{"a": 1}')
+        assert message != '{"a": 1}'
+        assert message
+
+    def test_an_envelope_with_message_yields_the_message(self):
+        assert _generate_counted('{"message": "hi"}')[1] == "hi"
+
+    def test_a_truncated_envelope_still_recovers_the_message(self):
+        # the embedded-JSON rung above repairs it; the plain-text rung is not reached
+        assert _generate_counted('{"message": "hi"') == (1, "hi")
+
+    def test_a_malformed_brace_envelope_is_shown_as_text(self):
+        # D-030 trade-off (a), documented: brace-shaped but unparseable, so it is
+        # prose now, not the generic apology
+        text = '{"message": hi}'
+        assert _generate_counted(text) == (1, text)
+
+    def test_think_prefixed_envelope_yields_the_message(self):
+        assert _generate_counted('<think>x</think>{"message": "hi"}')[1] == "hi"
+
+    def test_a_valid_array_envelope_is_still_replaced(self):
+        # pinned by test_llm_parse_fallback_seam ('top-level-array'): a PARSEABLE
+        # non-object envelope is plumbing, not prose
+        _, message = _generate_counted('[{"message": "leak"}]')
+        assert "leak" not in message
+        assert message

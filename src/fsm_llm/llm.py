@@ -79,6 +79,7 @@ from .ollama import (
     prepare_ollama_messages,
 )
 from .utilities import (
+    _remove_think_blocks,
     _resolve_reasoning_trace,
     coerce_confidence,
     extract_json_from_text,
@@ -1049,14 +1050,38 @@ class LiteLLMInterface(LLMInterface):
         # That signal now exists for the structured branch (`structured`, D-020),
         # but this raw-text rung is still schema-blind.
         # See decisions.md D-022.
+        # D-030 (below) narrows the over-firing part: brace-shaped text that does
+        # not PARSE as JSON is prose and is no longer replaced.
         #
         # Reuses this class's own `_looks_like_json` and the module's
         # `extract_json_from_text`; core must not import the equivalent
         # `_is_extraction_envelope` from fsm_llm_agents/adapt.py.
+        #
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-030 (supersedes the shape-only
+        # test above; D-022's accepted `{"a": 1}` case is unchanged). The braces
+        # decide nothing alone: the text is replaced by the message or the
+        # apology ONLY when it PARSES as JSON (object or array), so brace-shaped prose
+        # ('{name}, welcome! ...', '{1, 2, 3}') reaches the user and D-020's retry
+        # no longer doubles the apology. <think> blocks are dropped first (a
+        # provider may inline them); keep the original when nothing else is left.
+        # Do NOT use strip_think_and_fences here: it would strip code fences from
+        # a reply that is legitimately prose. Trade-off: a brace-shaped but
+        # malformed envelope is now shown as text. See decisions.md D-030.
+        content = _remove_think_blocks(content).strip() or content
         if self._looks_like_json(content):
-            parsed = extract_json_from_text(content)
-            recovered = parsed.get("message") if isinstance(parsed, dict) else None
-            content = (_safe_str(recovered) or "").strip() or _GENERIC_FALLBACK_MESSAGE
+            parsed: Any = extract_json_from_text(content)
+            if parsed is None:
+                try:
+                    parsed = json.loads(content)  # a valid array envelope
+                except (ValueError, RecursionError):
+                    pass
+            if parsed is not None:
+                recovered = (
+                    _safe_str(parsed.get("message"))
+                    if isinstance(parsed, dict)
+                    else None
+                )
+                content = (recovered or "").strip() or _GENERIC_FALLBACK_MESSAGE
         return ResponseGenerationResponse(
             message=content[:_RESPONSE_MESSAGE_MAX_LEN],
             message_type="response",
