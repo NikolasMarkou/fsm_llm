@@ -461,19 +461,58 @@ class WorkingMemory:
     # Serialization
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> dict[str, dict[str, Any]]:
-        """Serialize to a plain dict of dicts.
+    # The one key in `to_dict()`'s return that is NOT a buffer name. Reused by
+    # both `to_dict`/`from_dict` below -- keep the two in lockstep (D-021).
+    _HIDDEN_BUFFERS_DICT_KEY = "_hidden_buffers"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict of dicts, plus the hidden-buffer set.
 
         Returns:
-            Dictionary mapping buffer names to their contents.
+            Dictionary mapping buffer names to their contents, PLUS one
+            extra ``"_hidden_buffers"`` key (sorted list of hidden buffer
+            names) so ``from_dict()`` can round-trip a custom
+            ``hidden_buffers`` set without the caller hand-carrying it as a
+            separate value. ``"_hidden_buffers"`` is not itself a buffer
+            name; a buffer genuinely named that (not a name any code in
+            this codebase creates) would collide and lose its hidden-set
+            membership on the round trip -- a documented, accepted edge
+            case, not silently mismatched (D-021).
         """
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-021
+        # `to_dict()` used to return ONLY the buffer dict; `from_dict()`
+        # accepted `hidden_buffers` as a caller-supplied kwarg, defaulting to
+        # `DEFAULT_HIDDEN_BUFFERS` when omitted -- so a caller that round-tripped
+        # through `to_dict()`/`from_dict()` (or a file, see
+        # `fsm_llm_agents/memory_persistence.py`'s `save_working_memory`/
+        # `load_working_memory`, which call these two with NO `hidden_buffers`
+        # kwarg at all) silently lost a custom hidden-buffer set and fell back
+        # to the default on every reload. The extra `"_hidden_buffers"` key
+        # is deliberately embedded IN the same flat dict (not a
+        # `{"buffers": ..., "hidden_buffers": ...}` wrapper) so this widened
+        # `dict[str, Any]` return type is still assignable everywhere the OLD
+        # `dict[str, dict[str, Any]]`-typed return was used positionally (no
+        # existing caller unpacks a nested "buffers" key). `from_dict()` MUST
+        # pop this key out before treating the rest of `data` as buffer names
+        # -- see its own comment below. `api.py`'s `save_session`/
+        # `restore_session` already hand-carry `hidden_buffers` as a SIBLING
+        # `SessionState.working_memory["hidden_buffers"]` key (fsm.py's
+        # `get_conversation_snapshot`) and pass it explicitly to `from_dict`,
+        # so the explicit kwarg there always wins over this embedded default
+        # (see decisions.md D-021 for why that path is left unchanged rather
+        # than migrated to lean on the fold-in).
         with self._lock:
-            return {name: dict(data) for name, data in self._buffers.items()}
+            result: dict[str, Any] = {
+                name: dict(data) for name, data in self._buffers.items()
+            }
+            hidden = sorted(self._hidden_buffers)
+        result[self._HIDDEN_BUFFERS_DICT_KEY] = hidden
+        return result
 
     @classmethod
     def from_dict(
         cls,
-        data: dict[str, dict[str, Any]],
+        data: dict[str, Any],
         # `builtins.set` disambiguates from `WorkingMemory.set` (the method), which
         # mypy otherwise resolves in classmethod scope under `from __future__
         # import annotations`. Same type as before — annotation-only.
@@ -482,13 +521,25 @@ class WorkingMemory:
         """Deserialize from a plain dict of dicts.
 
         Args:
-            data: Dictionary mapping buffer names to their contents.
+            data: Dictionary mapping buffer names to their contents. May
+                also carry a ``"_hidden_buffers"`` key, as emitted by
+                ``to_dict()`` (D-021) -- if present, it is popped out
+                before the remaining keys are treated as buffer names, and
+                used as the DEFAULT hidden-buffer set.
             hidden_buffers: Buffer names to exclude from aggregate views.
-                Defaults to ``DEFAULT_HIDDEN_BUFFERS``.
+                Takes precedence over an embedded ``"_hidden_buffers"`` key
+                in *data* when both are given (back-compat override).
+                Defaults to ``DEFAULT_HIDDEN_BUFFERS`` when NEITHER is given
+                (e.g. *data* came from a pre-D-021 ``to_dict()`` call, or a
+                hand-built dict with no such key).
 
         Returns:
             New WorkingMemory instance.
         """
+        data = dict(data)  # shallow copy: never mutate the caller's dict
+        embedded_hidden = data.pop(cls._HIDDEN_BUFFERS_DICT_KEY, None)
+        if hidden_buffers is None and embedded_hidden is not None:
+            hidden_buffers = frozenset(embedded_hidden)
         buffer_names = list(data.keys())
         memory = cls(buffers=buffer_names, hidden_buffers=hidden_buffers)
         for name, contents in data.items():

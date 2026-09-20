@@ -11,6 +11,7 @@ from fsm_llm.memory import (
     BUFFER_REASONING,
     BUFFER_SCRATCH,
     DEFAULT_BUFFERS,
+    DEFAULT_HIDDEN_BUFFERS,
     WorkingMemory,
 )
 
@@ -314,6 +315,79 @@ class TestWorkingMemorySerialization:
         restored = WorkingMemory.from_dict(memory.to_dict())
         assert restored.get(BUFFER_CORE, "name") == "Alice"
         assert restored.get(BUFFER_ENVIRONMENT, "result") == [1, 2, 3]
+
+
+# ==================================================================
+# D-021 / fresh-audit-sweep.md finding: to_dict() never emitted
+# _hidden_buffers; from_dict() accepted it only as a separate kwarg,
+# defaulting to DEFAULT_HIDDEN_BUFFERS when omitted -- so a caller that
+# round-trips through to_dict()/from_dict() with NO explicit kwarg (e.g.
+# fsm_llm_agents.memory_persistence.save_working_memory/load_working_memory)
+# silently lost a custom hidden_buffers set on every reload.
+# ==================================================================
+
+
+class TestWorkingMemoryHiddenBuffersRoundTrip:
+    def test_to_dict_emits_hidden_buffers_key(self):
+        """The exact fold-in claim: to_dict()'s OWN output carries the set,
+        not just the buffer contents."""
+        memory = WorkingMemory(hidden_buffers={"metadata", "audit_trail"})
+        d = memory.to_dict()
+        assert set(d["_hidden_buffers"]) == {"metadata", "audit_trail"}
+
+    def test_from_dict_round_trips_a_custom_hidden_buffers_set_with_no_kwarg(self):
+        """The plan's exact scenario: from_dict(to_dict()) with NO caller
+        hand-carrying hidden_buffers separately."""
+        memory = WorkingMemory(hidden_buffers={"metadata", "audit_trail"})
+        memory.set(BUFFER_CORE, "name", "Alice")
+
+        restored = WorkingMemory.from_dict(memory.to_dict())
+
+        assert restored._hidden_buffers == frozenset({"metadata", "audit_trail"})
+        assert restored.get(BUFFER_CORE, "name") == "Alice"
+
+    def test_hidden_buffers_key_is_not_treated_as_a_real_buffer(self):
+        """Over-correction guard: from_dict must POP the embedded key, not
+        leave it to be misinterpreted as a buffer name (which would corrupt
+        list_buffers() and crash a second round-trip, since its value is a
+        list, not a dict of buffer contents)."""
+        memory = WorkingMemory(hidden_buffers={"metadata"})
+        memory.set(BUFFER_CORE, "name", "Alice")
+
+        restored = WorkingMemory.from_dict(memory.to_dict())
+
+        assert "_hidden_buffers" not in restored.list_buffers()
+        # A SECOND round-trip must not raise (would, if the list leaked
+        # through as a phantom buffer's "contents").
+        twice = WorkingMemory.from_dict(restored.to_dict())
+        assert twice.get(BUFFER_CORE, "name") == "Alice"
+
+    def test_explicit_kwarg_still_overrides_the_embedded_default(self):
+        """Back-compat: an explicit hidden_buffers= kwarg wins over whatever
+        to_dict() embedded, matching api.py's existing restore_session call
+        shape (it always passes hidden_buffers= explicitly)."""
+        memory = WorkingMemory(hidden_buffers={"metadata"})
+        restored = WorkingMemory.from_dict(
+            memory.to_dict(), hidden_buffers={"custom_override"}
+        )
+        assert restored._hidden_buffers == frozenset({"custom_override"})
+
+    def test_data_with_no_embedded_key_still_defaults_normally(self):
+        """A pre-D-021 to_dict() output (or any hand-built dict with no
+        "_hidden_buffers" key) must still fall back to DEFAULT_HIDDEN_BUFFERS,
+        exactly like before this fix -- the same assertion
+        TestWorkingMemorySerialization.test_from_dict's plain dict already
+        implicitly relies on."""
+        data = {"core": {"name": "Alice"}}
+        memory = WorkingMemory.from_dict(data)
+        assert memory._hidden_buffers == DEFAULT_HIDDEN_BUFFERS
+
+    def test_original_to_dict_output_is_not_mutated_by_from_dict(self):
+        """from_dict() must not pop the caller's own dict in place."""
+        memory = WorkingMemory(hidden_buffers={"metadata"})
+        d = memory.to_dict()
+        WorkingMemory.from_dict(d)
+        assert "_hidden_buffers" in d, "from_dict mutated the caller's dict"
 
 
 class TestWorkingMemoryLen:

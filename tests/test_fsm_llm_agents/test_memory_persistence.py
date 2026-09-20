@@ -45,6 +45,27 @@ class TestWorkingMemoryFileHelpers:
         save_working_memory(_memory(), path)
         assert load_working_memory(path).get(BUFFER_CORE, "name") == "Ada"
 
+    def test_custom_hidden_buffers_survive_the_file_round_trip(self, tmp_path):
+        """fsm_llm.memory D-021: these two helpers call
+        WorkingMemory.to_dict()/from_dict() with NO hidden_buffers kwarg at
+        all -- exactly the caller shape D-021 fixed. Before that fix, a
+        custom hidden-buffer set silently reset to DEFAULT_HIDDEN_BUFFERS on
+        every reload through this file-backed path."""
+        memory = WorkingMemory(
+            buffers=("core", "secret"), hidden_buffers=frozenset({"secret"})
+        )
+        memory.set(BUFFER_CORE, "name", "Ada")
+        memory.set("secret", "token", "sk-xyz")
+
+        path = str(tmp_path / "mem_hidden.json")
+        save_working_memory(memory, path)
+        loaded = load_working_memory(path)
+
+        assert loaded.get("secret", "token") == "sk-xyz"
+        all_data = loaded.get_all_data()
+        assert "token" not in all_data, "the restored buffer was not hidden"
+        assert "name" in all_data
+
 
 class TestMemorySessionStore:
     def test_requires_base_or_directory(self):
