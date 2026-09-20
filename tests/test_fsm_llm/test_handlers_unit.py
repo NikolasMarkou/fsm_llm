@@ -6,6 +6,7 @@ HandlerExecutionError, priority ordering, context cascading, and metadata tracki
 """
 
 import copy
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -311,6 +312,79 @@ class TestExecuteHandlersDeepCopyDeferral:
         result = hs.execute_handlers(HandlerTiming.PRE_PROCESSING, "s1", None, {})
         assert result["flag"] is True
         assert result["saw_flag"] is True
+
+
+class TestExecuteHandlersDeepCopyFailureIsNotSwallowed:
+    """D-025 (iter-3 completion-fix) / review-iter-3.md WARNING 2.
+
+    D-020 moved ``copy.deepcopy(context)`` INSIDE the per-handler ``try:``
+    block that was meant to catch handler EXECUTION errors. That meant a
+    non-deep-copyable context value (e.g. a live ``threading.Lock`` a caller
+    left in ``context``) with a handler that WOULD qualify:
+
+    * under the default ``error_mode="continue"``: silently produced ``{}``
+      -- no exception, the handler simply never ran -- instead of the bare
+      ``TypeError`` it raised pre-D-020.
+    * under ``error_mode="raise"``: raised ``HandlerExecutionError``
+      attributed to the qualifying handler, even though that handler was
+      NEVER actually invoked -- the deep-copy failed before ``execute()``
+      was ever called.
+
+    D-025 hoists the deep-copy back out of the handler-execution ``try:``
+    (it still only runs once ``should_execute()`` has confirmed a qualifying
+    handler was found, preserving D-020's deferral benefit) so a
+    non-deep-copyable context value raises loudly, in both error modes,
+    out of ``execute_handlers`` itself.
+    """
+
+    def _context_with_non_deep_copyable_value(self):
+        return {"lock": threading.Lock(), "a": 1}
+
+    def test_continue_mode_raises_instead_of_silently_swallowing(self):
+        hs = HandlerSystem(error_mode="continue")
+        hs.register_handler(AlwaysRunHandler(name="qualifies", result={"x": 1}))
+
+        with pytest.raises(TypeError):
+            hs.execute_handlers(
+                HandlerTiming.PRE_PROCESSING,
+                "s1",
+                None,
+                self._context_with_non_deep_copyable_value(),
+            )
+
+    def test_raise_mode_raises_a_copy_failure_not_a_handler_attribution(self):
+        hs = HandlerSystem(error_mode="raise")
+        hs.register_handler(AlwaysRunHandler(name="qualifies", result={"x": 1}))
+
+        # The deep-copy failure must surface as the plain TypeError it is,
+        # not get wrapped into a HandlerExecutionError that names "qualifies"
+        # as the failing handler -- that handler never actually ran.
+        with pytest.raises(TypeError) as excinfo:
+            hs.execute_handlers(
+                HandlerTiming.PRE_PROCESSING,
+                "s1",
+                None,
+                self._context_with_non_deep_copyable_value(),
+            )
+        assert "qualifies" not in str(excinfo.value)
+
+    def test_handler_genuinely_never_ran_when_copy_fails(self):
+        """The qualifying handler's ``execute()`` must never be reached."""
+        ran = []
+        hs = HandlerSystem(error_mode="continue")
+        hs.register_handler(
+            create_handler("would_run").do(lambda ctx: ran.append(True) or {})
+        )
+
+        with pytest.raises(TypeError):
+            hs.execute_handlers(
+                HandlerTiming.PRE_PROCESSING,
+                "s1",
+                None,
+                self._context_with_non_deep_copyable_value(),
+            )
+
+        assert ran == [], "handler's execute() ran despite the deep-copy failure"
 
 
 # ══════════════════════════════════════════════════════════════

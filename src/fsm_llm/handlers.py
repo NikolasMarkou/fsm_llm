@@ -361,6 +361,24 @@ class HandlerSystem:
         # more often.
         updated_context: dict[str, Any] | None = None
 
+        def _report_and_maybe_raise(
+            handler_name: str, handler: FSMHandler, exc: Exception
+        ) -> None:
+            """Log + apply the configured error_mode for a failure at ``handler``.
+
+            Shared by the ``should_execute()`` probe and the actual handler
+            execution below so both failure points get identical error-mode
+            semantics without duplicating the raise/continue decision twice.
+            Raises ``HandlerExecutionError`` (critical or error_mode="raise");
+            otherwise returns normally (error_mode="continue").
+            """
+            error = HandlerExecutionError(handler_name, exc)
+            logger.error(f"{error!s}\n{traceback.format_exc()}")
+            is_critical = getattr(handler, "critical", False)
+            if self.error_mode == "raise" or is_critical:
+                error.partial_context = dict(output_context)
+                raise error from exc
+
         # Execute applicable handlers in priority order (lower priority numbers first)
         for handler in candidates:
             handler_name = getattr(handler, "name", handler.__class__.__name__)
@@ -368,39 +386,53 @@ class HandlerSystem:
 
             try:
                 # Check if this handler should execute based on current conditions
-                if handler.should_execute(
+                should_run = handler.should_execute(
                     timing, current_state, target_state, probe_context, updated_keys
-                ):
-                    if updated_context is None:
-                        updated_context = copy.deepcopy(context)
+                )
+            except Exception as e:
+                _report_and_maybe_raise(handler_name, handler, e)
+                continue  # error_mode == "continue": move to the next handler
 
-                    logger.debug(f"Executing handler {handler_name} at {timing.name}")
+            if not should_run:
+                continue
 
-                    # Execute the handler with optional timeout
-                    result = self._execute_single_handler(
-                        handler, updated_context, handler_name
-                    )
+            # DECISION plan-2026-09-20T114608-a8e47b88/D-025
+            # copy.deepcopy(context) now runs OUTSIDE the handler-EXECUTION
+            # try/except below (D-020 originally placed it inside that try,
+            # alongside should_execute()). should_execute() has ALREADY
+            # confirmed this handler will run by this point, so D-020's
+            # "defer the copy until the first qualifying handler" benefit is
+            # unchanged -- this only moves WHERE the copy is attempted, not
+            # WHEN. A non-deep-copyable context value (e.g. a live
+            # threading.Lock a caller left in context) is a caller bug, not a
+            # handler-execution failure: pre-D-020 it raised a bare
+            # TypeError straight out of execute_handlers. With the copy
+            # inside the try, the default error_mode="continue" silently
+            # swallowed it (empty dict, handler never ran, no exception) and
+            # error_mode="raise" misattributed it to a handler that was never
+            # actually invoked. Do NOT move this back inside the try below --
+            # that reintroduces both regressions. See decisions.md D-025.
+            if updated_context is None:
+                updated_context = copy.deepcopy(context)
 
-                    # Update context with handler result if valid
-                    if result and isinstance(result, dict):
-                        updated_context.update(result)
-                        output_context.update(result)
+            logger.debug(f"Executing handler {handler_name} at {timing.name}")
 
-                    logger.debug(f"Handler {handler_name} completed successfully")
+            try:
+                # Execute the handler with optional timeout
+                result = self._execute_single_handler(
+                    handler, updated_context, handler_name
+                )
+
+                # Update context with handler result if valid
+                if result and isinstance(result, dict):
+                    updated_context.update(result)
+                    output_context.update(result)
+
+                logger.debug(f"Handler {handler_name} completed successfully")
 
             except Exception as e:
-                # Create structured error with context about the failed handler
-                error = HandlerExecutionError(handler_name, e)
-                logger.error(f"{error!s}\n{traceback.format_exc()}")
-
-                # Handle the error according to the configured error mode
-                # Critical handlers always raise, even in "continue" mode
-                is_critical = getattr(handler, "critical", False)
-                if self.error_mode == "raise" or is_critical:
-                    error.partial_context = dict(output_context)
-                    raise error from e
-                elif self.error_mode == "continue":
-                    continue  # Log the error and continue to next handler
+                _report_and_maybe_raise(handler_name, handler, e)
+                continue  # error_mode == "continue": move to the next handler
 
         return output_context
 
