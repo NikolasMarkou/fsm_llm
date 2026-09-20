@@ -906,3 +906,94 @@ class TestRestoreSessionFsmIdMismatch:
 
             assert result is not None
             assert not any("fsm_id" in str(r["message"]) for r in records)
+
+    def test_file_overwritten_in_place_warns_on_restore(self):
+        """D-016 / review-iter-2.md CRITICAL 1 regression (reviewer's own
+        live probe, reproduced as a unit test): a session saved under an
+        `API` built from an FSM FILE PATH (``API.from_file``, the
+        documented primary/CLI construction path) must still trigger the
+        fsm_id mismatch WARNING when that same path is later overwritten
+        in place with a semantically different FSM and restored via a
+        second `API` built from the same path. Pre-D-016, `fsm_id` was
+        `fsm_file_{path}` -- content-independent -- so this scenario fired
+        ZERO warnings; the raw-dict-path test above never exercised it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fsm_path = Path(tmpdir) / "fsm.json"
+            fsm_path.write_text(json.dumps(_minimal_fsm_dict("Alpha")))
+
+            store = FileSessionStore(tmpdir)
+            api_alpha = API.from_file(
+                str(fsm_path), llm_interface=MockLLM(), session_store=store
+            )
+            conv_id, _ = api_alpha.start_conversation()
+            api_alpha.converse("go", conv_id)
+            assert api_alpha.get_current_state(conv_id) == "end"
+            api_alpha.save_session(conv_id)
+
+            # Overwrite the SAME path in place with a semantically
+            # different FSM -- same "start"/"end" state names, different
+            # content -- exactly the reviewer's live-probe scenario.
+            fsm_path.write_text(json.dumps(_minimal_fsm_dict("Omega")))
+            api_omega = API.from_file(
+                str(fsm_path), llm_interface=MockLLM(), session_store=store
+            )
+
+            assert api_alpha.fsm_id != api_omega.fsm_id
+
+            _fsm_logger.enable("fsm_llm")
+            records: list[dict] = []
+            sink_id = _fsm_logger.add(
+                lambda message: records.append(message.record), level="WARNING"
+            )
+            try:
+                result = api_omega.restore_session(conv_id)
+            finally:
+                _fsm_logger.remove(sink_id)
+                _fsm_logger.disable("fsm_llm")
+
+            # Restore still succeeds -- WARNING, not hard-fail (D-011).
+            assert result is not None
+            warnings = [r for r in records if r["level"].name == "WARNING"]
+            assert len(warnings) == 1, (
+                f"expected exactly 1 fsm_id-mismatch WARNING, got "
+                f"{len(warnings)}: {[str(r['message']) for r in records]}"
+            )
+            assert "fsm_id" in str(warnings[0]["message"])
+
+    def test_same_fsm_content_different_construction_paths_does_not_warn(self):
+        """D-016 / review-iter-2.md WARNING 2 regression: the SAME FSM
+        content saved via one construction path (raw dict) and restored
+        against an `API` built via a DIFFERENT construction path (a file
+        written with that dict's JSON) must NOT fire a spurious mismatch
+        WARNING -- pre-D-016, the dict path hashed the raw dict under a
+        `fsm_dict_` prefix while the file path embedded the path string
+        under a `fsm_file_` prefix, so identical content never matched
+        across paths.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            fsm_dict = _minimal_fsm_dict("same-content")
+            api_dict, conv_id = self._advance_and_save(store, "same-content")
+
+            fsm_path = Path(tmpdir) / "fsm.json"
+            fsm_path.write_text(json.dumps(fsm_dict))
+            api_file = API.from_file(
+                str(fsm_path), llm_interface=MockLLM(), session_store=store
+            )
+
+            assert api_dict.fsm_id == api_file.fsm_id
+
+            _fsm_logger.enable("fsm_llm")
+            records: list[dict] = []
+            sink_id = _fsm_logger.add(
+                lambda message: records.append(message.record), level="WARNING"
+            )
+            try:
+                result = api_file.restore_session(conv_id)
+            finally:
+                _fsm_logger.remove(sink_id)
+                _fsm_logger.disable("fsm_llm")
+
+            assert result is not None
+            assert not any("fsm_id" in str(r["message"]) for r in records)

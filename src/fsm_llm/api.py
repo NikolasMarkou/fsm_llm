@@ -321,21 +321,18 @@ class API:
     def process_fsm_definition(
         cls, fsm_definition: FSMDefinition | dict[str, Any] | str
     ) -> tuple[FSMDefinition, str]:
-        """Process FSM definition input and return standardized format."""
+        """Process FSM definition input and return standardized format.
+
+        ``fsm_id`` identifies WHAT the FSM is, never HOW it was constructed
+        or loaded -- restore_session's fsm_id-mismatch WARNING (D-011)
+        depends on this.
+        """
         if isinstance(fsm_definition, FSMDefinition):
             fsm_def = fsm_definition
-            content_hash = hashlib.sha256(
-                json.dumps(fsm_def.model_dump(), sort_keys=True).encode()
-            ).hexdigest()[:FSM_ID_HASH_LENGTH]
-            fsm_id = f"fsm_def_{fsm_def.name}_{content_hash}"
 
         elif isinstance(fsm_definition, dict):
             try:
                 fsm_def = FSMDefinition(**fsm_definition)
-                content_hash = hashlib.sha256(
-                    json.dumps(fsm_definition, sort_keys=True).encode()
-                ).hexdigest()[:FSM_ID_HASH_LENGTH]
-                fsm_id = f"fsm_dict_{fsm_def.name}_{content_hash}"
             except Exception as e:
                 raise ValueError(f"Invalid FSM definition dictionary: {e!s}") from e
 
@@ -344,7 +341,6 @@ class API:
                 from .utilities import load_fsm_from_file
 
                 fsm_def = load_fsm_from_file(fsm_definition)
-                fsm_id = f"fsm_file_{fsm_definition}"
             except Exception as e:
                 raise ValueError(
                     f"Failed to load FSM from file '{fsm_definition}': {e!s}"
@@ -355,6 +351,34 @@ class API:
                 f"Invalid FSM definition type: {type(fsm_definition)}. "
                 f"Must be FSMDefinition, dict, or str"
             )
+
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-016
+        # ONE content hash, computed from fsm_def.model_dump() AFTER
+        # construction, shared by all three input shapes (dict/
+        # FSMDefinition/file path). Do NOT go back to a per-branch id
+        # (`fsm_def_`/`fsm_dict_`/`fsm_file_{path}`): the old file-path
+        # branch hashed the PATH STRING, not the file's content, so
+        # editing a loaded FSM file in place into a semantically
+        # different FSM kept the OLD fsm_id and restore_session's
+        # mismatch check (D-011) stayed silent -- the exact live-probe
+        # failure `findings/review-iter-2.md` CRITICAL 1 reproduced. The
+        # old dict/FSMDefinition branches also hashed different inputs
+        # (raw dict vs. model_dump()) under different prefixes, so the
+        # SAME FSM content loaded two different ways got two different
+        # ids -- a false-positive mismatch warning on every restore
+        # across construction paths (WARNING 2). Hashing the parsed
+        # model's own canonical model_dump() after the if/elif chain
+        # fixes both: identical content -> identical id, regardless of
+        # dict/object/file/relative-vs-absolute-path construction. A
+        # session saved under the OLD path-derived id will trigger a
+        # one-time mismatch WARNING against a NEW content-derived id on
+        # first restore post-upgrade -- an accepted, correct transition
+        # cost per D-011's own "WARNING, not hard-fail" philosophy, not
+        # a bug to work around. See decisions.md D-016.
+        content_hash = hashlib.sha256(
+            json.dumps(fsm_def.model_dump(), sort_keys=True).encode()
+        ).hexdigest()[:FSM_ID_HASH_LENGTH]
+        fsm_id = f"fsm_{fsm_def.name}_{content_hash}"
 
         return fsm_def, fsm_id
 
@@ -1317,6 +1341,13 @@ class API:
         lossy for non-JSON-native context values (datetime/set/custom
         objects are restored as strings, not their original type).
 
+        Note: the ``fsm_id``-mismatch WARNING this method logs (D-011) is
+        only observable if the ``fsm_llm`` logger namespace has been
+        enabled -- ``logging.py`` calls ``logger.disable("fsm_llm")`` at
+        import time, so a caller must have called ``setup_logging()`` /
+        ``enable_debug_logging()`` (or otherwise re-enabled the namespace)
+        before this WARNING is visible on any sink.
+
         Args:
             session_id: Session identifier to restore.
 
@@ -1343,7 +1374,9 @@ class API:
         # exist in THIS fsm_id's definition), and two definitions can share a
         # state name (e.g. both have "start") without being the same FSM, so
         # a mismatch can restore "successfully" onto semantically different
-        # states. This log is the operator-visible signal for that case.
+        # states. This log is the operator-visible signal for that case --
+        # but only if the "fsm_llm" logger namespace is enabled (disabled by
+        # default at import, see this method's docstring).
         if state.fsm_id != self.fsm_id:
             logger.warning(
                 f"restore_session: saved session '{session_id}' was recorded "

@@ -304,9 +304,10 @@ class TestRobustFSMDefinitionProcessing:
         assert condition.logic is None  # Pydantic default
         assert condition.evaluation_priority == 100  # Pydantic default
 
-        # Verify ID generation
+        # Verify ID generation -- content-hash derived (D-016), no
+        # construction-path-specific prefix.
         assert isinstance(fsm_id, str)
-        assert "fsm_dict_" in fsm_id
+        assert fsm_id.startswith("fsm_")
         assert len(fsm_id) > 10
 
     def test_process_minimal_fsm_dict(self, minimal_fsm_dict):
@@ -329,9 +330,10 @@ class TestRobustFSMDefinitionProcessing:
         assert state.response_instructions is None  # Default None
         assert state.transitions == []  # Empty list
 
-        # Verify ID generation
+        # Verify ID generation -- content-hash derived (D-016), no
+        # construction-path-specific prefix.
         assert isinstance(fsm_id, str)
-        assert "fsm_dict_" in fsm_id
+        assert fsm_id.startswith("fsm_")
 
     def test_process_fsm_definition_object(self, complete_simple_fsm):
         """Test processing existing FSMDefinition object."""
@@ -341,9 +343,10 @@ class TestRobustFSMDefinitionProcessing:
         assert fsm_def is complete_simple_fsm
         assert fsm_def.name == "Simple Greeting FSM"
 
-        # Verify ID generation for objects
+        # Verify ID generation for objects -- content-hash derived (D-016),
+        # no construction-path-specific prefix.
         assert isinstance(fsm_id, str)
-        assert "fsm_def_" in fsm_id
+        assert fsm_id.startswith("fsm_")
 
     def test_process_fsm_from_file(self, temp_fsm_file):
         """Test processing FSM from file with proper validation."""
@@ -359,10 +362,70 @@ class TestRobustFSMDefinitionProcessing:
         assert "greeting" in fsm_def.states
         assert "farewell" in fsm_def.states
 
-        # Verify file-based ID
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-016: the file-path ID
+        # is content-hash derived, NOT the path string itself -- the path
+        # must NOT leak into fsm_id (that was CRITICAL 1 in
+        # review-iter-2.md: a file overwritten in place with a different
+        # FSM used to keep the SAME id since the id was `fsm_file_{path}`).
         assert isinstance(fsm_id, str)
-        assert "fsm_file_" in fsm_id
-        assert temp_fsm_file in fsm_id
+        assert fsm_id.startswith("fsm_")
+        assert temp_fsm_file not in fsm_id
+
+    def test_process_fsm_from_file_content_hash_survives_overwrite(
+        self, complete_simple_fsm_dict
+    ):
+        """D-016 / review-iter-2.md CRITICAL 1 regression: a file loaded,
+        then overwritten in place with a semantically different FSM, must
+        NOT keep the old fsm_id -- the id has to track the file's CONTENT,
+        not its path.
+        """
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as f:
+            json.dump(complete_simple_fsm_dict, f, indent=2)
+            temp_path = f.name
+
+        try:
+            _, fsm_id_alpha = API.process_fsm_definition(temp_path)
+
+            omega_dict = dict(complete_simple_fsm_dict)
+            omega_dict["name"] = "Omega Public Chatbot"
+            with open(temp_path, "w") as f:
+                json.dump(omega_dict, f, indent=2)
+
+            _, fsm_id_omega = API.process_fsm_definition(temp_path)
+
+            assert fsm_id_alpha != fsm_id_omega
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+    def test_process_fsm_definition_same_content_different_construction_paths(
+        self, complete_simple_fsm_dict, complete_simple_fsm
+    ):
+        """D-016 / review-iter-2.md WARNING 2 regression: the SAME FSM
+        content must yield the SAME fsm_id whether constructed via the raw
+        dict, an FSMDefinition object built from that dict, or a file
+        written with that dict's JSON -- previously each construction path
+        hashed a different input (raw dict / model_dump() / path string)
+        under a different prefix, producing spurious mismatch warnings on
+        restore for what is actually the identical FSM.
+        """
+        _, fsm_id_from_dict = API.process_fsm_definition(complete_simple_fsm_dict)
+
+        fsm_def_from_dict = FSMDefinition(**complete_simple_fsm_dict)
+        _, fsm_id_from_object = API.process_fsm_definition(fsm_def_from_dict)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as f:
+            json.dump(complete_simple_fsm_dict, f, indent=2)
+            temp_path = f.name
+        try:
+            _, fsm_id_from_file = API.process_fsm_definition(temp_path)
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+        assert fsm_id_from_dict == fsm_id_from_object == fsm_id_from_file
 
     def test_invalid_fsm_dict_validation(self):
         """Test that invalid FSM dictionaries are properly rejected."""
@@ -411,9 +474,9 @@ class TestRobustInitialization:
         assert api.fsm_definition is complete_simple_fsm
         assert api.fsm_definition.name == "Simple Greeting FSM"
 
-        # Verify FSM ID was generated
+        # Verify FSM ID was generated -- content-hash derived (D-016)
         assert isinstance(api.fsm_id, str)
-        assert "fsm_def_" in api.fsm_id
+        assert api.fsm_id.startswith("fsm_")
 
     def test_init_with_complete_dict(
         self, complete_simple_fsm_dict, mock_llm_interface
