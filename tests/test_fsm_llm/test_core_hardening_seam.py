@@ -21,6 +21,7 @@ from fsm_llm.api import API
 from fsm_llm.definitions import FieldExtractionConfig, FSMError, LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
+from fsm_llm.pipeline import _PROVENANCE_KEY
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     DataExtractionPromptConfig,
@@ -1211,4 +1212,295 @@ class TestSaveSessionTornSnapshot:
             )
         finally:
             api.close()
+            api.close()
+
+
+def _old_shape_snapshot_reads(fsm_manager, conversation_id: str) -> dict:
+    """Reconstruct the PRE-D-005 ``save_session`` read composition verbatim
+    (``git show f9166f8^:src/fsm_llm/api.py``, lines ~1220-1279).
+
+    Three separately-locked ``FSMManager`` reads (state, then data, then
+    history) -- each its own ``_read_under_lock`` acquire/release -- followed
+    by a 4th block that reaches directly into the live instance under
+    ``FSMManager._lock`` (NOT ``_read_under_lock``, so it never participates
+    in the call-count rendezvous below) for working memory + provenance.
+    This is used ONLY by ``TestSaveSessionSnapshotAtomicityDiscriminates``
+    below, to prove the exact shape this plan replaced is the one that
+    tears (not merely that *some* torn-looking shape exists), and to feed
+    ``API.save_session`` every key it expects when the composition is
+    injected as a stand-in for ``get_conversation_snapshot``. Never call
+    this from production code -- see api.py:1247's D-005 comment.
+    """
+    current_state = fsm_manager.get_conversation_state(conversation_id)
+    context_data = fsm_manager.get_conversation_data(conversation_id)
+    conversation_history = fsm_manager.get_conversation_history(conversation_id)
+
+    with fsm_manager._lock:
+        instance = fsm_manager.instances.get(conversation_id)
+        wm_obj = instance.context.working_memory if instance is not None else None
+        provenance = (
+            dict(instance.context.metadata.get(_PROVENANCE_KEY) or {})
+            if instance is not None
+            else {}
+        )
+    working_memory = None
+    hidden_buffers: list[str] = []
+    if wm_obj is not None and hasattr(wm_obj, "to_dict"):
+        working_memory = wm_obj.to_dict()
+        hidden_buffers = sorted(getattr(wm_obj, "_hidden_buffers", frozenset()))
+
+    return {
+        "current_state": current_state,
+        "context_data": context_data,
+        "conversation_history": conversation_history,
+        "working_memory": working_memory,
+        "hidden_buffers": hidden_buffers,
+        "provenance": provenance,
+    }
+
+
+# DECISION plan-2026-09-20T114608-a8e47b88/D-009
+class TestSaveSessionSnapshotAtomicityDiscriminates:
+    """Completion-fix for review-iter-1.md concerns 1-2 (D-005 substance).
+
+    ``TestSaveSessionTornSnapshot`` (above) proves ``save_session`` performs
+    no read AFTER its snapshot call returns -- necessary, but an adversarial
+    review showed it is NOT sufficient: with
+    ``FSMManager.get_conversation_snapshot`` monkeypatched BACK to the
+    literal pre-fix 4-separate-reads composition, that test still PASSES,
+    because its barrier sits entirely outside the (now decomposed) reads --
+    no interleaving can occur where it would matter. Its RED evidence is
+    also an existence check (``AttributeError`` because the method did not
+    exist yet at the RED commit), not a tearing check.
+
+    This class closes both gaps with a mechanism sensitive to HOW MANY
+    ``FSMManager._read_under_lock`` calls a read composition makes --
+    exactly the property D-005's fix changed (three-plus decomposed reads ->
+    one). The concurrent turn is released the instant the FIRST
+    ``_read_under_lock`` call returns, i.e. the earliest point at which
+    ``conv_lock`` could have been dropped:
+
+    - For the real, fixed ``get_conversation_snapshot`` that IS the only
+      call it makes -- the entire result (state + data + history) was
+      already captured, together, while ``conv_lock`` was held, before that
+      point. No tear is possible no matter how long the turn runs
+      afterward.
+    - For ``_old_shape_snapshot_reads`` that is only the FIRST of three
+      separate reads -- releasing the turn there reopens the exact gap G2
+      exploited: ``get_conversation_data``/``get_conversation_history``
+      acquire ``conv_lock`` fresh, AFTER the turn has already landed.
+
+    Both scenarios run inside the SAME test method, against the SAME FSM and
+    SAME rendezvous helper, so the test is self-proving (review concern 1,
+    option (b)) rather than a red/green pair whose "red" side is an
+    existence check. If ``get_conversation_snapshot`` is ever decomposed
+    back into multiple locked reads -- the regression this whole class
+    exists to catch -- ``test_fixed_snapshot_is_not_torn`` starts failing.
+    """
+
+    WAIT_TIMEOUT = 10.0
+
+    def _make_api(self, tmp_path):
+        llm = MockLLM2Interface(extraction_data={"advance": "yes"})
+        store = FileSessionStore(tmp_path)
+        api = API.from_definition(
+            _torn_snapshot_fsm(), llm_interface=llm, session_store=store
+        )
+        return api, store
+
+    def _race_releasing_turn_after_first_read_call(self, api, conv_id, read_fn):
+        """Run ``read_fn()`` concurrently with a turn that flips
+        start -> done / sets "advance", releasing the turn the instant the
+        FIRST ``FSMManager._read_under_lock`` call ``read_fn`` makes
+        returns. Returns ``read_fn()``'s result.
+        """
+        manager_cls = type(api.fsm_manager)
+        real_read_under_lock = manager_cls._read_under_lock
+        call_count = {"n": 0}
+        window_open = threading.Barrier(2, timeout=self.WAIT_TIMEOUT)
+        turn_done = threading.Event()
+        released = threading.Event()
+
+        def wrapped(self_mgr, conversation_id, snapshot_fn):
+            # The real (unmodified) call runs FIRST, under its own genuine
+            # conv_lock acquire/release -- we only ever observe the point
+            # AFTER a given _read_under_lock call has already returned.
+            result = real_read_under_lock(self_mgr, conversation_id, snapshot_fn)
+            call_count["n"] += 1
+            if call_count["n"] == 1 and not released.is_set():
+                released.set()
+                window_open.wait(timeout=self.WAIT_TIMEOUT)
+                assert turn_done.wait(timeout=self.WAIT_TIMEOUT), (
+                    "concurrent turn did not complete during the window "
+                    "opened after the FIRST _read_under_lock call returned"
+                )
+            return result
+
+        errors: list[BaseException] = []
+
+        def do_concurrent_turn():
+            try:
+                window_open.wait(timeout=self.WAIT_TIMEOUT)
+                api.converse("please advance", conv_id)
+            except BaseException as exc:  # surfaced via `errors`, not raised here
+                errors.append(exc)
+            finally:
+                turn_done.set()
+
+        turn_thread = threading.Thread(
+            target=do_concurrent_turn, name="snapshot-atomicity-race-turn"
+        )
+        with patch.object(manager_cls, "_read_under_lock", wrapped):
+            turn_thread.start()
+            try:
+                result = read_fn()
+            finally:
+                turn_thread.join(timeout=self.WAIT_TIMEOUT)
+
+        assert not turn_thread.is_alive(), (
+            "concurrent turn thread hung -- interleaving is not deterministic"
+        )
+        assert errors == [], f"concurrent turn raised: {errors}"
+        return result
+
+    @staticmethod
+    def _is_torn(snapshot: dict) -> bool:
+        return (
+            snapshot["current_state"] == "start"
+            and "advance" in snapshot["context_data"]
+        )
+
+    def test_fixed_snapshot_is_not_torn(self, tmp_path):
+        """The real ``get_conversation_snapshot`` -- ONE ``_read_under_lock``
+        call -- must show no torn pairing even though the concurrent turn is
+        deliberately released the instant that single call returns."""
+        api, _ = self._make_api(tmp_path)
+        conv_id, _ = api.start_conversation()
+        try:
+            assert api.get_current_state(conv_id) == "start"
+
+            snapshot = self._race_releasing_turn_after_first_read_call(
+                api,
+                conv_id,
+                lambda: api.fsm_manager.get_conversation_snapshot(conv_id),
+            )
+
+            assert not self._is_torn(snapshot), (
+                "get_conversation_snapshot produced a torn pairing: "
+                f"state={snapshot['current_state']!r} "
+                f"data={snapshot['context_data']!r}"
+            )
+        finally:
+            api.close()
+
+    def test_old_shape_composition_is_torn(self, tmp_path):
+        """The reconstructed PRE-D-005 composition -- state read, THEN data
+        read, THEN history read, each its own separate
+        ``_read_under_lock`` -- MUST show a torn pairing under the exact
+        same rendezvous. This is the discriminator's own proof that it can
+        detect the bug D-005 fixed: if this assertion ever stops firing,
+        the rendezvous mechanism itself has stopped discriminating and
+        ``test_fixed_snapshot_is_not_torn`` passing would no longer be
+        meaningful evidence.
+        """
+        api, _ = self._make_api(tmp_path)
+        conv_id, _ = api.start_conversation()
+        try:
+            assert api.get_current_state(conv_id) == "start"
+
+            snapshot = self._race_releasing_turn_after_first_read_call(
+                api,
+                conv_id,
+                lambda: _old_shape_snapshot_reads(api.fsm_manager, conv_id),
+            )
+
+            assert self._is_torn(snapshot), (
+                "expected the reconstructed pre-fix composition to tear "
+                f"(discriminator broken): state={snapshot['current_state']!r} "
+                f"data={snapshot['context_data']!r}"
+            )
+        finally:
+            api.close()
+
+    def test_save_session_regresses_if_snapshot_decomposed(self, tmp_path):
+        """End-to-end: if ``FSMManager.get_conversation_snapshot`` is ever
+        monkeypatched/edited BACK to the old decomposed-reads shape,
+        ``API.save_session`` itself -- the real production entry point --
+        must be shown to persist a torn session. This is the literal check
+        review concern 1 performed by hand; pinning it here means a future
+        regression of ``get_conversation_snapshot`` back to separate reads
+        is caught through the SAME public path ``TestSaveSessionTornSnapshot``
+        exercises, not just through the lower-level helper above.
+        """
+        api, store = self._make_api(tmp_path)
+        conv_id, _ = api.start_conversation()
+        try:
+            assert api.get_current_state(conv_id) == "start"
+
+            def old_shape_get_conversation_snapshot(conversation_id, log=None):
+                return _old_shape_snapshot_reads(api.fsm_manager, conversation_id)
+
+            with patch.object(
+                api.fsm_manager,
+                "get_conversation_snapshot",
+                side_effect=old_shape_get_conversation_snapshot,
+            ):
+                self._race_releasing_turn_after_first_read_call(
+                    api, conv_id, lambda: api.save_session(conv_id)
+                )
+
+            persisted = store.load(conv_id)
+            assert persisted is not None, "save_session did not persist a session"
+            assert self._is_torn(
+                {
+                    "current_state": persisted.current_state,
+                    "context_data": persisted.context_data,
+                }
+            ), (
+                "expected save_session, with get_conversation_snapshot "
+                "decomposed back to separate reads, to persist a torn "
+                f"session (discriminator broken): state="
+                f"{persisted.current_state!r} data={persisted.context_data!r}"
+            )
+        finally:
+            api.close()
+            api.close()
+
+
+class TestSaveSessionRaisesOnVanishedInstance:
+    """Review NOTE 9: the atomic-snapshot refactor changed ``save_session``'s
+    behavior for a conversation ended concurrently mid-save.
+
+    Pre-fix, the working-memory block read
+    ``self.fsm_manager.instances.get(current_fsm_id)`` directly, which
+    returned ``None`` -- and the pre-fix code SILENTLY saved a session with
+    no working memory -- if the instance had already been removed by a
+    concurrent ``end_conversation``. Post-fix,
+    ``get_conversation_snapshot`` -> ``_read_under_lock`` raises
+    ``FSMError`` for that same window instead. This test reproduces the
+    window deterministically (no threads needed): call
+    ``FSMManager.end_conversation`` directly, which removes the instance
+    from ``FSMManager.instances`` WITHOUT touching
+    ``API.conversation_stacks`` -- exactly the state a concurrent
+    ``API.end_conversation`` would leave mid-save, before it pops its own
+    stack entry -- then confirm ``API.save_session`` raises loudly instead
+    of the old silent no-op.
+    """
+
+    def test_save_session_raises_fsm_error_not_silent_no_op(self, tmp_path):
+        llm = MockLLM2Interface(extraction_data={"advance": "yes"})
+        store = FileSessionStore(tmp_path)
+        api = API.from_definition(
+            _torn_snapshot_fsm(), llm_interface=llm, session_store=store
+        )
+        conv_id, _ = api.start_conversation()
+        try:
+            # Simulates the instance vanishing from FSMManager mid-save while
+            # the API-level stack entry (api.conversation_stacks) still
+            # resolves -- the exact window review NOTE 9 flags.
+            api.fsm_manager.end_conversation(conv_id)
+
+            with pytest.raises(FSMError, match=conv_id):
+                api.save_session(conv_id)
+        finally:
             api.close()

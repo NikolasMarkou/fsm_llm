@@ -851,6 +851,19 @@ class FSMManager:
         (plan-2026-07-21T045419-9925aa3a) for the underlying lock-order
         invariant this method reuses unchanged.
 
+        Shallow-copy boundary (review-iter-1.md NOTE 7): this guarantee
+        covers the READ only, not deep isolation of every field afterward --
+        ``conversation_history`` (``Conversation.get_recent()``) and
+        ``working_memory`` (``WorkingMemory.to_dict()``) return a new outer
+        container whose NESTED mutable values still alias the live
+        instance's objects, so a caller that holds onto and later mutates
+        those nested values can still observe/cause a change after
+        ``conv_lock`` is released. Only ``context_data`` is genuinely
+        rebuilt end-to-end (via ``_strip_internal_mapping``). In practice
+        ``save_session`` only reads these fields once and serializes them
+        immediately, so this is a latent caveat for any FUTURE caller, not a
+        known bug in the current one.
+
         Deliberately EXCLUDES stack depth: ``API.get_stack_depth`` reads
         ``API.conversation_stacks`` under a *different* lock
         (``API._stack_lock``), a structural property (which FSMs are
