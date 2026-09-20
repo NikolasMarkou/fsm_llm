@@ -399,7 +399,13 @@ def quick_start(fsm_file: str, model: str | None = None) -> API:
 
 def enable_debug_logging():
     """Enable debug logging for development."""
-    from .logging import _library_handler_ids, logger, prepare_log_record
+    from .constants import LOG_FORMAT_HUMAN, LOG_SINK_STDERR
+    from .logging import (
+        _library_handler_ids,
+        _stream_handler_ids,
+        logger,
+        prepare_log_record,
+    )
 
     # Re-enable the library loggers
     logger.enable("fsm_llm")
@@ -411,20 +417,35 @@ def enable_debug_logging():
         except ValueError:
             pass
     _library_handler_ids.clear()
+    # This handler's own stream_key entry (below) would otherwise dangle,
+    # pointing at an id no longer in _library_handler_ids.
+    _stream_handler_ids.clear()
 
     # Reset file handler flag so setup_file_logging can be called again
     from . import logging as log_module
 
     log_module._file_handler_initialized = False
 
-    _library_handler_ids.append(
-        logger.add(
-            sys.stderr,
-            level="DEBUG",
-            format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
-            filter=prepare_log_record,
-        )
+    handler_id = logger.add(
+        sys.stderr,
+        level="DEBUG",
+        format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
+        filter=prepare_log_record,
     )
+    _library_handler_ids.append(handler_id)
+
+    # DECISION plan-2026-09-20T114608-a8e47b88/D-013
+    # Register this handler under setup_logging()'s own _stream_handler_ids
+    # key (stream|format|context), mirroring setup_logging()'s own
+    # registration at logging.py ~line 234. Without this, a later
+    # setup_logging(sink="stderr", format="human") call cannot see this
+    # handler already exists (its own liveness check only reads
+    # _stream_handler_ids) and adds a SECOND stderr handler, duplicating
+    # every subsequent log line. context=False matches this handler's own
+    # (non-contextual) format string above -- do NOT hardcode a different
+    # key shape without checking setup_logging()'s stream_key format first.
+    stream_key = f"{LOG_SINK_STDERR}|{LOG_FORMAT_HUMAN}|False"
+    _stream_handler_ids[stream_key] = handler_id
 
 
 def disable_warnings():

@@ -13,6 +13,7 @@ from fsm_llm.constants import (
     ENV_LOG_FORMAT,
     ENV_LOG_LEVEL,
     LOG_DEFAULT_CONVERSATION_ID,
+    LOG_FORMAT_HUMAN,
     LOG_FORMAT_JSON,
     LOG_SINK_FILE,
     LOG_SINK_STDERR,
@@ -232,6 +233,48 @@ class TestBackwardCompatibility:
         from fsm_llm import enable_debug_logging
 
         enable_debug_logging()
+
+
+class TestEnableDebugLoggingHandlerDedup:
+    """``enable_debug_logging()`` (``__init__.py``) must register its stderr
+    handler in ``setup_logging()``'s own dedup dict (``_stream_handler_ids``,
+    ``logging.py``) -- otherwise a LATER ``setup_logging(sink="stderr",
+    format="human")`` call cannot see the handler already exists and adds a
+    SECOND stderr handler, duplicating every subsequent log line
+    (item 5 / D-013)."""
+
+    def test_setup_logging_after_enable_debug_logging_does_not_duplicate(self):
+        """RED before the fix: `second_id` was a real new handler id (> 0),
+        not -1, and _library_handler_ids grew by one."""
+        from fsm_llm import enable_debug_logging
+
+        enable_debug_logging()
+        before_count = len(_library_handler_ids)
+
+        second_id = setup_logging(sink=LOG_SINK_STDERR, format=LOG_FORMAT_HUMAN)
+
+        assert second_id == -1, (
+            "setup_logging() added a SECOND stderr handler after "
+            "enable_debug_logging() instead of recognizing the existing one "
+            f"(got handler_id={second_id})"
+        )
+        assert len(_library_handler_ids) == before_count
+
+    def test_single_log_call_produces_one_line_not_two(self, capsys):
+        """The end-user-visible symptom: one logger.warning() call must
+        produce exactly one printed line, not two."""
+        from fsm_llm import enable_debug_logging
+
+        enable_debug_logging()
+        setup_logging(sink=LOG_SINK_STDERR, format=LOG_FORMAT_HUMAN)
+
+        logger.warning("only once, please")
+
+        captured = capsys.readouterr()
+        occurrences = captured.err.count("only once, please")
+        assert occurrences == 1, (
+            f"expected exactly 1 log line, got {occurrences} in:\n{captured.err}"
+        )
 
 
 class TestContextualize:

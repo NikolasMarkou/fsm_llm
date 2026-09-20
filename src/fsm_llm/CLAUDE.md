@@ -29,10 +29,10 @@ fsm_llm/
 ├── utilities.py            # extract_json_from_text() (dict | None; non-object JSON -> None), load_fsm_definition(), load_fsm_from_file()
 ├── constants.py            # DEFAULT_LLM_MODEL, security patterns, INTERNAL_KEY_PREFIXES, ALLOWED_JSONLOGIC_OPERATIONS
 ├── session.py              # SessionStore ABC + FileSessionStore -- file-based session persistence with atomic writes
-├── logging.py              # Loguru setup, enable_debug_logging(), disable_warnings()
+├── logging.py              # Loguru setup: setup_logging(), setup_file_logging()
 ├── __main__.py             # CLI entry point (run, validate, visualize modes)
 ├── __version__.py          # "0.6.0"
-└── __init__.py             # 90+ exports in single __all__ list
+└── __init__.py             # 90+ exports in single __all__ list; enable_debug_logging(), disable_warnings()
 ```
 
 ## Key Classes
