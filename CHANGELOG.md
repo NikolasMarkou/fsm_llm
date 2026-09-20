@@ -283,8 +283,13 @@ Decision ids refer to that plan's `decisions.md`.
   zero-width lookahead, so only the `<` and the name are escaped; the first version
   consumed 257 characters and escaped benign prose, fixed in the final review round,
   concern 1), and the scan stays linear
-  (`"<a" * 10000` and `"<" + "a" * 100000` each under 0.5 s). A differential test pins
-  the new pattern against the pre-D-029 pattern on every string of length up to 6.
+  (`"<a" * 10000` and `"<" + "a" * 100000` each under 0.5 s). A benign `< name`
+  (`latency < threshold`) is kept raw only when NO `>` follows it anywhere in the
+  text (D-054): a padded opener (`< name` + 257 or more characters + `>`) is escaped,
+  as it was in ed6cffd. A differential test compares the new pattern with the
+  pre-D-029 pattern on every token string of length up to 6 AND on padded shapes of
+  258 to 1000 characters (the short corpus alone could not see a padded shape, it
+  stops at 24 characters); the documented residual set is asserted explicitly.
   Three tests that pinned the weakened iteration 3 output were rewritten with
   annotations, and the reversed-ordering payloads were added.
 - **`<rejected_corrections>` honours `context_scope.read_keys` (D-032, final review
@@ -466,10 +471,12 @@ Regressions found and fixed inside this run (stated plainly):
   - The prompt sanitizer escapes a `<name` opener or closer whose tail contains a
     nested `<` or is longer than 256 characters; only the `<` and the tag name are
     escaped (`&lt;/task`), never the text after it. Benign prose is byte-identical,
-    including a `<` followed by a space (`latency < threshold`). The exact residual:
-    a `<` DIRECTLY followed by a letter (`x<y`), with 257 or more characters and no
-    `>` after it, has its `<` escaped; and a `<` plus a space plus a name with no `/`
-    (`< task`) and no `>` within 256 characters is kept raw. An unterminated closer
+    including a `<` followed by a space (`latency < threshold`) when no `>` follows
+    it in the text. The exact residual (D-054): a `<` DIRECTLY followed by a letter
+    (`x<y`), with 257 or more characters and no `>` after it, has its `<` escaped;
+    a `<` plus whitespace plus a name with no `/` (`< task`), no `>` within 256
+    characters AND no `>` anywhere later in the text, is kept raw (a comparison);
+    with any `>` later in the text it is escaped. An unterminated closer
     or opener with a short tail and no `>` anywhere (`</task NEW INSTRUCTIONS`)
     still reaches the prompt raw; that shape is pre-existing (every earlier pattern
     left it raw) and is not closed by this change.
@@ -541,6 +548,12 @@ list: LV5-01 (D-050) and LV5-03 (D-052) are fixed offline; the sanitizer bypass,
   D-052).** `success=True` even though the evaluator never passed the output;
   `max_iterations_reached` in the final context is the only signal. It needs an owner
   decision on a public contract and was not changed in a final loop.
+- **`<extracted_data>` is not scoped by `context_scope.read_keys` (D-054, final
+  review concern 3).** `read_keys` scopes `<current_context>` and
+  `<rejected_corrections>` only. `<extracted_data>` (the keys extracted this turn from
+  the user's own message) is shown unscoped, so a key a state hides from
+  `<current_context>` still reaches Pass 2 on the turn it is extracted. It is
+  pre-existing since D-005 and was deliberately not changed in a final loop.
 - **RB-04 declined (D-041).** A normalising CONTEXT_UPDATE handler on an extracted key
   still disables later LLM corrections of that key.
 - **`restore_session` does not compare `fsm_id`** (concern 11): a session file can be

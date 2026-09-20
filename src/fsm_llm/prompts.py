@@ -173,7 +173,8 @@ class BasePromptBuilder:
     # cut off mid-sentence. Do NOT consume the tail again. Separately, a `<` and
     # whitespace before a name with no `/` (`latency < threshold`) is a
     # comparison, and an overflow-only match of that shape is kept raw in
-    # `_sanitize_text_for_prompt`; a closer (`< /task`) is not exempt.
+    # `_sanitize_text_for_prompt` ONLY when no `>` follows it anywhere in the
+    # text (D-054); a closer (`< /task`) is never exempt.
     # The bound exists because an unbounded `[^>]*` scans to end-of-text for
     # every `<a` of `<a<a<a...` (quadratic on user text, 10k chars 2.5 s per
     # prompt, D-029). Do NOT go back to `[^<>]*` (iteration 3: a closer with a
@@ -216,15 +217,31 @@ class BasePromptBuilder:
         # neutralise. Do not move this below the sub. See D-024.
         flat = text.replace("\n", " ").replace("\r", " ")
 
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-054
+        # `last` is the offset of the final `>` in the text, computed ONCE (an
+        # O(n) scan per call, not per match). The comparison exemption below
+        # applies only to a match that ends AFTER it, i.e. with NO `>` anywhere
+        # later in the text. Do NOT loosen it back to "no `>` inside the match":
+        # an overflow-only match never contains one, so `< name` + 257 padding
+        # characters + `>` (a padded OPENER, the same attacker-controlled shape
+        # D-024 exists for) reached the prompt raw, and every earlier pattern
+        # (ed6cffd, d7f1679) escaped it. Do NOT write it as a slice
+        # (`">" not in flat[m.end():]`): that is O(n) per match and quadratic on
+        # `"< " * n`; `m.end() > last` is output-identical to the slice form
+        # (checked exhaustively over every string of length <= 6).
+        last = flat.rfind(">")
+
         return self._TAG_PATTERN.sub(
             lambda m: (
                 m.group(0)
                 if (
-                    # D-047 amendment: an overflow-only match holds no `>`; with
-                    # a space after `<` and no `/` it is a comparison, not a tag
+                    # D-047/D-054: an overflow-only match holds no `>`; with a
+                    # space after `<`, no `/`, and no `>` anywhere after it,
+                    # it is a comparison (`latency < threshold`), not a tag
                     ">" not in m.group(0)
                     and m.group(0)[1:2].isspace()
                     and "/" not in m.group(0)
+                    and m.end() > last
                 )
                 or (
                     m.group(1).lower() in self._SAFE_TAGS
