@@ -112,7 +112,7 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/  # 1,870 tests
+pytest tests/test_fsm_llm/  # 1,925 tests
 ```
 
 - Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`

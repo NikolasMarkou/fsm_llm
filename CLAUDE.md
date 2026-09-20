@@ -12,7 +12,7 @@ FSM-LLM (v0.6.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (6,035 tests)
+make test           # pytest -v (6,091 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -271,17 +271,17 @@ including what is measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (6,035 collected)
-pytest tests/test_fsm_llm/            # Core package tests (1,870 tests)
+pytest                                 # Run all tests (6,091 collected)
+pytest tests/test_fsm_llm/            # Core package tests (1,925 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (115 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (159 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (1,003 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (1,004 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (299 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,981 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 5,965. The remaining 70 are three root-level files:
+# The 9 suites above sum to 6,021. The remaining 70 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (24)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
@@ -299,6 +299,17 @@ harness 1,964 passed / 17 skipped (environment-dependent; excludes the 12
 live-Ollama integration tests, which self-skip without a live Ollama instance).
 The older combined full run (plan-2026-09-12-45a654de step 4.1) was 5,422 passed /
 28 skipped / 2 xfailed in ~400s and predates the iteration-1 to iteration-4 tests.
+
+Collected counts re-measured again with `pytest --collect-only -q | tail -1` at
+plan-2026-09-20T114608-a8e47b88 iteration 4 step 19 (test-count reconciliation after
+that plan's 10-item `src/fsm_llm/` audit-fix added regression tests). Total 6,091
+collected (was 6,035): core `tests/test_fsm_llm/` 1,925 collected (1,924 passed / 1
+xfailed, was 1,870), agents `tests/test_fsm_llm_agents/` 1,004 (was 1,003), all other
+suites unchanged. The 9-suite sum is now 6,021 (was 5,965); the remaining 70
+root-level-file tests are unchanged. Cross-package suites ran clean at this step:
+agents+workflows+reasoning 1,269 passed / 9 skipped; harness (non-live) 1,887 passed /
+94 deselected; monitor+meta+regression+examples+packaging 853 passed / 2 skipped / 1
+xfailed plus the 5 then-expected doc-count-literal failures this same step fixes.
 
 **Conventions**:
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios
