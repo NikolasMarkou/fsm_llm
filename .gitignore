@@ -180,8 +180,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-plans/
+plans/*
 analyses/
 evaluation/2[0-9][0-9][0-9]-*/
 evaluation/rebaseline_run*/
 .claude/
+!plans/ANCHORS.md
