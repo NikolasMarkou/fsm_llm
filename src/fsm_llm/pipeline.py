@@ -832,6 +832,42 @@ class MessagePipeline:
         log = logger.bind(conversation_id=conversation_id)
 
         current_state = self.get_state(instance, conversation_id)
+
+        # DECISION plan-2026-09-20T165703-0d9c218e/D-006
+        # Fast-path for an initial state with empty response_instructions (a
+        # ReAct-style `think` state is the initial state of every agent FSM).
+        # Without this skip the greeting runs a full Pass 2 and the model's
+        # completion prose lands in history BEFORE any tool runs, poisoning
+        # every later `tool_name` extraction (F-LIVE-01). This block is an
+        # EXACT mirror of the sync-turn site in
+        # `_execute_response_generation_pass`:
+        # the `"."` system_prompt is the sentinel `LiteLLMInterface` uses to
+        # return a synthetic response WITHOUT calling litellm, so the call
+        # below IS the skip mechanism. Do NOT drop the `generate_response`
+        # call (a custom interface must see the same call count at the
+        # greeting as on every turn), do NOT set
+        # `instance.last_response_generation` (the sibling sites do not), and
+        # do NOT fold the three copies into a shared helper (D-006).
+        if (
+            current_state.response_instructions is not None
+            and not current_state.response_instructions
+        ):
+            request = ResponseGenerationRequest(
+                system_prompt=".",
+                user_message="",
+                extracted_data={},
+                context={},
+                transition_occurred=False,
+                previous_state=None,
+            )
+            self.llm_interface.generate_response(request)
+            synthetic = f"[{current_state.id}]"
+            instance.context.conversation.add_system_message(synthetic)
+            log.debug(
+                "Skipped initial response generation (empty response_instructions)"
+            )
+            return synthetic
+
         fsm_def = self.fsm_resolver(instance.fsm_id)
 
         system_prompt = self.response_generation_prompt_builder.build_response_prompt(

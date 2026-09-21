@@ -465,6 +465,89 @@ class TestGenerateInitialResponse:
             pipeline.generate_initial_response(instance, "conv-1")
 
 
+def _think_initial_fsm_dict(response_instructions) -> dict:
+    """Two-state FSM whose initial state carries the given response_instructions.
+
+    ``""`` models a ReAct-style ``think`` initial state (agent intermediate
+    state); ``None`` is the ordinary greeting state used as the control.
+    """
+    return {
+        "name": "think_initial_test",
+        "description": "FSM for the greeting Pass-2 skip tests",
+        "initial_state": "think",
+        "persona": "Test bot",
+        "states": {
+            "think": {
+                "id": "think",
+                "description": "Agent think state",
+                "purpose": "Decide which tool to call",
+                "response_instructions": response_instructions,
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "Never fires",
+                        "conditions": [
+                            {"description": "Never", "logic": {"==": [1, 2]}}
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "Terminal state",
+                "purpose": "Finish",
+                "response_instructions": "Say goodbye",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestGenerateInitialResponseSkipsEmptyInstructions:
+    """F-LIVE-01 (plan-2026-09-20-0d9c218e iter-2 step 1): the greeting must
+    honour the empty-``response_instructions`` fast path exactly as the sync
+    and streaming Pass-2 sites do. Without it, an agent whose initial state is
+    a ``think`` state gets one unsuppressed completion whose prose lands in
+    history before any tool runs."""
+
+    def test_empty_instructions_returns_state_marker_via_sentinel_request(self):
+        from fsm_llm.api import API
+
+        llm = _make_mock_llm()
+        api = API(fsm_definition=_think_initial_fsm_dict(""), llm_interface=llm)
+
+        conv_id, greeting = api.start_conversation()
+
+        assert greeting == "[think]"
+        llm.generate_response.assert_called_once()
+        request = llm.generate_response.call_args.args[0]
+        assert request.system_prompt == "."
+        assert "Decide which tool to call" not in request.system_prompt
+        assert request.user_message == ""
+        assert request.extracted_data == {}
+        assert request.context == {}
+        assert request.transition_occurred is False
+        assert request.previous_state is None
+        history = api.get_conversation_history(conv_id)
+        assert history[0] == {"system": "[think]"}
+
+    def test_none_instructions_still_builds_full_prompt(self):
+        from fsm_llm.api import API
+
+        llm = _make_mock_llm()
+        api = API(fsm_definition=_think_initial_fsm_dict(None), llm_interface=llm)
+
+        conv_id, greeting = api.start_conversation()
+
+        assert greeting == "Hello from mock LLM"
+        llm.generate_response.assert_called_once()
+        request = llm.generate_response.call_args.args[0]
+        assert request.system_prompt != "."
+        assert "Decide which tool to call" in request.system_prompt
+        history = api.get_conversation_history(conv_id)
+        assert history[0] == {"system": "Hello from mock LLM"}
+
+
 # ══════════════════════════════════════════════════════════════
 # 5. process() — full 2-pass pipeline
 # ══════════════════════════════════════════════════════════════
