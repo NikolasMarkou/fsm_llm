@@ -2096,6 +2096,12 @@ class MessagePipeline:
                 sort_keys=True,
             )
         except (TypeError, ValueError):
+            # Names only, never the values: a connection kwarg may be a secret.
+            logger.debug(
+                "Classifier cache bypassed: a connection kwarg is not "
+                "JSON-native (kwargs: {}); constructing a fresh instance",
+                sorted(connection_kwargs),
+            )
             return Classifier(
                 schema=schema,
                 model=model,
