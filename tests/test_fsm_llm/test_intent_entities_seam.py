@@ -25,6 +25,7 @@ import pytest
 
 from fsm_llm.classification import IntentRouter
 from fsm_llm.definitions import (
+    ClassificationError,
     ClassificationResult,
     ClassificationSchema,
     IntentDefinition,
@@ -205,6 +206,120 @@ class TestNoneEntityThroughRoute:
         assert observed["entities"]["order_id"] is None
         assert observed["entities"]["order_id"] != "None"
         assert not observed["entities"]["order_id"]
+
+
+# ---------------------------------------------------------------------------
+# validate() and shared handler resolution (route / route_multi)
+# ---------------------------------------------------------------------------
+
+
+def _three_intent_schema() -> ClassificationSchema:
+    """Three intents so validate() ordering and partial coverage are visible."""
+    return ClassificationSchema(
+        intents=[
+            IntentDefinition(name="order_status", description="Check an order"),
+            IntentDefinition(name="product_info", description="Product details"),
+            IntentDefinition(name="unclear", description="Fallback"),
+        ],
+        fallback_intent="unclear",
+        confidence_threshold=0.5,
+    )
+
+
+def _noop(user_message: str, entities: dict[str, str | None]) -> str:
+    return "noop"
+
+
+class TestIntentRouterValidateAndDispatch:
+    """`validate()` reports missing handlers once each, in schema order, and
+    `route` / `route_multi` share one fallback-or-raise resolution path."""
+
+    def test_validate_all_covered_returns_empty(self) -> None:
+        router = IntentRouter(_three_intent_schema())
+        router.register_many(
+            {"order_status": _noop, "product_info": _noop, "unclear": _noop}
+        )
+        assert router.validate() == []
+
+    def test_validate_reports_missing_in_schema_order(self) -> None:
+        router = IntentRouter(_three_intent_schema())
+        router.register("product_info", _noop)
+        assert router.validate() == ["order_status", "unclear"]
+
+    def test_validate_lists_missing_fallback_exactly_once(self) -> None:
+        schema = _three_intent_schema()
+        router = IntentRouter(schema)
+        router.register("order_status", _noop)
+        router.register("product_info", _noop)
+        missing = router.validate()
+        assert missing == [schema.fallback_intent]
+        assert missing.count(schema.fallback_intent) == 1
+
+    def test_route_falls_back_when_intent_handler_missing(self) -> None:
+        calls: list[tuple[str, dict[str, str | None]]] = []
+
+        def fallback(user_message: str, entities: dict[str, str | None]) -> str:
+            calls.append((user_message, entities))
+            return "FALLBACK"
+
+        router = IntentRouter(_three_intent_schema())
+        router.register("unclear", fallback)
+        result = ClassificationResult(
+            reasoning="asked about a product",
+            intent="product_info",
+            confidence=0.9,
+            entities={"product": "widget"},
+        )
+        assert router.route("tell me about widget", result) == "FALLBACK"
+        assert calls == [("tell me about widget", {"product": "widget"})]
+
+    def test_route_multi_falls_back_when_intent_handler_missing(self) -> None:
+        calls: list[tuple[str, dict[str, str | None]]] = []
+
+        def fallback(user_message: str, entities: dict[str, str | None]) -> str:
+            calls.append((user_message, entities))
+            return "FALLBACK"
+
+        router = IntentRouter(_three_intent_schema())
+        router.register("unclear", fallback)
+        result = MultiClassificationResult(
+            reasoning="asked about a product",
+            intents=[
+                IntentScore(
+                    intent="product_info",
+                    confidence=0.9,
+                    entities={"product": "widget"},
+                )
+            ],
+        )
+        assert router.route_multi("tell me about widget", result) == ["FALLBACK"]
+        assert calls == [("tell me about widget", {"product": "widget"})]
+
+    def test_route_and_route_multi_raise_same_message_without_fallback(
+        self,
+    ) -> None:
+        router = IntentRouter(_three_intent_schema())
+        router.register("order_status", _noop)
+
+        single = ClassificationResult(
+            reasoning="asked about a product",
+            intent="product_info",
+            confidence=0.9,
+            entities={},
+        )
+        multi = MultiClassificationResult(
+            reasoning="asked about a product",
+            intents=[IntentScore(intent="product_info", confidence=0.9, entities={})],
+        )
+
+        with pytest.raises(ClassificationError) as single_exc:
+            router.route("tell me about widget", single)
+        with pytest.raises(ClassificationError) as multi_exc:
+            router.route_multi("tell me about widget", multi)
+
+        assert str(single_exc.value) == str(multi_exc.value)
+        assert "No handler for intent 'product_info'" in str(single_exc.value)
+        assert "no fallback handler registered for 'unclear'" in str(single_exc.value)
 
 
 # ---------------------------------------------------------------------------

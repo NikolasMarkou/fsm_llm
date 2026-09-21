@@ -84,7 +84,7 @@ class Classifier:
         self.schema = schema
         self.model = model
         self.config = config or ClassificationPromptConfig()
-        self._kwargs: dict = {**litellm_kwargs}
+        self._kwargs: dict[str, Any] = {**litellm_kwargs}
         if api_key:
             self._kwargs["api_key"] = api_key
 
@@ -517,17 +517,7 @@ class IntentRouter:
             )
             return self._clarification_handler(user_message, result.entities)
 
-        handler = self._handlers.get(result.intent)
-        if handler is None:
-            fallback = self._handlers.get(self.schema.fallback_intent)
-            if fallback is None:
-                raise ClassificationError(
-                    f"No handler for intent '{result.intent}' and no fallback "
-                    f"handler registered for '{self.schema.fallback_intent}'"
-                )
-            logger.warning(f"No handler for '{result.intent}', using fallback")
-            handler = fallback
-
+        handler = self._resolve_handler(result.intent)
         return handler(user_message, result.entities)
 
     def route_multi(
@@ -552,15 +542,7 @@ class IntentRouter:
                 skipped += 1
                 continue
 
-            handler = self._handlers.get(scored.intent)
-            if handler is None:
-                handler = self._handlers.get(self.schema.fallback_intent)
-                if handler is None:
-                    raise ClassificationError(
-                        f"No handler for intent '{scored.intent}' and no fallback "
-                        f"handler registered for '{self.schema.fallback_intent}'"
-                    )
-                logger.warning(f"No handler for '{scored.intent}', using fallback")
+            handler = self._resolve_handler(scored.intent)
             outputs.append(handler(user_message, scored.entities))
 
         if not outputs and skipped > 0:
@@ -569,6 +551,27 @@ class IntentRouter:
                 f"({self.schema.confidence_threshold}); no handlers invoked"
             )
         return outputs
+
+    def _resolve_handler(self, intent: str) -> HandlerFn:
+        """Return the handler to invoke for ``intent``.
+
+        Contract: returns the handler registered for ``intent``; if none,
+        returns the handler registered for ``schema.fallback_intent`` and logs
+        a WARNING; if neither is registered, raises ``ClassificationError``.
+        Shared by ``route`` and ``route_multi`` so both paths fall back and
+        fail identically.
+        """
+        handler = self._handlers.get(intent)
+        if handler is not None:
+            return handler
+        fallback = self._handlers.get(self.schema.fallback_intent)
+        if fallback is None:
+            raise ClassificationError(
+                f"No handler for intent '{intent}' and no fallback "
+                f"handler registered for '{self.schema.fallback_intent}'"
+            )
+        logger.warning(f"No handler for '{intent}', using fallback")
+        return fallback
 
     # ----------------------------------------------------------
     # Validation & Defaults
@@ -579,14 +582,11 @@ class IntentRouter:
 
         Returns a list of intent names that lack handlers (empty if all covered).
         """
+        # ClassificationSchema.validate_schema guarantees fallback_intent is in
+        # intent_names, so the comprehension already covers the fallback.
         missing = [
             name for name in self.schema.intent_names if name not in self._handlers
         ]
-        if (
-            self.schema.fallback_intent not in self._handlers
-            and self.schema.fallback_intent not in missing
-        ):
-            missing.append(self.schema.fallback_intent)
         if missing:
             logger.warning(f"Intents without handlers: {missing}")
         return missing
