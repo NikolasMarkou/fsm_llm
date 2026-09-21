@@ -838,10 +838,12 @@ class TestClassifierCache:
                 for t in threads:
                     t.start()
                 for t in threads:
-                    t.join()
+                    t.join(timeout=10)
         finally:
             sys.setswitchinterval(old_interval)
 
+        # Pre-Mortem 2: a deadlocked worker must fail the test, not hang it.
+        assert all(not t.is_alive() for t in threads)
         assert errors == []
         assert len(pipeline._classifier_cache) == MAX_CLASSIFIER_CACHE_SIZE
 
