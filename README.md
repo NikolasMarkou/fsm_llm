@@ -23,7 +23,7 @@ FSM-LLM provides that structure:
 - **A finite state machine handles flow**: a fixed set of named states (such as "greeting", "collect email", "confirm") and rules for moving between them. The rules are plain JSON logic, so they are predictable and testable.
 - **The framework handles state**: what has been collected, which state the conversation is in, the history, hooks for your own code, and saving and restoring sessions.
 
-Version 0.7.0. License Apache-2.0. Python 3.10, 3.11, 3.12.
+Version 0.8.0. License Apache-2.0. Python 3.10, 3.11, 3.12.
 
 ## How it works
 

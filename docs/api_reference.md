@@ -1,6 +1,6 @@
 # API Reference
 
-> Covers FSM-LLM v0.7.0
+> Covers FSM-LLM v0.8.0
 
 Complete API documentation for FSM-LLM and its extension packages.
 

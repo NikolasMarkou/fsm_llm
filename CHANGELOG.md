@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [0.8.0] - 2026-09-21
+
+Licence change release: FSM-LLM is now distributed under the Apache License 2.0
+(previously GPL-3.0-or-later). Releases up to and including 0.7.0 remain available
+under GPL-3.0-or-later. No code or behaviour changes.
+
 ### Changed
 
 - Relicensed from GPL-3.0-or-later to Apache-2.0 (`LICENSE`, `pyproject.toml` `license`, `fsm_llm.__license__`, README, CLAUDE.md).
@@ -1471,6 +1479,7 @@ examples, signatures, and the 2-pass core contract are unchanged. New optional
 - 7 examples (basic, intermediate, advanced)
 - Comprehensive documentation
 
+[0.8.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.4.0...v0.5.0

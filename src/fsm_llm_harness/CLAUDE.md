@@ -5,7 +5,7 @@ Purpose: The iterative-planner protocol as a real FSM-LLM FSM: 6 states (EXPLORE
 
 ## Scope
 
-Driver (`HarnessAgent`), FSM factory, role workers and prompts, confined workspace and plan-directory tools, artifact models and (de)serializers, plan-directory storage, gate and audit validator, small-model reply hardening, CLI. Extra `harness` pulls `fsm-llm[agents]` (imports `fsm_llm_agents`), no third-party deps of its own. Version from `fsm_llm.__version__` (0.7.0). CLI `fsm-llm-harness` (`python -m fsm_llm_harness`). Bench tooling lives outside the package: `scripts/harness_bench.py`, committed blocks under `scripts/bench_data/`, root-level `tests/test_harness_bench.py`.
+Driver (`HarnessAgent`), FSM factory, role workers and prompts, confined workspace and plan-directory tools, artifact models and (de)serializers, plan-directory storage, gate and audit validator, small-model reply hardening, CLI. Extra `harness` pulls `fsm-llm[agents]` (imports `fsm_llm_agents`), no third-party deps of its own. Version from `fsm_llm.__version__` (0.8.0). CLI `fsm-llm-harness` (`python -m fsm_llm_harness`). Bench tooling lives outside the package: `scripts/harness_bench.py`, committed blocks under `scripts/bench_data/`, root-level `tests/test_harness_bench.py`.
 
 The one idea: a gate reads the FILESYSTEM, never the model's account of it. `findings_count` counts non-empty `findings/*.md`; a dispatch claiming a write must show a tool call whose target now carries bytes. Measurement found 4B models asserting completed work over an empty directory 5/5.
 
