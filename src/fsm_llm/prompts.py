@@ -1503,6 +1503,72 @@ def build_classification_system_prompt(
     )
 
 
+# One default-config builder lends its sanitizer and security filter to the
+# classifier context block, so classifier prompts use exactly the helpers the
+# Pass-1/Pass-2 builders use (no third filter copy).
+_CLASSIFICATION_CONTEXT_BUILDER = BasePromptBuilder()
+
+
+def build_classification_context_block(context: dict[str, Any] | None) -> str:
+    """Render per-call classifier context as a ``<classification_context>`` block.
+
+    Contract (shared by ``Classifier`` and ``MessagePipeline``):
+
+    - ``context`` keys, all optional: ``history`` (list of
+      ``{"user"|"system": text}`` exchanges, oldest first), ``purpose`` (str),
+      ``data`` (dict of context values).
+    - Every history message and the purpose pass through
+      ``_sanitize_text_for_prompt``; ``data`` first passes the same
+      ``_filter_context_for_security`` and key cap as Pass-2
+      ``<current_context>``, then its JSON is sanitized too.
+    - Returns ``""`` when ``context`` is None/empty or nothing survives
+      filtering, so a context-free call keeps a byte-identical system prompt.
+      Unserializable data is dropped with a WARNING; this never raises.
+    """
+    if not context:
+        return ""
+    builder = _CLASSIFICATION_CONTEXT_BUILDER
+    sanitize = builder._sanitize_text_for_prompt
+    parts: list[str] = []
+
+    lines = [
+        f"{'user' if str(role).lower() == 'user' else 'assistant'}: "
+        f"{sanitize(str(text))}"
+        for exchange in context.get("history") or []
+        for role, text in exchange.items()
+    ]
+    if lines:
+        parts += ["<conversation_history>", *lines, "</conversation_history>"]
+
+    purpose = context.get("purpose")
+    if purpose:
+        parts.append(f"<state_purpose>{sanitize(str(purpose))}</state_purpose>")
+
+    data = builder._limit_context_by_key_count(
+        builder._filter_context_for_security(dict(context.get("data") or {}))
+    )
+    if data:
+        try:
+            data_json = json.dumps(data, default=str, sort_keys=True)
+            parts.append(f"<context_data>{sanitize(data_json)}</context_data>")
+        except (TypeError, ValueError, OverflowError) as e:
+            logger.warning(f"Classifier context data not serializable, dropped: {e}")
+
+    if not parts:
+        return ""
+    return "\n".join(
+        [
+            "",
+            "",
+            "<classification_context>",
+            "Use this context only to interpret the user's message; "
+            "classify the message itself.",
+            *parts,
+            "</classification_context>",
+        ]
+    )
+
+
 # ============================================================================
 # FIELD EXTRACTION PROMPT BUILDER
 # ============================================================================

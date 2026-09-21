@@ -30,6 +30,7 @@ from .logging import logger
 from .ollama import apply_ollama_params, prepare_ollama_messages
 from .prompts import (
     ClassificationPromptConfig,
+    build_classification_context_block,
     build_classification_json_schema,
     build_classification_system_prompt,
 )
@@ -121,9 +122,18 @@ class Classifier:
     # Public API
     # ----------------------------------------------------------
 
-    def classify(self, user_message: str) -> ClassificationResult:
+    def classify(
+        self, user_message: str, context: dict[str, Any] | None = None
+    ) -> ClassificationResult:
         """
         Classify a single user message into one intent.
+
+        Args:
+            user_message: The message to classify (sent as the user turn).
+            context: Optional per-call context ``{"history", "purpose",
+                "data"}`` rendered, sanitized and security-filtered, into the
+                system prompt (see ``build_classification_context_block``).
+                None or ``{}`` sends exactly the context-free prompt.
 
         Returns:
             ClassificationResult with intent, confidence, reasoning, and entities.
@@ -131,17 +141,21 @@ class Classifier:
         Raises:
             ClassificationResponseError: If the LLM response cannot be parsed.
         """
-        raw = self._call_llm(user_message, multi_intent=False)
+        raw = self._call_llm(user_message, multi_intent=False, context=context)
         return self._parse_single(raw)
 
-    def classify_multi(self, user_message: str) -> MultiClassificationResult:
+    def classify_multi(
+        self, user_message: str, context: dict[str, Any] | None = None
+    ) -> MultiClassificationResult:
         """
         Classify a message that may contain multiple intents.
+
+        ``context`` is the same optional per-call context as ``classify``.
 
         Returns:
             MultiClassificationResult with a ranked list of IntentScores.
         """
-        raw = self._call_llm(user_message, multi_intent=True)
+        raw = self._call_llm(user_message, multi_intent=True, context=context)
         return self._parse_multi(raw)
 
     def is_low_confidence(self, result: ClassificationResult) -> bool:
@@ -152,13 +166,26 @@ class Classifier:
     # LLM Communication
     # ----------------------------------------------------------
 
-    def _call_llm(self, user_message: str, *, multi_intent: bool) -> dict:
+    def _call_llm(
+        self,
+        user_message: str,
+        *,
+        multi_intent: bool,
+        context: dict[str, Any] | None = None,
+    ) -> dict:
         """Make the LLM call and return the parsed JSON dict."""
         start = time.time()
 
+        # DECISION plan-2026-09-21T203800-8a03483a/D-004: per-call context is
+        # appended HERE, to the cached base prompt, never baked into
+        # __init__. Do NOT move it into the constructor or the pipeline's
+        # classifier cache key: one Classifier serves every turn of a state, so
+        # a constructor input would either go stale or bust the content-keyed
+        # cache on every turn. Do NOT render context text without the shared
+        # prompts.py sanitizer/filter: history and data are user-controlled.
         system_prompt = (
             self._multi_system_prompt if multi_intent else self._system_prompt
-        )
+        ) + build_classification_context_block(context)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
@@ -431,14 +458,17 @@ class HierarchicalClassifier:
             for domain, intent_schema in schema.intent_schemas.items()
         }
 
-    def classify(self, user_message: str) -> HierarchicalResult:
+    def classify(
+        self, user_message: str, context: dict[str, Any] | None = None
+    ) -> HierarchicalResult:
         """
         Run two-stage classification: domain then intent.
 
         If the domain result maps to the fallback and no sub-classifier exists,
-        the intent result mirrors the domain result.
+        the intent result mirrors the domain result. ``context`` is forwarded
+        to both stages (see ``Classifier.classify``).
         """
-        domain_result = self._domain_classifier.classify(user_message)
+        domain_result = self._domain_classifier.classify(user_message, context)
 
         sub = self._intent_classifiers.get(domain_result.intent)
         if sub is None:
@@ -451,7 +481,7 @@ class HierarchicalClassifier:
                 intent=domain_result,
             )
 
-        intent_result = sub.classify(user_message)
+        intent_result = sub.classify(user_message, context)
         return HierarchicalResult(
             domain=domain_result,
             intent=intent_result,

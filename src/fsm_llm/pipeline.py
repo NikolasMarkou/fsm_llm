@@ -25,6 +25,7 @@ from typing import Any
 from .classification import Classifier
 from .constants import (
     CLASSIFICATION_EXTRACTION_RESULT_SUFFIX,
+    CLASSIFIER_HISTORY_EXCHANGES,
     CONTEXT_KEY_AGENT_TRACE,
     CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
@@ -2205,7 +2206,12 @@ class MessagePipeline:
                     self._classifier_connection_kwargs(config.model),
                 )
 
-                result: ClassificationResult = classifier.classify(user_message)
+                result: ClassificationResult = classifier.classify(
+                    user_message,
+                    context=self._build_classifier_context(
+                        instance, current_state, conversation_id, config.context_keys
+                    ),
+                )
 
                 log.debug(
                     f"Classification extraction '{config.field_name}': "
@@ -2318,7 +2324,12 @@ class MessagePipeline:
             classifier = self._get_classifier(
                 schema, model, None, self._classifier_connection_kwargs()
             )
-            result: ClassificationResult = classifier.classify(user_message)
+            result: ClassificationResult = classifier.classify(
+                user_message,
+                context=self._build_classifier_context(
+                    instance, current_state, conversation_id
+                ),
+            )
         except _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS as e:
             # DECISION plan-2026-09-20T165703-0d9c218e/D-001: "stay" is the
             # degrade ONLY for the classes the shared tuple names (the D-004
@@ -2403,6 +2414,37 @@ class MessagePipeline:
             f"(confidence={result.confidence:.2f})"
         )
         return result.intent
+
+    def _build_classifier_context(
+        self,
+        instance: FSMInstance,
+        state: State,
+        conversation_id: str,
+        context_keys: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Per-call classifier context: ``{"history", "purpose", "data"}``.
+
+        ``history`` is the last ``CLASSIFIER_HISTORY_EXCHANGES`` exchanges
+        without the in-flight user message (the classifier receives that as
+        its user turn). ``data`` is ``get_user_visible_data()`` (WorkingMemory
+        included, data wins) scoped by ``context_keys`` when given, else by
+        the state's ``read_keys``. Security filtering and sanitization happen
+        where it is rendered (``prompts.build_classification_context_block``).
+        """
+        # DECISION plan-2026-09-21T203800-8a03483a/D-004: one builder for
+        # both classifier call sites (extraction and ambiguous transition).
+        # Do NOT pass raw instance.context.data or skip the scope: read_keys
+        # must hide from the classifier what it hides from Pass 2, and the
+        # result is per-call input to classify(), never a cache-key input.
+        history = instance.context.conversation.get_recent(CLASSIFIER_HISTORY_EXCHANGES)
+        if history and "user" in history[-1]:
+            history = history[:-1]
+        visible = instance.context.get_user_visible_data()
+        if context_keys is not None:
+            data = {k: v for k, v in visible.items() if k in context_keys}
+        else:
+            data = self._apply_context_scope(visible, state, conversation_id)
+        return {"history": history, "purpose": state.purpose, "data": data}
 
     # ----------------------------------------------------------
     # Classification schema builder

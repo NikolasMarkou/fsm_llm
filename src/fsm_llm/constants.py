@@ -114,6 +114,10 @@ CONTEXT_KEY_AGENT_TRACE = "agent_trace"
 # Classification extraction defaults
 CLASSIFICATION_EXTRACTION_RESULT_SUFFIX = "_classification"
 
+# Recent exchanges (user+assistant pairs) the pipeline gives each classifier
+# call as history (MessagePipeline._build_classifier_context, D-004).
+CLASSIFIER_HISTORY_EXCHANGES = 3
+
 # Upper bound on intents in one multi-intent classification. Single source for
 # the `MultiClassificationResult.intents` pydantic cap (definitions.py), the
 # `ClassificationPromptConfig.max_intents` bound (prompts.py) and the

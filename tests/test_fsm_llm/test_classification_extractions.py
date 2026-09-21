@@ -448,7 +448,7 @@ class TestExecuteClassificationExtractions:
         )
 
         with patch.object(
-            Classifier, "classify", side_effect=lambda msg: next(results)
+            Classifier, "classify", side_effect=lambda msg, context=None: next(results)
         ):
             data = pipeline._execute_classification_extractions(
                 state, "urgent complaint", instance, "conv1"

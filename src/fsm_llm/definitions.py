@@ -516,8 +516,10 @@ class ClassificationExtractionConfig(BaseModel):
     context_keys: list[str] | None = Field(
         default=None,
         description=(
-            "Context keys to snapshot alongside the classification result. "
-            "If None, no context snapshot is stored."
+            "Context keys the classifier sees as context data and that are "
+            "snapshotted alongside the classification result. If None, the "
+            "classifier sees the state's read_keys-scoped visible context and "
+            "no snapshot is stored."
         ),
     )
 
@@ -1114,7 +1116,9 @@ class FSMContext(BaseModel):
     reaches no Pass-2 prompt through it; a custom ``LLMInterface`` that reads
     ``request.context`` WILL see buffer data there. ``update_context`` and
     handlers write ``data`` only. See ``fsm_llm.memory.WorkingMemory`` for
-    the full statement.
+    the full statement. Both classifier call sites (classification
+    extractions and ambiguous-transition resolution) also read it, scoped,
+    through ``MessagePipeline._build_classifier_context``.
     """
 
     model_config = {"arbitrary_types_allowed": True}

@@ -458,7 +458,7 @@ class TestADaPTSubtaskExecution:
             classifier_instance = MagicMock()
             first_intent = schema.intents[0].name if schema.intents else "unknown"
 
-            def _classify(msg):
+            def _classify(msg, context=None):
                 result = MagicMock()
                 result.intent = first_intent
                 result.confidence = 0.9
@@ -521,7 +521,7 @@ class TestADaPTSubtaskExecution:
             classifier_instance = MagicMock()
             first_intent = schema.intents[0].name if schema.intents else "unknown"
 
-            def _classify(msg):
+            def _classify(msg, context=None):
                 result = MagicMock()
                 result.intent = first_intent
                 result.confidence = 0.9
