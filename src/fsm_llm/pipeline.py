@@ -441,6 +441,13 @@ class MessagePipeline:
             pre_turn_wm = copy.deepcopy(instance.context.working_memory)
             pre_turn_metadata = copy.deepcopy(instance.context.metadata)
 
+            # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): a transition
+            # classification record belongs to the turn that produced it. Clear
+            # it AFTER the snapshot so a rolled-back turn restores the prior
+            # record; do NOT move this before the snapshot, and do NOT drop it
+            # from process_stream() (same clear there).
+            instance.context.data.pop(CONTEXT_KEY_CLASSIFICATION_RESULT, None)
+
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
             # Widened turn-atomicity: PRE_PROCESSING and POST_PROCESSING handler
             # calls are now EACH individually wrapped in their own restore-on-
@@ -600,6 +607,10 @@ class MessagePipeline:
             pre_turn_data = copy.deepcopy(instance.context.data)
             pre_turn_wm = copy.deepcopy(instance.context.working_memory)
             pre_turn_metadata = copy.deepcopy(instance.context.metadata)
+
+            # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): streaming
+            # mirror of the per-turn clear in process(); after the snapshot.
+            instance.context.data.pop(CONTEXT_KEY_CLASSIFICATION_RESULT, None)
 
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
             # Widened turn-atomicity, streaming mirror of process()'s guard
@@ -2337,16 +2348,38 @@ class MessagePipeline:
             f"confidence={result.confidence:.2f}, reasoning={result.reasoning}"
         )
 
+        # DECISION plan-2026-09-21T203800-8a03483a/D-002: a result below
+        # schema.confidence_threshold means "stay" (A1). Compare against the
+        # schema built above, the same `<` rule as Classifier.is_low_confidence
+        # and the extraction site; do NOT call classifier.is_low_confidence()
+        # here, because a patched Classifier returns a truthy mock and would
+        # silently turn every mocked transition into a stay. Do NOT route this
+        # through an exception: the soft-fail tuple above stays closed.
+        low_confidence = result.confidence < schema.confidence_threshold
+
         # Store classification result in context for debugging
-        instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = {
+        record: dict[str, Any] = {
             "intent": result.intent,
             "confidence": result.confidence,
             "reasoning": result.reasoning,
             "entities": result.entities,
         }
+        if low_confidence:
+            record["low_confidence"] = True
+        instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = record
 
         # Store as transition decision for debugging
         instance.last_transition_decision = result
+
+        if low_confidence:
+            log.warning(
+                f"Transition classification below threshold in state "
+                f"'{current_state.id}': intent={result.intent}, "
+                f"confidence={result.confidence:.2f}, "
+                f"threshold={schema.confidence_threshold} -- staying in state"
+            )
+            # D-007 of plan-2026-09-19T175721-21cd7f8e: stay is None.
+            return None
 
         # Handle fallback intent (low confidence or unknown) — stay in current state
         if result.intent == TRANSITION_CLASSIFICATION_FALLBACK_INTENT:
