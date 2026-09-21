@@ -405,6 +405,127 @@ class TestWorkingMemoryHiddenBuffersRoundTrip:
         assert "_hidden_buffers" in d, "from_dict mutated the caller's dict"
 
 
+class TestWorkingMemoryFromDictValidation:
+    """Findings memory #10 / #11 (plan-2026-09-20T165703-0d9c218e, D-001).
+
+    ``from_dict`` used to call ``dict(contents)`` on whatever a buffer body
+    was: ``None`` raised a bare ``TypeError`` with no buffer name, a string
+    raised a ``ValueError`` about dictionary update sequences, and an
+    embedded ``"_hidden_buffers": "metadata"`` was iterated into the set
+    ``{"m", "e", "t", "a", "d"}``. Every malformed shape now raises a
+    ``ValueError`` that names the buffer / key.
+    """
+
+    @pytest.mark.parametrize(
+        "bad_body", ["not-a-dict", None, [1, 2, 3]], ids=["str", "None", "list"]
+    )
+    def test_non_dict_buffer_body_raises_naming_the_buffer(self, bad_body):
+        with pytest.raises(ValueError) as excinfo:
+            WorkingMemory.from_dict({"core": bad_body})
+        message = str(excinfo.value)
+        assert "'core'" in message
+        assert type(bad_body).__name__ in message
+
+    def test_none_body_does_not_become_an_empty_buffer(self):
+        """The exact simpler alternative D-001 rejects: silently treating
+        ``None`` as ``{}``."""
+        with pytest.raises(ValueError):
+            WorkingMemory.from_dict({"core": {"ok": 1}, "scratch": None})
+
+    def test_bare_string_hidden_buffers_raises_and_is_not_iterated(self):
+        with pytest.raises(ValueError) as excinfo:
+            WorkingMemory.from_dict({"core": {}, "_hidden_buffers": "metadata"})
+        message = str(excinfo.value)
+        assert "_hidden_buffers" in message
+        assert "str" in message
+
+    def test_hidden_buffers_with_a_non_str_element_raises(self):
+        with pytest.raises(ValueError, match="_hidden_buffers"):
+            WorkingMemory.from_dict({"core": {}, "_hidden_buffers": [1]})
+
+    def test_hidden_buffers_dict_value_raises(self):
+        with pytest.raises(ValueError, match="_hidden_buffers"):
+            WorkingMemory.from_dict({"core": {}, "_hidden_buffers": {"m": 1}})
+
+    @pytest.mark.parametrize(
+        "collection",
+        [
+            ["metadata", "audit"],
+            ("metadata", "audit"),
+            {"metadata", "audit"},
+            frozenset({"metadata", "audit"}),
+        ],
+        ids=["list", "tuple", "set", "frozenset"],
+    )
+    def test_accepted_collection_types_round_trip_to_the_same_frozenset(
+        self, collection
+    ):
+        memory = WorkingMemory.from_dict(
+            {"core": {"k": 1}, "_hidden_buffers": collection}
+        )
+        assert memory._hidden_buffers == frozenset({"metadata", "audit"})
+        assert memory.get("core", "k") == 1
+
+    def test_validation_happens_before_construction(self):
+        """A malformed body must not leave a half-built instance behind: the
+        reserved-name guard (D-026) and the body check both fire from the
+        same pre-construction pass, so neither observes partial state."""
+        with pytest.raises(ValueError, match="'core'"):
+            WorkingMemory.from_dict({"core": None, "_hidden_buffers": ["x"]})
+
+    def test_restore_session_surfaces_corrupted_buffer_and_leaves_no_conversation(
+        self, tmp_path, mock_llm_interface
+    ):
+        """Public path: a hand-corrupted session file (``buffers.core`` is a
+        string) makes ``API.restore_session`` raise with ``'core'`` in the
+        message, and the D-003 teardown (api.py) leaves no half-restored
+        conversation registered. ``restore_session`` re-raises the original
+        exception unwrapped (``except Exception: ...; raise``), so the type
+        is the ``ValueError`` from ``from_dict``."""
+        import json
+
+        from fsm_llm import API, FileSessionStore
+
+        fsm = {
+            "name": "wm-corrupt",
+            "description": "Session corruption regression",
+            "initial_state": "start",
+            "states": {
+                "start": {
+                    "id": "start",
+                    "description": "Only state",
+                    "purpose": "Hold",
+                    "response_instructions": "Say hi",
+                }
+            },
+        }
+        store = FileSessionStore(tmp_path)
+        api = API(
+            fsm_definition=fsm,
+            llm_interface=mock_llm_interface,
+            session_store=store,
+        )
+        conv_id, _ = api.start_conversation()
+        wm = WorkingMemory()
+        wm.set(BUFFER_CORE, "marker", "alive")
+        api.fsm_manager.instances[conv_id].context.working_memory = wm
+        api.save_session(conv_id)
+        api.end_conversation(conv_id)
+
+        session_file = tmp_path / f"{conv_id}.json"
+        raw = json.loads(session_file.read_text())
+        assert isinstance(raw["working_memory"]["buffers"]["core"], dict)
+        raw["working_memory"]["buffers"]["core"] = "corrupted"
+        session_file.write_text(json.dumps(raw))
+
+        before = set(api.list_active_conversations())
+        with pytest.raises(ValueError) as excinfo:
+            api.restore_session(conv_id)
+        assert "'core'" in str(excinfo.value)
+        assert set(api.list_active_conversations()) == before
+        assert len(api.fsm_manager.instances) == 0
+
+
 class TestWorkingMemoryReservedBufferNameRejected:
     """D-026 (iter-3 completion-fix) / review-iter-3.md WARNING 1.
 

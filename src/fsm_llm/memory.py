@@ -596,9 +596,39 @@ class WorkingMemory:
 
         Returns:
             New WorkingMemory instance.
+
+        Raises:
+            ValueError: If a buffer body is not a ``dict`` (``None``
+                included -- a corrupted session file must fail loudly, not
+                restore as an empty buffer), or if the embedded
+                ``"_hidden_buffers"`` value is not a ``list``/``tuple``/
+                ``set``/``frozenset`` whose elements are all ``str`` (a
+                bare ``str`` is rejected, never iterated character by
+                character). The message names the offending buffer / key.
         """
         data = dict(data)  # shallow copy: never mutate the caller's dict
         embedded_hidden = data.pop(cls._HIDDEN_BUFFERS_DICT_KEY, None)
+        # DECISION plan-2026-09-20T165703-0d9c218e/D-001
+        # Validate every shape BEFORE constructing the instance (memory #10,
+        # #11). Do NOT coerce: `None` -> `{}` would turn a corrupted session
+        # file into a silently empty buffer, and `frozenset("metadata")` would
+        # iterate the string into single characters. Construction still goes
+        # through `cls(...)` so the D-026 reserved-name guard applies unchanged.
+        if embedded_hidden is not None:
+            if not isinstance(
+                embedded_hidden, (list, tuple, builtins.set, frozenset)
+            ) or not all(isinstance(n, str) for n in embedded_hidden):
+                raise ValueError(
+                    f"WorkingMemory.from_dict: {cls._HIDDEN_BUFFERS_DICT_KEY!r} "
+                    "must be a list/tuple/set/frozenset of str, got "
+                    f"{type(embedded_hidden).__name__}"
+                )
+        for name, contents in data.items():
+            if not isinstance(contents, dict):
+                raise ValueError(
+                    f"WorkingMemory.from_dict: buffer {name!r} must be a dict, "
+                    f"got {type(contents).__name__}"
+                )
         if hidden_buffers is None and embedded_hidden is not None:
             hidden_buffers = frozenset(embedded_hidden)
         buffer_names = list(data.keys())
