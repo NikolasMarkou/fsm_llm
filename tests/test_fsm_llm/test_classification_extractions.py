@@ -12,8 +12,8 @@ from litellm.exceptions import RateLimitError
 from fsm_llm.api import API
 from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import (
-    CLASSIFICATION_EXTRACTION_RESULT_SUFFIX,
     MAX_MULTI_INTENTS,
+    METADATA_KEY_CLASSIFICATION_RESULTS,
 )
 from fsm_llm.definitions import (
     ClassificationError,
@@ -326,11 +326,12 @@ class TestExecuteClassificationExtractions:
                 state, "I'm so frustrated!", instance, "conv1"
             )
 
-        assert data["sentiment"] == "negative"
-        full_key = f"_sentiment{CLASSIFICATION_EXTRACTION_RESULT_SUFFIX}"
-        assert full_key in data
-        assert data[full_key]["intent"] == "negative"
-        assert data[full_key]["confidence"] == 0.9
+        # A4 (D-005): the returned delta carries only the intent; the full
+        # result lives in context.metadata, not in a dropped `_` data key.
+        assert data == {"sentiment": "negative"}
+        full = instance.context.metadata[METADATA_KEY_CLASSIFICATION_RESULTS]
+        assert full["sentiment"]["intent"] == "negative"
+        assert full["sentiment"]["confidence"] == 0.9
 
     def test_below_threshold_skipped(self):
         config = _make_config(confidence_threshold=0.8)
@@ -424,8 +425,9 @@ class TestExecuteClassificationExtractions:
                 state, "test", instance, "conv1"
             )
 
-        full_key = f"_sentiment{CLASSIFICATION_EXTRACTION_RESULT_SUFFIX}"
-        assert data[full_key]["context_snapshot"] == {"user_name": "Alice"}
+        assert data == {"sentiment": "positive"}
+        full = instance.context.metadata[METADATA_KEY_CLASSIFICATION_RESULTS]
+        assert full["sentiment"]["context_snapshot"] == {"user_name": "Alice"}
 
     def test_multiple_classification_extractions(self):
         configs = [

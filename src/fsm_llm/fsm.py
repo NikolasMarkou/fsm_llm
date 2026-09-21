@@ -1041,7 +1041,15 @@ class FSMManager:
     def get_complete_conversation(
         self, conversation_id: str, log: Any = None
     ) -> dict[str, Any]:
-        """Get complete conversation data for analysis."""
+        """Get complete conversation data for analysis.
+
+        ``metadata`` is a shallow copy of ``context.metadata``. Besides
+        ``_pipeline_extracted`` (provenance digests) it carries
+        ``classification_results`` ({field_name: latest full classification
+        record}) and, for the latest turn only, ``transition_classification``
+        (the ambiguous-transition classifier record). Both are JSON-native and
+        replaced, never mutated in place, so a returned snapshot stays stable.
+        """
         # Snapshot every mutable container (+ fsm_id/state_id and the debug-model
         # refs) in ONE pass under conv_lock, so collected_data / history / metadata
         # AND the current_state sub-dict are internally consistent and cannot be

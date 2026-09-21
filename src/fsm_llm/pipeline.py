@@ -24,12 +24,13 @@ from typing import Any
 
 from .classification import Classifier
 from .constants import (
-    CLASSIFICATION_EXTRACTION_RESULT_SUFFIX,
     CLASSIFIER_HISTORY_EXCHANGES,
     CONTEXT_KEY_AGENT_TRACE,
     CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     MAX_CLASSIFIER_CACHE_SIZE,
+    METADATA_KEY_CLASSIFICATION_RESULTS,
+    METADATA_KEY_TRANSITION_CLASSIFICATION,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
     is_forbidden_context_entry,
 )
@@ -202,6 +203,53 @@ def _record_provenance(instance: FSMInstance, committed: dict[str, Any]) -> None
     prov = instance.context.metadata.setdefault(_PROVENANCE_KEY, {})
     for key, value in committed.items():
         prov[key] = _value_digest(value)
+
+
+# DECISION plan-2026-09-21T203800-8a03483a/D-005 (A4): full classification
+# records live in `context.metadata`, NOT in a `_<field>_classification` data
+# key: `clean_context_keys` drops every internal-prefixed key before commit,
+# and `has_internal_prefix` must not be special-cased per field. Writes are
+# copy-on-write (a NEW dict replaces the metadata entry): do NOT switch to
+# `metadata.setdefault(...)[field] = record`, because
+# `get_complete_conversation` returns a SHALLOW copy of metadata and a later
+# turn would mutate a snapshot a caller already holds. Records hold
+# JSON-native values only (`_json_native_values`).
+def _record_classification_result(
+    instance: FSMInstance, field_name: str, record: dict[str, Any]
+) -> None:
+    """Store ``record`` as the latest result of classification field
+    ``field_name`` under ``metadata[METADATA_KEY_CLASSIFICATION_RESULTS]``."""
+    metadata = instance.context.metadata
+    results = dict(metadata.get(METADATA_KEY_CLASSIFICATION_RESULTS) or {})
+    results[field_name] = record
+    metadata[METADATA_KEY_CLASSIFICATION_RESULTS] = results
+
+
+def _record_transition_classification(
+    instance: FSMInstance, record: dict[str, Any]
+) -> None:
+    """Store the turn's transition-classification record in the back-compat
+    ``context.data`` key and its ``context.metadata`` mirror
+    (plan-2026-09-21T203800-8a03483a/D-005); the mirror is a separate copy so
+    neither aliases the other."""
+    instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = record
+    instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION] = copy.deepcopy(
+        record
+    )
+
+
+def _json_native_values(data: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    """Independent JSON-native copies of ``data[k]`` for each present ``k``;
+    a value that does not survive ``json.dumps`` is left out (never
+    stringified, so no object repr lands in metadata)."""
+    out: dict[str, Any] = {}
+    for key in keys:
+        if key in data:
+            try:
+                out[key] = json.loads(json.dumps(data[key], allow_nan=False))
+            except (TypeError, ValueError, RecursionError):
+                continue
+    return out
 
 
 class _BulkFailed(dict):
@@ -446,8 +494,11 @@ class MessagePipeline:
             # classification record belongs to the turn that produced it. Clear
             # it AFTER the snapshot so a rolled-back turn restores the prior
             # record; do NOT move this before the snapshot, and do NOT drop it
-            # from process_stream() (same clear there).
+            # from process_stream() (same clear there). The metadata mirror
+            # (A4, plan-2026-09-21T203800-8a03483a/D-005) is part of the same
+            # record and is cleared with it.
             instance.context.data.pop(CONTEXT_KEY_CLASSIFICATION_RESULT, None)
+            instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
 
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
             # Widened turn-atomicity: PRE_PROCESSING and POST_PROCESSING handler
@@ -612,6 +663,7 @@ class MessagePipeline:
             # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): streaming
             # mirror of the per-turn clear in process(); after the snapshot.
             instance.context.data.pop(CONTEXT_KEY_CLASSIFICATION_RESULT, None)
+            instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
 
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
             # Widened turn-atomicity, streaming mirror of process()'s guard
@@ -2150,10 +2202,18 @@ class MessagePipeline:
 
         For each :class:`ClassificationExtractionConfig`, builds a
         :class:`ClassificationSchema`, creates a :class:`Classifier`,
-        and stores the result in two context keys:
+        and stores the result in two places:
 
-        - ``field_name`` → intent string (simple, JsonLogic-friendly)
-        - ``_{field_name}_classification`` → full result dict (debugging)
+        - ``field_name`` → intent string in the returned dict (simple,
+          JsonLogic-friendly; fallback always, other intents only at or above
+          ``confidence_threshold``)
+        - ``context.metadata["classification_results"][field_name]`` → full
+          result dict (intent, confidence, reasoning, entities, plus
+          ``low_confidence`` when below ``confidence_threshold`` (a non-fallback
+          intent is then discarded) and ``context_snapshot`` of the
+          JSON-native ``context_keys`` values), written for every result
+          (plan-2026-09-21T203800-8a03483a/D-005). Readable via
+          ``FSMManager.get_complete_conversation``.
 
         Args:
             current_state: Current state (for config lookup).
@@ -2218,6 +2278,24 @@ class MessagePipeline:
                     f"intent={result.intent}, confidence={result.confidence:.2f}"
                 )
 
+                # plan-2026-09-21T203800-8a03483a/D-005 (A4): the full result
+                # of EVERY classification of this field (fallback and
+                # discarded low-confidence ones too) is the inspectable
+                # record; see _record_classification_result.
+                full_result: dict[str, Any] = {
+                    "intent": result.intent,
+                    "confidence": result.confidence,
+                    "reasoning": result.reasoning,
+                    "entities": dict(result.entities),
+                }
+                if result.confidence < config.confidence_threshold:
+                    full_result["low_confidence"] = True
+                if config.context_keys:
+                    full_result["context_snapshot"] = _json_native_values(
+                        instance.context.data, config.context_keys
+                    )
+                _record_classification_result(instance, config.field_name, full_result)
+
                 # Always store fallback intent so the context key exists
                 # for downstream JsonLogic conditions
                 if result.intent == config.fallback_intent:
@@ -2243,24 +2321,6 @@ class MessagePipeline:
 
                 # Store simple value (user-visible, works with JsonLogic)
                 extracted[config.field_name] = result.intent
-
-                # Store full result (internal key, debugging)
-                suffix = CLASSIFICATION_EXTRACTION_RESULT_SUFFIX
-                full_key = f"_{config.field_name}{suffix}"
-                full_result: dict[str, Any] = {
-                    "intent": result.intent,
-                    "confidence": result.confidence,
-                    "reasoning": result.reasoning,
-                    "entities": result.entities,
-                }
-                # Include context snapshot if configured
-                if config.context_keys:
-                    full_result["context_snapshot"] = {
-                        k: instance.context.data.get(k)
-                        for k in config.context_keys
-                        if k in instance.context.data
-                    }
-                extracted[full_key] = full_result
 
                 log.info(
                     f"Classification extraction '{config.field_name}' = "
@@ -2342,10 +2402,9 @@ class MessagePipeline:
                 f"Classification failed during ambiguous transition resolution: {e}"
             )
             log.warning("Falling back to current state (no transition)")
-            instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = {
-                "error": str(e),
-                "fallback": True,
-            }
+            _record_transition_classification(
+                instance, {"error": str(e), "fallback": True}
+            )
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-007: "stay" is None,
             # not instance.current_state. Returning the current state made the
             # caller run PRE/POST_TRANSITION handlers and tell Pass 2 a
@@ -2368,16 +2427,17 @@ class MessagePipeline:
         # through an exception: the soft-fail tuple above stays closed.
         low_confidence = result.confidence < schema.confidence_threshold
 
-        # Store classification result in context for debugging
+        # Store the classification record: data key + metadata mirror
+        # (plan-2026-09-21T203800-8a03483a/D-005).
         record: dict[str, Any] = {
             "intent": result.intent,
             "confidence": result.confidence,
             "reasoning": result.reasoning,
-            "entities": result.entities,
+            "entities": dict(result.entities),
         }
         if low_confidence:
             record["low_confidence"] = True
-        instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = record
+        _record_transition_classification(instance, record)
 
         # Store as transition decision for debugging
         instance.last_transition_decision = result

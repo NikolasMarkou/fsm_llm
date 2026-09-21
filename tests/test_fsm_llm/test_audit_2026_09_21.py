@@ -591,3 +591,168 @@ class TestStep03A3:
             hier.classify("charge me back", context=ctx)
         assert len(cap.calls) == 2
         assert all("Resolve billing issues" in m[0]["content"] for m in cap.calls)
+
+
+# ---------------------------------------------------------------------------
+# Step 4: A4 (full classification result persisted in context.metadata)
+# ---------------------------------------------------------------------------
+
+# The documented metadata keys are pinned as literals: they are the public
+# contract a monitor or debugger reads through get_complete_conversation.
+_A4_RESULTS_KEY = "classification_results"
+_A4_TRANSITION_KEY = "transition_classification"
+
+
+def _a4_metadata(api: API, conv_id: str) -> dict[str, Any]:
+    return api.fsm_manager.get_complete_conversation(conv_id)["metadata"]
+
+
+class TestStep04A4:
+    """A4: every classification-extraction result is recorded in full under
+    ``context.metadata["classification_results"][field_name]`` and the
+    transition-classification record is mirrored to
+    ``context.metadata["transition_classification"]``. Both are readable via
+    ``get_complete_conversation``, stay out of ``get_data`` and ``context.data``
+    (except the back-compat transition key), are JSON-native, and roll back
+    with the turn.
+    """
+
+    def test_a4_classification_result_visible_via_get_complete_conversation(self):
+        api, conv_id = _a3_api(_a3_extraction_fsm(context_keys=["topic"]))
+        with _ClassifierCapture("buy", 0.9):
+            api.converse("I want to buy these", conv_id)
+
+        metadata = _a4_metadata(api, conv_id)
+        assert metadata[_A4_RESULTS_KEY]["intent"] == {
+            "intent": "buy",
+            "confidence": 0.9,
+            "reasoning": "r",
+            "entities": {},
+            "context_snapshot": {"topic": "running shoes"},
+        }
+        # JSON-native: the whole metadata mapping serialises without default=.
+        json.dumps(metadata)
+
+    def test_a4_result_not_in_get_data(self):
+        api, conv_id = _a3_api(_a3_extraction_fsm())
+        with _ClassifierCapture("buy", 0.9):
+            api.converse("I want to buy these", conv_id)
+
+        data = api.get_data(conv_id)
+        assert data["intent"] == "buy"
+        assert _A4_RESULTS_KEY not in data
+        assert not any("classification" in k for k in _raw_data(api, conv_id))
+
+    def test_a4_fallback_and_low_confidence_results_are_recorded(self):
+        api, conv_id = _a3_api(_a3_extraction_fsm())
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+        record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
+        assert record["intent"] == "browse"
+        assert "low_confidence" not in record
+
+        with _ClassifierCapture("buy", 0.2):
+            api.converse("maybe buy?", conv_id)
+        record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
+        assert record["intent"] == "buy"
+        assert record["low_confidence"] is True
+        # The discarded result never became the field value.
+        assert api.get_data(conv_id)["intent"] == "browse"
+        assert api.get_current_state(conv_id) == "triage"
+
+    def test_a4_rollback_restores_metadata_result(self):
+        llm = _mock_llm()
+        api = API.from_definition(_a3_extraction_fsm(), llm_interface=llm)
+        conv_id, _ = api.start_conversation()
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+        prior = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]
+
+        llm.generate_response.side_effect = RuntimeError("pass 2 down")
+        with _ClassifierCapture("buy", 0.9), pytest.raises(FSMError):
+            api.converse("buy it now", conv_id)
+
+        assert api.get_current_state(conv_id) == "triage"
+        assert _a4_metadata(api, conv_id)[_A4_RESULTS_KEY] == prior
+        assert prior["intent"]["intent"] == "browse"
+
+    def test_a4_earlier_snapshot_not_mutated_by_later_turn(self):
+        api, conv_id = _a3_api(_a3_extraction_fsm())
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+        earlier = _a4_metadata(api, conv_id)
+
+        with _ClassifierCapture("browse", 0.7):
+            api.converse("still looking", conv_id)
+
+        assert earlier[_A4_RESULTS_KEY]["intent"]["confidence"] == 0.95
+        later = _a4_metadata(api, conv_id)
+        assert later[_A4_RESULTS_KEY]["intent"]["confidence"] == 0.7
+
+    def test_a4_context_snapshot_keeps_json_native_values_only(self):
+        api = API.from_definition(
+            _a3_extraction_fsm(context_keys=["topic", "handle"]),
+            llm_interface=_mock_llm(),
+        )
+        conv_id, _ = api.start_conversation(
+            initial_context={"topic": "running shoes", "handle": object()}
+        )
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+
+        record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
+        assert record["context_snapshot"] == {"topic": "running shoes"}
+        json.dumps(record)
+
+    def test_a4_transition_record_in_metadata(self):
+        api, conv_id, _ = _api(_ambiguous_then_blocked_fsm())
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.return_value.classify.return_value = _classification("a", 0.95)
+            api.converse("a please", conv_id)
+
+        assert api.get_current_state(conv_id) == "a"
+        mirrored = _a4_metadata(api, conv_id)[_A4_TRANSITION_KEY]
+        assert mirrored == _raw_data(api, conv_id)[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        assert mirrored["intent"] == "a"
+        assert mirrored["confidence"] == pytest.approx(0.95)
+        json.dumps(mirrored)
+
+        # A8's turn-start clear covers the metadata mirror too.
+        api.converse("still here", conv_id)
+        assert _A4_TRANSITION_KEY not in _a4_metadata(api, conv_id)
+
+    def test_a4_transition_low_confidence_and_failure_mirrored(self):
+        api, conv_id, _ = _api(
+            _ambiguous_then_blocked_fsm({"confidence_threshold": 0.9})
+        )
+        # One patch for both turns: the pipeline caches the classifier.
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.return_value.classify.side_effect = [
+                _classification("a", 0.05),
+                RuntimeError("down"),
+            ]
+            api.converse("maybe a?", conv_id)
+            assert _a4_metadata(api, conv_id)[_A4_TRANSITION_KEY]["low_confidence"]
+            api.converse("again", conv_id)
+        mirrored = _a4_metadata(api, conv_id)[_A4_TRANSITION_KEY]
+        assert mirrored == {"error": "down", "fallback": True}
+
+    def test_a4_session_save_restore_unaffected(self, tmp_path):
+        from fsm_llm.session import FileSessionStore
+
+        api = API.from_definition(
+            _a3_extraction_fsm(),
+            llm_interface=_mock_llm(),
+            session_store=FileSessionStore(tmp_path),
+        )
+        conv_id, _ = api.start_conversation()
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+        api.save_session(conv_id)
+
+        restored = api.restore_session(conv_id)
+        assert restored is not None
+        new_conv_id, state = restored
+        assert api.get_data(new_conv_id)["intent"] == "browse"
+        # Per-turn debug records are not session state; only provenance is.
+        assert set(state.metadata) == {"pipeline_extracted"}

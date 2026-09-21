@@ -111,8 +111,11 @@ TRANSITION_CLASSIFICATION_FALLBACK_INTENT = "_stay_in_state"
 CONTEXT_KEY_CLASSIFICATION_RESULT = "_transition_classification_result"
 CONTEXT_KEY_AGENT_TRACE = "agent_trace"
 
-# Classification extraction defaults
-CLASSIFICATION_EXTRACTION_RESULT_SUFFIX = "_classification"
+# `context.metadata` keys for full classification records (A4, D-005): the
+# latest result per classification-extraction field, and the current turn's
+# transition-classification record (mirror of CONTEXT_KEY_CLASSIFICATION_RESULT).
+METADATA_KEY_CLASSIFICATION_RESULTS = "classification_results"
+METADATA_KEY_TRANSITION_CLASSIFICATION = "transition_classification"
 
 # Recent exchanges (user+assistant pairs) the pipeline gives each classifier
 # call as history (MessagePipeline._build_classifier_context, D-004).
