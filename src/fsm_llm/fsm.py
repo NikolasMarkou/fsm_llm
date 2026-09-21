@@ -22,6 +22,7 @@ from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
     MAX_CONTEXT_FILTER_DEPTH,
+    MAX_CONTEXT_FILTER_NODES,
     has_internal_prefix,
 )
 from .definitions import (
@@ -96,7 +97,14 @@ def _strip_internal_mapping(source: dict[Any, Any]) -> dict[Any, Any]:
             return "internal key prefix"
         return None
 
-    return filter_context_tree(source, MAX_CONTEXT_FILTER_DEPTH, _should_drop)
+    # No `leaf` hook here (D-010 of plan-2026-09-21T203800-8a03483a): a
+    # handler-stored object is application data for `get_data`, not a leak.
+    return filter_context_tree(
+        source,
+        MAX_CONTEXT_FILTER_DEPTH,
+        _should_drop,
+        max_nodes=MAX_CONTEXT_FILTER_NODES,
+    )
 
 
 # Return type of a read snapshot (see FSMManager._read_under_lock).

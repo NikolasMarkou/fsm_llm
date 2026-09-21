@@ -12,10 +12,13 @@ Key Features:
 
 from __future__ import annotations
 
+import datetime
+import decimal
 import json
 import math
 import os
 import re
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -156,10 +159,76 @@ def strip_think_and_fences(content: str) -> str:
 # Depth-bounded context-filter tree walker
 # --------------------------------------------------------------
 
-# Sentinel: a container past the caller-supplied max depth, which the caller
-# (this walker itself) drops. Module-private -- callers never see this value,
-# only the filtered result.
+# Sentinels for a value the walker itself drops, keyed to the ``on_drop``
+# reason reported for it. Module-private -- callers never see these values,
+# only the filtered result and the reason string.
 _TOO_DEEP = object()
+_CYCLE = object()
+_OVER_BUDGET = object()
+_DROP_REASONS = ((_TOO_DEEP, "too_deep"), (_CYCLE, "cycle"))
+
+
+def _drop_reason(value: Any) -> str | None:
+    """The ``on_drop`` reason for a walker sentinel (identity, never ``==``)."""
+    for sentinel, reason in _DROP_REASONS:
+        if value is sentinel:
+            return reason
+    return None
+
+
+# The leaf types a prompt can render faithfully (``json.dumps`` without
+# ``default=``). Containers (dict/list/tuple) are walked, never leaves.
+_JSON_NATIVE_LEAF_TYPES = (str, int, float, bool)
+
+# Stdlib value scalars whose ``str()`` IS the value (an ISO date, a number, a
+# UUID) and carries no attribute fields. EXACT types only: a subclass can
+# override ``__str__``. See decisions.md D-032.
+_VALUE_SCALAR_TYPES = frozenset(
+    {
+        datetime.date,
+        datetime.datetime,
+        datetime.time,
+        datetime.timedelta,
+        decimal.Decimal,
+        uuid.UUID,
+    }
+)
+
+
+def redact_non_json_leaf(value: Any) -> Any:
+    """Return *value* if it is a JSON-native leaf, else a type-name placeholder.
+
+    Contract:
+        - ``None`` and instances of ``str``/``int``/``float``/``bool`` (including
+          subclasses such as ``StrEnum``/``IntEnum``) are returned unchanged,
+          as are values whose EXACT type is ``datetime.date``/``datetime``/
+          ``time``/``timedelta``, ``decimal.Decimal`` or ``uuid.UUID``.
+        - Anything else (pydantic model, dataclass, ``MappingProxyType``, set,
+          bytes, arbitrary object, a subclass of a value scalar) becomes
+          ``"<redacted:TypeName>"``.
+        - Never raises; never calls ``str()``/``repr()`` on *value*.
+        - Shared by ``prompts.BasePromptBuilder``'s walker and
+          ``context.clean_context_keys`` (as ``filter_context_tree``'s
+          ``leaf`` hook); ``fsm._strip_internal_mapping`` does NOT use it.
+
+    # DECISION plan-2026-09-21T203800-8a03483a/D-010
+    # Redact, do NOT drop (the model still learns the key exists) and do NOT
+    # ``str()`` the object: its ``__str__``/``__repr__`` is exactly the path
+    # that carried `password='...'` fields past every key filter. Do NOT wire
+    # this into `get_data`'s walker: a handler-stored object is legitimate
+    # application data there. See decisions.md D-010.
+    """
+    # DECISION plan-2026-09-21T203800-8a03483a/D-032
+    # The stdlib value scalars stay (a date in context is ordinary data and a
+    # prior plan pins it reaching Pass 2); do NOT widen this to `isinstance`
+    # or to arbitrary types with a "safe-looking" `__str__`. See D-032.
+    if (
+        value is None
+        or isinstance(value, _JSON_NATIVE_LEAF_TYPES)
+        or type(value) in _VALUE_SCALAR_TYPES
+    ):
+        return value
+    return f"<redacted:{type(value).__name__}>"
 
 
 def filter_context_tree(
@@ -167,6 +236,8 @@ def filter_context_tree(
     max_depth: int,
     should_drop: Callable[[Any, Any, str], str | None],
     on_drop: Callable[[str, str], None] = lambda _path, _reason: None,
+    leaf: Callable[[Any], Any] | None = None,
+    max_nodes: int | None = None,
 ) -> dict[Any, Any]:
     """Recursively filter a mapping's keys, bounded at ``max_depth``.
 
@@ -215,32 +286,73 @@ def filter_context_tree(
           list/tuple's own elements each get one additional depth increment
           beyond that (this asymmetry existed identically in both original
           implementations and is preserved verbatim, not "fixed").
-        - Scalars pass through unchanged at any depth; only dict/list/tuple
-          containers are ever subject to the depth bound.
+        - Scalars pass through unchanged at any depth (or through ``leaf``
+          when given); only dict/list/tuple containers are ever subject to
+          the depth bound.
         - Fail-closed at the bound: a container deeper than ``max_depth`` is
           dropped, never returned unfiltered.
+        - ``leaf(value) -> value``: optional, applied to every non-container
+          value that is kept (``None`` = identity). Policy stays with the
+          caller: it is a closure, like ``should_drop``.
+        - Cycles: a container already on the ACTIVE recursion path is dropped
+          with reason ``"cycle"``. A container reached twice WITHOUT a cycle
+          (shared, acyclic) is filtered at every occurrence, as before.
+        - ``max_nodes``: every value visited (container or scalar) costs one
+          node; once the budget is spent the remaining values are dropped
+          (fail-closed) and ``on_drop`` is called once per truncated container
+          with reason ``"over_budget"``. ``None`` = no budget.
         - Two call sites today: `fsm.py::_strip_internal_mapping` (silent,
           bare-prefix predicate) and `context.py::clean_mapping` (5-reason
           predicate, logging `on_drop`) -- a "same shape, different
           behavior" extraction, not a policy merge.
+
+    # DECISION plan-2026-09-21T203800-8a03483a/D-011
+    # The depth bound alone does not bound WORK: 3-way aliasing at 14 levels
+    # is 3**14 paths and never finished. Two guards sit NEXT TO the bound
+    # (neither replaces it, per D-010): an active-path `id()` set drops a
+    # true cycle, and a node budget caps total work. Do NOT memoise a shared
+    # container's filtered result and reuse it (that changes output shape
+    # for shared-but-acyclic data) and do NOT keep a global `seen` set (that
+    # drops the second occurrence of a shared list). See decisions.md D-011.
     """
+    active: set[int] = set()
+    remaining = [max_nodes or 0]
+
+    def _spend() -> bool:
+        """Charge one node; False once the budget is exhausted."""
+        if max_nodes is None:
+            return True
+        remaining[0] -= 1
+        return remaining[0] >= 0
 
     def _filter_value(value: Any, path: str, depth: int) -> Any:
+        if not _spend():
+            return _OVER_BUDGET
         if not isinstance(value, (dict, list, tuple)):
-            return value
+            return value if leaf is None else leaf(value)
         if depth > max_depth:
             return _TOO_DEEP
-        if isinstance(value, dict):
-            return _filter_mapping(value, path, depth)
-        items = []
-        for index, item in enumerate(value):
-            element_path = f"{path}[{index}]"
-            filtered_item = _filter_value(item, element_path, depth + 1)
-            if filtered_item is _TOO_DEEP:
-                on_drop(element_path, "too_deep")
-                continue
-            items.append(filtered_item)
-        return tuple(items) if isinstance(value, tuple) else items
+        if id(value) in active:
+            return _CYCLE
+        active.add(id(value))
+        try:
+            if isinstance(value, dict):
+                return _filter_mapping(value, path, depth)
+            items = []
+            for index, item in enumerate(value):
+                element_path = f"{path}[{index}]"
+                filtered_item = _filter_value(item, element_path, depth + 1)
+                if filtered_item is _OVER_BUDGET:
+                    on_drop(path, "over_budget")
+                    break
+                dropped = _drop_reason(filtered_item)
+                if dropped is not None:
+                    on_drop(element_path, dropped)
+                    continue
+                items.append(filtered_item)
+            return tuple(items) if isinstance(value, tuple) else items
+        finally:
+            active.discard(id(value))
 
     def _filter_mapping(
         mapping: dict[Any, Any], path: str, depth: int
@@ -253,12 +365,17 @@ def filter_context_tree(
                 on_drop(full_key, reason)
                 continue
             filtered = _filter_value(value, full_key, depth + 1)
-            if filtered is _TOO_DEEP:
-                on_drop(full_key, "too_deep")
+            if filtered is _OVER_BUDGET:
+                on_drop(path or full_key, "over_budget")
+                break
+            dropped = _drop_reason(filtered)
+            if dropped is not None:
+                on_drop(full_key, dropped)
                 continue
             result[key] = filtered
         return result
 
+    active.add(id(source))
     return _filter_mapping(source, "", 0)
 
 

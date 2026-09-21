@@ -30,6 +30,7 @@ from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     INTERNAL_KEY_PREFIXES,
     MAX_CONTEXT_FILTER_DEPTH,
+    MAX_CONTEXT_FILTER_NODES,
     MAX_MULTI_INTENTS,
     has_internal_prefix,
     is_forbidden_context_entry,
@@ -46,6 +47,7 @@ from .definitions import (
 # Local imports
 # --------------------------------------------------------------
 from .logging import logger
+from .utilities import redact_non_json_leaf
 
 # ============================================================================
 # SHARED CONFIGURATION AND UTILITIES
@@ -55,6 +57,8 @@ from .logging import logger
 # caller. Walker-local by design (identity is never compared across modules);
 # the DEPTH BOUND itself is the shared value, and it lives in constants.py.
 _TOO_DEEP = object()
+# Sentinel: the walk's node budget (MAX_CONTEXT_FILTER_NODES) is spent.
+_OVER_BUDGET = object()
 
 # Per-line cap for the compact history block in field-extraction prompts.
 _FIELD_HISTORY_LINE_CHARS = 150
@@ -398,12 +402,30 @@ class BasePromptBuilder:
         ``{"user": {"password": "x"}}`` is filtered like its flat equivalent.
         Recursion is bounded at ``MAX_CONTEXT_FILTER_DEPTH``; a container
         deeper than that is dropped rather than passed through unfiltered.
-        Scalars (including ``0``/``False``/``""``) pass through at any depth.
+        JSON-native scalars (including ``0``/``False``/``""``) pass through at
+        any depth; any other leaf becomes ``"<redacted:TypeName>"``. A
+        container already on the active recursion path (a cycle) is dropped,
+        and past ``MAX_CONTEXT_FILTER_NODES`` visited values the rest is
+        dropped with a WARNING.
+
+        # DECISION plan-2026-09-21T203800-8a03483a/D-010
+        # Non-JSON leaves are REDACTED via the shared
+        # `utilities.redact_non_json_leaf`: `json.dumps(default=str)` would
+        # otherwise print a pydantic model's / dataclass's fields, secrets
+        # included, past every key check. Do NOT pass them through.
+        # DECISION plan-2026-09-21T203800-8a03483a/D-011
+        # Cycle guard (active path only) + node budget bound the work; the
+        # depth bound stays. Do NOT memoise shared containers (changes output
+        # for shared-but-acyclic data). See decisions.md D-010, D-011.
         """
         if not self.config.filter_internal_context:
             return context_data
 
-        return self._filter_context_mapping(context_data, 0)
+        # One walk = one active-path set and one node counter (a 1-cell list,
+        # decremented in place by every value visit).
+        return self._filter_context_mapping(
+            context_data, 0, {id(context_data)}, [MAX_CONTEXT_FILTER_NODES]
+        )
 
     def _is_forbidden_context_key(self, key: Any, value: Any = None) -> bool:
         """Return True if this context entry must never reach the LLM prompt.
@@ -429,37 +451,68 @@ class BasePromptBuilder:
             return True
         return is_forbidden_context_entry(key, value)
 
-    def _filter_context_value(self, value: Any, depth: int) -> Any:
-        """Filter one context value; returns ``_TOO_DEEP`` past the bound.
+    def _filter_context_value(
+        self, value: Any, depth: int, active: set[int], budget: list[int]
+    ) -> Any:
+        """Filter one context value; returns a drop sentinel when it must go.
 
-        Containers are rebuilt; scalars are returned unchanged.
+        ``_TOO_DEEP`` past the depth bound or on a cycle (a container already
+        in ``active``, the ids on the current recursion path);
+        ``_OVER_BUDGET`` once ``budget[0]`` visits are spent. Containers are
+        rebuilt; JSON-native leaves are returned unchanged, others redacted.
         """
+        budget[0] -= 1
+        if budget[0] < 0:
+            if budget[0] == -1:  # log once per walk, at the first overrun
+                logger.warning(
+                    "Context values dropped from prompt: more than "
+                    f"{MAX_CONTEXT_FILTER_NODES} values to security-filter"
+                )
+            return _OVER_BUDGET
         if not isinstance(value, (dict, list, tuple)):
-            return value
+            return redact_non_json_leaf(value)
         if depth > MAX_CONTEXT_FILTER_DEPTH:
             logger.warning(
                 f"Context value dropped from prompt: nested deeper than "
                 f"{MAX_CONTEXT_FILTER_DEPTH} levels and cannot be security-filtered"
             )
             return _TOO_DEEP
-        if isinstance(value, dict):
-            return self._filter_context_mapping(value, depth)
+        if id(value) in active:
+            logger.warning("Context value dropped from prompt: reference cycle")
+            return _TOO_DEEP
+        active.add(id(value))
+        try:
+            if isinstance(value, dict):
+                return self._filter_context_mapping(value, depth, active, budget)
 
-        # Lists/tuples are in scope: `{"users": [{"password": "x"}]}` is the
-        # same leak as `{"user": {"password": "x"}}`.
-        items = [self._filter_context_value(item, depth + 1) for item in value]
-        kept = [item for item in items if item is not _TOO_DEEP]
-        return tuple(kept) if isinstance(value, tuple) else kept
+            # Lists/tuples are in scope: `{"users": [{"password": "x"}]}` is
+            # the same leak as `{"user": {"password": "x"}}`.
+            kept = []
+            for item in value:
+                cleaned = self._filter_context_value(item, depth + 1, active, budget)
+                if cleaned is _OVER_BUDGET:
+                    break
+                if cleaned is not _TOO_DEEP:
+                    kept.append(cleaned)
+            return tuple(kept) if isinstance(value, tuple) else kept
+        finally:
+            active.discard(id(value))
 
     def _filter_context_mapping(
-        self, source: dict[str, Any], depth: int
+        self,
+        source: dict[str, Any],
+        depth: int,
+        active: set[int],
+        budget: list[int],
     ) -> dict[str, Any]:
         """Apply the key filter to one mapping level, then recurse into values."""
         filtered: dict[str, Any] = {}
         for key, value in source.items():
             if self._is_forbidden_context_key(key, value):
                 continue
-            cleaned = self._filter_context_value(value, depth + 1)
+            cleaned = self._filter_context_value(value, depth + 1, active, budget)
+            if cleaned is _OVER_BUDGET:
+                break
             if cleaned is _TOO_DEEP:
                 continue
             filtered[key] = cleaned

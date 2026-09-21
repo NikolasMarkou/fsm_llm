@@ -1269,3 +1269,317 @@ class TestStep07A7:
         assert _a6_last_prompt(plain_llm.generate_response) == _a6_last_prompt(
             wm_llm.generate_response
         )
+
+
+# ---------------------------------------------------------------------------
+# Step 8: D1-D5 (LLM parsing and context-filter security)
+# ---------------------------------------------------------------------------
+
+
+class _D1Message:
+    def __init__(self, content: Any) -> None:
+        self.content = content
+
+
+class _D1Choice:
+    def __init__(self, content: Any) -> None:
+        self.message = _D1Message(content)
+
+
+class _D1Response:
+    """Minimal litellm completion envelope (``choices[0].message.content``)."""
+
+    def __init__(self, content: Any) -> None:
+        self.choices = [_D1Choice(content)]
+
+
+def _d3_aliased(levels: int) -> dict[str, Any]:
+    """3-way aliasing per level: 3**levels paths through ``levels + 1`` dicts."""
+    cur: dict[str, Any] = {"leaf": 1}
+    for _ in range(levels):
+        cur = {"a": cur, "b": cur, "c": cur}
+    return cur
+
+
+def _d3_walkers() -> dict[str, Any]:
+    """The three context filters, each as ``data -> filtered``."""
+    from fsm_llm.context import clean_context_keys
+    from fsm_llm.fsm import _strip_internal_mapping
+    from fsm_llm.prompts import BasePromptBuilder
+
+    builder = BasePromptBuilder()
+    return {
+        "clean_context_keys": lambda d: clean_context_keys(d, "conv-d3"),
+        "get_data": _strip_internal_mapping,
+        "prompt": builder._filter_context_for_security,
+    }
+
+
+def _d3_run_bounded(fn: Any, data: Any, seconds: float) -> tuple[bool, Any]:
+    """Run ``fn(data)`` in a daemon thread; ``(finished, result)``."""
+    import threading
+
+    box: dict[str, Any] = {}
+
+    def _target() -> None:
+        box["result"] = fn(data)
+
+    worker = threading.Thread(target=_target, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    return (not worker.is_alive(), box.get("result"))
+
+
+# Credential-shaped values per D5 name (numeric where real systems store one).
+_D5_CREDENTIALS: dict[str, Any] = {
+    "passwd": "Tr0ub4dor&3xq",
+    "pwd": "Tr0ub4dor&3xq",
+    "pass": "Tr0ub4dor&3xq",
+    "passcode": 482913,
+    "passphrase": "correct horse battery staple",
+    "pin": 4821,
+    "otp": "492817",
+    "mfa_code": "731904",
+    "cvv": "123",
+    "ssn": "123-45-6789",
+    "credit_card": "4111 1111 1111 1111",
+    "card_number": "4111111111111111",
+    "cookie": "sessionid=9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+    "jwt": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlLXZhbHVl",
+    "bearer": "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a",
+    "authorization": "Bearer 9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a",
+    "auth_header": "Basic dXNlcjpodW50ZXIy",
+    "recovery_codes": ["8f3k-2m9q", "7x1p-4n6r"],
+}
+
+
+class TestStep08D1D5:
+    """D1-D5: a ``<think>`` draft never becomes the reply; non-JSON leaves are
+    redacted on the prompt paths; cycles and aliasing are bounded; a flat bulk
+    reply's envelope keys are dropped; 18 credential names are stripped
+    (plan-2026-09-21T203800-8a03483a/D-009..D-012)."""
+
+    # -- D1 --------------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            ('<think>{"message": "DRAFT"}</think>{"message": "FINAL"}', "FINAL"),
+            ('<think>{"message": "DRAFT"}</think>Plain final prose.', None),
+            ('<think>a\n{"message": "DRAFT"}\n</think>\n{"message": "FINAL"}', "FINAL"),
+        ],
+    )
+    def test_d1_think_draft_never_returned(self, content, expected):
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="test", api_key="test")
+        reply = llm._parse_response_generation_response(_D1Response(content))
+        assert "DRAFT" not in reply.message
+        if expected is not None:
+            assert reply.message == expected
+        else:
+            assert reply.message == "Plain final prose."
+
+    def test_d1_embedded_json_without_think_unchanged(self):
+        """Guard (passes on the pre-step source): first-wins Strategy 3."""
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="test", api_key="test")
+        reply = llm._parse_response_generation_response(
+            _D1Response('Here: {"message": "FIRST"} and {"message": "SECOND"}')
+        )
+        assert reply.message == "FIRST"
+
+    # -- D2 --------------------------------------------------------------
+
+    def test_d2_pydantic_model_redacted_in_prompt(self):
+        from pydantic import BaseModel
+
+        from fsm_llm.prompts import BasePromptBuilder
+
+        class Account(BaseModel):
+            password: str = "zzsecretzz"
+            name: str = "Ada"
+
+        filtered = BasePromptBuilder()._filter_context_for_security(
+            {"account": Account(), "n": [Account()], "city": "Oslo"}
+        )
+        assert filtered == {
+            "account": "<redacted:Account>",
+            "n": ["<redacted:Account>"],
+            "city": "Oslo",
+        }
+
+        api, conv_id, llm = _api(_a7_fsm())
+        api.update_context(conv_id, {"account": Account(), "city": "Oslo"})
+        api.converse("hello", conv_id)
+        prompt = _a6_last_prompt(llm.generate_response)
+        assert "zzsecretzz" not in prompt
+        assert "<redacted:Account>" in prompt
+        assert "Oslo" in prompt
+
+    def test_d2_dataclass_and_mappingproxy_redacted(self):
+        import dataclasses
+        import datetime
+        import decimal
+        from types import MappingProxyType
+
+        from fsm_llm.context import clean_context_keys
+        from fsm_llm.prompts import BasePromptBuilder
+
+        @dataclasses.dataclass
+        class Creds:
+            password: str = "zzsecretzz"
+
+        data = {
+            "creds": Creds(),
+            "proxy": MappingProxyType({"password": "zzsecretzz"}),
+            "nested": {"deep": (Creds(), 3, None, True, 1.5, "s")},
+            "when": datetime.datetime(2026, 1, 2, 3, 4, 5),
+            "amount": decimal.Decimal("9.99"),
+        }
+        prompt_view = BasePromptBuilder()._filter_context_for_security(data)
+        clean_view = clean_context_keys(data, "conv-d2", remove_none_values=False)
+        for view in (prompt_view, clean_view):
+            assert "zzsecretzz" not in repr(view)
+            assert view["creds"] == "<redacted:Creds>"
+            assert view["proxy"] == "<redacted:mappingproxy>"
+            # stdlib value scalars are data, not objects (D-032)
+            assert view["when"] == data["when"]
+            assert view["amount"] == data["amount"]
+            assert view["nested"]["deep"] == (
+                "<redacted:Creds>",
+                3,
+                None,
+                True,
+                1.5,
+                "s",
+            )
+
+    def test_d2_get_data_unchanged_for_json_native(self):
+        """Guard (passes on the pre-step source): ``get_data`` carries no leaf
+        hook, so JSON-native values AND handler-stored objects come back as-is."""
+        api, conv_id, _ = _api(_a7_fsm())
+        marker = object()
+        native = {
+            "name": "Ada",
+            "nums": [1, 2.5, True, None, ""],
+            "nested": {"t": (1, "x"), "d": {"k": [{"v": 0}]}},
+            "_internal": "hidden",
+        }
+        api.update_context(conv_id, {**native, "obj": marker})
+        data = api.get_data(conv_id)
+        assert data["obj"] is marker
+        expected = {k: v for k, v in native.items() if k != "_internal"}
+        assert {k: v for k, v in data.items() if k != "obj"} == expected
+
+    # -- D3 --------------------------------------------------------------
+
+    def test_d3_aliased_14_levels_completes_under_2s(self):
+        data = {"root": _d3_aliased(14)}
+        for name, walker in _d3_walkers().items():
+            finished, result = _d3_run_bounded(walker, data, 2.0)
+            assert finished, f"{name}: 3-way aliasing at 14 levels did not finish in 2s"
+            assert isinstance(result, dict)
+
+    def test_d3_self_cycle_dropped_not_looped(self):
+        cyclic: dict[str, Any] = {"name": "bob"}
+        cyclic["self"] = cyclic
+        loop: list[Any] = [1]
+        loop.append(loop)
+        for name, walker in _d3_walkers().items():
+            assert walker({"root": cyclic}) == {"root": {"name": "bob"}}, name
+            assert walker({"lst": loop}) == {"lst": [1]}, name
+            top: dict[str, Any] = {"k": 1}
+            top["me"] = top
+            assert walker(top) == {"k": 1}, name
+
+    def test_d3_shared_acyclic_output_unchanged(self):
+        """Guard (passes on the pre-step source): a container reached twice
+        without a cycle is filtered at every occurrence."""
+        shared = {"x": 1, "_h": 2}
+        data = {"a": shared, "b": [shared, (shared,)], "c": {"d": shared}}
+        expected = {"a": {"x": 1}, "b": [{"x": 1}, ({"x": 1},)], "c": {"d": {"x": 1}}}
+        for name, walker in _d3_walkers().items():
+            assert walker(data) == expected, name
+
+    def test_d3_node_budget_truncates_fail_closed(self):
+        from fsm_llm.constants import MAX_CONTEXT_FILTER_NODES
+
+        big = {"first": "kept", "items": list(range(MAX_CONTEXT_FILTER_NODES + 50))}
+        for name, walker in _d3_walkers().items():
+            result = walker(big)
+            assert result["first"] == "kept", name
+            assert len(result.get("items", [])) < MAX_CONTEXT_FILTER_NODES, name
+
+    # -- D4 --------------------------------------------------------------
+
+    def test_d4_flat_reply_envelope_keys_dropped(self):
+        from fsm_llm.definitions import BulkExtractionRequest
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="test", api_key="test")
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        flat = '{"name": "Ann", "confidence": 0.8, "reasoning": "user said Ann"}'
+        with patch("fsm_llm.llm.completion", return_value=_D1Response(flat)):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {"name": "Ann"}
+        assert result.confidence == 0.8
+
+        wrapped = (
+            '{"extracted_data": {"confidence": "high", "reasoning": "r"}, '
+            '"confidence": 0.4, "reasoning": "x"}'
+        )
+        with patch("fsm_llm.llm.completion", return_value=_D1Response(wrapped)):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {"confidence": "high", "reasoning": "r"}
+        assert result.confidence == 0.4
+
+    # -- D5 --------------------------------------------------------------
+
+    @pytest.mark.parametrize("name", sorted(_D5_CREDENTIALS))
+    def test_d5_credential_name_stripped(self, name):
+        from fsm_llm.constants import is_forbidden_context_entry
+        from fsm_llm.context import clean_context_keys
+        from fsm_llm.prompts import BasePromptBuilder
+
+        value = _D5_CREDENTIALS[name]
+        camel = "new" + "".join(part.title() for part in name.split("_"))
+        for key in (name, f"user_{name}", name.upper(), f"db-{name}", camel):
+            assert is_forbidden_context_entry(key, value), key
+            assert is_forbidden_context_entry(key), f"{key} (name-only caller)"
+        data = {name: value, "city": "Oslo"}
+        assert clean_context_keys(data, "c", strip_forbidden_keys=True) == {
+            "city": "Oslo"
+        }
+        assert BasePromptBuilder()._filter_context_for_security(data) == {
+            "city": "Oslo"
+        }
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("shipping", "express"),
+            ("opinion", "positive"),
+            ("passenger", "Ada Lovelace"),
+            ("compass", "north"),
+            ("laptop", "ThinkPad X1"),
+            ("bypass", "none"),
+            ("spin", "clockwise"),
+            ("author", "Ada"),
+            ("passport_country", "NO"),
+            ("pinned", True),
+            ("cookie_banner", "shown"),
+            ("pin_attempts", 3),
+            ("otp_enabled", True),
+            ("criteria_pass_count", 2),
+            ("all_criteria_pass", True),
+            ("pass_status", "ok"),
+        ],
+    )
+    def test_d5_benign_lookalikes_kept(self, key, value):
+        """Guard (passes on the pre-step source): substring lookalikes,
+        policy/status suffixes and boolean flags stay visible."""
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        assert not is_forbidden_context_entry(key, value)

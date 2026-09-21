@@ -62,6 +62,16 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
 # passed through unfiltered (D-010). See decisions.md D-010, D-011.
 MAX_CONTEXT_FILTER_DEPTH = 16
 
+# DECISION plan-2026-09-21T203800-8a03483a/D-011
+# Work bound shared by the context walkers (`utilities.filter_context_tree`,
+# used by `clean_context_keys` and `get_data`, and the prompt builder's own
+# walker): every value visited costs one node, and past the budget the rest is
+# DROPPED (fail-closed, like the depth bound). The depth bound does not bound
+# work on aliased input (3-way aliasing at 14 levels never finished). Do NOT
+# lower this toward "typical" context sizes: a legitimate context this large
+# is truncated, which is the accepted cost. See decisions.md D-011.
+MAX_CONTEXT_FILTER_NODES = 100_000
+
 
 # --------------------------------------------------------------
 # LLM Configuration Defaults
@@ -1546,6 +1556,35 @@ _TOKEN_VALUE_SCAN_NAME_RE = re.compile(
 )
 
 
+# DECISION plan-2026-09-21T203800-8a03483a/D-012
+# DECISION plan-2026-09-21T203800-8a03483a/D-031
+# Credential names with no `password`/`secret`/`key`/`token` substring, which
+# layer 1 never reached (audit D5). Each term matches ONLY as a whole
+# `[\W_]`-delimited segment (camelCase via the snake re-test below): `pin`
+# strips `pin`/`user_pin`/`newPin` but never `shipping`/`spin`/`opinion`, and
+# `pass` never `passenger`/`compass`/`bypass`/`passport`. Do NOT drop the
+# segment anchors to catch `dbpass`/`userpin` (that re-opens every substring
+# false positive above); those stay open by design, like `dbpassword`.
+# Two KEEP rules bound the over-strip, both reused rather than invented:
+#   1. a tail that decomposes ENTIRELY into `_PASSWORD_POLICY_SUFFIXES`
+#      (`pin_attempts`, `otp_enabled`, `criteria_pass_count`) is metadata,
+#      by the same measured rule `password_*` already uses (D-030);
+#   2. a `bool` value is never credential material (`all_criteria_pass:
+#      True`, the harness REFLECT gate flag). Numbers are NOT exempt: a PIN,
+#      CVV, OTP or card number is routinely stored as an int.
+# A name-only caller (`value=None`) strips. See decisions.md D-012, D-031.
+_CREDENTIAL_NAME_TERMS = (
+    r"passwd|pwd|pass|passcode|passphrase|pin|otp|mfa[\W_]?code|cvv|ssn"
+    r"|credit[\W_]?card|card[\W_]?number|cookie|jwt|bearer|authorization"
+    r"|auth[\W_]?header|recovery[\W_]?code"
+)
+_CREDENTIAL_NAME_RE = re.compile(
+    rf"(?:^|.*[\W_])(?:{_CREDENTIAL_NAME_TERMS})s?"
+    rf"(?!(?:[-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))+$){_WORD_END}",
+    re.IGNORECASE,
+)
+
+
 def _token_value_is_credential(value: object, name: str = "") -> bool:
     """Layer-2 verdict for the TOKEN arm: is *value* credential material?
 
@@ -1628,12 +1667,19 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     # `secretary`, `keyboardLayout`); `dbpassword`/`mysecret` stay open by
     # design. Exact `str` only: `.sub` on a hostile `str` subclass would
     # dispatch to its overrides (D-006 polarity).
-    if type(key) is str:
-        snake_key = _CAMEL_BOUNDARY.sub("_", key)
-        if snake_key != key and any(
-            pattern.match(snake_key) for pattern in COMPILED_FORBIDDEN_CONTEXT_PATTERNS
-        ):
-            return True
+    snake_key = _CAMEL_BOUNDARY.sub("_", key) if type(key) is str else key
+    if snake_key != key and any(
+        pattern.match(snake_key) for pattern in COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+    ):
+        return True
+
+    # DECISION plan-2026-09-21T203800-8a03483a/D-031 -- tested BEFORE the token
+    # referral so a name matching both (`pin_token`) gets the stricter verdict
+    # (same rule as D-021 below). Only a `bool` value keeps a matched name.
+    if _CREDENTIAL_NAME_RE.match(key) or (
+        snake_key != key and _CREDENTIAL_NAME_RE.match(snake_key)
+    ):
+        return not isinstance(value, bool)
 
     # DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE] -- the TOKEN referral is
     # tested FIRST, and deliberately: a name matching both shapes (`foo_key_token`)

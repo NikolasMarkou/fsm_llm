@@ -791,7 +791,8 @@ class TestGetConversationDataNestedFiltering:
         assert cursor == {"kept": "y"}
 
     def test_self_referential_dict_terminates(self):
-        """The bound, not a `seen` set, is what stops a cycle (D-010)."""
+        """A cycle terminates: the active-path guard drops it (D-011 of
+        plan-2026-09-21T203800-8a03483a); the depth bound stays the backstop."""
         cyclic: dict = {"name": "bob"}
         cyclic["self"] = cyclic
 

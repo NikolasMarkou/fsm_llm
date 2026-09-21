@@ -938,17 +938,26 @@ class TestNestedContextCleaning:
         result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
         assert result == {"user": {}}
 
-    def test_scalars_and_non_dict_values_pass_through_untouched(self):
+    def test_json_scalars_pass_through_and_other_leaves_are_redacted(self):
+        """Re-baselined by plan-2026-09-21T203800-8a03483a/D-010 (audit D2):
+        JSON-native scalars still pass through unchanged, but a non-JSON leaf
+        (whose ``str()`` would print its fields past every key filter) is
+        replaced by a type-name placeholder instead of passed through."""
         obj = object()
         data = {"o": obj, "n": 1.5, "b": b"raw", "l": [1, "", 0, False]}
         result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
-        assert result == data
-        assert result["o"] is obj
+        assert result == {
+            "o": "<redacted:object>",
+            "n": 1.5,
+            "b": "<redacted:bytes>",
+            "l": [1, "", 0, False],
+        }
 
     # -- recursion safety --
 
     def test_self_referential_dict_does_not_recurse_forever(self):
-        """A cycle must terminate at the depth bound, not raise RecursionError."""
+        """A cycle must terminate (active-path guard, depth bound as backstop),
+        not raise RecursionError."""
         data: dict = {"name": "bob"}
         data["self"] = data
         result = clean_context_keys(data, "test-conv", strip_forbidden_keys=True)
@@ -2055,7 +2064,13 @@ class TestCryptoKeyAndTokenTriggers:
         future change starts stripping them, that is a real improvement and the
         pin should be updated deliberately, not absorbed silently.
         """
-        residual = ("csrf_max_token", "jwt_page_token", "bearer_cached_token")
+        # plan-2026-09-21T203800-8a03483a/D-031 closed two of the three:
+        # `jwt` and `bearer` are now whole-segment credential names (audit D5),
+        # so `jwt_page_token`/`bearer_cached_token` strip on the NAME whatever
+        # the value. `csrf_max_token` is the remaining disclosed residual.
+        closed = ("jwt_page_token", "bearer_cached_token")
+        assert [k for k in closed if self._kept(k, "abc")] == []
+        residual = ("csrf_max_token",)
         assert [k for k in residual if not self._kept(k, "abc")] == [], (
             "the disclosed infixed-bearer residual has changed. This is "
             "probably an improvement -- re-measure both axes and update D-021 "
@@ -2064,7 +2079,7 @@ class TestCryptoKeyAndTokenTriggers:
         # And the same names WITH a real credential still strip, so the
         # residual is bounded by value shape and not by the name at all.
         real = "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2aD8cE4rT7uI"
-        assert [k for k in residual if self._kept(k, real)] == []
+        assert [k for k in residual + closed if self._kept(k, real)] == []
 
     # -- (d) anti-vacuity -------------------------------------------------
     def test_every_shipped_vocabulary_changes_the_result_set(self):

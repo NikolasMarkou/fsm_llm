@@ -103,6 +103,11 @@ _GENERIC_FALLBACK_MESSAGE = (
     "I'm sorry, I couldn't generate a proper response. Please try again."
 )
 
+# Top-level keys of the bulk-extraction envelope the pipeline asks for
+# (`{"extracted_data": {...}, "confidence": ..., "reasoning": ...}`). Dropped
+# from a FLAT reply's data in `extract_bulk_data` (D-009, audit D4).
+_BULK_ENVELOPE_KEYS = frozenset({"confidence", "reasoning"})
+
 
 def _safe_str(value: Any) -> str | None:
     """Coerce a MODEL-SUPPLIED value into a value the capped models will accept.
@@ -581,7 +586,9 @@ class LiteLLMInterface(LLMInterface):
             - Filtering of ``None``/empty-string/empty-dict values out of
               ``extracted_data`` is the CALLER's job (``pipeline.py``'s merge
               logic), not this method's — this method returns the extraction
-              verbatim.
+              verbatim, except that a FLAT reply (no ``extracted_data``
+              wrapper) loses its top-level ``confidence``/``reasoning``
+              envelope keys (the confidence is still read from it).
         """
         try:
             messages = [
@@ -614,7 +621,17 @@ class LiteLLMInterface(LLMInterface):
                 # "the model found nothing", per the contract above.
                 return DataExtractionResponse(extracted_data={})
 
-            extracted = data.get("extracted_data", data)
+            # DECISION plan-2026-09-21T203800-8a03483a/D-009 (D4): a flat reply
+            # (no `extracted_data` wrapper) carries the envelope's `confidence`
+            # and `reasoning` at top level; they are metadata, not user data,
+            # so they never enter context. A wrapped reply keeps whatever its
+            # `extracted_data` holds. Do NOT return the flat object verbatim.
+            if "extracted_data" in data:
+                extracted = data["extracted_data"]
+            else:
+                extracted = {
+                    k: v for k, v in data.items() if k not in _BULK_ENVELOPE_KEYS
+                }
             if not isinstance(extracted, dict):
                 return DataExtractionResponse(extracted_data={})
 
@@ -991,9 +1008,16 @@ class LiteLLMInterface(LLMInterface):
                     f"Failed to parse structured response generation response: {e}"
                 )
 
-        # Fallback: extract JSON embedded in text (handles <think> tags, etc.)
+        # Fallback: extract JSON embedded in text.
+        # DECISION plan-2026-09-21T203800-8a03483a/D-009
+        # Strip <think> blocks BEFORE the scan: Strategy 3 is first-wins
+        # (utilities D-023, unchanged), so a JSON draft inside a reasoning
+        # trace used to beat the real answer after it. Do NOT flip the scan to
+        # last-wins instead, and do NOT feed it raw `content` again. When only
+        # a think block exists nothing is parsed here; the terminal rung below
+        # decides (D-030). See decisions.md D-009.
         if isinstance(content, str):
-            data = extract_json_from_text(content)
+            data = extract_json_from_text(_remove_think_blocks(content))
             if isinstance(data, dict) and "message" in data:
                 message = data["message"]
                 if isinstance(message, str) and message.strip():

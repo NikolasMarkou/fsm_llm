@@ -132,6 +132,30 @@ SECRET_KEYS: tuple[str, ...] = (
     "credentials",
     "aws_secret_access_key",
     "stripe_secret_key",
+    # credential names with none of the substrings above (audit D5,
+    # plan-2026-09-21T203800-8a03483a): Unix/DB shorthand, payment forms, MFA
+    # flows, HTTP auth headers and session cookies
+    "passwd",
+    "pwd",
+    "pass",
+    "db_pass",
+    "passcode",
+    "passphrase",
+    "pin",
+    "card_pin",
+    "otp",
+    "mfa_code",
+    "cvv",
+    "ssn",
+    "credit_card",
+    "card_number",
+    "cookie",
+    "session_cookie",
+    "jwt",
+    "bearer",
+    "authorization",
+    "auth_header",
+    "recovery_codes",
 )
 
 # --------------------------------------------------------------------------
@@ -217,6 +241,23 @@ SAFE_KEYS: tuple[str, ...] = (
     "monkey_species",
     "tokenizer_config",
     "credentialing_body",
+    # near-miss negatives for the audit-D5 names: the short terms appear
+    # INSIDE ordinary words, never as a whole segment
+    "shipping",
+    "shipping_address",
+    "opinion",
+    "passenger",
+    "passenger_count",
+    "passport_country",
+    "compass",
+    "compass_heading",
+    "laptop",
+    "bypass",
+    "spin",
+    "author",
+    "author_name",
+    "pinned",
+    "cookbook",
 )
 
 # --------------------------------------------------------------------------

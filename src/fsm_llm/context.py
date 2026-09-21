@@ -11,12 +11,13 @@ from typing import Any
 
 from .constants import (
     MAX_CONTEXT_FILTER_DEPTH,
+    MAX_CONTEXT_FILTER_NODES,
     has_internal_prefix,
     is_forbidden_context_entry,
 )
 from .definitions import ResponseGenerationRequest
 from .logging import logger
-from .utilities import filter_context_tree
+from .utilities import filter_context_tree, redact_non_json_leaf
 
 
 class ContextCompactor:
@@ -290,11 +291,34 @@ def clean_context_keys(
                 f"Context value '{full_key}' dropped: nested deeper than "
                 f"{MAX_CONTEXT_FILTER_DEPTH} levels and cannot be security-filtered"
             )
+        elif reason == "cycle":
+            removed_keys.append(f"{full_key} (reference cycle)")
+            log.warning(f"Context value '{full_key}' dropped: reference cycle")
+        elif reason == "over_budget":
+            removed_keys.append(f"{full_key} (over node budget)")
+            log.warning(
+                f"Context values under '{full_key or '<root>'}' dropped: more than "
+                f"{MAX_CONTEXT_FILTER_NODES} values to security-filter"
+            )
         else:
             removed_keys.append(f"{full_key} ({reason})")
             log.debug(f"Context key '{full_key}' removed: {reason}")
 
-    cleaned = filter_context_tree(data, MAX_CONTEXT_FILTER_DEPTH, should_drop, on_drop)
+    # DECISION plan-2026-09-21T203800-8a03483a/D-010
+    # DECISION plan-2026-09-21T203800-8a03483a/D-011
+    # The leaf hook redacts non-JSON-native values (their str() carried object
+    # fields past the key filter); do NOT drop it to "keep values as-is". The
+    # node budget and the walker's active-path cycle guard bound work on
+    # aliased input; they sit NEXT TO the depth bound (D-010 above), never
+    # instead of it. See decisions.md D-010, D-011.
+    cleaned = filter_context_tree(
+        data,
+        MAX_CONTEXT_FILTER_DEPTH,
+        should_drop,
+        on_drop,
+        leaf=redact_non_json_leaf,
+        max_nodes=MAX_CONTEXT_FILTER_NODES,
+    )
 
     if warned_keys:
         log.warning(
