@@ -321,7 +321,9 @@ test in `tests/test_fsm_llm/`. Full suite: 6,174 tests collected (was 6,158);
   (those always carry `.message`); the RED test uses a `SimpleNamespace` shape.
 - **N8 / W7: `restore_session` collapsed an explicit empty buffers map into the defaults
   (`3b9deac`).** `API.restore_session` now maps a missing / `None` `working_memory.buffers`
-  to `WorkingMemory()` (the four defaults) and an explicit `{}` to
+  to the default buffers and, when no `hidden_buffers` key is present, the default
+  hidden set (`{"metadata"}`; an explicit list, `[]` included, is honoured as-is --
+  loop-2 completion fix `iter-2/step-6.1`), and an explicit `{}` to
   `WorkingMemory.from_dict({})` (zero buffers), matching loop 1's `from_dict({})` contract;
   a `# DECISION plan-2026-09-20T165703-0d9c218e/D-001` anchor in `memory.py` pins
   `buffers if buffers is not None else DEFAULT_BUFFERS` against the tempting

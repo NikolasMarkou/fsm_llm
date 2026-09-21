@@ -43,7 +43,7 @@ fsm_llm/
   - Queries: `get_data(conv_id)`, `get_current_state(conv_id)`, `get_conversation_history(conv_id)`, `list_active_conversations()`
   - FSM stacking: `push_fsm(conv_id, new_fsm)`, `pop_fsm(conv_id, merge_strategy)`, `get_stack_depth(conv_id)`, `get_sub_conversation_id(conv_id)`
   - Handlers: `register_handler(handler)`, `register_handlers(handlers)`, `create_handler(name)` → HandlerBuilder
-  - Sessions: `save_session(conv_id)`, `load_session(session_id)` → `SessionState | None`, `restore_session(session_id)` → `(conv_id, SessionState) | None`. `restore_session` working-memory rule (N8, D-001): a missing or `None` `working_memory.buffers` map restores `WorkingMemory()` (the four defaults); an explicit `{}` restores `WorkingMemory.from_dict({})` (zero buffers); do not collapse the two
+  - Sessions: `save_session(conv_id)`, `load_session(session_id)` → `SessionState | None`, `restore_session(session_id)` → `(conv_id, SessionState) | None`. `restore_session` working-memory rule (N8, D-001): a missing or `None` `working_memory.buffers` map restores the default buffers and, when no `hidden_buffers` key is present, the default hidden set (`{"metadata"}`; an explicit list, `[]` included, is honoured as-is); an explicit `{}` restores `WorkingMemory.from_dict({})` (zero buffers); do not collapse None and empty for either key
   - Management: `update_context(conv_id, data)`, `cleanup_stale_conversations()`, `get_llm_interface()`, `close()`
 - **FSMManager** (`fsm.py`) -- Orchestration with per-conversation thread locks, LRU FSM cache (max 64)
   - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `resolve_state_definition(instance)`

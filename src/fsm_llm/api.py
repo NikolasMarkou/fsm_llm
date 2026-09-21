@@ -1429,7 +1429,18 @@ class API:
                     # (the tested `from_dict({})` contract). Do not collapse
                     # both into `wm.get("buffers") or {}` again.
                     buffers_raw = wm.get("buffers")
-                    hidden = frozenset(wm.get("hidden_buffers") or [])
+                    # DECISION plan-2026-09-20T165703-0d9c218e/D-001
+                    # Same None-vs-empty rule for `hidden_buffers`: a missing
+                    # or null key passes `None` so `WorkingMemory` applies
+                    # `DEFAULT_HIDDEN_BUFFERS` ({"metadata"}) and `from_dict`
+                    # lets the embedded `_hidden_buffers` key decide; an
+                    # explicit list (including `[]`) is honoured verbatim. Do
+                    # NOT write `frozenset(wm.get("hidden_buffers") or [])`:
+                    # that collapsed "absent" into "none hidden" and leaked
+                    # `metadata` into the aggregate views (review-iter-2
+                    # concern 3). See decisions.md D-001.
+                    hidden_raw = wm.get("hidden_buffers")
+                    hidden = None if hidden_raw is None else frozenset(hidden_raw)
                     wm_instance.context.working_memory = (
                         WorkingMemory(hidden_buffers=hidden)
                         if buffers_raw is None

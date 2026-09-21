@@ -9,6 +9,7 @@ import fsm_llm.memory
 from fsm_llm.memory import (
     BUFFER_CORE,
     BUFFER_ENVIRONMENT,
+    BUFFER_METADATA,
     BUFFER_REASONING,
     BUFFER_SCRATCH,
     DEFAULT_BUFFERS,
@@ -707,6 +708,53 @@ class TestRestoreSessionBuffersNoneVsEmpty:
         assert restored.list_buffers() == list(DEFAULT_BUFFERS)
         assert restored.get(BUFFER_CORE, "x", "D") == "D"
         assert restored._hidden_buffers == frozenset()
+
+    def test_null_buffers_without_hidden_key_keeps_default_hidden_set(
+        self, tmp_path, mock_llm_interface
+    ):
+        """Review-iter-2 concern 3 (iter-2 step 6.1): a session with NO
+        ``hidden_buffers`` key used to restore ``hidden_buffers=frozenset()``
+        (``wm.get(...) or []``), dropping the DEFAULT ``{"metadata"}`` hidden
+        set so ``metadata`` leaked into the aggregate views."""
+        api, conv_id = self._saved_session(
+            tmp_path, mock_llm_interface, {"buffers": None}
+        )
+        restored = self._restored_memory(api, conv_id)
+        assert restored.list_buffers() == list(DEFAULT_BUFFERS)
+        assert restored._hidden_buffers == DEFAULT_HIDDEN_BUFFERS
+        assert restored._hidden_buffers == frozenset({BUFFER_METADATA})
+        restored.set(BUFFER_METADATA, "k", "v")
+        assert "k" not in restored.get_all_data()
+
+    def test_null_buffers_with_explicit_empty_hidden_list_is_honoured(
+        self, tmp_path, mock_llm_interface
+    ):
+        """Companion: an explicit ``[]`` still means NO hidden buffers."""
+        api, conv_id = self._saved_session(
+            tmp_path, mock_llm_interface, {"buffers": None, "hidden_buffers": []}
+        )
+        restored = self._restored_memory(api, conv_id)
+        assert restored._hidden_buffers == frozenset()
+        restored.set(BUFFER_METADATA, "k", "v")
+        assert restored.get_all_data().get("k") == "v"
+
+    def test_buffers_map_without_hidden_key_defers_to_from_dict(
+        self, tmp_path, mock_llm_interface
+    ):
+        """``from_dict`` branch: no ``hidden_buffers`` key passes ``None`` so
+        the embedded ``_hidden_buffers`` key (or the default) decides."""
+        api, conv_id = self._saved_session(
+            tmp_path,
+            mock_llm_interface,
+            {"buffers": {"core": {}, "_hidden_buffers": ["core"]}},
+        )
+        restored = self._restored_memory(api, conv_id)
+        assert restored._hidden_buffers == frozenset({BUFFER_CORE})
+        api2, conv_id2 = self._saved_session(
+            tmp_path / "b", mock_llm_interface, {"buffers": {"core": {}}}
+        )
+        restored2 = self._restored_memory(api2, conv_id2)
+        assert restored2._hidden_buffers == DEFAULT_HIDDEN_BUFFERS
 
     def test_explicit_empty_buffers_restores_zero_buffers(
         self, tmp_path, mock_llm_interface
