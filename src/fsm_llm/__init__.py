@@ -45,6 +45,7 @@ from .definitions import (
     ClassificationResult,
     ClassificationSchema,
     # Context and conversation management
+    ContextScope,
     Conversation,
     # Improved 2-pass architecture models
     DataExtractionResponse,
@@ -185,6 +186,7 @@ __all__ = [
     "State",
     "Transition",
     "TransitionCondition",
+    "ContextScope",
     "Conversation",
     # Improved 2-pass architecture components
     "DataExtractionResponse",

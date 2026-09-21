@@ -948,6 +948,7 @@ def _maximal_fsm_data():
                         "fallback_intent": "browse",
                     }
                 ],
+                "context_scope": {"read_keys": ["name"], "write_keys": ["name"]},
             },
             "done": {
                 "id": "done",
@@ -967,6 +968,7 @@ def _maximal_fsm_data():
 _MODEL_ANCHORS = {
     "FSMDefinition": (),
     "State": ("states", "start"),
+    "ContextScope": ("states", "start", "context_scope"),
     "Transition": ("states", "start", "transitions", 0),
     "TransitionCondition": ("states", "start", "transitions", 0, "conditions", 0),
     "FieldExtractionConfig": ("states", "start", "field_extractions", 0),
@@ -994,6 +996,12 @@ _VALIDATOR_VIOLATIONS = {
     ("FSMDefinition", "validate_fsm_structure"): (
         ("initial_state",),
         "a_state_that_does_not_exist",
+    ),
+    # B10: an internal-prefixed required key can never be extracted
+    # (`State._validate_extraction_configs`, ValueError -> value_error).
+    ("State", "_validate_extraction_configs"): (
+        ("states", "start", "required_context_keys"),
+        ["_internal_only"],
     ),
     ("FieldExtractionConfig", "validate_validation_rule_keys"): (
         ("states", "start", "field_extractions", 0, "validation_rules"),

@@ -156,7 +156,7 @@ The condition is what holds the state until the address is complete; `required_c
 
 **Progressive building**: Collect information gradually across states rather than all at once.
 
-**Context scope**: `context_scope.read_keys` restricts which context keys a state's prompts see. `write_keys` is advisory: it is not enforced and not validated.
+**Context scope**: `context_scope.read_keys` restricts which context keys a state's prompts see. `write_keys` is advisory: it is not enforced. Both must be lists of strings, and any other key in `context_scope` (for example a misspelt `read_key`) is a load error.
 
 **Gate keys the user must not set**: a key a transition condition reads (`is_admin`, `is_verified`) can be written by a steered extraction unless you list it in the FSM-level `handler_only_keys`. Listed keys are dropped from every LLM extraction channel and stay writable by handlers, `update_context` and `initial_context`. It is opt-in and covers only the listed keys (an unlisted gate key, or one owned by a `classification_extractions` entry, is not protected). `fsm-llm-validate` warns about a listed key no state references (usually a typo) and about a listed key that a `classification_extractions` entry writes.
 

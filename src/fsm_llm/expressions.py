@@ -66,7 +66,10 @@ from collections.abc import Callable
 from functools import reduce
 from typing import Any
 
-from .constants import ALLOWED_JSONLOGIC_OPERATIONS
+from .constants import (
+    ALLOWED_JSONLOGIC_OPERATIONS,
+    MAX_JSONLOGIC_DEPTH,
+)
 from .definitions import TransitionEvaluationError
 
 # --------------------------------------------------------------
@@ -693,14 +696,6 @@ _NONE_IS_FALSE_OPERATORS: frozenset[str] = frozenset(
 )
 
 # --------------------------------------------------------------
-# Main evaluation function
-# --------------------------------------------------------------
-
-
-MAX_JSONLOGIC_DEPTH = 50
-
-
-# --------------------------------------------------------------
 # Data-access operator handlers
 # --------------------------------------------------------------
 # These operators need direct access to the data dict (no recursive
@@ -790,7 +785,10 @@ def _op_context_length(values: list, data: dict[str, Any], _depth: int) -> int:
     return 0
 
 
-#: Dispatch dict for operators that need direct data access (no arg pre-eval)
+#: Dispatch dict for operators that need direct data access. `var`, `missing`
+#: and `missing_some` never evaluate their arguments; that set is
+#: `constants.JSONLOGIC_RAW_ARGUMENT_OPERATIONS`, which the load-time walk in
+#: definitions.py reads. Keep them in step (pinned by the step-10 audit tests).
 _data_operators: dict[str, Any] = {
     "var": _op_var,
     "missing": _op_missing,

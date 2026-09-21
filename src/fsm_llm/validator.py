@@ -309,6 +309,10 @@ class FSMValidator:
                     "string_type",
                     "dict_type",
                     "list_type",
+                    # Typed sub-models with `extra="forbid"` (ContextScope,
+                    # D-015): a non-dict value and an unknown key.
+                    "model_type",
+                    "extra_forbidden",
                 ):
                     self.result.add_error(f"Schema: {loc}: {error['msg']}")
                 else:

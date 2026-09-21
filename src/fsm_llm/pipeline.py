@@ -2792,7 +2792,7 @@ class MessagePipeline:
         if state.context_scope is None:
             return context
 
-        read_keys = state.context_scope.get("read_keys")
+        read_keys = state.context_scope.read_keys
         if not read_keys:
             return context
 

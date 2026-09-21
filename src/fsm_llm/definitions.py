@@ -19,12 +19,14 @@ from collections.abc import Iterator
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .constants import (
     ALLOWED_JSONLOGIC_OPERATIONS,
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
+    JSONLOGIC_RAW_ARGUMENT_OPERATIONS,
+    MAX_JSONLOGIC_DEPTH,
     MAX_MULTI_INTENTS,
     MESSAGE_TRUNCATION_SUFFIX,
     has_internal_prefix,
@@ -540,13 +542,27 @@ class ClassificationExtractionConfig(BaseModel):
 # --------------------------------------------------------------
 
 
-def _walk_logic_operators(node: Any) -> Iterator[str]:
-    """Yield every operator (dict) key inside a JsonLogic `node`, recursively.
+def _walk_logic_operators(node: Any, _depth: int = 0) -> Iterator[str]:
+    """Yield every operator key in a JsonLogic `node`, visiting exactly the
+    positions `evaluate_logic` evaluates as logic.
 
     A JsonLogic object is a dict whose single key is an operator mapping to its
-    argument value(s); arguments may be nested logic objects, lists of them, or
-    plain data. This walk yields ONLY dict keys (operators), never data values,
-    so the allow-list check can be applied to the yielded operator names.
+    argument value(s): a list/tuple of arguments, or one bare argument. Each
+    argument is evaluated as logic one level deeper. A list or tuple met AS an
+    argument is DATA (`evaluate_logic` returns it unevaluated), so its elements,
+    dicts included, are never walked; nor are the raw arguments of the
+    `JSONLOGIC_RAW_ARGUMENT_OPERATIONS` (`var`, `missing`, `missing_some`).
+
+    # DECISION plan-2026-09-21T203800-8a03483a/D-014
+    # This supersedes D-007's "recurse into list/tuple ELEMENTS" clause below
+    # (B9): walking data-list elements rejected `{"in":[{"var":"x"},[{"foo":1}]]}`,
+    # which evaluates fine. Do NOT recurse into data lists or raw-argument
+    # operators again, and do NOT drop the depth or single-key checks (B5):
+    # without them over-deep or multi-key logic loads clean and is silently
+    # False at every turn (`evaluate_logic` raises, the evaluator swallows it).
+    # The depth bound is `evaluate_logic`'s own (every evaluated position at
+    # depth > MAX_JSONLOGIC_DEPTH raises there), so load and runtime agree.
+    # D-007's empty-dict rejection is kept. See decisions.md D-014.
 
     # DECISION plan-2026-07-21T045419-9925aa3a/D-007
     # An EMPTY dict is malformed JsonLogic (an operator object with zero operator
@@ -555,28 +571,46 @@ def _walk_logic_operators(node: Any) -> Iterator[str]:
     # skip empty dicts: `logic: {}` previously meant "always fail" while
     # `logic: null` means "always pass", a silent divergence this guard closes.
     # Do NOT recurse into a dict's KEYS (they are operators, already yielded) —
-    # only into its VALUES and into list/tuple ELEMENTS. Primitives, including
-    # the literal strings in a data-list arg such as `{"in":[{"var":"x"},["a",
-    # "b"]]}`, are DATA not operators and are ignored (false-reject trap). This
+    # only into its VALUES and into list/tuple ELEMENTS [superseded by D-014:
+    # only an operator's ARGUMENT list is walked, never a data list]. Primitives,
+    # including the literal strings in a data-list arg such as
+    # `{"in":[{"var":"x"},["a","b"]]}`, are DATA not operators and are ignored
+    # (false-reject trap). This
     # helper lives here, NOT in expressions.py, because expressions.py imports
     # FROM definitions.py — the reverse edge would be a circular import.
     # See decisions.md D-007.
 
     Contract:
-        node: any fragment of a JsonLogic expression (dict / list / scalar).
+        node: a JsonLogic position that `evaluate_logic` evaluates (the root
+            logic dict, or one operator argument).
+        _depth: the `evaluate_logic` depth of `node` (0 for the root).
     Yields: each operator key (str) encountered, in traversal order.
-    Raises: ValueError if any dict node is empty (malformed operator object).
+    Raises: ValueError if an evaluated position is deeper than
+        MAX_JSONLOGIC_DEPTH, or an operator dict has zero keys (D-007) or more
+        than one key.
     """
-    if isinstance(node, dict):
-        if not node:
-            raise ValueError("Empty JsonLogic object '{}' is not a valid condition")
-        for key, value in node.items():
-            yield key
-            yield from _walk_logic_operators(value)
-    elif isinstance(node, (list, tuple)):
-        for element in node:
-            yield from _walk_logic_operators(element)
-    # Primitives (str/int/float/bool/None) are data, not operators — ignored.
+    if _depth > MAX_JSONLOGIC_DEPTH:
+        raise ValueError(
+            f"JsonLogic nesting exceeds the maximum depth ({MAX_JSONLOGIC_DEPTH})"
+        )
+    if not isinstance(node, dict):
+        # Primitives and lists at an evaluated position are data.
+        return
+    if not node:
+        raise ValueError("Empty JsonLogic object '{}' is not a valid condition")
+    if len(node) != 1:
+        raise ValueError(
+            f"JsonLogic object has keys {sorted(map(str, node))}; each operator "
+            "object must have exactly one key"
+        )
+    operator, arguments = next(iter(node.items()))
+    yield operator
+    if operator in JSONLOGIC_RAW_ARGUMENT_OPERATIONS:
+        return
+    if not isinstance(arguments, (list, tuple)):
+        arguments = [arguments]
+    for argument in arguments:
+        yield from _walk_logic_operators(argument, _depth + 1)
 
 
 class TransitionCondition(BaseModel):
@@ -614,8 +648,8 @@ class TransitionCondition(BaseModel):
 
     @model_validator(mode="after")
     def _validate_logic(self) -> TransitionCondition:
-        """Reject an empty/nested-empty (H6) or non-allow-listed-operator (H8)
-        `logic` dict at LOAD time, so `API.from_file` and `fsm-llm-validate`
+        """Reject an empty/nested-empty (H6), non-allow-listed-operator (H8),
+        multi-key or over-deep (B5, D-014) `logic` dict at LOAD time, so `API.from_file` and `fsm-llm-validate`
         both fail on a malformed condition instead of blowing up mid-conversation.
 
         # DECISION plan-2026-07-21T045419-9925aa3a/D-007
@@ -684,6 +718,33 @@ class Transition(BaseModel):
 # --------------------------------------------------------------
 # State Definition Models
 # --------------------------------------------------------------
+
+
+class ContextScope(BaseModel):
+    """Which context keys a state's prompts see.
+
+    # DECISION plan-2026-09-21T203800-8a03483a/D-015
+    # A typed model with `extra="forbid"`, not a free-form dict. Do NOT loosen
+    # it back to `dict[str, Any]` or to `extra="ignore"`: a bare-string
+    # `read_keys` made scoping a substring test (`"u" in "username"`), and a
+    # misspelt key (`read_key`) silently disabled scoping. `State.context_scope`
+    # still accepts a plain dict, which pydantic validates into this model.
+    # See decisions.md D-015.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    read_keys: list[str] | None = Field(
+        default=None,
+        description=(
+            "Keys included in this state's prompts; None or [] means all "
+            "user-visible context"
+        ),
+    )
+    write_keys: list[str] | None = Field(
+        default=None,
+        description="Keys this state is expected to produce (advisory, not enforced)",
+    )
 
 
 class State(BaseModel):
@@ -783,16 +844,56 @@ class State(BaseModel):
         ),
     )
 
-    context_scope: dict[str, Any] | None = Field(
+    context_scope: ContextScope | None = Field(
         default=None,
         description=(
-            "Optional context scoping for this state. Controls which "
-            "context keys are injected into LLM prompts. "
-            "Keys: 'read_keys' (list[str]) — keys to include in prompts; "
-            "'write_keys' (list[str]) — keys this state is expected to produce. "
+            "Optional context scoping for this state (a ContextScope or a dict "
+            "with only 'read_keys' and/or 'write_keys', each a list of strings). "
+            "Controls which context keys are injected into LLM prompts. "
             "When None, all user-visible context is injected (default behavior)."
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_extraction_configs(self) -> State:
+        """Reject state configs that can never work (B10).
+
+        # DECISION plan-2026-09-21T203800-8a03483a/D-016
+        # A plain ValueError (pydantic `value_error`, promoted to ERROR by
+        # validator.py) so loader and `fsm-llm-validate` agree. Do NOT downgrade
+        # these to warnings: two configs of one channel writing one
+        # `field_name` race for the same context key, and an empty or
+        # internal-prefixed required key is never extracted (internal keys are
+        # filtered out of extraction), so the state can never be satisfied.
+        # DECISION plan-2026-09-21T203800-8a03483a/D-033: duplicates are checked
+        # per list. Do NOT extend the check ACROSS field_extractions and
+        # classification_extractions: one explicit extraction named like a
+        # classification field is the supported below-threshold fallback of
+        # plan-2026-09-19T175721-21cd7f8e/D-006 (pipeline.py). See decisions.md
+        # D-016, D-033.
+        """
+        for channel, configs in (
+            ("field_extractions", self.field_extractions),
+            ("classification_extractions", self.classification_extractions),
+        ):
+            names = [c.field_name for c in configs or []]
+            duplicates = sorted({name for name in names if names.count(name) > 1})
+            if duplicates:
+                raise ValueError(
+                    f"State '{self.id}': field_name(s) {duplicates} are declared "
+                    f"more than once in {channel}"
+                )
+        bad_keys = [
+            key
+            for key in self.required_context_keys or []
+            if not key.strip() or has_internal_prefix(key)
+        ]
+        if bad_keys:
+            raise ValueError(
+                f"State '{self.id}': required_context_keys {bad_keys} are empty or "
+                "internal-prefixed and can never be extracted"
+            )
+        return self
 
 
 # --------------------------------------------------------------

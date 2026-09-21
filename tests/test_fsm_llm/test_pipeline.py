@@ -32,6 +32,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 
 from fsm_llm.definitions import (
+    ContextScope,
     FieldExtractionConfig,
     FieldExtractionResponse,
     FSMContext,
@@ -1122,28 +1123,28 @@ class TestApplyContextScope:
 
     def test_scope_filters_to_read_keys(self):
         state = _make_state("start")
-        state.context_scope = {"read_keys": ["name", "email"]}
+        state.context_scope = ContextScope(read_keys=["name", "email"])
         context = {"name": "Alice", "email": "alice@test.com", "age": 30}
         result = MessagePipeline._apply_context_scope(context, state, "conv-1")
         assert result == {"name": "Alice", "email": "alice@test.com"}
 
     def test_scope_missing_keys_ignored(self):
         state = _make_state("start")
-        state.context_scope = {"read_keys": ["name", "missing_key"]}
+        state.context_scope = ContextScope(read_keys=["name", "missing_key"])
         context = {"name": "Alice", "age": 30}
         result = MessagePipeline._apply_context_scope(context, state, "conv-1")
         assert result == {"name": "Alice"}
 
     def test_scope_empty_read_keys_returns_all(self):
         state = _make_state("start")
-        state.context_scope = {"read_keys": []}
+        state.context_scope = ContextScope(read_keys=[])
         context = {"name": "Alice"}
         result = MessagePipeline._apply_context_scope(context, state, "conv-1")
         assert result == context
 
     def test_scope_no_read_keys_in_dict_returns_all(self):
         state = _make_state("start")
-        state.context_scope = {"write_keys": ["output"]}
+        state.context_scope = ContextScope(write_keys=["output"])
         context = {"name": "Alice"}
         result = MessagePipeline._apply_context_scope(context, state, "conv-1")
         assert result == context
@@ -1152,7 +1153,7 @@ class TestApplyContextScope:
         """Integration: verify context_scope is respected during response gen."""
         llm = _make_mock_llm()
         state = _make_state("start")
-        state.context_scope = {"read_keys": ["visible_key"]}
+        state.context_scope = ContextScope(read_keys=["visible_key"])
         fsm_def = _make_fsm_definition({"start": state})
         pipeline = _make_pipeline(llm=llm, fsm_def=fsm_def)
         instance = _make_instance(
@@ -1178,7 +1179,9 @@ class TestContextScopeInFSMDefinition:
             purpose="Testing",
             context_scope={"read_keys": ["name"], "write_keys": ["output"]},
         )
-        assert state.context_scope == {"read_keys": ["name"], "write_keys": ["output"]}
+        assert state.context_scope == ContextScope(
+            read_keys=["name"], write_keys=["output"]
+        )
 
     def test_state_context_scope_none_by_default(self):
         state = State(
@@ -1208,7 +1211,7 @@ class TestContextScopeInFSMDefinition:
             },
         }
         fsm_def = FSMDefinition(**fsm_dict)
-        assert fsm_def.states["start"].context_scope["read_keys"] == ["greeting"]
+        assert fsm_def.states["start"].context_scope.read_keys == ["greeting"]
 
 
 # ══════════════════════════════════════════════════════════════

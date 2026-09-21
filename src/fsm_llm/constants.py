@@ -156,6 +156,19 @@ ENV_FSM_PATH = "FSM_PATH"
 # Validation and Safety Constants
 # --------------------------------------------------------------
 
+#: Deepest operator nesting `evaluate_logic` accepts (DoS guard). It lives here,
+#: not in expressions.py, so `definitions.TransitionCondition` can enforce the
+#: same bound at load time without importing expressions (which imports
+#: definitions). Both import it from this one place.
+MAX_JSONLOGIC_DEPTH = 50
+
+#: JsonLogic operators whose arguments `evaluate_logic` reads as raw DATA (a
+#: var name and default, key names) and never evaluates as logic. The load-time
+#: walk in definitions.py skips their arguments for the same reason.
+JSONLOGIC_RAW_ARGUMENT_OPERATIONS: frozenset[str] = frozenset(
+    {"var", "missing", "missing_some"}
+)
+
 # Security constants
 ALLOWED_JSONLOGIC_OPERATIONS = {
     "==",
