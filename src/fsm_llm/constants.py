@@ -120,6 +120,12 @@ CLASSIFICATION_EXTRACTION_RESULT_SUFFIX = "_classification"
 # truncation in `Classifier.classify_multi` (classification.py).
 MAX_MULTI_INTENTS = 5
 
+# Upper bound on cached `Classifier` instances per `MessagePipeline`
+# (`MessagePipeline._get_classifier`), keyed on a content hash of schema +
+# model + prompt config + connection kwargs; the oldest entry is evicted at
+# the bound. Matches `FSMManager`'s `max_fsm_cache_size` default (fsm.py).
+MAX_CLASSIFIER_CACHE_SIZE = 64
+
 # --------------------------------------------------------------
 # Environment Variable Keys
 # --------------------------------------------------------------

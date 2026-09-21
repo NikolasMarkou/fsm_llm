@@ -13,6 +13,7 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 """
 
 import copy
+import dataclasses
 import hashlib
 import json
 import re
@@ -26,6 +27,7 @@ from .constants import (
     CONTEXT_KEY_AGENT_TRACE,
     CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
+    MAX_CLASSIFIER_CACHE_SIZE,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
     is_forbidden_context_entry,
 )
@@ -241,6 +243,8 @@ class MessagePipeline:
         self.field_extraction_prompt_builder = (
             field_extraction_prompt_builder or FieldExtractionPromptBuilder()
         )
+        # Content-keyed, bounded; see `_get_classifier`.
+        self._classifier_cache: dict[str, Classifier] = {}
 
     def get_state(
         self, instance: FSMInstance, conversation_id: str | None = None
@@ -1986,6 +1990,68 @@ class MessagePipeline:
             connection["timeout"] = timeout
         return connection
 
+    def _get_classifier(
+        self,
+        schema: ClassificationSchema,
+        model: str,
+        prompt_config: ClassificationPromptConfig | None,
+        connection_kwargs: dict[str, Any],
+    ) -> Classifier:
+        """Return the cached ``Classifier`` for this exact configuration, or build it.
+
+        Contract: ``schema`` is the intent schema, ``model`` the resolved model
+        name, ``prompt_config`` the per-entry prompt override (or ``None``) and
+        ``connection_kwargs`` the output of ``_classifier_connection_kwargs``.
+        Returns a ``Classifier`` whose four inputs are content-equal to the
+        arguments; it never returns a classifier built for a different
+        schema/model/config/connection. Cache misses construct via the
+        module-level ``Classifier`` symbol (so ``patch("fsm_llm.pipeline.
+        Classifier")`` keeps observing construction) and evict the oldest entry
+        when the cache holds ``MAX_CLASSIFIER_CACHE_SIZE`` entries. Never raises
+        on its own; construction errors propagate to the caller unchanged.
+
+        Thread safety: a ``MessagePipeline`` is shared across conversations.
+        Two threads missing on the same key may each construct an equal
+        classifier and the later dict write wins; the write itself is atomic
+        in CPython and ``Classifier`` is immutable after ``__init__`` (Assumption
+        A5, verified in step 8), so the race is benign. No lock on purpose.
+        """
+        # DECISION plan-2026-09-20T165703-0d9c218e/D-001: the key is a content
+        # hash of schema + model + prompt config + connection kwargs, NOT
+        # `(state_id, field_name)`. A per-entry `model` override, a changed
+        # `api_base`/`timeout`, or an edited prompt_config would otherwise reuse
+        # a stale instance built for the old settings; the content hash makes
+        # staleness impossible by construction. Do NOT key on identity or on
+        # the state/field names. See decisions.md D-001.
+        key = hashlib.sha256(
+            json.dumps(
+                {
+                    "schema": schema.model_dump(),
+                    "model": model,
+                    "config": (
+                        dataclasses.asdict(prompt_config) if prompt_config else None
+                    ),
+                    "conn": connection_kwargs,
+                },
+                sort_keys=True,
+                default=str,
+            ).encode()
+        ).hexdigest()
+        cache = self._classifier_cache
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
+        classifier = Classifier(
+            schema=schema,
+            model=model,
+            config=prompt_config,
+            **connection_kwargs,
+        )
+        if len(cache) >= MAX_CLASSIFIER_CACHE_SIZE:
+            cache.pop(next(iter(cache)), None)
+        cache[key] = classifier
+        return classifier
+
     def _execute_classification_extractions(
         self,
         current_state: State,
@@ -2048,11 +2114,11 @@ class MessagePipeline:
                 if config.prompt_config:
                     prompt_config = ClassificationPromptConfig(**config.prompt_config)
 
-                classifier = Classifier(
-                    schema=schema,
-                    model=effective_model,
-                    config=prompt_config,
-                    **self._classifier_connection_kwargs(config.model),
+                classifier = self._get_classifier(
+                    schema,
+                    effective_model,
+                    prompt_config,
+                    self._classifier_connection_kwargs(config.model),
                 )
 
                 result: ClassificationResult = classifier.classify(user_message)
@@ -2162,10 +2228,8 @@ class MessagePipeline:
                 "transition resolution"
             )
 
-        classifier = Classifier(
-            schema=schema,
-            model=model,
-            **self._classifier_connection_kwargs(),
+        classifier = self._get_classifier(
+            schema, model, None, self._classifier_connection_kwargs()
         )
 
         try:

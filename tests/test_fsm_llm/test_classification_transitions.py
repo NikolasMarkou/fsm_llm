@@ -38,15 +38,20 @@ from fsm_llm.api import API
 from fsm_llm.constants import (
     CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
+    MAX_CLASSIFIER_CACHE_SIZE,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
 )
 from fsm_llm.definitions import (
     ClassificationError,
+    ClassificationExtractionConfig,
+    ClassificationResult,
+    ClassificationSchema,
     DataExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMError,
     FSMInstance,
+    IntentDefinition,
     State,
     Transition,
     TransitionEvaluation,
@@ -641,3 +646,167 @@ class TestAmbiguousTransitionExceptionDiscipline:
                 api.converse("which one?", conv_id)
 
         assert mock_cls.return_value.classify.called
+
+
+# ---------------------------------------------------------------------------
+# Tests: bounded per-pipeline Classifier cache
+# ---------------------------------------------------------------------------
+
+
+def _stay_result() -> ClassificationResult:
+    """A real ``ClassificationResult`` that keeps the conversation in its state."""
+    return ClassificationResult(
+        reasoning="mock",
+        intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+        confidence=0.9,
+    )
+
+
+def _api_on(fsm_def: FSMDefinition):
+    mock_llm = MagicMock(spec=LLMInterface)
+    configure_mock_extract_field(mock_llm)
+    mock_llm.model = "gpt-4"
+    mock_llm.generate_response.return_value = MagicMock(
+        message="ok", message_type="response", reasoning="mock"
+    )
+    api = API.from_definition(fsm_def, llm_interface=mock_llm)
+    conv_id, _ = api.start_conversation()
+    return api, conv_id
+
+
+def _schema(*names: str) -> ClassificationSchema:
+    intents = [IntentDefinition(name=n, description=f"Intent {n}") for n in names]
+    return ClassificationSchema(
+        intents=intents, fallback_intent=names[0], confidence_threshold=0.6
+    )
+
+
+class TestClassifierCache:
+    """``MessagePipeline._get_classifier`` reuses one ``Classifier`` per content
+    key (schema + model + prompt config + connection kwargs), bounded at
+    ``MAX_CLASSIFIER_CACHE_SIZE``. Pins plan-2026-09-20T165703-0d9c218e D-001.
+    """
+
+    def test_same_state_over_two_turns_constructs_once(self):
+        api, conv_id = _api_on(_ambiguous_fsm())
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.return_value.classify.return_value = _stay_result()
+            api.converse("first", conv_id)
+            api.converse("second", conv_id)
+
+        assert mock_cls.call_count == 1
+        assert mock_cls.return_value.classify.call_count == 2
+        assert api.get_current_state(conv_id) == "start"
+
+    def test_extra_intent_in_schema_constructs_again(self):
+        fsm_def = _ambiguous_fsm()
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, fsm_def)
+        instance = _make_instance(current_state="start")
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.return_value.classify.return_value = _stay_result()
+            for evaluation in (
+                _make_ambiguous_evaluation("a", "b"),
+                _make_ambiguous_evaluation("a", "b", "c"),
+                _make_ambiguous_evaluation("a", "b"),
+            ):
+                pipeline._resolve_ambiguous_transition(
+                    evaluation, "msg", DataExtractionResponse(), instance, "conv-1"
+                )
+
+        assert mock_cls.call_count == 2
+        assert len(pipeline._classifier_cache) == 2
+
+    def test_model_override_constructs_again(self):
+        intents = [
+            IntentDefinition(name="yes", description="Yes"),
+            IntentDefinition(name="no", description="No"),
+        ]
+        base = ClassificationExtractionConfig(
+            field_name="answer", intents=intents, fallback_intent="no"
+        )
+        override = ClassificationExtractionConfig(
+            field_name="answer_alt",
+            intents=intents,
+            fallback_intent="no",
+            model="gpt-4o",
+        )
+        state = State(
+            id="start",
+            description="Start",
+            purpose="Ask",
+            classification_extractions=[base, override],
+        )
+        fsm_def = _make_fsm_definition({"start": state})
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, fsm_def)
+        instance = _make_instance(current_state="start")
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.return_value.classify.return_value = ClassificationResult(
+                reasoning="mock", intent="yes", confidence=0.9
+            )
+            pipeline._execute_classification_extractions(state, "yes", instance, "c")
+            pipeline._execute_classification_extractions(state, "yes", instance, "c")
+
+        assert mock_cls.call_count == 2
+        assert {c.kwargs["model"] for c in mock_cls.call_args_list} == {
+            "gpt-4",
+            "gpt-4o",
+        }
+        assert mock_cls.return_value.classify.call_count == 4
+
+    def test_cache_is_bounded_and_evicts_oldest(self):
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
+        assert MAX_CLASSIFIER_CACHE_SIZE == 64
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
+            first = pipeline._get_classifier(_schema("i0", "j0"), "gpt-4", None, {})
+            first_key = next(iter(pipeline._classifier_cache))
+            for n in range(1, MAX_CLASSIFIER_CACHE_SIZE + 1):
+                pipeline._get_classifier(_schema(f"i{n}", f"j{n}"), "gpt-4", None, {})
+
+        assert mock_cls.call_count == MAX_CLASSIFIER_CACHE_SIZE + 1
+        assert len(pipeline._classifier_cache) == MAX_CLASSIFIER_CACHE_SIZE
+        assert first_key not in pipeline._classifier_cache
+        assert first not in pipeline._classifier_cache.values()
+
+    def test_both_sites_share_one_cache(self):
+        """An extraction entry whose schema equals the auto-built transition
+        schema of the same state yields ONE construction across both sites."""
+        extraction = ClassificationExtractionConfig(
+            field_name="route",
+            intents=[
+                IntentDefinition(name="a", description="Go to a"),
+                IntentDefinition(name="b", description="Go to b"),
+                IntentDefinition(
+                    name=TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+                    description="None of the above options clearly match the user's intent",
+                ),
+            ],
+            fallback_intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+            confidence_threshold=DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
+        )
+        state = State(
+            id="start",
+            description="Start",
+            purpose="Route",
+            extraction_instructions="Extract data",
+            response_instructions="Respond",
+            transitions=[_make_transition("a"), _make_transition("b")],
+            classification_extractions=[extraction],
+        )
+        api, conv_id = _api_on(_make_fsm_definition({"start": state}))
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.return_value.classify.return_value = _stay_result()
+            api.converse("which one?", conv_id)
+
+        assert mock_cls.return_value.classify.call_count == 2
+        assert mock_cls.call_count == 1
+        assert len(api.fsm_manager._pipeline._classifier_cache) == 1
