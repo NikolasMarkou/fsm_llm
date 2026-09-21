@@ -47,8 +47,60 @@ class TestWorkingMemoryInit:
         assert memory.get(BUFFER_CORE, "name") == "Alice"
 
     def test_initial_data_ignored_if_no_core_buffer(self):
-        memory = WorkingMemory(buffers=["custom"], initial_data={"name": "Alice"})
+        from fsm_llm.logging import logger
+
+        records: list[str] = []
+        sink_id = logger.add(
+            lambda m: records.append(m.record["message"]), level="WARNING"
+        )
+        logger.enable("fsm_llm")
+        try:
+            memory = WorkingMemory(
+                buffers=["custom"], initial_data={"name": "Alice", "age": 30}
+            )
+        finally:
+            logger.remove(sink_id)
+
         assert not memory.has_buffer(BUFFER_CORE)
+        assert memory.get_all_data() == {}
+        # memory #9: the drop is announced, not silent -- names the key count
+        # and the buffer list.
+        assert any(
+            "dropped 2 initial_data" in r and "['custom']" in r for r in records
+        ), records
+
+    def test_initial_data_with_core_does_not_warn(self):
+        from fsm_llm.logging import logger
+
+        records: list[str] = []
+        sink_id = logger.add(
+            lambda m: records.append(m.record["message"]), level="WARNING"
+        )
+        logger.enable("fsm_llm")
+        try:
+            WorkingMemory(initial_data={"name": "Alice"})
+        finally:
+            logger.remove(sink_id)
+        assert not any("initial_data" in r for r in records)
+
+    def test_explicit_empty_list_means_no_buffers(self):
+        # memory #8: `buffers=[]` used to fall through `or DEFAULT_BUFFERS`
+        # and silently create the four defaults.
+        memory = WorkingMemory(buffers=[])
+        assert memory.list_buffers() == []
+        assert len(memory) == 0
+
+    def test_explicit_empty_tuple_means_no_buffers(self):
+        memory = WorkingMemory(buffers=())
+        assert memory.list_buffers() == []
+
+    def test_none_buffers_still_means_defaults(self):
+        memory = WorkingMemory(buffers=None)
+        assert set(memory.list_buffers()) == set(DEFAULT_BUFFERS)
+
+    def test_from_dict_empty_round_trips_to_empty_memory(self):
+        restored = WorkingMemory.from_dict(WorkingMemory(buffers=[]).to_dict())
+        assert restored.list_buffers() == []
 
     def test_empty_memory(self):
         memory = WorkingMemory()
@@ -208,6 +260,34 @@ class TestWorkingMemoryGetAllData:
     def test_empty_buffers(self):
         memory = WorkingMemory()
         assert memory.get_all_data() == {}
+
+    def test_last_created_non_core_buffer_wins_and_core_beats_all(self):
+        # memory #12: among non-core buffers the MOST RECENTLY CREATED wins,
+        # and core still overrides every one of them.
+        memory = WorkingMemory(buffers=["first", "second", "third"])
+        memory.set("first", "key", "from_first")
+        memory.set("second", "key", "from_second")
+        memory.set("third", "key", "from_third")
+        assert memory.get_all_data()["key"] == "from_third"
+
+        # A buffer created AFTER construction is the newest and wins again.
+        memory.set("fourth", "key", "from_fourth")
+        assert memory.get_all_data()["key"] == "from_fourth"
+
+        memory.set(BUFFER_CORE, "key", "from_core")
+        assert memory.get_all_data()["key"] == "from_core"
+
+    def test_to_dict_is_shallow_values_shared_by_reference(self):
+        # memory #13: documented contract -- buffer mappings are copied,
+        # buffer VALUES are not.
+        memory = WorkingMemory()
+        memory.set(BUFFER_CORE, "items", [1, 2])
+        d = memory.to_dict()
+        d[BUFFER_CORE]["items"].append(3)
+        assert memory.get(BUFFER_CORE, "items") == [1, 2, 3]
+        # ... but adding a key to the returned mapping does not touch memory.
+        d[BUFFER_CORE]["new"] = "x"
+        assert memory.get(BUFFER_CORE, "new") is None
 
 
 class TestWorkingMemoryScopedView:

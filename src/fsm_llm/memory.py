@@ -84,9 +84,14 @@ class WorkingMemory:
         """Initialize working memory with named buffers.
 
         Args:
-            buffers: Buffer names to create. Defaults to
-                (core, scratch, environment, reasoning).
-            initial_data: Data to populate the core buffer with.
+            buffers: Buffer names to create. ``None`` (the default) means
+                (core, scratch, environment, reasoning). An explicit empty
+                sequence (``[]`` / ``()``) means NO buffers -- it is not
+                treated as "use the defaults", so ``from_dict({})`` and
+                ``WorkingMemory(buffers=[])`` both yield an empty memory.
+            initial_data: Data to populate the core buffer with. If no
+                ``core`` buffer is among *buffers* the data is dropped and
+                a warning is logged naming the key count and buffer list.
             hidden_buffers: Buffer names to exclude from aggregate views
                 (``get_all_data``, ``to_scoped_view``) and ``search``.
                 Hidden buffers carry orchestration metadata that should
@@ -96,7 +101,7 @@ class WorkingMemory:
             ValueError: If ``"_hidden_buffers"`` (the reserved key, D-026)
                 appears in *buffers*.
         """
-        buffer_names = buffers or DEFAULT_BUFFERS
+        buffer_names = buffers if buffers is not None else DEFAULT_BUFFERS
         if self._HIDDEN_BUFFERS_DICT_KEY in buffer_names:
             raise ValueError(
                 f"{self._HIDDEN_BUFFERS_DICT_KEY!r} is a reserved WorkingMemory "
@@ -116,8 +121,15 @@ class WorkingMemory:
             hidden_buffers if hidden_buffers is not None else DEFAULT_HIDDEN_BUFFERS
         )
 
-        if initial_data and BUFFER_CORE in self._buffers:
-            self._buffers[BUFFER_CORE].update(initial_data)
+        if initial_data:
+            if BUFFER_CORE in self._buffers:
+                self._buffers[BUFFER_CORE].update(initial_data)
+            else:
+                logger.warning(
+                    f"Working memory: dropped {len(initial_data)} initial_data "
+                    f"key(s) because no '{BUFFER_CORE}' buffer exists "
+                    f"(buffers={list(buffer_names)})"
+                )
 
     # ------------------------------------------------------------------
     # CRUD operations
@@ -272,8 +284,11 @@ class WorkingMemory:
     def get_all_data(self) -> dict[str, Any]:
         """Flatten all buffers into a single dict for backward compat.
 
-        When the same key exists in multiple buffers, the **core**
-        buffer wins, followed by buffers in creation order.
+        When the same key exists in multiple buffers, the **core** buffer
+        wins; among the others the most recently created buffer wins
+        (non-core buffers are merged in creation order, so a later buffer
+        overwrites an earlier one's value for the same key). Hidden
+        buffers are never merged.
 
         Returns:
             Merged dictionary of all buffer contents.
@@ -519,6 +534,13 @@ class WorkingMemory:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict of dicts, plus the hidden-buffer set.
+
+        The copy is SHALLOW: only the buffer mappings are copied. Buffer
+        VALUES are shared by reference with the live memory, so mutating a
+        nested list/dict inside the returned structure mutates the buffer
+        (and vice versa). Mirrors the caveat on
+        ``FSMManager.get_conversation_snapshot`` in ``fsm.py``; deep-copy
+        the result if you need isolation.
 
         Returns:
             Dictionary mapping buffer names to their contents, PLUS one
