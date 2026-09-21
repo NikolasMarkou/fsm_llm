@@ -12,7 +12,7 @@ FSM-LLM (v0.6.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (6,158 tests)
+make test           # pytest -v (6,174 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -271,8 +271,8 @@ including what is measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (6,158 collected)
-pytest tests/test_fsm_llm/            # Core package tests (1,990 tests)
+pytest                                 # Run all tests (6,174 collected)
+pytest tests/test_fsm_llm/            # Core package tests (2,006 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (115 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (159 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (1,004 tests)
@@ -281,7 +281,7 @@ pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,981 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 6,086. The remaining 72 are three root-level files:
+# The 9 suites above sum to 6,102. The remaining 72 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (26)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
@@ -324,6 +324,17 @@ step 10 against `ollama_chat/qwen3.5:9b-q8_0` together with `test_integration_ol
 18 passed / 1 failed (F-LIVE-01, the ReAct memory agent never calls `remember`; see
 `CHANGELOG.md` Unreleased). Consumer suites at this step (agents + regression +
 examples, non-live markers, the two deselects named above) are recorded in the
+plan's verification.md.
+
+Collected counts re-measured again with `pytest --collect-only -q | tail -1` at
+plan-2026-09-20-0d9c218e iteration 2 step 10 (the plan's final loop: review fixes
+W1-W7 / N8 / N10 / N11 and the F-LIVE-01 core fix, each with regression tests). Total
+6,174 collected (was 6,158): core `tests/test_fsm_llm/` 2,006 (was 1,990), all other
+suites and the 72 root-level-file tests unchanged. The 9-suite sum is now 6,102 (was
+6,086). The live suite was RUN once at iteration-2 step 9 against
+`ollama_chat/qwen3.5:9b-q8_0` together with `test_integration_ollama.py`: 18 passed /
+1 failed (F-LIVE-01 fixed; the remaining FAIL is F-LIVE-02, an agents-package post-tool
+stall, see `CHANGELOG.md` Unreleased). Consumer-suite totals for this step are in the
 plan's verification.md.
 
 **Conventions**:

@@ -43,7 +43,7 @@ fsm_llm/
   - Queries: `get_data(conv_id)`, `get_current_state(conv_id)`, `get_conversation_history(conv_id)`, `list_active_conversations()`
   - FSM stacking: `push_fsm(conv_id, new_fsm)`, `pop_fsm(conv_id, merge_strategy)`, `get_stack_depth(conv_id)`, `get_sub_conversation_id(conv_id)`
   - Handlers: `register_handler(handler)`, `register_handlers(handlers)`, `create_handler(name)` → HandlerBuilder
-  - Sessions: `save_session(conv_id)`, `load_session(session_id)` → `SessionState | None`, `restore_session(session_id)` → `(conv_id, SessionState) | None`
+  - Sessions: `save_session(conv_id)`, `load_session(session_id)` → `SessionState | None`, `restore_session(session_id)` → `(conv_id, SessionState) | None`. `restore_session` working-memory rule (N8, D-001): a missing or `None` `working_memory.buffers` map restores `WorkingMemory()` (the four defaults); an explicit `{}` restores `WorkingMemory.from_dict({})` (zero buffers); do not collapse the two
   - Management: `update_context(conv_id, data)`, `cleanup_stale_conversations()`, `get_llm_interface()`, `close()`
 - **FSMManager** (`fsm.py`) -- Orchestration with per-conversation thread locks, LRU FSM cache (max 64)
   - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `resolve_state_definition(instance)`
@@ -52,7 +52,7 @@ fsm_llm/
   - `save_session` on a stacked conversation saves the ROOT frame's state, data, history and working memory (not the sub-FSM's)
 - **MessagePipeline** (`pipeline.py`) -- 2-pass engine
   - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition
-  - Pass 2: response generation from new state -- skipped entirely when the state's `response_instructions` is empty (no response LLM call; used for intermediate agent states in tool-use loops)
+  - Pass 2: response generation from new state -- skipped entirely when the state's `response_instructions` is empty (no response LLM call; used for intermediate agent states in tool-use loops). The greeting site `generate_initial_response` (called by `start_conversation`) skips the same way since plan-2026-09-20-0d9c218e iteration 2 (D-006): an initial state with empty `response_instructions` gets no prose greeting, the synthetic `[<state_id>]` marker is recorded as the first assistant history entry and returned (F-LIVE-01: the old greeting prose poisoned the ReAct agent's first `tool_name` extraction)
   - `process_message(instance, conv_id, msg)`, `generate_initial_response(instance, conv_id)`
   - Streaming (`process_message_stream`) uses a plain-text Pass-2 prompt (`build_response_prompt(..., plain_text_response=True)`) unless the state carries `_output_response_format`, so yielded tokens and stored history have no `{"message","reasoning"}` envelope
   - `context_scope.read_keys` scopes `<current_context>` and `<rejected_corrections>` in the Pass-2 prompt (turn, stream and greeting), not only `request.context` (D-005, D-032); `<extracted_data>` (keys extracted this turn from the user's own message) is NOT scoped, a named limitation (D-054)
@@ -70,7 +70,7 @@ fsm_llm/
   - Error modes: "continue" (skip failed) | "raise"
 - **HandlerBuilder** (`handlers.py`) -- Fluent API: `.at(timing)` → `.on_state(id)` → `.when(lambda)`/`.when_context_has()`/`.when_keys_updated()` (+ shorthands `.on_state_entry()`, `.on_state_exit()`, `.on_context_update()`, `.with_priority()`) → `.do(lambda)` → `BaseHandler`
 - **HandlerTiming** enum -- 8 points: START_CONVERSATION, PRE_PROCESSING, POST_PROCESSING, PRE_TRANSITION, POST_TRANSITION, CONTEXT_UPDATE, END_CONVERSATION, ERROR
-- **Classifier** (`classification.py`) -- `classify(msg)` → ClassificationResult, `classify_multi(msg)` → MultiClassificationResult; `is_low_confidence(result)` compares against `schema.confidence_threshold` (the `ClassificationResult.is_low_confidence` property uses a fixed 0.6). The pipeline builds classifiers through `_get_classifier`, a per-pipeline content-keyed cache bounded at `MAX_CLASSIFIER_CACHE_SIZE` (64, FIFO eviction) shared by the classification-extraction and ambiguous-transition sites; both sites catch only `_CLASSIFICATION_SOFT_FAIL_EXCEPTIONS` (`ClassificationError`, `ValueError`, `TypeError`, `KeyError`, `RuntimeError`, `OSError`), so other programming errors and `KeyboardInterrupt` propagate
+- **Classifier** (`classification.py`) -- `classify(msg)` → ClassificationResult, `classify_multi(msg)` → MultiClassificationResult; `is_low_confidence(result)` compares against `schema.confidence_threshold` (the `ClassificationResult.is_low_confidence` property uses a fixed 0.6). The pipeline builds classifiers through `_get_classifier`, a per-pipeline content-keyed cache bounded at `MAX_CLASSIFIER_CACHE_SIZE` (64, FIFO eviction) shared by the classification-extraction and ambiguous-transition sites; check/construct/evict/insert is one critical section under `_classifier_cache_lock`, and a non-JSON-native connection kwarg (e.g. a pydantic `SecretStr`) BYPASSES the cache (fresh instance, no insert, no `default=str` digest), while cached instances retain their connection credentials for the pipeline's lifetime by design (D-001). Both sites catch only `_CLASSIFICATION_SOFT_FAIL_EXCEPTIONS` (`ClassificationError`, `ValueError`, `TypeError`, `KeyError`, `RuntimeError`, `OSError`), with the `_get_classifier` call inside the `try` so a construction failure degrades to "stay" at both; other programming errors and `KeyboardInterrupt` propagate (through `API.converse` as `FSMError`). `Classifier._call_llm` wraps post-call parsing (`.choices[0].message.content`, `_extract_response`) so `AttributeError`/`IndexError`/`TypeError` from a malformed response shape surface as `ClassificationResponseError` (defensive: the installed litellm's real objects do not produce these shapes)
 - **HierarchicalClassifier** -- Two-stage domain → intent for >15 intents
 - **IntentRouter** -- `route(msg)` → dispatches to handler functions by intent
 - **TransitionEvaluator** (`transition_evaluator.py`) -- Returns DETERMINISTIC | AMBIGUOUS | BLOCKED with confidence scores
@@ -113,7 +113,7 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 ## Testing
 
 ```bash
-pytest tests/test_fsm_llm/  # 1,990 tests
+pytest tests/test_fsm_llm/  # 2,006 tests
 ```
 
 - Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`

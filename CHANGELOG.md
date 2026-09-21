@@ -166,7 +166,9 @@ tests collected (was 6,091); `ruff`/`mypy src/fsm_llm/` clean after every code s
   dropped key count instead of vanishing; `get_all_data`'s "last non-core buffer wins" shadow
   order is documented and pinned by a 3-buffer collision test; `to_dict` is documented as a
   one-level-shallow copy (nested containers are shared with the caller) at the source, not
-  one file away.
+  one file away. **Behavior change**: `WorkingMemory(buffers=[])` and
+  `WorkingMemory.from_dict({})` now mean ZERO buffers (previously both silently produced
+  the four default buffers); pass `buffers=None` (the default) to get the defaults.
 - **`IntentRouter.validate()` dead branch and duplicated dispatch (classification #1, #7,
   #8; `345c28c`).** The unreachable "append fallback" branch is deleted with a one-line
   invariant comment (`ClassificationSchema.validate_schema` guarantees `fallback_intent in
@@ -180,7 +182,10 @@ tests collected (was 6,091); `ruff`/`mypy src/fsm_llm/` clean after every code s
   caught by the extraction site's existing narrow tuple, logged, and leaves the key unset.
   The field doc states that Ollama models force `temperature` to 0 under structured output
   (`apply_ollama_params`), and `ClassificationExtractionConfig.prompt_config` lists all six
-  accepted keys.
+  accepted keys. **Behavior change**: the bounds are enforced at construction, so
+  `ClassificationPromptConfig(max_intents=6)` (previously accepted, any value above
+  `MAX_MULTI_INTENTS`), `max_tokens=0` or `temperature=3.0` now raise `ValueError` instead
+  of being carried into the prompt.
 - **`_resolve_ambiguous_transition` caught `Exception` (classification #2; `d4acaac`).** The
   ambiguous-transition classifier site now catches the same D-004 soft-fail tuple the
   extraction site already used, hoisted to one module-level
@@ -188,7 +193,11 @@ tests collected (was 6,091); `ruff`/`mypy src/fsm_llm/` clean after every code s
   `ValueError`, `TypeError`, `KeyError`, `RuntimeError`, `OSError`). Those still degrade to
   "stay in state" with `_classification_result.fallback = True`; programming errors
   (`AttributeError`, `ZeroDivisionError`) and `KeyboardInterrupt` now propagate through
-  `API.converse` instead of being swallowed as a stay.
+  `API.converse` instead of being swallowed as a stay. **Behavior change**: a
+  non-soft-fail exception (`AttributeError`, `ZeroDivisionError`, `IndexError`, ...)
+  raised by `Classifier.classify` at the ambiguous-transition site now escapes
+  `API.converse` as `FSMError` (`converse` wraps every non-`FSMError` exception);
+  previously the turn completed as a "stay" and the caller never saw it.
 
 ### Changed
 
@@ -263,6 +272,100 @@ tests collected (was 6,091); `ruff`/`mypy src/fsm_llm/` clean after every code s
   under-call on the ReAct extraction path, the same family as the fixed 4b under-call, now
   on 9b with a different prompt; not a `classification.py`/`memory.py` defect (neither was
   invoked). The test is kept strict; the agents package is out of this plan's scope.
+  (Superseded by loop 2 below: the root cause turned out to be in core `pipeline.py`, and
+  is fixed.)
+
+### Fixed -- `classification.py` / `memory.py` audit loop 2 (plan-2026-09-20-0d9c218e, iteration 2, final loop)
+
+Iteration 2 re-audited iteration 1's own diffs (adversarial review W1-W7, N8-N12) and
+root-caused F-LIVE-01 from the retained raw calls. Every code item ships with a regression
+test in `tests/test_fsm_llm/`. Full suite: 6,174 tests collected (was 6,158);
+`ruff`/`mypy src/fsm_llm/` clean after every code step.
+
+- **F-LIVE-01 root cause was in core, not the agent: the greeting Pass-2 call ignored an
+  empty `response_instructions` (D-006; `ead5535`).** `MessagePipeline.process_message`
+  skips Pass 2 when the state's `response_instructions` is empty, but
+  `generate_initial_response` (the `start_conversation` greeting) did not, so every ReAct
+  agent run opened with a full prose greeting built from the `think` state's purpose; that
+  prose then sat in the history and poisoned the `tool_name` extraction on the first real
+  turn. `generate_initial_response` now mirrors the sync site exactly: on an empty
+  `response_instructions` it makes the `"."` sentinel request (no litellm call in
+  `LiteLLMInterface`), records the synthetic `[<state_id>]` marker as the first assistant
+  entry and returns it. RED test written against the old code first; a
+  `response_instructions=None` control still builds the full prompt.
+- **W2: classifier-cache race and unguarded construction (`4047ccd`).** The check /
+  construct / evict / insert sequence in `_get_classifier` is one critical section under a
+  new `_classifier_cache_lock` (review reproduced `RuntimeError: dictionary changed size
+  during iteration` on the unlocked code); the `_get_classifier` call at the
+  ambiguous-transition site moved INSIDE the soft-fail `try`, so a classifier construction
+  failure (`ValueError` from a bad `prompt_config`) degrades to "stay" at both sites
+  instead of escaping only at one.
+- **W1 / N11: cache key digested non-JSON-native connection kwargs via `default=str`
+  (`40204c8`).** A `SecretStr` (whose `str()` is a fixed mask) or any object whose `str()`
+  does not identify its value made two different credentials hash to the SAME key, so a
+  cached instance built for one could be served for the other. `_get_classifier` now BYPASSES the cache for a
+  non-JSON-native connection kwarg (fresh construct, no insert, no lock); `default=str` is
+  gone. Documented at the D-001 anchor: cached `Classifier` instances retain `api_key` and
+  other connection credentials for the pipeline's lifetime, up to
+  `MAX_CLASSIFIER_CACHE_SIZE` copies, by design.
+- **W4: cache-key components pinned (`1d0ad06`).** Tests assert that a changed
+  `prompt_config` and a changed connection kwarg each produce a distinct cache entry, and
+  that the same inputs hit the same instance.
+- **N10: `Classifier._call_llm` malformed-shape wrap (`118aff1`).** The post-call parsing
+  (`.choices[0].message.content` chase and `_extract_response`) is wrapped in
+  `except (AttributeError, IndexError, TypeError)` re-raised as
+  `ClassificationResponseError("Malformed LLM response shape: ...")`, so a choice without
+  `.message` now lands in the existing `ClassificationError` family instead of leaking a
+  raw `AttributeError`; the existing `"Empty response from LLM"` raise is untouched.
+  Caveat: defensive, not reachable via the installed litellm's real response objects
+  (those always carry `.message`); the RED test uses a `SimpleNamespace` shape.
+- **N8 / W7: `restore_session` collapsed an explicit empty buffers map into the defaults
+  (`3b9deac`).** `API.restore_session` now maps a missing / `None` `working_memory.buffers`
+  to `WorkingMemory()` (the four defaults) and an explicit `{}` to
+  `WorkingMemory.from_dict({})` (zero buffers), matching loop 1's `from_dict({})` contract;
+  a `# DECISION plan-2026-09-20T165703-0d9c218e/D-001` anchor in `memory.py` pins
+  `buffers if buffers is not None else DEFAULT_BUFFERS` against the tempting
+  `buffers or DEFAULT_BUFFERS` simplification.
+- **W3: prompt-reach docs corrected (`cc71820`).** `FSMContext` (class docstring and the
+  `working_memory` Field) and `docs/architecture.md` now say where the buffer data goes:
+  `get_user_visible_data()` feeds the Pass-1 per-field prompt AND the public
+  `ResponseGenerationRequest.context` at the three Pass-2 sites when a response is
+  generated; the shipped `LiteLLMInterface` never reads `request.context`, so no buffer
+  data reaches the Pass-2 PROMPT, but a custom `LLMInterface` that reads it will see it.
+  The earlier "only Pass-1" wording was wrong about the request object.
+- **W5: live suite hardened (`8b33388`).** The `<intent>` injection test asserts the
+  injected message still classifies as `check_balance` (it previously only asserted "no
+  crash"); the raw-call recorder writes `rec.dump()` for EVERY test (pass or fail) to
+  `$FSM_LLM_LIVE_RAW_DIR/<nodeid>.txt`, so passing tests can be audited from their raw
+  calls; the memory-agent test mirrors the example's `temperature=0.7` /
+  `max_iterations=5`.
+
+Live evidence (iteration 2, `ollama_chat/qwen3.5:9b-q8_0`, n=1, no commit): the live suite
+plus `test_integration_ollama.py` ran **18 passed / 1 failed in 246.83s**. The F-LIVE-01
+greeting mechanism is GONE: `remember` fires at iteration 1 with the correct
+`{key, value, buffer}` payload and the first `agent.run` reaches `conclude`. The remaining
+FAIL is a NEW known limitation, **F-LIVE-02** (`fsm_llm_agents`, not fixed, out of this
+plan's scope): after a tool result the ReAct loop can sit in `think` with every transition
+BLOCKED until the budget is exhausted. Three framework-side links: (a) a `null`
+`tool_input` falls back to the whole task string, so `recall` searches for
+`"Use the recall tool: what is the user's favourite colour?"` and `WorkingMemory.search`
+(substring match) finds nothing; (b) the per-field extraction prompt's closing IMPORTANT
+block ("extract from the current message") overrides its own NOTE about the `Continue.`
+signal, so `tool_name` comes back `null` on every continuation turn while
+`should_terminate=false` stays pinned in `Already extracted:` and is never re-asked; (c)
+the 3-consecutive-no-tool stall detector (`AgentToolExecutor`, POST_TRANSITION) and the
+iteration limiter (PRE_TRANSITION) never run while transitions are blocked, so the net
+written for exactly this case is unreachable and the run ends only on the outer
+`BudgetExhaustedError`. The same mechanism drives `examples/agents/memory_agent` (1/5;
+task 1 additionally sends `remember` with the whole fact stuffed into `key` and no
+`value`, rejected by the tool; the example's `memory_populated` check counts the four
+default buffers, so it is `True` on an empty memory). Two further raw-read observations,
+recorded not fixed: the multi-intent ranking follows the order intents are mentioned in
+the message rather than any salience, and a terminal reply may claim a side effect
+("I've saved that") that no tool performed. `examples/classification/multi_intent` 2/4 is
+unchanged from iteration 1 (OBS-LIVE-01, example design). Examples untouched.
+
+These changes are not yet released; no version bump is cut by this plan (D-004).
 
 ## [0.6.0] - 2026-09-20
 
