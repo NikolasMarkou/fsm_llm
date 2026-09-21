@@ -223,10 +223,23 @@ class Classifier:
         if not response or not getattr(response, "choices", None):
             raise ClassificationResponseError("Empty response from LLM")
 
-        content = response.choices[0].message.content
-        logger.debug(f"Classification call completed in {elapsed:.2f}s")
-
-        return self._extract_response(content, response)
+        # A non-raising completion() return with a malformed shape (choice
+        # without .message, message without .content, non-indexable choices)
+        # must surface as ClassificationResponseError -- already a member of
+        # the pipeline's soft-fail tuple -- instead of leaking AttributeError,
+        # which is not, and would crash the turn for a required=False field.
+        # ClassificationResponseError raised by _extract_response (parse
+        # failure) is not in this tuple and passes through unchanged. KeyError
+        # (choices as a dict) is left bare: the pipeline tuple already lists
+        # it. See review N10, plan-2026-09-20T165703-0d9c218e.
+        try:
+            content = response.choices[0].message.content
+            logger.debug(f"Classification call completed in {elapsed:.2f}s")
+            return self._extract_response(content, response)
+        except (AttributeError, IndexError, TypeError) as e:
+            raise ClassificationResponseError(
+                f"Malformed LLM response shape: {e}"
+            ) from e
 
     # ----------------------------------------------------------
     # Response Extraction

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,6 +18,7 @@ from fsm_llm.constants import (
 from fsm_llm.definitions import (
     ClassificationError,
     ClassificationExtractionConfig,
+    ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
     FSMContext,
@@ -696,6 +698,77 @@ class TestClassifierLLMBoundary:
         ):
             with pytest.raises(ClassificationError):
                 hier.classify("where is my refund")
+
+
+class TestClassifierMalformedResponseShape:
+    """RED-before regression for review N10 (plan-2026-09-20T165703-0d9c218e).
+
+    `Classifier._call_llm` chased `response.choices[0].message.content` bare,
+    so a `completion()` return that does not raise but carries a malformed
+    shape leaked `AttributeError` -- a type NOT in the pipeline's
+    `_CLASSIFICATION_SOFT_FAIL_EXCEPTIONS`, so a `required=False` field
+    would crash the turn instead of failing soft. The post-call parse is now
+    wrapped into `ClassificationResponseError` (already a member of that
+    tuple) WITHOUT widening the tuple.
+
+    Not reachable through genuine litellm 1.x objects (`Choices`/`Message`
+    always carry `.message`/`.content`); reachable via a patched/mocked
+    `completion` or a future litellm type change. Driven with bare
+    `SimpleNamespace` objects on purpose: a `MagicMock` auto-creates any
+    attribute and can never exercise the missing-attribute path.
+    """
+
+    def test_choice_without_message_raises_classification_response_error(self):
+        """RED on old code: AttributeError('... no attribute message')."""
+        response = types.SimpleNamespace(choices=[types.SimpleNamespace()])
+        with patch("fsm_llm.classification.completion", return_value=response):
+            with pytest.raises(ClassificationResponseError, match="Malformed") as exc:
+                _classifier().classify("x")
+
+        assert isinstance(exc.value.__cause__, AttributeError)
+
+    def test_message_without_content_raises_classification_response_error(self):
+        response = types.SimpleNamespace(
+            choices=[types.SimpleNamespace(message=types.SimpleNamespace())]
+        )
+        with patch("fsm_llm.classification.completion", return_value=response):
+            with pytest.raises(ClassificationResponseError, match="Malformed"):
+                _classifier().classify("x")
+
+    def test_empty_choices_guard_keeps_its_original_message(self):
+        """The pre-existing guard sits BEFORE the wrap and is not re-worded."""
+        response = types.SimpleNamespace(choices=[])
+        with patch("fsm_llm.classification.completion", return_value=response):
+            with pytest.raises(ClassificationResponseError, match="Empty response"):
+                _classifier().classify("x")
+
+    def test_parse_failure_inside_extract_response_passes_through_unchanged(self):
+        """`ClassificationResponseError` is not in the wrap tuple, so a parse
+        failure raised inside `_extract_response` keeps its own message."""
+        response = types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(message=types.SimpleNamespace(content="not json"))
+            ]
+        )
+        with patch("fsm_llm.classification.completion", return_value=response):
+            with pytest.raises(ClassificationResponseError, match="Failed to parse"):
+                _classifier().classify("x")
+
+    def test_choices_as_dict_raises_keyerror_which_the_pipeline_tuple_covers(self):
+        """Measured behaviour, documented rather than wrapped.
+
+        `choices` as a non-empty dict makes `choices[0]` a `KeyError`. It is
+        deliberately NOT added to the classifier wrap: `KeyError` is already
+        in the pipeline's soft-fail tuple, so this shape never escaped, and
+        widening the wrap would hide a genuinely different failure class.
+        """
+        from fsm_llm.pipeline import _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS
+
+        assert KeyError in _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS
+        response = types.SimpleNamespace(choices={"a": 1})
+        with patch("fsm_llm.classification.completion", return_value=response):
+            with pytest.raises(KeyError):
+                _classifier().classify("x")
 
 
 # ----------------------------------------------------------
