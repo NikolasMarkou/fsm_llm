@@ -14,7 +14,7 @@ from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from .constants import DEFAULT_LLM_MODEL
+from .constants import DEFAULT_LLM_MODEL, MAX_MULTI_INTENTS
 from .definitions import (
     ClassificationError,
     ClassificationResponseError,
@@ -369,15 +369,17 @@ class Classifier:
                 "Multi-intent response contained no valid intents after filtering"
             )
 
-        # MultiClassificationResult.intents enforces max_length=5; keep the
-        # highest-scored intents to avoid an uncaught pydantic ValidationError.
-        if len(scored) > 5:
+        # MultiClassificationResult.intents enforces max_length=MAX_MULTI_INTENTS;
+        # keep the highest-scored intents to avoid an uncaught pydantic
+        # ValidationError.
+        if len(scored) > MAX_MULTI_INTENTS:
             logger.warning(
-                f"Multi-intent response truncated: discarding {len(scored) - 5} of "
-                f"{len(scored)} valid intents to fit the max_length=5 cap "
+                "Multi-intent response truncated: discarding "
+                f"{len(scored) - MAX_MULTI_INTENTS} of {len(scored)} valid intents "
+                f"to fit the max_length={MAX_MULTI_INTENTS} cap "
                 f"(max_intents={self.config.max_intents} was requested)"
             )
-        scored = scored[:5]
+        scored = scored[:MAX_MULTI_INTENTS]
 
         return MultiClassificationResult(
             reasoning=data.get("reasoning", ""),

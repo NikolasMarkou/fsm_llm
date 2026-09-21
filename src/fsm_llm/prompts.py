@@ -30,6 +30,7 @@ from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     INTERNAL_KEY_PREFIXES,
     MAX_CONTEXT_FILTER_DEPTH,
+    MAX_MULTI_INTENTS,
     has_internal_prefix,
     is_forbidden_context_entry,
 )
@@ -1292,7 +1293,19 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
 
 @dataclass(frozen=True)
 class ClassificationPromptConfig:
-    """Controls classification prompt generation behavior."""
+    """Controls classification prompt generation behavior.
+
+    Bounds are checked at construction and a violation raises ``ValueError``
+    naming the field: ``max_tokens >= 1``, ``0.0 <= temperature <= 2.0`` and
+    ``1 <= max_intents <= MAX_MULTI_INTENTS`` (the
+    ``MultiClassificationResult.intents`` pydantic cap, so a request for more
+    intents than the result model can hold is refused up front instead of being
+    silently truncated).
+
+    ``temperature`` is advisory on Ollama models: ``apply_ollama_params(...,
+    structured=True)`` forces ``temperature=0`` for structured classification
+    output regardless of the value set here.
+    """
 
     include_reasoning: bool = True
     max_tokens: int = 512
@@ -1300,6 +1313,19 @@ class ClassificationPromptConfig:
     include_entities: bool = True
     multi_intent: bool = False
     max_intents: int = 3
+
+    def __post_init__(self) -> None:
+        if self.max_tokens < 1:
+            raise ValueError(f"max_tokens must be >= 1, got {self.max_tokens}")
+        if not 0.0 <= self.temperature <= 2.0:
+            raise ValueError(
+                f"temperature must be within 0.0..2.0, got {self.temperature}"
+            )
+        if not 1 <= self.max_intents <= MAX_MULTI_INTENTS:
+            raise ValueError(
+                f"max_intents must be within 1..{MAX_MULTI_INTENTS} "
+                f"(the MultiClassificationResult.intents cap), got {self.max_intents}"
+            )
 
 
 def build_classification_json_schema(

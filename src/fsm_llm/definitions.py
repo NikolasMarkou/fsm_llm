@@ -25,6 +25,7 @@ from .constants import (
     ALLOWED_JSONLOGIC_OPERATIONS,
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
+    MAX_MULTI_INTENTS,
     MESSAGE_TRUNCATION_SUFFIX,
     has_internal_prefix,
 )
@@ -503,7 +504,12 @@ class ClassificationExtractionConfig(BaseModel):
         default=None,
         description=(
             "Override ClassificationPromptConfig fields as a dict. "
-            "Keys: include_reasoning, max_tokens, temperature, include_entities."
+            "Keys: include_reasoning, max_tokens, temperature, include_entities, "
+            "multi_intent, max_intents. Bounds (max_tokens >= 1, "
+            "0.0 <= temperature <= 2.0, 1 <= max_intents <= 5) are checked when "
+            "the config is built at extraction time; an out-of-range value is "
+            "logged and leaves the field key unset (or raises ClassificationError "
+            "when required=True)."
         ),
     )
 
@@ -1412,7 +1418,7 @@ class MultiClassificationResult(BaseModel):
     )
     intents: list[IntentScore] = Field(
         min_length=1,
-        max_length=5,
+        max_length=MAX_MULTI_INTENTS,
         description="Ranked list of detected intents, most probable first",
     )
 

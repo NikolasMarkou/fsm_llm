@@ -10,7 +10,10 @@ from litellm.exceptions import RateLimitError
 
 from fsm_llm.api import API
 from fsm_llm.classification import Classifier, HierarchicalClassifier
-from fsm_llm.constants import CLASSIFICATION_EXTRACTION_RESULT_SUFFIX
+from fsm_llm.constants import (
+    CLASSIFICATION_EXTRACTION_RESULT_SUFFIX,
+    MAX_MULTI_INTENTS,
+)
 from fsm_llm.definitions import (
     ClassificationError,
     ClassificationExtractionConfig,
@@ -22,6 +25,7 @@ from fsm_llm.definitions import (
     FSMInstance,
     HierarchicalSchema,
     IntentDefinition,
+    MultiClassificationResult,
     State,
     Transition,
 )
@@ -731,23 +735,115 @@ class TestMultiIntentTruncationWarning:
         finally:
             logger.remove(sink_id)
 
-        assert len(result.intents) == min(n_intents, 5)
+        assert len(result.intents) == min(n_intents, MAX_MULTI_INTENTS)
         return [r["message"] for r in records]
 
+    # max_intents is now bounded at construction (1..MAX_MULTI_INTENTS), so the
+    # over-return this class exercises is the LLM ignoring the prompt's cap, not
+    # a config asking for more than the result model holds.
     def test_warns_naming_the_discarded_count_when_truncating(self):
-        messages = self._parse(n_intents=8, max_intents=10)
+        messages = self._parse(n_intents=8, max_intents=5)
 
         truncation = [m for m in messages if "truncated" in m]
         assert len(truncation) == 1
         # The count actually discarded (8 - 5), the total, and the request.
         assert "discarding 3 of 8" in truncation[0]
-        assert "max_intents=10" in truncation[0]
+        assert "max_intents=5" in truncation[0]
 
     def test_silent_when_within_the_cap(self):
-        assert self._parse(n_intents=5, max_intents=10) == []
+        assert self._parse(n_intents=5, max_intents=5) == []
 
     def test_silent_when_below_the_cap(self):
-        assert self._parse(n_intents=3, max_intents=10) == []
+        assert self._parse(n_intents=3, max_intents=5) == []
+
+
+class TestClassificationPromptConfigValidation:
+    """Classification audit #3 / #9: bounds checked at construction.
+
+    `max_intents` above the `MultiClassificationResult.intents` cap used to be
+    accepted and silently truncated at parse time; `max_tokens=0` and an
+    out-of-range temperature surfaced only as a provider error (or, on Ollama,
+    not at all, since `apply_ollama_params` forces temperature=0).
+    """
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("max_intents", 0),
+            ("max_intents", 6),
+            ("max_tokens", 0),
+            ("temperature", -0.1),
+            ("temperature", 2.1),
+        ],
+    )
+    def test_out_of_range_raises_naming_the_field(self, field, value):
+        with pytest.raises(ValueError, match=field):
+            ClassificationPromptConfig(**{field: value})
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("max_intents", 1),
+            ("max_intents", 5),
+            ("max_tokens", 1),
+            ("temperature", 0.0),
+            ("temperature", 2.0),
+        ],
+    )
+    def test_boundary_values_accepted(self, field, value):
+        assert getattr(ClassificationPromptConfig(**{field: value}), field) == value
+
+    def test_max_intents_bound_is_the_result_model_cap(self):
+        """The lockstep, asserted: the bound IS the pydantic cap, one constant."""
+        metadata = MultiClassificationResult.model_fields["intents"].metadata
+        cap = next(
+            (m.max_length for m in metadata if getattr(m, "max_length", None)),
+            None,
+        )
+        assert cap == MAX_MULTI_INTENTS
+        ClassificationPromptConfig(max_intents=cap)
+        with pytest.raises(ValueError, match="max_intents"):
+            ClassificationPromptConfig(max_intents=cap + 1)
+
+    def test_bad_prompt_config_on_a_state_is_a_warning_at_converse_time(
+        self, mock_llm2_interface
+    ):
+        """Public path: `prompt_config={"max_intents": 0}` on a soft field.
+
+        The `ClassificationPromptConfig(**prompt_config)` call sits inside the
+        extraction site's narrow `try`, whose tuple carries `ValueError`, so the
+        turn completes, the key stays unset and the failure is logged.
+        """
+        config = _make_config(prompt_config={"max_intents": 0})
+        fsm = _make_fsm(
+            {
+                "triage": _make_state(classification_extractions=[config]),
+                "end": _terminal_state("end"),
+            }
+        )
+        mock_llm2_interface.model = "gpt-4o"
+        api = API.from_definition(fsm, llm_interface=mock_llm2_interface)
+        conv_id, _ = api.start_conversation()
+
+        records: list = []
+        sink_id = logger.add(
+            lambda message: records.append(message.record), level="WARNING"
+        )
+        logger.enable("fsm_llm")
+        try:
+            with patch("fsm_llm.classification.completion") as mock_completion:
+                response = api.converse("I am furious", conv_id)
+        finally:
+            logger.remove(sink_id)
+
+        assert isinstance(response, str)
+        assert not mock_completion.called, "classifier must not be built"
+        assert "sentiment" not in api.get_data(conv_id)
+        messages = [r["message"] for r in records]
+        assert any(
+            "Classification extraction 'sentiment' failed" in m and "max_intents" in m
+            for m in messages
+        ), messages
 
 
 _NON_ASCII_NAMES = ["café", "名前", "naïve_intent", "буя", "intent_µ"]
