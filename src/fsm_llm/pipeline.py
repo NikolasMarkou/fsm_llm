@@ -792,7 +792,7 @@ class MessagePipeline:
             user_message=user_message,
             plain_text_response=output_response_format is None,
             context=self._apply_context_scope(
-                instance.context.data, current_state, conversation_id
+                instance.context.get_merged_data(), current_state, conversation_id
             ),
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-032
             # read_keys scopes THIS channel too: a refused value is a context
@@ -946,7 +946,7 @@ class MessagePipeline:
             previous_state=None,
             user_message="",
             context=self._apply_context_scope(
-                instance.context.data, current_state, conversation_id
+                instance.context.get_merged_data(), current_state, conversation_id
             ),
         )
 
@@ -2722,8 +2722,12 @@ class MessagePipeline:
             # PROMPT, not only request.context (llm.py never reads it). Do NOT
             # revert to full instance.context.data: read_keys would then
             # promise scoping the prompt never delivered (hidden values leaked).
+            # DECISION plan-2026-09-21T203800-8a03483a/D-008: the prompt gets
+            # WorkingMemory under data (get_merged_data), scoped the same way,
+            # at all three Pass-2 sites (sync, stream, greeting). Do NOT feed
+            # WM through request.context only, and do NOT merge hidden buffers.
             context=self._apply_context_scope(
-                instance.context.data, current_state, conversation_id
+                instance.context.get_merged_data(), current_state, conversation_id
             ),
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-032
             # read_keys scopes THIS channel too: a refused value is a context

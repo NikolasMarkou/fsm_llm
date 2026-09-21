@@ -1103,22 +1103,18 @@ class FSMContext(BaseModel):
     data from all non-hidden working memory buffers (flattened). The flat
     ``data`` dict remains the primary storage for backward compatibility.
 
-    Prompt reach: the pipeline calls ``get_user_visible_data()`` at four
-    sites. At the Pass-1 per-field extraction site
-    (``_execute_field_extractions``, a field whose ``context_keys`` is left
-    at its default) the merged data DOES enter the extraction prompt. At the
-    three Pass-2 sites (``_execute_response_generation_pass``,
-    ``_stream_response_generation_pass``, and ``generate_initial_response``
-    when a greeting is generated) it feeds the public
-    ``ResponseGenerationRequest.context`` field. The shipped
-    ``LiteLLMInterface`` never reads ``request.context`` (its
-    ``<current_context>`` block is built from ``data`` alone), so buffer data
-    reaches no Pass-2 prompt through it; a custom ``LLMInterface`` that reads
-    ``request.context`` WILL see buffer data there. ``update_context`` and
-    handlers write ``data`` only. See ``fsm_llm.memory.WorkingMemory`` for
-    the full statement. Both classifier call sites (classification
-    extractions and ambiguous-transition resolution) also read it, scoped,
-    through ``MessagePipeline._build_classifier_context``.
+    Prompt reach: non-hidden buffer data sits under ``data`` (``data`` wins
+    on collision) in ``get_merged_data()``, which feeds the transition
+    evaluator's working context and the Pass-2 ``<current_context>`` block at
+    all three sites (``_execute_response_generation_pass``,
+    ``_stream_response_generation_pass``, ``generate_initial_response``),
+    scoped by ``read_keys``. ``get_user_visible_data()`` (the same merge
+    without internal keys) feeds the Pass-1 per-field extraction prompt (a
+    field whose ``context_keys`` is left at its default), both classifier
+    call sites (through ``MessagePipeline._build_classifier_context``), and
+    ``ResponseGenerationRequest.context``. The bulk extraction pass sees
+    ``data`` only. ``update_context`` and handlers write ``data`` only. See
+    ``fsm_llm.memory.WorkingMemory`` for the full statement.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -1144,13 +1140,11 @@ class FSMContext(BaseModel):
         default=None,
         description=(
             "Optional WorkingMemory instance for structured buffer-based "
-            "context management. When set, get_user_visible_data() merges "
-            "data from non-hidden working memory buffers. That merged data "
-            "enters the Pass-1 per-field extraction prompt; at the three "
-            "Pass-2 sites it only fills ResponseGenerationRequest.context, "
-            "which the shipped LiteLLMInterface never reads (a custom "
-            "LLMInterface that reads request.context will see it). Import "
-            "from fsm_llm.memory."
+            "context management. Non-hidden buffer data is merged under "
+            "the flat data dict (data wins) for the transition evaluator, "
+            "the Pass-2 prompt, the per-field extraction prompt and the "
+            "classifiers; hidden buffers are never merged. Import from "
+            "fsm_llm.memory."
         ),
         exclude=True,
     )
@@ -1181,26 +1175,35 @@ class FSMContext(BaseModel):
             logger.debug(f"Updating context with keys: {list(new_data.keys())}")
             self.data.update(new_data)
 
-    def get_user_visible_data(self) -> dict[str, Any]:
-        """Get context data filtered for user visibility.
+    def get_merged_data(self) -> dict[str, Any]:
+        """Non-hidden WorkingMemory buffers under the flat ``data`` dict.
 
-        When ``working_memory`` is set, merges flattened buffer data
-        with the flat ``data`` dict. The flat ``data`` dict takes
-        precedence on key collisions.
+        Returns a new dict: ``working_memory.get_all_data()`` (hidden buffers
+        never included) overlaid by ``data`` (``data`` wins on collision).
+        Internal-prefix keys are NOT stripped, so the result is a drop-in
+        for ``data`` wherever a consumer applies its own filter (the
+        transition evaluator, the Pass-2 prompt builder). Without working
+        memory, or with empty buffers, it equals ``dict(data)`` in content
+        and key order. Never raises.
         """
-        # Start with working memory data if available
+        # DECISION plan-2026-09-21T203800-8a03483a/D-008: the one WM-under-data
+        # merge for every decision point. Do NOT let a buffer value override
+        # context.data (existing FSMs that never write WM must stay
+        # byte-identical) and do NOT merge hidden buffers (get_all_data skips
+        # them; they carry orchestration metadata that must never reach an LLM).
         if self.working_memory is not None and hasattr(
             self.working_memory, "get_all_data"
         ):
-            merged = self.working_memory.get_all_data()
-            # Flat data dict overrides working memory on collision
+            merged: dict[str, Any] = self.working_memory.get_all_data()
             merged.update(self.data)
-        else:
-            merged = self.data
+            return merged
+        return dict(self.data)
 
+    def get_user_visible_data(self) -> dict[str, Any]:
+        """``get_merged_data()`` without internal-prefix keys or ``system``."""
         return {
             key: value
-            for key, value in merged.items()
+            for key, value in self.get_merged_data().items()
             if not has_internal_prefix(key) and key != "system"
         }
 

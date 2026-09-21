@@ -167,9 +167,13 @@ class TransitionEvaluator:
         """
         Prepare working context for transition evaluation.
 
-        Combines existing context with newly extracted data.
+        Non-hidden WorkingMemory buffers, overlaid by ``context.data`` (data
+        wins), overlaid by newly extracted data.
         """
-        working_context = context.data.copy()
+        # DECISION plan-2026-09-21T203800-8a03483a/D-008: start from
+        # context.get_merged_data(), NOT context.data.copy(): a WorkingMemory
+        # value may gate a transition, but never override context.data.
+        working_context = context.get_merged_data()
 
         if extracted_data:
             # Log context updates

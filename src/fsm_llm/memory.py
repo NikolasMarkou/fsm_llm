@@ -59,19 +59,19 @@ class WorkingMemory:
 
     Custom buffers can be added at construction or dynamically.
 
-    **Prompt reach (what the LLM actually sees).** When attached as
-    ``FSMContext.working_memory``, buffer data reaches ONLY the Pass-1
-    per-field extraction prompt, and only while a field's
-    ``FieldExtractionConfig.context_keys`` is left at its default (``None``):
-    that path calls ``FSMContext.get_user_visible_data()``, which merges the
-    non-hidden buffers into the flat ``data``. A field with explicit
-    ``context_keys`` reads raw ``context.data`` only, and the bulk
-    extraction pass sees neither. Buffer data does NOT appear in the Pass-2
-    response prompt: its ``<current_context>`` block is built from
-    ``context.data`` alone, and ``llm.py`` never reads ``request.context``.
-    ``API.update_context`` and handler return values write ``context.data``
-    only; nothing syncs a buffer into ``data`` or back. To put a value in
-    front of the response model, write it to ``context.data``.
+    **Prompt reach (what the LLM and the rules see).** When attached as
+    ``FSMContext.working_memory``, non-hidden buffer data is merged UNDER the
+    flat ``context.data`` (``data`` wins on a key collision) by
+    ``FSMContext.get_merged_data()``. That merge feeds the transition
+    evaluator (a buffer key can satisfy a condition), the Pass-2
+    ``<current_context>`` block at all three response sites (sync, stream,
+    greeting), the Pass-1 per-field extraction prompt (a field whose
+    ``FieldExtractionConfig.context_keys`` is left at ``None``), and both
+    classifier call sites; prompts are scoped by the state's ``read_keys``.
+    A field with explicit ``context_keys`` reads raw ``context.data`` only,
+    and the bulk extraction pass sees ``data`` only. Hidden buffers reach
+    none of these. ``API.update_context`` and handler return values write
+    ``context.data`` only; nothing syncs a buffer into ``data`` or back.
 
     Example::
 
