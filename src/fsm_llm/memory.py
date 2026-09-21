@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Working memory management for FSM-LLM.
 
@@ -10,6 +8,8 @@ reasoning traces) rather than a flat key-value bag.
 Inspired by CoALA (Cognitive Architectures for Language Agents) and
 Cognitive Workspace (CW) research on structured working memory.
 """
+
+from __future__ import annotations
 
 import builtins
 import threading

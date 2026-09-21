@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+import fsm_llm.memory
 from fsm_llm.memory import (
     BUFFER_CORE,
     BUFFER_ENVIRONMENT,
@@ -14,6 +15,20 @@ from fsm_llm.memory import (
     DEFAULT_HIDDEN_BUFFERS,
     WorkingMemory,
 )
+
+
+class TestModuleDocstring:
+    """Regression for finding memory #1 (plan-2026-09-20T165703-0d9c218e).
+
+    The module docstring used to sit AFTER ``from __future__ import
+    annotations``, making it an inert expression statement and leaving
+    ``fsm_llm.memory.__doc__`` as ``None``.
+    """
+
+    def test_module_docstring_is_set(self):
+        doc = fsm_llm.memory.__doc__
+        assert isinstance(doc, str)
+        assert "Working memory" in doc
 
 
 class TestWorkingMemoryInit:
