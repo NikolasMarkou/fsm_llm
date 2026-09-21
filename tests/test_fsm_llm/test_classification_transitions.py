@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
@@ -876,3 +877,48 @@ class TestClassifierCache:
         assert mock_cls.return_value.classify.call_count == 2
         assert mock_cls.call_count == 1
         assert len(api.fsm_manager._pipeline._classifier_cache) == 1
+
+    def test_non_json_native_connection_kwarg_bypasses_cache(self):
+        """Two distinct ``SecretStr`` api keys must yield two constructions and
+        insert nothing. RED on the pre-step-3 code: ``json.dumps(...,
+        default=str)`` digested both as ``'**********'`` so the second key hit
+        the first key's classifier (review W1). Pins the JSON-native
+        cacheability guard: a non-native value bypasses the cache entirely.
+        """
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
+        schema = _schema("a", "b")
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
+            first = pipeline._get_classifier(
+                schema, "gpt-4", None, {"api_key": SecretStr("A")}
+            )
+            second = pipeline._get_classifier(
+                schema, "gpt-4", None, {"api_key": SecretStr("B")}
+            )
+
+        assert mock_cls.call_count == 2
+        assert first is not second
+        assert [
+            c.kwargs["api_key"].get_secret_value() for c in mock_cls.call_args_list
+        ] == ["A", "B"]
+        assert len(pipeline._classifier_cache) == 0
+
+    def test_json_native_connection_kwarg_still_caches(self):
+        """The guard fires only on non-JSON-native values: a plain-string
+        ``api_key`` still yields one construction over two calls and one entry."""
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
+        schema = _schema("a", "b")
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
+            first = pipeline._get_classifier(schema, "gpt-4", None, {"api_key": "k"})
+            second = pipeline._get_classifier(schema, "gpt-4", None, {"api_key": "k"})
+
+        assert mock_cls.call_count == 1
+        assert first is second
+        assert len(pipeline._classifier_cache) == 1

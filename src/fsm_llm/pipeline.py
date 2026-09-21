@@ -2046,8 +2046,12 @@ class MessagePipeline:
         schema/model/config/connection. Cache misses construct via the
         module-level ``Classifier`` symbol (so ``patch("fsm_llm.pipeline.
         Classifier")`` keeps observing construction) and evict the oldest entry
-        when the cache holds ``MAX_CLASSIFIER_CACHE_SIZE`` entries. Never raises
-        on its own; construction errors propagate to the caller unchanged.
+        when the cache holds ``MAX_CLASSIFIER_CACHE_SIZE`` entries. When
+        ``connection_kwargs`` holds a value ``json.dumps`` cannot serialise
+        (e.g. a pydantic ``SecretStr``), the call bypasses the cache: a fresh
+        ``Classifier`` is built and returned without a lookup, an insert or
+        the lock. Never raises on its own; construction errors propagate to
+        the caller unchanged.
 
         Thread safety: a ``MessagePipeline`` is shared across conversations,
         so the hit check, the construction, the eviction and the insert run
@@ -2064,14 +2068,23 @@ class MessagePipeline:
         # hash of schema + model + prompt config + connection kwargs, NOT
         # `(state_id, field_name)`. A per-entry `model` override, a changed
         # `api_base`/`timeout`, or an edited prompt_config would otherwise reuse
-        # a stale instance built for the old settings; the content hash makes
-        # staleness impossible by construction. Do NOT key on identity or on
-        # the state/field names. The check/construct/evict/insert sequence
-        # below is ONE critical section under `_classifier_cache_lock`: do
-        # NOT narrow the lock to the dict writes only, the FIFO `next(iter())`
-        # eviction is what raced (review W2). See decisions.md D-001.
-        key = hashlib.sha256(
-            json.dumps(
+        # a stale instance built for the old settings. The content hash makes
+        # staleness impossible ONLY when every connection-kwarg value is
+        # JSON-native (schema and prompt_config always are); a non-native
+        # value (e.g. pydantic `SecretStr`, whose `str()` elides its state so
+        # two different keys would collide, review W1) BYPASSES the cache:
+        # construct fresh, never insert. Do NOT reintroduce a `str()` default
+        # or a custom encoder: a redacting `__str__` cannot be made unique, so
+        # bypassing is the only honest key. Do NOT key on identity or on the
+        # state/field names. Cached instances retain `api_key`/connection
+        # credentials for the pipeline's lifetime (up to
+        # `MAX_CLASSIFIER_CACHE_SIZE` copies) by design (review N11). The
+        # check/construct/evict/insert sequence below is ONE critical section
+        # under `_classifier_cache_lock`: do NOT narrow the lock to the dict
+        # writes only, the FIFO `next(iter())` eviction is what raced (review
+        # W2). See decisions.md D-001.
+        try:
+            payload = json.dumps(
                 {
                     "schema": schema.model_dump(),
                     "model": model,
@@ -2081,9 +2094,15 @@ class MessagePipeline:
                     "conn": connection_kwargs,
                 },
                 sort_keys=True,
-                default=str,
-            ).encode()
-        ).hexdigest()
+            )
+        except (TypeError, ValueError):
+            return Classifier(
+                schema=schema,
+                model=model,
+                config=prompt_config,
+                **connection_kwargs,
+            )
+        key = hashlib.sha256(payload.encode()).hexdigest()
         cache = self._classifier_cache
         with self._classifier_cache_lock:
             hit = cache.get(key)
