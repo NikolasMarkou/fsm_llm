@@ -1097,7 +1097,10 @@ class MessagePipeline:
             # for every agent loop. Do NOT relax the provenance requirement:
             # that reopens repro5 (handler-seeded gate value). States that own
             # classification_extractions are excluded so the call budget stays
-            # 1 bulk + 1 retry per still-null required key. A self-loop is not a
+            # 1 bulk + 1 retry per still-null required key [budget SUPERSEDED
+            # by plan-2026-09-21T203800-8a03483a/D-006 below: the exclusion
+            # stays; +1 classifier call per unset classification field of the
+            # new state is added]. A self-loop is not a
             # revisit (the state's own extraction just ran on this message; a
             # re-run would let the bulk overwrite a same-turn per-field value
             # and cost +1 call on every chatty turn). The re-run replaces the
@@ -1114,11 +1117,34 @@ class MessagePipeline:
                     for c in new_configs
                 )
             )
-            if revisit or missing_configs:
+            # DECISION plan-2026-09-21T203800-8a03483a/D-006 [supersedes the
+            # budget sentence of plan-2026-09-19T175721-21cd7f8e/D-034 above]:
+            # intent stated for the NEW state in this message was lost because
+            # this pass only built field configs. Classify each of the new
+            # state's classification fields that is still unset (absent or
+            # None), once, through the same commit below. Budget: +1 classifier
+            # call per unset classification field of a different, non-agent new
+            # state. Do NOT include set fields, self-loops (the state's own pass
+            # just classified this message), agent FSMs (guarded above) or
+            # `handler_only_keys` (D-033). Do NOT drop the `revisit` exclusion
+            # of classification-owning states: a full re-run there would buy
+            # the bulk call on top of these.
+            class_configs = (
+                [
+                    c
+                    for c in new_state.classification_extractions or []
+                    if c.field_name not in handler_only
+                    and instance.context.data.get(c.field_name) is None
+                ]
+                if previous_state != instance.current_state
+                else []
+            )
+            if revisit or missing_configs or class_configs:
                 log.debug(
                     f"Post-transition extraction in "
                     f"'{instance.current_state}' for "
                     f"{'re-run' if revisit else [c.field_name for c in missing_configs]}"
+                    f" + classification {[c.field_name for c in class_configs]}"
                 )
                 try:
                     post_data: dict[str, Any] = {}
@@ -1133,13 +1159,24 @@ class MessagePipeline:
                         extraction_response.extraction_failed |= again.extraction_failed
                         # the re-run overwrote the turn's response on the instance
                         instance.last_extraction_response = extraction_response
-                    else:
+                    elif missing_configs:
                         post_results = self._execute_field_extractions(
                             instance, user_message, missing_configs, conversation_id
                         )
                         for result in post_results:
                             if result.is_valid and result.value is not None:
                                 post_data[result.field_name] = result.value
+                    if class_configs:
+                        # plan-2026-09-21T203800-8a03483a/D-006
+                        post_data.update(
+                            self._execute_classification_extractions(
+                                new_state,
+                                user_message,
+                                instance,
+                                conversation_id,
+                                configs_override=class_configs,
+                            )
+                        )
 
                     if post_data:
                         post_data = self._clean_empty_context_keys(
