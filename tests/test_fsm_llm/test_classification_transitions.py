@@ -11,6 +11,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
@@ -32,15 +34,18 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
+from fsm_llm.api import API
 from fsm_llm.constants import (
     CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
 )
 from fsm_llm.definitions import (
+    ClassificationError,
     DataExtractionResponse,
     FSMContext,
     FSMDefinition,
+    FSMError,
     FSMInstance,
     State,
     Transition,
@@ -537,3 +542,102 @@ class TestClassificationTransitionConstants:
 
     def test_context_key_is_internal(self):
         assert CONTEXT_KEY_CLASSIFICATION_RESULT.startswith("_")
+
+
+# ---------------------------------------------------------------------------
+# Tests: exception discipline at the ambiguous-transition classifier call
+# ---------------------------------------------------------------------------
+
+
+def _ambiguous_fsm() -> FSMDefinition:
+    """A start state with two unconditioned transitions -> AMBIGUOUS each turn."""
+    return _make_fsm_definition(
+        {
+            "start": _make_state(
+                "start",
+                transitions=[_make_transition("a"), _make_transition("b")],
+            ),
+        }
+    )
+
+
+def _api_with_failing_classifier(exc: BaseException):
+    """Build an API on the ambiguous FSM whose transition classifier raises ``exc``.
+
+    Returns ``(api, conv_id, patcher)``; the caller enters ``patcher`` around
+    ``api.converse`` so the exception is raised inside the public turn path.
+    """
+    mock_llm = MagicMock(spec=LLMInterface)
+    configure_mock_extract_field(mock_llm)
+    mock_llm.model = "gpt-4"
+    mock_llm.generate_response.return_value = MagicMock(
+        message="ok", message_type="response", reasoning="mock"
+    )
+    api = API.from_definition(_ambiguous_fsm(), llm_interface=mock_llm)
+    conv_id, _ = api.start_conversation()
+    patcher = patch("fsm_llm.pipeline.Classifier")
+    return api, conv_id, patcher, exc
+
+
+class TestAmbiguousTransitionExceptionDiscipline:
+    """``_resolve_ambiguous_transition`` degrades to a stay ONLY for the shared
+    soft-fail tuple; programming errors and BaseException propagate out of
+    ``API.converse``. Pins plan-2026-09-20T165703-0d9c218e D-001.
+    """
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            ClassificationError("classifier outage"),
+            ValueError("bad payload"),
+            RuntimeError("transport hiccup"),
+        ],
+        ids=["ClassificationError", "ValueError", "RuntimeError"],
+    )
+    def test_soft_fail_classes_stay_in_state_with_fallback_marker(self, exc):
+        api, conv_id, patcher, exc = _api_with_failing_classifier(exc)
+        with patcher as mock_cls:
+            mock_cls.return_value.classify.side_effect = exc
+            response = api.converse("which one?", conv_id)
+
+        assert mock_cls.return_value.classify.called
+        assert isinstance(response, str)
+        assert api.get_current_state(conv_id) == "start"
+        # get_data() strips internal keys; read the raw instance context.
+        instance = api.fsm_manager.instances[conv_id]
+        stored = instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        assert stored["fallback"] is True
+        assert str(exc) in stored["error"]
+
+    @pytest.mark.parametrize(
+        "exc",
+        [AttributeError("no such attr"), ZeroDivisionError("division by zero")],
+        ids=["AttributeError", "ZeroDivisionError"],
+    )
+    def test_programming_errors_propagate_out_of_converse(self, exc):
+        """Not swallowed into a stay. ``FSMManager.process_message`` wraps any
+        non-FSMError into ``FSMError`` (``fsm.py`` ``raise FSMError(...) from e``),
+        so the public surface is an ``FSMError`` whose ``__cause__`` is the
+        original programming error.
+        """
+        api, conv_id, patcher, exc = _api_with_failing_classifier(exc)
+        with patcher as mock_cls:
+            mock_cls.return_value.classify.side_effect = exc
+            with pytest.raises(FSMError) as info:
+                api.converse("which one?", conv_id)
+
+        assert info.value.__cause__ is exc
+        assert mock_cls.return_value.classify.called
+        assert api.get_current_state(conv_id) == "start"
+        instance = api.fsm_manager.instances[conv_id]
+        # No fallback marker: the failure was not degraded to a stay.
+        assert CONTEXT_KEY_CLASSIFICATION_RESULT not in instance.context.data
+
+    def test_keyboard_interrupt_propagates_bare(self):
+        api, conv_id, patcher, exc = _api_with_failing_classifier(KeyboardInterrupt())
+        with patcher as mock_cls:
+            mock_cls.return_value.classify.side_effect = exc
+            with pytest.raises(KeyboardInterrupt):
+                api.converse("which one?", conv_id)
+
+        assert mock_cls.return_value.classify.called

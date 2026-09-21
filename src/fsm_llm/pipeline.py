@@ -155,6 +155,25 @@ _CLASSIFIER_BOUND_NAMES = frozenset({"schema", "model", "config"})
 # value the pipeline itself extracted (never the values). D-015.
 _PROVENANCE_KEY = "_pipeline_extracted"
 
+# DECISION plan-2026-09-20T165703-0d9c218e/D-001
+# The ONE exception tuple both classifier call sites degrade on (D-004 of
+# plan-2026-07-19T191147-4b664252 chose it for
+# `_execute_classification_extractions`; this plan's D-001 extends it to
+# `_resolve_ambiguous_transition`). A soft failure means: the classification
+# extraction is skipped (or raised as ClassificationError when required), and an
+# ambiguous transition becomes a "stay". Programming errors (AttributeError,
+# NameError, ZeroDivisionError, ...) and BaseException are NOT in the tuple and
+# propagate. Do not widen either site back to `except Exception`, and do not
+# inline a second copy of this tuple -- add classes here or nowhere.
+_CLASSIFICATION_SOFT_FAIL_EXCEPTIONS: tuple[type[Exception], ...] = (
+    ClassificationError,
+    ValueError,
+    TypeError,
+    KeyError,
+    RuntimeError,
+    OSError,
+)
+
 
 def _value_digest(value: Any) -> str:
     """Short stable digest of a context value, for provenance comparison.
@@ -2092,14 +2111,7 @@ class MessagePipeline:
                     f"'{result.intent}' (confidence={result.confidence:.2f})"
                 )
 
-            except (
-                ClassificationError,
-                ValueError,
-                TypeError,
-                KeyError,
-                RuntimeError,
-                OSError,
-            ) as e:
+            except _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS as e:
                 if config.required:
                     raise ClassificationError(
                         f"Required classification extraction '{config.field_name}' "
@@ -2158,7 +2170,14 @@ class MessagePipeline:
 
         try:
             result: ClassificationResult = classifier.classify(user_message)
-        except Exception as e:
+        except _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS as e:
+            # DECISION plan-2026-09-20T165703-0d9c218e/D-001: "stay" is the
+            # degrade ONLY for the classes the shared tuple names (the D-004
+            # set of plan-2026-07-19T191147-4b664252, reused unchanged).
+            # A programming error (AttributeError etc.) propagates out of the
+            # turn; it is not a classifier outage. Do not widen this back to
+            # `except Exception` -- the old broad catch predated D-004 and no
+            # test pinned it. See decisions.md D-001.
             log.warning(
                 f"Classification failed during ambiguous transition resolution: {e}"
             )
