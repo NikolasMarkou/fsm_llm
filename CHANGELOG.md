@@ -137,6 +137,133 @@ zero regressions; `ruff`/`mypy` clean across all 6 packages throughout.
   fix touches the same handler-execution path a prompt-content change would. Still not
   re-measured; still a release gate before the baseline can be trusted.
 
+Third-layer audit of `classification.py` / `memory.py` (`plans/plan-2026-09-20T165703-0d9c218e`,
+iteration 1, "classification.py / memory.py audit, loop 1 of 5"). Two deep audits (16 memory
+findings, 9 classification findings) drove 8 code steps, one documentation-truth step and one
+NEW gated live suite; every code item ships with a regression test in `tests/test_fsm_llm/`.
+Finding ids below are the audit's own (`memory #N`, `classification #N`). Full suite: 6,158
+tests collected (was 6,091); `ruff`/`mypy src/fsm_llm/` clean after every code step.
+
+### Fixed -- `classification.py` / `memory.py` audit loop 1 (plan-2026-09-20-0d9c218e, iteration 1)
+
+- **`fsm_llm.memory.__doc__` was `None` (memory #1; `6122510`).** The module docstring sat
+  BELOW `from __future__ import annotations`, so Python discarded it. Moved above the import;
+  regression test asserts a non-empty `str`. The executor's sweep then found the SAME defect in
+  81 modules repo-wide (D-003: `fsm_llm`, `fsm_llm_workflows`, `fsm_llm_agents`,
+  `fsm_llm_monitor`); all swapped in `4aadd01`, with a filesystem-derived
+  `tests/test_packaging.py` test that fails on any future module hiding its docstring behind
+  the future import.
+- **`WorkingMemory.from_dict` accepted malformed session data silently or with a raw stdlib
+  error (memory #10, #11; `0a02716`).** A non-dict buffer body (`None`, a string, a list) now
+  raises `ValueError` naming the buffer (`buffer 'core' must be a dict, got NoneType`); a
+  `_hidden_buffers` value that is not a `list`/`tuple`/`set`/`frozenset` of `str` (a bare
+  `str` was previously iterated character by character) raises `ValueError` naming
+  `_hidden_buffers`. `API.restore_session` on a hand-corrupted session file raises with the
+  buffer named and leaves no half-registered conversation.
+- **`WorkingMemory.__init__` edges (memory #8, #9, #12, #13; `a311bb7`).** `buffers=[]` /
+  `buffers=()` now means NO buffers (was: silently replaced by the four defaults through a
+  falsy check); `initial_data` passed without a `core` buffer logs a WARNING naming the
+  dropped key count instead of vanishing; `get_all_data`'s "last non-core buffer wins" shadow
+  order is documented and pinned by a 3-buffer collision test; `to_dict` is documented as a
+  one-level-shallow copy (nested containers are shared with the caller) at the source, not
+  one file away.
+- **`IntentRouter.validate()` dead branch and duplicated dispatch (classification #1, #7,
+  #8; `345c28c`).** The unreachable "append fallback" branch is deleted with a one-line
+  invariant comment (`ClassificationSchema.validate_schema` guarantees `fallback_intent in
+  intent_names`); `route` and `route_multi` share one private `_resolve_handler(intent)` so
+  both raise identically when handler and fallback are absent; `Classifier._kwargs` is typed
+  `dict[str, Any]`.
+- **`ClassificationPromptConfig` had no bounds (classification #3, #9; `ed40bea`).**
+  `__post_init__` now enforces `1 <= max_intents <= MAX_MULTI_INTENTS` (new `constants.py`
+  value, 5), `max_tokens >= 1` and `0 <= temperature <= 2`, each `ValueError` naming the
+  field; a `prompt_config={"max_intents": 0}` on a `classification_extractions` entry is
+  caught by the extraction site's existing narrow tuple, logged, and leaves the key unset.
+  The field doc states that Ollama models force `temperature` to 0 under structured output
+  (`apply_ollama_params`), and `ClassificationExtractionConfig.prompt_config` lists all six
+  accepted keys.
+- **`_resolve_ambiguous_transition` caught `Exception` (classification #2; `d4acaac`).** The
+  ambiguous-transition classifier site now catches the same D-004 soft-fail tuple the
+  extraction site already used, hoisted to one module-level
+  `_CLASSIFICATION_SOFT_FAIL_EXCEPTIONS` in `pipeline.py` (`ClassificationError`,
+  `ValueError`, `TypeError`, `KeyError`, `RuntimeError`, `OSError`). Those still degrade to
+  "stay in state" with `_classification_result.fallback = True`; programming errors
+  (`AttributeError`, `ZeroDivisionError`) and `KeyboardInterrupt` now propagate through
+  `API.converse` instead of being swallowed as a stay.
+
+### Changed
+
+- **Classifier instances are cached per pipeline (classification #5; `7d2e81c`).** Both
+  pipeline classification sites go through `MessagePipeline._get_classifier`, keyed by a
+  content hash of schema + model + prompt config + connection kwargs (NOT
+  `(state_id, field_name)`), bounded at `MAX_CLASSIFIER_CACHE_SIZE` (new `constants.py`
+  value, 64) with oldest-entry eviction. One `Classifier` (pre-built prompts and schema, no
+  per-call `self` writes) now serves every turn and conversation with the same key; a
+  different schema still constructs a new instance. `patch("fsm_llm.pipeline.Classifier")`
+  keeps working because construction goes through the module-level symbol.
+
+### Added
+
+- **Buffer-name exports (memory #15; `4aadd01`).** `BUFFER_CORE`, `BUFFER_SCRATCH`,
+  `BUFFER_ENVIRONMENT`, `BUFFER_REASONING`, `DEFAULT_BUFFERS` and `DEFAULT_HIDDEN_BUFFERS`
+  are importable from `fsm_llm` and listed in `__all__`.
+- **`tests/test_fsm_llm/test_live_classification_memory.py` (`c462594`).** A 7-test live
+  suite gated exactly like `tests/test_integration_ollama.py` (`integration` + `real_llm` +
+  `slow` markers, `conftest.ollama_available()` skip), retaining raw litellm
+  request/response pairs and printing them on failure: single- and multi-intent
+  classification, `<intent>` injection resistance, entity extraction, a two-stage
+  `HierarchicalClassifier`, a classified FSM transition with a working-memory session
+  round trip, and a `ReactAgent` + `create_memory_tools` round trip. Iteration-1 result on `ollama_chat/qwen3.5:9b-q8_0` (run together with
+  `test_integration_ollama.py`): **18 passed / 1 failed in 122.72s**. The one FAIL is
+  F-LIVE-01 below. The 5 example runs at 9b all exited 0; `examples/classification/multi_intent`
+  scoring 2/4 is an example-design artefact, not a classifier miss (OBS-LIVE-01:
+  `primary_intent` is a `classification_extractions` field on the `listen` state only, so
+  turns arriving in `handle_purchase`/`handle_question` keep the stale value; both turns that
+  reached the classifier were classified correctly). Examples untouched.
+
+### Docs
+
+- **WorkingMemory's real prompt reach (memory #2-#4, #7, #14; `4aadd01`).** The
+  `WorkingMemory` class docstring, `FSMContext` in `definitions.py`, `docs/architecture.md`
+  and `docs/fsm_design.md` now state that working-memory data reaches ONLY the Pass-1
+  per-field extraction prompt (through the default `context_keys`) and NOT the Pass-2
+  response prompt, which is built from raw `context.data`; `to_scoped_view` drops its
+  "scoped view for LLM prompts" claim (method kept); the `exclude=True` consequence for
+  `model_dump()` is noted at the field.
+- **`docs/api_reference.md` `is_low_confidence` example (classification #4; `4aadd01`).**
+  The example now calls `classifier.is_low_confidence(result)` (the property on the result is
+  a fixed 0.6 threshold, not the classifier's configured one).
+
+### Known limitations -- still open for later loops of this plan
+
+- **WorkingMemory is not wired into Pass 2 (memory #2, #5, #6).** Documented truthfully this
+  loop, not changed: the response prompt never sees buffer contents, and the
+  scoped-view/reasoning-buffer machinery has no consumer in the pipeline. Wiring is a
+  design decision for a later loop, not a mechanical fix.
+- **The classifier receives no conversation history or FSM context (classification #6).**
+  `Classifier._call_llm` builds exactly two messages (static system prompt + raw user
+  message); `ClassificationExtractionConfig.context_keys` only feeds a post-hoc debug
+  snapshot. A bare "yes" reply whose intent is decidable only from prior turns cannot be
+  classified correctly. A design gap, deferred: it changes prompt content and is gated on
+  the still-stale `scripts/eval.py` baseline.
+- **`WorkingMemory.search` and `fsm_llm_agents` `MemoryBackend` have different shapes
+  (memory #16).** `MemoryBackend.search(query, k) -> list[(text, score, meta)]` vs
+  `WorkingMemory.search(query, limit) -> list[(buffer, key, value)]`; passing a
+  `WorkingMemory` to `augment_task_with_memories` raises `TypeError` inside that function's
+  broad catch and silently degrades to "no recall" with a WARNING. One of three
+  incompatible memory shapes in the repo; consolidation is out of this core-package loop's
+  scope.
+- **F-LIVE-01 -- `ReactAgent` + `create_memory_tools` on 9b never calls `remember`
+  (`fsm_llm_agents`, MEDIUM).** `TestLiveMemoryAgent::test_remember_then_recall` fails
+  (`remember did not write 'teal' into WorkingMemory: {}`) and the untouched
+  `examples/agents/memory_agent` reproduces it (`Tools used: []`, budget exhausted, empty
+  memory). Mechanism read from the 14 raw calls: the ReAct loop's per-field extraction
+  (`tool_name`, `tool_input`) driven by the synthetic `Continue.` message returns `null` on
+  every iteration ("contains no new information"), then `"none"` once the Pass-2 prose
+  "I've noted that your favorite color is teal." has leaked into the history. A model-side
+  under-call on the ReAct extraction path, the same family as the fixed 4b under-call, now
+  on 9b with a different prompt; not a `classification.py`/`memory.py` defect (neither was
+  invoked). The test is kept strict; the agents package is out of this plan's scope.
+
 ## [0.6.0] - 2026-09-20
 
 Core-engine audit release (4 audit-fix loops over `src/fsm_llm`, each verified live on

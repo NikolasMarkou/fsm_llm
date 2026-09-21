@@ -12,7 +12,7 @@ FSM-LLM (v0.6.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (6,091 tests)
+make test           # pytest -v (6,158 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -271,8 +271,8 @@ including what is measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (6,091 collected)
-pytest tests/test_fsm_llm/            # Core package tests (1,925 tests)
+pytest                                 # Run all tests (6,158 collected)
+pytest tests/test_fsm_llm/            # Core package tests (1,990 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (115 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (159 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (1,004 tests)
@@ -281,8 +281,8 @@ pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,981 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 6,021. The remaining 70 are three root-level files:
-#   tests/test_integration_ollama.py (12), tests/test_packaging.py (24)
+# The 9 suites above sum to 6,086. The remaining 72 are three root-level files:
+#   tests/test_integration_ollama.py (12), tests/test_packaging.py (26)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
@@ -310,6 +310,21 @@ root-level-file tests are unchanged. Cross-package suites ran clean at this step
 agents+workflows+reasoning 1,269 passed / 9 skipped; harness (non-live) 1,887 passed /
 94 deselected; monitor+meta+regression+examples+packaging 853 passed / 2 skipped / 1
 xfailed plus the 5 then-expected doc-count-literal failures this same step fixes.
+
+Collected counts re-measured again with `pytest --collect-only -q | tail -1` at
+plan-2026-09-20-0d9c218e iteration 1 step 11 (test-count reconciliation after the
+`classification.py` / `memory.py` audit loop 1 added regression tests and a gated live
+suite). Total 6,158 collected (was 6,091): core `tests/test_fsm_llm/` 1,990 collected
+(was 1,925; +58 regression tests across steps 2-9 and the 7-test
+`test_live_classification_memory.py`, which self-skips without a live Ollama), root-level
+`tests/test_packaging.py` 26 (was 24; the two filesystem-derived module-docstring
+placement tests), all other suites unchanged. The 9-suite sum is now 6,086 (was
+6,021); the remaining 72 root-level-file tests (was 70). The live suite was RUN once at
+step 10 against `ollama_chat/qwen3.5:9b-q8_0` together with `test_integration_ollama.py`:
+18 passed / 1 failed (F-LIVE-01, the ReAct memory agent never calls `remember`; see
+`CHANGELOG.md` Unreleased). Consumer suites at this step (agents + regression +
+examples, non-live markers, the two deselects named above) are recorded in the
+plan's verification.md.
 
 **Conventions**:
 - Test files: `test_<module>.py` and `test_<module>_elaborate.py` for extended scenarios
