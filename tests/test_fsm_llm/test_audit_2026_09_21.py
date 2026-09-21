@@ -1651,7 +1651,7 @@ class TestStep09B1B4:
 
     @pytest.mark.parametrize(
         ("a", "b"),
-        [(1.0, "1"), ("1", 1.0), ("1", "1.0"), (2, "2.00"), ("1e3", 1000), (0.5, ".5")],
+        [(1.0, "1"), ("1", 1.0), (2, "2.00"), ("1e3", 1000), (0.5, ".5")],
     )
     def test_b3_eq_numeric_coercion_agrees_with_le_ge(self, a, b):
         from fsm_llm.expressions import evaluate_logic
@@ -1661,6 +1661,15 @@ class TestStep09B1B4:
         assert evaluate_logic({"==": [a, b]}) is True
         assert evaluate_logic({"!=": [a, b]}) is False
         assert evaluate_logic({"==": [{"var": "v"}, b]}, {"v": a}) is True
+
+    @pytest.mark.parametrize(("a", "b"), [("01", "1"), ("1", "1.0"), ("1e3", "1000")])
+    def test_b3_two_strings_are_never_numerically_coerced(self, a, b):
+        """Two strings compare as strings (JS semantics): leading zeros matter."""
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic({"==": [a, b]}) is False
+        assert evaluate_logic({"!=": [a, b]}) is True
+        assert evaluate_logic({"==": [{"var": "zip"}, b]}, {"zip": a}) is False
 
     def test_b3_unequal_numbers_stay_unequal(self):
         """Guard: coercion only equates numerically equal values."""

@@ -52,7 +52,8 @@ None / missing rule (one rule, applied by ``evaluate_logic``):
       string ``"None"``), and numerically equal operands are equal
       (``{"==": [1.0, "1"]}`` is True), so ``==``, ``<=`` and ``>=`` agree.
       A ``bool`` operand is never numerically coerced by ``==``
-      (``true == "1"`` is False; ``true == 1`` stays True via ``bool()``).
+      (``true == "1"`` is False; ``true == 1`` stays True via ``bool()``),
+      and neither are two strings (``"01" == "1"`` is False, as in JS).
     * "Missing" means absent, ``None`` or ``""`` (``is_missing``). It is the
       one predicate behind ``missing``, ``missing_some`` and a transition
       condition's ``requires_context_keys``. ``0``, ``False`` and ``[]`` are
@@ -136,9 +137,12 @@ def soft_equals(a: Any, b: Any) -> bool:
 
         4. Otherwise -> standard Python equality.
 
-        Rules 2-4 also accept numerically equal operands (``_numeric_equal``:
-        ``1.0 == "1"``, ``"1" == "1.0"``), so ``==`` agrees with ``<=``/``>=``.
-        Rule 1 (any ``bool``) is never numerically coerced.
+        Rules 3-4 also accept numerically equal operands (``_numeric_equal``:
+        ``1.0 == "1"``), so ``==`` agrees with ``<=``/``>=`` on mixed
+        number/string operands. Rule 1 (any ``bool``) is never numerically
+        coerced, and rule 2 (two strings) never is either: ``"01" == "1"`` is
+        False, as in JavaScript, because identifiers such as zip codes and
+        account numbers are strings whose leading zeros matter.
     """
     # Boolean comparison — guard None, handle bool+string ("true"==True)
     if isinstance(a, bool) or isinstance(b, bool):
@@ -156,12 +160,13 @@ def soft_equals(a: Any, b: Any) -> bool:
     # (LLMs often return "Yes"/"yes", "Buy"/"buy" inconsistently)
     # DECISION plan-2026-09-21T203800-8a03483a/D-013 (supersedes
     # plan-2026-07-19T191147-4b664252/D-023 "soft_equals is deliberately
-    # untouched"): rules 2-4 below accept numerically equal operands so `==`,
+    # untouched"): rules 3-4 below accept numerically equal operands so `==`,
     # `<=` and `>=` agree (`1.0 == "1"`). Do NOT move this coercion above the
-    # bool branch (`true == "1"` must stay False) and do NOT let it reach a
-    # None operand (`_numeric_equal` is False for None, keeping D-017 intact).
+    # bool branch (`true == "1"` must stay False), do NOT apply it to two
+    # strings (`"01" == "1"` must stay False: zip codes, ids), and do NOT let
+    # it reach a None operand (`_numeric_equal` is False for None, D-017).
     if isinstance(a, str) and isinstance(b, str):
-        return a.lower() == b.lower() or _numeric_equal(a, b)
+        return a.lower() == b.lower()
     if isinstance(a, str) or isinstance(b, str):
         # DECISION plan-2026-07-18T051819-80b0bd4d/D-017 [STALE]
         # Do NOT delete this guard and do NOT "simplify" it back to a bare
