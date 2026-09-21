@@ -1888,8 +1888,13 @@ class TestNumericStringInequalityAgreesWithEquality:
         expected = {"<=": ["abc", "abd"]} == logic
         assert evaluate_logic(logic) is expected
 
-    def test_equality_operator_is_untouched(self):
-        assert evaluate_logic({"==": [1, "1.0"]}) is False
+    def test_equality_operator_agrees_with_the_inclusive_operators(self):
+        # Re-baselined by plan-2026-09-21T203800-8a03483a/D-013 (B3), which
+        # supersedes the D-023 "== untouched" pin: `==` now accepts the same
+        # numerically equal pairs `<=`/`>=` do; bools stay uncoerced.
+        assert evaluate_logic({"==": [1, "1.0"]}) is True
+        assert evaluate_logic({"!=": [1, "1.0"]}) is False
+        assert evaluate_logic({"==": [True, "1.0"]}) is False
 
     @pytest.mark.parametrize("op", [">=", "<="])
     def test_transition_condition_fires_through_converse(self, op):

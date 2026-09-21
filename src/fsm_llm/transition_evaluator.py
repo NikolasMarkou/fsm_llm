@@ -68,7 +68,7 @@ from .definitions import (
     TransitionEvaluationResult,
     TransitionOption,
 )
-from .expressions import evaluate_logic, get_var
+from .expressions import evaluate_logic, is_missing
 
 # --------------------------------------------------------------
 # local imports
@@ -168,7 +168,8 @@ class TransitionEvaluator:
         Prepare working context for transition evaluation.
 
         Non-hidden WorkingMemory buffers, overlaid by ``context.data`` (data
-        wins), overlaid by newly extracted data.
+        wins), overlaid by newly extracted data (an extracted ``None`` never
+        overwrites a stored value).
         """
         # DECISION plan-2026-09-21T203800-8a03483a/D-008: start from
         # context.get_merged_data(), NOT context.data.copy(): a WorkingMemory
@@ -180,7 +181,18 @@ class TransitionEvaluator:
             if self.config.detailed_logging:
                 logger.debug(f"Merging extracted data: {list(extracted_data.keys())}")
 
-            working_context.update(extracted_data)
+            # DECISION plan-2026-09-21T203800-8a03483a/D-013: an extracted None
+            # means "the model said nothing about this key this turn", not
+            # "delete it". Do NOT let it overwrite a stored value (the commit
+            # path, clean_context_keys, drops None too, so the gate and the
+            # stored context would otherwise disagree).
+            working_context.update(
+                {
+                    key: value
+                    for key, value in extracted_data.items()
+                    if value is not None or key not in working_context
+                }
+            )
 
         return working_context
 
@@ -355,11 +367,10 @@ class TransitionEvaluator:
         """
         # Check required context keys first
         if condition.requires_context_keys:
-            _not_found = object()
             missing_keys = [
                 key
                 for key in condition.requires_context_keys
-                if get_var(context, key, _not_found) is _not_found
+                if is_missing(context, key)
             ]
 
             if missing_keys:

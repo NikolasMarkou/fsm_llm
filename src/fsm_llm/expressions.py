@@ -38,6 +38,25 @@ Example:
         # Evaluate the logic
         result = evaluate_logic(logic, context)
         # result is True
+
+None / missing rule (one rule, applied by ``evaluate_logic``):
+
+    * ``{"var": ...}`` resolves an absent key to ``None``, so "unset" and
+      "explicitly None" behave the same in every operator below.
+    * Ordering (``<``, ``<=``, ``>``, ``>=``) and arithmetic (``+``, ``-``,
+      ``*``, ``/``, ``%``, ``min``, ``max``) return ``False`` when ANY operand
+      is ``None``. ``-`` is unary only when it has exactly one operand
+      (``{"-": [5]}`` is ``-5``); ``{"-": [5, null]}`` is ``False``.
+    * ``==`` / ``!=`` keep ``null == null`` True (JsonLogic), a ``None``
+      never equals a non-``None`` value (so an unset var never equals the
+      string ``"None"``), and numerically equal operands are equal
+      (``{"==": [1.0, "1"]}`` is True), so ``==``, ``<=`` and ``>=`` agree.
+      A ``bool`` operand is never numerically coerced by ``==``
+      (``true == "1"`` is False; ``true == 1`` stays True via ``bool()``).
+    * "Missing" means absent, ``None`` or ``""`` (``is_missing``). It is the
+      one predicate behind ``missing``, ``missing_some`` and a transition
+      condition's ``requires_context_keys``. ``0``, ``False`` and ``[]`` are
+      present. ``has_context`` is different on purpose: pure key existence.
 """
 
 from __future__ import annotations
@@ -116,6 +135,10 @@ def soft_equals(a: Any, b: Any) -> bool:
            ``str(a) == str(b)``, so ``soft_equals("5", 5)`` is True.
 
         4. Otherwise -> standard Python equality.
+
+        Rules 2-4 also accept numerically equal operands (``_numeric_equal``:
+        ``1.0 == "1"``, ``"1" == "1.0"``), so ``==`` agrees with ``<=``/``>=``.
+        Rule 1 (any ``bool``) is never numerically coerced.
     """
     # Boolean comparison — guard None, handle bool+string ("true"==True)
     if isinstance(a, bool) or isinstance(b, bool):
@@ -131,8 +154,14 @@ def soft_equals(a: Any, b: Any) -> bool:
     # Example: {"==": [{"var": "intent"}, "Purchase"]} matches "purchase" and "PURCHASE".
     # String comparison — case-insensitive when BOTH are strings
     # (LLMs often return "Yes"/"yes", "Buy"/"buy" inconsistently)
+    # DECISION plan-2026-09-21T203800-8a03483a/D-013 (supersedes
+    # plan-2026-07-19T191147-4b664252/D-023 "soft_equals is deliberately
+    # untouched"): rules 2-4 below accept numerically equal operands so `==`,
+    # `<=` and `>=` agree (`1.0 == "1"`). Do NOT move this coercion above the
+    # bool branch (`true == "1"` must stay False) and do NOT let it reach a
+    # None operand (`_numeric_equal` is False for None, keeping D-017 intact).
     if isinstance(a, str) and isinstance(b, str):
-        return a.lower() == b.lower()
+        return a.lower() == b.lower() or _numeric_equal(a, b)
     if isinstance(a, str) or isinstance(b, str):
         # DECISION plan-2026-07-18T051819-80b0bd4d/D-017 [STALE]
         # Do NOT delete this guard and do NOT "simplify" it back to a bare
@@ -151,10 +180,10 @@ def soft_equals(a: Any, b: Any) -> bool:
         # `soft_equals("5", 5)` is still True. See decisions.md D-017.
         if a is None or b is None:
             return False
-        return str(a) == str(b)
+        return str(a) == str(b) or _numeric_equal(a, b)
 
     # Standard equality
-    return bool(a == b)
+    return bool(a == b) or _numeric_equal(a, b)
 
 
 def hard_equals(a: Any, b: Any) -> bool:
@@ -246,9 +275,10 @@ def _numeric_equal(a: Any, b: Any) -> bool:
     """True when both sides are ``float()``-able and equal (``1`` and ``"1.0"``).
 
     Interface contract: ``a``/``b`` any values; never raises (an uncoercible
-    side is simply not numerically equal). Used only by ``<=``/``>=`` so they
-    agree with the numeric coercion ``<``/``>`` already apply (D-023);
-    ``soft_equals`` is deliberately untouched.
+    side, including ``None``, is simply not numerically equal). Shared by
+    ``soft_equals`` (non-bool rules only) and ``<=``/``>=``, so the three
+    agree on numeric equality (D-013 of plan-2026-09-21T203800-8a03483a,
+    superseding the earlier D-023 that kept ``soft_equals`` out of it).
     """
     try:
         return float(a) == float(b)
@@ -411,6 +441,22 @@ def get_var(data: dict[str, Any], var_name: str, not_found: Any = None) -> Any:
     return current_data
 
 
+_ABSENT = object()
+
+
+def is_missing(data: dict[str, Any], var_name: Any) -> bool:
+    """True when ``var_name`` is absent from ``data``, or holds ``None`` or ``""``.
+
+    Interface contract: ``data`` any mapping, ``var_name`` a (dotted) path as
+    accepted by ``get_var``. Never raises. ``0``, ``False`` and empty
+    containers are present. The single "missing" predicate behind the
+    ``missing`` / ``missing_some`` operators and ``TransitionCondition.
+    requires_context_keys`` (D-013 of plan-2026-09-21T203800-8a03483a).
+    """
+    value = get_var(data, var_name, _ABSENT)
+    return value is _ABSENT or value is None or (isinstance(value, str) and not value)
+
+
 def missing(data: dict[str, Any], *args: Any) -> list[str]:
     """
     Implement the 'missing' operator for finding missing variables.
@@ -435,23 +481,16 @@ def missing(data: dict[str, Any], *args: Any) -> list[str]:
 
     Note:
         - Supports both individual arguments and a single list argument
-        - Uses get_var() internally, so supports dot notation
+        - A variable is missing per ``is_missing`` (absent, None or ``""``),
+          with dot notation
         - Empty list means all variables are present
     """
-    # Sentinel object to detect missing values
-    not_found = object()
-
     # Handle case where args is a single list
     var_names: tuple[Any, ...] | list[Any] = args
     if args and isinstance(args[0], list):
         var_names = args[0]
 
-    missing_vars = []
-    for arg in var_names:
-        if get_var(data, arg, not_found) is not_found:
-            missing_vars.append(arg)
-
-    return missing_vars
+    return [arg for arg in var_names if is_missing(data, arg)]
 
 
 def missing_some(data: dict[str, Any], min_required: int, args: list[str]) -> list[str]:
@@ -480,13 +519,12 @@ def missing_some(data: dict[str, Any], min_required: int, args: list[str]) -> li
     Note:
         - Returns empty list as soon as minimum requirement is satisfied
         - If min_required < 1, always returns empty list
-        - Uses get_var() internally for consistent behavior
+        - A variable is missing per ``is_missing`` (absent, None or ``""``)
     """
     if min_required < 1:
         return []
 
     found = 0
-    not_found = object()
     missing_vars = []
 
     # Guard: treat string arg as single var name, not iterable of chars
@@ -494,7 +532,7 @@ def missing_some(data: dict[str, Any], min_required: int, args: list[str]) -> li
         args = [args]
 
     for arg in args:
-        if get_var(data, arg, not_found) is not_found:
+        if is_missing(data, arg):
             missing_vars.append(arg)
         else:
             found += 1
@@ -560,6 +598,20 @@ def _safe_mod(a: Any, b: Any) -> float:
     return float(a) % divisor
 
 
+def _minus(*args: Any) -> float:
+    """``-``: unary negation for exactly one operand, else ``a - b``.
+
+    Arity is decided by operand COUNT, never by a ``None`` default, so a
+    second operand that resolved to ``None`` is not mistaken for "omitted"
+    (and ``evaluate_logic`` already returns False for it). Any other arity
+    raises ``TypeError``, which ``evaluate_logic`` turns into False.
+    """
+    if len(args) == 1:
+        return -float(args[0])
+    a, b = args
+    return float(a) - float(b)
+
+
 def _logical_not(*args: Any) -> bool:
     """Logical NOT — negates the FIRST argument only.
 
@@ -618,7 +670,7 @@ operations: dict[str, Callable[..., Any]] = {
     "contains": lambda a, b: b in a if hasattr(a, "__contains__") else False,
     # Arithmetic operators
     "+": lambda *args: sum(float(arg) for arg in args),
-    "-": lambda a, b=None: -float(a) if b is None else float(a) - float(b),
+    "-": _minus,
     "*": lambda *args: reduce(lambda x, y: float(x) * float(y), args, 1.0),
     "/": _safe_div,
     "%": _safe_mod,
@@ -628,6 +680,12 @@ operations: dict[str, Callable[..., Any]] = {
     # String operators
     "cat": cat,
 }
+
+#: Ordering and arithmetic operators: False when ANY evaluated operand is None
+#: (module docstring, "None / missing rule"). ``==``/``!=`` are NOT here.
+_NONE_IS_FALSE_OPERATORS: frozenset[str] = frozenset(
+    {"<", "<=", ">", ">=", "+", "-", "*", "/", "%", "min", "max"}
+)
 
 # --------------------------------------------------------------
 # Main evaluation function
@@ -915,6 +973,16 @@ def evaluate_logic(
 
     # For other operators, recursively evaluate values first
     evaluated_values = [evaluate_logic(val, data, _depth + 1) for val in values]
+
+    # DECISION plan-2026-09-21T203800-8a03483a/D-013: an unset operand makes an
+    # ordering or arithmetic operator False. Do NOT extend this to `==`/`!=`
+    # (`null == null` must stay True, D-017) and do NOT fall back to treating
+    # None as 0 or as "operand omitted" (`{"-": [a, null]}` was `-a`, and
+    # `<=`/`>=` were True for two unset vars through `soft_equals(None, None)`).
+    if operator in _NONE_IS_FALSE_OPERATORS and any(
+        v is None for v in evaluated_values
+    ):
+        return False
 
     # Get the operation function from the registry
     operation = operations.get(operator)

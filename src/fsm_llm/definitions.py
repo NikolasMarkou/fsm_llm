@@ -594,7 +594,11 @@ class TransitionCondition(BaseModel):
     )
 
     requires_context_keys: list[str] | None = Field(
-        default=None, description="Context keys required for evaluation"
+        default=None,
+        description=(
+            "Context keys required for evaluation; a key that is absent, None "
+            "or an empty string is missing and fails the condition"
+        ),
     )
 
     logic: dict[str, Any] | None = Field(

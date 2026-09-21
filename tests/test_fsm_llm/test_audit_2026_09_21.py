@@ -1583,3 +1583,169 @@ class TestStep08D1D5:
         from fsm_llm.constants import is_forbidden_context_entry
 
         assert not is_forbidden_context_entry(key, value)
+
+
+# ---------------------------------------------------------------------------
+# Step 9: B1-B4 (one None/missing rule for JsonLogic)
+# ---------------------------------------------------------------------------
+
+
+def _b4_evaluate(
+    condition: TransitionCondition,
+    data: dict[str, Any],
+    extracted: dict[str, Any] | None = None,
+) -> TransitionEvaluation:
+    context = FSMContext()
+    context.data.update(data)
+    return TransitionEvaluator().evaluate_transitions(
+        _a2_state(
+            [Transition(target_state="next", description="go", conditions=[condition])]
+        ),
+        context,
+        extracted,
+    )
+
+
+class TestStep09B1B4:
+    """B1-B4: None/missing is one documented rule across every operator family."""
+
+    def test_b1_minus_with_none_second_operand_is_false(self):
+        from fsm_llm.expressions import evaluate_logic
+
+        logic = {"-": [{"var": "total"}, {"var": "discount"}]}
+        assert evaluate_logic(logic, {"total": 50}) is False
+        assert evaluate_logic(logic, {"total": 50, "discount": None}) is False
+        assert evaluate_logic({"-": [5, None]}) is False
+        # Guard: the rest of the arithmetic family is False on a None operand too.
+        for op in ("+", "*", "/", "%", "min", "max"):
+            assert evaluate_logic({op: [{"var": "a"}, 2]}, {}) is False, op
+
+    def test_b1_unary_minus_unchanged(self):
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic({"-": [5]}) == -5
+        assert evaluate_logic({"-": [-5]}) == 5
+        assert evaluate_logic({"-": 5}) == -5
+        assert evaluate_logic({"-": [5, 2]}) == 3
+        assert evaluate_logic({"-": [{"var": "x"}]}, {"x": 4}) == -4
+        assert evaluate_logic({"-": [{"var": "x"}]}, {}) is False
+
+    def test_b2_le_ge_false_when_both_unset(self):
+        from fsm_llm.expressions import evaluate_logic
+
+        for op in ("<=", ">=", "<", ">"):
+            assert evaluate_logic({op: [{"var": "x"}, {"var": "y"}]}, {}) is False, op
+            assert evaluate_logic({op: [None, None]}) is False, op
+            assert evaluate_logic({op: [{"var": "x"}, 5]}, {"x": None}) is False, op
+        # A three-operand chain with a None link is False as well.
+        assert evaluate_logic({"<=": [1, {"var": "x"}, 3]}, {}) is False
+        assert evaluate_logic({"<=": [1, {"var": "x"}, 3]}, {"x": 2}) is True
+
+    def test_b2_null_eq_null_still_true(self):
+        from fsm_llm.expressions import evaluate_logic, soft_equals
+
+        assert soft_equals(None, None) is True
+        assert evaluate_logic({"==": [{"var": "x"}, {"var": "y"}]}, {}) is True
+        assert evaluate_logic({"!=": [{"var": "x"}, {"var": "y"}]}, {}) is False
+        assert evaluate_logic({"==": [{"var": "x"}, 0]}, {}) is False
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [(1.0, "1"), ("1", 1.0), ("1", "1.0"), (2, "2.00"), ("1e3", 1000), (0.5, ".5")],
+    )
+    def test_b3_eq_numeric_coercion_agrees_with_le_ge(self, a, b):
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic({"<=": [a, b]}) is True
+        assert evaluate_logic({">=": [a, b]}) is True
+        assert evaluate_logic({"==": [a, b]}) is True
+        assert evaluate_logic({"!=": [a, b]}) is False
+        assert evaluate_logic({"==": [{"var": "v"}, b]}, {"v": a}) is True
+
+    def test_b3_unequal_numbers_stay_unequal(self):
+        """Guard: coercion only equates numerically equal values."""
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic({"==": [1.5, "1"]}) is False
+        assert evaluate_logic({"==": ["01", "1.5"]}) is False
+        assert evaluate_logic({"==": ["abc", "ABC"]}) is True
+        assert evaluate_logic({"==": ["abc", 1]}) is False
+
+    def test_b3_bool_not_coerced(self):
+        from fsm_llm.expressions import evaluate_logic, soft_equals
+
+        assert soft_equals(True, "1") is False
+        assert soft_equals(False, "0") is False
+        assert soft_equals(True, "1.0") is False
+        assert soft_equals(True, "true") is True
+        assert evaluate_logic({"==": [True, 1]}) is True
+        assert evaluate_logic({"==": [True, "1"]}) is False
+
+    def test_b3_missing_var_never_equals_string_None(self):
+        from fsm_llm.expressions import evaluate_logic, soft_equals
+
+        for probe in ("None", "none", "NONE", "nan", ""):
+            assert evaluate_logic({"==": [{"var": "x"}, probe]}, {}) is False, probe
+            assert evaluate_logic({"!=": [{"var": "x"}, probe]}, {}) is True, probe
+            assert soft_equals(None, probe) is False, probe
+
+    def test_b4_missing_treats_none_and_empty_as_missing(self):
+        from fsm_llm.expressions import evaluate_logic
+
+        data = {"a": None, "b": "", "c": 0, "d": False, "e": [], "f": "x"}
+        assert evaluate_logic(
+            {"missing": ["a", "b", "c", "d", "e", "f", "g"]}, data
+        ) == [
+            "a",
+            "b",
+            "g",
+        ]
+        assert evaluate_logic({"missing_some": [2, ["a", "b", "f"]]}, data) == [
+            "a",
+            "b",
+        ]
+        assert evaluate_logic({"missing_some": [1, ["a", "b", "f"]]}, data) == []
+        nested = {"user": {"email": "", "name": "Ada"}}
+        assert evaluate_logic({"missing": ["user.email", "user.name"]}, nested) == [
+            "user.email"
+        ]
+
+    def test_b4_requires_context_keys_none_and_empty_block(self):
+        condition = TransitionCondition(
+            description="email known", requires_context_keys=["email"]
+        )
+        for value in (None, ""):
+            result = _b4_evaluate(condition, {"email": value})
+            assert result.result_type == TransitionEvaluationResult.BLOCKED, value
+        for value in ("a@b.c", 0, False):
+            result = _b4_evaluate(condition, {"email": value})
+            assert result.result_type == TransitionEvaluationResult.DETERMINISTIC, value
+
+    def test_b4_requires_context_keys_shares_the_missing_helper(self):
+        """Guard: one predicate, not three copies of the sentinel idiom."""
+        import inspect
+
+        from fsm_llm import expressions, transition_evaluator
+
+        assert transition_evaluator.is_missing is expressions.is_missing
+        source = inspect.getsource(expressions) + inspect.getsource(
+            transition_evaluator
+        )
+        assert "_not_found = object()" not in source
+        assert "not_found = object()" not in source
+
+    def test_b4_extracted_none_does_not_overwrite_stored(self):
+        condition = TransitionCondition(
+            description="email is ada",
+            requires_context_keys=["email"],
+            logic={"==": [{"var": "email"}, "ada@example.com"]},
+        )
+        result = _b4_evaluate(
+            condition, {"email": "ada@example.com"}, extracted={"email": None}
+        )
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        # A non-None extracted value still overrides the stored one.
+        result = _b4_evaluate(
+            condition, {"email": "ada@example.com"}, extracted={"email": "bob@x.y"}
+        )
+        assert result.result_type == TransitionEvaluationResult.BLOCKED
