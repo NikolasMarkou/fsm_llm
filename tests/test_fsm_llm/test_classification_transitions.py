@@ -65,6 +65,7 @@ from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LLMInterface
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
+    ClassificationPromptConfig,
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
@@ -922,3 +923,57 @@ class TestClassifierCache:
         assert mock_cls.call_count == 1
         assert first is second
         assert len(pipeline._classifier_cache) == 1
+
+    def test_prompt_config_change_constructs_again(self):
+        """Same schema and model, ``temperature=0.1`` vs ``temperature=0.2``
+        -> two constructions and two entries. PASSES by design today (the
+        key already hashes ``dataclasses.asdict(prompt_config)``, D-001);
+        this pin guards a future key simplification that drops the prompt
+        config and would silently reuse a classifier built for the old
+        temperature (review W4).
+        """
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
+        schema = _schema("a", "b")
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
+            first = pipeline._get_classifier(
+                schema, "gpt-4", ClassificationPromptConfig(temperature=0.1), {}
+            )
+            second = pipeline._get_classifier(
+                schema, "gpt-4", ClassificationPromptConfig(temperature=0.2), {}
+            )
+
+        assert mock_cls.call_count == 2
+        assert first is not second
+        assert [c.kwargs["config"].temperature for c in mock_cls.call_args_list] == [
+            0.1,
+            0.2,
+        ]
+        assert len(pipeline._classifier_cache) == 2
+
+    def test_connection_kwargs_change_constructs_again(self):
+        """Same schema, model and config, ``api_key="k1"`` vs ``api_key="k2"``
+        -> two constructions and two entries. Both values are JSON-native, so
+        both calls go THROUGH the cache (the complement of
+        ``test_json_native_connection_kwarg_still_caches``: different key ->
+        different instance). PASSES by design today (the key already hashes
+        ``connection_kwargs``, D-001); this pin guards a future key
+        simplification that drops the connection kwargs (review W4).
+        """
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
+        schema = _schema("a", "b")
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
+            first = pipeline._get_classifier(schema, "gpt-4", None, {"api_key": "k1"})
+            second = pipeline._get_classifier(schema, "gpt-4", None, {"api_key": "k2"})
+
+        assert mock_cls.call_count == 2
+        assert first is not second
+        assert [c.kwargs["api_key"] for c in mock_cls.call_args_list] == ["k1", "k2"]
+        assert len(pipeline._classifier_cache) == 2
