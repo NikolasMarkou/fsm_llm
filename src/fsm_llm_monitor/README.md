@@ -1,185 +1,95 @@
-# FSM-LLM Monitor
+# fsm_llm_monitor
 
-> Web-based monitoring dashboard with real-time observability for FSMs, agents, and workflows.
+A web dashboard for FSM-LLM. It lets you launch, watch, and talk to FSM chatbots, agents, and workflows from a browser, and it can also export events to OpenTelemetry.
 
----
+## What it is for
 
-## Overview
+FSM-LLM is a Python framework that builds chatbots as finite state machines (FSMs: a fixed set of named states plus rules for moving between them), with a large language model (LLM) doing the talking and the data extraction. When such a bot runs, a lot happens out of sight: which state it is in, what data it pulled from each message, why it moved to another state, what went wrong. This package makes that visible. It runs a small web server with a single-page dashboard that shows live counters, events, logs, and conversation details, and lets you start new FSMs, agents, and demo workflows with a few clicks.
 
-`fsm_llm_monitor` is a web-based monitoring dashboard for FSM-LLM systems. It provides real-time visibility into running conversations, agent executions, and workflow instances through a Grafana-inspired dark-themed UI.
+It is part of the `fsm-llm` distribution and is installed with the `monitor` extra.
 
-Key capabilities:
-- **Real-time dashboard** with metric cards, instance grid, and event stream
-- **Conversation viewer** with chat interface and state tracking
-- **Control center** for managing FSM, agent, and workflow instances
-- **FSM visualizer** with interactive graph rendering
-- **Log viewer** with level filtering and live/pause streaming
-- **Builder page** for interactive artifact construction via the meta-agent
-- **WebSocket** for live updates (metrics, events, logs, agent status)
-- **OpenTelemetry export** via `OTELExporter` -- send spans to Jaeger, Datadog, Langfuse, etc.
+## How it works
 
-## Installation
-
-```bash
-pip install fsm-llm[monitor]
+```mermaid
+flowchart LR
+    Browser[Browser dashboard] -- REST /api --> Server[server.py FastAPI app]
+    Browser <-- WebSocket /ws every refresh_interval --> Server
+    Server --> Manager[InstanceManager]
+    Manager --> FSMs[FSM API instances]
+    Manager --> Agents[Agents in background threads]
+    Manager --> Workflows[Workflow engines]
+    FSMs & Agents -- handler hooks --> Collectors[EventCollector per instance + global]
+    Loguru[loguru logs] -- sink --> Collectors
+    Collectors --> Server
+    Collectors -. optional .-> OTEL[OTELExporter spans]
 ```
 
-**Requirements**: Python 3.10+ | Additional dependencies: fastapi, uvicorn, jinja2
+1. `fsm-llm-monitor` starts a FastAPI server (default `http://127.0.0.1:8420`) and opens your browser.
+2. The server keeps one `InstanceManager`. It creates FSM instances (from example presets or pasted JSON), agents (run in background threads with stub tools), and two small demo workflows.
+3. Every instance gets observer hooks. They record events (conversation start and end, state transitions, errors, and so on) into a per-instance `EventCollector` and a global one. All loguru log output is also captured.
+4. The browser calls REST endpoints for actions and details, and holds a WebSocket open. Every `refresh_interval` seconds (1 by default) the server pushes metrics, new events, new logs, the instance list, and progress for running agents and workflows.
 
-## Quick Start
+## Files
 
-**1. Launch the dashboard**:
+- `__main__.py` - the `fsm-llm-monitor` command: parses `--host`, `--port`, `--no-browser`, `--version`, `--info`, then runs uvicorn.
+- `server.py` - FastAPI app: HTML page, REST API, WebSocket, optional API key check, meta-builder chat sessions.
+- `instance_manager.py` - creates, runs, queries, and destroys FSM, agent, and workflow instances.
+- `collector.py` - `EventCollector`: thread-safe bounded store of events and logs, metric counters, handler callbacks.
+- `bridge.py` - `MonitorBridge`: attach the monitor to an `API` object you already have; also turns FSM JSON into display snapshots.
+- `otel.py` - `OTELExporter`: mirrors collector events as OpenTelemetry spans.
+- `definitions.py` - Pydantic models for events, logs, metrics, snapshots, config, and request bodies.
+- `constants.py` - event type names, defaults, theme color constants, handler name and priority.
+- `exceptions.py` - `MonitorError` and its subclasses.
+- `__init__.py`, `__version__.py`, `py.typed` - public exports, version (shared with `fsm_llm`), type marker.
+- `static/` - the browser app: JavaScript modules, stylesheet, and hand-drawn agent and workflow graphs (`flows.json`).
+- `templates/index.html` - the single HTML page. It holds the markup for every screen and loads `static/app.js`.
+
+## How to use it
+
+Run the dashboard:
 
 ```bash
-fsm-llm-monitor                          # http://127.0.0.1:8420
-fsm-llm-monitor --host 0.0.0.0 --port 9000  # Custom host/port
-fsm-llm-monitor --no-browser             # Without auto-opening browser
+pip install "fsm-llm[monitor]"
+fsm-llm-monitor                       # opens http://127.0.0.1:8420
+fsm-llm-monitor --port 9000 --no-browser
 ```
 
-**2. Connect programmatically**:
+Watch an `API` object from your own program:
 
 ```python
-from fsm_llm import API
-from fsm_llm_monitor import MonitorBridge, configure, app
-
-api = API.from_file("my_fsm.json", model="gpt-4o-mini")
-bridge = MonitorBridge(api=api)   # creates and wires its own EventCollector
-configure(bridge)                 # register the bridge with the global web server
-
 import uvicorn
+from fsm_llm import API
+from fsm_llm_monitor import MonitorBridge, app, configure
+
+api = API.from_file("examples/basic/simple_greeting/fsm.json", model="ollama_chat/qwen3.5:4b")
+configure(bridge=MonitorBridge(api=api))
 uvicorn.run(app, host="127.0.0.1", port=8420)
 ```
 
-**3. Monitor agents and workflows**:
+Export events to OpenTelemetry (needs the `otel` extra):
 
 ```python
-from fsm_llm_monitor import InstanceManager
-
-manager = InstanceManager(collector=collector)
-instance_id = manager.launch_agent(agent_type="react", model="gpt-4o-mini",
-                                   tools_config=[{"name": "search", "type": "builtin"}])
-status = manager.get_agent_status(instance_id)
-```
-
-## Architecture
-
-```
-Browser (SPA) ──── REST API ──────┐
-                                  │
-              ──── WebSocket ─┐   │
-                              ▼   ▼
-                    FastAPI Server
-                    ├── MonitorBridge    → FSM API instances
-                    ├── EventCollector   → Events, logs, metrics
-                    └── InstanceManager  → FSM, agent, workflow lifecycle
-```
-
-### Core Components
-
-| Component | Module | Purpose |
-|-----------|--------|---------|
-| `EventCollector` | `collector.py` | Thread-safe event/log capture with bounded deques and loguru integration |
-| `MonitorBridge` | `bridge.py` | Connects to FSM API instances, provides query interface for snapshots |
-| `InstanceManager` | `instance_manager.py` | Manages lifecycle of FSM conversations, workflows, and agents |
-| FastAPI Server | `server.py` | 35+ REST endpoints + WebSocket for real-time updates |
-
-## Dashboard Pages
-
-- **Dashboard** -- Metric cards, instance grid, live event stream
-- **Control Center** -- Unified instance table with detail drawer for FSMs, agents, workflows
-- **Conversations** -- Chat interface with state tracking and context view
-- **Visualizer** -- Interactive FSM graph rendering with presets
-- **Logs** -- Level-filtered stream (DEBUG/INFO/WARNING/ERROR) with live/pause
-- **Builder** -- Interactive artifact construction via MetaBuilderAgent
-- **Settings** -- Runtime config and system info
-
-## REST API Endpoints
-
-### Monitoring
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/metrics` | Current metric snapshot |
-| GET | `/api/events` | Recent events (with limit param) |
-| GET | `/api/logs` | Recent logs (with limit and level filter) |
-
-### Instance Management
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/instances` | List all instances |
-| POST | `/api/instances/fsm` | Launch new FSM instance |
-| POST | `/api/instances/agent` | Launch new agent instance |
-| POST | `/api/instances/workflow` | Launch new workflow instance |
-
-### FSM / Agent / Workflow Operations
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET/POST | `/api/conversations/{id}/*` | Conversation CRUD + messaging |
-| GET/POST | `/api/agents/{id}/*` | Agent status, result, cancel |
-| GET/POST | `/api/workflows/{id}/*` | Workflow status, advance, cancel |
-
-### WebSocket
-| Endpoint | Description |
-|----------|-------------|
-| `/ws` | Real-time updates: metrics, events, logs, agent status |
-
-## Key API Reference
-
-### EventCollector
-
-```python
-collector = EventCollector(max_events=1000, max_logs=5000)
-collector.record_event("conversation_started", {"conversation_id": "abc"})
-metrics = collector.get_metrics()
-logs = collector.get_logs(level="ERROR", limit=50)
-callbacks = collector.create_handler_callbacks()
-```
-
-### MonitorBridge
-
-```python
-bridge = MonitorBridge()
-bridge.connect(api, collector)
-snapshot = bridge.get_conversation_snapshot(conversation_id)
-all_snapshots = bridge.get_all_conversation_snapshots()
-bridge.load_fsm_from_dict(fsm_dict)
-```
-
-### MonitorConfig
-
-```python
-from fsm_llm_monitor import MonitorConfig
-config = MonitorConfig(host="127.0.0.1", port=8420, refresh_interval=1.0,
-                       max_events=1000, max_logs=5000, open_browser=True)
-```
-
-### OTELExporter (OpenTelemetry)
-
-```python
-from fsm_llm_monitor import EventCollector
-from fsm_llm_monitor.otel import OTELExporter
+from fsm_llm_monitor import EventCollector, OTELExporter
 
 collector = EventCollector()
-otel = OTELExporter(service_name="my-chatbot")
+otel = OTELExporter(service_name="my-bot")   # prints spans to the console by default
 otel.enable(collector)
-
-# Events are now also exported as OTEL spans
-# Supports: Jaeger, Datadog, Langfuse, or any OTEL-compatible backend
 ```
 
-Requires: `pip install fsm-llm[otel]`
+Require an API key for every endpoint that changes something:
 
-## Exception Hierarchy
-
-```
-Exception
-└── MonitorError
-    ├── MonitorInitializationError  # Server/component startup failures
-    ├── MetricCollectionError       # Metric gathering failures
-    └── MonitorConnectionError      # API/WebSocket connection issues
+```bash
+FSM_LLM_MONITOR_API_KEY=secret fsm-llm-monitor
+# clients send:  Authorization: Bearer secret   or   X-API-Key: secret
 ```
 
-Note: `MonitorError` inherits from `Exception` (not `FSMError`) since it's an infrastructure concern.
+## Things to know
 
-## License
-
-GPL-3.0-or-later. See [LICENSE](../../LICENSE) for details.
+- Importing `fsm_llm_monitor` needs `fastapi`, `uvicorn`, and `jinja2`. `OTELExporter` needs the `otel` extra only when you create one.
+- FSM presets are read from the repository's `examples/` folder. In an installed wheel without that folder, the preset list is empty.
+- Only seven agent types can be launched from the dashboard: ReAct, Reflexion, Plan-Execute, REWOO, ADaPT, Debate, and Self-Consistency. The first five need at least one tool. Tools are stubs that return a fixed text you type in.
+- Workflows are limited to two built-in demos (`demo_linear`, `demo_branching`). Pasted workflow JSON is rejected.
+- Cancelling an agent sets a flag, but an agent run cannot be interrupted mid-flight. Destroying it waits 1.5 seconds and then leaves the thread running.
+- With an API key set, the WebSocket and the read-only GET routes stay open.
+- CORS allows only `localhost` and `127.0.0.1` by default.
+- Conversation context keys that look internal or secret (prefixes `_`, `system_`, `internal_`, `__`) are hidden unless `show_internal_keys` is turned on in Settings.

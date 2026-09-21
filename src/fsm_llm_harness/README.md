@@ -1,462 +1,85 @@
-# FSM-LLM Harness
+# fsm_llm_harness
 
-> The iterative-planner protocol as a real FSM: six states, hard gates that read the filesystem, and an autonomy leash that cannot talk its way past two fix attempts.
+A harness that runs the "iterative planner" way of working (explore, plan, execute, reflect, pivot, close) as a real FSM-LLM state machine, with hard gates that check files on disk instead of trusting what the model says it did.
 
----
+## What it is for
 
-## Overview
+When an LLM works on a coding task by itself, it tends to say it did things it did not do: "I wrote the findings", "the tests pass", over an empty folder. This package puts the work inside a finite state machine (a fixed set of states with rules for moving between them) built on FSM-LLM. The rules that matter most are gates that read the filesystem. The run cannot move from exploring to planning until at least three real findings files exist on disk. It cannot close until a verification is recorded and approved. It cannot keep trying to fix the same step forever: it stops after two failed attempts (the "autonomy leash") and asks for help.
 
-`fsm_llm_harness` is an FSM-LLM-native emulation of the iterative-planner
-protocol. It runs the protocol as a genuine finite state machine rather than a
-prompt-driven loop:
+Everything the run knows is written to a plan directory as Markdown files (`state.md`, `plan.md`, `decisions.md`, `findings/`, ...), so a run can be inspected, audited, and resumed.
 
-- **6 states**: EXPLORE, PLAN, EXECUTE, REFLECT, PIVOT, CLOSE.
-- **9 transitions**, of which **4 are HARD-gated**. Every gate is a JsonLogic
-  `TransitionCondition` term, so a gated edge is DETERMINISTIC or BLOCKED —
-  never an LLM judgement call.
-- **Memory is a directory of Markdown artifacts** (`state.md`, `plan.md`,
-  `decisions.md`, `findings/`, ...) with an ownership table saying which role
-  may write which file.
-- **Gate values are DERIVED FROM THE FILESYSTEM**, not read from the model's
-  report. `findings_count` counts non-empty `findings/*.md` files; a dispatch
-  that claims a write must show a tool call whose target now carries bytes.
-- **The autonomy leash halts at exactly 2 fix attempts** and cannot be reset
-  from inside an approving callback.
-- **Confinement flows through one `resolve()` chokepoint**: every path a role
-  touches is resolved-then-compared against its confinement root, so a
-  sentinel-prefixed or `../`-laden path escapes nothing.
+## How it works
 
-The one idea worth carrying away: **a gate reads the filesystem, never the
-model's account of the filesystem.** Both disk-derivation and the leash exist
-because measurement caught 4B models asserting completed work over an empty
-directory.
-
-## Installation
-
-```bash
-pip install fsm-llm[harness]
+```mermaid
+flowchart LR
+    E[EXPLORE: explorer writes findings] -- 3+ findings on disk --> P[PLAN: plan-writer writes plan.md]
+    P -- plan approved --> X[EXECUTE: executor edits code]
+    P -- needs more research --> E
+    X --> R[REFLECT: verifier checks results]
+    R -- verified and approved --> C[CLOSE: archivist summarises]
+    R -- small fix, fewer than 2 tries --> X
+    R -- approach is wrong --> V[PIVOT: reviewer rethinks]
+    R -- needs more research --> E
+    V --> P
 ```
 
-The `harness` extra pulls in `fsm-llm[agents]` (the package imports
-`fsm_llm_agents`). It has no third-party dependencies of its own.
+- Each state has one worker "role" (explorer, plan-writer, executor, verifier, reviewer, archivist). The driver sends one worker per state visit. Each role has only the tools it needs and may write only the files it owns.
+- Workers get two separate, fenced-off folders: the source code workspace and the plan directory. Paths that try to escape (`../`, absolute paths, symlinks) are refused.
+- A human approval callback is asked before a plan is accepted and before closing. By default it says no, so an unattended run cannot approve itself.
+- Every loop has a limit. When a limit is hit, the run stops with a named reason (for example `explore-cap`, `plan-cap`, `leash-cap`) instead of spinning.
+- `validate` audits a plan directory against 30 checks, such as section order in `plan.md` and the format of `decisions.md`.
 
-**Requirements**: Python 3.10+
+## Files
 
-## Quick Start
+- `harness.py` - `HarnessAgent`, the driver: dispatches workers, runs the gates and the leash, writes `state.md`, resumes.
+- `fsm_definition.py` - the 6-state, 9-transition FSM and its gate rules.
+- `rules.py` - the protocol text for each state and who owns which file.
+- `roles.py` - the six worker roles, their prompts and output formats, and the stock worker factory.
+- `tools.py` - the confined workspace and plan-directory tools that workers call.
+- `storage.py`, `_atomic.py` - plan directory access, plan id creation, size limits, safe atomic file writes.
+- `artifacts.py` - data models and Markdown readers/writers for every plan file.
+- `plan_validator.py` - the pre-step gate and the 30-check audit.
+- `hardening.py` - cleaning up messy small-model replies (thinking blocks, code fences, bad JSON).
+- `constants.py`, `exceptions.py` - names, limits, defaults; error classes.
+- `__main__.py` - the `fsm-llm-harness` command.
+- `__init__.py`, `__version__.py`, `py.typed` - public exports, version, type marker.
 
-### CLI
+## How to use it
 
 ```bash
-# Mint a plan directory and drive the protocol
-fsm-llm-harness new "add a retry to the uploader"
+pip install "fsm-llm[harness]"
 
-# Mint and seed the plan directory, then stop (no LLM is called)
-fsm-llm-harness new "add a retry to the uploader" --create-only
-
-# Continue an existing plan directory
-fsm-llm-harness resume plans/plan-2026-07-22T101500-1a2b3c4d
-
-# Report a plan directory's position in the protocol
-fsm-llm-harness status plans/plan-2026-07-22T101500-1a2b3c4d
-
-# Audit a plan directory (optionally scan a source tree for decision anchors)
-fsm-llm-harness validate plans/plan-... --workspace .
-
-# Audit, then apply the CLOSE size policies (dry-run without --apply)
-fsm-llm-harness close plans/plan-... --apply
+fsm-llm-harness new "add a retry to the uploader" --workspace .   # create a plan dir and run
+fsm-llm-harness new "add a retry to the uploader" --create-only   # create only, no LLM calls
+fsm-llm-harness status   plans/plan-...                           # where is it?
+fsm-llm-harness resume   plans/plan-...                           # keep going
+fsm-llm-harness validate plans/plan-... --workspace .             # audit
+fsm-llm-harness close    plans/plan-... --apply                   # apply closing size rules
 ```
 
-Model resolution for the driving subcommands is `--model` > `$LLM_MODEL` >
-`Defaults.MODEL`. Exit codes are exactly three: `0` pass, `1` a negative or
-absent answer (an `audit()` ERROR, a failed run, a missing goal), and `2`
-RESERVED for a HARD `pre_step_gate` refusal.
-
-### Programmatic
+From Python:
 
 ```python
-from fsm_llm_harness import HarnessAgent, ContextKeys
+from fsm_llm_harness import ContextKeys, HarnessAgent
+from fsm_llm_harness.roles import build_default_worker_factory
+from fsm_llm_harness.tools import Workspace
 
+workspace = Workspace(".")
 agent = HarnessAgent(
-    worker_factory=my_worker_factory,       # Callable[[RoleRequest], AgentResult]
-    approval_callback=lambda req: ...,      # consulted at every human gate; defaults to DENY
-    revert_callback=None,                   # None => compute the revert directive, execute nothing
-    findings_threshold=3,
-    max_fix_attempts=2,
-    max_leash_grants=2,
-    iteration_hard_cap=6,
-    max_explore_redispatches=9,
+    worker_factory=build_default_worker_factory(workspace, model="ollama_chat/qwen3.5:4b"),
+    approval_callback=lambda request: input("Approve? [y/N] ") == "y",
 )
-
 result = agent.run(
     "add a retry to the uploader",
-    initial_context={
-        ContextKeys.PLAN_DIR: "plans/plan-...",
-        ContextKeys.WORKSPACE_ROOT: ".",
-    },
+    initial_context={ContextKeys.PLAN_DIR: "plans/plan-...", ContextKeys.WORKSPACE_ROOT: "."},
 )
 ```
 
-- **`worker_factory=None` is a DIAGNOSTIC mode, not a way to run the protocol.**
-  The FSM still turns and Pass 2 still answers, but no gate ever opens — a gate
-  flag records worker or human evidence, and there is no worker to produce any.
-  Expect a stall halt naming the first shut gate.
-- **`approval_callback` defaults to a callback that DENIES.** An unattended run
-  cannot approve its own plan or close itself.
-- **`revert_callback=None` is not a degraded mode**: the `leash-cap`
-  `RevertDirective` is always computed, scoped (never the plan directory) and
-  reported; only its EXECUTION is deferred to a confirmed caller. `git` is
-  deliberately absent from the command allowlist.
-- **One run per instance**: `run()` takes a lock, and a worker that re-enters
-  `run`/`api`/`conversation_id` gets `HarnessReentrancyError`.
-
-## Architecture
-
-### The protocol graph (`fsm_definition.py`)
-
-`build_harness_fsm()` returns an FSM-JSON `dict` consumable by
-`fsm_llm.API.from_definition`. **Lower `priority` wins**, and slots are spaced
->= 150 apart so two passing edges never fall inside the ambiguity threshold — a
-gate decision is never routed to the LLM classifier.
-
-| Edge | Priority | Gate (JsonLogic) |
-|---|---|---|
-| EXPLORE -> PLAN | 10 | **HARD**: `findings_count >= threshold` |
-| PLAN -> EXECUTE | 10 | **HARD**: `plan_approved AND iteration < cap` |
-| PLAN -> EXPLORE | 200 | `needs_explore` |
-| EXECUTE -> REFLECT | 10 | `execute_complete` |
-| REFLECT -> CLOSE | 10 | **HARD**: `close_confirmed AND all_criteria_pass` |
-| REFLECT -> EXECUTE | 200 | **HARD**: `completion_fix AND fix_attempts < cap` |
-| REFLECT -> PIVOT | 400 | `needs_pivot` |
-| REFLECT -> EXPLORE | 600 | `needs_explore` |
-| PIVOT -> PLAN | 10 | `pivot_resolved` |
-
-Every condition declares `requires_context_keys`, so a garbled or missing
-worker reply leaves the edge **BLOCKED** rather than accidentally satisfied.
-
-### Disk-derived gates (`tools.py`)
-
-Gate values are computed from the filesystem, not the worker's report:
-
-- `derive_disk_counts` / `DISK_DERIVED_COUNTS` — the mapping from gate key to
-  its disk derivation.
-- `count_gate_files` / `gate_files` — count and enumerate the non-empty files a
-  gate reads (e.g. `findings/*.md` for `findings_count`).
-- `has_bytes` — the non-empty predicate. The gate value, the number the model
-  is told, and the redispatch loop's condition are one derivation.
-
-### The autonomy leash (`harness.py`)
-
-Executor dispatches on ONE plan step are bounded by
-`max_fix_attempts * (1 + max_leash_grants)` for **any** sequence of approvals.
-The approval callback cannot raise it — an earlier version reset `fix_attempts`
-on every grant and the leash was decorative. Both counters reset together only
-when the driver advances to a new plan step.
-
-### The confinement chokepoint (`tools.py`)
-
-`Workspace` (the source tree) and `PlanMemory` (one plan directory, also
-ownership-scoped) route every path through ONE `resolve()` method:
-**RESOLVE FIRST, COMPARE SECOND**. A sentinel-prefixed absolute path
-(`/workspace/uploader.py`) is rewritten to root-relative before the
-resolve-and-compare; `/etc/passwd`, `../outside.txt`, symlink escapes and
-shared-prefix cases all raise `HarnessConfinementError`.
-
-### Ownership model (`rules.OWNERSHIP`)
-
-A table mapping 16 artifacts to the roles permitted to WRITE them.
-`PlanMemory.authorise` reads it directly, so an edit to the table changes what a
-live role can write. See `src/fsm_llm_harness/CLAUDE.md` for the full ownership
-table, the per-state role/tool map, and the artifact grammars.
-
-## Key API Reference
-
-### HarnessAgent (`harness.py`)
-
-The driver. A `fsm_llm_agents.BaseAgent` subclass that builds the harness FSM,
-registers handlers at 6 state entries plus a pre-step gate, and dispatches one
-worker per state entry. Constructor keywords include `worker_factory`,
-`approval_callback`, `revert_callback`, `config`, `findings_threshold`,
-`max_fix_attempts`, `max_leash_grants`, `iteration_hard_cap`,
-`max_explore_redispatches`, `max_plan_redispatches`, and `max_stall_turns`.
-Public surface: `run()`, `api`, `conversation_id`, `presentations`, `reverts`,
-`audit_issues`, `on_leash_cap`.
-
-### PlanDirectory (`storage.py`)
-
-The driver's accessor for one plan directory: plan-id minting, atomic writes,
-the CLOSE size policies (LESSONS eviction, SYSTEM cap, the 4-plan cross-plan
-sliding window), and `RunState` persistence. Reads go through a 4 MB
-driver-facing path; a worker's `PlanMemory.read_text` keeps a 64 KB cap.
-
-### plan_validator (`plan_validator.py`)
-
-```python
-from fsm_llm_harness import pre_step_gate, audit
-
-gate = pre_step_gate("plans/plan-...")                 # -> GateResult
-issues = audit("plans/plan-...", workspace_root=".")   # -> list[Issue]
-```
-
-`pre_step_gate` evaluates 4 ordered slugs (`no-plan`, `wrong-state`,
-`leash-cap`, `iteration-cap`) and short-circuits on the first failure (every
-failure is HARD, exit code 2). `audit` runs 30 checks and NEVER raises for a
-finding — a check that raises is itself reported as an ERROR.
-
-## Bench Methodology
-
-Capability claims are backed by pre-registered fixed-n benches from
-`scripts/harness_bench.py`, with raw evidence committed under
-`scripts/bench_data/` (git-tracked on purpose, so every number can be
-recomputed). See `scripts/bench_data/README.md` for the full protocol. In
-brief:
-
-- **Pre-registration**: a block's manifest is written before dispatch 1. A
-  block runs ONCE at its fixed n — no interim looks, no re-rolls.
-- **6 required manifest fields**: `prompt_bytes_sha256`, `tool_surface`,
-  `fixture_hash`, `model_digest`, `arm`, `git_commit`.
-- **Append-only rows** (`rows_<arm>.jsonl`), one raw row per dispatch;
-  `content_matched` is sha256-based, never a stat.
-- **Statistics**: Wilson 95% CI per arm and Fisher exact two-sided between
-  arms, with per-row seeds recorded.
-
-```bash
-.venv/bin/python scripts/harness_bench.py report <bench-id>
-```
-
-## Status — what is measured, and what is not
-
-Measured live on `ollama_chat/qwen3.5:4b` (digest `2a654d98e6fb`). Small n is
-reported as k/n, and the bars are the ones the plans set in advance. Numbers
-below are freshly recomputed from the committed raw rows.
-
-### Model-level single-state bars (MET)
-
-| Criterion | Bar | Measured |
-|---|---|---|
-| L4 write tool issued AND workspace bytes on disk | >= 4/5 | **5/5 issued, 5/5 bytes — MET** |
-| L4 strict sha256 content-hash match of the requested edit | >= 4/5 | **4/5 — MET** (react control 0/5) |
-| L5 >= 3 distinct non-empty `findings/*.md` from dispatches | >= 4/5 | **5/5 — MET** |
-
-L4 was moved by a **measured structural fix, not prompt wording**: the driver
-now reads `plan.md`'s Files To Modify and names the exact target path + tool in
-the EXECUTE dispatch. The pre-registered bench `l4-execute-write` measured the
-effect directly — native EXECUTE dispatches content-matched the requested edit
-**2/40** before the fix (B0) and **40/40** after (B1), Fisher p ≈ 1.6e-20; the
-ReAct control arm was 0/40 in both blocks. Caveat: the content-match metric
-shares vocabulary with the fix's own prompt text, so treat a PASS as
-target-selection compliance, not proven code correctness (`content_matched_ast`
-is the vocabulary-decoupled successor for future blocks).
-
-### End-to-end bar (NOT MET)
-
-`TestL6EndToEndRealWorkers` is the package's first graded end-to-end criterion
-on REAL role workers (n=3 per block). It is NOT MET in either committed block:
-
-| Block | Result | Shape |
-|---|---|---|
-| L6 B0 | **0/3 — NOT MET** | 2 honest explore-cap halts, 1 slugless PLAN stall over an empty plan-writer reply |
-| L6 B1 | **0/3 — NOT MET** | 3/3 `furthest_state=explore`, `halt_slug=explore-cap`, `honest_halt=true`, zero slugless stalls |
-
-The measured blocker is **EXPLORE cold-start over an empty plan directory** —
-one state earlier than B0's mixed picture. The PLAN-and-later machinery (a PLAN
-redispatch budget halting on the honest `plan-cap` slug; a driver-named
-`plan.md` deliverable line; a verified-write floor tightened to an EXECUTE-state
-workspace write) is offline-verified but live-unexercised, because no B1 run
-left EXPLORE.
-
-### Cold-start lever (REFUTED)
-
-The `l7-explore-coldstart/B0` block tested whether seeding a zero-byte protocol
-skeleton into the plan directory would move first-dispatch EXPLORE cold-start.
-Two arms, n=12 each, byte-identical prompts, differing only in on-disk
-population:
-
-| Arm | bytes on disk |
-|---|---|
-| `bare` (plain `mkdir`) | **5/12** (Wilson 95% [0.193, 0.680]) |
-| `seeded` (skeleton stubs) | **7/12** (Wilson 95% [0.320, 0.807]) |
-
-Fisher two-sided **p = 0.6843**. The pre-registered rule (VALIDATED iff
-`k_seeded > k_bare` AND p < 0.05) yields **NOT VALIDATED** — a positive but
-non-significant delta. The zero-byte seeding capability exists in the code but
-ships UNWIRED. What the block establishes: a single first EXPLORE dispatch over
-a bare directory is not impossible (5/12), so **first-dispatch impossibility is
-ruled out** as the mechanism. What it does NOT establish: all 24 rows used one
-topic and one dispatch (no redispatch loop), and one dispatch's write is not
-the same as clearing the 3-findings EXPLORE gate, so the 5/12-vs-0/3 magnitudes
-are not directly comparable. That successor hypothesis has now been **measured**
-by the named redispatch-loop bench — see below.
-
-### L8 — the EXPLORE redispatch-loop mechanism (`l8-explore-loop/B0`, n=10)
-
-A single-state EXPLORE **loop** bench (not L7's single dispatch), instrumented
-with a per-tool-call spy on `ToolRegistry.execute`, run once (100 dispatches,
-`qwen3.5:4b`, committed with a tracked `PRE_REGISTRATION.md`). A deterministic
-classifier partitioned every failed dispatch into exactly one mechanism bucket
-(partition hard-gate passed). Pooled over 89 failed dispatches:
-
-| Mechanism (family) | Count |
-|---|---|
-| `never-called`-a-write-tool (i) | **75 (84%)** |
-| `empty-reply` (iii) | 14 (16%) |
-| `wrong-root` (ii) / `accepted-no-bytes` / `unparseable` | 0 |
-
-`gate_cleared` **0/10** (Wilson 95% [0.000, 0.278]) — no run reached PLAN. This
-**refutes** the parse-collapse hypothesis as the *primary* driver: the explorer
-produces a parseable answer (`unverified-write`, `objects=1`) and issues only
-read/list calls (with wrong-root READ churn) but **never calls a write tool**.
-The dominant mechanism is measured to be **(i) never-called-a-write-tool**, so
-per the pre-registered rule the single follow-on fix is AIMED at a driver-side
-**forced-write EXPLORE target** (the EXECUTE 2/40→40/40 pattern), not
-`response_format`-primary — a later iteration, not executed here. A secondary,
-unmeasured contributing hypothesis: the explorer may exhaust its turn budget on
-failed wrong-root reads before ever writing.
-
-Scope of this claim: it is measured on a **single** seeded exploration
-workspace/goal with 3 rotating sub-topics, and n is ~10 runs (89 dispatches
-clustered within them), not 89 independent trials. The never-called **direction**
-is robust to the classifier's precedence (`empty-reply` is ranked above
-`never-called`, so 16% is the *maximal* empty-reply attribution) and at the run
-level (8/10 runs never-called-dominant); no CI is placed on the 84/16 split.
-
-### L8 B1 + L6 B2 — the forced-write fix, VALIDATED (EXPLORE fixed, wall moved to PLAN)
-
-The fix aimed by L8 B0 was built as an **additive, default-off forced-write
-finalization**: `AgentConfig.force_final_tool` plus a post-loop
-forced-`tool_choice` turn in `native_fc.py` (it mirrors the D-002 repair turn —
-`tools=`+`tool_choice`, never `response_format=`; it fires at most once, after
-the read loop), wired EXPLORE-only in `roles.py` (`Role.EXPLORER` →
-`write_plan_file`). The **MODEL issues the real `write_plan_file` call** (recorded
-in the trace); `_verified_writes` stays honest, there is **no driver salvage**,
-and the "a confident sentence cannot open a gate" ethos is **intact**.
-
-**L8 B1** (`l8-explore-loop/B1`, n=10, one look, committed) re-measured the
-mechanism over the fixed product:
-
-| Metric | B0 | B1 |
-|---|---|---|
-| `gate_cleared` | 0/10 | **9/10** (Wilson 95% [0.596, 0.982]; Fisher p=**0.00012**) |
-| failed dispatches | 89/100 | **8/37** |
-| `empty-reply` (iii) | 14 | **0** |
-| residual `never-called` (i) | 75 | **8** |
-
-The forced write converts the 84%-never-called collapse into gate clearance —
-the first EXPLORE gate clearance on 4b.
-
-**L6 B2** (`l6-e2e/B2`, n=3, one look, committed; floor sha256 verified
-**identical to B1** `cbeeb6aa…` before AND after the block-constant edit) then
-tested the full real-worker traverse. **All 3/3 runs now reach PLAN**
-(`furthest_state=plan`) — vs the adjacent baseline **B1, which was 0/3 reaching
-PLAN, every run stuck at EXPLORE** (`furthest=explore`, `explore-cap`); B0 was
-also 0/3 at the ≥ EXECUTE floor but 1/3 reached PLAN (a slugless stall) — each
-writing **3 real findings**
-(`problem-scope.md` 1262, `affected-files.md` 1304, `constraints-and-patterns.md`
-1809 bytes) via the forced write. But the e2e **floor (≥ EXECUTE + verified_write
-+ honest_halt) is still 0/3 — the floor test FAILS as measured** — because the
-wall MOVED a full state to a NEW blocker: the 4b plan-writer cannot emit a valid
-11-section `plan.md`. Runs 2 & 3 returned an empty `plan.md`, spent the budget
-(`plan_redispatches=3=MAX_PLAN_REDISPATCHES`), and halted honestly on `plan-cap`
-(`honest_halt=true`). Run 1 wrote a non-empty (4153-byte) but schema-invalid
-`plan.md`, which the DENY-default approval correctly refused, after which the run
-stalled `slug=None` (`honest_halt=false`).
-
-This is the biggest capability advance in the package's history **and** an honest
-floor FAIL: the EXPLORE blocker of the last four iterations is **fixed**
-(measured), the founding e2e end-goal is **not yet achieved** (the wall moved to
-PLAN, a different failure class — structured-output conformance, not
-never-called), and the fix keeps the **model-does-the-write** property. **W3**
-got its first live evidence: `MAX_PLAN_REDISPATCHES=3` fired at the cap with a
-`plan-cap` honest halt 2/3 (not refuted). Two named successors carry forward:
-**S1** the PLAN-writer valid-`plan.md` blocker (the new e2e wall), **S2** the
-non-empty-but-schema-invalid-`plan.md` slugless stall (run 1).
-
-### L6 B3 — the scaffold+honest-approval fix (S2 FIXED, gates validated, but scaffold+append REFUTED)
-
-The user-chosen fix seeds `plan.md` with the 11 `PlanSchema.SECTIONS` headers at
-PLAN entry (structure only), steers the plan-writer to fill them via
-`append_plan_file`, and aligns `_plan_has_content` and the approval gate on ONE
-bar (`_plan_is_approvable` = valid `PlanDoc` AND every section non-placeholder).
-**L6 B3** (`l6-e2e/B3`, n=3, one look, committed; floor sha256 **identical** to
-B1/B2 `cbeeb6aa…`; honest-approval confound declared in `PRE_REGISTRATION_B3.md`)
-measured **0/3 at the floor** (all 3 `furthest_state=plan`, `verified_write=false`)
-— but the shape changed decisively:
-
-- **S2 is FIXED**: all 3 runs halt on the honest `plan-cap` slug with
-  `honest_halt=true`; the slugless `slug=None` stall (B2 run 1) no longer occurs.
-- The plan-writer now writes **15-18 KB** of content (`plan_md_bytes`
-  17122 / 15592 / 18455, up from B2's 0 / 0 / 4153) — 4b **can** produce
-  substantial plan content.
-- The **scaffold+append mechanism is REFUTED**: `append_plan_file` appends to the
-  file END, so content does not distribute into the 11 ordered sections — run 1
-  is a valid `PlanDoc` but with 10 placeholder sections (content concentrated in
-  one), runs 2/3 hit a `plan-section` ERROR (appended content duplicated headers).
-- The **aligned strict bar held the line live — via the BUDGET gate, not the
-  approval stub**: run 1's valid-but-1-section plan made `_plan_has_content`
-  False (shared `_plan_is_approvable`), so it redispatched and halted on honest
-  `plan-cap`, never approved. Under a loose bar it would have reached approval and
-  passed to EXECUTE. Precision: all 3 B3 rows have `approvals: []` — the approval
-  stub was never invoked live (unit-validated only), and the declared
-  honest-approval confound was thus inert in B3.
-
-The floor stays **0/3** and the wall advanced from "empty/invalid plan" to
-"content-not-distributed." The aimed successor is a **`response_format`
-structured plan** (the model authors 11 fields, the driver renders
-correctly-structured Markdown — distribution by construction). Diagnosis
-confidence is STRONG but not byte-confirmed (the `tmp_path` plan dirs are
-deleted post-session; it rests on the audit signature).
-
-## What is NOT claimed
-
-- The harness is **NOT production-ready**.
-- A 4B model is **NOT claimed to drive it unattended to a useful result** — the
-  L6 floor is still **0/3 at ≥ EXECUTE**, measured FOUR times now (B0, B1, B2,
-  B3); this reinforces the claim's absence, it does not soften it.
-- **L6 end-to-end is measured 0/3 (unmet)** in all four committed blocks — now
-  blocked at **PLAN** (the plan-writer can't produce an approvable, all-sections
-  -filled plan.md), no longer at EXPLORE.
-- The **zero-byte cold-start seeding lever was refuted** (Fisher p = 0.6843) and
-  ships unwired.
-- The EXPLORE-loop never-called mechanism is **FIXED** (the forced-write turn;
-  L8 B1 0/10 → 9/10 p=0.00012, L6 B2 EXPLORE cleared 3/3), and iteration 6 FIXED
-  the slugless PLAN stall (S2: L6 B3 3/3 honest `plan-cap`) and confirmed 4b
-  writes 15-18 KB plans — the MODEL issues the write, the honest gates held (B3
-  run 1's hollow plan was held out by the aligned budget gate → honest
-  `plan-cap`, never approved). But the **≥ EXECUTE e2e goal is still 0/3**:
-  the scaffold+append mechanism was refuted (append-to-end doesn't distribute
-  content into the 11 sections), so the dominant wall is now DISTRIBUTING plan
-  content into sections — the aimed fix is a `response_format` structured plan.
-
-What IS claimed is narrow and mechanical: the gates read the filesystem, and a
-confident sentence cannot open one.
-
-For the full protocol graph, ownership table, artifact grammars, exact test
-counts and the complete measured-vs-not-measured writeup, see
-[`src/fsm_llm_harness/CLAUDE.md`](CLAUDE.md).
-
-## CLI Tools
-
-| Command | Description |
-|---|---|
-| `fsm-llm-harness new <goal> [--plans-dir DIR] [--create-only]` | Mint a plan directory and drive the protocol |
-| `fsm-llm-harness resume <plan_dir> [--goal GOAL]` | Continue an existing plan directory |
-| `fsm-llm-harness status <plan_dir>` | Report a plan directory's position |
-| `fsm-llm-harness validate <plan_dir> [--workspace DIR]` | Audit a plan directory |
-| `fsm-llm-harness close <plan_dir> [--workspace DIR] [--apply]` | Audit, then apply the CLOSE size policies |
-
-The driving subcommands (`new`, `resume`) also accept the shared model options
-(`--model`, resolved as `--model` > `$LLM_MODEL` > `Defaults.MODEL`).
-
-## Exception Hierarchy
-
-```
-FSMError
-└── HarnessError
-    ├── HarnessArtifactError(artifact, message, cause=None)  # unreadable/unparseable/over-cap
-    ├── HarnessOwnershipError(artifact, role, owner)         # OWNERSHIP denies this role the write
-    ├── HarnessReentrancyError(role)                         # a worker re-entered the driver
-    └── HarnessConfinementError(path, root)                  # a path escaped its root
-```
-
-## License
-
-GPL-3.0-or-later. See [LICENSE](../../LICENSE) for details.
+## Things to know
+
+- Exit codes: `0` success, `1` failure or a negative answer, `2` is reserved for a hard gate refusal. Even a mistyped option exits `1`, so scripts can trust that `2` always means "a gate said stop".
+- Running shell commands is off by default. When enabled, only `cat grep head ls tail wc` are allowed; `git` is never run by the harness.
+- After two failed fix attempts on a step, the run stops and reports a revert suggestion. It never runs the revert itself unless you pass a `revert_callback`.
+- This is experimental. Measured on a 4B local model, single steps work well (for example the executor writes the right file 4 or 5 times out of 5), but full unattended runs from start to a verified close have not yet succeeded 3 times out of 3.
+- A known gap: nothing writes `verification.md` after planning, so the close approval cannot pass on the default setup.
+- Live model tests only run with `FSM_LLM_HARNESS_LIVE=1` and a reachable Ollama server.

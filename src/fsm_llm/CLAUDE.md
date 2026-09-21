@@ -1,145 +1,122 @@
-# fsm_llm -- Core Framework
+# fsm_llm
 
-FSM-LLM core package. 2-pass architecture: Pass 1 extracts data + evaluates transitions, Pass 2 generates response from the final state.
+Path: `src/fsm_llm`
+Purpose: Core FSM-LLM framework: JSON-defined finite state machines driven by an LLM through a 2-pass pipeline (Pass 1 extract + transition, Pass 2 respond from the final state).
 
-- **Version**: 0.7.0
-- **Python**: 3.10, 3.11, 3.12
-- **Deps**: loguru, litellm (>=1.82,<2.0, !=1.82.7, !=1.82.8), pydantic (>=2.0), python-dotenv
+## Scope
 
-## File Map
+Everything needed to define, validate, visualize, and run FSM conversations: `API`, `FSMManager`, `MessagePipeline`, models, JsonLogic, handlers, classification, litellm interface, prompts, context security, working memory, sessions, CLI. Version 0.7.0 (`__version__.py`, shared by all six packages). Deps: loguru, litellm (>=1.82,<2.0, excluding 1.82.7 and 1.82.8), pydantic v2, python-dotenv. Python 3.10-3.12. Not here: reasoning, workflows, agents, monitor, harness (sibling packages that import this one).
 
-```
-fsm_llm/
-├── api.py                  # API class -- primary entry point (from_file, from_definition, converse, push/pop_fsm)
-├── fsm.py                  # FSMManager -- orchestration with per-conversation RLocks, LRU FSM cache
-├── pipeline.py             # MessagePipeline -- 2-pass processing (extraction → transition → response)
-├── classification.py       # Classifier, HierarchicalClassifier, IntentRouter, HandlerFn type alias
-├── definitions.py          # Pydantic models + exception hierarchy (State, Transition, FSMDefinition, FSMContext, FSMInstance, Conversation, all classification/extraction models)
-├── handlers.py             # HandlerSystem, HandlerBuilder, BaseHandler, LambdaHandler, HandlerTiming enum (8 points)
-├── prompts.py              # Prompt builders: DataExtraction, ResponseGeneration, FieldExtraction, Classification
-├── llm.py                  # LLMInterface ABC + LiteLLMInterface (generate_response, extract_field)
-├── ollama.py               # Ollama-specific helpers (thinking disable, json_schema format)
-├── transition_evaluator.py # TransitionEvaluator + TransitionEvaluatorConfig -- rule-based with confidence scoring
-├── expressions.py          # evaluate_logic() -- JsonLogic evaluator (var, and, or, ==, in, has_context, context_length)
-├── context.py              # clean_context_keys() + ContextCompactor (transient key clearing, pruning, summarization)
-├── memory.py               # WorkingMemory -- 4 named buffers (core, scratch, environment, reasoning) + BUFFER_*/DEFAULT_BUFFERS/DEFAULT_HIDDEN_BUFFERS constants
-├── runner.py               # Interactive CLI conversation runner
-├── validator.py            # FSMValidator.validate() + validate_fsm_from_file()
-├── visualizer.py           # visualize_fsm_ascii() + visualize_fsm_from_file() (full/compact/minimal styles)
-├── utilities.py            # extract_json_from_text() (dict | None; non-object JSON -> None), load_fsm_definition(), load_fsm_from_file()
-├── constants.py            # DEFAULT_LLM_MODEL, security patterns, INTERNAL_KEY_PREFIXES, ALLOWED_JSONLOGIC_OPERATIONS
-├── session.py              # SessionStore ABC + FileSessionStore -- file-based session persistence with atomic writes
-├── logging.py              # Loguru setup: setup_logging(), setup_file_logging()
-├── __main__.py             # CLI entry point (run, validate, visualize modes)
-├── __version__.py          # "0.7.0"
-└── __init__.py             # 90+ exports in single __all__ list; enable_debug_logging(), disable_warnings()
+## Architecture
+
+```mermaid
+flowchart TD
+    API[api.API] -->|fsm_loader closure| FM[fsm.FSMManager]
+    FM -->|per-conv RLock + _active_turns| MP[pipeline.MessagePipeline]
+    MP --> PRE[PRE_PROCESSING handlers]
+    PRE --> DX[_execute_data_extraction: bulk + field + retries]
+    DX --> CU[context.update + CONTEXT_UPDATE handlers + provenance]
+    CU --> CX[classification_extractions]
+    CX --> TE[TransitionEvaluator: DETERMINISTIC / AMBIGUOUS / BLOCKED]
+    TE -->|AMBIGUOUS| AC[_resolve_ambiguous_transition via Classifier]
+    TE --> ST[_execute_state_transition: PRE/POST_TRANSITION, rollback]
+    ST --> PX[post-transition extraction / back-edge re-run]
+    PX --> POST[POST_PROCESSING handlers]
+    POST --> RG[Pass 2 response generation, skipped if response_instructions empty]
 ```
 
-## Key Classes
+Lock order is `FSMManager._lock -> conv_lock` everywhere; never take `_lock` while holding a `conv_lock` in new code. `API._stack_lock` is a plain non-reentrant `Lock` and is never held across `FSMManager` calls.
 
-- **API** (`api.py`) -- User-facing entry point
-  - Factory: `from_file(path, **kwargs)`, `from_definition(fsm_def, **kwargs)`
-  - Conversation: `start_conversation(initial_context)` → `(conv_id, greeting)`, `converse(msg, conv_id)` → str, `converse_stream(msg, conv_id)` → `Iterator[str]`, `end_conversation(conv_id)`, `has_conversation_ended(conv_id)`
-  - Queries: `get_data(conv_id)`, `get_current_state(conv_id)`, `get_conversation_history(conv_id)`, `list_active_conversations()`
-  - FSM stacking: `push_fsm(conv_id, new_fsm)`, `pop_fsm(conv_id, merge_strategy)`, `get_stack_depth(conv_id)`, `get_sub_conversation_id(conv_id)`
-  - Handlers: `register_handler(handler)`, `register_handlers(handlers)`, `create_handler(name)` → HandlerBuilder
-  - Sessions: `save_session(conv_id)`, `load_session(session_id)` → `SessionState | None`, `restore_session(session_id)` → `(conv_id, SessionState) | None`. `restore_session` working-memory rule (N8, D-001): a missing or `None` `working_memory.buffers` map restores the default buffers and, when no `hidden_buffers` key is present, the default hidden set (`{"metadata"}`; an explicit list, `[]` included, is honoured as-is); an explicit `{}` restores `WorkingMemory.from_dict({})` (zero buffers); do not collapse None and empty for either key
-  - Management: `update_context(conv_id, data)`, `cleanup_stale_conversations()`, `get_llm_interface()`, `close()`
-- **FSMManager** (`fsm.py`) -- Orchestration with per-conversation thread locks, LRU FSM cache (max 64)
-  - `start_conversation(fsm_id, initial_context)`, `process_message(conv_id, msg)`, `resolve_state_definition(instance)`
-  - ERROR-timing handlers fire on `FSMError` (e.g. `LLMResponseError`) and on the streaming path via `_fire_error_handlers`; the `FSMError` is still re-raised unwrapped. KeyboardInterrupt/SystemExit/GeneratorExit run no handlers
-  - Re-entrancy guard (`_active_turns`, `_enter_turn`): a same-conversation `converse`/`converse_stream` from a handler (or between `next()` calls of an open stream) while a turn is in flight raises `FSMError`; `update_context` stays allowed
-  - `save_session` on a stacked conversation saves the ROOT frame's state, data, history and working memory (not the sub-FSM's)
-- **MessagePipeline** (`pipeline.py`) -- 2-pass engine
-  - Pass 1: data extraction → field extractions → classification extractions → transition evaluation → state transition
-  - Pass 2: response generation from new state -- skipped entirely when the state's `response_instructions` is empty (no response LLM call; used for intermediate agent states in tool-use loops). The greeting site `generate_initial_response` (called by `start_conversation`) skips the same way since plan-2026-09-20-0d9c218e iteration 2 (D-006): an initial state with empty `response_instructions` gets no prose greeting, the synthetic `[<state_id>]` marker is recorded as the first assistant history entry and returned (F-LIVE-01: the old greeting prose poisoned the ReAct agent's first `tool_name` extraction)
-  - `process_message(instance, conv_id, msg)`, `generate_initial_response(instance, conv_id)`
-  - Streaming (`process_message_stream`) uses a plain-text Pass-2 prompt (`build_response_prompt(..., plain_text_response=True)`) unless the state carries `_output_response_format`, so yielded tokens and stored history have no `{"message","reasoning"}` envelope
-  - `context_scope.read_keys` scopes `<current_context>` and `<rejected_corrections>` in the Pass-2 prompt (turn, stream and greeting), not only `request.context` (D-005, D-032); `<extracted_data>` (keys extracted this turn from the user's own message) is NOT scoped, a named limitation (D-054)
-  - Bulk extraction pass provenance: `context.metadata["_pipeline_extracted"]` holds a digest per key the pipeline extracted; the bulk pass overwrites a stored key only if it is config-covered, the FSM is not agent-managed and the stored value still matches the digest (handler-set and `update_context` values are never overwritten, including a value a same-timing CONTEXT_UPDATE handler edited; the digests are persisted in `SessionState.metadata["pipeline_extracted"]` by `save_session` and re-seeded by `restore_session`, so a correction lands after a restart, and an old session file restores an empty map). A correction the rule refuses and the user's message states is carried on `DataExtractionResponse.rejected_corrections` (default `{}`) and shown to Pass 2 as a `<rejected_corrections>` block (`build_response_prompt`'s optional argument), so the reply says the change was not applied; the grounding test is a whole-token match of at least 3 characters (`bored` does not ground `red`, `1500 items` does not ground `500`, and a 1 or 2 character value such as `US` or `42` never produces the block: the named cost, D-049); an instruction-only key (no config) that already holds a different value is reported the same way on non-agent FSMs, never overwritten (D-052); after a back-edge re-extraction an entry whose value is now the stored value is dropped, so an applied correction is never listed as rejected (LV6-01). If the bulk extraction call itself raises, the helper returns a private empty `_BulkFailed` dict, `DataExtractionResponse.extraction_failed` is set (default `False`) and `build_response_prompt`'s last optional argument `extraction_failed` adds one plain line saying a restated value may not have been stored (D-050); a turn with no rejection and no failure builds a byte-identical prompt. Bulk values for config-covered keys are coerced/validated like per-field values. The bulk prompt sanitizes user text; the bulk result drops `agent_trace` and forbidden-name keys; it never fills a classification-owned key on a non-agent FSM
-  - `execute_handlers` returns immediately when no handler subscribes to the timing (`HandlerSystem.handlers_at`), skipping the context deep-copies (a zero-handler advance turn: 14 -> 4 copies); the pre-turn rollback snapshots are unaffected. `handlers_at` is an optional fast-path hook read with a guarded `getattr`: a duck-typed `handler_system` with only `execute_handlers` still works
-  - `FSMDefinition.handler_only_keys` (opt-in, default `[]`): a listed gate key is dropped from the bulk return, the per-field configs and the post-transition configs, so user text cannot write it; handler writes, `update_context` and `initial_context` still work; a stacked child uses its own list. Only listed keys are covered (an unlisted gate key stays writable, a classification-owned key is not covered). `fsm-llm-validate` emits a WARNING for a listed key no state references (a likely typo) and one for a key that is a `classification_extractions` field name; both are warnings only, silent for an empty list (D-051)
-  - Back-edge re-extraction: a transition into a DIFFERENT state whose own config-covered key is already set with provenance re-runs the target state's Pass-1 extraction, so a same-message correction lands; a self-loop, an agent-managed FSM, a handler-seeded key, a forward hop into an empty state and a state that owns `classification_extractions` do not (+1 bulk call on a back edge into a filled state, +1 retry per still-null required key)
-  - Skip-if-set filter (`_execute_data_extraction`): a config-covered key that already holds a value is not re-asked; for an agent-managed FSM (context carries `agent_trace`) an EMPTY list or dict counts as unset, so `plan_execute`'s `plan_steps: []` seed is still extracted; a non-agent FSM that seeds `[]` for a config-covered key makes no ask for it (D-046)
-  - On Ollama (`ollama/` or `ollama_chat/` prefix, temperature 0) an identical null per-field extraction is memoised within one extraction call (keyed on field name plus the built prompt and message); successes, exceptions and other providers are never memoised
-  - A classification result discarded for being below its `confidence_threshold` is a WARNING naming field, intent, confidence and threshold; behaviour is unchanged (the gated key stays unset)
-  - An ERROR-timing handler's returned dict is NOT merged (the turn was rolled back); `update_context` is the supported write path
-  - A classifier error or fallback intent in `_resolve_ambiguous_transition` returns `None` (a stay, not a transition); the `Classifier` inherits `api_key`/`api_base`/`timeout` from the `LiteLLMInterface`
-- **HandlerSystem** (`handlers.py`) -- Event-driven hook execution; `handlers_at(timing)` is the optional subscription probe the pipeline uses to skip empty timings
-  - `register_handler(handler)`, `execute_handlers(timing, current_state, target_state, context, updated_keys)` → dict
-  - Error modes: "continue" (skip failed) | "raise"
-- **HandlerBuilder** (`handlers.py`) -- Fluent API: `.at(timing)` → `.on_state(id)` → `.when(lambda)`/`.when_context_has()`/`.when_keys_updated()` (+ shorthands `.on_state_entry()`, `.on_state_exit()`, `.on_context_update()`, `.with_priority()`) → `.do(lambda)` → `BaseHandler`
-- **HandlerTiming** enum -- 8 points: START_CONVERSATION, PRE_PROCESSING, POST_PROCESSING, PRE_TRANSITION, POST_TRANSITION, CONTEXT_UPDATE, END_CONVERSATION, ERROR
-- **Classifier** (`classification.py`) -- `classify(msg)` → ClassificationResult, `classify_multi(msg)` → MultiClassificationResult; `is_low_confidence(result)` compares against `schema.confidence_threshold` (the `ClassificationResult.is_low_confidence` property uses a fixed 0.6). The pipeline builds classifiers through `_get_classifier`, a per-pipeline content-keyed cache bounded at `MAX_CLASSIFIER_CACHE_SIZE` (64, FIFO eviction) shared by the classification-extraction and ambiguous-transition sites; check/construct/evict/insert is one critical section under `_classifier_cache_lock`, and a non-JSON-native connection kwarg (e.g. a pydantic `SecretStr`) BYPASSES the cache (fresh instance, no insert, no `default=str` digest), while cached instances retain their connection credentials for the pipeline's lifetime by design (D-001). Both sites catch only `_CLASSIFICATION_SOFT_FAIL_EXCEPTIONS` (`ClassificationError`, `ValueError`, `TypeError`, `KeyError`, `RuntimeError`, `OSError`), with the `_get_classifier` call inside the `try` so a construction failure degrades to "stay" at both; other programming errors and `KeyboardInterrupt` propagate (through `API.converse` as `FSMError`). `Classifier._call_llm` wraps post-call parsing (`.choices[0].message.content`, `_extract_response`) so `AttributeError`/`IndexError`/`TypeError` from a malformed response shape surface as `ClassificationResponseError` (defensive: the installed litellm's real objects do not produce these shapes)
-- **HierarchicalClassifier** -- Two-stage domain → intent for >15 intents
-- **IntentRouter** -- `route(msg)` → dispatches to handler functions by intent
-- **TransitionEvaluator** (`transition_evaluator.py`) -- Returns DETERMINISTIC | AMBIGUOUS | BLOCKED with confidence scores
-- **LiteLLMInterface** (`llm.py`) -- `generate_response(request)`, `extract_field(request)`, `generate_response_stream(request)` → `Iterator[str]` via litellm (100+ providers). Supports `response_format` for schema-enforced JSON output
-  - Reply parsing: an uncoercible `confidence` (`"high"`, null, object) keeps the returned value at confidence 0.5; a structured reply with no `message` but a `reasoning` key reaches the user as the JSON text; the plain-text rung strips `<think>` blocks first and replaces brace-shaped text only when it parses as JSON; `strip_think_and_fences` strips a fence only at the start of the reply and the closing fence only when a leading fence was stripped, so a reply that ends in a code block keeps its closing fence (D-048), and `extract_json_from_text` skips a fenced non-object by blanking its span (so JSON before a fenced example is found)
-- **WorkingMemory** (`memory.py`) -- `get/set/delete(buffer, key)`, `get_all_data()`, `search(query)`, `get_buffer()`, `clear_buffer()`, `list_buffers()`, `has_buffer()`, `create_buffer()`, `to_scoped_view()` (public helper, unused by the pipeline), `update_buffer()`, `import_flat_data()`, `to_dict()` (shallow: values shared by reference), `from_dict()`. Prompt reach: as `FSMContext.working_memory`, buffer data enters ONLY the Pass-1 per-field extraction prompt (default `context_keys`, via `get_user_visible_data()`); the Pass-2 `<current_context>` is built from `context.data` alone and `llm.py` never reads `request.context`; `update_context`/handlers write `context.data` only, nothing syncs the two. `FSMContext.working_memory` is `exclude=True`: `model_dump()` omits it. Exports from `fsm_llm`: `WorkingMemory`, `BUFFER_CORE`, `BUFFER_SCRATCH`, `BUFFER_ENVIRONMENT`, `BUFFER_REASONING`, `BUFFER_METADATA`, `DEFAULT_BUFFERS`, `DEFAULT_HIDDEN_BUFFERS`
-- **SessionStore** (`session.py`) -- ABC for session persistence: `save(id, state)`, `load(id)`, `delete(id) -> bool`, `list_sessions()`, `exists(id)`
-- **FileSessionStore** (`session.py`) -- File-based implementation with JSON files and atomic writes (temp file + rename). Path-traversal protection via session ID validation
-- **SessionState** (`session.py`) -- Pydantic model: conversation_id, fsm_id, current_state, context_data, conversation_history, stack_depth, saved_at, metadata
-- **ContextCompactor** (`context.py`) -- `compact(ctx)` (clear transient), `prune(ctx)` (on transition), `summarize(conversation)`
+## Key files
 
-## Core Models (definitions.py)
+| File | Role | Notes |
+| --- | --- | --- |
+| `api.py` | `API`, `FSMStackFrame`, `ContextMergeStrategy` | Stack, sessions, idle tracking, ended-conversation cache (10,000) |
+| `fsm.py` | `FSMManager` | LRU FSM cache (64), `instances`, `_conversation_locks`, re-entrancy guard |
+| `pipeline.py` | `MessagePipeline` | 2-pass engine, rollback contracts, provenance, classifier cache |
+| `definitions.py` | Pydantic models + exceptions | `FSMDefinition` validates structure |
+| `transition_evaluator.py` | `TransitionEvaluator`, `TransitionEvaluatorConfig` | Rule-based, no LLM |
+| `expressions.py` | `evaluate_logic` | JsonLogic, max depth 50 |
+| `classification.py` | `Classifier`, `HierarchicalClassifier`, `IntentRouter`, `HandlerFn` | litellm with JSON schema |
+| `handlers.py` | `HandlerSystem`, `HandlerBuilder`, `BaseHandler`, `LambdaHandler`, `HandlerTiming`, `FSMHandler` protocol | |
+| `llm.py` | `LLMInterface` ABC, `LiteLLMInterface` | Parsing ladders for structured replies |
+| `ollama.py` | `is_ollama_model`, `apply_ollama_params`, JSON schemas | `ollama/` and `ollama_chat/` prefixes |
+| `prompts.py` | Prompt builders + classification schema/prompt | XML-tag sanitization |
+| `context.py` | `clean_context_keys`, `ContextCompactor` | |
+| `memory.py` | `WorkingMemory`, `BUFFER_*`, `DEFAULT_BUFFERS`, `DEFAULT_HIDDEN_BUFFERS` | |
+| `session.py` | `SessionState`, `SessionStore`, `FileSessionStore` | Atomic temp + `os.replace` |
+| `utilities.py` | `extract_json_from_text`, `load_fsm_from_file`, `load_fsm_definition`, `filter_context_tree`, `strip_think_and_fences`, `coerce_confidence`, `get_fsm_summary` | |
+| `validator.py`, `visualizer.py` | `FSMValidator`, ASCII diagrams | Own `main_cli` entry points |
+| `runner.py`, `__main__.py` | Interactive CLI | Redacts secret-shaped context values in logs |
+| `constants.py` | Defaults, security regexes, prompt text, env names | ~1,700 lines, mostly prompt strings |
+| `logging.py` | `setup_logging`, `setup_file_logging`, decorators | `logger.disable("fsm_llm")` at import |
 
-- **FSMDefinition**: name, description, states dict, initial_state, version="4.1", persona, handler_only_keys (list, default `[]`; `model_dump` emits it). Validates reachability + terminal states
-- **State**: id, description, purpose, extraction_instructions, response_instructions, transitions, required_context_keys, field_extractions, classification_extractions, context_scope
-- **Transition**: target_state, description, conditions list, priority (0-1000)
-- **TransitionCondition**: description, requires_context_keys, logic (JsonLogic dict), evaluation_priority
-- **FSMContext**: data dict, conversation (Conversation), metadata, working_memory
-- **FSMInstance**: fsm_id, current_state, context (FSMContext), persona, last_extraction/transition/response debug fields
-- **Conversation**: exchanges list, max_history_size, max_message_length, summary. Methods: add_user_message, add_system_message, get_recent, search
-- **ClassificationSchema**: intents list (IntentDefinition), fallback_intent, confidence_threshold
-- **ClassificationResult**: reasoning, intent, confidence, entities. Property: is_low_confidence
-- **FieldExtractionConfig**: field_name, field_type, extraction_instructions, validation_rules, required, confidence_threshold
-- **ClassificationExtractionConfig**: field_name, intents list, fallback_intent, confidence_threshold, model override
+## Public interface
 
-## JsonLogic Operators (expressions.py)
+`API(fsm_definition, llm_interface=None, model=None, api_key=None, temperature=None (0.5), max_tokens=None (1000), max_history_size=5, max_message_length=1000, handlers=None, handler_error_mode="continue", transition_config=None, session_store=None, **llm_kwargs)`; `fsm_definition` is `FSMDefinition | dict | str path`; model falls back to env `LLM_MODEL`, then `DEFAULT_LLM_MODEL`.
+- Factories: `API.from_file(path, **kw)` (FileNotFoundError), `API.from_definition(defn | definition=..., **kw)`, `API.process_fsm_definition(x) -> (FSMDefinition, fsm_id)` where `fsm_id = f"fsm_{name}_{sha256(model_dump sorted)[:8]}"`.
+- Conversation: `start_conversation(initial_context=None) -> (conv_id, greeting)`, `converse(msg, conv_id) -> str`, `converse_stream(msg, conv_id) -> Iterator[str]`, `end_conversation(conv_id)`, `has_conversation_ended`, `get_data` (internal keys stripped), `get_current_state -> str`, `get_conversation_history`, `list_active_conversations`, `update_context(conv_id, dict)`, `cleanup_stale_conversations(max_idle_seconds=3600) -> list[str]`.
+- Stacking: `push_fsm(conv_id, new_fsm_definition, context_to_pass=None, return_context=None, shared_context_keys=None, preserve_history=False, inherit_context=True) -> str`, `pop_fsm(conv_id, context_to_return=None, merge_strategy="update"|"preserve") -> str`, `get_stack_depth`, `get_sub_conversation_id`. Max depth `DEFAULT_MAX_STACK_DEPTH = 10`.
+- Handlers: `register_handler`, `register_handlers`, `create_handler(name, timing=None, action=None) -> HandlerBuilder` (auto-registers when both given).
+- Sessions: `save_session(conv_id)`, `load_session(id) -> SessionState | None`, `restore_session(id) -> (new_conv_id, SessionState) | None`. All raise `FSMError` without a store. `converse`/`converse_stream` auto-save when a store is set (failures logged, not raised).
+- Management: `get_llm_interface()`, `close()`, context manager.
+- Package-level (`__init__`): `has_workflows/get_workflows`, `has_reasoning/get_reasoning`, `has_agents/get_agents`, `get_version_info`, `quick_start(fsm_file, model)`, `setup_logging`, `enable_debug_logging`, `disable_warnings`. `__all__` is one static list.
+- Handlers: `HandlerTiming` = `START_CONVERSATION, PRE_PROCESSING, POST_PROCESSING, PRE_TRANSITION, POST_TRANSITION, CONTEXT_UPDATE, END_CONVERSATION, ERROR`. Builder: `create_handler(name).at(*timings).on_state(*ids).not_on_state().on_target_state().not_on_target_state().when(fn).when_context_has(*keys).when_keys_updated(*keys).on_state_entry().on_state_exit().on_context_update().with_priority(n).critical().do(fn) -> BaseHandler` (or `.build()`). Handler functions take the context dict and return a delta dict. `HandlerSystem(error_mode="continue"|"raise")`: `register_handler`, `handlers_at(timing)`, `execute_handlers(timing, current_state, target_state, context, updated_keys) -> dict`, `close()`.
+- `Classifier(schema, model, ...)`: `classify(msg) -> ClassificationResult`, `classify_multi(msg) -> MultiClassificationResult` (max 5 intents), `is_low_confidence(result)` (uses `schema.confidence_threshold`; the model property `ClassificationResult.is_low_confidence` uses fixed 0.6). `HierarchicalClassifier` (domain then intent, for >15 intents). `IntentRouter`: `register`, `register_many`, `route`, `route_multi`, `validate`.
+- `LiteLLMInterface(model, api_key, temperature, max_tokens, **kw)`: `generate_response`, `generate_response_stream -> Iterator[str]`, `extract_field`, `extract_bulk_data`. Supports `response_format` schema enforcement.
+- `evaluate_logic(logic, data) -> Any`. Operators: `== === != !== > >= < <=`, `! !! and or if`, `in contains`, `+ - * / % min max`, `cat`, `var missing missing_some`, custom `has_context`, `context_length`.
+- CLI (pyproject scripts): `fsm-llm --fsm F [--mode run|validate|visualize] [--style full|compact|minimal] [-n history] [-l msglen]`, `fsm-llm-validate --fsm F`, `fsm-llm-visualize --fsm F [--style]`. `run` needs env `LLM_MODEL` (optional `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `FSM_PATH`), loads `.env`.
 
-Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or`, `!` | Arithmetic: `+`, `-`, `*`, `/`, `%` | Functions: `var`, `in`, `contains`, `cat`, `if`, `min`, `max`, `missing`, `missing_some` | Custom: `has_context`, `context_length`
+## Data shapes
 
-## Constants (constants.py)
+- `FSMDefinition{name, description, states: dict[str, State], initial_state, version="4.1", persona, handler_only_keys=[]}`. Validator: initial state exists, `state.id == key`, transition targets exist, at least one terminal state, no orphaned states, a reachable terminal.
+- `State{id (ASCII identifier), description (<=300), purpose (<=500), extraction_instructions, response_instructions, transitions, required_context_keys, extraction_retries 0-3 (=1), extraction_confidence_threshold (=0.0), transition_classification, field_extractions, classification_extractions, context_scope{read_keys, write_keys}}`.
+- `Transition{target_state, description, conditions, priority 0-1000 (=100), llm_description}`; `TransitionCondition{description, requires_context_keys, logic, evaluation_priority}` (logic operators validated against an allowlist).
+- `ClassificationExtractionConfig{field_name, intents (>=2), fallback_intent (must be one of intents), confidence_threshold, model}` - intents sit directly on the entry, no nested schema.
+- `FieldExtractionConfig{field_name, field_type, extraction_instructions, validation_rules, required, confidence_threshold}`.
+- `FSMContext{data, conversation: Conversation, metadata, working_memory (exclude=True)}`; `FSMInstance{fsm_id, current_state, context, persona, last_extraction_response, last_transition_decision, last_response_generation}`; `Conversation{exchanges [{"user"|"system": text}], max_history_size, max_message_length, summary}`.
+- `SessionState{conversation_id, fsm_id, current_state, context_data, conversation_history, stack_depth, working_memory {"buffers", "hidden_buffers"} | None, saved_at, metadata {"pipeline_extracted": digests}}`.
+- Seeded context keys: `_conversation_id`, `_conversation_start`, `_timestamp`, `_fsm_id`; on transition `_previous_state`, `_current_state`, `_transition_timestamp`; ERROR handlers see `_error`, `_traceback`; push with history adds `_inherited_history`; pop with history adds `_sub_conversation_summary`.
 
-- `DEFAULT_LLM_MODEL = "ollama_chat/qwen3.5:4b"`
-- `DEFAULT_TEMPERATURE = 0.5`, `DEFAULT_MAX_HISTORY_SIZE = 5`, `DEFAULT_MAX_MESSAGE_LENGTH = 1000`
-- `DEFAULT_MAX_STACK_DEPTH = 10`, `FSM_ID_HASH_LENGTH = 8`
-- `INTERNAL_KEY_PREFIXES = ["_", "system_", "internal_", "__"]`
-- `FORBIDDEN_CONTEXT_PATTERNS`: Regex for passwords, secrets, API keys, tokens
-- `DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE = 0.6`
-- `MAX_MULTI_INTENTS = 5` (multi-intent results truncated with a warning), `MAX_CLASSIFIER_CACHE_SIZE = 64` (per-pipeline `Classifier` cache bound)
+## Invariants and constraints
 
-## Testing
+- Transitions: `TransitionEvaluator` passes a transition only if all its conditions pass. One passing -> DETERMINISTIC. Several -> DETERMINISTIC if leader confidence >= `minimum_confidence` (0.5) and gap >= `ambiguity_threshold` (0.1), or equal confidence with different priorities (lower value wins); else AMBIGUOUS. None -> BLOCKED (stay). AMBIGUOUS goes to a `Classifier`; classifier error or fallback intent means stay.
+- Turn atomicity: `process()` deep-copies `current_state`, `context.data`, `working_memory`, `metadata` before the turn. PRE_PROCESSING failure restores. POST_PROCESSING or Pass-2 failure restores the whole turn, including Pass 1's committed transition. Inside Pass 1: CONTEXT_UPDATE failure after extraction rolls back only the committed keys (shallow); POST_TRANSITION failure restores the full data+metadata snapshot and the old state; a post-transition CONTEXT_UPDATE `HandlerExecutionError` propagates with the transition already committed. Handler external side effects are never undone.
+- `FSMManager`: failed turn pops the just-added user message; ERROR handlers run for `FSMError` and other exceptions (stream path too) but not for `KeyboardInterrupt`, `SystemExit`, `GeneratorExit`; an ERROR handler's raise replaces the original (chained). ERROR handler return values are not merged.
+- Re-entrancy: a same-conversation `converse`/`converse_stream` while a turn is in flight (from a handler or another thread) raises `FSMError`; `update_context` and reads are allowed.
+- Streams acquire `conv_lock` lazily on first `next()`, so an abandoned generator leaks nothing. Existence is validated eagerly at call time.
+- Terminal state: `converse` raises `FSMError("Conversation has ended ...")`.
+- Pass 2 is skipped when the state's `response_instructions` is empty; the greeting then records and returns a `[<state_id>]` marker.
+- Provenance: `context.metadata["_pipeline_extracted"]` holds a digest per pipeline-extracted key. The bulk pass overwrites a stored key only if it is config-covered, the FSM is not agent-managed (`agent_trace` in context), and the stored value still matches its digest; handler and `update_context` values are never overwritten. Refused corrections the user stated reach Pass 2 as `<rejected_corrections>` (whole-token match, values of 3+ chars). A failed bulk call sets `DataExtractionResponse.extraction_failed`.
+- Post-transition: after a transition on a non-agent FSM, the new state's missing config-covered keys are extracted; a transition into a different state whose keys already carry provenance re-runs that state's Pass-1 extraction (not for self-loops or states with `classification_extractions`).
+- `handler_only_keys` are never extracted from user text (bulk, per-field, post-transition). `fsm-llm-validate` warns on unreferenced or classification-owned listed keys.
+- Classifier cache: per pipeline, content-keyed, max 64 (`MAX_CLASSIFIER_CACHE_SIZE`), FIFO, one critical section under `_classifier_cache_lock`; non-JSON-native connection kwargs bypass the cache. Soft-fail exceptions: `ClassificationError, ValueError, TypeError, KeyError, RuntimeError, OSError`.
+- Ollama at temperature 0: identical null per-field extractions are memoised within one extraction call.
+- Security: internal prefixes `_`, `system_`, `internal_`, `__` via `constants.has_internal_prefix` (never re-inline `startswith("_")`). Three filters share `MAX_CONTEXT_FILTER_DEPTH = 16` and fail closed at the bound: `fsm._strip_internal_mapping` (drops, for `get_data`), `context.clean_context_keys` (drops None/internal/forbidden), `prompts._filter_context_for_security` (drops for prompts). `runner._redact_context` keeps keys and redacts values on purpose. Forbidden patterns live once in `COMPILED_FORBIDDEN_CONTEXT_PATTERNS`.
+- Sessions: `save_session` snapshots the ROOT frame atomically via `FSMManager.get_conversation_snapshot` (stacks are not restorable). `restore_session` starts with `_suppress_start=True` (no START handlers, no greeting), replays history, re-seeds provenance and working memory, then `set_conversation_state` (raises `FSMError` for a state not in this FSM; the half-restored conversation is ended). A different `fsm_id` only logs a WARNING. Missing/null `buffers` or `hidden_buffers` mean defaults; explicit `{}`/`[]` are honoured.
+- `FileSessionStore`: ids must match `^[a-zA-Z0-9_\-]+$`; `load` returns None on unreadable files; values round-trip through `json.dumps(default=str)`.
+- `WorkingMemory` data reaches only the Pass-1 per-field prompt; Pass-2 `<current_context>` uses `context.data` only; nothing syncs the two.
+- Idle tracking: `_get_current_fsm_conversation_id` is the single `_last_accessed` refresh point (`time.monotonic()`), plus `pop_fsm` and `get_stack_depth`.
+- Temp FSM definitions from `push_fsm` live in `_temp_fsm_definitions` until no frame (or in-flight push in `_pending_push_ids`) references them.
 
-```bash
-pytest tests/test_fsm_llm/  # 2,009 tests
-```
+## Dependencies
 
-- Mock LLMs: `Mock(spec=LLMInterface)` (simple) and `MockLLM2Interface` (2-pass) in `conftest.py`
-- Fixtures: `sample_fsm_definition` (v3.0), `sample_fsm_definition_v2` (v4.1), `mock_llm_interface`, `mock_llm2_interface`
-- Test files: `test_<module>.py` + `test_<module>_elaborate.py` for extended scenarios
-- Helper functions: `_make_state()`, `_minimal_fsm_dict()` etc.
+- External: `litellm` (all LLM calls), `pydantic` v2 (models), `loguru` (logging), `python-dotenv` (CLI). No internal package dependencies.
+- Consumers rely on: `API`, `HandlerTiming`, `create_handler`, `LLMInterface`, `FSMDefinition`, `constants.has_internal_prefix`, `constants.DEFAULT_LLM_MODEL`, `API.fsm_manager.get_complete_conversation` (monitor), `CONTEXT_KEY_AGENT_TRACE` semantics (agents).
 
-## Exceptions
+## Failure modes
 
-```
-FSMError (base for all core exceptions)
-├── StateNotFoundError(state_id)
-├── InvalidTransitionError(source_state, target_state)
-├── LLMResponseError
-├── TransitionEvaluationError(state_id)
-├── ClassificationError
-│   ├── SchemaValidationError
-│   └── ClassificationResponseError
-└── HandlerSystemError
-    └── HandlerExecutionError(handler_name, original_error)
-```
+- Exceptions: `FSMError` -> `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` -> (`SchemaValidationError`, `ClassificationResponseError`); `HandlerSystemError(FSMError)` -> `HandlerExecutionError(handler_name, original_error)`.
+- `API` wraps unexpected exceptions as `FSMError`; `ValueError` for unknown conversation ids passes through. Invalid definitions raise `ValueError` from `process_fsm_definition`.
+- `start_conversation` failure fires END_CONVERSATION handlers and frees resources; a failing END handler wins (chained).
+- A classifier failure or low-confidence result degrades to "stay" or leaves the key unset (WARNING logged with field, intent, confidence, threshold).
+- LLM reply parsing: uncoercible `confidence` becomes 0.5; `<think>` blocks and a leading code fence are stripped; `extract_json_from_text` returns a dict or None.
 
-## Code Conventions
+## Working here
 
-- Logging: `from fsm_llm.logging import logger`
-- Models: Pydantic v2 BaseModel with model_validator for complex validation
-- Exports: Single `__all__` list in `__init__.py` -- no dynamic extend/append
-- Security: Internal key prefixes stripped by clean_context_keys(). XML tag sanitization in prompts (`_TAG_PATTERN` in `prompts.py`: an opener/closer tail is `[^>]{0,256}/?>` or, as a zero-width lookahead, a 257-character overflow, so a closing tag with a nested `<` or a padded tail is escaped, only its `<` and name, without a quadratic scan and without touching the prose after it; `latency < threshold` stays raw only when no `>` follows it anywhere in the text, a padded opener `< name` + 257 characters + `>` is escaped, D-047, D-054)
-- Thread safety: Per-conversation RLocks in FSMManager
+- Conventions: ruff (py310, line 88), mypy, Pydantic v2 with `model_validator`, `from fsm_llm.logging import logger`, single static `__all__`. Many `# DECISION plan-.../D-NNN` comments guard non-obvious choices; read them before changing the code next to them and do not revert what they forbid.
+- Adding a JsonLogic operator: add it to `expressions.py` and to the allowlist in `constants.py` (`ALLOWED_JSONLOGIC_OPERATIONS`) or `TransitionCondition` validation rejects it.
+- Adding a state field: update `State` in `definitions.py`, the pipeline read site, `validator.py` known keys (unknown keys warn), and docs snippets.
+- New handler firing site: follow the existing rule that whatever escapes `execute_handlers` is re-raised, and snapshot/restore both `data` and `metadata` if you roll back.
+- Tests: `pytest tests/test_fsm_llm/` (mock LLMs: `Mock(spec=LLMInterface)` and `MockLLM2Interface` in `conftest.py`; fixtures `sample_fsm_definition` v3.0, `sample_fsm_definition_v2` v4.1). `tests/test_fsm_llm/test_docs_snippets.py` loads every full FSM JSON snippet in `README.md`, `docs/quickstart.md`, this folder's `README.md`, and root `CLAUDE.md`, so keep those snippets valid. Live suite `test_live_classification_memory.py` self-skips without Ollama.
+- Commands: `make test`, `make lint`, `make type-check`.

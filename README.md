@@ -9,59 +9,71 @@
   <img src="./images/fsm-llm-logo-1.png" alt="FSM-LLM Logo" width="500"/>
 </p>
 
-**A Python framework for building robust, stateful conversational AI by combining Large Language Models with Finite State Machines.**
+**A Python framework for building stateful conversational AI by combining large language models (LLMs) with finite state machines (FSMs).**
 
 ---
 
-## Why FSM-LLM?
+## What it is for
 
-Large Language Models generate remarkable text, but they are stateless. Building multi-turn conversations that remember context, follow structured flows, and make consistent decisions requires something more.
+LLMs write good text, but each call starts from nothing. A multi-turn conversation that must remember what it collected, follow a set flow, and make the same decision every time needs structure around the model.
 
-FSM-LLM bridges this gap:
+FSM-LLM provides that structure:
 
-- **LLMs handle language** -- understanding, extraction, and response generation.
-- **Finite State Machines provide structure** -- predictable flows, testable transitions, and clear business logic.
-- **The framework manages state** -- context persistence, transition evaluation, and handler orchestration.
+- **The LLM handles language**: understanding the user, pulling out facts, and writing replies.
+- **A finite state machine handles flow**: a fixed set of named states (such as "greeting", "collect email", "confirm") and rules for moving between them. The rules are plain JSON logic, so they are predictable and testable.
+- **The framework handles state**: what has been collected, which state the conversation is in, the history, hooks for your own code, and saving and restoring sessions.
 
-## Key Features
+Version 0.7.0. License GPL-3.0-or-later. Python 3.10, 3.11, 3.12.
 
-- **2-pass architecture** -- Pass 1 extracts data and evaluates transitions; Pass 2 generates the response from the correct state.
-- **Handler system** -- 8 hook points (START_CONVERSATION, PRE/POST_PROCESSING, PRE/POST_TRANSITION, CONTEXT_UPDATE, END_CONVERSATION, ERROR) with a fluent builder API.
-- **JsonLogic transitions** -- Deterministic rule-based transitions with operators like `==`, `in`, `has_context`, `and`, `or`.
-- **FSM stacking** -- Push/pop nested FSMs with context merging for complex multi-flow scenarios.
-- **Streaming responses** -- `converse_stream()` yields response tokens incrementally for low-latency UIs.
-- **Session persistence** -- `SessionStore` / `FileSessionStore` save and restore conversation state across process restarts with atomic writes.
-- **Working memory** -- `WorkingMemory` provides named buffers (core, scratch, environment, reasoning) for structured agent context.
-- **100+ LLM providers** -- OpenAI, Anthropic, Ollama, Azure, AWS Bedrock, and more via litellm.
-- **5 extension packages** -- Reasoning, workflows, agents (12+ patterns + swarm, agent graph, MCP, A2A, SOPs, semantic tools, meta builder), monitoring dashboard (with OTEL export), and the iterative-planner harness.
-- **Iterative-planner harness** -- A 6-state planning protocol driven as a real FSM, with JsonLogic hard gates, Markdown artifacts on disk as memory, per-role file ownership, and a 2-attempt autonomy leash. Gate values are derived from the filesystem, so a confident sentence cannot open a gate.
-- **Security built in** -- Internal key prefixes, forbidden context patterns, XML tag sanitization. Compromised litellm 1.82.7/1.82.8 are excluded; `make audit` scans for malicious `.pth` injections.
+## How it works
+
+Every user message goes through two LLM passes:
+
+```mermaid
+flowchart LR
+    U[User message] --> P1[Pass 1: extract data]
+    P1 --> C[Update context]
+    C --> T{Transition rules}
+    T -- one fits --> S[New state]
+    T -- several fit --> L[LLM picks one] --> S
+    T -- none fit --> K[Stay]
+    S --> P2[Pass 2: reply from the final state]
+    K --> P2
+    P2 --> R[Reply]
+```
+
+Pass 2 runs after the transition, so the reply always comes from the state the conversation is actually in. A state with empty `response_instructions` skips Pass 2 entirely, which agents use for silent intermediate steps.
+
+Features:
+
+- **Handlers**: your functions run at 8 points (start, before and after processing, before and after a transition, context update, end, error), set up with a fluent builder.
+- **JsonLogic transitions**: rules like `{">=": [{"var": "age"}, 18]}` or `{"has_context": "email"}` are evaluated in Python, not by the LLM.
+- **Intent classification**: single, multi-intent, and two-stage hierarchical classifiers, plus an intent router.
+- **FSM stacking**: hand a conversation to a sub-FSM and come back with its results.
+- **Streaming**: `converse_stream()` yields reply tokens as they arrive.
+- **Sessions**: save and restore a conversation to JSON files with atomic writes.
+- **Working memory**: named buffers for agent-style scratch data.
+- **100+ LLM providers** through litellm (OpenAI, Anthropic, Ollama, Azure, Bedrock, and more).
+- **Security**: internal context keys are hidden, secret-looking keys are kept out of prompts, and user text is sanitised before it enters XML-tagged prompts. The known-compromised litellm 1.82.7 and 1.82.8 are excluded, and `make audit` scans installed packages for malicious `.pth` files.
 
 ## Installation
 
 ```bash
-pip install fsm-llm
+pip install fsm-llm           # core
+pip install "fsm-llm[all]"    # everything
 ```
 
-Install with extension packages:
-
-```bash
-pip install fsm-llm[all]  # Everything
-```
-
-Or pick what you need:
-
-| Extra | Command | Additional Dependencies |
+| Extra | Command | Additional dependencies |
 |-------|---------|------------------------|
-| `reasoning` | `pip install fsm-llm[reasoning]` | None |
-| `agents` | `pip install fsm-llm[agents]` | None |
-| `workflows` | `pip install fsm-llm[workflows]` | None |
-| `harness` | `pip install fsm-llm[harness]` | None (pulls `fsm-llm[agents]`) |
-| `monitor` | `pip install fsm-llm[monitor]` | fastapi, uvicorn, jinja2 |
-| `mcp` | `pip install fsm-llm[mcp]` | mcp (>=1.0.0) |
-| `otel` | `pip install fsm-llm[otel]` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
-| `a2a` | `pip install fsm-llm[a2a]` | httpx (>=0.24.0) |
-| `all` | `pip install fsm-llm[all]` | All of the above |
+| `reasoning` | `pip install "fsm-llm[reasoning]"` | None |
+| `agents` | `pip install "fsm-llm[agents]"` | None |
+| `workflows` | `pip install "fsm-llm[workflows]"` | None |
+| `harness` | `pip install "fsm-llm[harness]"` | None (pulls `fsm-llm[agents]`) |
+| `monitor` | `pip install "fsm-llm[monitor]"` | fastapi, uvicorn, jinja2 |
+| `mcp` | `pip install "fsm-llm[mcp]"` | mcp (>=1.0.0) |
+| `otel` | `pip install "fsm-llm[otel]"` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
+| `a2a` | `pip install "fsm-llm[a2a]"` | httpx (>=0.24.0) |
+| `all` | `pip install "fsm-llm[all]"` | All of the above |
 
 ## Quick Start
 
@@ -104,6 +116,8 @@ Or pick what you need:
 }
 ```
 
+A state with no transitions (here `farewell`) ends the conversation. `required_context_keys` on a state only tells Pass 1 what to extract; to block a transition until a value exists, use a condition like the one above.
+
 **2. Run a conversation**:
 
 ```python
@@ -112,14 +126,12 @@ from fsm_llm import API
 api = API.from_file("greeting.json", model="openai/gpt-4o-mini")
 conversation_id, initial_response = api.start_conversation()
 
-response = api.converse("Hi there! I'm Alice.", conversation_id)
-print(response)
-
-response = api.converse("Goodbye!", conversation_id)
-print(response)
+print(api.converse("Hi there! I'm Alice.", conversation_id))
+print(api.converse("Goodbye!", conversation_id))
+print(api.get_data(conversation_id))
 ```
 
-**3. Or use the CLI**:
+**3. Or use the command line**:
 
 ```bash
 export OPENAI_API_KEY="your-key-here"
@@ -127,7 +139,7 @@ export LLM_MODEL="openai/gpt-4o-mini"   # required by the CLI
 fsm-llm --fsm greeting.json
 ```
 
-**Environment variables** read by the `fsm-llm` command (the `API` class reads only `LLM_MODEL`, as the fallback for its `model` argument, then the package default `ollama_chat/qwen3.5:4b`):
+Environment variables read by the `fsm-llm` command (the `API` class reads only `LLM_MODEL`, as the fallback for its `model` argument, then the package default `ollama_chat/qwen3.5:4b`):
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
@@ -138,22 +150,20 @@ fsm-llm --fsm greeting.json
 
 Provider keys (`OPENAI_API_KEY`, ...) are read by litellm. A `.env` file is looked up relative to the installed package, not your working directory, so prefer `export`.
 
-## 2-Pass Architecture
+## Packages
 
-```
-User Input → [Pass 1: Data Extraction (LLM)] → Context Update
-           → Transition Evaluation (JsonLogic rules or LLM classification)
-           → State Transition
-           → [Pass 2: Response Generation (LLM)] → User Output
-```
+The repository ships six Python packages in one distribution. Only `fsm_llm` is required; the others are installed with extras.
 
-Pass 2 runs **after** the transition, so the response always reflects the correct state. States with an empty `response_instructions` skip Pass 2 entirely (no response LLM call) -- useful for intermediate agent states in tool-use loops.
+| Package | What it adds |
+|---------|--------------|
+| `fsm_llm` | The core: FSM definitions, the 2-pass pipeline, handlers, classification, LLM access, sessions, validation, visualization |
+| `fsm_llm_reasoning` | A problem solver that picks one of 9 reasoning styles and runs it as an FSM, with answer validation and retries |
+| `fsm_llm_workflows` | An async workflow engine with 11 step types (API calls, LLM steps, FSM conversations, agents, timers, events, parallel, retry, switch) |
+| `fsm_llm_agents` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan-and-execute, debate, orchestrator, ...), tools, human approval, memory, MCP and remote agents, and a meta-builder that designs FSMs, workflows, and agents by chat |
+| `fsm_llm_monitor` | A web dashboard to launch, watch, and chat with FSMs, agents, and workflows, with optional OpenTelemetry export |
+| `fsm_llm_harness` | The iterative-planner protocol (explore, plan, execute, reflect, pivot, close) as an FSM whose gates check files on disk |
 
-## Extension Packages
-
-### Classification (built into core)
-
-LLM-backed intent classification: single-intent, multi-intent, hierarchical two-stage, and `IntentRouter`.
+**Classification** (core):
 
 ```python
 from fsm_llm import Classifier, ClassificationSchema, IntentDefinition
@@ -170,7 +180,7 @@ classifier = Classifier(schema=schema, model="openai/gpt-4o-mini")
 result = classifier.classify("I can't log in to my account")
 ```
 
-### Reasoning -- 9 strategies as FSMs
+**Reasoning**:
 
 ```python
 from fsm_llm_reasoning import ReasoningEngine
@@ -178,18 +188,30 @@ engine = ReasoningEngine(model="openai/gpt-4o-mini")
 solution, trace = engine.solve_problem("What is the probability of rolling two sixes?")
 ```
 
-### Workflows -- async event-driven, 11 step types
+**Workflows**:
 
 ```python
-from fsm_llm_workflows import create_workflow, auto_step, llm_step, conversation_step
-workflow = create_workflow("order_pipeline") \
-    .add(auto_step("validate", action=validate_order)) \
-    .add(llm_step("summarize", prompt="Summarize: {order}")) \
-    .add(conversation_step("support", fsm_file="support.json")) \
-    .build()
+import asyncio
+from fsm_llm_workflows import WorkflowEngine, auto_step, condition_step, create_workflow
+
+wf = create_workflow("orders", "Order check")
+wf.with_initial_step(auto_step("load", "Load order", next_state="route",
+                               action=lambda ctx: {"amount": 1500}))
+wf.with_step(condition_step("route", "Big order?", condition=lambda ctx: ctx["amount"] >= 1000,
+                            true_state="review", false_state="done"))
+wf.with_step(auto_step("review", "Manual review", next_state="done"))
+wf.with_step(auto_step("done", "Finish", next_state=""))
+
+async def main():
+    engine = WorkflowEngine()
+    engine.register_workflow(wf)
+    instance_id = await engine.start_workflow("orders")
+    print(engine.get_workflow_status(instance_id))
+
+asyncio.run(main())
 ```
 
-### Agents -- 12 patterns with tool use
+**Agents**:
 
 ```python
 from fsm_llm_agents import create_agent, tool
@@ -201,28 +223,16 @@ def search(query: str) -> str:
 
 agent = create_agent(tools=[search])
 result = agent("What is the capital of France?")
+print(result.answer, result.success)
 ```
 
-Patterns: ReAct, REWOO, Reflexion, Plan-Execute, Prompt Chain, Self-Consistency, Debate, Orchestrator, ADaPT, Eval-Optimize, Maker-Checker, Reasoning-ReAct. Plus: Swarm (dynamic agent handoffs), Agent Graph (DAG-based orchestration), MCP tool integration, A2A remote agents, SOPs, and semantic tool retrieval.
-
-### Monitor -- web dashboard
+**Monitor**:
 
 ```bash
-fsm-llm-monitor  # Opens at http://localhost:8420
+fsm-llm-monitor   # opens http://127.0.0.1:8420
 ```
 
-Pages: Dashboard, Control Center, Visualizer, Conversations, Logs, Builder, Settings.
-
-### Meta Builder -- interactive artifact creation
-
-```bash
-fsm-llm-meta  # Interactive CLI for building FSMs, workflows, agents
-```
-
-### Harness -- the iterative-planner protocol as an FSM
-
-A 6-state planning protocol -- EXPLORE, PLAN, EXECUTE, REFLECT, PIVOT, CLOSE --
-driven as a real FSM over a plan directory of Markdown artifacts.
+**Harness**:
 
 ```bash
 fsm-llm-harness new "add a retry to the uploader"
@@ -231,7 +241,7 @@ fsm-llm-harness validate plans/plan-2026-07-22T101500-1a2b3c4d
 ```
 
 ```python
-from fsm_llm_harness import HarnessAgent, Workspace, build_default_worker_factory, ContextKeys
+from fsm_llm_harness import ContextKeys, HarnessAgent, Workspace, build_default_worker_factory
 
 workspace = Workspace("./src")
 agent = HarnessAgent(worker_factory=build_default_worker_factory(workspace))
@@ -241,45 +251,35 @@ result = agent.run(
 )
 ```
 
-All nine of its transitions are gated by JsonLogic conditions -- four of them
-HARD -- so a gated edge is DETERMINISTIC or BLOCKED, never an LLM judgement call.
-Every condition declares its required context keys, so a garbled worker reply
-leaves the edge blocked rather than accidentally satisfied. Gate values are derived
-from the filesystem rather than read from the model's report, each role holds only
-the file-writing tools its ownership entry grants it, and the autonomy leash halts
-at exactly 2 fix attempts and cannot be reset from inside an approving callback.
-`fsm-llm-harness validate` audits a plan directory against 30 structural checks.
-See [`src/fsm_llm_harness/CLAUDE.md`](src/fsm_llm_harness/CLAUDE.md) for the
-protocol graph, the ownership table, and an honest account of what has and has not
-been measured on a small local model.
+The harness gates are JSON rules over values counted from the plan directory, so a model's claim alone cannot open one; the approval callback denies by default; and a step stops after 2 failed fix attempts. It is experimental: on a 4B local model single steps succeed reliably, but unattended end-to-end runs have not yet met their 3-out-of-3 bar.
 
-## CLI Tools
+## Command-line tools
 
 | Command | Description |
 |---------|-------------|
-| `fsm-llm --fsm <path.json>` | Run an FSM interactively |
-| `fsm-llm-visualize --fsm <path.json>` | ASCII visualization |
-| `fsm-llm-validate --fsm <path.json>` | Validate FSM definition |
-| `fsm-llm-monitor` | Launch web monitoring dashboard |
-| `fsm-llm-meta` | Interactive artifact builder |
+| `fsm-llm --fsm <path.json>` | Chat with an FSM interactively |
+| `fsm-llm-visualize --fsm <path.json>` | Draw an FSM as ASCII art |
+| `fsm-llm-validate --fsm <path.json>` | Check an FSM definition for problems |
+| `fsm-llm-monitor` | Launch the web dashboard |
+| `fsm-llm-meta` | Build FSMs, workflows, or agents by chatting |
 | `fsm-llm-harness <new\|resume\|status\|validate\|close>` | Drive or audit an iterative-planner plan directory |
 
 ## Examples
 
-100 examples across 8 categories:
+100 examples across 8 categories, each runnable with `python examples/<category>/<name>/run.py` (OpenAI key, or a local Ollama as fallback):
 
 | Category | Count | Highlights |
 |----------|-------|------------|
-| Basic | 14 | simple_greeting, form_filling, multi_turn_extraction, insurance_claim, job_application, and more |
+| Basic | 14 | simple_greeting, form_filling, multi_turn_extraction, insurance_claim, job_application |
 | Intermediate | 3 | book_recommendation, product_recommendation, adaptive_quiz |
-| Advanced | 17 | e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations, and more |
+| Advanced | 17 | e_commerce (FSM stacking), support_pipeline, handler_hooks, concurrent_conversations |
 | Classification | 4 | intent_routing, smart_helpdesk, classified_transitions, multi_intent |
 | Reasoning | 1 | math_tutor |
 | Workflows | 8 | order_processing, parallel_steps, conditional_branching, loan_processing |
-| Agents | 48 | react_search, plan_execute, reflexion, debate, orchestrator, adapt, and more |
+| Agents | 48 | react_search, plan_execute, reflexion, debate, orchestrator, adapt |
 | Meta | 5 | build_fsm, build_workflow, build_agent, meta_review_loop, meta_from_spec |
 
-Run with: `python examples/<category>/<name>/run.py`. See `EVALUATE.md` for evaluation results.
+`scripts/eval.py` runs all examples in parallel and scores them.
 
 ## Development
 
@@ -291,17 +291,10 @@ make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
 make build          # python -m build (wheel + sdist)
 make coverage       # Tests with coverage report
+make audit          # scan site-packages for suspicious .pth files
 ```
 
-## Documentation
-
-- [Quick Start Guide](docs/quickstart.md)
-- [API Reference](docs/api_reference.md)
-- [Architecture](docs/architecture.md) -- 2-pass flow, security model, performance
-- [FSM Design Patterns](docs/fsm_design.md) -- patterns, anti-patterns, real-world examples
-- [Handler Development](docs/handlers.md) -- 8 timing points, builder API, error handling
-
-Each extension package also ships a `CLAUDE.md` developer reference: [reasoning](src/fsm_llm_reasoning/CLAUDE.md), [workflows](src/fsm_llm_workflows/CLAUDE.md), [agents](src/fsm_llm_agents/CLAUDE.md), [monitor](src/fsm_llm_monitor/CLAUDE.md), [harness](src/fsm_llm_harness/CLAUDE.md). Every package also ships a package-level `README.md`.
+Repository layout: `src/` holds the six packages, `tests/` one test folder per package plus regression and example checks, `examples/` the runnable examples, `scripts/` evaluation and benchmark tools, `docs/` longer guides.
 
 ## Contributing
 
@@ -314,4 +307,4 @@ Each extension package also ships a `CLAUDE.md` developer reference: [reasoning]
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 or later. See [LICENSE](LICENSE) for details.
+GNU General Public License v3.0 or later. See the `LICENSE` file.

@@ -1,872 +1,130 @@
-# fsm_llm_harness -- Iterative-Planner Protocol Harness
+# fsm_llm_harness
 
-An FSM-LLM-native emulation of the iterative-planner protocol: a 6-state
-EXPLORE / PLAN / EXECUTE / REFLECT / PIVOT / CLOSE machine whose hard gates are
-JsonLogic `TransitionCondition` terms, whose memory is a directory of Markdown
-artifacts on disk, and whose autonomy leash halts at exactly 2 fix attempts.
+Path: `src/fsm_llm_harness`
+Purpose: The iterative-planner protocol as a real FSM-LLM FSM: 6 states (EXPLORE / PLAN / EXECUTE / REFLECT / PIVOT / CLOSE), 9 transitions, HARD gates as JsonLogic terms whose values are derived from the filesystem, Markdown artifacts on disk as memory, and an autonomy leash that halts at 2 fix attempts.
 
-- **Version**: 0.7.0 (synced from fsm_llm)
-- **Extra deps**: none of its own; the extra pulls `fsm-llm[agents]` because the
-  package imports `fsm_llm_agents`
-- **Install**: `pip install fsm-llm[harness]`
-- **CLI**: `fsm-llm-harness` (`python -m fsm_llm_harness`)
+## Scope
 
-**The one idea worth carrying away**: a gate reads the FILESYSTEM, never the
-model's account of the filesystem. `findings_count` is a count of non-empty
-`findings/*.md` files, not the integer the worker reported; a dispatch that holds
-a write tool and claims a write must show a tool call whose target now carries
-bytes. Both mechanisms exist because measurement found 4B models asserting
-completed work over an empty directory 5/5.
+Driver (`HarnessAgent`), FSM factory, role workers and prompts, confined workspace and plan-directory tools, artifact models and (de)serializers, plan-directory storage, gate and audit validator, small-model reply hardening, CLI. Extra `harness` pulls `fsm-llm[agents]` (imports `fsm_llm_agents`), no third-party deps of its own. Version from `fsm_llm.__version__` (0.7.0). CLI `fsm-llm-harness` (`python -m fsm_llm_harness`). Bench tooling lives outside the package: `scripts/harness_bench.py`, committed blocks under `scripts/bench_data/`, root-level `tests/test_harness_bench.py`.
 
-## File Map
+The one idea: a gate reads the FILESYSTEM, never the model's account of it. `findings_count` counts non-empty `findings/*.md`; a dispatch claiming a write must show a tool call whose target now carries bytes. Measurement found 4B models asserting completed work over an empty directory 5/5.
 
-```
-fsm_llm_harness/
-├── harness.py          # HarnessAgent -- the driver. 6 state-entry handlers, the pre-step
-│                       #   gate, worker dispatch, the leash, Presentation Contracts,
-│                       #   state.md read/write, resume. (3,089 lines -- the biggest file)
-├── _atomic.py          # atomic_write_text -- the one fsync+os.replace primitive, moved out
-│                       #   of storage.py so tools.py can use it too without an import cycle
-│                       #   (storage.py imports PlanMemory from tools.py). A deliberate leaf:
-│                       #   imports nothing from storage.py or tools.py.
-├── artifacts.py        # Pydantic models + Markdown (de)serializers for 15 artifact kinds,
-│                       #   the 9 decision entry-type schemas and the 6 Presentation Contracts
-├── storage.py          # PlanDirectory: plan-id minting, atomic writes, LESSONS eviction,
-│                       #   SYSTEM cap, the 4-plan cross-plan sliding window, RunState
-├── plan_validator.py   # pre_step_gate() (4 slugs, ordered, short-circuit) + audit() (30 checks)
-├── tools.py            # Workspace (confined source tree) + PlanMemory (confined AND
-│                       #   ownership-scoped plan directory) + the 13 agent-facing tools
-├── roles.py            # RoleSpec x6, role prompt builders, build_default_worker_factory
-├── rules.py            # OWNERSHIP, ROLE_BY_STATE, per-state StateRules, EXPLORE_TOPICS
-├── fsm_definition.py   # build_harness_fsm() -- 6 states, 9 transitions, the JsonLogic gates
-├── constants.py        # HarnessStates, Role, ContextKeys, ArtifactNames, GateSlug,
-│                       #   Severity, PlanSchema, Defaults, DRIVER_OWNED_SEEDS
-├── hardening.py        # Small-model reply recovery: strip_model_noise, parse_json_payload,
-│                       #   parse_role_output, coerce_worker_output, retry
-├── exceptions.py       # HarnessError -> Artifact / Ownership / Reentrancy / Confinement
-├── __main__.py         # main_cli(): new / resume / status / validate / close, exit 0/1/2
-├── __version__.py      # Imports from fsm_llm.__version__
-└── __init__.py         # 118 public exports in one literal __all__
+## Architecture
+
+```mermaid
+stateDiagram-v2
+    [*] --> explore
+    explore --> plan: p10 HARD findings_count >= threshold
+    plan --> execute: p10 HARD plan_approved AND iteration < cap
+    plan --> explore: p200 needs_explore
+    execute --> reflect: p10 execute_complete
+    reflect --> close: p10 HARD close_confirmed AND all_criteria_pass
+    reflect --> execute: p200 HARD completion_fix AND fix_attempts < cap
+    reflect --> pivot: p400 needs_pivot
+    reflect --> explore: p600 needs_explore
+    pivot --> plan: p10 pivot_resolved
+    close --> [*]
 ```
 
-## The Protocol Graph (`fsm_definition.py`)
+- Lower `priority` wins (`TransitionEvaluator` confidence = `max(0.1, 1 - priority/1000)`); slots are >= 150 apart so two passing edges never fall inside the 0.1 ambiguity threshold. A gate decision must never reach the LLM classifier.
+- One `TransitionCondition` per edge with `requires_context_keys`, so a missing key BLOCKS the edge (fail closed). Operators only `>= < == and var`.
+- No state has `extraction_instructions` (the field is gone from `StateRules`): it would cost one extra bulk-extraction LLM call per turn (measured 2.000 -> 1.000 calls per turn).
+- Driver loop: `HarnessAgent.run` drives `converse("Continue.")`; handlers fire one worker dispatch per state entry (priority 100), a pre-step gate before EXECUTE (50), an extraction guard that reverts driver-owned keys the LLM wrote (5), start dispatch (10), end/error (200).
 
-6 states, 9 transitions. **Lower `priority` wins** (`TransitionEvaluator` derives
-confidence as `max(0.1, 1.0 - priority/1000)`), and slots are spaced >= 150 apart
-so two passing edges never fall inside the 0.1 ambiguity threshold -- a gate
-decision must never be routed to the LLM classifier.
+## Key files
 
-| Edge | Priority | Gate (JsonLogic) |
-|---|---|---|
-| EXPLORE -> PLAN | 10 | **HARD**: `findings_count >= threshold` |
-| PLAN -> EXECUTE | 10 | **HARD**: `plan_approved AND iteration < cap` |
-| PLAN -> EXPLORE | 200 | `needs_explore` |
-| EXECUTE -> REFLECT | 10 | `execute_complete` |
-| REFLECT -> CLOSE | 10 | **HARD**: `close_confirmed AND all_criteria_pass` |
-| REFLECT -> EXECUTE | 200 | **HARD**: `completion_fix AND fix_attempts < cap` |
-| REFLECT -> PIVOT | 400 | `needs_pivot` |
-| REFLECT -> EXPLORE | 600 | `needs_explore` |
-| PIVOT -> PLAN | 10 | `pivot_resolved` |
+| File | Role | Notes |
+| --- | --- | --- |
+| `harness.py` | `HarnessAgent(BaseAgent)`, `RoleRequest`, `Presentation`, `RevertDirective`, `derive_execute_target`, `_derive_prose_target`, `_plan_is_approvable` | 3,736 lines; state-entry handlers, leash, redispatch budgets, stall detector, state.md read/write, resume |
+| `fsm_definition.py` | `build_harness_fsm()` | graph shape + gate logic only; prose from `rules.py` |
+| `rules.py` | `OWNERSHIP` (16 artifacts), `ROLE_BY_STATE`, per-state `StateRules`, `EXPLORE_TOPICS` | protocol CONTENT |
+| `roles.py` | `ROLE_SPECS` (6 frozen `RoleSpec`), role prompt builders, output schemas, `build_default_worker_factory`, `_evidence_path` | |
+| `tools.py` | `Workspace`, `PlanMemory`, 13 agent tools, `has_bytes`, `gate_files`, `count_gate_files`, `derive_disk_counts`, `COMMAND_ALLOWLIST`, `VERIFICATION_COMMANDS` | single `resolve()` chokepoint |
+| `storage.py` | `PlanDirectory`, `mint_plan_id`, `evict_lessons`, `check_system_cap`, `apply_sliding_window`, `RunState` | `DRIVER_READ_MAX_BYTES = 4_000_000` |
+| `_atomic.py` | `atomic_write_text` (temp in target dir + fsync + `os.replace`) | leaf module to avoid a storage/tools import cycle |
+| `artifacts.py` | Pydantic models + Markdown (de)serializers for 15 artifact kinds, 9 decision entry schemas, 6 Presentation Contracts | isomorphic with the source protocol, not byte-identical |
+| `plan_validator.py` | `pre_step_gate`, `audit`, `CHECKS` (30), `GateResult`, `Issue` | |
+| `hardening.py` | `strip_model_noise`, `parse_json_payload`, `parse_role_output`, `coerce_worker_output`, `type_matches`, `as_int`, `retry`, `RETRYABLE_EXCEPTIONS` | all fail closed |
+| `constants.py` | `HarnessStates`, `Role`, `ContextKeys`, `GateSlug`, `Severity`, `HandlerPriorities`, `HandlerNames`, `ArtifactNames`, `PlanSchema`, `Defaults`, `DRIVER_OWNED_SEEDS` (16), `DRIVER_OWNED_UNSET` (5) | |
+| `exceptions.py` | `HarnessError` tree | |
+| `__main__.py` | `main_cli`: `new`, `resume`, `status`, `validate`, `close` | exit codes 0/1/2 |
+| `__init__.py` | 123 exports in one literal `__all__` | |
 
-Every condition declares `requires_context_keys`, so a garbled or missing worker
-reply leaves the edge **BLOCKED** rather than accidentally satisfied: the
-evaluator fails a condition whose key is absent before it evaluates the logic.
+## Public interface
 
-**No harness state carries `extraction_instructions`.** The field was deleted
-from `StateRules` outright, because `pipeline.py`'s additive bulk-extraction pass
-fires on `bool(state.extraction_instructions)` alone and costs one extra LLM call
-per turn. Measured live: 2.000 -> 1.000 core LLM calls per FSM turn.
+- `HarnessAgent(worker_factory=None, approval_callback=None, revert_callback=None, config=None, findings_threshold=3, max_fix_attempts=2, max_leash_grants=2, iteration_hard_cap=6, max_explore_redispatches=9, max_plan_redispatches=3, max_reflect_redispatches=3, max_close_denials=3, max_stall_turns=...)`; `run(goal, initial_context={ContextKeys.PLAN_DIR: ..., ContextKeys.WORKSPACE_ROOT: ...}) -> AgentResult`; properties `api`, `conversation_id`, `presentations`, `reverts`, `audit_issues`; `on_leash_cap(...)`.
+  - `worker_factory: Callable[[RoleRequest], AgentResult]`. `None` is a diagnostic mode: the FSM turns but no gate opens (expect a stall halt).
+  - `approval_callback` defaults to DENY (`_deny_approval`): an unattended run cannot approve its own plan or close itself.
+  - `revert_callback=None`: the `leash-cap` `RevertDirective` is still computed and reported (never scoped to the plan directory); only execution is left to a caller. `git` is not in `COMMAND_ALLOWLIST`, so the driver never shells out to it.
+  - One run per instance (`threading.Lock`); a worker re-entering `run`/`api`/`conversation_id` raises `HarnessReentrancyError`.
+- `build_default_worker_factory(workspace, ...)`: stock workers; `native_function_calling=True` by default (`fsm_llm_agents.NativeFunctionCallingReactAgent`); the ReAct alternative stalls under role-weight prompts. EXPLORE uses `AgentConfig.force_final_tool="write_plan_file"` (a forced final write turn issued by the model, not the driver). PLAN uses a `response_format` structured plan that the driver renders into the 11 sections.
+- `pre_step_gate(plan_dir, expected_state=...) -> GateResult(passed, slug, detail, exit_code)`: slugs in `GateSlug.ORDER` = `no-plan`, `wrong-state`, `leash-cap`, `iteration-cap`; first failure returns; every failure is HARD (`exit_code == 2`). Reads only `state.md` with plain `Path.read_text`, writes nothing (going through `PlanMemory` would `mkdir` the directory `no-plan` reports).
+- `audit(plan_dir, workspace_root=".") -> list[Issue]`: 30 checks, never raises for a finding (a raising check becomes an ERROR). Leash audit: 2 attempts legal, 3 WARNING, 4+ ERROR; iteration WARN at 5, ERROR at 6+.
+- `PlanDirectory(plan_dir, role=Role.ORCHESTRATOR)`, `PlanDirectory.create(parent)`: reads `read_text` (4 MB cap), `read_artifact`, `list_dir`, `exists`, `finding_path`, `checkpoint_path`, `load_run_state`; writes `write_text`, `append_text`, `write_artifact`, `save_run_state`; CLOSE policies `enforce_lessons_cap`, `enforce_system_cap`, `apply_sliding_window` (4-plan cross-plan window). `.path` is the plan dir, `.root` its parent (the confinement root).
+- `Workspace` tools: `read_file`, `write_file`, `append_file`, `delete_file`, `list_dir`, `path_exists`, `grep_files`, `run_command` (disabled by default; allowlist `cat grep head ls tail wc`; `VERIFICATION_COMMANDS` `git make mypy pytest ruff` is opt-in). `PlanMemory(plan_dir, role=...)` tools: `read_plan_file`, `write_plan_file`, `append_plan_file`, `list_plan_dir`, `plan_path_exists`; checks confinement AND `rules.OWNERSHIP`.
+- CLI: `fsm-llm-harness new GOAL [--plans-dir plans] [--create-only] [--model M] [--workspace .]`, `resume PLAN_DIR [--goal G] [--model M] [--workspace .]`, `status PLAN_DIR`, `validate PLAN_DIR [--workspace DIR]` (anchor scan only when given), `close PLAN_DIR [--workspace DIR] [--apply]`, `--version`. Model: `--model` > `$LLM_MODEL` > `Defaults.MODEL`. `--help` imports nothing from the package.
 
-## Key Classes
+## Data shapes
 
-### HarnessAgent (`harness.py`)
-
-The driver. A `fsm_llm_agents.BaseAgent` subclass that builds the harness FSM,
-registers handlers at 6 state entries plus a pre-step gate, and dispatches one
-worker per state entry.
-
-```python
-from fsm_llm_harness import HarnessAgent, ContextKeys
-
-agent = HarnessAgent(
-    worker_factory=my_worker,               # Callable[[RoleRequest], AgentResult]
-    approval_callback=lambda req: ...,      # defaults to a callback that DENIES
-    revert_callback=None,                   # None => compute the revert, execute nothing
-    findings_threshold=3,
-    max_fix_attempts=2,
-    max_leash_grants=2,
-    iteration_hard_cap=6,
-    max_explore_redispatches=9,
-)
-result = agent.run(
-    "add a retry to the uploader",
-    initial_context={ContextKeys.PLAN_DIR: "plans/plan-...", ContextKeys.WORKSPACE_ROOT: "."},
-)
-```
-
-- **Public surface**: `run()`, `api`, `conversation_id`, `presentations`,
-  `reverts`, `audit_issues`, `on_leash_cap`.
-- **`worker_factory=None` is a DIAGNOSTIC mode, not a way to run the protocol**:
-  the FSM still turns, but no gate ever opens because a gate flag records worker
-  or human evidence and there is no worker to produce any. Expect a stall halt.
-- **`approval_callback` defaults to DENY.** An unattended run cannot approve its
-  own plan or close itself.
-- **`revert_callback=None` is not a degraded mode**: the `leash-cap`
-  `RevertDirective` is always computed and scoped (never the plan directory) and
-  reported in the leash block; only its EXECUTION is deferred to a confirmed
-  caller. `git` is deliberately absent from `COMMAND_ALLOWLIST`, so the driver
-  never shells out to it.
-- **One run per instance**: `run()` takes a `threading.Lock`; a worker that
-  re-enters `run`/`api`/`conversation_id` gets `HarnessReentrancyError`.
-
-**Leash arithmetic.** Executor dispatches on ONE plan step are bounded by
-`max_fix_attempts * (1 + max_leash_grants)` = 6 for **any** sequence of
-approvals. The approval callback cannot raise it -- an earlier version reset
-`fix_attempts` on every grant and the leash was decorative.
-
-**Driver-owned context.** `constants.DRIVER_OWNED_SEEDS` seeds 16 driver-owned
-keys with falsy values before turn 1 -- the nine gate flags plus the counters and
-rollups -- and `DRIVER_OWNED_UNSET` names 5 more that must stay ABSENT. This is
-not tidiness: core's
-`_build_field_configs_from_state` mints a REQUIRED extraction config for every
-key named in a transition condition's `requires_context_keys`, so an unseeded
-gate key is a key the LLM is asked to invent every turn. Measured before the
-seeds existed: an LLM emitting `{"plan_approved": true, "close_confirmed": true}`
-drove a full traverse to CLOSE while every worker dispatch failed and a DENYING
-approval callback was never consulted.
-
-### PlanDirectory (`storage.py`)
-
-The driver's accessor for one plan directory. Composes `PlanMemory`, so it
-inherits confinement and ownership rather than restating them; what it adds is
-atomicity, the path layout and the three size policies.
-
-- `PlanDirectory(plan_dir, role=Role.ORCHESTRATOR)` / `PlanDirectory.create(parent)`
-- Reads: `read_text`, `read_artifact`, `list_dir`, `exists`, `finding_path`,
-  `checkpoint_path`, `load_run_state`
-- Writes: `write_text`, `append_text`, `write_artifact`, `save_run_state`
-- CLOSE policies: `enforce_lessons_cap`, `enforce_system_cap`, `apply_sliding_window`
-- Module functions: `mint_plan_id()`, `evict_lessons()`, `check_system_cap()`,
-  `apply_sliding_window()`
-- **`path` vs `root`**: `.path` is the plan directory; `.root` is its PARENT,
-  the confinement root `PlanMemory` was constructed with. Pass `.path` to
-  anything that expects a plan directory.
-
-**Atomicity is load-bearing, not belt-and-braces**: a torn `state.md` still
-PARSES, and a truncated Fix-Attempts section reads as a smaller
-`fix_attempt_count` -- i.e. a leash that resets itself on a crash. Writes go
-through `_atomic.atomic_write_text` (re-exported here as `_atomic_write_text`,
-which is what `tests/test_storage.py` still imports by that name) that creates
-its temp file in `target.parent` (`os.replace` is atomic only within one
-filesystem) and `os.replace`s it into position. `tools.PlanMemory.write_text`/
-`append_text` use the SAME primitive (plan-2026-09-12T135914-45a654de/D-009) --
-`_atomic.py` is a standalone leaf module for exactly this reason: `storage.py`
-imports `PlanMemory` from `tools.py`, so the primitive could not live in
-either module without a cycle.
-
-**Two read paths, on purpose.** `PlanMemory.read_text` -- the tool a ROLE calls
--- keeps a 64 KB cap, because that cap bounds what an untrusted worker can pull
-into an LLM context window. `PlanDirectory.read_text` -- the DRIVER's accessor,
-never handed to a worker -- reads directly with a separate
-`DRIVER_READ_MAX_BYTES` of 4 MB, because a real `decisions.md` outgrows 64 KB and
-the audit checks that matter most were going dark on the biggest artifact.
-
-**LESSONS is EVICTED, SYSTEM is REFUSED -- the caps are not symmetric.**
-`LESSONS.md` carries a protocol-defined eviction order (the `[I:N]` tag, 5
-protected) and is trimmed, but only for a section the parser can reproduce BYTE
-FOR BYTE from its own parse; anything else raises. `SYSTEM.md` carries no
-ordering and all six of its sections are required, so its cap is measured and an
-over-cap atlas is refused, never trimmed.
-
-### plan_validator (`plan_validator.py`)
-
-```python
-from fsm_llm_harness import pre_step_gate, audit
-
-gate = pre_step_gate("plans/plan-...")        # -> GateResult(passed, slug, detail, exit_code)
-issues = audit("plans/plan-...", workspace_root=".")   # -> list[Issue]
-```
-
-- **`pre_step_gate`** evaluates 4 slugs in `GateSlug.ORDER` -- `no-plan`,
-  `wrong-state`, `leash-cap`, `iteration-cap` -- and the FIRST failure returns.
-  Every failure is HARD (`exit_code == 2`). It reads exactly one file,
-  `state.md`, with a plain `Path.read_text` and writes nothing: routing it
-  through `PlanMemory` would `mkdir` the very directory whose absence `no-plan`
-  exists to report.
-- **`audit`** runs 30 checks (`CHECKS`) and NEVER raises for a finding -- a check
-  that raises is itself reported as an ERROR, so one unreadable artifact cannot
-  suppress the others.
-- The two-tier leash thresholds are deliberately NOT the gate thresholds: 2
-  attempts is legal, 3 is a WARNING (the gate was passed), 4+ is an ERROR.
-  Iteration: WARN at 5, ERROR at 6+.
-
-`CHECKS` (30): `anchor-badprefix`, `anchor-orphan`, `anchor-refs-missing`,
-`anchor-refs-stale`, `anchor-unqualified`, `atlas-absent`, `atlas-cap`,
-`changelog-dref-orphan`, `changelog-malformed`, `checkpoints`, `complexity`,
-`compress-markers`, `decisions-schema`, `evidence`, `findings`,
-`findings-index`, `findings-topic`, `iteration`, `leash`, `lessons-absent`,
-`lessons-cap`, `lessons-eviction`, `ownership`, `plan`, `plan-section`,
-`preamble-mismatch`, `preamble-missing`, `progress`, `state`, `verdict`.
-
-### Workspace / PlanMemory (`tools.py`)
-
-Two confined roots, two vocabularies, ONE `resolve()` chokepoint.
-
-| | `Workspace` | `PlanMemory` |
-|---|---|---|
-| Root | the source tree being edited | one plan directory |
-| Checks | confinement | confinement **+** `rules.OWNERSHIP` |
-| Tools | `read_file`, `write_file`, `append_file`, `delete_file`, `list_dir`, `path_exists`, `grep_files`, `run_command` | `read_plan_file`, `write_plan_file`, `append_plan_file`, `list_plan_dir`, `plan_path_exists` |
-
-- **RESOLVE FIRST, COMPARE SECOND.** A model-emitted sentinel-prefixed absolute
-  path (`/workspace/uploader.py`) is rewritten to root-relative BEFORE the
-  unchanged resolve-and-compare. `/etc/passwd`, `../outside.txt`,
-  `a/../../outside.txt`, symlink escapes and the shared-prefix `ws-evil` case all
-  still raise `HarnessConfinementError` (16 escape shapes pinned, and a 43-case
-  attack found zero escapes).
-- The sentinel LISTS are split (`_WORKSPACE_SENTINELS` vs `_PLAN_SENTINELS`) --
-  a shared list let `Workspace.resolve("/plan/findings/x.md")` write protocol
-  memory into the user's source tree, confined but into the wrong root.
-- `run_command` is **disabled by default**; `COMMAND_ALLOWLIST` is
-  `cat grep head ls tail wc` and `git` is deliberately not in it (it executes
-  repo-local hooks, aliases and pagers). `VERIFICATION_COMMANDS`
-  (`git make mypy pytest ruff`) is a NAMED set a caller may opt into, not a
-  default.
-- Caps: `MAX_READ_BYTES` 64 KB, `MAX_OUTPUT_BYTES` 8 KB, `MAX_LIST_ENTRIES` 200,
-  `MAX_GREP_HITS` 50.
-- **Corrective tool feedback, never re-routing.** A FAILED cross-root call is
-  ANNOTATED with the counterpart tool's name ("that path belongs to the plan
-  directory: use `write_plan_file`"); a FAILED `read_plan_file` on a
-  not-yet-existing protocol artifact is annotated with "`write_plan_file`
-  creates the file, and any missing folder, in one call". Neither converts a
-  failure into a success, and a failed WRITE is never told "write it" -- that
-  would make an ownership refusal read as encouragement.
-- Disk-derived gate values: `gate_files`, `count_gate_files`, `has_bytes`,
-  `derive_disk_counts`, `DISK_DERIVED_COUNTS`. The gate value, the number the
-  model is told, and the re-dispatch loop's condition are one derivation by
-  construction.
-
-### Roles (`roles.py`)
-
-Six frozen `RoleSpec`s, one per state, all derived from `rules.OWNERSHIP` so tool
-scope, prompt text and `owned_artifacts` are the same fact read three times.
+- Roles (`ROLE_SPECS`):
 
 | State | Role | Owns | Loop budget | Writable gate keys |
-|---|---|---|---|---|
-| EXPLORE | `explorer` | `findings/` | 14 | `findings_count`, `needs_explore` |
-| PLAN | `plan-writer` | `plan.md`, `decisions.md`, `verification.md` | 10 | `needs_explore`, `total_steps` |
-| EXECUTE | `executor` | `decisions.md`, `changelog.md`, `checkpoints/` | 14 | *(none -- `summary` is schema-visible only)* |
-| REFLECT | `verifier` | *(nothing)* | 12 | `all_criteria_pass`, `needs_pivot`, `completion_fix`, `needs_explore`, `criteria_pass_count`, `criteria_total` |
-| PIVOT | `reviewer` | `findings/` | 10 | `pivot_resolved`, `pivot_reason` |
-| CLOSE | `archivist` | `decisions.md`, `summary.md` + all 6 cross-plan files | 10 | `halt_reason` |
+| --- | --- | --- | --- | --- |
+| explore | `explorer` | `findings/` | 14 | `findings_count`, `needs_explore` |
+| plan | `plan-writer` | `plan.md`, `decisions.md`, `verification.md` | 10 | `needs_explore`, `total_steps` |
+| execute | `executor` | `decisions.md`, `changelog.md`, `checkpoints/` | 14 | none |
+| reflect | `verifier` | nothing (read-only + `run_command`) | 12 | `all_criteria_pass`, `needs_pivot`, `completion_fix`, `needs_explore`, `criteria_pass_count`, `criteria_total` |
+| pivot | `reviewer` | `findings/` | 10 | `pivot_resolved`, `pivot_reason` |
+| close | `archivist` | `decisions.md`, `summary.md`, `FINDINGS.md`, `DECISIONS.md`, `LESSONS.md`, `LESSONS-archive.md`, `SYSTEM.md`, `INDEX.md` | 10 | `halt_reason` |
 
-The verifier owns nothing on purpose: a verifier RETURNS results. The intended
-counterpart -- the driver merging those results into `verification.md` -- does
-NOT exist yet: no driver code writes `verification.md` after PLAN, and the
-response_format plan render does not seed it either (rules.py:438), so on the
-current configuration nothing populates `verification.md` at all. This is the
-named REFLECT plumbing gap (B8, plan-032ae337 D-002).
+- Artifacts per plan: `state.md`, `plan.md`, `decisions.md`, `findings.md`, `findings/`, `progress.md`, `verification.md`, `changelog.md`, `summary.md`, `checkpoints/`. Cross-plan (parent dir): `FINDINGS.md`, `DECISIONS.md`, `LESSONS.md` (+ `LESSONS-archive.md`), `SYSTEM.md`, `INDEX.md`.
+- Grammars the validator relies on: `plan.md` 11 `##` sections in exact order (`PlanSchema.SECTIONS`); `decisions.md` header `## D-NNN | PHASE | YYYY-MM-DD`, a `**Trade-off**:` field containing `at the cost of`, 9 entry-type field sets (`DECISION_ENTRY_SCHEMAS`); `verification.md` criteria table + 3 `MANDATORY_ADDITIONAL_CHECKS` rows + 5-bullet verdict (`VERDICT_BULLETS`) + a `VERDICT_RECOMMENDATIONS` value + evidence rules (`evidence_is_acceptable`, `REJECTED_EVIDENCE`); `changelog.md` 8 pipe-delimited regex-checked fields (`parse_changelog_line`).
+- Presentation Contracts (`PRESENTATION_CONTRACTS`): `PC-EXPLORE`, `PC-PLAN`, `PC-EXECUTE-STEP`, `PC-EXECUTE-LEASH`, `PC-REFLECT`, `PC-PIVOT`; checked by `missing_floor_fields`.
+- Halt slugs beyond the gate four: `explore-cap`, `plan-cap`, `reflect-cap`, `close-cap` (one per bounded redispatch budget).
+- Context keys: gate flags (`findings_count`, `plan_approved`, `iteration`, `close_confirmed`, `all_criteria_pass`, `fix_attempts`, `leash_grants`, `needs_explore`, `needs_pivot`, `completion_fix`, `execute_complete`, `pivot_resolved`), counters (`step_number`, `total_steps`, `criteria_pass_count`, `criteria_total`), driver state (`current_role`, `current_role_result`, `role_results`, `dispatch_ledger`, `pivot_reason`, `last_gate_slug`, `halt_reason`), inputs `goal`, `plan_dir`, `workspace_root`.
+- `Defaults`: `TEMPERATURE 0.3`, `MAX_TOKENS 2000`, `MAX_TURNS 60`, `TIMEOUT_SECONDS 1800`, `LLM_TIMEOUT_SECONDS 120`, retry 3 attempts (1 s base, 30 s max, x2), `FINDINGS_THRESHOLD 3`, `MAX_EXPLORE_REDISPATCHES 9`, `MAX_PLAN_REDISPATCHES 3`, `MAX_REFLECT_REDISPATCHES 3`, `MAX_CLOSE_DENIALS 3` (the last two are unmeasured placeholders), `MAX_FIX_ATTEMPTS 2`, `MAX_LEASH_GRANTS 2`, `ITERATION_HARD_CAP 6`, `LESSONS_LINE_CAP 200`, `SYSTEM_LINE_CAP 300`, `DECISIONS_COMPRESS_LINES 300`.
 
-**Prompt placement is a MEASURED result, not a preference.** `build_role_prompt`
-is three filters over one ordered block list:
-`build_role_system_prompt` returns the STANDING blocks (identity, exit gate,
-operative rules, held tools, write scope, stop rule, reply shape),
-`build_role_task_prompt` returns the per-dispatch blocks (goal, position, context
-snapshot, assigned topic), and `build_role_prompt` returns all of them in the
-original order, byte-identical to before the split. On `:4b`, EXECUTE, n=5 per
-arm with workspace bytes stat'd: whole prompt in the user turn wrote 0/5;
-deleting the entire rules block reached 2/5; moving the standing half to the
-SYSTEM message reached 4/5. Nothing was deleted or softened -- every byte the
-model was told before, it is still told.
+## Invariants and constraints
 
-**Every role schema carries `message: str`.** Without it, core's
-`_parse_response_generation_response` replaces any brace-wrapped reply lacking a
-`message` key with `_GENERIC_FALLBACK_MESSAGE`, and a schema-constrained role
-reply is structurally guaranteed to be exactly that shape. Supplying the key
-makes core's EXISTING rescue fire two rungs earlier; the terminal guard is NOT
-weakened. `message` and `summary` are schema-visible, absent from
-`_WORKER_WRITABLE`, dropped by `coerce_worker_output`, and not required by
-`parse_role_output`.
+- Leash: executor dispatches on one plan step are bounded by `max_fix_attempts * (1 + max_leash_grants)` = 6 for ANY approval sequence. An approving callback cannot reset `fix_attempts`.
+- Driver-owned context: `DRIVER_OWNED_SEEDS` seeds 16 keys falsy before turn 1 and `DRIVER_OWNED_UNSET` keeps 5 absent. Core mints a required extraction config for every key in a condition's `requires_context_keys`, so an unseeded gate key is one the LLM is asked to invent each turn (measured: an LLM emitting `{"plan_approved": true, "close_confirmed": true}` once drove a full traverse past a DENYING callback). The extraction guard reverts any LLM write to these keys.
+- Disk-derived gates: `derive_disk_counts` is the single derivation for the gate value, the number shown to the model, and the redispatch loop condition. Verified writes are labelled through the same `resolve()` that verified the bytes (`_evidence_path`).
+- Budgets: each of EXPLORE, PLAN, REFLECT, and denied CLOSE approvals has a bounded redispatch budget that halts on its honest slug; do not mint a generic `STALL` slug. `_plan_is_approvable` (valid `PlanDoc` AND every section non-placeholder) is shared by the PLAN budget check and the approval stub.
+- Confinement: resolve first, compare second. Sentinel-prefixed absolute paths (`/workspace/...`, `/plan/...`, bare `/workspace` and `/plan`) are rewritten to root-relative before the unchanged resolve-and-compare; `/` alone, `/etc/passwd`, `..` escapes, symlink escapes, and shared-prefix siblings raise `HarnessConfinementError`. Sentinel lists are separate per root (`_WORKSPACE_SENTINELS`, `_PLAN_SENTINELS`).
+- Tool caps: `MAX_READ_BYTES` 64 KB (role reads), `MAX_OUTPUT_BYTES` 8 KB, `MAX_LIST_ENTRIES` 200, `MAX_GREP_HITS` 50. The driver's own reads use `DRIVER_READ_MAX_BYTES` 4 MB and are never handed to a worker.
+- Corrective feedback never re-routes: a failed cross-root call is annotated with the counterpart tool name; a failed read of a missing protocol artifact is told `write_plan_file` creates it; a failed WRITE is never told to write.
+- All writes are atomic (`_atomic.atomic_write_text`): a torn `state.md` still parses and would shrink the recorded fix-attempt count, silently resetting the leash.
+- LESSONS is evicted (by `[I:N]` tag, 5 protected, only for sections the parser reproduces byte for byte); SYSTEM is refused over cap, never trimmed.
+- Every role output schema carries `message: str` so core's structured-reply rescue fires instead of the generic fallback; `message`/`summary` are dropped by `coerce_worker_output` and not required by `parse_role_output`.
+- Role prompts: standing blocks go in the SYSTEM message (`build_role_system_prompt`), per-dispatch blocks in the user turn (`build_role_task_prompt`); `build_role_prompt` returns both in the original order. Measured on `:4b` EXECUTE: whole prompt in the user turn 0/5 writes, standing half in SYSTEM 4/5.
+- `OWNERSHIP` quirks that are intended: `findings/` is `(EXPLORER, REVIEWER)`; `decisions.md` has four owners (disjoint, phase-tagged appends).
+- Known plumbing gap: nothing writes `verification.md` after PLAN (the verifier holds no write tool for it and no driver merge exists), so on the current configuration the CLOSE approval path cannot open.
 
-**`build_default_worker_factory(workspace, ...)`** builds the stock worker.
-`native_function_calling=True` is the default: roles are backed by
-`NativeFunctionCallingReactAgent`, which issues provider-native `tool_calls`.
-The shipped ReAct alternative collapses under role-weight prompts -- measured
-`Stall detected: 3 consecutive iterations with no tool selected`, zero tool
-calls -- so every live number this package carries was taken on the native arm.
+## Dependencies
 
-### hardening (`hardening.py`)
+- `fsm_llm`: `API`, `HandlerTiming`, `TransitionEvaluator` semantics, `DEFAULT_LLM_MODEL`, `FSMError`, logging.
+- `fsm_llm_agents`: `BaseAgent`, `AgentConfig` (`force_final_tool`), `AgentResult`, `ToolRegistry`, `NativeFunctionCallingReactAgent`, `ReactAgent`.
+- pydantic v2 for artifacts and role schemas; stdlib `subprocess` for `run_command`.
 
-Small-model reply recovery, all fail-CLOSED.
+## Failure modes
 
-- `strip_model_noise(text)` -- removes `<think>` blocks and fences.
-- `parse_json_payload(text)` -- prefers the cleaned text, retries the RAW text
-  when the cleaned text yields no object (so a payload that lives only inside a
-  `<think>` block is still recovered; a real payload outside always outranks it).
-- `parse_role_output(...) -> RoleOutput` -- required keys, never `message`/`summary`.
-- `coerce_worker_output(...)` -- exact-type filter down to the state's writable keys.
-- `type_matches`, `as_int`, `retry` (strict allowlist: a garbled reply is NOT
-  retried, it fails closed), `RETRYABLE_EXCEPTIONS`.
+- `HarnessError(FSMError)` -> `HarnessArtifactError(artifact, message, cause=None)` (unreadable, unparseable, over cap), `HarnessOwnershipError(artifact, role, owner)`, `HarnessReentrancyError(role)`, `HarnessConfinementError(path, root)`.
+- Garbled worker reply: `parse_role_output` fails closed, the gate key stays falsy, the edge stays BLOCKED; `retry` only retries `RETRYABLE_EXCEPTIONS`, never a garbled reply.
+- CLI exit codes: `0` pass; `1` negative answer or no answer (audit ERROR, failed run, missing goal, broken install, argparse error); `2` RESERVED for a HARD `pre_step_gate` refusal. `_Parser.error()` exits 1 so a wrapper retrying on "usage error" cannot retry past `leash-cap`. `status` calls the gate twice (defaults first, then with `expected_state` from `state.md`). `close` is dry-run without `--apply` and refuses to compress when `audit()` has ERRORs.
 
-**Two pinned-not-endorsed behaviours** (documented in their tests): a payload
-whose own STRING VALUE contains `<think>` or a fence comes back with that value
-blanked; and `parse_json_payload`'s raw-text retry means a `<think>`-wrapped
-draft can win when nothing else parses. Both are currently harmless; neither is
-a guarantee.
+## Status (measured on `ollama_chat/qwen3.5:4b`, digest `2a654d98e6fb`)
 
-## Artifacts (`artifacts.py`)
+- L1 full traverse with scripted workers, zero audit ERRORs: 3/3. L2 leash halts at exactly 2, not resettable by approval: 6/6. L3 REFLECT -> PIVOT -> PLAN: 3/3.
+- L4 EXECUTE write with real workers: write tool 5/5, bytes 5/5, strict content-hash 4/5 (bar >= 4/5, MET) after the driver-assigned EXECUTE target fix (bench `l4-execute-write` B0 2/40 -> B1 40/40, Fisher p=1.6e-20). The content-match metric shares vocabulary with the fix prompt; `content_matched_ast` is the decoupled successor. L5 >= 3 findings on disk: 5/5.
+- L6 end-to-end with real workers (n=3 per block, frozen floor: reached >= EXECUTE AND verified workspace write AND honest halt): NOT MET in all nine blocks B0-B8. Walls cleared one state at a time: EXPLORE never-called-a-write-tool (forced final write; L8 `l8-explore-loop` gate 0/10 -> 9/10, p=0.00012), PLAN empty/invalid/undistributed plan (`response_format` structured plan rendered by the driver), EXECUTE target assignment (prose fallback `_derive_prose_target`), EXECUTE credit labels (`_evidence_path`), honest-halt bookkeeping (`reflect-cap`, `close-cap`). B8: 2/3 runs cleared the per-run conjunction for the first time, zero slugless stalls; run 2 halted honestly on `plan-cap`. The next wall is the `verification.md` plumbing gap above.
+- Not claimed: production readiness, or that a 4B model drives the harness unattended to a useful result.
+- Bench protocol: pre-registered fixed-n blocks, 6-field manifests, append-only raw jsonl, Wilson CI and Fisher exact, per-row seeds; blocks are immutable once committed.
 
-15 artifact kinds with pydantic models and Markdown (de)serializers. **Aim is
-isomorphism with the source protocol's format -- same section names, same order,
-same strict grammars -- not byte-identical Markdown.**
+## Working here
 
-Per-plan: `state.md`, `plan.md`, `decisions.md`, `findings.md`, `findings/`,
-`progress.md`, `verification.md`, `changelog.md`, `summary.md`, `checkpoints/`.
-Cross-plan: `FINDINGS.md`, `DECISIONS.md`, `LESSONS.md`, `SYSTEM.md`, `INDEX.md`.
-
-Strict grammars the validator leans on:
-- `plan.md`: 11 `##` sections in exact order (`PlanSchema.SECTIONS`), positional.
-- `decisions.md`: `## D-NNN | PHASE | YYYY-MM-DD` header, a `**Trade-off**:`
-  field containing `at the cost of`, and 9 entry-type field sets
-  (`DECISION_ENTRY_SCHEMAS`).
-- `verification.md`: a criteria table, 3 mandatory additional-check rows
-  (`MANDATORY_ADDITIONAL_CHECKS`), a 5-bullet verdict (`VERDICT_BULLETS`), a
-  recommendation from `VERDICT_RECOMMENDATIONS`, and evidence-shape rules
-  (`evidence_is_acceptable` / `REJECTED_EVIDENCE`).
-- `changelog.md`: 8 pipe-delimited fields, each regex-validated
-  (`parse_changelog_line`).
-
-`PRESENTATION_CONTRACTS` carries the 6 contracts (`PC-EXPLORE`, `PC-PLAN`,
-`PC-EXECUTE-STEP`, `PC-EXECUTE-LEASH`, `PC-REFLECT`, `PC-PIVOT`) as
-required-field / floor data, checked by `missing_floor_fields`.
-
-## Ownership Model (`rules.OWNERSHIP`)
-
-16 artifacts -> the roles permitted to WRITE them. `PlanMemory.authorise` reads
-this table directly, so an edit here changes what a live role can write.
-
-Two entries look like transcription slips and are not:
-1. `findings/` is `(EXPLORER, REVIEWER)` -- PIVOT's operative rules order the
-   reviewer to correct stale findings in place, so removing REVIEWER would order
-   a role to write a file it holds no tool for.
-2. `decisions.md` has FOUR owners -- the writes are disjoint and sequenced by the
-   driver (one appended entry per phase), and the `## D-NNN | PHASE | date`
-   header records which phase wrote each one.
-
-## CLI (`__main__.py`)
-
-```bash
-fsm-llm-harness new "add a retry to the uploader"        # mint + drive
-fsm-llm-harness new "..." --create-only                  # mint + seed, no LLM call
-fsm-llm-harness resume plans/plan-2026-07-22T101500-1a2b3c4d
-fsm-llm-harness status   plans/plan-...
-fsm-llm-harness validate plans/plan-... [--workspace .]
-fsm-llm-harness close    plans/plan-... [--apply]
-```
-
-**Exit codes -- exactly three, and the third is a contract.**
-
-| Code | Meaning |
-|---|---|
-| `0` | pass |
-| `1` | a negative answer, or no answer: an `audit()` ERROR, a failed run, a missing goal, a broken install |
-| `2` | **RESERVED**: a HARD `pre_step_gate` refusal |
-
-Because `2` is reserved, a `_Parser` subclass overrides `argparse`'s `error()` to
-exit `1` instead of argparse's conventional `2` -- so `fsm-llm-harness --nope`
-reports 1 where `ls --nope` reports 2. The reason is asymmetric risk: a wrapper
-that retries on "usage error" would otherwise silently retry past a `leash-cap`.
-`--help` and `--version` are untouched and exit 0.
-
-`status` calls the gate TWICE on purpose: once with the defaults (which is what
-answers `no-plan` without constructing a `PlanDirectory`, whose `PlanMemory`
-would `mkdir` the directory), then again with `expected_state` read back from
-`state.md`, so a healthy plan sitting in EXPLORE is not reported `wrong-state`.
-
-`close` opens the directory as `Role.ARCHIVIST` (the CLOSE policies act on
-archivist-owned cross-plan files), is DRY-RUN unless `--apply` is passed, and
-REFUSES to compress at all when `audit()` finds ERROR-severity issues.
-
-Model resolution: `--model` > `$LLM_MODEL` > `Defaults.MODEL`.
-
-## Testing
-
-```bash
-pytest tests/test_fsm_llm_harness/          # 1,981 tests, 10 test files
-```
-
-| File | Tests |
-|---|---|
-| `test_roles_and_tools.py` | 483 |
-| `test_harness_agent.py` | 353 |
-| `test_artifacts.py` | 273 |
-| `test_hardening.py` | 258 |
-| `test_plan_validator.py` | 191 |
-| `test_cli.py` | 103 |
-| `test_storage.py` | 115 |
-| `test_fsm_definition.py` | 87 |
-| `test_live_ollama.py` | 94 (17 live, gated off by default) |
-| `test_extraction_cost.py` | 24 |
-
-**Live tests are DOUBLE-gated** and auto-skip: they need both
-`FSM_LLM_HARNESS_LIVE=1` and a reachable Ollama, with the env term checked FIRST
-so `make test` never pays a socket timeout at collection.
-
-```bash
-FSM_LLM_HARNESS_LIVE=1 pytest tests/test_fsm_llm_harness/test_live_ollama.py
-```
-
-The live file splits FIDELITY by what each criterion is a claim about. L1/L2/L3
-are claims about the HARNESS (an audit verdict, a counter, an FSM edge), so the
-FSM runs live while the role workers are SCRIPTED -- they still write REAL
-artifacts through a role-scoped `PlanMemory`, so `OWNERSHIP` authorises them
-exactly as it would a live role. L4/L5 are claims about the MODEL, so they run
-the real `build_default_worker_factory` and report raw k/n. Running everything
-end-to-end would make L2 unfalsifiable: "the leash halted at exactly 2" only
-means something when the executor is GUARANTEED to fail.
-
-## Status -- what is measured, and what is not
-
-Measured live on `ollama_chat/qwen3.5:4b` (digest `2a654d98e6fb`). Small n is
-stated as k/n, not as a rate, and the bars are the ones the plans set in
-advance. The two model-level rows (L4/L5) were re-measured ONCE after the
-driver-assigned EXECUTE target fix, bars and assertions byte-untouched
-(`MODEL_BAR=4` / `RUNS_MODEL=5`).
-
-| Criterion | Bar | Measured |
-|---|---|---|
-| L1 full EXPLORE->CLOSE traverse, `audit()` zero ERRORs | pass | **3/3** |
-| L2 leash halts at exactly 2 fix attempts, not resettable by an approving callback | pass | **6/6** |
-| L3 REFLECT -> PIVOT -> PLAN loop-back completes | pass | **3/3** |
-| L4 write tool issued AND workspace bytes on disk | >= 4/5 | **5/5 issued, 5/5 bytes -- MET** |
-| L4 strict sha256 content-hash match of the requested edit | >= 4/5 | **4/5 -- MET** (react control 0/5) |
-| L5 >= 3 distinct non-empty `findings/*.md` on disk from dispatches | >= 4/5 | **5/5 -- met** |
-| L6 B0 end-to-end REAL workers: 3/3 runs reach >= EXECUTE, >= 1 verified write, honest halt | 3/3 | **0/3 -- NOT MET** (2 explore-cap, 1 slugless PLAN stall) |
-| L6 B1, same >= EXECUTE / honest-halt clauses, verified-write TIGHTENED to EXECUTE-state workspace write | 3/3 | **0/3 -- NOT MET** (3/3 furthest=explore, slug=explore-cap, honest; zero slugless stalls) |
-| L6 B2, same floor, forced-write fix live (floor sha256-identical to B1) | 3/3 | **0/3 -- NOT MET at floor, but all 3/3 now reach PLAN** (EXPLORE blocker FIXED; new PLAN-writer blocker) |
-| L6 B3, same floor, scaffold+honest-approval fix live (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor** (S2 slugless-stall FIXED: 3/3 honest plan-cap; plan-writer now writes 15-18KB; but scaffold+append refuted -- content doesn't distribute into sections) |
-| L6 B4, same floor, response_format PLAN dispatch (floor sha256-identical) | 3/3 | **0/3 -- CONFOUNDED** (could-not-succeed: valid structured_output but renderer gated on `result.success`, discarded the plan; fixed by D-002) |
-| L6 B5, same floor, PLAN gate keys on rendered-disk-content (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor**, but run 1 FIRST-EVER to clear PLAN and reach REFLECT on a valid 11-section plan.md; missed verified_write (S4a) + honest_halt (S4b) |
-| L6 B6, same floor, S4a existence-gated prose EXECUTE target (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor**; run 2 reached REFLECT, target ASSIGNED from prose (`assigned-prose`/uploader.py -- B5 `no-target-token` FALSIFIED, model wrote uploader.py), but verified_write still False (credit-layer wall, S5); runs 1/3 explore-cap |
-| L6 B7, same floor, S5 label-normalization fix + S4b reflect-cap budget (floor sha256-identical) | 3/3 | **0/3 -- NOT MET at floor, honest**; run 1 explore-cap (S4c); runs 2/3 BOTH reached EXECUTE and BOTH `verified_write=true` (exact normalized label `workspace:uploader.py` -- first lineage rows with ANY true); honest_halt false on both: run 2 gap (α) bench-allowlist lag on `reflect-cap`, run 3 gap (β) denied-CLOSE slugless stall |
-| L6 B8, same floor, β close-cap budget + α honest-set grading extension (floor sha256-identical) | 3/3 | **2/3 -- 3/3 bar NOT MET, honest miss**; runs 1/3 the FIRST lineage rows to clear the full per-run conjunction (`>=EXECUTE` + `verified_write` + `honest_halt`): run 1 `close-cap` after 4 denied `confirm_close` + 1+3 REFLECT dispatches (β live-validated), run 3 `reflect-cap` (α grades it honest); run 2 honest `plan-cap` (plan-writer empty-reply x4); ZERO slugless stalls; verification.md never written in any run (REFLECT has no write path to it -- plumbing gap, D-002) |
-
-This is the first time L4 has MET the standing bar. (The strict row's in-test
-assertion is existential -- >= 1 content-matched dispatch across both arms,
-measured 4/10; the native arm's 4/5 also clears the >= 4/5 `MODEL_BAR` reading,
-which is the bar reported here.)
-
-**What moved L4: a measured structural fix, not prompt wording.** A durable
-bench now exists -- `scripts/harness_bench.py`, with blocks committed under
-`scripts/bench_data/l4-execute-write/{B0,B1}` (n=40/arm, 6-field manifests +
-raw jsonl rows; `seed` is honored by ollama for `:4b` -- probe committed under
-`scripts/bench_data/seed-probe/` -- and per-row seeds are recorded). B0
-measured the wrong-ROOT defect: native EXECUTE dispatches content-matched the
-requested edit **2/40**. The fix extends the driver-assigned-target pattern to
-EXECUTE: the driver reads plan.md's Files To Modify and names the exact target
-path + tool in the dispatch. B1, same manifest: **40/40** (Fisher p=1.6e-20).
-The ReAct control arm measured 0/40 in both blocks -- its failure mode is
-upstream of target selection. Caveat: the content-match/content-hash metric
-shares vocabulary with the fix's own prompt text ("retry"/"backoff" appear in
-the task prose) -- treat a PASS as target-selection compliance, not proven
-code correctness; `content_matched_ast` (AST-structural, vocabulary-decoupled,
-additive) exists for future blocks.
-
-**L6 is the open one, and it is reported as it measured -- twice.**
-`TestL6EndToEndRealWorkers` is the package's first graded end-to-end criterion
-on REAL role workers (n=3 per block, disk-derived rubric vectors, DENY-default
-disk-bound approval stub). Block B0 (frozen under
-`scripts/bench_data/l6-e2e/B0/`) measured **0/3, NOT MET**: two honest
-explore-cap halts, and one run that reached PLAN and stalled SLUGLESSLY after
-an empty plan-writer reply -- B0's verified-write clause held 3/3, but it
-scored True off EXPLORE findings writes alone, so it was near-vacuous. Both
-defects were fixed structurally (PLAN redispatch budget with exhaustion
-halting on the honest `plan-cap` slug; driver-named `plan.md` deliverable
-line) and block B1 was pre-registered with the verified-write clause
-TIGHTENED to require an EXECUTE-state WORKSPACE write -- `>= EXECUTE` and
-honest-halt clauses byte-identical to B0's, n=3, same model digest. B1
-measured **0/3, NOT MET**, in a different and cleaner shape: every run
-`furthest_state=explore`, `halt_slug=explore-cap`, `honest_halt=true` (wall
-clocks 344.6/298.5/357.9 s vs the 1800 s ceiling; findings on disk 0/0/2).
-Zero slugless stalls in B1's rows. Scope that claim precisely: the
-redispatch budget covers worker-failure replies ONLY -- it retries when
-`result is None or not result.success` and halts on `plan-cap` when spent
--- so the B0 worker-failure stall shape is structurally closed. The residual
-`success=True`-but-empty-plan.md slugless PLAN stall (a reply that skipped the
-budget, fell through to approval, and stalled slug=None on the denial) is NOW
-closed too, this iteration (D-005): a disk-derived empty-`plan.md` check
-(`_plan_has_content`, `tools.has_bytes` over the driver's own uncapped reader)
-folded into the SAME budget condition consumes the budget for that shape, so
-exhaustion halts on the honest `plan-cap` slug rather than slug=None -- no
-generic `STALL` slug was minted (predecessor D-003 respected). Offline-verified,
-still live-unexercised. No B1 run reached PLAN, so the redispatch budget and deliverable line
-are offline-verified (unit-proven) but live-unexercised, and the tightened
-verified-write clause measured false 3/3 because nothing reached EXECUTE.
-The end-to-end blocker was probed by a dedicated L7 A/B
-(`l7-explore-coldstart/B0`, committed under `scripts/bench_data/`): a SINGLE
-cold-start EXPLORE dispatch over a bare `mkdir` scored **bare 5/12 vs seeded
-7/12** (Fisher two-sided p=0.6843 -- the zero-byte protocol-skeleton cold-start
-lever is **NOT VALIDATED**; a positive-but-non-significant delta). What this
-measures precisely: a single first EXPLORE dispatch over a bare dir is NOT
-impossible (5/12), so first-dispatch impossibility is ruled out as the
-mechanism. It does NOT measure the multi-dispatch traverse -- all 24 L7 rows
-carry `assigned_topic="problem-scope"` (one topic, one dispatch, no redispatch
-loop), and one dispatch's `bytes_on_disk` success is NOT the same event as
-clearing the EXPLORE 3-findings gate, so the 5/12-vs-0/3 magnitudes are not
-directly comparable. The LEADING SUCCESSOR HYPOTHESIS -- consistent with, but
-not established by, this block -- is that L6's 0/3 is a multi-dispatch
-redispatch-loop / structured-output-parse (`objects=0`, `empty-reply`)
-failure rather than a first-dispatch one; that mechanism remains UNMEASURED.
-(The seeded arm's `empty-reply` count shifted 1->3, but at n=12 that is
-within noise and is not read as a signal; the NOT-VALIDATED verdict rests on
-the primary p=0.6843 alone.) L6's honest 0/3, every row naming its blocking
-state and slug, was the package's end-to-end status through that iteration
-(see the B8 paragraph below for the current one).
-
-**L8 (`l8-explore-loop/B0`, NEW this iteration) MEASURES the traverse mechanism
-the L7 hypothesis only pointed to -- and REFUTES parse-collapse as the primary
-driver.** The named successor -- a single-state EXPLORE redispatch-LOOP bench
-(not L7's single dispatch) instrumented with a per-tool-call spy on
-`ToolRegistry.execute` -- has now been built and RUN once (n=10 loops, 100
-dispatches, `ollama_chat/qwen3.5:4b` digest `2a654d98e6fb`, one look, committed
-under `scripts/bench_data/l8-explore-loop/B0/` with a tracked `PRE_REGISTRATION.md`
-fixing n + the mechanism vocabulary + the W1->W2 decision rule before the run).
-A deterministic classifier partitioned every FAILED dispatch into exactly one
-of six buckets (partition hard-gate passed). Pooled result: `gate_cleared`
-**0/10** (Wilson95 [0.000, 0.278] -- no run reached PLAN, consistent with L6),
-and of 89 failed dispatches **`never-called` (family i) = 75 (84%)**,
-**`empty-reply` (family iii) = 14 (16%)**, `wrong-root` (ii) / `accepted-no-bytes`
-/ `unparseable` = **0**. The per-tool-call trace resolves what the
-dispatch-boundary log could not: the dominant `reason=unverified-write objects=1`
-signature (a PARSEABLE answer claiming work) has **`write_calls=0`** -- the
-explorer issues only read/list tools (with heavy wrong-root READ churn,
-`read_file`<->`read_plan_file`) and NEVER calls a write tool. So the dominant
-mechanism is **(i) never-called-a-write-tool**, measured, NOT the
-`empty-reply`/parse-collapse the leading hypothesis predicted (which is real but
-secondary at 16%). Per the pre-registered rule this AIMS the single W2 follow-on
-at a driver-side FORCED-WRITE EXPLORE target (mirroring the EXECUTE 2/40->40/40
-structural fix), NOT `response_format`-primary (which would target only the 16%
-tail). The forced-write fix + a fresh L6 B2 are the named successor, a LATER
-iteration -- NOT executed here (D-004). A secondary, UNMEASURED contributing
-hypothesis the trace surfaces: the explorer may burn its 14-turn budget on
-failed wrong-root READ calls before ever reaching a write. Scope of the L8
-claim, precisely: it is measured on a SINGLE seeded exploration workspace/goal
-(the retry-backoff-uploader fixture) with 3 rotating sub-topics, and n is ~10
-runs (89 dispatches clustered within them, empty-reply concentrated in runs
-3/4/6), not 89 independent trials. The DIRECTION (never-called dominant) is
-robust to classifier precedence -- `empty-reply` is ranked ABOVE `never-called`
-(the ordering most generous to the parse-collapse hypothesis) and never-called
-still wins, so the 16% is the MAXIMAL empty-reply attribution, not a floor; and
-robust at the run level too (8/10 runs never-called-dominant).
-
-**L8 B1 + L6 B2 (NEW this iteration) VALIDATE the forced-write fix -- the
-EXPLORE blocker of the last four iterations is FIXED, and the wall MOVED a full
-state to PLAN.** The fix (D-003) is an additive, default-off forced-write
-finalization: `AgentConfig.force_final_tool` plus a post-loop forced-`tool_choice`
-turn in `native_fc.py` (it mirrors the D-002 repair turn -- `tools=`+`tool_choice`,
-never `response_format=`; it fires at most once, after the read loop), wired
-EXPLORE-only in `roles.py` (`Role.EXPLORER` -> `write_plan_file`). Crucially the
-MODEL issues the real `write_plan_file` call (recorded in the trace);
-`_verified_writes` stays honest, there is NO driver salvage, and the founding
-"a confident sentence cannot open a gate" ethos is INTACT. **L8 B1**
-(`l8-explore-loop/B1`, n=10, one look, committed): `gate_cleared`
-**0/10 -> 9/10** (Wilson95 [0.596, 0.982]; Fisher two-sided p=**0.00012** vs
-B0); failed dispatches **89/100 -> 8/37**; `empty-reply` (family iii)
-**14 -> 0**; residual `never-called` **75 -> 8** absolute -- the forced write
-converts the 84%-never-called collapse into gate clearance. **L6 B2**
-(`l6-e2e/B2`, n=3, one look, committed; floor sha256 verified IDENTICAL to B1
-`cbeeb6aa...` before AND after the block-constant edit): **all 3/3 runs now
-reach PLAN** (`furthest_state=plan`) -- vs the rigorous adjacent baseline **B1,
-which was 0/3 reaching PLAN, every run stuck at EXPLORE** (`furthest=explore`,
-`explore-cap`); B0 was 0/3 at the >= EXECUTE floor too but 1/3 DID reach PLAN
-(run 3, an empty-`plan.md` slugless stall) -- each writing **3 real,
-substantive findings** (`problem-scope.md` 1262, `affected-files.md` 1304,
-`constraints-and-patterns.md` 1809 bytes) via the forced write. BUT the e2e
-FLOOR (>= EXECUTE + verified_write + honest_halt) is still **0/3 -- the floor
-test FAILS as measured** -- because a NEW, deeper blocker emerged at PLAN: the
-4b plan-writer cannot emit a valid 11-section `plan.md`. Runs 2 & 3: the
-plan-writer returned an EMPTY `plan.md`, consumed the redispatch budget
-(`plan_redispatches=3=MAX_PLAN_REDISPATCHES`), and halted HONESTLY on
-`plan-cap` (`honest_halt=true`). Run 1: a NON-EMPTY (4153 bytes) but
-SCHEMA-INVALID `plan.md` (missing all 11 `## `-sections; `PlanDoc` validation
-failed), which the DENY-default disk-bound approval correctly REFUSED, after
-which the run stalled `slug=None` (`honest_halt=false`) -- a slugless stall.
-This is the biggest capability advance in the package's history AND an honest
-floor FAIL: the fix did exactly what it was built to do (the p=0.00012 L8 shift
-proves it), the founding e2e end-goal is NOT YET achieved, and the wall is now a
-DIFFERENT failure class -- structured-output conformance, not
-never-called-a-write-tool (run 1 proves forcing the write alone yields an
-invalid plan.md, not a valid one). **W3 gets its first live evidence.**
-`MAX_PLAN_REDISPATCHES=3` had ZERO live evidence before this block; runs 2 & 3
-both show `plan_redispatches=3` (== the cap) with `plan-cap` + `honest_halt=true`
--- the PLAN redispatch budget's worker-failure branch is now live-exercised 2/3
-(run 1 wrote a plan.md, `plan_redispatches=0`, and stalled on the approval-denial
-path). The falsifier is NOT refuted. Two named successors, deferred (NOT fixed
-here): **S1** -- the PLAN-writer valid-`plan.md` blocker (the new dominant e2e
-wall; needs its own investigation: a `response_format` plan schema, a plan.md
-scaffold the model fills, or a looser accepted schema); **S2** -- the
-non-empty-but-schema-invalid-`plan.md` slugless stall (run 1): predecessor
-D-005 (`plan-2026-07-22T212329-16de43da`) closed the EMPTY-plan.md slugless
-stall via `_plan_has_content` (a BYTES check), but a non-empty-but-INVALID
-plan.md passes the bytes check, is denied at approval, and stalls `slug=None`;
-`_plan_has_content` should check plan VALIDITY (parseable `PlanDoc`), not just
-bytes.
-
-**L6 B3 (NEW this iteration) FIXES S2 and VALIDATES the honest-approval /
-aligned-gates machinery LIVE, but REFUTES this iteration's chosen scaffold+append
-S1 mechanism -- the floor stays 0/3 and the wall advances from "empty/invalid
-plan" to "content-not-distributed".** The user-chosen fix (D-001) is a
-scaffold + honest-approval design: at PLAN entry the driver seeds `plan.md` with
-the 11 `PlanSchema.SECTIONS` headers (structure only), the plan-writer fills
-sections via append (`force_final_tool=append_plan_file` for PLAN + a
-deliverable-line instruction), and `_plan_has_content` + the approval gate now
-share ONE bar (`_plan_is_approvable` = valid `PlanDoc` AND every section
-non-placeholder), closing the slugless-stall gap. **L6 B3** (`l6-e2e/B3`, n=3,
-one look, committed; floor sha256 verified IDENTICAL to B1/B2 `cbeeb6aa...`
-before AND after; honest-approval confound DECLARED in `PRE_REGISTRATION_B3.md`)
-measured **0/3 at the floor -- the floor test FAILS as measured**, all 3 runs
-`furthest_state=plan`, `verified_write=false`. But the shape changed decisively.
-(1) **S2 is FIXED**: all 3 runs halt on the honest `plan-cap` slug with
-`honest_halt=true`; the slugless `slug=None` stall (B2 run 1) NO LONGER OCCURS.
-(2) The plan-writer now writes **15-18 KB** of real content (`plan_md_bytes`
-17122 / 15592 / 18455, up from B2's 0 / 0 / 4153) -- 4b IS capable of producing
-substantial plan content. (3) BUT the **scaffold+append mechanism is REFUTED**:
-`append_plan_file` appends to the FILE END, so content does not distribute into
-the 11 ordered sections -- run 1's plan.md parses as a valid `PlanDoc` (no
-`plan-section` ERROR) yet has **10 placeholder sections** (all ~17 KB
-concentrated in one; audit `plan-section` WARNING x10), and runs 2/3 hit a
-`plan-section` ERROR (the appended content included its own `## ` headers ->
-duplicate sections -> invalid). Appending cannot fill in-place sections. (4) The
-**aligned strict bar held the line LIVE (via the BUDGET gate, not the approval
-stub)**: run 1's valid-but-1-section plan made `_plan_has_content` return False
-(through the shared `_plan_is_approvable` = all-non-placeholder), so it consumed
-the redispatch budget and halted on the honest `plan-cap` -- it was NEVER
-approved. Under a loose not-all-placeholder bar that hollow plan (1 real + 10
-empty) would have been substantive → reached approval → passed to EXECUTE; the
-aligned strict bar prevented exactly that hollow gate. IMPORTANT precision: all
-3 B3 rows carry `approvals: []` -- `DiskEvidenceApprovals` was NEVER invoked live
-(approval is only reachable once `_plan_has_content` is True), so the honest
-APPROVAL stub is UNIT-validated only; the gate that held the hollow plan out live
-was the aligned BUDGET gate. A corollary: the declared honest-approval B2↔B3
-confound turned out INERT (no B3 plan was substantive enough to reach approval),
-so B2↔B3 comparability is cleaner than declared. The ethos held live via the
-shared predicate. Hedge honestly: the S2 honesty fix and the
-aligned-gates machinery are permanent, VALIDATED wins that ship regardless; the
-S1 CAPABILITY goal (a full run reaching >= EXECUTE) is NOT met; the wall
-advanced from "empty/invalid plan" to "content authored but not distributed
-into the right headers." Diagnosis confidence is STRONG but not byte-confirmed
-(the L6 plan dirs are pytest `tmp_path`, deleted post-session, so run 1's raw
-17 KB plan.md is gone; the append-to-end conclusion rests on the audit signature
--- valid-`PlanDoc` + 10 placeholder + 17 KB = concentrated in one section for
-run 1, `plan-section` ERROR = duplicate headers for runs 2/3 -- which is
-decisive but derived; a future bench should retain FAILED plan.md artifacts).
-**Aimed successor (grounded, not guessed)**: the model produces ample content
-but cannot place it under the right headers by appending, so the next mechanism
-must DISTRIBUTE content into sections. Strongest = the **`response_format`
-structured plan** (EXPLORE candidate B, NOT chosen this iteration): the model
-authors 11 fields, the driver RENDERS them into correctly-structured Markdown
-(distribution by construction, no append-to-end flaw). Secondary = seed the
-scaffold as a readable TEMPLATE and have the model OVERWRITE the full plan
-(riskier -- reintroduces free-text-structure risk).
-
-Known gaps, standing after L6 B3 (the scaffold+honest-approval fix):
-- **#1 gap -- DISTRIBUTE plan content into the 11 sections**: L6 B3 proved 4b
-  CAN write substantial plan content (15-18 KB) but the scaffold+append
-  mechanism cannot place it under the right headers -- `append_plan_file`
-  appends to the file END, so content concentrates in one section (valid but
-  hollow) or duplicates headers (invalid). The scaffold seed + append steering
-  are SHIPPED but MEASURED-INEFFECTIVE for this goal (the S2/honesty fixes they
-  came bundled with DO stand). The aimed fix is the **`response_format`
-  structured plan** (the model authors 11 fields, the driver renders correctly
-  structured Markdown -- distribution by construction); a secondary is a
-  template-overwrite scaffold. UNMEASURED how far a fix here would carry a run
-  past PLAN toward the >= EXECUTE floor.
-- **The slugless PLAN stall (S2) -- CLOSED/FIXED this iteration (L6 B3, 3/3)**:
-  predecessor D-005 closed the EMPTY-plan.md slugless stall via a BYTES-only
-  `_plan_has_content`, but a non-empty-but-INVALID plan.md (B2 run 1) still
-  passed the bytes check, was denied at approval, and stalled `slug=None`. The
-  aligned `_plan_is_approvable` bar (valid `PlanDoc` AND all-non-placeholder,
-  shared by `_plan_has_content` and the approval stub) now consumes the
-  redispatch budget for that shape too, so exhaustion halts on the honest
-  `plan-cap` slug -- L6 B3 shows 3/3 `plan-cap` + `honest_halt=true`, zero
-  slugless stalls. No generic `STALL` slug was minted (predecessor D-003
-  respected).
-- **PLAN redispatch budget**: `MAX_PLAN_REDISPATCHES=3` now has its FIRST live
-  evidence (L6 B2 runs 2/3: `plan_redispatches=3=MAX` + `plan-cap` +
-  `honest_halt=true`) -- the worker-failure branch is live-exercised, NOT
-  refuted. The `success=True`-but-EMPTY-plan.md slugless-stall residual is CLOSED
-  (D-005); the non-empty-but-invalid variant is S2 (above). REFLECT is now
-  budgeted too (`reflect-cap`, plan-2c22e5f6 D-003, live-fired in B7 run 2 on
-  an unroutable verifier), and the denied-CLOSE approval loop (residual β) is
-  now budgeted as well (`close-cap`, plan-032ae337 D-001, live-fired in B8
-  run 1 on 4 disk-truth denials); still unbudgeted: PIVOT/CLOSE worker-failure
-  stalls -- no generic `STALL` slug is minted, per predecessor D-003.
-- **Bare `/workspace` sentinel** -- CLOSED this iteration (D-004): a bare
-  `/workspace` (and bare `/plan`) sentinel now maps to the confinement root
-  inside the single `_strip_root_sentinel` chokepoint instead of being refused;
-  `/` alone still raises.
-- **Wrong-root reads**: a live explorer read a plan-dir findings path through
-  the workspace-rooted `read_file` and was rejected -- the tool surface
-  separates the two roots but the model conflated them.
-
-The test suite itself has been audited adversarially, by execution: 5/5
-load-bearing guard mutations (leash-cap boundary, writable-key allowlist,
-empty-file gate counting, ownership deny branch, live-gate short-circuit) each
-flipped tests red in a scratch copy (93 red total), and `test_cli.py`'s
-exit-code 0/1/2 contract close-read verdict was CLEAN.
-
-Offline, the package is green: 1,981 tests (1,964 passed / 17 skipped;
-+1 for the S5 raw-observation retention round-trip, +10 for the D-002
-write-evidence label-normalization regressions, +18 for the D-003
-reflect-cap budget regressions, +13 for the β close-cap budget
-regressions -- `TestBoundedCloseRedispatch`, cap ∈ [0,1,2], granted-after-retry
-and reflect/close budget disjointness; the former D-005 pin that `REFLECT_CAP`
-stays OUT of the bench `HONEST_HALT_SLUGS` was flipped to an INCLUSION assert
-under B8's pre-registration, exactly the extension path D-005 authorized),
-`ruff` clean, `mypy` 0 errors.
-
-**Not claimed**: that the harness is production-ready, or that a 4B model drives
-it unattended to a useful result YET -- the frozen L6 3/3 floor bar is still
-**NOT MET** across nine blocks (B0-B8). B8 is the first block where any run
-clears the full per-run floor conjunction (2/3 did; run 2 missed honestly on
-`plan-cap`). This is the founding e2e goal and it remains OPEN, not abandoned.
-
-**What the nine blocks establish is a per-STATE progression, each wall cleared
-structurally**: EXPLORE never-called-a-write-tool (fixed, forced write, L8
-0/10->9/10); PLAN empty/invalid/undistributed plan (fixed, response_format
-structured plan, B5 run 1 the first-ever run to clear PLAN and reach REFLECT);
-the EXECUTE **target-assignment** wall (fixed, iteration 8, D-001: a real 4b
-plan names its files in PROSE, so the backtick-only `derive_execute_target`
-assigned nothing -- the additive existence-gated prose fallback
-`_derive_prose_target` assigned `uploader.py` in B6 run 2 and the model wrote
-it; `derive_execute_target` stays byte-frozen); the EXECUTE
-**credit-layer** wall (S5 -- fixed, plan-2c22e5f6 D-002, measured first, see
-below); and the two honest-halt bookkeeping walls α/β (fixed, plan-032ae337
-D-001, B8 -- see below).
-
-**S5 is DIAGNOSED and FIXED (measured, not guessed).** B6 revealed the wall:
-`verified_write` stayed False in the full traverse even though the target was
-assigned AND `uploader.py` changed on disk. A scratch probe replayed the B6
-run-2 configuration at the same seed with raw per-dispatch observation
-retention active (retention is now a STANDING bench feature -- every L6 row
-carries its full `observations` list plus `artifacts/run-{n}/observations.json`)
-and reproduced the anomaly 1/1. The retained EXECUTE record NAMED the
-mechanism: **(c) label-spelling, absolute-real-path variant** -- the model
-wrote the assigned file via its ABSOLUTE tmp path; `Workspace.resolve()`
-accepted it and the bytes were verified, but the raw-parameter label escaped
-the frozen `_normalized_ws_path` membership test, so the floor failed CLOSED.
-**Division-of-labour is REFUTED as the S5 cause** -- the bundled EXECUTE
-dispatch did its one assigned write correctly -- as are (a) bundled-dispatch
-bookkeeping loss and (b) exception-branch empty evidence, for that run. The
-fix (`roles.py` `_evidence_path`, D-002) labels every verified write through
-the SAME resolve chokepoint that verified the bytes. Its load-bearingness is
-proven OFFLINE: the frozen-floor replay of the retained probe record flips
-`verified_write` False->True under the fix. B7's in-loop 2/2 credits are an
-existence proof, not attribution (the retained labels are POST-normalization,
-so B7's records cannot show what raw spelling the model typed).
-
-**L6 B7 (`l6-e2e/B7`, n=3, floor sha256-identical `cbeeb6aa...`, 8th block):
-floor 0/3 honest, both fixes exercised live.** Run 1: honest `explore-cap`
-halt, never reached EXECUTE (S4c variance). Runs 2/3: BOTH reached EXECUTE
-and BOTH earned `verified_write=true` with the exact normalized label
-`workspace:uploader.py` -- the first rows in the B0-B7 lineage with ANY true.
-The S4b reflect-cap budget (`MAX_REFLECT_REDISPATCHES` + honest `reflect-cap`
-slug, routability-keyed, mirroring plan-cap; D-003) landed and FIRED honestly:
-run 2 spent the cap on 4/4 unparseable verifier replies and halted on
-`reflect-cap`. Two named residuals kept both EXECUTE-reaching runs off the
-floor's honest_halt clause: **(α)** the bench-side `HONEST_HALT_SLUGS`
-allowlist (non-frozen) lacks `REFLECT_CAP`, so an honest reflect-cap halt
-grades `honest_halt=false` BY CONSTRUCTION -- a measured B7 confound for that
-clause; the exclusion is now PINNED as a recorded decision (D-005) so any
-extension rides its own pre-registered B8, not a silent regrade; **(β)** a
-denied-CLOSE approval does not consume the reflect budget (D-003 pre-named
-this out of scope), so run 3 ended in a slugless stall. Run 3 was functionally
-the DEEPEST lineage run: the verifier claimed 4/4 criteria PASS and routed
-toward CLOSE, and the close gate DENIED on an empty `verification.md` -- the
-disk-truth gates held; the failure point is the protocol's evidence
-requirement, not traverse inability.
-
-**L6 B8 (`l6-e2e/B8`, n=3, floor sha256-identical `cbeeb6aa...`, 9th block):
-α and β BOTH RESOLVED under a pre-registered block; floor 2/3 per-run, the
-frozen 3/3 bar honestly NOT MET.** The β fix (plan-032ae337 D-001) mints a
-bounded close-denial budget -- `GateSlug.CLOSE_CAP` + `_close_denials` +
-`MAX_CLOSE_DENIALS=3` (an unmeasured placeholder), mirroring plan-cap: each
-denied `confirm_close` re-dispatches the verifier and cap exhaustion
-pre-writes the honest `close-cap` slug before the stall detector can fire.
-(CORRECTED post-review, plan-032ae337 D-002: the registration's premise that
-the verifier "holds the write tool for `verification.md`" was FALSE -- the
-REFLECT role gets READ_ONLY + SHELL tools only (roles.py:322), owns no
-artifact (rules.py:122), and no driver path writes `verification.md`, so on
-this configuration the redispatch cannot repair an "absent or empty
-verification.md" denial; the budget's validated value is the bounded HONEST
-halt, not repair.) The α change extends the NON-frozen bench allowlist
-`HONEST_HALT_SLUGS` with `REFLECT_CAP`/`CLOSE_CAP` -- a DECLARED
-grading-semantics change riding B8's registration exactly as B7's D-005 pin
-required; B8 rows only, nothing in B0-B7 regraded. B8 measured: run 1
-validated β's mechanism live (plan approved on disk evidence -> EXECUTE
-verified write -> verifier verdict routed toward CLOSE -> **4 denied
-`confirm_close` on "verification.md is absent or empty"** -> 1+3 REFLECT
-dispatches -> honest `close-cap`); run 3 an honest `reflect-cap` (4/4
-unparseable verifier replies, the B7 run 2 shape, now grading honest under
-α); run 2 an honest `plan-cap` (plan-writer empty-reply x4, top-of-funnel
-variance, S4c-adjacent but at PLAN). **Runs 1 and 3 are the FIRST rows in the
-lineage to clear the full per-run floor conjunction** (`>=EXECUTE` ∧
-`verified_write` ∧ `honest_halt`); ZERO slugless stalls; the 3/3 bar fails
-honestly on run 2. The new dominant measured wall is a **harness PLUMBING
-gap, not verifier content**: REFLECT has no write path to `verification.md`
-at all -- the verifier holds no write tool for it, no driver code merges the
-verifier reply to disk, and the PLAN-writer's rules.py:438 obligation to seed
-`verification.md` is unmet under the response_format render
-(`verification_md_bytes=0` in every B7/B8 row; run 1's redispatched verifiers
-empty-replied x3, run 3's were unparseable x4, but even run 1's PARSEABLE
-obs[5] verdict left the file at 0 bytes). No verifier-side
-prompt/response_format fix can populate it; until a driver merge of a
-structured verifier reply or PLAN-render seeding lands, the close-approval
-path cannot open on this configuration -- which is why run 1's cap spend was
-futile-for-repair yet correctly honest. The close gate's disk-truth denial
-held 4/4. Attribution stays as registered: run 1 exercises both α
-and β; run 3 exercises α on the grading side only; neither shows the model
-can produce verification.md content.
-
-**Forward: the floor stays OPEN, not a ceiling.** Measured successor items,
-in order of evidence: the **REFLECT->`verification.md` plumbing gap** (named
-at B8, reframed post-review D-002: `verification.md` has NO write path on
-this configuration -- neither a verifier tool nor a driver merge -- and PLAN
-never seeds it, so the successor is driver-side: merge a structured verifier
-reply into `verification.md`, or seed it at the PLAN render (rules.py:438);
-a verifier-side prompt/response_format fix alone cannot populate it, and
-neither option is chosen yet); top-of-funnel variance (S4c-class, ~1
-run per block dies before EXECUTE, B5-B8 -- at PLAN in B8 run 2); and budget
-tuning (`MAX_REFLECT_REDISPATCHES`/`MAX_CLOSE_DENIALS` remain unmeasured
-placeholders; B8's funded-retry observations suggest the verifier, not the
-budget size, is the lever -- tuning needs its own pre-registered bench).
-Division-of-labour remains an UNMEASURED forward direction for the S4c-class
-variance, but it is refuted as the S5 cause. Through all nine blocks the
-gates stayed mechanical: the model performs every write, the gate reads the
-filesystem, and a confident sentence still cannot open one.
-
-## Exceptions
-
-```
-FSMError
-└── HarnessError
-    ├── HarnessArtifactError(artifact, message, cause=None)  # unreadable/unparseable/over-cap
-    ├── HarnessOwnershipError(artifact, role, owner)         # OWNERSHIP denies this role the write
-    ├── HarnessReentrancyError(role)                         # a worker re-entered the driver
-    └── HarnessConfinementError(path, root)                  # a path escaped its root
-```
-
-## Conventions specific to this package
-
-- **Constants live in `constants.py`**; `rules.py` owns protocol CONTENT (prose,
-  ownership, topics) and `fsm_definition.py` owns only graph shape and gate logic.
-- **One literal `__all__`** in `__init__.py` -- no dynamic extend/append.
-- **Anchored decisions**: non-obvious code carries a
-  `# DECISION plan-<full-plan-id>/D-NNN` comment stating what NOT to do and why.
-  The full plan-id keeps the `THHMMSS` segment; the commit-tag form drops it.
-  Writing the tag form into an anchor makes it invisible to the anchor audit.
-- **Interface contracts** on shared helpers name their call sites, so a reader
-  can see at the definition whether a change is local.
-- **Evidence over testimony.** If a number can be derived from the filesystem,
-  derive it. If it can only be claimed, treat it as advisory and record it as
-  such.
+- Constants live in `constants.py`; protocol prose, ownership, topics in `rules.py`; `fsm_definition.py` owns only graph and gate logic. Keep `__all__` one literal list.
+- Anchored decisions: non-obvious code carries `# DECISION plan-<full-plan-id>/D-NNN` saying what NOT to do and why. Keep the full plan id (with the `THHMMSS` segment) or the anchor audit cannot see it. Shared helpers document their call sites.
+- Evidence over testimony: if a number can be derived from the filesystem, derive it; a model claim is advisory.
+- Changing a gate: edit `fsm_definition.py`, keep priority spacing >= 150, add the key to `DRIVER_OWNED_SEEDS` or `DRIVER_OWNED_UNSET`, and add it to exactly one role's writable keys (or none).
+- Changing `OWNERSHIP` changes what a live role can write; update `roles.py` tool scopes and prompts, which derive from it.
+- Tests: `pytest tests/test_fsm_llm_harness/          # 1,981 tests, 10 test files` (`test_roles_and_tools.py`, `test_harness_agent.py`, `test_artifacts.py`, `test_hardening.py`, `test_plan_validator.py`, `test_storage.py`, `test_cli.py`, `test_fsm_definition.py`, `test_live_ollama.py`, `test_extraction_cost.py`). `tests/test_packaging.py` pins every test-count token in this file to the measured harness count and file count; update both numbers when tests are added. Live tests are double-gated (`FSM_LLM_HARNESS_LIVE=1` checked first, then a reachable Ollama): `FSM_LLM_HARNESS_LIVE=1 pytest tests/test_fsm_llm_harness/test_live_ollama.py`. L1-L3 run the live FSM with scripted workers writing real artifacts through role-scoped `PlanMemory`; L4/L5/L6 use `build_default_worker_factory` and report raw k/n.

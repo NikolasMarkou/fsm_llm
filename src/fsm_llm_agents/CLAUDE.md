@@ -1,203 +1,111 @@
-# fsm_llm_agents -- Agentic Patterns
+# fsm_llm_agents
 
-12+ agent patterns with tool use, human-in-the-loop, structured output, working memory, and a meta-builder. Each pattern is backed by an auto-generated FSM.
+Path: `src/fsm_llm_agents`
+Purpose: Agent patterns (ReAct and 17 others) built as generated FSM-LLM FSMs driven by a shared loop, plus tools, HITL, memory, multi-agent coordination, MCP/A2A integration, and the meta-builder.
 
-- **Version**: 0.5.0 (synced from fsm_llm)
-- **Extra deps**: None beyond core fsm_llm
-- **Install**: `pip install fsm-llm[agents]`
+## Scope
 
-## File Map
+All agent code for the `fsm-llm` distribution (extra `agents`, no third-party deps; optional `mcp`, `a2a`=httpx, fastapi for `AgentServer`). Version from `fsm_llm.__version__`. Consumers: `fsm_llm_monitor` (launches 7 agent types, Builder page uses `MetaBuilderAgent`), `fsm_llm_harness` (uses `NativeFunctionCallingReactAgent` and the tool registry), examples under `examples/agents/` and `examples/meta/`. Console script `fsm-llm-meta = fsm_llm_agents.meta_cli:main_cli`.
 
-```
-fsm_llm_agents/
-├── base.py                 # BaseAgent ABC -- shared conversation loop, budgets, __call__, structured output
-├── react.py                # ReactAgent -- ReAct loop with auto-generated FSM and tool dispatch
-├── tools.py                # ToolRegistry + @tool decorator (auto-schema from type hints) + register_agent()
-├── truncation.py           # smart_truncate() -- structure-aware tool-result truncation (head+tail, JSON-aware)
-├── skills.py               # SkillDefinition + SkillLoader -- directory-based plugin loading
-├── memory_tools.py         # create_memory_tools(WorkingMemory) -- remember, recall, forget, list_memories
-├── hitl.py                 # HumanInTheLoop -- approval gates, escalation, confidence thresholds, timeouts
-├── handlers.py             # AgentHandlers -- execute_tool(), check_iteration_limit(), check_approval()
-├── fsm_definitions.py      # build_react_fsm() + 10 pattern-specific FSM builders
-├── prompts.py              # Prompt builders for think/act/conclude/approval states
-├── definitions.py          # ToolDefinition, ToolCall, ToolResult, AgentStep, AgentTrace, AgentConfig, AgentResult, ApprovalRequest
-├── constants.py            # AgentStates, ContextKeys (30+), HandlerNames, HandlerPriorities, Defaults
-├── exceptions.py           # AgentError hierarchy + MetaBuilderError hierarchy
-├── __main__.py             # CLI: python -m fsm_llm_agents --info
-├── __version__.py          # Imports from fsm_llm.__version__
-├── __init__.py             # Public exports + create_agent() factory
-│
-│ -- Agent pattern implementations --
-├── adapt.py                # ADaPTAgent -- adaptive complexity with decomposition
-├── debate.py               # DebateAgent -- multi-perspective debate with judge
-├── evaluator_optimizer.py  # EvaluatorOptimizerAgent -- iterative eval/optimize loop
-├── maker_checker.py        # MakerCheckerAgent -- draft-review verification
-├── orchestrator.py         # OrchestratorAgent -- worker delegation and synthesis
-├── plan_execute.py         # PlanExecuteAgent -- plan decomposition + sequential execution
-├── prompt_chain.py         # PromptChainAgent -- sequential prompt pipeline with gates
-├── reasoning_react.py      # ReasoningReactAgent -- ReAct + structured reasoning (requires fsm_llm_reasoning)
-├── reflexion.py            # ReflexionAgent -- self-reflection with memory
-├── rewoo.py                # REWOOAgent -- planning-first tool execution
-├── self_consistency.py     # SelfConsistencyAgent -- multiple samples with voting
-│
-│ -- Multi-agent coordination, integrations, SOPs --
-├── swarm.py                # SwarmAgent -- emergent coordination with dynamic agent handoffs
-├── agent_graph.py          # AgentGraph + AgentGraphBuilder -- DAG-based agent orchestration with conditional edges
-├── mcp.py                  # MCPToolProvider -- MCP server integration for tool discovery (requires fsm-llm[mcp])
-├── remote.py               # AgentServer + RemoteAgentTool -- A2A HTTP protocol (requires fsm-llm[a2a])
-├── semantic_tools.py       # SemanticToolRegistry -- embedding-based tool retrieval via litellm
-├── sop.py                  # SOPDefinition + SOPRegistry + load_builtin_sops() -- YAML/JSON SOP management
-│
-│ -- Additive extensions (0.4.x, all backward-compatible) --
-├── tool_registries.py      # CachingToolRegistry, RetryingToolRegistry -- drop-in ToolRegistry subclasses
-├── semantic_memory.py      # SemanticMemoryStore + create_semantic_memory_tools -- embedding long-term memory (persistable)
-├── auto_memory.py          # AutoMemoryReactAgent + augment_task_with_memories/remember_interaction -- auto recall/persist
-├── memory_persistence.py   # MemorySessionStore + save/load_working_memory -- WorkingMemory persistence
-├── parallel_react.py       # ParallelReactAgent + build_parallel_react_fsm -- multi-tool-per-step concurrent dispatch
-├── verified_react.py       # VerifiedReactAgent -- verify-and-retry (verification_fn) + reflect-every-n
-├── summarization.py        # make_observation_summarizer -- condense old observations (auto_summarize_after)
-├── composition.py          # react_worker_factory + default_llm_judge -- Orchestrator+ReAct worker, LLM-as-judge
-├── native_fc.py            # NativeFunctionCallingReactAgent -- provider-native tools=/tool_calls loop (litellm)
-│
-│ -- Meta-builder (interactive artifact creation) --
-├── meta_builder.py         # MetaBuilderAgent -- routes to FSM/workflow/agent builders
-├── meta_builders.py        # FSMBuilder, WorkflowBuilder, AgentBuilder -- automated generation
-├── meta_cli.py             # CLI entry for fsm-llm-meta command
-├── meta_tools.py           # create_fsm_tools(), create_workflow_tools(), create_agent_tools()
-├── meta_fsm.py             # 3-state FSM (INTAKE → REVIEW → OUTPUT) with classification_extractions
-├── meta_prompts.py         # Intake, build spec, review, revision prompts
-└── meta_output.py          # format_artifact_json(), format_summary(), save_artifact()
+## Architecture
+
+```mermaid
+sequenceDiagram
+    participant U as caller
+    participant A as XAgent.run
+    participant B as BaseAgent._standard_run
+    participant API as fsm_llm.API
+    U->>A: run(task, initial_context)
+    A->>A: fsm_def = build_x_fsm(...); ctx = _init_context(task, ..., extra)
+    A->>B: _standard_run(task, fsm_def, ctx, agent_type, handlers=?)
+    B->>API: _create_api(fsm_def) (model/temperature/max_tokens from AgentConfig)
+    B->>API: _register_handlers + _register_lifecycle_handlers
+    loop until has_conversation_ended
+        B->>B: _check_budgets (timeout, iterations > max*3)
+        B->>B: _on_loop_iteration (HITL)
+        B->>API: converse("Continue.")
+    end
+    B->>API: get_data, end_conversation (finally)
+    B-->>U: AgentResult(answer, success, trace, final_context filtered, structured_output)
 ```
 
-## Key Classes
+ReAct FSM (`build_react_fsm`): `think` -> `act` (tool) -> `think` ... -> `conclude`; optional `await_approval` when HITL has a policy. Tools execute in a handler on `act` state entry (`AgentHandlers.execute_tool`); `check_iteration_limit` runs at PRE_TRANSITION. `think`/`act` have empty `response_instructions`, so Pass 2 is skipped for them. The pipeline treats a context carrying `agent_trace` as agent-managed (no post-transition extraction, bulk overwrite rules differ).
 
-### BaseAgent (`base.py`) -- ABC for all agents
+## Key files
 
-- Constructor: `__init__(model, tools, system_prompt, max_iterations, timeout, hitl, config)`
-- `run(task, context=None)` → AgentResult
-- `__call__(task)` → AgentResult (shorthand)
-- Budget enforcement: hard limit = `max_iterations * 3` (`FSM_BUDGET_MULTIPLIER`), timeout via threading
-- Structured output: `config.output_schema` (Pydantic BaseModel) validated at conclusion
+| File | Role | Notes |
+| --- | --- | --- |
+| `base.py` | `BaseAgent` ABC | `_standard_run`, `_standard_run_stream`, `_run_conversation_loop`, `_extract_answer`, `_completion_is_real`, `_build_trace`, `_try_parse_structured_output`, `_filter_context`, `_create_api` |
+| `fsm_definitions.py` | FSM builders | `build_react_fsm`, `build_rewoo_fsm`, `build_reflexion_fsm`, `build_plan_execute_fsm`, `build_prompt_chain_fsm`, `build_self_consistency_fsm`, `build_debate_fsm`, `build_orchestrator_fsm`, `build_adapt_fsm`, `build_evalopt_fsm`, `build_maker_checker_fsm` |
+| `prompts.py` | Per-state extraction/response instruction builders | |
+| `handlers.py` | `AgentHandlers(registry)` | `execute_tool`, `check_iteration_limit`, `classification_tool_override`, `reset` |
+| `tools.py` | `ToolRegistry`, `tool`, `register_agent`, `normalize_tool_input` | thread-safe (`_tools_lock`) |
+| `hitl.py` | `HumanInTheLoop`, `make_hitl_checker` | |
+| `definitions.py` | Models | `AgentConfig`, `AgentResult`, etc. |
+| `constants.py` | States per pattern, `ContextKeys`, `HandlerNames`, `HandlerPriorities`, `Defaults`, `MetaDefaults`, messages | |
+| `native_fc.py` | `NativeFunctionCallingReactAgent` | own litellm loop with `tools=`, does NOT use the FSM pipeline |
+| `meta_builder.py` | `MetaBuilderAgent` | classify-next-tool then extract-params loop over an `ArtifactBuilder` |
+| `meta_builders.py` | `ArtifactBuilder`, `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder` | |
 
-### Agent Patterns
+## Public interface
 
-| Pattern | Class | Key Mechanism |
-|---------|-------|---------------|
-| ReAct | `ReactAgent` | Think → Act (tool) → Observe → loop or Conclude |
-| REWOO | `REWOOAgent` | Plan all tools upfront → Execute sequentially |
-| Reflexion | `ReflexionAgent` | Attempt → Reflect on failure → Retry with memory |
-| Plan-Execute | `PlanExecuteAgent` | Decompose → Execute steps → Replan if needed |
-| Prompt Chain | `PromptChainAgent` | Sequential prompts with quality gates between |
-| Self-Consistency | `SelfConsistencyAgent` | N samples → Majority vote |
-| Debate | `DebateAgent` | Proposer vs Critic → Judge synthesizes |
-| Orchestrator | `OrchestratorAgent` | Delegate subtasks to worker agents |
-| ADaPT | `ADaPTAgent` | Estimate complexity → Decompose if too complex |
-| Eval-Optimize | `EvaluatorOptimizerAgent` | Generate → Evaluate → Optimize loop |
-| Maker-Checker | `MakerCheckerAgent` | Draft → Review → Revise if needed |
-| Reasoning-ReAct | `ReasoningReactAgent` | ReAct + structured reasoning engine |
-| Swarm | `SwarmAgent` | Emergent coordination -- agents hand off to each other dynamically |
-| Agent Graph | `AgentGraph` | DAG-based orchestration with conditional edges (built via `AgentGraphBuilder`) |
+- `BaseAgent(config=None, **api_kwargs)`: `run(task, initial_context=None) -> AgentResult` (abstract), `__call__(task, **kw)`. Subclasses implement `_register_handlers(api)` (React/ParallelReact widen with a required call-local `handlers`).
+- Constructors:
+  - `ReactAgent(tools, config=None, hitl=None, use_classification=False, **api_kwargs)`; also `run_stream(task) -> Iterator[str]`.
+  - `REWOOAgent(tools, config)`, `ReflexionAgent(tools, config, evaluation_fn=None, max_reflections=3, hitl=None)`, `ParallelReactAgent(tools, config, max_parallel=4)`, `ReasoningReactAgent(tools, config, hitl, reasoning_model=None)` (adds a `reason` pseudo-tool; `AgentError` if `fsm_llm_reasoning` missing).
+  - `PlanExecuteAgent(tools=None, config, max_replans=2)`, `ADaPTAgent(tools=None, config, max_depth=3)`, `OrchestratorAgent(worker_factory=None, tools=None, config, max_workers=5)`.
+  - `PromptChainAgent(chain: list[ChainStep], config)`, `SelfConsistencyAgent(config, num_samples=5, aggregation_fn=None, max_workers=1)`, `DebateAgent(config, num_rounds=3, proposer_persona="", critic_persona="", judge_persona="")`.
+  - `EvaluatorOptimizerAgent(evaluation_fn, config, max_refinements=3)`, `MakerCheckerAgent(maker_instructions, checker_instructions, config, max_revisions=3, quality_threshold=0.7)`.
+  - `VerifiedReactAgent(*args, max_verify_retries=1, **kw)` (uses `config.verification_fn`, `reflect_every_n`), `AutoMemoryReactAgent(*args, memory=None, recall_k=3, recall_min_score=0.25, auto_remember=True, remember_only_on_success=False, enable_respond=True, **kw)`, `with_auto_memory`, `augment_task_with_memories`, `remember_interaction`.
+  - `NativeFunctionCallingReactAgent(tools, config, complete_fn=None, system_policy=None, *, seed=None)`; `complete_fn(model, messages, tool_schemas) -> {"content", "tool_calls": [{"id","name","arguments"}]}`.
+  - `SwarmAgent(agents: dict[str, BaseAgent], entry_agent, max_handoffs=10, memory=None, config)`: hands off via `final_context["next_agent"]`; `add_agent`, `agents`, `entry_agent`.
+  - `AgentGraphBuilder().add_node(name, agent).add_edge(src, dst, condition=None).set_entry(name).build() -> AgentGraph` (rejects cycles); `AgentGraph.run`, `nodes`, `entry`, `get_edges`, `get_terminal_nodes`.
+- `create_agent(system_prompt="You are a helpful assistant.", tools=None (list of @tool fns or ToolRegistry), pattern="react", **kwargs)`; patterns: `react, rewoo, debate, plan_execute, prompt_chain, self_consistency, orchestrator, adapt, evaluator_optimizer, maker_checker, reflexion, meta_builder, swarm, parallel_react, native_fc, verified_react, auto_memory` (+ `reasoning_react` if installed). Unknown -> `ValueError`.
+- `ToolRegistry()`: `register(ToolDefinition) -> self`, `register_function(fn, name=None, description=None, parameter_schema=None, requires_approval=False) -> self`, `register_skill`, `register_agent(agent, name, description)`, `get(name)` (only method that raises `ToolNotFoundError`), `list_tools`, `tool_names` (property), `execute(ToolCall) -> ToolResult` (never raises), `to_prompt_description`, `get_json_schemas`, `to_classification_schema`, `__len__`, `__contains__`. `CachingToolRegistry(max_entries=256)`, `RetryingToolRegistry(max_retries=2, backoff_seconds=0.0)`, `SemanticToolRegistry(embedding_model, top_k, auto_embed)` (`retrieve`, `rebuild_embeddings`; full list under 20 tools).
+- `@tool` / `@tool(name=, description=, parameter_schema=, requires_approval=)`: attaches `fn._tool_definition`; schema inferred from type hints (`Annotated[str, "desc"]` for descriptions).
+- `HumanInTheLoop(approval_policy=None, approval_callback=None, on_escalation=None, confidence_threshold=0.3, approval_timeout=None)`: `requires_approval(call, ctx)`, `request_approval(call, ctx) -> bool` (raises `ApprovalDeniedError` without a callback; timeout = denied), `escalate`, `should_escalate_on_confidence`, `has_approval_policy`, `has_approval_callback`.
+- Memory: `create_memory_tools(WorkingMemory)` (remember, recall, forget, list_memories); `SemanticMemoryStore(...)` (`add`, `search`, `forget`, `clear`, `save`, `load`, `to_dict`, `from_dict`), `create_semantic_memory_tools`, `MemoryEntry`; `MemorySessionStore` (a `fsm_llm.SessionStore`), `save_working_memory(mem, path)`, `load_working_memory(path)`; `make_observation_summarizer(n)`; `smart_truncate(text, max_length=2000)`.
+- Skills/SOPs: `SkillDefinition` (`to_tool_definition`), `SkillLoader.from_directory`, `.from_functions`, `.to_tool_registry`, `.by_category`; `SOPDefinition` (`render_task`, `to_agent_config`, `to_dict`, `from_dict`), `SOPRegistry` (`register`, `register_from_dict`, `register_from_file`, `register_directory`, `get`, `list_sops`, `list_names`, `has`, `remove`), `load_builtin_sops()` (code-review, summarize, data-extraction).
+- Integrations: `MCPToolProvider.from_stdio(command, args)` / `.from_url(url)`, async `discover_tools()`, `register_tools(registry) -> int`, `tools`, `get_tool_names`, `create_mock_tool`. `AgentServer(agent, host, port, timeout)` (`app`, `run`; routes `/invoke`, `/stream` SSE, `/health`, `/info`). `RemoteAgentTool(url, ...)` (`invoke`, async `ainvoke`, `to_tool_definition`, `health_check`, `url`).
+- Composition: `react_worker_factory(...)` (ReAct workers for `OrchestratorAgent`), `default_llm_judge(...)`.
+- Meta-builder: `MetaBuilderAgent(config: MetaBuilderConfig | None)`: `run(task) -> MetaBuilderResult`, turn-by-turn `start(initial_message="") -> str`, `send(msg) -> str`, `is_complete()`, `get_result()`, `get_internal_state()`, `run_interactive()`. Tool factories `create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools`; output helpers `format_artifact_json`, `format_summary`, `save_artifact`.
+- CLIs: `fsm-llm-meta [--model] [--output/-o] [--temperature] [--max-turns]`; `python -m fsm_llm_agents [--info] [--version]` (no `--meta` flag despite a docstring in `meta_cli.py`).
 
-`SwarmAgent` is `create_agent()`-creatable (pattern `"swarm"`); `AgentGraph` is constructed via `AgentGraphBuilder`, not the factory.
+## Data shapes
 
-### Multi-Agent Coordination & Integrations
+- `AgentConfig{model, max_iterations=10, timeout_seconds=300.0, temperature=0.5, max_tokens=1000, output_schema (pydantic class, excluded), transition_config (excluded), max_history_size=None, enable_prompt_cache=False (passes litellm caching=True), reflect_every_n, auto_summarize_after, verification_fn (excluded), force_final_tool}`.
+- `AgentResult{answer, success, trace: AgentTrace, final_context, structured_output}`; `AgentTrace{tool_calls: list[ToolCall], total_iterations, ...}`; `ToolCall{tool_name, parameters, reasoning}`; `ToolResult{tool_name, success, result, error, execution_time_ms}`; `ToolDefinition{name, description, parameter_schema, requires_approval, execute_fn (excluded)}`; `ApprovalRequest{tool_name, parameters, reasoning, context_summary}`; `AgentStep{iteration, thought, action, observation, timestamp}`.
+- Pattern models: `PlanStep`, `EvaluationResult`, `ReflexionMemory`, `DebateRound`, `ChainStep`, `DecompositionResult`; meta: `ArtifactType`, `BuildProgress{total_required, completed, missing, warnings}`, `MetaBuilderConfig(AgentConfig){max_turns, build_max_iterations, build_timeout_seconds, build_temperature, output_path}`, `MetaBuilderResult(AgentResult){artifact, artifact_json, artifact_type, is_valid, validation_errors, ...}`.
+- Core context keys: `task`, `tool_name`, `tool_input`, `reasoning`, `should_terminate`, `tool_result`, `tool_error`, `tool_status`, `observations`, `final_answer`, `confidence`, `iteration_count`, `max_iterations_reached`, `approval_required`, `approval_granted`, `agent_trace`; `NO_TOOL = "none"`. Pattern keys (plan, evidence, draft/checker, chain, samples, subtasks/worker_results, debate, attempt) live in `ContextKeys`.
 
-- **SwarmAgent** (`swarm.py`) -- Agents hand off to each other by setting `next_agent` in `final_context`. Constructor: `SwarmAgent(agents={name: agent}, entry_agent="name", max_handoffs=10)`. Properties: `agents`, `entry_agent`. Method: `add_agent(name, agent)`
-- **AgentGraph** (`agent_graph.py`) -- DAG execution with BFS traversal. Built via `AgentGraphBuilder().add_node(name, agent).add_edge(src, dst, condition=fn).set_entry(name).build()`. Validates no cycles, rejects with error suggesting SwarmAgent for cyclic patterns. Properties: `nodes`, `entry`. Methods: `get_edges(node)`, `get_terminal_nodes()`
-- **MCPToolProvider** (`mcp.py`) -- Connects to MCP servers, discovers tools, converts to ToolDefinitions. Factory: `from_stdio(command, args)`, `from_url(url)`. Methods: `discover_tools()` (async), `register_tools(registry)`. Static: `create_mock_tool()` for testing. Requires `pip install fsm-llm[mcp]`
-- **AgentServer** (`remote.py`) -- Wraps any agent as HTTP endpoint with `/invoke`, `/stream` (SSE), `/health`, `/info`. Constructor: `AgentServer(agent, host, port, timeout)`. Property: `app` (FastAPI). Method: `run()`. Requires `fastapi`
-- **RemoteAgentTool** (`remote.py`) -- Wraps remote agent URL as local tool. Methods: `invoke(task)`, `ainvoke(task)` (async), `to_tool_definition()`, `health_check()`. Requires `pip install fsm-llm[a2a]`
-- **SemanticToolRegistry** (`semantic_tools.py`) -- Extends `ToolRegistry` with embedding-based retrieval. Constructor: `SemanticToolRegistry(embedding_model, top_k, auto_embed)`. Methods: `retrieve(query, top_k)`, `rebuild_embeddings()`, `to_prompt_description(query)`. Falls back to full list for <20 tools. Uses litellm embeddings
-- **SOPDefinition** (`sop.py`) -- Reusable agent config template: name, agent_pattern, task_template, required_tools, output_schema, config_overrides. Methods: `render_task(**vars)`, `to_agent_config()`, `to_dict()`, `from_dict()`
-- **SOPRegistry** (`sop.py`) -- Registry for SOPs. Methods: `register(sop)`, `register_from_file(path)`, `register_directory(path)`, `get(name)`, `list_sops()`, `list_names()`, `has(name)`, `remove(name)`
-- **load_builtin_sops()** (`sop.py`) -- Returns SOPRegistry with 3 built-in SOPs: code-review, summarize, data-extraction
+## Invariants and constraints
 
-### create_agent() Factory (`__init__.py`)
+- `_init_context` always sets `task`, `agent_trace=[]`, `iteration_count=0` (warns and overwrites if the caller passed them) and `_output_response_format` when `output_schema` is set.
+- Budgets: `timeout_seconds` -> `AgentTimeoutError`; loop iterations > `max_iterations * FSM_BUDGET_MULTIPLIER (3)` -> `BudgetExhaustedError`. Both propagate unwrapped; any other failure becomes `AgentError("<Type> execution failed: ...")`.
+- Answer: `final_answer` -> pattern `extra_answer_keys` -> last non-empty response -> "Agent could not determine an answer.".
+- `success`: planner patterns (orchestrator, rewoo, plan_execute) pass `execution_evidence_keys` and need real executed work; others need an answer key or at least one tool call. Otherwise `success=False` with a WARNING.
+- `final_context` is filtered with `fsm_llm.constants.has_internal_prefix` (top level only). Never re-inline `startswith("_")`.
+- Tool-using agents raise `AgentError` on an empty registry (React, ReWOO, Reflexion, ParallelReact, NativeFC).
+- `AgentHandlers` is created per `run()` and passed explicitly to `_register_handlers`; never stash it on `self` (data race).
+- `ToolRegistry.execute` never raises: missing tool, bad params, or tool exception return `ToolResult(success=False)`.
+- `execute_tool` refuses to conclude before any tool call on the first iteration (premature-terminate guard).
+- `_output_response_format` has exactly two call sites (`_init_context`, `native_fc`); keep it that way.
+- Lifecycle handlers registered on every API: END_CONVERSATION marker, ERROR logger, `ContextCompactor` clearing `tool_result/tool_status/tool_error` at PRE_PROCESSING, optional observation summarizer.
 
-`create_agent(pattern, model, tools, **kwargs)` → BaseAgent. Pattern names (13): "react", "rewoo", "debate", "plan_execute", "prompt_chain", "self_consistency", "orchestrator", "adapt", "evaluator_optimizer", "maker_checker", "reflexion", "meta_builder", "swarm". Plus "reasoning_react" when `fsm_llm_reasoning` is installed.
+## Dependencies
 
-### ToolRegistry (`tools.py`)
+- `fsm_llm`: `API`, `HandlerTiming`, `ContextCompactor`, `WorkingMemory`, `SessionStore`, `Classifier`, `ClassificationSchema`, `IntentDefinition`, `utilities.extract_json_from_text`, `constants.has_internal_prefix`, `DEFAULT_LLM_MODEL`.
+- `litellm` directly in `native_fc.py`, `meta_builder.py`, `semantic_tools.py`, `semantic_memory.py`, `composition.py`.
+- Optional: `fsm_llm_reasoning` (ReasoningReactAgent), `mcp`, `httpx`, `fastapi`, `fsm_llm_workflows` (WorkflowBuilder artifacts are validated structurally).
 
-- `register(tool_or_func)` -- Register @tool-decorated function or ToolDefinition
-- `execute(tool_call)` → `ToolResult` -- **never raises**; a missing tool, a
-  validation failure, or the tool function itself raising are all caught and
-  returned as `ToolResult(success=False, error=...)`, since callers (ReAct,
-  ReWOO, native-FC loops) treat a failed tool call as data to feed back into
-  the reasoning loop, not as a fatal error
-- `get(name)` → ToolDefinition -- the only method that raises `ToolNotFoundError`
-  (on a missing tool name)
-- `list_tools()` → list[ToolDefinition]
-- `get_json_schemas()` → list[dict] (for LLM function calling)
-- `register_agent(registry, agent, name, description)` -- Register another agent as a tool
+## Failure modes
 
-### @tool Decorator (`tools.py`)
+- `AgentError(message, details)` (base: `FSMError`) -> `ToolExecutionError(message, tool_name)`, `ToolNotFoundError(tool_name)`, `ToolValidationError(tool_name, reason)` (no call site), `BudgetExhaustedError(budget_type, limit)`, `ApprovalDeniedError(action_description)`, `AgentTimeoutError(timeout_seconds)`, `EvaluationError(message, evaluator)`, `DecompositionError(message, depth)`, `MetaBuilderError` -> `BuilderError(message, action)`, `MetaValidationError`, `OutputError(message, path)`.
+- Structured output parse failure returns `structured_output=None` (context keys, then JSON in answer, then JSON in observations) with a WARNING.
+- Known open issue F-LIVE-02: a post-tool stall in the agents loop on live small models (reproduced by the live Ollama suite, not fixed).
 
-Auto-generates JSON schema from type hints and docstrings. Supports: str, int, float, bool, list, dict, Optional, Literal, Enum.
+## Working here
 
-### HumanInTheLoop (`hitl.py`)
-
-- Constructor: `__init__(approval_callback, require_approval_for, confidence_threshold, timeout, escalation_callback)`
-- `request_approval(ApprovalRequest)` → bool
-- Confidence-based auto-approve: above threshold → skip human
-- Timeout: raises ApprovalDeniedError after N seconds
-
-### SkillLoader (`skills.py`)
-
-- `load_directory(path)` → list[SkillDefinition]
-- `load_function(func)` → SkillDefinition
-- Skills convert to tools via `skill.to_tool()`
-
-## Data Models (`definitions.py`)
-
-- **AgentConfig**: output_schema (Pydantic BaseModel), custom settings
-- **AgentResult**: answer (str), success (bool), trace (AgentTrace), structured_output (BaseModel | None)
-- **AgentTrace**: steps list, tool_calls list, total_iterations, execution_time
-- **AgentStep**: step_type, content, tool_call (optional), observation (optional)
-- **ToolDefinition**: name, description, parameters (JSON schema), function (callable)
-- **ToolCall**: tool_name, arguments dict
-- **ToolResult**: tool_name, result (str), success (bool), error (optional)
-- **ApprovalRequest**: tool_name, arguments, context, confidence
-
-## Constants (`constants.py`)
-
-- **AgentStates**: THINK, ACT, OBSERVE, CONCLUDE, APPROVE, ERROR (+ pattern-specific states)
-- **ContextKeys**: 30+ keys (TASK, TOOLS, THOUGHTS, ACTION, OBSERVATION, ANSWER, ITERATION_COUNT, etc.)
-- **Defaults**: MAX_ITERATIONS=10, TIMEOUT=300, FSM_BUDGET_MULTIPLIER=3
-
-## Handlers (`handlers.py`)
-
-- `execute_tool(context)` -- Dispatches tool call from context, accumulates observations
-- `check_iteration_limit(context)` -- Enforces budget, forces conclude at limit
-- `check_approval(context)` -- Routes to HITL approval if required
-
-## FSM Builders (`fsm_definitions.py`)
-
-- `build_react_fsm(tools, hitl)` -- THINK → ACT → OBSERVE → CONCLUDE (+ APPROVE if HITL)
-- Pattern-specific: `build_rewoo_fsm()`, `build_reflexion_fsm()`, `build_plan_execute_fsm()`, etc.
-- Each generates a complete FSMDefinition dict from ToolRegistry
-
-## Testing
-
-```bash
-pytest tests/test_fsm_llm_agents/  # 723 tests
-pytest tests/test_fsm_llm_meta/    # 205 tests, 9 test files
-```
-
-## Exceptions
-
-```
-FSMError
-└── AgentError
-    ├── ToolExecutionError
-    ├── ToolNotFoundError      # raised only by ToolRegistry.get(); execute() never raises (see "ToolRegistry" above)
-    ├── ToolValidationError    # currently unused -- no call site in this package; kept in the hierarchy, not dead-code-removed
-    ├── BudgetExhaustedError
-    ├── ApprovalDeniedError
-    ├── AgentTimeoutError
-    ├── EvaluationError
-    ├── DecompositionError
-    └── MetaBuilderError
-        ├── BuilderError
-        ├── MetaValidationError
-        └── OutputError
-```
+- New pattern: add `build_<x>_fsm` in `fsm_definitions.py`, prompt builders in `prompts.py`, a states class and context keys in `constants.py`, the agent class subclassing `BaseAgent` (use `_standard_run`), register it in `create_agent._PATTERNS` and `__all__`, and a graph in `src/fsm_llm_monitor/static/flows.json` if the monitor should draw it.
+- Keep intermediate states' `response_instructions` empty so Pass 2 is skipped; only the final state should produce prose.
+- Tests: `pytest tests/test_fsm_llm_agents/` (45 files, e.g. `test_react.py`, `test_base_agent.py`, `test_completion_guard.py`, `test_native_fc.py`) and `pytest tests/test_fsm_llm_meta/` (meta-builder). Examples: `examples/agents/*`, `examples/meta/*` (do not modify examples unless asked; they are evaluation baselines for `scripts/eval.py`).

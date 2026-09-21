@@ -1,307 +1,105 @@
-# FSM-LLM Agents
+# fsm_llm_agents
 
-> 12+ agentic patterns with tool use, human-in-the-loop, structured output, and a unified interface.
+Ready-made AI agent patterns for FSM-LLM: agents that call tools, plan, reflect, debate, vote, or hand work to other agents. It also includes a "meta-builder" that helps you design new FSMs, workflows, and agents by chatting with it.
 
----
+## What it is for
 
-## Overview
+An agent is an LLM that works on a task over several steps, often calling tools (your Python functions) along the way. Each pattern here is a known way of organising those steps, for example ReAct (think, call a tool, look at the result, repeat). Under the hood every pattern is built as an FSM-LLM finite state machine: a fixed set of states (such as `think`, `act`, `conclude`) with rules for moving between them. That keeps the loop structured and bounded, which matters most with small local models. You get a common `agent.run(task)` call that returns an answer, a success flag, and a trace of tool calls.
 
-`fsm_llm_agents` brings agentic AI patterns to FSM-LLM. Each agent pattern is implemented as an auto-generated FSM, giving you the reliability of state machines with the flexibility of LLM-driven tool use and reasoning.
+## How it works
 
-Key capabilities:
-- **12+ agent patterns** from simple ReAct to multi-agent orchestration
-- **Swarm coordination** -- agents hand off to each other dynamically
-- **Agent Graph** -- DAG-based orchestration with conditional edges
-- **MCP integration** -- connect MCP servers for tool discovery (`pip install fsm-llm[mcp]`)
-- **A2A protocol** -- expose agents as HTTP endpoints, call remote agents as tools (`pip install fsm-llm[a2a]`)
-- **Semantic tool retrieval** -- embedding-based tool selection for large tool registries
-- **SOPs** -- reusable agent configurations from YAML/JSON templates
-- **Tool system** with `@tool` decorator and auto-schema from type hints
-- **Human-in-the-loop** approval gates, escalation, and confidence thresholds
-- **Structured output** via Pydantic model validation
-- **Budget enforcement** with iteration limits and timeouts
-- **Working memory** tools (remember, recall, forget, list)
-- **Skill loading** from directories with auto-discovery
-- **Meta-builder** agent that builds FSMs, workflows, and agents interactively
-
-## Installation
-
-```bash
-pip install fsm-llm[agents]
+```mermaid
+flowchart TD
+    T[agent.run task] --> B[Build an FSM for this pattern]
+    B --> A[Create an FSM-LLM API with handlers]
+    A --> L{Loop: send 'Continue.'}
+    L --> TH[think: LLM picks a tool and its input]
+    TH --> AC[act: handler runs the tool, stores the observation]
+    AC --> L
+    TH -- should_terminate --> C[conclude: LLM writes the final answer]
+    C --> R[AgentResult: answer, success, trace, final_context]
 ```
 
-**Requirements**: Python 3.10+ | No additional dependencies beyond core `fsm-llm`.
+- The agent feeds the FSM the message `Continue.` again and again until it reaches a final state.
+- Tools run inside handlers (hooks FSM-LLM calls at fixed points), not inside the LLM. A tool failure is shown to the model as an observation instead of crashing the run.
+- Limits stop runaway loops: `max_iterations` (default 10, with a hard ceiling of three times that in FSM steps) and `timeout_seconds` (default 300).
+- `success` is only `True` when the run produced a real answer or ran at least one tool; planner patterns must show real executed work.
 
-## Quick Start
+## Patterns
+
+| Pattern | Class | Idea |
+| --- | --- | --- |
+| ReAct | `ReactAgent` | Think, call a tool, observe, repeat, then answer |
+| ReWOO | `REWOOAgent` | Plan every tool call first, run them, then answer |
+| Reflexion | `ReflexionAgent` | ReAct plus self-critique and retry after failure |
+| Plan and execute | `PlanExecuteAgent` | Break the task into steps, run each, replan on failure |
+| Prompt chain | `PromptChainAgent` | A fixed series of prompts with quality gates |
+| Self-consistency | `SelfConsistencyAgent` | Answer several times, take the majority |
+| Debate | `DebateAgent` | Proposer and critic argue, a judge decides |
+| Orchestrator | `OrchestratorAgent` | Split into subtasks and hand them to workers |
+| ADaPT | `ADaPTAgent` | Try directly; if it fails, break it down further |
+| Evaluator-optimizer | `EvaluatorOptimizerAgent` | Generate, score with your function, refine |
+| Maker-checker | `MakerCheckerAgent` | One role drafts, another reviews, revise until good |
+| Reasoning ReAct | `ReasoningReactAgent` | ReAct plus a built-in `reason` tool that runs the structured reasoning engine (needs `fsm_llm_reasoning`) |
+| Parallel ReAct | `ParallelReactAgent` | Several tool calls per step, run at once |
+| Verified ReAct | `VerifiedReactAgent` | Check the answer with your function and retry |
+| Auto-memory ReAct | `AutoMemoryReactAgent` | Recall related memories before, save after |
+| Native function calling | `NativeFunctionCallingReactAgent` | Uses the provider's own tool-calling API instead of the FSM |
+| Swarm | `SwarmAgent` | Agents pass the task to each other |
+| Agent graph | `AgentGraph` | Agents wired as a graph with conditional edges, no cycles |
+
+## Files
+
+- `base.py` - `BaseAgent`: the shared loop, limits, answer extraction, trace, structured output.
+- `react.py`, `rewoo.py`, `reflexion.py`, `plan_execute.py`, `prompt_chain.py`, `self_consistency.py`, `debate.py`, `orchestrator.py`, `adapt.py`, `evaluator_optimizer.py`, `maker_checker.py`, `reasoning_react.py`, `parallel_react.py`, `verified_react.py`, `auto_memory.py`, `native_fc.py`, `swarm.py`, `agent_graph.py` - one pattern each.
+- `fsm_definitions.py` - builds the FSM for each pattern. `prompts.py` - the instructions each state gives the LLM.
+- `tools.py` - `ToolRegistry` and the `@tool` decorator. `tool_registries.py` - caching and retrying registries. `semantic_tools.py` - picks relevant tools by embedding similarity.
+- `handlers.py` - runs tools and enforces the iteration limit. `hitl.py` - human approval before sensitive tools.
+- `memory_tools.py`, `semantic_memory.py`, `memory_persistence.py`, `summarization.py`, `truncation.py` - memory tools, long-term memory, saving memory, condensing old observations, shortening long tool output.
+- `composition.py` - helpers to use ReAct agents as orchestrator workers and an LLM judge.
+- `skills.py`, `sop.py` - load tools from folders; reusable task templates (three built in).
+- `mcp.py` - load tools from an MCP (Model Context Protocol) server. `remote.py` - serve an agent over HTTP, or call a remote one as a tool.
+- `meta_builder.py`, `meta_builders.py`, `meta_tools.py`, `meta_fsm.py`, `meta_prompts.py`, `meta_output.py`, `meta_cli.py` - the meta-builder and its `fsm-llm-meta` command.
+- `definitions.py`, `constants.py`, `exceptions.py` - data models, names and defaults, errors.
+- `__init__.py`, `__main__.py`, `__version__.py`, `py.typed` - exports and `create_agent()`, `python -m fsm_llm_agents --info`, version, type marker.
+
+## How to use it
 
 ```python
-from fsm_llm_agents import ReactAgent, tool
+from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
 
 @tool
-def search(query: str) -> str:
-    """Search the web for information."""
-    return f"Results for: {query}"
+def add(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
 
-agent = ReactAgent(model="gpt-4o-mini", tools=[search], max_iterations=10)
-result = agent.run("What is the population of France times 2?")
-print(result.answer)
+registry = ToolRegistry()
+registry.register(add._tool_definition)
+
+agent = ReactAgent(tools=registry, config=AgentConfig(model="ollama_chat/qwen3.5:4b"))
+result = agent.run("What is 17 + 25?")
+print(result.answer, result.success, [c.tool_name for c in result.trace.tool_calls])
 ```
 
-Use the factory for any pattern:
+Or with the factory:
 
 ```python
 from fsm_llm_agents import create_agent
-agent = create_agent("react", model="gpt-4o-mini", tools=[search])
-result = agent("Your task here")  # callable shorthand
+agent = create_agent(tools=[add], pattern="react")
+print(agent("What is 2 + 3?").answer)
 ```
 
-## Agent Patterns
+Build a new FSM by chatting:
 
-| Pattern | Class | Description |
-|---------|-------|-------------|
-| **ReAct** | `ReactAgent` | Reasoning + Acting loop with tool dispatch |
-| **REWOO** | `REWOOAgent` | Planning-first: plan all tool calls, then execute |
-| **Reflexion** | `ReflexionAgent` | Self-reflection with memory of past attempts |
-| **Plan-Execute** | `PlanExecuteAgent` | Decompose task into plan, execute steps sequentially |
-| **Prompt Chain** | `PromptChainAgent` | Sequential prompt pipeline with quality gates |
-| **Self-Consistency** | `SelfConsistencyAgent` | Multiple samples with majority voting |
-| **Debate** | `DebateAgent` | Multi-perspective debate with judge synthesis |
-| **Orchestrator** | `OrchestratorAgent` | Delegate subtasks to worker agents |
-| **ADaPT** | `ADaPTAgent` | Adaptive complexity with task decomposition |
-| **Eval-Optimize** | `EvaluatorOptimizerAgent` | Iterative evaluation and optimization loop |
-| **Maker-Checker** | `MakerCheckerAgent` | Draft-review verification pattern |
-| **Reasoning-ReAct** | `ReasoningReactAgent` | ReAct with structured reasoning (requires `fsm_llm_reasoning`) |
-
-`create_agent()` also accepts `"meta_builder"` and `"swarm"`. The multi-agent coordination primitives `SwarmAgent` and `AgentGraph` are documented in the Swarm and Agent Graph sections below.
-
-### Pattern Selection Guide
-
-| Task Type | Recommended Pattern |
-|-----------|-------------------|
-| Tool use + reasoning | ReAct |
-| Known tool sequence | REWOO |
-| Multi-step with learning | Reflexion |
-| Complex decomposable tasks | Plan-Execute |
-| Sequential data transformation | Prompt Chain |
-| High-stakes decisions | Self-Consistency or Debate |
-| Multi-agent delegation | Orchestrator |
-| Variable complexity | ADaPT |
-| Quality-critical output | Eval-Optimize or Maker-Checker |
-
-## Tool System
-
-### @tool Decorator
-
-```python
-from fsm_llm_agents import tool
-
-@tool
-def get_weather(city: str, units: str = "celsius") -> str:
-    """Get current weather for a city.
-
-    Args:
-        city: City name to look up
-        units: Temperature units (celsius or fahrenheit)
-    """
-    return f"Weather in {city}: 22{units[0].upper()}"
+```bash
+fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
 ```
 
-Auto-generates JSON schema from type hints and docstrings.
+## Things to know
 
-### ToolRegistry
-
-```python
-from fsm_llm_agents import ToolRegistry, ToolCall
-
-registry = ToolRegistry()
-registry.register(get_weather)
-result = registry.execute(ToolCall(tool_name="get_weather", parameters={"city": "Paris"}))
-# -> ToolResult, never raises
-```
-
-`execute()` always returns a `ToolResult`, even on a missing tool or a failing
-tool function -- failures come back as `ToolResult(success=False, error=...)`
-rather than an exception, since a failed tool call is expected, recoverable
-data for the agent loop, not a fatal error. Only `registry.get(name)` raises
-(`ToolNotFoundError`, on a missing tool name). `ToolValidationError` is part of
-the exception hierarchy below but currently has no call site in this package.
-
-### Agents as Tools
-
-```python
-from fsm_llm_agents import register_agent
-researcher = ReactAgent(model="gpt-4o-mini", tools=[search])
-register_agent(registry, researcher, name="research", description="Deep research")
-```
-
-## Human-in-the-Loop
-
-```python
-from fsm_llm_agents import HumanInTheLoop
-
-hitl = HumanInTheLoop(
-    approval_callback=lambda req: input(f"Approve {req.tool_name}? (y/n): ") == "y",
-    require_approval_for=["send_email", "delete_file"],
-    confidence_threshold=0.8,
-    timeout=300,
-)
-agent = ReactAgent(model="gpt-4o-mini", tools=[send_email], hitl=hitl)
-```
-
-## Structured Output
-
-```python
-from pydantic import BaseModel
-from fsm_llm_agents import ReactAgent, AgentConfig
-
-class Analysis(BaseModel):
-    summary: str
-    sentiment: str
-    confidence: float
-
-agent = ReactAgent(model="gpt-4o-mini", tools=[search],
-                   config=AgentConfig(output_schema=Analysis))
-result = agent.run("Analyze sentiment of recent Tesla news")
-print(result.structured_output.summary)
-```
-
-## Working Memory & Skills
-
-```python
-from fsm_llm_agents import ReactAgent, create_memory_tools, SkillLoader
-from fsm_llm import WorkingMemory
-
-# Memory tools
-memory_tools = create_memory_tools(WorkingMemory())
-agent = ReactAgent(model="gpt-4o-mini", tools=[search, *memory_tools])
-
-# Load skills from directory
-skills = SkillLoader().load_directory("./skills/")
-tools = [skill.to_tool() for skill in skills]
-```
-
-## Key API Reference
-
-### BaseAgent (shared by all patterns)
-
-```python
-agent = ReactAgent(
-    model="gpt-4o-mini", tools=[...], system_prompt="...",
-    max_iterations=10, timeout=300, hitl=hitl, config=AgentConfig(...)
-)
-result = agent.run("task")  # or agent("task")
-
-result.answer             # str — final answer
-result.success            # bool — completed successfully
-result.trace              # AgentTrace — execution trace
-result.structured_output  # Pydantic model (if output_schema set)
-```
-
-## Multi-Agent Coordination
-
-### Swarm (Dynamic Handoffs)
-
-```python
-from fsm_llm_agents import SwarmAgent
-
-swarm = SwarmAgent(
-    agents={"triage": triage_agent, "billing": billing_agent, "support": support_agent},
-    entry_agent="triage",
-    max_handoffs=5,
-)
-result = swarm.run("I need help with my bill")
-```
-
-Agents hand off by setting `next_agent` and `handoff_message` in their `final_context`.
-
-### Agent Graph (DAG Orchestration)
-
-```python
-from fsm_llm_agents import AgentGraphBuilder
-
-graph = (
-    AgentGraphBuilder()
-    .add_node("classifier", classifier_agent)
-    .add_node("billing", billing_agent)
-    .add_node("support", support_agent)
-    .add_edge("classifier", "billing", condition=lambda ctx: ctx.get("intent") == "billing")
-    .add_edge("classifier", "support", condition=lambda ctx: ctx.get("intent") == "support")
-    .set_entry("classifier")
-    .build()
-)
-result = graph.run("I need help with my invoice")
-```
-
-### MCP Tool Integration
-
-```python
-from fsm_llm_agents import MCPToolProvider, ToolRegistry
-
-provider = MCPToolProvider.from_stdio("npx", ["-y", "@modelcontextprotocol/server-everything"])
-tools = await provider.discover_tools()
-registry = ToolRegistry()
-provider.register_tools(registry)
-```
-
-Requires: `pip install fsm-llm[mcp]`
-
-### A2A Remote Agents
-
-```python
-from fsm_llm_agents import AgentServer, RemoteAgentTool
-
-# Serve an agent over HTTP
-server = AgentServer(agent=my_agent, port=8500)
-server.run()
-
-# Call remote agent as a tool
-remote = RemoteAgentTool(url="http://localhost:8500", name="remote_agent", description="Remote helper")
-registry.register(remote.to_tool_definition())
-```
-
-Requires: `pip install fsm-llm[a2a]`
-
-### SOPs (Standard Operating Procedures)
-
-```python
-from fsm_llm_agents import SOPRegistry, load_builtin_sops
-
-registry = load_builtin_sops()  # code-review, summarize, data-extraction
-sop = registry.get("code-review")
-task = sop.render_task(code="def foo(): pass", language="python")
-```
-
-## Meta-Builder Agent
-
-Interactively builds FSMs, workflows, and agents:
-
-```python
-from fsm_llm_agents import MetaBuilderAgent
-builder = MetaBuilderAgent(model="gpt-4o-mini")
-result = builder.run("Build an FSM for a pizza ordering chatbot")
-```
-
-Or use the CLI: `fsm-llm-meta`
-
-## Exception Hierarchy
-
-```
-FSMError
-└── AgentError
-    ├── ToolExecutionError
-    ├── ToolNotFoundError      # raised only by ToolRegistry.get(); execute() never raises
-    ├── ToolValidationError    # currently unused -- no call site in this package
-    ├── BudgetExhaustedError
-    ├── ApprovalDeniedError
-    ├── AgentTimeoutError
-    ├── EvaluationError
-    ├── DecompositionError
-    └── MetaBuilderError
-        ├── BuilderError
-        ├── MetaValidationError
-        └── OutputError
-```
-
-## License
-
-GPL-3.0-or-later. See [LICENSE](../../LICENSE) for details.
+- `pip install "fsm-llm[agents]"` has no extra dependencies. `mcp.py` needs `fsm-llm[mcp]`; `RemoteAgentTool` needs `fsm-llm[a2a]` (httpx); `AgentServer` needs fastapi.
+- `ReactAgent` and most tool patterns refuse an empty tool registry.
+- Each `run()` makes many LLM calls. Small models can hit the iteration limit and fail with `BudgetExhaustedError`.
+- Human approval: if a tool needs approval and no approval callback is set, the agent raises `ApprovalDeniedError` instead of approving silently.
+- Keys in the returned `final_context` that look internal (starting with `_`, `system_`, `internal_`, `__`) are removed.
+- `EvaluatorOptimizerAgent` and `MakerCheckerAgent` need arguments `create_agent` cannot guess (an evaluation function, maker and checker instructions); pass them yourself.

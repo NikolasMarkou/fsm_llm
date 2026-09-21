@@ -1,157 +1,66 @@
-# FSM-LLM Reasoning
+# fsm_llm_reasoning
 
-> Structured multi-strategy reasoning engine powered by FSM-orchestrated LLM pipelines.
+A problem-solving engine built on FSM-LLM. It picks a reasoning style for a question (math, deduction, analogy, and so on), walks an LLM through that style step by step, checks the answer, and returns it with a trace of what happened.
 
----
+## What it is for
 
-## Overview
+Asking an LLM a hard question in one shot often gives a shallow or wrong answer. This package breaks the work into structured steps. FSM-LLM (the core `fsm_llm` package) runs conversations as finite state machines: fixed states with rules for moving between them. Here, each reasoning style is its own small state machine, and a top-level "orchestrator" machine analyses the problem, chooses a style, runs it, combines the result, and validates it, retrying up to three times if the answer looks weak. The result is a final answer plus a trace you can inspect.
 
-`fsm_llm_reasoning` is an extension package that adds structured reasoning capabilities to FSM-LLM. It implements **9 distinct reasoning strategies**, each modeled as its own FSM, orchestrated by a meta-FSM that classifies problems and routes them to the appropriate strategy.
+## How it works
 
-The engine automatically:
-1. **Classifies** the problem to determine the best reasoning approach
-2. **Executes** the selected strategy through a dedicated reasoning FSM
-3. **Validates** the solution and retries if needed
-4. **Synthesizes** the final answer with confidence scoring
-
-## Installation
-
-```bash
-pip install fsm-llm[reasoning]
+```mermaid
+flowchart TD
+    P[Problem text] --> A[problem_analysis]
+    A --> S[strategy_selection]
+    S -. handler runs the classifier FSM .-> C[classifier: domain, structure, needs, recommendation]
+    S --> E[execute_reasoning]
+    E -. handler picks a strategy FSM .-> X[push strategy FSM, run up to 30 turns, pop results back]
+    E --> Y[synthesize_solution]
+    Y --> V[validate_refine]
+    V -- weak answer, retries left --> E
+    V --> F[final_answer]
 ```
 
-**Requirements**: Python 3.10+ | No additional dependencies beyond core `fsm-llm`.
+- The orchestrator is driven by sending it "Continue reasoning" messages until it reaches its final state (at most 50 rounds).
+- When the orchestrator enters `execute_reasoning`, a handler chooses the strategy FSM. The engine pushes it on top of the orchestrator (FSM stacking), drives it, then pops it and copies its results back.
+- A validator checks four things: there is an answer, there are key insights (not needed for plain arithmetic), the answer has enough detail, and it shares words with the question.
 
-## Quick Start
+Nine strategies are available: `simple_calculator`, `analytical`, `deductive`, `inductive`, `abductive` (best explanation), `analogical`, `creative`, `critical`, and `hybrid`.
+
+## Files
+
+- `engine.py` - `ReasoningEngine`: sets up the orchestrator and classifier, registers handlers, runs the solve loop.
+- `reasoning_modes.py` - all FSM definitions as Python dictionaries (orchestrator, classifier, nine strategies).
+- `handlers.py` - answer validation, trace recording, context pruning, result merging, final answer extraction.
+- `definitions.py` - Pydantic models for steps, traces, validation, classification, problems, and solutions.
+- `constants.py` - reasoning types, state names, context key names, limits, and message text.
+- `utilities.py` - load an FSM definition, map loose words like "math" to a strategy, list strategies.
+- `exceptions.py` - error classes.
+- `__main__.py` - command-line tool.
+- `__init__.py`, `__version__.py`, `py.typed` - public exports, version, type marker.
+
+## How to use it
+
+```bash
+pip install "fsm-llm[reasoning]"
+python -m fsm_llm_reasoning "What is 15% of 240?"
+python -m fsm_llm_reasoning "Why might sales drop in summer?" --type abductive --output detailed
+python -m fsm_llm_reasoning --list-types
+```
 
 ```python
 from fsm_llm_reasoning import ReasoningEngine
 
-engine = ReasoningEngine(model="gpt-4o-mini")
-solution, trace = engine.solve_problem("What is 15% of 240?")
+engine = ReasoningEngine(model="ollama_chat/qwen3.5:4b")
+solution, trace = engine.solve_problem("If all cats are mammals and Tom is a cat, what is Tom?")
 print(solution)
+print(trace["summary"])
 ```
 
-With initial context:
+## Things to know
 
-```python
-solution, trace = engine.solve_problem(
-    "Should we expand into the European market?",
-    initial_context={
-        "company_size": "mid-market",
-        "current_revenue": "50M",
-    },
-)
-print(f"Reasoning types used: {trace['reasoning_types_used']}")
-```
-
-Force a specific strategy:
-
-```python
-from fsm_llm_reasoning import ReasoningType
-
-solution, trace = engine.solve_problem(
-    "All mammals are warm-blooded. Whales are mammals. What can we conclude?",
-    initial_context={"reasoning_type_selected": ReasoningType.DEDUCTIVE},
-)
-```
-
-CLI usage:
-
-```bash
-python -m fsm_llm_reasoning "What is the square root of 144?"
-python -m fsm_llm_reasoning "Analyze this trend" --model gpt-4o --save results.json
-python -m fsm_llm_reasoning --list-types
-```
-
-## Architecture
-
-```
-Problem Input → Orchestrator FSM (6 states)
-                  ├── PROBLEM_ANALYSIS
-                  ├── STRATEGY_SELECTION ← Classifier FSM (4 states)
-                  ├── EXECUTE_REASONING ← Strategy FSM (1 of 9, 3 states each)
-                  ├── SYNTHESIZE_SOLUTION
-                  ├── VALIDATE_REFINE → retry if needed
-                  └── FINAL_ANSWER
-              → Solution + Trace
-```
-
-## Reasoning Strategies
-
-| Type | Description | Best For |
-|------|-------------|----------|
-| `simple_calculator` | Direct arithmetic and calculations | Math, unit conversions |
-| `analytical` | Breaking down complex systems | System analysis, root cause |
-| `deductive` | Deriving conclusions from premises | Logic puzzles, formal arguments |
-| `inductive` | Finding patterns from examples | Trend analysis, generalization |
-| `creative` | Generating novel solutions | Brainstorming, design |
-| `critical` | Evaluating arguments and claims | Decision analysis, assessment |
-| `hybrid` | Combining multiple approaches | Complex multi-faceted problems |
-| `abductive` | Finding best explanations | Diagnosis, hypothesis generation |
-| `analogical` | Learning through analogies | Novel domains, knowledge transfer |
-
-## Key API Reference
-
-### ReasoningEngine
-
-Thread-safe — `solve_problem()` is serialized internally.
-
-```python
-engine = ReasoningEngine(model="gpt-4o-mini")
-solution, trace = engine.solve_problem(problem="Your problem here", initial_context={})
-```
-
-**Trace dict contains**: `steps`, `reasoning_types_used`, `final_confidence`, `execution_time_seconds`.
-
-### Data Models
-
-```python
-from fsm_llm_reasoning import (
-    ReasoningStep,      # Individual step with confidence
-    ReasoningTrace,     # Full execution trace
-    SolutionResult,     # Solution with validation and alternatives
-    ProblemContext,      # Problem specification with constraints
-    ValidationResult,   # Multi-check validation result
-)
-```
-
-**SolutionResult** computed properties: `confidence_level`, `is_high_confidence`, `reasoning_depth`, `is_validated`, `solution_quality_summary`.
-
-## Configuration
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `MAX_RETRIES` | 3 | Max validation retry attempts |
-| `MAX_TOTAL_ITERATIONS` | 50 | Max FSM iterations across all phases |
-| `MAX_TRACE_STEPS` | 50 | Max recorded trace steps |
-| `MIN_SOLUTION_LENGTH` | 20 | Minimum chars for valid solution |
-| `CONTEXT_PRUNE_THRESHOLD` | 8000 | Context size before pruning (chars) |
-
-## Handlers
-
-Reasoning logic is organized into three utility classes of static methods (see `handlers.py`),
-registered against the orchestrator FSM by `ReasoningEngine`:
-
-| Class.method | Purpose |
-|--------------|---------|
-| `ReasoningHandlers.validate_solution` | Multi-check solution validation; enforces `MAX_RETRIES` |
-| `ReasoningHandlers.update_reasoning_trace` | Records state transitions; prunes at `MAX_TRACE_STEPS` |
-| `ReasoningHandlers.prune_context` | Prevents context explosion at `CONTEXT_PRUNE_THRESHOLD` |
-| `ContextManager.extract_relevant_context` | Filters context down to a target key list |
-| `ContextManager.merge_reasoning_results` | Maps a strategy sub-FSM's results back to the orchestrator |
-| `OutputFormatter.extract_final_solution` | Selects the best available solution field |
-| `OutputFormatter.format_reasoning_summary` | Builds a human-readable trace summary |
-
-## Exception Hierarchy
-
-```
-FSMError
-└── ReasoningEngineError
-    ├── ReasoningExecutionError      # Strategy FSM execution failures
-    └── ReasoningClassificationError # Problem classification failures
-```
-
-## License
-
-GPL-3.0-or-later. See [LICENSE](../../LICENSE) for details.
+- One engine handles one problem at a time. Calls to `solve_problem` on the same engine wait for each other.
+- Every step is an LLM call, so one problem can take dozens of calls. Small local models may loop until a limit stops them.
+- `--type` (or `preferred_reasoning_type` in the starting context) overrides the classifier's choice.
+- If a strategy FSM cannot be loaded, the engine falls back to `analytical` only, never to another style.
+- Unknown words in `map_reasoning_type` fall back to `analytical` with a warning.
