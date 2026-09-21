@@ -139,7 +139,7 @@ class TestDeterministicTransitions:
 
 
 class TestAmbiguousTransitions:
-    """Multiple valid options with similar confidence -> AMBIGUOUS."""
+    """Two or more passing transitions tied at the lowest priority -> AMBIGUOUS."""
 
     def test_ambiguous_same_priority(self):
         """Two transitions with same priority and no distinguishing conditions."""
@@ -154,8 +154,13 @@ class TestAmbiguousTransitions:
         targets = {opt.target_state for opt in result.available_options}
         assert targets == {"a", "b"}
 
-    def test_ambiguous_close_confidence(self):
-        """Transitions with close priority values -> AMBIGUOUS when gap < threshold."""
+    def test_close_priorities_are_deterministic_despite_threshold(self):
+        """A2 (D-003): close but different priorities never go AMBIGUOUS.
+
+        Was ``test_ambiguous_close_confidence`` (100 vs 110 with
+        ``ambiguity_threshold=0.5`` -> AMBIGUOUS); the threshold is now a no-op
+        and the unique lowest priority wins.
+        """
         t1 = _make_transition("a", priority=100)
         t2 = _make_transition("b", priority=110)
         evaluator = TransitionEvaluator(
@@ -164,7 +169,8 @@ class TestAmbiguousTransitions:
         state = _make_state("start", [t1, t2])
         result = evaluator.evaluate_transitions(state, _make_context())
 
-        assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "a"
 
     def test_ambiguous_options_use_llm_description(self):
         """Ambiguous options should prefer llm_description when available."""
@@ -298,7 +304,7 @@ class TestConfidenceScoring:
     """Test confidence calculation mechanics."""
 
     def test_lower_priority_gives_higher_confidence(self):
-        """Lower priority value = higher base confidence."""
+        """Lower priority value = higher (diagnostic) base confidence, and wins."""
         evaluator = TransitionEvaluator()
         t_high = _make_transition("high", priority=100)
         t_low = _make_transition("low", priority=500)
@@ -307,21 +313,31 @@ class TestConfidenceScoring:
 
         # High priority transition should be selected
         assert result.deterministic_transition == "high"
+        scores = evaluator._evaluate_individual_transitions([t_high, t_low], {})
+        by_target = {s["transition"].target_state: s["confidence"] for s in scores}
+        assert by_target["high"] > by_target["low"]
 
     def test_condition_boost_increases_confidence(self):
-        """Passing conditions should boost confidence above base."""
+        """Passing conditions boost the diagnostic confidence above base.
+
+        A2 (D-003): the boost is reported but no longer decides the outcome;
+        the lower priority value wins.
+        """
         cond = _make_condition(logic={"==": [{"var": "x"}, 1]}, requires_keys=["x"])
-        # Priority 100 with condition boost: 0.9 * 1.5 = 1.0 (capped)
-        t_with_cond = _make_transition("conditioned", priority=100, conditions=[cond])
-        # Priority 500 without conditions: 0.5 base confidence
+        t_with_cond = _make_transition("conditioned", priority=500, conditions=[cond])
         t_no_cond = _make_transition("plain", priority=500)
         evaluator = TransitionEvaluator()
-        state = _make_state("start", [t_with_cond, t_no_cond])
-        result = evaluator.evaluate_transitions(state, _make_context({"x": 1}))
+        scores = evaluator._evaluate_individual_transitions(
+            [t_with_cond, t_no_cond], {"x": 1}
+        )
+        by_target = {s["transition"].target_state: s["confidence"] for s in scores}
+        assert by_target["conditioned"] > by_target["plain"]
 
-        # Condition boost on same-priority transition should clearly win
+        t_plain_first = _make_transition("plain", priority=100)
+        state = _make_state("start", [t_with_cond, t_plain_first])
+        result = evaluator.evaluate_transitions(state, _make_context({"x": 1}))
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
-        assert result.deterministic_transition == "conditioned"
+        assert result.deterministic_transition == "plain"
 
     def test_failed_condition_severely_reduces_confidence(self):
         """Failed conditions should reduce confidence by 90%."""
@@ -394,18 +410,21 @@ class TestEdgeCases:
 
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
 
-    def test_minimum_confidence_threshold(self):
-        """Transitions below minimum confidence should not be DETERMINISTIC."""
+    def test_minimum_confidence_threshold_is_noop(self):
+        """A2 (D-003): ``minimum_confidence`` no longer affects the outcome.
+
+        Was ``test_minimum_confidence_threshold`` (0.99 -> AMBIGUOUS for 100 vs
+        150); the unique lowest priority now wins regardless.
+        """
         config = TransitionEvaluatorConfig(minimum_confidence=0.99)
         evaluator = TransitionEvaluator(config)
-        # Two transitions with similar priority - neither above 0.99
         t1 = _make_transition("a", priority=100)
         t2 = _make_transition("b", priority=150)
         state = _make_state("start", [t1, t2])
         result = evaluator.evaluate_transitions(state, _make_context())
 
-        # With very high minimum confidence, should be AMBIGUOUS
-        assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "a"
 
 
 class TestWorkingContextPreparation:

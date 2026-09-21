@@ -20,14 +20,18 @@ from fsm_llm.constants import (
 from fsm_llm.definitions import (
     ClassificationResult,
     FieldExtractionResponse,
+    FSMContext,
     FSMDefinition,
     FSMError,
     State,
     Transition,
     TransitionCondition,
+    TransitionEvaluation,
+    TransitionEvaluationResult,
 )
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LLMInterface
+from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -230,3 +234,124 @@ class TestStep01A1A8:
         assert reply == "ok"
         assert api.get_current_state(conv_id) == "a"
         assert CONTEXT_KEY_CLASSIFICATION_RESULT not in _raw_data(api, conv_id)
+
+
+# ---------------------------------------------------------------------------
+# Step 2: A2 (priority is decisive among passing transitions)
+# ---------------------------------------------------------------------------
+
+
+def _a2_state(transitions: list[Transition]) -> State:
+    return State(
+        id="start",
+        description="start",
+        purpose="route",
+        response_instructions="Respond",
+        transitions=transitions,
+    )
+
+
+def _a2_evaluate(
+    transitions: list[Transition],
+    data: dict[str, Any] | None = None,
+    config: TransitionEvaluatorConfig | None = None,
+) -> TransitionEvaluation:
+    context = FSMContext()
+    context.data.update(data or {})
+    return TransitionEvaluator(config).evaluate_transitions(
+        _a2_state(transitions), context
+    )
+
+
+def _a2_conditions(count: int) -> list[TransitionCondition]:
+    return [
+        TransitionCondition(
+            description=f"x is set ({i})",
+            requires_context_keys=["x"],
+            logic={"==": [{"var": "x"}, 1]},
+        )
+        for i in range(count)
+    ]
+
+
+class TestStep02A2:
+    """A2: among passing transitions the unique lowest priority wins outright."""
+
+    def test_a2_unconditioned_priorities_0_and_200_still_deterministic_to_lower(
+        self,
+    ):
+        result = _a2_evaluate(
+            [
+                Transition(target_state="late", description="late", priority=200),
+                Transition(target_state="early", description="early", priority=0),
+            ]
+        )
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "early"
+
+    def test_a2_priorities_100_and_150_deterministic_not_ambiguous(self):
+        result = _a2_evaluate(
+            [
+                Transition(target_state="b", description="b", priority=150),
+                Transition(target_state="a", description="a", priority=100),
+            ]
+        )
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "a"
+
+    def test_a2_condition_count_cannot_invert_priority(self):
+        result = _a2_evaluate(
+            [
+                Transition(
+                    target_state="rich",
+                    description="five conditions",
+                    priority=850,
+                    conditions=_a2_conditions(5),
+                ),
+                Transition(
+                    target_state="lean",
+                    description="one condition",
+                    priority=800,
+                    conditions=_a2_conditions(1),
+                ),
+            ],
+            data={"x": 1},
+        )
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "lean"
+
+    def test_a2_tie_at_lowest_is_ambiguous_with_only_tied_candidates(self):
+        result = _a2_evaluate(
+            [
+                Transition(target_state="a", description="a", priority=100),
+                Transition(target_state="c", description="c", priority=300),
+                Transition(target_state="b", description="b", priority=100),
+            ]
+        )
+        assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
+        assert [o.target_state for o in result.available_options] == ["a", "b"]
+
+    def test_a2_thresholds_are_noops(self):
+        transitions = [
+            Transition(target_state="a", description="a", priority=100),
+            Transition(target_state="b", description="b", priority=110),
+        ]
+        for config in (
+            TransitionEvaluatorConfig(ambiguity_threshold=0.9),
+            TransitionEvaluatorConfig(minimum_confidence=0.99),
+            TransitionEvaluatorConfig(ambiguity_threshold=0.0, minimum_confidence=0.0),
+        ):
+            result = _a2_evaluate(transitions, config=config)
+            assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+            assert result.deterministic_transition == "a"
+        tied = [
+            Transition(target_state="a", description="a", priority=100),
+            Transition(target_state="b", description="b", priority=100),
+        ]
+        result = _a2_evaluate(
+            tied,
+            config=TransitionEvaluatorConfig(
+                ambiguity_threshold=0.0, minimum_confidence=0.0
+            ),
+        )
+        assert result.result_type == TransitionEvaluationResult.AMBIGUOUS

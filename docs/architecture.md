@@ -73,8 +73,8 @@ Plugin architecture with 8 timing points. Handlers self-determine execution via 
 ### TransitionEvaluator (`transition_evaluator.py`)
 
 Three-outcome evaluation:
-- **DETERMINISTIC** -- Exactly one transition matches, proceed automatically
-- **AMBIGUOUS** -- Multiple matches, delegate to LLM classification
+- **DETERMINISTIC** -- One passing transition, or a unique lowest `priority` value among several passing ones, proceed automatically
+- **AMBIGUOUS** -- Two or more passing transitions tied at the lowest priority; only the tied group is delegated to LLM classification
 - **BLOCKED** -- No matches, stay in current state
 
 Uses JsonLogic conditions (`expressions.py`) and required context key checks.

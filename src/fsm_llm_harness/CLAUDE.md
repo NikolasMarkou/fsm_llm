@@ -26,7 +26,7 @@ stateDiagram-v2
     close --> [*]
 ```
 
-- Lower `priority` wins (`TransitionEvaluator` confidence = `max(0.1, 1 - priority/1000)`); slots are >= 150 apart so two passing edges never fall inside the 0.1 ambiguity threshold. A gate decision must never reach the LLM classifier.
+- Lower `priority` wins: among passing edges the unique lowest value is DETERMINISTIC regardless of the gap; only equal priorities go AMBIGUOUS. Every edge of a state has a distinct priority (slots are >= 150 apart, a historical spacing from the old confidence-gap rule), so a gate decision never reaches the LLM classifier.
 - One `TransitionCondition` per edge with `requires_context_keys`, so a missing key BLOCKS the edge (fail closed). Operators only `>= < == and var`.
 - No state has `extraction_instructions` (the field is gone from `StateRules`): it would cost one extra bulk-extraction LLM call per turn (measured 2.000 -> 1.000 calls per turn).
 - Driver loop: `HarnessAgent.run` drives `converse("Continue.")`; handlers fire one worker dispatch per state entry (priority 100), a pre-step gate before EXECUTE (50), an extraction guard that reverts driver-owned keys the LLM wrote (5), start dispatch (10), end/error (200).

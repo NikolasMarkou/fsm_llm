@@ -144,7 +144,9 @@ class AgentConfig(BaseModel):
     transition_config: Any = Field(default=None, exclude=True)
     """Optional ``TransitionEvaluatorConfig`` to tune FSM transition evaluation.
 
-    Controls ambiguity thresholds, minimum confidence, and strict matching.
+    Controls strict matching and diagnostic logging; transition ranking is
+    by priority alone, so ``ambiguity_threshold``/``minimum_confidence`` are
+    no-ops.
     When None (default), uses the core library defaults.
     """
 

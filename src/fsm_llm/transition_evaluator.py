@@ -26,20 +26,21 @@ The evaluator produces three distinct outcomes:
 
 1. **DETERMINISTIC**: Single clear transition path identified
    - All conditions satisfied for target transition
-   - Reached either because EXACTLY ONE transition passes its conditions — in
-     which case it fires regardless of its confidence score, and
-     ``minimum_confidence`` is never consulted — or because several passed and
-     the leader won the disambiguation below
-   - When disambiguating between several passing transitions: the leader needs
-     confidence ≥ ``minimum_confidence`` AND a gap from the runner-up of
-     ≥ ``ambiguity_threshold`` (or an exact-tie priority tiebreak)
+   - Among the transitions whose conditions pass, the one with the unique
+     lowest ``priority`` value wins outright. The gap between priorities and
+     the number of conditions play no part.
    - Results in immediate transition without LLM consultation
 
 2. **AMBIGUOUS**: Multiple valid transition paths detected
-   - Several transitions pass their conditions
-   - Insufficient confidence gap between top options
+   - Two or more passing transitions share the lowest ``priority`` value
    - Requires LLM assistance to select appropriate path
-   - Presents curated options to LLM for decision
+   - Only the tied-lowest group is offered to the classifier: a transition
+     with a higher priority value can never beat a lower one
+
+The per-transition ``confidence`` (derived from priority plus a condition-count
+boost) is still computed and reported for diagnostics, but it does not decide
+the outcome. ``TransitionEvaluatorConfig.minimum_confidence`` and
+``ambiguity_threshold`` are kept for backward compatibility and have no effect.
 
 3. **BLOCKED**: No valid transition paths available
    - All transitions fail their required conditions
@@ -54,7 +55,6 @@ from typing import Any
 
 from .constants import (
     CONDITION_SUCCESS_RATE_BOOST,
-    FLOAT_EQUALITY_EPSILON,
     MIN_BASE_CONFIDENCE,
     PRIORITY_SCALING_DIVISOR,
 )
@@ -84,13 +84,14 @@ from .logging import logger
 class TransitionEvaluatorConfig:
     """Configuration for transition evaluation behavior."""
 
-    # Evaluation thresholds
-    ambiguity_threshold: float = 0.1  # Confidence difference threshold for ambiguity
-    # Gates the MULTI-CANDIDATE disambiguation path only: a sole passing
-    # transition fires deterministically at any confidence, without consulting
-    # this field. See the module docstring; behavior deliberately unchanged
-    # (D-003/D-004).
-    minimum_confidence: float = 0.5  # Minimum confidence to pick a leader from >1
+    # DECISION plan-2026-09-21T203800-8a03483a/D-003: both thresholds are
+    # deprecated no-ops. Ranking is by ``priority`` alone (unique lowest wins,
+    # a tie at the lowest is AMBIGUOUS). Do NOT re-wire them into the outcome
+    # and do NOT delete them: existing ``TransitionEvaluatorConfig(...)``
+    # callers pass them. Supersedes the earlier D-003/D-004 note that kept
+    # ``minimum_confidence`` as the multi-candidate gate.
+    ambiguity_threshold: float = 0.1  # Deprecated: no effect on the outcome
+    minimum_confidence: float = 0.5  # Deprecated: no effect on the outcome
 
     # Evaluation modes
     strict_condition_matching: bool = True  # Require all conditions to pass
@@ -215,8 +216,9 @@ class TransitionEvaluator:
                     }
                 )
 
-        # Sort by confidence and priority
-        results.sort(key=lambda x: (-x["confidence"], x["transition"].priority))
+        # Rank by priority only; the sort is stable, so ties keep definition
+        # order. Confidence is diagnostic and must not reorder (D-003).
+        results.sort(key=lambda x: x["transition"].priority)
 
         if self.config.detailed_logging:
             logger.debug(f"Evaluated {len(results)} transitions")
@@ -388,6 +390,11 @@ class TransitionEvaluator:
         """
         Determine the final evaluation result based on transition scores.
 
+        Among the passing transitions, the unique lowest ``priority`` value is
+        DETERMINISTIC. Two or more tied at the lowest priority are AMBIGUOUS,
+        and only that tied group becomes the classifier's candidate set. None
+        passing is BLOCKED. Confidence does not take part (D-003).
+
         Args:
             transition_scores: Evaluated transitions with scores
             current_state: Current state definition
@@ -404,33 +411,21 @@ class TransitionEvaluator:
         if not passing_transitions:
             return self._create_blocked_result(transition_scores, current_state)
 
-        # Check for single clear winner — if only one transition passes, it wins
-        if len(passing_transitions) == 1:
-            return self._create_deterministic_result(passing_transitions[0])
+        # DECISION plan-2026-09-21T203800-8a03483a/D-003: priority is decisive.
+        # Do NOT rank by confidence, compare confidence gaps against
+        # ``ambiguity_threshold``, or offer higher-priority-value transitions
+        # to the classifier: condition count and priority gaps once inverted
+        # or blurred the documented "lower priority wins" rule (audit A2).
+        lowest = min(score["transition"].priority for score in passing_transitions)
+        tied = [
+            score
+            for score in passing_transitions
+            if score["transition"].priority == lowest
+        ]
+        if len(tied) == 1:
+            return self._create_deterministic_result(tied[0])
 
-        # Check for clear confidence leader
-        if len(passing_transitions) > 1:
-            top_two = passing_transitions[:2]
-            confidence_gap = top_two[0]["confidence"] - top_two[1]["confidence"]
-
-            if top_two[0]["confidence"] >= self.config.minimum_confidence:
-                if (
-                    confidence_gap
-                    >= self.config.ambiguity_threshold - FLOAT_EQUALITY_EPSILON
-                ):
-                    return self._create_deterministic_result(top_two[0])
-                # Tiebreaker: when confidences are effectively equal, lower priority value wins.
-                # Both must have passing conditions for priority to be reliable.
-                if (
-                    abs(confidence_gap) < FLOAT_EQUALITY_EPSILON
-                    and top_two[1]["confidence"] >= self.config.minimum_confidence
-                    and top_two[0]["transition"].priority
-                    != top_two[1]["transition"].priority
-                ):
-                    return self._create_deterministic_result(top_two[0])
-
-        # Multiple viable options or low confidence - create ambiguous result
-        return self._create_ambiguous_result(passing_transitions, current_state)
+        return self._create_ambiguous_result(tied, current_state)
 
     def _create_deterministic_result(
         self, winner: dict[str, Any]

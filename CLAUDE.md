@@ -124,7 +124,7 @@ python -m fsm_llm_reasoning "problem" [--type T]    # Reasoning CLI (no console 
 }
 ```
 
-Rules: `required_context_keys` only tells Pass 1 what to extract, it never blocks a transition; gate with a condition (`requires_context_keys` + `logic`). `intents`/`fallback_intent` sit directly on the `classification_extractions` entry (no nested `schema`), at least two intents, and `fallback_intent` must be one of them. A state without transitions is terminal. Lower transition `priority` wins. The definition must have a reachable terminal state and no orphaned states.
+Rules: `required_context_keys` only tells Pass 1 what to extract, it never blocks a transition; gate with a condition (`requires_context_keys` + `logic`). `intents`/`fallback_intent` sit directly on the `classification_extractions` entry (no nested `schema`), at least two intents, and `fallback_intent` must be one of them. A state without transitions is terminal. Among passing transitions the unique lowest `priority` value wins outright (gap and condition count do not matter); only a tie at the lowest priority is AMBIGUOUS and goes to the classifier, with just the tied transitions as candidates. The definition must have a reachable terminal state and no orphaned states.
 
 ## Invariants and constraints
 

@@ -166,8 +166,8 @@ Named buffers: `core`, `scratch`, `environment`, `reasoning` (constants `BUFFER_
 ```python
 @dataclass
 class TransitionEvaluatorConfig:
-    ambiguity_threshold: float = 0.1
-    minimum_confidence: float = 0.5
+    ambiguity_threshold: float = 0.1   # deprecated, no effect
+    minimum_confidence: float = 0.5    # deprecated, no effect
     strict_condition_matching: bool = True
     evidence_conditions_normalizer: float = 5.0
     detailed_logging: bool = False

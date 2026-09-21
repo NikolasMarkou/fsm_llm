@@ -34,13 +34,13 @@ the real edge count; do not add three placeholder edges to reach twelve.
 
 Priority semantics
 ------------------
-In this codebase a **lower** ``priority`` value wins.  ``TransitionEvaluator``
-derives base confidence as ``max(0.1, 1.0 - priority / 1000)``
-(``transition_evaluator.py:250``), so priority 10 outranks priority 600.  The
-slots below are spaced >= 150 apart because two passing edges are resolved
-DETERMINISTICally only when their confidence gap clears the 0.1
-``ambiguity_threshold``; a narrower spacing would route a gate decision to the
-LLM classifier, which is exactly what invariant I1 forbids.
+In this codebase a **lower** ``priority`` value wins.  Among passing edges
+``TransitionEvaluator`` picks the unique lowest priority DETERMINISTICally,
+whatever the gap, so priority 10 outranks priority 600; only equal priorities
+go AMBIGUOUS.  Every edge of a state therefore needs a distinct priority, or a
+gate decision would reach the LLM classifier, which is exactly what invariant
+I1 forbids.  The >= 150 spacing below dates from an older confidence-gap rule
+and is kept as harmless headroom.
 
 Ordering rationale, per state:
 

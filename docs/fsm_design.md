@@ -80,7 +80,7 @@ Write purposes that guide natural conversation:
 }
 ```
 
-With no `conditions`, both transitions are ambiguous and the LLM picks between them from the descriptions. To make "Identity verified" deterministic, give it a condition with `requires_context_keys` and a `logic`.
+With no `conditions` and equal (default) priorities, both transitions pass and tie, so they are ambiguous and the LLM picks between them from the descriptions. Among passing transitions the unique lowest `priority` value wins outright, so to make "Identity verified" deterministic, give each transition a condition with `requires_context_keys` and a `logic` so only one passes, or give it a lower `priority` than the fallback edge.
 
 ### The Collector -- Gathering Information
 

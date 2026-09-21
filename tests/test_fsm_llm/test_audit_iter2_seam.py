@@ -527,7 +527,12 @@ class TestBulkValueIsCoercedAndValidated:
 
 
 def _reentry_fsm() -> dict:
-    """repro1: one loopable state so a turn does Pass 2 only."""
+    """repro1: one loopable state so a turn does Pass 2 only.
+
+    The two edges tie at priority 100 so every turn is AMBIGUOUS and the mocked
+    classifier fails soft to "stay". Under A2 (plan-2026-09-21T203800-8a03483a
+    D-003) the old 1-vs-100 spacing would be DETERMINISTIC to ``done``.
+    """
     return {
         "name": "Reentry",
         "description": "d",
@@ -541,7 +546,7 @@ def _reentry_fsm() -> dict:
                 "response_instructions": "Reply.",
                 "transitions": [
                     {"target_state": "chat", "description": "stay", "priority": 100},
-                    {"target_state": "done", "description": "bye", "priority": 1},
+                    {"target_state": "done", "description": "bye", "priority": 100},
                 ],
             },
             "done": {
