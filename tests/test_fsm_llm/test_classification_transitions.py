@@ -8,6 +8,8 @@ AMBIGUOUS transitions instead of the raw LLM prompt.
 
 from __future__ import annotations
 
+import sys
+import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -638,6 +640,26 @@ class TestAmbiguousTransitionExceptionDiscipline:
         # No fallback marker: the failure was not degraded to a stay.
         assert CONTEXT_KEY_CLASSIFICATION_RESULT not in instance.context.data
 
+    def test_construction_failure_degrades_to_stay(self):
+        """A ``Classifier(...)`` CONSTRUCTION failure at the transition site is
+        covered by the same soft-fail try as ``classify()``: the turn stays in
+        state instead of escaping as ``FSMError``. RED on the pre-step-2 code,
+        where the ``_get_classifier`` call sat outside the try (review W2).
+        """
+        exc = ValueError("schema rejected at construction")
+        api, conv_id, patcher, exc = _api_with_failing_classifier(exc)
+        with patcher as mock_cls:
+            mock_cls.side_effect = exc
+            response = api.converse("which one?", conv_id)
+
+        assert mock_cls.called
+        assert isinstance(response, str)
+        assert api.get_current_state(conv_id) == "start"
+        instance = api.fsm_manager.instances[conv_id]
+        stored = instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        assert stored["fallback"] is True
+        assert str(exc) in stored["error"]
+
     def test_keyboard_interrupt_propagates_bare(self):
         api, conv_id, patcher, exc = _api_with_failing_classifier(KeyboardInterrupt())
         with patcher as mock_cls:
@@ -776,6 +798,50 @@ class TestClassifierCache:
         assert len(pipeline._classifier_cache) == MAX_CLASSIFIER_CACHE_SIZE
         assert first_key not in pipeline._classifier_cache
         assert first not in pipeline._classifier_cache.values()
+
+    def test_eviction_race_two_threads(self):
+        """Concurrent misses past the bound must not raise. RED on the
+        pre-step-2 code: the unlocked ``cache.pop(next(iter(cache)))`` raced a
+        concurrent insert into ``RuntimeError: dictionary changed size during
+        iteration`` (review W2). Pins the ``_classifier_cache_lock``.
+        """
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
+        errors: list[BaseException] = []
+        n_threads, n_calls = 4, 2000
+
+        def worker(tid: int) -> None:
+            try:
+                for n in range(n_calls):
+                    pipeline._get_classifier(
+                        _schema(f"t{tid}_i{n}", f"t{tid}_j{n}"), "gpt-4", None, {}
+                    )
+            except BaseException as e:  # collected for the assert below
+                errors.append(e)
+
+        old_interval = sys.getswitchinterval()
+        try:
+            with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+                mock_cls.side_effect = lambda **kwargs: object()
+                for n in range(MAX_CLASSIFIER_CACHE_SIZE):
+                    pipeline._get_classifier(
+                        _schema(f"p{n}", f"q{n}"), "gpt-4", None, {}
+                    )
+                assert len(pipeline._classifier_cache) == MAX_CLASSIFIER_CACHE_SIZE
+                sys.setswitchinterval(1e-6)
+                threads = [
+                    threading.Thread(target=worker, args=(t,)) for t in range(n_threads)
+                ]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+        finally:
+            sys.setswitchinterval(old_interval)
+
+        assert errors == []
+        assert len(pipeline._classifier_cache) == MAX_CLASSIFIER_CACHE_SIZE
 
     def test_both_sites_share_one_cache(self):
         """An extraction entry whose schema equals the auto-built transition

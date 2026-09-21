@@ -17,6 +17,7 @@ import dataclasses
 import hashlib
 import json
 import re
+import threading
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -243,8 +244,10 @@ class MessagePipeline:
         self.field_extraction_prompt_builder = (
             field_extraction_prompt_builder or FieldExtractionPromptBuilder()
         )
-        # Content-keyed, bounded; see `_get_classifier`.
+        # Content-keyed, bounded; see `_get_classifier`. The lock guards
+        # check/construct/evict/insert as one unit (review W2, step 2).
         self._classifier_cache: dict[str, Classifier] = {}
+        self._classifier_cache_lock = threading.Lock()
 
     def get_state(
         self, instance: FSMInstance, conversation_id: str | None = None
@@ -2046,11 +2049,16 @@ class MessagePipeline:
         when the cache holds ``MAX_CLASSIFIER_CACHE_SIZE`` entries. Never raises
         on its own; construction errors propagate to the caller unchanged.
 
-        Thread safety: a ``MessagePipeline`` is shared across conversations.
-        Two threads missing on the same key may each construct an equal
-        classifier and the later dict write wins; the write itself is atomic
-        in CPython and ``Classifier`` is immutable after ``__init__`` (Assumption
-        A5, verified in step 8), so the race is benign. No lock on purpose.
+        Thread safety: a ``MessagePipeline`` is shared across conversations,
+        so the hit check, the construction, the eviction and the insert run
+        under ``self._classifier_cache_lock`` as one unit. The unlocked
+        version raced ``cache.pop(next(iter(cache)))`` against a concurrent
+        insert into ``RuntimeError: dictionary changed size during
+        iteration`` (reproduced by the iteration-1 review, W2, and pinned by
+        ``test_eviction_race_two_threads``). Holding the lock across
+        ``Classifier(...)`` is cheap: construction is pure CPU (prompt and
+        schema building, no network call), and it also removes the
+        double-construct on a shared miss.
         """
         # DECISION plan-2026-09-20T165703-0d9c218e/D-001: the key is a content
         # hash of schema + model + prompt config + connection kwargs, NOT
@@ -2058,7 +2066,10 @@ class MessagePipeline:
         # `api_base`/`timeout`, or an edited prompt_config would otherwise reuse
         # a stale instance built for the old settings; the content hash makes
         # staleness impossible by construction. Do NOT key on identity or on
-        # the state/field names. See decisions.md D-001.
+        # the state/field names. The check/construct/evict/insert sequence
+        # below is ONE critical section under `_classifier_cache_lock`: do
+        # NOT narrow the lock to the dict writes only, the FIFO `next(iter())`
+        # eviction is what raced (review W2). See decisions.md D-001.
         key = hashlib.sha256(
             json.dumps(
                 {
@@ -2074,18 +2085,19 @@ class MessagePipeline:
             ).encode()
         ).hexdigest()
         cache = self._classifier_cache
-        hit = cache.get(key)
-        if hit is not None:
-            return hit
-        classifier = Classifier(
-            schema=schema,
-            model=model,
-            config=prompt_config,
-            **connection_kwargs,
-        )
-        if len(cache) >= MAX_CLASSIFIER_CACHE_SIZE:
-            cache.pop(next(iter(cache)), None)
-        cache[key] = classifier
+        with self._classifier_cache_lock:
+            hit = cache.get(key)
+            if hit is not None:
+                return hit
+            classifier = Classifier(
+                schema=schema,
+                model=model,
+                config=prompt_config,
+                **connection_kwargs,
+            )
+            if len(cache) >= MAX_CLASSIFIER_CACHE_SIZE:
+                cache.pop(next(iter(cache)), None)
+            cache[key] = classifier
         return classifier
 
     def _execute_classification_extractions(
@@ -2264,11 +2276,12 @@ class MessagePipeline:
                 "transition resolution"
             )
 
-        classifier = self._get_classifier(
-            schema, model, None, self._classifier_connection_kwargs()
-        )
-
         try:
+            # Inside the try, as at the extraction site: a construction
+            # failure degrades to "stay" like a classify() failure (review W2).
+            classifier = self._get_classifier(
+                schema, model, None, self._classifier_connection_kwargs()
+            )
             result: ClassificationResult = classifier.classify(user_message)
         except _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS as e:
             # DECISION plan-2026-09-20T165703-0d9c218e/D-001: "stay" is the
