@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-FSM-LLM (v0.6.0) is a Python framework for building stateful conversational AI by combining LLMs with Finite State Machines. It uses a **2-pass architecture**: Pass 1 extracts data + evaluates transitions, Pass 2 generates the response from the final state.
+FSM-LLM (v0.7.0) is a Python framework for building stateful conversational AI by combining LLMs with Finite State Machines. It uses a **2-pass architecture**: Pass 1 extracts data + evaluates transitions, Pass 2 generates the response from the final state.
 
 - **License**: GPL-3.0-or-later
 - **Python**: 3.10, 3.11, 3.12
@@ -12,7 +12,7 @@ FSM-LLM (v0.6.0) is a Python framework for building stateful conversational AI b
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (6,174 tests)
+make test           # pytest -v (6,177 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -271,8 +271,8 @@ including what is measured and what is not.
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (6,174 collected)
-pytest tests/test_fsm_llm/            # Core package tests (2,006 tests)
+pytest                                 # Run all tests (6,177 collected)
+pytest tests/test_fsm_llm/            # Core package tests (2,009 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (115 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (159 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (1,004 tests)
@@ -281,7 +281,7 @@ pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,981 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (282 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 6,102. The remaining 72 are three root-level files:
+# The 9 suites above sum to 6,105. The remaining 72 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (26)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
@@ -384,10 +384,15 @@ Harness capability benches run via `scripts/harness_bench.py` (pre-registered fi
 - `docs/architecture.md` -- System design, 2-pass flow, security, performance
 - `docs/fsm_design.md` -- FSM design patterns, anti-patterns, real-world examples
 - `docs/handlers.md` -- Handler development guide with 8 timing points
-- `CHANGELOG.md` -- Version history (current: 0.5.0)
+- `CHANGELOG.md` -- Version history (current: 0.7.0)
 
 ## Pre-commit & CI
 
 - **Pre-commit**: trailing whitespace, EOF fixer, YAML/JSON validation, ruff (with --fix), pytest pre-push
 - **CI**: GitHub Actions on push/PR to main -- tests on Python 3.10, 3.11, 3.12
 - **Tox**: Multi-version testing + lint + mypy environments
+
+Collected counts re-measured a final time at the v0.7.0 release commit: 6,177 collected
+(was 6,174): core `tests/test_fsm_llm/` 2,009 (was 2,006; the three restore-session
+hidden-set pins from plan-2026-09-20-0d9c218e completion step 6.1 landed after the
+step-10 reconciliation). 9-suite sum 6,105; root-level 72 unchanged.
