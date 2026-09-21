@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 EvaluatorOptimizerAgent — Generate-Evaluate-Refine agent implementation.
 
@@ -7,6 +5,8 @@ Uses an external evaluation function (NOT LLM self-evaluation) to
 iteratively improve LLM-generated output until it passes or
 maximum refinements are reached.
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

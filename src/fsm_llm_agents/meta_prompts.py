@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Prompt builders for the meta-agent — hybrid architecture.
 
@@ -8,6 +6,8 @@ now happens via the FSM's ``field_extractions`` pipeline. This module
 retains: review presentation, welcome message, follow-up helpers, and
 output formatting.
 """
+
+from __future__ import annotations
 
 from .definitions import ArtifactType
 from .meta_builders import ArtifactBuilder

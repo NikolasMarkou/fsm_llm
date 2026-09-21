@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Persistence for agent WorkingMemory.
 
@@ -16,6 +14,8 @@ are lost on process restart. This module closes that gap additively:
 
 Nothing imports this by default; it is opt-in.
 """
+
+from __future__ import annotations
 
 import json
 import os

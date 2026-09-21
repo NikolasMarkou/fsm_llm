@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 MakerCheckerAgent — Two-persona quality loop agent implementation.
 
 The maker creates content and the checker critiques it. The loop
 continues until the checker approves or maximum revisions are reached.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

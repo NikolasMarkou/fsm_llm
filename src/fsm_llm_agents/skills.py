@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Skill loading system for FSM-LLM agents.
 
 Enables loading external skill definitions as agent tools from
 Python files, directories, or programmatic definitions.
 """
+
+from __future__ import annotations
 
 import hashlib
 import importlib

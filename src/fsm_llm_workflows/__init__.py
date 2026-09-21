@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 FSM-LLM Workflow System - Clean Architecture
 ===========================================
@@ -11,6 +9,8 @@ A workflow system built on top of FSM-LLM that enables:
 - Parallel workflow execution
 - Monitoring and error recovery
 """
+
+from __future__ import annotations
 
 # Core models and exceptions
 # Version info — imported via __version__.py to stay in sync (matches classification/reasoning pattern)

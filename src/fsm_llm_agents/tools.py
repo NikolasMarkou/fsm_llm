@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Tool registry for agent tool management.
 """
+
+from __future__ import annotations
 
 import inspect
 import json

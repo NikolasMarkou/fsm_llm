@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 JsonLogic Expression Evaluator for FSM-LLM.
 
@@ -41,6 +39,8 @@ Example:
         result = evaluate_logic(logic, context)
         # result is True
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from functools import reduce

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Monitor bridge connecting the EventCollector to a live FSM API instance.
 
@@ -7,6 +5,8 @@ Provides a unified query interface for the web dashboard, handling graceful
 degradation when optional extensions (agents, workflows, reasoning) are not
 installed.
 """
+
+from __future__ import annotations
 
 import json
 from pathlib import Path

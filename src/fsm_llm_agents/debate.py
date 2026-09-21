@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 DebateAgent -- Multi-perspective quality improvement through structured debate.
 
 Implements a propose -> critique -> counter -> judge loop with
 configurable personas and round limits.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

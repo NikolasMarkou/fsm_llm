@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Structure-aware text truncation for tool results.
 
@@ -7,6 +5,8 @@ Preserves head and tail content with a clear truncation marker in the
 middle, so the LLM sees both the initial context and the final
 conclusions/errors from tool output.
 """
+
+from __future__ import annotations
 
 
 def smart_truncate(text: str, max_length: int = 2000) -> str:

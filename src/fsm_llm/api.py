@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Enhanced API Module for FSM-LLM: Stateful Conversational AI
 
@@ -85,6 +83,8 @@ Custom handler integration:
 
     api.register_handler(validation_handler)
 """
+
+from __future__ import annotations
 
 import hashlib
 import json

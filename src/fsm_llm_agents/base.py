@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 BaseAgent — Abstract base class for all fsm_llm agents.
 
 Extracts the common conversation loop, budget enforcement, answer extraction,
 trace building, and context filtering from the 12 agent implementations.
 """
+
+from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod

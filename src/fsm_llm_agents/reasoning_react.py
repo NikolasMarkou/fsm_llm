@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 ReasoningReactAgent — ReAct agent with integrated structured reasoning.
 
@@ -8,6 +6,8 @@ FSM-LLM's reasoning engine via FSM stacking (push_fsm / pop_fsm).
 The agent autonomously decides when to use structured reasoning versus
 regular tools.
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

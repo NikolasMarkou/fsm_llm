@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Transition Evaluator Module for FSM-LLM: Intelligent State Transition Resolution.
 
@@ -48,6 +46,8 @@ The evaluator produces three distinct outcomes:
    - Context lacks necessary data for any path
    - May trigger error handling or user clarification prompts
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any

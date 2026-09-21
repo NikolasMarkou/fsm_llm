@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Human-in-the-Loop (HITL) support for agent patterns.
 
 Provides approval gates, confidence-based escalation, and human override
 mechanisms that integrate with the agent FSM via handlers and context.
 """
+
+from __future__ import annotations
 
 import threading
 from collections.abc import Callable

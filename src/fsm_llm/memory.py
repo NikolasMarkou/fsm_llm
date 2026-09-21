@@ -59,6 +59,20 @@ class WorkingMemory:
 
     Custom buffers can be added at construction or dynamically.
 
+    **Prompt reach (what the LLM actually sees).** When attached as
+    ``FSMContext.working_memory``, buffer data reaches ONLY the Pass-1
+    per-field extraction prompt, and only while a field's
+    ``FieldExtractionConfig.context_keys`` is left at its default (``None``):
+    that path calls ``FSMContext.get_user_visible_data()``, which merges the
+    non-hidden buffers into the flat ``data``. A field with explicit
+    ``context_keys`` reads raw ``context.data`` only, and the bulk
+    extraction pass sees neither. Buffer data does NOT appear in the Pass-2
+    response prompt: its ``<current_context>`` block is built from
+    ``context.data`` alone, and ``llm.py`` never reads ``request.context``.
+    ``API.update_context`` and handler return values write ``context.data``
+    only; nothing syncs a buffer into ``data`` or back. To put a value in
+    front of the response model, write it to ``context.data``.
+
     Example::
 
         memory = WorkingMemory()
@@ -68,7 +82,7 @@ class WorkingMemory:
         # Flat view for backward compat
         all_data = memory.get_all_data()  # {"user_name": "Alice", "search_result": {...}}
 
-        # Scoped view for LLM prompts
+        # Key-filtered view (public helper; the pipeline does not use it)
         scoped = memory.to_scoped_view(["user_name"])  # {"user_name": "Alice"}
 
         # Search across all buffers
@@ -329,8 +343,12 @@ class WorkingMemory:
     def to_scoped_view(self, read_keys: list[str]) -> dict[str, Any]:
         """Return a subset of all data matching the given keys.
 
-        Searches across all buffers. If a key exists in multiple
+        Searches across all non-hidden buffers. If a key exists in multiple
         buffers, core wins (same as ``get_all_data``).
+
+        This is a public convenience helper for callers; the message
+        pipeline does not build any prompt through it (it uses
+        ``FSMContext.get_user_visible_data()`` and its own scoping).
 
         Args:
             read_keys: Keys to include in the view.

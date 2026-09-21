@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Session persistence for FSM-LLM conversations.
 
@@ -24,6 +22,8 @@ Usage::
     api.save_session(conv_id)
     api.load_session(conv_id)
 """
+
+from __future__ import annotations
 
 import abc
 import json

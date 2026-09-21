@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 FSM Handler System: A Comprehensive Framework for Self-Determining Function Handlers in FSM-LLM.
 
@@ -69,6 +67,8 @@ Advanced Conditional Logic::
                      ctx.get("user_score", 0) > 80 and "premium" in ctx.get("features", []))
                .do(lambda ctx: enable_premium_features(ctx)))
 """
+
+from __future__ import annotations
 
 import concurrent.futures
 import copy

@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 DSL helper functions for creating workflows with a fluent API.
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

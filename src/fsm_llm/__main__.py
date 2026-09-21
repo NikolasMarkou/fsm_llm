@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """
 Command-line entry-point for the **FSM-LLM** framework.
 
-This module exposes a *single* public function – :pyfunc:`main_cli` – which
+This module exposes a *single* public function - :pyfunc:`main_cli` - which
 implements a thin wrapper around the three high-level workflows offered by the
 package:
 
-* **run** – interactively execute an FSM-driven conversation
-* **validate** – perform static analysis on an FSM definition
-* **visualize** – produce an ASCII diagram of an FSM
+* **run** - interactively execute an FSM-driven conversation
+* **validate** - perform static analysis on an FSM definition
+* **visualize** - produce an ASCII diagram of an FSM
 
 All heavy-lifting is delegated to the corresponding ``main`` functions in
 :pyfile:`runner.py`, :pyfile:`validator.py`, and :pyfile:`visualizer.py`.  That
@@ -41,9 +39,9 @@ Optional switches
 ^^^^^^^^^^^^^^^^^
 
 ``--mode`` *(default: ``run``)*
-    • ``run`` – chat with the FSM using the model and environment settings
-    • ``validate`` – lint the FSM and emit a pass/fail report
-    • ``visualize`` – render an ASCII diagram to stdout (or ``--output``)
+    • ``run`` - chat with the FSM using the model and environment settings
+    • ``validate`` - lint the FSM and emit a pass/fail report
+    • ``visualize`` - render an ASCII diagram to stdout (or ``--output``)
 
 ``--style, -s`` *(visualize only)*
     Rendering style: ``full`` (rich, multi-section), ``compact``, or ``minimal``.
@@ -60,6 +58,8 @@ Optional switches
 ``--version, -v``
     Print the package version and exit.
 """
+
+from __future__ import annotations
 
 import argparse
 import sys

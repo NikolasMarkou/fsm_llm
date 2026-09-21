@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 OrchestratorAgent — Dynamic multi-agent coordination.
 
@@ -9,6 +7,8 @@ collects results, and synthesizes a final answer.
 FSM flow: orchestrate -> delegate -> collect -> synthesize
                                              -> orchestrate (if more work needed)
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

@@ -130,6 +130,8 @@ class FSMContext:
     working_memory: WorkingMemory  # Named buffers (core, scratch, environment, reasoning)
 ```
 
+`working_memory` reaches the LLM in exactly one place: the Pass-1 per-field extraction prompt, when a field's `context_keys` is left at its default (`get_user_visible_data()` merges the non-hidden buffers into `data`). The Pass-2 response prompt's `<current_context>` is built from `data` alone, and `update_context`/handlers write `data` only; a value that must reach the response model belongs in `data`. `working_memory` is also `exclude=True`, so `FSMContext.model_dump()` omits it (sessions persist it through `WorkingMemory.to_dict()`).
+
 Special keys (prefixed with `_`): `_conversation_id`, `_conversation_start`, `_fsm_id`, `_timestamp`, and, once a transition has happened, `_current_state`, `_previous_state`, `_transition_timestamp`. ERROR handlers additionally see `_error` and `_traceback`. The raw user message is not in the context, so handlers see extracted keys only.
 
 ### Context in Stacked FSMs

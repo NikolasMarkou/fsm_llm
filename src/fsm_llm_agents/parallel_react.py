@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 ParallelReactAgent — a ReAct variant that dispatches MULTIPLE tool calls per
 step, concurrently.
@@ -23,6 +21,8 @@ Example::
                                max_parallel=4)
     result = agent.run("Compare the weather in Paris, Tokyo and Cairo.")
 """
+
+from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any

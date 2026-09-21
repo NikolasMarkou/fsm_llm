@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 A2A (Agent-to-Agent) Protocol for Remote Agents.
 
 AgentServer wraps any FSM-LLM agent as an HTTP endpoint.
 RemoteAgentTool wraps a remote agent URL as a local tool.
 """
+
+from __future__ import annotations
 
 import json
 from typing import Any, cast

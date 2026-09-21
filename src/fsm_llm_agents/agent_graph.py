@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Graph-Based Agent Orchestration.
 
@@ -7,6 +5,8 @@ Wires agents as nodes in a directed graph with conditional edges.
 Each node runs an agent, and its AgentResult.final_context becomes
 the edge state that condition functions evaluate against.
 """
+
+from __future__ import annotations
 
 import time
 from collections import defaultdict, deque

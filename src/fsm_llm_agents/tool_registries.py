@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Drop-in :class:`ToolRegistry` subclasses that add cross-cutting execution
 behavior (result caching, retry-on-failure) without changing the dispatch
@@ -19,6 +17,8 @@ Example::
     registry.register(search._tool_definition)
     agent = ReactAgent(tools=registry, config=AgentConfig(model=model))
 """
+
+from __future__ import annotations
 
 import threading
 import time

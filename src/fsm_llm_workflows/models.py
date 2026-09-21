@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Core data models for the FSM-LLM Workflow System.
 """
+
+from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone

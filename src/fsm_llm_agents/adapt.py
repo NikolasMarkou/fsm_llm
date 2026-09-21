@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 ADaPTAgent — Adaptive Decomposition and Planning for Tasks.
 
 Attempts tasks directly first, decomposes on failure, recursion bounded by max_depth.
 FSM: attempt -> assess -> combine | assess -> decompose -> [recursive run()] -> combine
 """
+
+from __future__ import annotations
 
 import json
 import time

@@ -31,6 +31,33 @@ class TestModuleDocstring:
         assert "Working memory" in doc
 
 
+class TestPackageExports:
+    """Regression for finding memory #15 (plan-2026-09-20T165703-0d9c218e).
+
+    The buffer-name constants used to be reachable only from the
+    ``fsm_llm.memory`` submodule while ``BUFFER_METADATA`` alone sat at the
+    package top level.
+    """
+
+    _NAMES = (
+        "BUFFER_CORE",
+        "BUFFER_SCRATCH",
+        "BUFFER_ENVIRONMENT",
+        "BUFFER_REASONING",
+        "BUFFER_METADATA",
+        "DEFAULT_BUFFERS",
+        "DEFAULT_HIDDEN_BUFFERS",
+        "WorkingMemory",
+    )
+
+    @pytest.mark.parametrize("name", _NAMES)
+    def test_buffer_constant_exported_from_package(self, name: str):
+        import fsm_llm
+
+        assert name in fsm_llm.__all__
+        assert getattr(fsm_llm, name) is getattr(fsm_llm.memory, name)
+
+
 class TestWorkingMemoryInit:
     """Test WorkingMemory construction."""
 

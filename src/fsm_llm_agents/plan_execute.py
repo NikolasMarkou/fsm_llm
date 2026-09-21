@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 PlanExecuteAgent — Plan-and-Execute agent implementation.
 
@@ -8,6 +6,8 @@ Plan -> Execute Step -> Check Result -> Synthesize (all done)
                                       -> Replan (step failed)
                                       -> Execute Step (next step)
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

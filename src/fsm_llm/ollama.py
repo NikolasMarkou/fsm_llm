@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Ollama-specific helpers for structured output compatibility.
 
@@ -17,6 +15,8 @@ calls ``litellm.completion()`` directly) apply the same fixes:
 - ``temperature = 0`` — deterministic output for structured calls
 - ``json_schema`` response format with explicit schema
 """
+
+from __future__ import annotations
 
 import copy
 import json

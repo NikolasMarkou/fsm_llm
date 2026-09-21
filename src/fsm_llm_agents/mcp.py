@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 MCP (Model Context Protocol) Tool Integration.
 
 Connects to MCP servers and converts their tool definitions into
 ToolDefinition objects compatible with ToolRegistry.
 """
+
+from __future__ import annotations
 
 import json
 from typing import Any

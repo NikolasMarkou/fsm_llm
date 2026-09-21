@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Artifact builders for incrementally constructing FSMs, Workflows, and Agents.
 
@@ -10,6 +8,8 @@ Each builder maintains partial state and provides:
 - Summary generation for LLM context injection
 - Final serialization to validated definitions
 """
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar

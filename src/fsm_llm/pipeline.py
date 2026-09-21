@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 MessagePipeline: The 2-pass message processing engine.
 
@@ -11,6 +9,8 @@ Encapsulates all LLM-driven processing logic extracted from FSMManager:
 FSMManager delegates to this class for all message processing.
 The pipeline does not own instances or locks — those remain in FSMManager.
 """
+
+from __future__ import annotations
 
 import copy
 import dataclasses

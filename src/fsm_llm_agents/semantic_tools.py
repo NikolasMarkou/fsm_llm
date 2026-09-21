@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Semantic Tool Retrieval.
 
 Extends ToolRegistry with embedding-based retrieval for scalable tool
 selection. Uses litellm's embedding() API (no new dependencies).
 """
+
+from __future__ import annotations
 
 import math
 import threading

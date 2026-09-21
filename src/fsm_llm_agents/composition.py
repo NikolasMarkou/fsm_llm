@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Composition helpers that wire existing agents together.
 
@@ -17,6 +15,8 @@ Two reusable building blocks for the "Claude-like" patterns:
 
 Both are additive and import-light; nothing else depends on them.
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

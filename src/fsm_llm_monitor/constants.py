@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Constants for fsm_llm_monitor package.
 """
+
+from __future__ import annotations
 
 # --- Theme Colors (Grafana dark) ---
 THEME_NAME = "grafana_dark"

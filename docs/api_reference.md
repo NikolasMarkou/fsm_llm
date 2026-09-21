@@ -159,7 +159,7 @@ wm.get("core", "goal")                    # get(buffer, key, default=None)
 wm.get_all_data()                         # flattened view across buffers
 ```
 
-Named buffers: `core`, `scratch`, `environment`, `reasoning`. The `BUFFER_METADATA` (`"metadata"`) buffer is hidden by default and excluded from the LLM-visible context.
+Named buffers: `core`, `scratch`, `environment`, `reasoning` (constants `BUFFER_CORE`, `BUFFER_SCRATCH`, `BUFFER_ENVIRONMENT`, `BUFFER_REASONING`, `DEFAULT_BUFFERS`, `DEFAULT_HIDDEN_BUFFERS` are exported from `fsm_llm`). The `BUFFER_METADATA` (`"metadata"`) buffer is hidden by default and excluded from `get_all_data()`/`get_user_visible_data()`. Reach: when attached as `FSMContext.working_memory`, buffer data enters only the Pass-1 per-field extraction prompt (default `context_keys`); the Pass-2 response prompt is built from `context.data` alone, so a value the response model must see goes in `context.data`.
 
 ## TransitionEvaluatorConfig
 
@@ -189,8 +189,14 @@ schema = ClassificationSchema(
 )
 classifier = Classifier(schema, model="gpt-4o-mini")
 result = classifier.classify("Where is my invoice?")
-# result.intent, result.confidence, result.is_low_confidence
+# result.intent, result.confidence
+if classifier.is_low_confidence(result):  # compares against schema.confidence_threshold
+    ...
+```
 
+The `ClassificationResult.is_low_confidence` property compares against a fixed default of 0.6 (`DEFAULT_CONFIDENCE_THRESHOLD`), not the schema's `confidence_threshold`; use `classifier.is_low_confidence(result)` for the schema-aware check.
+
+```python
 # Multi-intent
 result = classifier.classify_multi("Check order and update billing")
 

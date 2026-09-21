@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Constants and configuration values for the FSM-LLM framework.
 """
+
+from __future__ import annotations
 
 import math
 import re

@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Pydantic models for the agents package.
 """
+
+from __future__ import annotations
 
 import re
 from collections.abc import Callable

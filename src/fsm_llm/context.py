@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Context management utilities for FSM-LLM.
 
 Provides stateless utility functions for context cleaning and compaction,
 kept separate from the orchestration classes.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

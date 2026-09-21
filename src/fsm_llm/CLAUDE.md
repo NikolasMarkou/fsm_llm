@@ -22,7 +22,7 @@ fsm_llm/
 ├── transition_evaluator.py # TransitionEvaluator + TransitionEvaluatorConfig -- rule-based with confidence scoring
 ├── expressions.py          # evaluate_logic() -- JsonLogic evaluator (var, and, or, ==, in, has_context, context_length)
 ├── context.py              # clean_context_keys() + ContextCompactor (transient key clearing, pruning, summarization)
-├── memory.py               # WorkingMemory -- 4 named buffers (core, scratch, environment, reasoning)
+├── memory.py               # WorkingMemory -- 4 named buffers (core, scratch, environment, reasoning) + BUFFER_*/DEFAULT_BUFFERS/DEFAULT_HIDDEN_BUFFERS constants
 ├── runner.py               # Interactive CLI conversation runner
 ├── validator.py            # FSMValidator.validate() + validate_fsm_from_file()
 ├── visualizer.py           # visualize_fsm_ascii() + visualize_fsm_from_file() (full/compact/minimal styles)
@@ -70,13 +70,13 @@ fsm_llm/
   - Error modes: "continue" (skip failed) | "raise"
 - **HandlerBuilder** (`handlers.py`) -- Fluent API: `.at(timing)` → `.on_state(id)` → `.when(lambda)`/`.when_context_has()`/`.when_keys_updated()` (+ shorthands `.on_state_entry()`, `.on_state_exit()`, `.on_context_update()`, `.with_priority()`) → `.do(lambda)` → `BaseHandler`
 - **HandlerTiming** enum -- 8 points: START_CONVERSATION, PRE_PROCESSING, POST_PROCESSING, PRE_TRANSITION, POST_TRANSITION, CONTEXT_UPDATE, END_CONVERSATION, ERROR
-- **Classifier** (`classification.py`) -- `classify(msg)` → ClassificationResult, `classify_multi(msg)` → MultiClassificationResult
+- **Classifier** (`classification.py`) -- `classify(msg)` → ClassificationResult, `classify_multi(msg)` → MultiClassificationResult; `is_low_confidence(result)` compares against `schema.confidence_threshold` (the `ClassificationResult.is_low_confidence` property uses a fixed 0.6). The pipeline builds classifiers through `_get_classifier`, a per-pipeline content-keyed cache bounded at `MAX_CLASSIFIER_CACHE_SIZE` (64, FIFO eviction) shared by the classification-extraction and ambiguous-transition sites; both sites catch only `_CLASSIFICATION_SOFT_FAIL_EXCEPTIONS` (`ClassificationError`, `ValueError`, `TypeError`, `KeyError`, `RuntimeError`, `OSError`), so other programming errors and `KeyboardInterrupt` propagate
 - **HierarchicalClassifier** -- Two-stage domain → intent for >15 intents
 - **IntentRouter** -- `route(msg)` → dispatches to handler functions by intent
 - **TransitionEvaluator** (`transition_evaluator.py`) -- Returns DETERMINISTIC | AMBIGUOUS | BLOCKED with confidence scores
 - **LiteLLMInterface** (`llm.py`) -- `generate_response(request)`, `extract_field(request)`, `generate_response_stream(request)` → `Iterator[str]` via litellm (100+ providers). Supports `response_format` for schema-enforced JSON output
   - Reply parsing: an uncoercible `confidence` (`"high"`, null, object) keeps the returned value at confidence 0.5; a structured reply with no `message` but a `reasoning` key reaches the user as the JSON text; the plain-text rung strips `<think>` blocks first and replaces brace-shaped text only when it parses as JSON; `strip_think_and_fences` strips a fence only at the start of the reply and the closing fence only when a leading fence was stripped, so a reply that ends in a code block keeps its closing fence (D-048), and `extract_json_from_text` skips a fenced non-object by blanking its span (so JSON before a fenced example is found)
-- **WorkingMemory** (`memory.py`) -- `get/set/delete(buffer, key)`, `get_all_data()`, `search(query)`, `get_buffer()`, `clear_buffer()`, `list_buffers()`, `has_buffer()`, `create_buffer()`, `to_scoped_view()`, `update_buffer()`, `import_flat_data()`, `to_dict()`, `from_dict()`
+- **WorkingMemory** (`memory.py`) -- `get/set/delete(buffer, key)`, `get_all_data()`, `search(query)`, `get_buffer()`, `clear_buffer()`, `list_buffers()`, `has_buffer()`, `create_buffer()`, `to_scoped_view()` (public helper, unused by the pipeline), `update_buffer()`, `import_flat_data()`, `to_dict()` (shallow: values shared by reference), `from_dict()`. Prompt reach: as `FSMContext.working_memory`, buffer data enters ONLY the Pass-1 per-field extraction prompt (default `context_keys`, via `get_user_visible_data()`); the Pass-2 `<current_context>` is built from `context.data` alone and `llm.py` never reads `request.context`; `update_context`/handlers write `context.data` only, nothing syncs the two. `FSMContext.working_memory` is `exclude=True`: `model_dump()` omits it. Exports from `fsm_llm`: `WorkingMemory`, `BUFFER_CORE`, `BUFFER_SCRATCH`, `BUFFER_ENVIRONMENT`, `BUFFER_REASONING`, `BUFFER_METADATA`, `DEFAULT_BUFFERS`, `DEFAULT_HIDDEN_BUFFERS`
 - **SessionStore** (`session.py`) -- ABC for session persistence: `save(id, state)`, `load(id)`, `delete(id) -> bool`, `list_sessions()`, `exists(id)`
 - **FileSessionStore** (`session.py`) -- File-based implementation with JSON files and atomic writes (temp file + rename). Path-traversal protection via session ID validation
 - **SessionState** (`session.py`) -- Pydantic model: conversation_id, fsm_id, current_state, context_data, conversation_history, stack_depth, saved_at, metadata
@@ -108,6 +108,7 @@ Comparison: `==`, `!=`, `===`, `!==`, `>`, `>=`, `<`, `<=` | Logical: `and`, `or
 - `INTERNAL_KEY_PREFIXES = ["_", "system_", "internal_", "__"]`
 - `FORBIDDEN_CONTEXT_PATTERNS`: Regex for passwords, secrets, API keys, tokens
 - `DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE = 0.6`
+- `MAX_MULTI_INTENTS = 5` (multi-intent results truncated with a warning), `MAX_CLASSIFIER_CACHE_SIZE = 64` (per-pipeline `Classifier` cache bound)
 
 ## Testing
 

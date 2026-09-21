@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Dependency-Based Workflow Parallelism.
 
@@ -7,6 +5,8 @@ Computes execution waves from declared step dependencies using topological
 sort. Steps within the same wave have no dependencies on each other and
 can execute in parallel.
 """
+
+from __future__ import annotations
 
 from collections import defaultdict, deque
 

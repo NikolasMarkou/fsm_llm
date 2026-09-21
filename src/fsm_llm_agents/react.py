@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 ReactAgent — ReAct (Reasoning + Acting) agent implementation.
 
 Uses FSM-LLM's 2-pass architecture to implement the ReAct loop:
 Think -> Act -> Observe -> Think -> ... -> Conclude
 """
+
+from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import Any

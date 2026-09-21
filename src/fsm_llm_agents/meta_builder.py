@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 MetaBuilderAgent — agentic artifact builder with classification-based tool routing.
 
@@ -12,6 +10,8 @@ Uses a classify-then-extract loop to build artifacts incrementally:
 This approach works with small models (4B+) because each LLM call
 is focused: either pick from a list OR extract one value.
 """
+
+from __future__ import annotations
 
 import json
 from typing import Any, ClassVar, cast

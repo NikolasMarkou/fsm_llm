@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 PromptChainAgent -- Fixed sequential pipeline with validation gates.
 
 Chains a user-defined list of LLM steps, each with optional validation
 gates that can short-circuit the pipeline on failure.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

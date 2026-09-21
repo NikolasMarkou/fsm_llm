@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Swarm Pattern — Emergent Agent Coordination.
 
@@ -7,6 +5,8 @@ Agents hand off to each other dynamically by returning the next agent ID,
 a handoff message, and optional context. The swarm runner loops until an
 agent returns no next_agent or the max handoff limit is reached.
 """
+
+from __future__ import annotations
 
 import time
 from typing import Any

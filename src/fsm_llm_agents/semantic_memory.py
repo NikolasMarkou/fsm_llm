@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Long-term semantic memory for agents.
 
@@ -30,6 +28,8 @@ Example::
     # ... later process ...
     store2 = SemanticMemoryStore.load("~/.agent_memory.json")
 """
+
+from __future__ import annotations
 
 import json
 import os

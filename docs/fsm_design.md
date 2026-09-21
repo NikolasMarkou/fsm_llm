@@ -197,7 +197,7 @@ Classification is built into the core (`fsm_llm.Classifier`). Use it with `class
 
 Agent patterns (`fsm_llm_agents`) auto-generate FSMs from tool registries. The core ReAct loop is a 3-4 state FSM: **Think -> Act -> Observe -> Conclude**. Tool execution happens via handlers, not state instructions.
 
-For agent-style flows that accumulate intermediate results across turns, `WorkingMemory` (`fsm_llm.WorkingMemory`) provides named buffers (`core`, `scratch`, `environment`, `reasoning`) so tool outputs and intermediate reasoning are organized rather than flattened into one context dict. Intermediate states can also set an empty `response_instructions` to skip the Pass-2 response LLM call entirely (see the 2-pass notes), which is the common pattern for tool-dispatch states inside a ReAct loop.
+For agent-style flows that accumulate intermediate results across turns, `WorkingMemory` (`fsm_llm.WorkingMemory`) provides named buffers (`core`, `scratch`, `environment`, `reasoning`) so tool outputs and intermediate reasoning are organized rather than flattened into one context dict. Note the reach: buffer data is merged into the Pass-1 per-field extraction prompt only (default `context_keys`), never into the Pass-2 response prompt, which reads `context.data` alone; put anything the response model must see in `context.data` (via `update_context` or a handler). Intermediate states can also set an empty `response_instructions` to skip the Pass-2 response LLM call entirely (see the 2-pass notes), which is the common pattern for tool-dispatch states inside a ReAct loop.
 
 ## Anti-Patterns to Avoid
 

@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Output formatting and file writing for meta-agent artifacts.
 """
+
+from __future__ import annotations
 
 import json
 from pathlib import Path

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Automatic long-term memory for agents.
 
@@ -30,6 +28,8 @@ Example::
     agent.run("My favorite language is Python.")   # auto-stored
     agent.run("What language do I like?")           # auto-recalled into prompt
 """
+
+from __future__ import annotations
 
 from typing import Any, Protocol
 

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Enhanced FSM-LLM: Improved 2-Pass Architecture for Large Language Model Finite State Machines.
 
@@ -7,6 +5,8 @@ This package provides a sophisticated framework for building stateful conversati
 systems using an improved 2-pass architecture that generates responses after transition
 evaluation for optimal contextual accuracy.
 """
+
+from __future__ import annotations
 
 import sys
 import warnings
@@ -110,7 +110,16 @@ from .logging import setup_logging
 # --------------------------------------------------------------
 # Working Memory
 # --------------------------------------------------------------
-from .memory import BUFFER_METADATA, WorkingMemory
+from .memory import (
+    BUFFER_CORE,
+    BUFFER_ENVIRONMENT,
+    BUFFER_METADATA,
+    BUFFER_REASONING,
+    BUFFER_SCRATCH,
+    DEFAULT_BUFFERS,
+    DEFAULT_HIDDEN_BUFFERS,
+    WorkingMemory,
+)
 
 # --------------------------------------------------------------
 # Enhanced Prompt Building Components
@@ -229,7 +238,13 @@ __all__ = [
     # Context utilities
     "ContextCompactor",
     # Working memory
+    "BUFFER_CORE",
+    "BUFFER_ENVIRONMENT",
     "BUFFER_METADATA",
+    "BUFFER_REASONING",
+    "BUFFER_SCRATCH",
+    "DEFAULT_BUFFERS",
+    "DEFAULT_HIDDEN_BUFFERS",
     "WorkingMemory",
     # Session persistence
     "FileSessionStore",

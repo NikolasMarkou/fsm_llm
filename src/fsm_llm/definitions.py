@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Enhanced FSM-LLM definitions with improved 2-pass architecture.
 
@@ -12,6 +10,8 @@ Key Changes:
 - Response generation occurs after transition evaluation
 - Enhanced request/response models for each pass
 """
+
+from __future__ import annotations
 
 import re
 from collections import deque
@@ -1098,8 +1098,15 @@ class FSMContext(BaseModel):
 
     Supports an optional ``working_memory`` for structured buffer-based
     context management. When set, ``get_user_visible_data()`` includes
-    data from all working memory buffers (flattened). The flat ``data``
-    dict remains the primary storage for backward compatibility.
+    data from all non-hidden working memory buffers (flattened). The flat
+    ``data`` dict remains the primary storage for backward compatibility.
+
+    Prompt reach: the pipeline calls ``get_user_visible_data()`` only for
+    Pass-1 per-field extraction with a default ``context_keys``, so working
+    memory data reaches that prompt and no other. The Pass-2 response
+    prompt's ``<current_context>`` is built from ``data`` alone, and
+    ``update_context``/handlers write ``data`` only. See
+    ``fsm_llm.memory.WorkingMemory`` for the full statement.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -1116,16 +1123,20 @@ class FSMContext(BaseModel):
         default_factory=dict, description="System metadata and operational data"
     )
 
-    working_memory: Any = (
-        Field(  # Runtime: WorkingMemory | None (avoids circular import)
-            default=None,
-            description=(
-                "Optional WorkingMemory instance for structured buffer-based "
-                "context management. When set, get_user_visible_data() merges "
-                "data from working memory buffers. Import from fsm_llm.memory."
-            ),
-            exclude=True,
-        )
+    # Runtime: WorkingMemory | None (typed Any to avoid a circular import).
+    # `exclude=True` means model_dump()/model_dump_json() omit this field
+    # ENTIRELY (no key, not even None); model_copy(deep=True) and copy.deepcopy
+    # do carry it. Persist working memory via WorkingMemory.to_dict(), as
+    # save_session does -- not via a context dump.
+    working_memory: Any = Field(
+        default=None,
+        description=(
+            "Optional WorkingMemory instance for structured buffer-based "
+            "context management. When set, get_user_visible_data() merges "
+            "data from non-hidden working memory buffers (reaches only the "
+            "Pass-1 per-field extraction prompt). Import from fsm_llm.memory."
+        ),
+        exclude=True,
     )
 
     def __init__(self, **data):

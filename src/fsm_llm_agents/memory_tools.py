@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Memory management tools for FSM-LLM agents.
 
@@ -21,6 +19,8 @@ Usage::
     for tool_def in tools:
         registry.register(tool_def)
 """
+
+from __future__ import annotations
 
 from typing import Annotated
 

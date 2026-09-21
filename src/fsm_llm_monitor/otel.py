@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 OpenTelemetry (OTEL) Observability Adapter.
 
@@ -7,6 +5,8 @@ Wraps EventCollector events into OTEL spans and metrics using the adapter
 pattern. Does not modify the existing EventCollector — observes its events
 and exports them to OTEL-compatible backends (Jaeger, Datadog, Langfuse, etc.).
 """
+
+from __future__ import annotations
 
 import threading
 import uuid

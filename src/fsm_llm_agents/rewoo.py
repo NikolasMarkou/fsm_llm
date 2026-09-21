@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 REWOOAgent — Reasoning WithOut Observation agent implementation.
 
 Uses exactly 2 LLM calls: plan all tool calls upfront (#E1, #E2 refs),
 execute them sequentially (no LLM), then synthesize from evidence.
 """
+
+from __future__ import annotations
 
 import re
 from typing import Any

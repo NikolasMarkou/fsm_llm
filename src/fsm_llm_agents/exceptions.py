@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Exception hierarchy for the agents package.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

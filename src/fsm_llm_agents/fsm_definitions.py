@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Pre-built FSM definitions for agent patterns.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

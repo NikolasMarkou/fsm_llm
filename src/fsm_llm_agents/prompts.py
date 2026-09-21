@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Prompt builders for agent tool awareness and observation formatting.
 """
+
+from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 

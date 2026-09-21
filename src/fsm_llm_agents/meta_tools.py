@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Builder tool factories for the meta-agent.
 
@@ -7,6 +5,8 @@ Each factory creates a ``ToolRegistry`` whose tools are closures over a
 concrete builder instance.  These registries are part of the public API
 for programmatic artifact construction outside of MetaBuilderAgent.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

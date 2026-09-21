@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 ReflexionAgent — ReAct with evaluation, verbal self-critique, and episodic memory.
 
@@ -7,6 +5,8 @@ Extends the ReAct loop with an evaluation gate and a reflection state:
 Think -> Act -> Evaluate -> Reflect (if failed) -> Think (loop)
                           -> Conclude (if passed)
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

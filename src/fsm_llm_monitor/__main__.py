@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 CLI entry point for fsm_llm_monitor.
 
@@ -7,6 +5,8 @@ Usage:
     python -m fsm_llm_monitor [--host HOST] [--port PORT]
     fsm-llm-monitor [--host HOST] [--port PORT]
 """
+
+from __future__ import annotations
 
 import argparse
 import sys

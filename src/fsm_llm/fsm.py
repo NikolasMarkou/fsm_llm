@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 FSMManager: Conversation lifecycle orchestrator for the 2-pass architecture.
 
@@ -8,6 +6,8 @@ Delegates all message processing to MessagePipeline.
 
 Thread-safe per-conversation. See docs/architecture.md for details.
 """
+
+from __future__ import annotations
 
 import threading
 import time

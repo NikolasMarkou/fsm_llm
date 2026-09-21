@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Constants for the agents package.
 """
+
+from __future__ import annotations
 
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 

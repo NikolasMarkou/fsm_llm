@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 NativeFunctionCallingReactAgent — a ReAct loop using provider-native function
 calling instead of JSON-in-prompt tool extraction.
@@ -38,6 +36,8 @@ message, leaving the user turn to carry only that turn's task. It is read at
 attribute afterwards. Default ``None`` reproduces the previous system message
 byte for byte.
 """
+
+from __future__ import annotations
 
 import json
 import time

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Legacy FSM definition for the MetaBuilderAgent.
 
@@ -8,6 +6,8 @@ Legacy FSM definition for the MetaBuilderAgent.
     tools. This module is kept for backward compatibility but
     ``build_meta_builder_fsm()`` is no longer called by MetaBuilderAgent.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 SelfConsistencyAgent -- Parallel scaling via multiple generations + majority vote.
 
@@ -7,6 +5,8 @@ Generates multiple independent answers to the same task at varying
 temperatures, then aggregates them via majority vote (or a custom
 aggregation function).
 """
+
+from __future__ import annotations
 
 import math
 from collections import Counter

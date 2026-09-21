@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 FSM-LLM Agents
 ==============
@@ -26,6 +24,8 @@ With HITL:
     )
     agent = ReactAgent(tools=registry, hitl=hitl)
 """
+
+from __future__ import annotations
 
 from .__version__ import __version__
 from .adapt import ADaPTAgent

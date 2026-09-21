@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 VerifiedReactAgent — a ReAct variant with answer verification + periodic
 self-reflection.
@@ -32,6 +30,8 @@ Example::
         max_verify_retries=2,
     )
 """
+
+from __future__ import annotations
 
 from typing import Any
 

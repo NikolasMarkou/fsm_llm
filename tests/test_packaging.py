@@ -13,6 +13,7 @@ one day it matters: the day a seventh package lands.
 
 from __future__ import annotations
 
+import ast
 import collections
 import os
 import pathlib
@@ -222,6 +223,54 @@ class TestPackageBackedExtrasAreInstalled:
             requested = set(re.findall(r"[\[,]([a-z0-9_]+)", _one_line(rel, needle)))
         missing = self.EXPECTED - requested
         assert not missing, f"{label} does not request extras: {sorted(missing)}"
+
+
+# ══════════════════════════════════════════════════════════════
+# Module docstrings are real docstrings (not inert strings after a future import)
+# ══════════════════════════════════════════════════════════════
+
+#: Every module under `src/`, derived from disk.
+SRC_MODULES: tuple[pathlib.Path, ...] = tuple(
+    sorted((_REPO_ROOT / "src").glob("*/**/*.py"))
+)
+
+
+def _future_import_precedes_docstring(path: pathlib.Path) -> bool:
+    """True when the module's first statement is a `from __future__` import and
+    its SECOND statement is a bare string literal -- the string the author meant
+    as the module docstring, which Python then leaves out of `__doc__`."""
+    body = ast.parse(path.read_text(encoding="utf-8")).body
+    if len(body) < 2:
+        return False
+    first, second = body[0], body[1]
+    return (
+        isinstance(first, ast.ImportFrom)
+        and first.module == "__future__"
+        and isinstance(second, ast.Expr)
+        and isinstance(second.value, ast.Constant)
+        and isinstance(second.value.value, str)
+    )
+
+
+class TestModuleDocstringsAreReal:
+    """plan-2026-09-20T165703-0d9c218e D-003: a module docstring placed AFTER
+    `from __future__ import annotations` is an inert expression, so
+    `module.__doc__` is None and `help()` shows nothing. 81 modules had this
+    defect; the sweep moved every docstring above the future import."""
+
+    def test_module_list_is_not_empty(self):
+        assert len(SRC_MODULES) >= 50, len(SRC_MODULES)
+
+    def test_no_module_hides_its_docstring_behind_a_future_import(self):
+        offenders = [
+            str(p.relative_to(_REPO_ROOT))
+            for p in SRC_MODULES
+            if _future_import_precedes_docstring(p)
+        ]
+        assert not offenders, (
+            "module docstring sits after `from __future__ import annotations` "
+            f"(so __doc__ is None) in: {offenders}"
+        )
 
 
 # ══════════════════════════════════════════════════════════════

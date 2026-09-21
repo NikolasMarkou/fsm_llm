@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 LLM Interface Module for FSM-Driven Conversational AI.
 
@@ -48,6 +46,8 @@ This module integrates with the broader fsm-llm system:
 - **API** (`api.py`) provides the high-level interface that developers use, internally
   coordinating between FSM management and LLM communication.
 """
+
+from __future__ import annotations
 
 import abc
 import json

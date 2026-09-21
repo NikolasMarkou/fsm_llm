@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 FSM-LLM Monitor Extension
 ==========================
@@ -23,6 +21,8 @@ Quick Start::
     configure(bridge)
     # Run with uvicorn: uvicorn fsm_llm_monitor.server:app
 """
+
+from __future__ import annotations
 
 from .__version__ import __version__
 

@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Event collector for fsm_llm_monitor.
 
 Captures FSM lifecycle events via handler hooks and log records via a loguru sink.
 Stores events in bounded deques and computes basic metrics.
 """
+
+from __future__ import annotations
 
 import threading
 from collections import deque

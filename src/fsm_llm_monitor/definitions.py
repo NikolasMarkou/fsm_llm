@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Pydantic models for fsm_llm_monitor.
 
 Defines event, metric, configuration, and snapshot models used by
 the collector, bridge, and web dashboard.
 """
+
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any

@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Workflow definition and validation for the FSM-LLM Workflow System.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

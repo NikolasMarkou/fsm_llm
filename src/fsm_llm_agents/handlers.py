@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 """
 Agent-specific handlers for tool execution, iteration limiting,
 observation tracking, and HITL gating.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

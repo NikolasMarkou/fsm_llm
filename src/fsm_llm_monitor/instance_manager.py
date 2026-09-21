@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Instance manager for fsm_llm_monitor.
 
 Manages multiple concurrent FSM, workflow, and agent instances with
 per-instance event collection and lifecycle management.
 """
+
+from __future__ import annotations
 
 import collections
 import json

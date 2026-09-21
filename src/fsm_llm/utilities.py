@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 This module provides utility functions for FSM definition loading,
 JSON processing, and other common operations in the enhanced
@@ -11,6 +9,8 @@ Key Features:
 - Error handling and logging integration
 - Support for new FSM definition format
 """
+
+from __future__ import annotations
 
 import json
 import math

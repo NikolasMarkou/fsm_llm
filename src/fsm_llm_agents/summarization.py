@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Observation summarization for long agent loops.
 
@@ -15,6 +13,8 @@ handler. Default summarization is deterministic (structure-preserving
 truncation, no LLM call) so it is cheap and testable; pass a custom
 ``summarize_fn`` for an LLM-backed summary.
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any

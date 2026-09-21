@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Agent SOPs — Standard Operating Procedures.
 
@@ -7,6 +5,8 @@ Loads YAML/JSON SOP definitions and configures agents from them.
 SOPs define reusable task configurations: prompt templates, required tools,
 output schemas, and agent patterns.
 """
+
+from __future__ import annotations
 
 import json
 from pathlib import Path

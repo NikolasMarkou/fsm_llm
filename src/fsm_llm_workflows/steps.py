@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Workflow step implementations for the FSM-LLM Workflow System.
 """
+
+from __future__ import annotations
 
 import asyncio
 import copy

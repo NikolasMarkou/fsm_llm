@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Exception hierarchy for fsm_llm_monitor package.
 """
+
+from __future__ import annotations
 
 
 class MonitorError(Exception):
