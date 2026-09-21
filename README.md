@@ -1,6 +1,6 @@
 # FSM-LLM: Adding State to the Stateless
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org)
 [![PyPI version](https://badge.fury.io/py/fsm-llm.svg)](https://badge.fury.io/py/fsm-llm)
 [![Tests](https://github.com/NikolasMarkou/fsm_llm/actions/workflows/python-package.yml/badge.svg)](https://github.com/NikolasMarkou/fsm_llm/actions)
@@ -23,7 +23,7 @@ FSM-LLM provides that structure:
 - **A finite state machine handles flow**: a fixed set of named states (such as "greeting", "collect email", "confirm") and rules for moving between them. The rules are plain JSON logic, so they are predictable and testable.
 - **The framework handles state**: what has been collected, which state the conversation is in, the history, hooks for your own code, and saving and restoring sessions.
 
-Version 0.7.0. License GPL-3.0-or-later. Python 3.10, 3.11, 3.12.
+Version 0.7.0. License Apache-2.0. Python 3.10, 3.11, 3.12.
 
 ## How it works
 
@@ -307,4 +307,4 @@ Repository layout: `src/` holds the six packages, `tests/` one test folder per p
 
 ## License
 
-GNU General Public License v3.0 or later. See the `LICENSE` file.
+Apache License 2.0. See the `LICENSE` file.

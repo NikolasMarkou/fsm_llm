@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(nothing yet)
+### Changed
+
+- Relicensed from GPL-3.0-or-later to Apache-2.0 (`LICENSE`, `pyproject.toml` `license`, `fsm_llm.__license__`, README, CLAUDE.md).
 
 ## [0.7.0] - 2026-09-22
 
