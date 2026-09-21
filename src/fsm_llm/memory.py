@@ -115,6 +115,11 @@ class WorkingMemory:
             ValueError: If ``"_hidden_buffers"`` (the reserved key, D-026)
                 appears in *buffers*.
         """
+        # DECISION plan-2026-09-20T165703-0d9c218e/D-001: an explicit empty
+        # sequence (`[]` / `()`) means NO buffers. Do NOT "simplify" this to
+        # `buffers or DEFAULT_BUFFERS` -- that silently coerced `[]` back to
+        # the defaults (finding memory #8) and made `from_dict({})` lie.
+        # Callers that want "no signal -> defaults" pass None (api.py N8).
         buffer_names = buffers if buffers is not None else DEFAULT_BUFFERS
         if self._HIDDEN_BUFFERS_DICT_KEY in buffer_names:
             raise ValueError(

@@ -633,6 +633,95 @@ class TestWorkingMemoryFromDictValidation:
         assert len(api.fsm_manager.instances) == 0
 
 
+class TestRestoreSessionBuffersNoneVsEmpty:
+    """Review N8 (plan-2026-09-20T165703-0d9c218e, iter-2 step 6).
+
+    ``API.restore_session`` used to pass ``wm.get("buffers") or {}`` to
+    ``WorkingMemory.from_dict``, collapsing "no ``buffers`` signal" (key
+    missing or JSON ``null``) into the explicit-empty dict. Since iter-1
+    step 4 ``from_dict({})`` honestly means ZERO buffers, so such a session
+    restored with no ``core`` buffer and ``get("core", k, default)`` raised
+    ``KeyError``. The caller now maps ``None`` to the DEFAULT buffers and
+    leaves an explicit ``{}`` as zero buffers (that contract is unchanged).
+    Not reachable via the in-repo round-trip (``to_dict`` always writes a
+    map); reachable via hand-edited files and third-party ``SessionStore``.
+    """
+
+    @staticmethod
+    def _saved_session(tmp_path, mock_llm_interface, working_memory):
+        import json
+
+        from fsm_llm import API, FileSessionStore
+
+        fsm = {
+            "name": "wm-none-vs-empty",
+            "description": "Session buffers None-vs-{} regression",
+            "initial_state": "start",
+            "states": {
+                "start": {
+                    "id": "start",
+                    "description": "Only state",
+                    "purpose": "Hold",
+                    "response_instructions": "Say hi",
+                }
+            },
+        }
+        store = FileSessionStore(tmp_path)
+        api = API(
+            fsm_definition=fsm,
+            llm_interface=mock_llm_interface,
+            session_store=store,
+        )
+        conv_id, _ = api.start_conversation()
+        api.save_session(conv_id)
+        api.end_conversation(conv_id)
+
+        session_file = tmp_path / f"{conv_id}.json"
+        raw = json.loads(session_file.read_text())
+        raw["working_memory"] = working_memory
+        session_file.write_text(json.dumps(raw))
+        return api, conv_id
+
+    def _restored_memory(self, api, conv_id):
+        api.restore_session(conv_id)
+        assert len(api.fsm_manager.instances) == 1
+        instance = next(iter(api.fsm_manager.instances.values()))
+        return instance.context.working_memory
+
+    def test_missing_buffers_key_restores_default_buffers(
+        self, tmp_path, mock_llm_interface
+    ):
+        api, conv_id = self._saved_session(
+            tmp_path, mock_llm_interface, {"hidden_buffers": ["environment"]}
+        )
+        restored = self._restored_memory(api, conv_id)
+        assert restored.list_buffers() == list(DEFAULT_BUFFERS)
+        assert restored.get(BUFFER_CORE, "x", "D") == "D"
+        assert restored._hidden_buffers == frozenset({BUFFER_ENVIRONMENT})
+
+    def test_null_buffers_restores_default_buffers(self, tmp_path, mock_llm_interface):
+        api, conv_id = self._saved_session(
+            tmp_path, mock_llm_interface, {"buffers": None, "hidden_buffers": []}
+        )
+        restored = self._restored_memory(api, conv_id)
+        assert restored.list_buffers() == list(DEFAULT_BUFFERS)
+        assert restored.get(BUFFER_CORE, "x", "D") == "D"
+        assert restored._hidden_buffers == frozenset()
+
+    def test_explicit_empty_buffers_restores_zero_buffers(
+        self, tmp_path, mock_llm_interface
+    ):
+        """Companion pin: an explicit ``{}`` still means zero buffers
+        (``from_dict({})`` contract, iter-1 step 4); only ``None`` changed."""
+        api, conv_id = self._saved_session(
+            tmp_path, mock_llm_interface, {"buffers": {}, "hidden_buffers": []}
+        )
+        restored = self._restored_memory(api, conv_id)
+        assert restored.list_buffers() == []
+        with pytest.raises(KeyError):
+            restored.get(BUFFER_CORE, "x", "D")
+
+
 class TestWorkingMemoryReservedBufferNameRejected:
     """D-026 (iter-3 completion-fix) / review-iter-3.md WARNING 1.
 

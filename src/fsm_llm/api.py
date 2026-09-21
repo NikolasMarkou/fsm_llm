@@ -1423,9 +1423,17 @@ class API:
                     wm_instance = self.fsm_manager.instances.get(current_fsm_id)
                 if wm_instance is not None:
                     wm = state.working_memory
-                    wm_instance.context.working_memory = WorkingMemory.from_dict(
-                        wm.get("buffers") or {},
-                        hidden_buffers=frozenset(wm.get("hidden_buffers") or []),
+                    # Review N8 (plan-2026-09-20T165703-0d9c218e): no `buffers`
+                    # signal (key missing or JSON null) means the DEFAULT
+                    # buffers; an explicit `{}` keeps meaning zero buffers
+                    # (the tested `from_dict({})` contract). Do not collapse
+                    # both into `wm.get("buffers") or {}` again.
+                    buffers_raw = wm.get("buffers")
+                    hidden = frozenset(wm.get("hidden_buffers") or [])
+                    wm_instance.context.working_memory = (
+                        WorkingMemory(hidden_buffers=hidden)
+                        if buffers_raw is None
+                        else WorkingMemory.from_dict(buffers_raw, hidden_buffers=hidden)
                     )
 
         # DECISION plan-2026-07-21T072826-e3131cc2/D-003: restore_session must
