@@ -833,8 +833,10 @@ class FSMManager:
             dict from ``WorkingMemory.to_dict()``, or ``None`` if the
             conversation has no working memory configured),
             ``hidden_buffers`` (sorted list of hidden buffer names, ``[]``
-            if none/none configured), and ``provenance`` (a shallow copy of
-            ``context.metadata[_PROVENANCE_KEY]``, ``{}`` if absent).
+            if none/none configured), ``provenance`` (a shallow copy of
+            ``context.metadata[_PROVENANCE_KEY]``, ``{}`` if absent), and
+            ``conversation_summary`` (``Conversation.summary``, str or
+            ``None``).
           - Failure: same as ``_read_under_lock`` (``FSMError`` for an
             unknown conversation or a missing per-conversation lock).
 
@@ -892,6 +894,11 @@ class FSMManager:
                 "working_memory": working_memory,
                 "hidden_buffers": hidden_buffers,
                 "provenance": dict(inst.context.metadata.get(_PROVENANCE_KEY) or {}),
+                # DECISION plan-2026-09-21T203800-8a03483a/D-007 (A6): the
+                # summary is read in this SAME hold as the history it
+                # complements (a trim moves exchanges from one to the other).
+                # Do NOT read it through a separate call in save_session.
+                "conversation_summary": inst.context.conversation.summary,
             }
 
         return self._read_under_lock(conversation_id, _snapshot)

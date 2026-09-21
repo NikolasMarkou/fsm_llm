@@ -578,14 +578,42 @@ class BasePromptBuilder:
             "",
         ]
 
+    def _build_summary_block(self, summary: str | None) -> str:
+        """Render ``Conversation.summary`` as one sanitized line.
+
+        Contract (shared by the base history section and the per-field
+        prompt): returns ``<conversation_summary>...</conversation_summary>``
+        with the text passed through ``_sanitize_text_for_prompt`` (tags
+        escaped, newlines flattened), or ``""`` for a None/blank summary so
+        prompts of conversations that never trimmed history stay
+        byte-identical. Never raises.
+        """
+        # DECISION plan-2026-09-21T203800-8a03483a/D-007 (A6): the summary is
+        # the only trace of trimmed exchanges, so it must reach the prompt,
+        # but it is raw user/assistant text. Do NOT emit it unsanitized or
+        # inside the history CDATA (its escaping covers `]]>`/`</` only), and
+        # do NOT emit an empty block when there is no summary.
+        if not summary or not summary.strip():
+            return ""
+        text = self._sanitize_text_for_prompt(summary)
+        return f"<conversation_summary>{text}</conversation_summary>"
+
     def _build_enhanced_history_section(self, instance: FSMInstance) -> list[str]:
-        """Build enhanced conversation history section."""
-        recent_exchanges = instance.context.conversation.get_recent(
-            self.config.max_history_messages
+        """Build enhanced conversation history section.
+
+        A non-empty ``Conversation.summary`` of trimmed exchanges is emitted
+        first as a ``<conversation_summary>`` block (A6).
+        """
+        summary, recent_exchanges = (
+            instance.context.conversation.get_summary_and_recent(
+                self.config.max_history_messages
+            )
         )
+        summary_block = self._build_summary_block(summary)
+        summary_lines = [summary_block, ""] if summary_block else []
 
         if not recent_exchanges:
-            return []
+            return summary_lines
 
         # Format and manage exchanges
         formatted_exchanges = []
@@ -616,6 +644,7 @@ class BasePromptBuilder:
                 )
                 safe_history_json = self._escape_cdata(history_json)
                 return [
+                    *summary_lines,
                     "<conversation_history><![CDATA[",
                     safe_history_json,
                     "]]></conversation_history>",
@@ -624,7 +653,7 @@ class BasePromptBuilder:
             except (TypeError, ValueError, OverflowError) as e:
                 logger.warning(f"Failed to serialize conversation history: {e}")
 
-        return []
+        return summary_lines
 
 
 # ============================================================================
@@ -1685,9 +1714,13 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         # half of the leak. Truncate BEFORE managing so the budget accounts for
         # the text actually emitted. See decisions.md D-012.
         if self.config.include_conversation_history:
-            recent = instance.context.conversation.get_recent(
+            summary, recent = instance.context.conversation.get_summary_and_recent(
                 self.config.max_history_messages
             )
+            summary_block = self._build_summary_block(summary)
+            if summary_block:
+                sections.append("")
+                sections.append(summary_block)
             # DECISION plan-2026-07-19T191147-4b664252/D-019 [STALE]
             # Emit ONE single-key dict per (role, message) pair. Do NOT collapse
             # an entry's roles into a single dict keyed by "user"/"system": the

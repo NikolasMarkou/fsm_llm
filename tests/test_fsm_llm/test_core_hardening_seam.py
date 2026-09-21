@@ -1244,6 +1244,11 @@ def _old_shape_snapshot_reads(fsm_manager, conversation_id: str) -> dict:
             if instance is not None
             else {}
         )
+        # A6 (plan-2026-09-21T203800-8a03483a/D-007): save_session also
+        # expects the summary key; read in the same 4th block.
+        conversation_summary = (
+            instance.context.conversation.summary if instance is not None else None
+        )
     working_memory = None
     hidden_buffers: list[str] = []
     if wm_obj is not None and hasattr(wm_obj, "to_dict"):
@@ -1257,6 +1262,7 @@ def _old_shape_snapshot_reads(fsm_manager, conversation_id: str) -> dict:
         "working_memory": working_memory,
         "hidden_buffers": hidden_buffers,
         "provenance": provenance,
+        "conversation_summary": conversation_summary,
     }
 
 

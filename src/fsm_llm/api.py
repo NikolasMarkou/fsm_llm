@@ -1293,6 +1293,7 @@ class API:
             # would only pull an unrelated lock into the hold. See plan.md's
             # explicit scope note.
             stack_depth=self.get_stack_depth(conversation_id),
+            conversation_summary=snapshot["conversation_summary"],
         )
 
         # H10: the flat context_data does not carry WorkingMemory, so persist it
@@ -1405,6 +1406,20 @@ class API:
         conv_lock = self.fsm_manager._conversation_locks.get(current_fsm_id)
 
         def _replay_and_restore_wm() -> None:
+            # DECISION plan-2026-09-21T203800-8a03483a/D-007 (A6, order per
+            # D-029): seed the saved summary BEFORE replaying history, not
+            # after. If this API keeps fewer exchanges than the saver did, the
+            # replay trims and `_append_to_summary` appends the trimmed
+            # exchanges after the saved digest, in order; setting it after the
+            # replay would overwrite those. A legacy file (no summary) leaves
+            # the fresh conversation's None untouched.
+            if state.conversation_summary:
+                with self.fsm_manager._lock:
+                    summary_instance = self.fsm_manager.instances.get(current_fsm_id)
+                if summary_instance is not None:
+                    summary_instance.context.conversation.summary = (
+                        state.conversation_summary
+                    )
             self._replay_history(current_fsm_id, state.conversation_history)
             # D-031: re-seed provenance; an old file has no key -> empty map
             saved_prov = state.metadata.get("pipeline_extracted")

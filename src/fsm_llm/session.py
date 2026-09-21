@@ -66,6 +66,10 @@ class SessionState(BaseModel):
     # persisted here. Default None keeps old session files (written before
     # this field existed) loadable unchanged.
     working_memory: dict[str, Any] | None = None
+    # A6: `Conversation.summary`, the digest of exchanges trimmed out of
+    # `conversation_history`. Default None keeps session files written
+    # before this field existed loadable unchanged.
+    conversation_summary: str | None = None
     saved_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
