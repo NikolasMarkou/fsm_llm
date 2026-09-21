@@ -1101,12 +1101,20 @@ class FSMContext(BaseModel):
     data from all non-hidden working memory buffers (flattened). The flat
     ``data`` dict remains the primary storage for backward compatibility.
 
-    Prompt reach: the pipeline calls ``get_user_visible_data()`` only for
-    Pass-1 per-field extraction with a default ``context_keys``, so working
-    memory data reaches that prompt and no other. The Pass-2 response
-    prompt's ``<current_context>`` is built from ``data`` alone, and
-    ``update_context``/handlers write ``data`` only. See
-    ``fsm_llm.memory.WorkingMemory`` for the full statement.
+    Prompt reach: the pipeline calls ``get_user_visible_data()`` at four
+    sites. At the Pass-1 per-field extraction site
+    (``_execute_field_extractions``, a field whose ``context_keys`` is left
+    at its default) the merged data DOES enter the extraction prompt. At the
+    three Pass-2 sites (``_execute_response_generation_pass``,
+    ``_stream_response_generation_pass``, and ``generate_initial_response``
+    when a greeting is generated) it feeds the public
+    ``ResponseGenerationRequest.context`` field. The shipped
+    ``LiteLLMInterface`` never reads ``request.context`` (its
+    ``<current_context>`` block is built from ``data`` alone), so buffer data
+    reaches no Pass-2 prompt through it; a custom ``LLMInterface`` that reads
+    ``request.context`` WILL see buffer data there. ``update_context`` and
+    handlers write ``data`` only. See ``fsm_llm.memory.WorkingMemory`` for
+    the full statement.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -1133,8 +1141,12 @@ class FSMContext(BaseModel):
         description=(
             "Optional WorkingMemory instance for structured buffer-based "
             "context management. When set, get_user_visible_data() merges "
-            "data from non-hidden working memory buffers (reaches only the "
-            "Pass-1 per-field extraction prompt). Import from fsm_llm.memory."
+            "data from non-hidden working memory buffers. That merged data "
+            "enters the Pass-1 per-field extraction prompt; at the three "
+            "Pass-2 sites it only fills ResponseGenerationRequest.context, "
+            "which the shipped LiteLLMInterface never reads (a custom "
+            "LLMInterface that reads request.context will see it). Import "
+            "from fsm_llm.memory."
         ),
         exclude=True,
     )
