@@ -6,7 +6,7 @@ Technical overview of the FSM-LLM architecture and how components work together.
 
 ## System Overview
 
-FSM-LLM uses an **improved 2-pass architecture** that separates data extraction, transition evaluation, and response generation:
+FSM-LLM uses a **2-pass architecture** that separates data extraction, transition evaluation, and response generation:
 
 1. **Pass 1 -- Analysis & Transition**: Data extraction from user input, transition evaluation via JsonLogic rules (with LLM classification fallback for ambiguous cases), state transition.
 2. **Pass 2 -- Response Generation**: Response generated from the new state's context, ensuring the response always reflects the correct state.

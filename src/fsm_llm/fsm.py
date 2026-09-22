@@ -753,20 +753,19 @@ class FSMManager:
 
         HARD RULE: ``snapshot_fn`` runs while holding ``conv_lock`` and MUST do
         only fast in-memory work. It MUST NOT call ``resolve_state_definition`` /
-        ``get_fsm_definition`` (nor anything else that re-enters ``self._lock``):
-        that would nest ``_lock`` under ``conv_lock`` and risk the lock-order
-        inversion the write path is careful to avoid. Resolve state OUTSIDE this
-        call, after it returns. See decisions.md D-005.
+        ``get_fsm_definition`` (a cache miss runs ``fsm_loader``, arbitrary and
+        possibly slow code, and would hold ``conv_lock`` across it), nor anything
+        that takes ``self._lock`` (a lock-order inversion). Resolve state OUTSIDE
+        this call, after it returns. See decisions.md D-005.
         """
         # DECISION plan-2026-07-21T045419-9925aa3a/D-005
-        # State resolution (resolve_state_definition -> get_fsm_definition) re-enters
-        # the plain, NON-reentrant self._lock. Running it inside snapshot_fn (under
-        # conv_lock) would hold conv_lock and then block on _lock. The write path
-        # acquires conv_lock while holding _lock (non-blocking), so the reverse
-        # order here would close a circular wait -> deadlock. Therefore: take
-        # _lock ONLY for the dict lookup, RELEASE it, THEN acquire conv_lock
-        # (blocking) for the snapshot. Do NOT move any resolve_state_definition /
-        # get_fsm_definition call into snapshot_fn. See decisions.md D-005.
+        # The write path acquires conv_lock while holding _lock (non-blocking), so
+        # blocking on _lock while holding conv_lock would close a circular wait ->
+        # deadlock. Therefore: take _lock ONLY for the dict lookup, RELEASE it, THEN
+        # acquire conv_lock (blocking) for the snapshot. Do NOT move any
+        # resolve_state_definition / get_fsm_definition call into snapshot_fn: it no
+        # longer takes _lock (leaf _fsm_cache_lock, D-036 of 8b258a25), but a cache
+        # miss runs fsm_loader (arbitrary code) under conv_lock. See D-005.
         with self._lock:
             if conversation_id not in self.instances:
                 raise FSMError(f"Conversation {conversation_id} not found")
@@ -821,8 +820,9 @@ class FSMManager:
         """Check if conversation has reached terminal state."""
         instance = self._read_under_lock(conversation_id, lambda inst: inst)
 
-        # State resolution re-enters _lock, so it happens OUTSIDE conv_lock (the
-        # _read_under_lock snapshot has already returned). See D-005.
+        # State resolution may run fsm_loader on a cache miss, so it happens
+        # OUTSIDE conv_lock (the _read_under_lock snapshot has already returned).
+        # See D-005.
         current_state = self.resolve_state_definition(instance, conversation_id)
 
         is_ended = not current_state.transitions
@@ -877,12 +877,12 @@ class FSMManager:
         # the FSM-def membership check is the invariant that turns a corrupted or
         # foreign session naming a nonexistent state into a loud FSMError instead
         # of silent corruption. Do NOT inline this back into restore_session, and
-        # do NOT invert the lock order: `_lock` is a plain (non-reentrant)
-        # threading.Lock and `get_fsm_definition` re-acquires it, so `_lock` MUST
-        # be released before resolving the def / acquiring `conv_lock`. Acquiring
-        # `conv_lock` only AFTER `_lock` is released preserves the canonical
-        # `_lock -> conv_lock` order that restore_session relies on. See
-        # decisions.md D-004.
+        # do NOT invert the lock order: `_lock` MUST be released before resolving
+        # the def / acquiring `conv_lock`. `get_fsm_definition` takes only its leaf
+        # `_fsm_cache_lock` now (D-036 of 8b258a25), but a cache miss runs
+        # `fsm_loader` (arbitrary code), which must not run under `_lock`.
+        # Acquiring `conv_lock` only AFTER `_lock` is released preserves the
+        # canonical `_lock -> conv_lock` order. See decisions.md D-004.
         with self._lock:
             if conversation_id not in self.instances:
                 raise FSMError(f"Conversation {conversation_id} not found")
@@ -1265,8 +1265,8 @@ class FSMManager:
             ),
         )
 
-        # State resolution re-enters _lock, so it happens OUTSIDE conv_lock (the
-        # snapshot has already returned). See D-005. Resolve the State from the
+        # State resolution may run fsm_loader on a cache miss, so it happens
+        # OUTSIDE conv_lock (the snapshot has already returned). See D-005. Resolve the State from the
         # fsm_id + state_id CAPTURED in the snapshot -- NOT via
         # resolve_state_definition(instance), which re-reads inst.current_state fresh: a
         # concurrent transition between the snapshot and that re-read would yield a

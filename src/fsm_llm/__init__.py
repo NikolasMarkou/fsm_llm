@@ -1,9 +1,9 @@
 """
-Enhanced FSM-LLM: Improved 2-Pass Architecture for Large Language Model Finite State Machines.
+FSM-LLM: a 2-pass architecture for Large Language Model Finite State Machines.
 
-This package provides a sophisticated framework for building stateful conversational AI
-systems using an improved 2-pass architecture that generates responses after transition
-evaluation for optimal contextual accuracy.
+This package provides a framework for building stateful conversational AI
+systems using a 2-pass architecture that generates responses after transition
+evaluation, so every reply comes from the state the conversation is in.
 """
 
 from __future__ import annotations

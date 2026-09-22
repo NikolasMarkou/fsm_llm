@@ -284,7 +284,8 @@ class API:
         # set, a concurrent `pop_fsm`/`end_conversation` on ANOTHER conversation
         # calls `_release_unreferenced_temp_definitions` in that window, sees the
         # id as unreferenced (no frame yet), and evicts it — bricking the in-flight
-        # sub-conversation with `ValueError: Unknown FSM ID`. Cleanup treats
+        # sub-conversation with `FSMDefinitionNotFoundError` (a `ValueError`,
+        # "Unknown FSM ID ..."). Cleanup treats
         # pending ids as referenced. See D-011.
         self._pending_push_ids: set[str] = set()
 
@@ -614,7 +615,8 @@ class API:
                 # here. The pushed def used to survive only in the LRU `fsm_cache`;
                 # once ~65 distinct FSM ids loaded it was evicted and the loader
                 # fell through to `load_fsm_definition`, which raises
-                # `ValueError: Unknown FSM ID` for a content-hash id — bricking the
+                # `FSMDefinitionNotFoundError` (a `ValueError`) for a content-hash
+                # id — bricking the
                 # sub-conversation. The def must stay registered for the frame's
                 # LIFETIME; `_release_unreferenced_temp_definitions` (called on
                 # pop_fsm / end_conversation / _rollback_push) drops it once the
@@ -732,7 +734,8 @@ class API:
         in every live stack under ``_stack_lock``, then drop only temp entries
         absent from that set. Do NOT drop a temp entry merely because one
         referencing conversation ended — that reintroduces
-        ``ValueError: Unknown FSM ID`` for the conversations still using it.
+        ``FSMDefinitionNotFoundError`` (a ``ValueError``) for the conversations
+        still using it.
 
         Contract: takes no args; acquires ``_stack_lock`` internally (callers
         must NOT already hold it); mutates ``_temp_fsm_definitions`` in place;

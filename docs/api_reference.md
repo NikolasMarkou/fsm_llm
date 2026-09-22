@@ -24,9 +24,13 @@ API(
     handler_error_mode: str = "continue",
     transition_config: TransitionEvaluatorConfig | None = None,
     session_store: SessionStore | None = None,
+    handler_timeout: float | None = None,
+    max_fsm_cache_size: int = 64,
     **llm_kwargs,
 )
 ```
+
+`handler_timeout` (seconds, `None` disables it) goes to the API's single `HandlerSystem`, so the cap of 4 still-running timed-out handler threads (`constants.MAX_TIMED_HANDLER_STRAGGLERS`) is shared by every conversation of that `API`. `max_fsm_cache_size` bounds `FSMManager`'s FSM definition cache. The prompt builders and the FSM loader are not configurable through `API`; construct `FSMManager` directly for those.
 
 ### Factory Methods
 
@@ -136,13 +140,15 @@ class LLMInterface(ABC):
     # The base class raises NotImplementedError; implement it for per-field extraction.
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse: ...
 
-    # Same default: needed for states with extraction_instructions and no per-field schema.
+    # Same default: called for every state with extraction_instructions.
     # Without it the pipeline logs "Bulk extraction fallback failed" and extracts
     # nothing for that free-text instruction.
     def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse: ...
 
     def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]: ...
 ```
+
+A state with empty `response_instructions` still sends a `generate_response` request, marked `skip_generation=True` (and, until 1.0, `system_prompt="."`). A custom interface should return an empty response for it without calling a model, as `LiteLLMInterface` does. `ResponseGenerationRequest` carries `system_prompt`, `user_message`, `transition_occurred`, `response_format` and `skip_generation`; the prompt is the only context channel. `FieldExtractionRequest.context` and `.validation_rules` are filled for third-party interfaces even though `LiteLLMInterface` does not read them.
 
 `DataExtractionResponse` (the `extract_bulk_data` return) carries `rejected_corrections: dict[str, Any]` (default `{}`): a bulk value for an already-set key that the provenance rule refused and that the user's message states as a whole word of at least 3 characters (a 1 or 2 character value such as `US` never grounds). The stored value is unchanged; the pipeline hands the dict to the Pass-2 prompt as a `<rejected_corrections>` block so the reply says the change was not applied. It also carries `extraction_failed: bool` (default `False`): set by the pipeline when the bulk extraction call raised, so `build_response_prompt(..., extraction_failed=True)` adds one plain line saying a restated value may not have been stored. A custom `LLMInterface` never needs to set either field.
 
@@ -432,6 +438,7 @@ uvicorn.run(app, host="127.0.0.1", port=8420)
 ```
 FSMError
 ├── ConversationBusyError
+├── FSMDefinitionNotFoundError (also a ValueError: id is not a file path, no FSM registry)
 ├── StateNotFoundError
 ├── InvalidTransitionError
 ├── LLMResponseError

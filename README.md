@@ -264,6 +264,67 @@ The harness gates are JSON rules over values counted from the plan directory, so
 | `fsm-llm-meta` | Build FSMs, workflows, or agents by chatting |
 | `fsm-llm-harness <new\|resume\|status\|validate\|close>` | Drive or audit an iterative-planner plan directory |
 
+## Behaviour details
+
+### LLM calls per turn
+
+One `converse()` call makes these LLM calls, in this order. Each row counts logical calls; `LiteLLMInterface(retries=N)` (default `0`) lets the provider SDK repeat a failed request up to N more times on top.
+
+| Call | When it runs | Calls |
+|------|--------------|-------|
+| Per-field extraction (Pass 1) | The state has field configs: its `required_context_keys`, the `requires_context_keys` of its transition conditions, and its `field_extractions`. Keys owned by a `classification_extractions` entry, keys in `handler_only_keys` and keys already set are left out | 1 per field |
+| Classification extraction | The state has `classification_extractions` | 1 per entry |
+| Extraction retries | `extraction_retries` (0 to 3, default 1) is above 0 and a required field or classification is still unset | Up to `extraction_retries` rounds, 1 call per still-unset required field or classification per round |
+| Bulk extraction | The state has `extraction_instructions` | 1 |
+| Ambiguous-transition classifier | Two or more passing transitions tie at the lowest `priority` | 1 |
+| Post-transition extraction | A transition happened and the FSM is not agent-managed (no `agent_trace` key in context). If the new state is a different state that has `extraction_instructions`, no `classification_extractions`, and a config-covered key the pipeline already filled, its whole Pass 1 extraction runs again (the rows above, for the new state). Otherwise each still-unset config-covered key of the new state gets one per-field call, with no retries. Each unset classification field of a different new state gets one classifier call | Varies, see left |
+| Pass 2 (response) | The final state's `response_instructions` is non-empty. An empty string skips the call: the request carries `skip_generation=True` and `LiteLLMInterface` returns without calling the model | 0 or 1 |
+| Apology retry | A non-streaming Pass 2 reply (turn or greeting) has no usable text. The call is retried exactly once and the second result is returned whatever it is. `LiteLLMInterface.apology_retry_count` counts how often this happened | 0 or 1 |
+
+`start_conversation()` makes one Pass 2 call for the greeting (plus the apology retry), or none when the initial state's `response_instructions` is empty. `converse_stream()` has the same Pass 1 calls and streams Pass 2 with no apology retry.
+
+On Ollama models (`ollama/` and `ollama_chat/`), extraction and classification calls always run at temperature 0, whatever temperature you set; Pass 2 keeps yours. Because the same prompt then gives the same answer, a per-field retry whose prompt matches an earlier attempt that returned null reuses that null instead of calling the model again. This saving is scoped to one extraction pass (first attempt plus its retries) and never reuses a successful value. The result: on Ollama, `extraction_retries` usually costs nothing and also recovers nothing when the first attempt found no value.
+
+### Handler timeouts and the FSM cache
+
+`API(handler_timeout=..., max_fsm_cache_size=...)` passes both settings through to the handler system and the FSM manager:
+
+- `handler_timeout` (seconds, default `None`, meaning no timeout): each handler runs in its own thread on a copy of the context and fails as a timeout when it overruns (`handler_error_mode` decides whether that raises). Python cannot stop a thread, so a timed-out handler keeps running in the background. While 4 such stragglers (`constants.MAX_TIMED_HANDLER_STRAGGLERS`) are still running, every new timed handler call fails at once as a timeout. That limit belongs to the one `HandlerSystem` an `API` owns, so it is shared by every conversation of that `API`: one conversation with stuck handlers makes timed handlers of all the others fail too. Use a separate `API` to isolate them.
+- `max_fsm_cache_size` (default `64`): the size of the least-recently-used cache of FSM definitions (the root FSM plus FSMs pushed with `push_fsm`).
+
+### What the extractor can write
+
+Pass 1 writes into the conversation context through three channels:
+
+- **Per-field extraction** writes only its configured key (one call per key, listed in the table above), after type coercion and the field's `validation_rules`.
+- **Classification extraction** writes only its `field_name`, and only the intent name. The full result (confidence, reasoning, entities and a snapshot of the `context_keys` values with secret-looking entries removed) is kept in `get_complete_conversation()["metadata"]["classification_results"]`.
+- **Bulk extraction** runs whenever the state has `extraction_instructions`, and the model picks the key names. Its output is filtered before it is written: empty values (`None`, `""`, `{}`) are dropped, and so are the `agent_trace` key, any key listed in `handler_only_keys`, secret-looking keys (the same check that keeps them out of prompts), and internal keys (prefixes `_`, `system_`, `internal_`, `__`). A key that is already set is never overwritten, with one exception: a key that also has a field config may be corrected when its stored value is still exactly what the pipeline extracted earlier. Values set by handlers or `update_context` are never overwritten. A key owned by a classification extraction is left to the classifier (except on agent-managed FSMs).
+
+Any other key the model invents from the user's message can land in the context through bulk extraction, including a key a transition condition reads (for example `is_admin`). To reserve a key for your own code, list it in the FSM's top-level `handler_only_keys`. Listed keys are never extracted from user text (bulk, per-field or post-transition); handlers and `update_context` can still set them. The list is empty by default, so this protection is opt-in, and `fsm-llm-validate` warns about listed keys that nothing reads or that a classification extraction owns.
+
+### JsonLogic differences
+
+Transition conditions use JsonLogic, evaluated in Python by `fsm_llm.expressions`. It departs from reference (JavaScript) JsonLogic in these places:
+
+| Rule | This library | Reference JsonLogic |
+|------|--------------|---------------------|
+| `in` and `contains` | `{"in": [needle, haystack]}` as in the reference. `contains` is an extension with the operands the other way round: `{"contains": [haystack, needle]}` | No `contains` |
+| `==` on two strings | Case-insensitive: `"Yes" == "yes"` is true. Use `===` for an exact match | Case-sensitive |
+| `==` between a boolean and a string | Compares lowercased text: `true == "TRUE"` is true, `true == "1"` is false | `true == "1"` is true |
+| `<`, `<=`, `>`, `>=` on strings | Numbers are tried first: `"10" < "2"` is false | Text order: `"10" < "2"` is true |
+| `null` in `<`, `<=`, `>`, `>=` | Always false | `null` counts as `0` |
+| Arithmetic with an unset operand | The result is undefined and makes every comparison false, so the condition fails | `null` becomes `0` or `NaN`, depending on the operator |
+| `%` with a negative operand | The result takes the sign of the divisor: `-7 % 3` is `2` | Sign of the dividend: `-1` |
+| Division or `%` by zero | An error, so the condition fails | `Infinity` or `NaN` |
+| Arithmetic results and `cat` | Arithmetic returns floats, and `cat` uses Python text: `{"cat": [{"+": [1, 2]}, true]}` is `"3.0True"` | `"3true"` |
+
+`missing`, `missing_some` and a condition's `requires_context_keys` treat an absent key, `null` and `""` as missing. The extension `has_context` checks only that the key exists.
+
+### Limits of the `API` constructor
+
+- The prompt builders are always built with their default configuration. To use custom `DataExtractionPromptBuilder`, `ResponseGenerationPromptBuilder` or `FieldExtractionPromptBuilder` settings, construct `FSMManager` directly.
+- The `fsm-llm` command's log output redacts only secret-looking context values. Other values, including internal keys and personal data such as email addresses, are logged as they are.
+
 ## Examples
 
 100 examples across 8 categories, each runnable with `python examples/<category>/<name>/run.py` (OpenAI key, or a local Ollama as fallback):
@@ -297,6 +358,8 @@ make audit          # scan site-packages for suspicious .pth files
 Repository layout: `src/` holds the six packages, `tests/` one test folder per package plus regression and example checks, `examples/` the runnable examples, `scripts/` evaluation and benchmark tools, `docs/` longer guides.
 
 ## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, the test commands and the planning and decision-anchor conventions. In short:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/your-feature`)

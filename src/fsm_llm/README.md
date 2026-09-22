@@ -51,7 +51,8 @@ flowchart TD
 - `validator.py`, `visualizer.py` - check an FSM file for problems; draw it as ASCII art.
 - `runner.py`, `__main__.py` - the interactive command-line chat.
 - `utilities.py` - JSON extraction from LLM text, FSM file loading, shared helpers.
-- `constants.py` - defaults, security patterns, prompt text, environment variable names.
+- `security.py` - the two key checks every context filter uses: internal keys (`has_internal_prefix`) and secret-looking keys (`is_forbidden_context_entry`).
+- `constants.py` - defaults, limits, environment variable names and shared key names; it also re-exports the names from `security.py`.
 - `logging.py` - loguru setup (logging is off until you turn it on).
 
 ## How to use it
