@@ -43,14 +43,22 @@ None / missing rule (one rule, applied by ``evaluate_logic``):
 
     * ``{"var": ...}`` resolves an absent key to ``None``, so "unset" and
       "explicitly None" behave the same in every operator below.
-    * Ordering (``<``, ``<=``, ``>``, ``>=``) and arithmetic (``+``, ``-``,
-      ``*``, ``/``, ``%``, ``min``, ``max``) return ``False`` when ANY operand
-      is ``None``. ``-`` is unary only when it has exactly one operand
-      (``{"-": [5]}`` is ``-5``); ``{"-": [5, null]}`` is ``False``.
+    * Arithmetic (``+``, ``-``, ``*``, ``/``, ``%``, ``min``, ``max``)
+      returns ``None`` when ANY operand is ``None``, so the unset value
+      propagates through nested arithmetic. Ordering (``<``, ``<=``, ``>``,
+      ``>=``) returns ``False`` when ANY operand is ``None``, so
+      ``{"<": [{"-": [total, discount]}, 100]}`` with ``discount`` unset is
+      ``False``, and a bare arithmetic condition on an unset operand is falsy
+      (the transition does not fire). ``-`` is unary only when it has exactly
+      one operand (``{"-": [5]}`` is ``-5``); ``{"-": [5, null]}`` is
+      ``None``.
     * ``==`` / ``!=`` keep ``null == null`` True (JsonLogic), a ``None``
       never equals a non-``None`` value (so an unset var never equals the
       string ``"None"``), and numerically equal operands are equal
       (``{"==": [1.0, "1"]}`` is True), so ``==``, ``<=`` and ``>=`` agree.
+      Only plain decimal/scientific strings are numeric (``"1"``, ``"-2.5"``,
+      ``"1e3"``, ``".5"``); Python-only forms (``"1_000"``, ``" 1 "``,
+      ``"inf"``, ``"nan"``) are not.
       A ``bool`` operand is never numerically coerced by ``==``
       (``true == "1"`` is False; ``true == 1`` stays True via ``bool()``),
       and neither are two strings (``"01" == "1"`` is False, as in JS).
@@ -62,6 +70,7 @@ None / missing rule (one rule, applied by ``evaluate_logic``):
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from functools import reduce
 from typing import Any
@@ -286,12 +295,27 @@ def _numeric_equal(a: Any, b: Any) -> bool:
     side, including ``None``, is simply not numerically equal). Shared by
     ``soft_equals`` (non-bool rules only) and ``<=``/``>=``, so the three
     agree on numeric equality (D-013 of plan-2026-09-21T203800-8a03483a,
-    superseding the earlier D-023 that kept ``soft_equals`` out of it).
+    superseding the earlier D-023 that kept ``soft_equals`` out of it). A
+    ``str`` side must be a plain decimal/scientific literal
+    (``_PLAIN_NUMBER_RE``); ``"1_000"``, ``" 1 "``, ``"inf"`` are not numbers.
     """
+    # DECISION plan-2026-09-21T203800-8a03483a/D-048: a string operand must
+    # be a PLAIN decimal/scientific literal. Do NOT go back to bare `float()`
+    # on strings: it accepts "1_000", " 1 ", "inf" and "nan", so `"1_000" ==
+    # 1000` became True. See decisions.md D-048.
+    for side in (a, b):
+        if isinstance(side, str) and not _PLAIN_NUMBER_RE.fullmatch(side):
+            return False
     try:
         return float(a) == float(b)
     except (TypeError, ValueError):
         return False
+
+
+# JSON-style number text only: optional sign, digits with an optional
+# fraction (or a leading-dot fraction), optional exponent. No `_`, no
+# surrounding whitespace, no inf/nan, no hex. Used with `fullmatch`.
+_PLAIN_NUMBER_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 
 
 def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
@@ -639,7 +663,7 @@ def _minus(*args: Any) -> float:
 
     Arity is decided by operand COUNT, never by a ``None`` default, so a
     second operand that resolved to ``None`` is not mistaken for "omitted"
-    (and ``evaluate_logic`` already returns False for it). Any other arity
+    (and ``evaluate_logic`` already returns None for it). Any other arity
     raises ``TypeError``, which ``evaluate_logic`` turns into False.
     """
     if len(args) == 1:
@@ -717,10 +741,13 @@ operations: dict[str, Callable[..., Any]] = {
     "cat": cat,
 }
 
-#: Ordering and arithmetic operators: False when ANY evaluated operand is None
-#: (module docstring, "None / missing rule"). ``==``/``!=`` are NOT here.
-_NONE_IS_FALSE_OPERATORS: frozenset[str] = frozenset(
-    {"<", "<=", ">", ">=", "+", "-", "*", "/", "%", "min", "max"}
+#: Ordering operators: False when ANY evaluated operand is None (module
+#: docstring, "None / missing rule"). ``==``/``!=`` are NOT here.
+_NONE_IS_FALSE_OPERATORS: frozenset[str] = frozenset({"<", "<=", ">", ">="})
+#: Arithmetic operators: None when ANY evaluated operand is None, so the unset
+#: value reaches the enclosing operator (an ordering one then gives False).
+_NONE_PROPAGATING_OPERATORS: frozenset[str] = frozenset(
+    {"+", "-", "*", "/", "%", "min", "max"}
 )
 
 # --------------------------------------------------------------
@@ -1015,14 +1042,18 @@ def evaluate_logic(
     evaluated_values = [evaluate_logic(val, data, _depth + 1) for val in values]
 
     # DECISION plan-2026-09-21T203800-8a03483a/D-013: an unset operand makes an
-    # ordering or arithmetic operator False. Do NOT extend this to `==`/`!=`
+    # ordering operator False. Do NOT extend this to `==`/`!=`
     # (`null == null` must stay True, D-017) and do NOT fall back to treating
     # None as 0 or as "operand omitted" (`{"-": [a, null]}` was `-a`, and
     # `<=`/`>=` were True for two unset vars through `soft_equals(None, None)`).
-    if operator in _NONE_IS_FALSE_OPERATORS and any(
-        v is None for v in evaluated_values
-    ):
-        return False
+    # DECISION plan-2026-09-21T203800-8a03483a/D-048: arithmetic on an unset
+    # operand returns None, NOT False: a False result was read as 0 by the
+    # enclosing comparison (`{"<": [{"-": [150, null]}, 100]}` was True).
+    if any(v is None for v in evaluated_values):
+        if operator in _NONE_IS_FALSE_OPERATORS:
+            return False
+        if operator in _NONE_PROPAGATING_OPERATORS:
+            return None
 
     # Get the operation function from the registry
     operation = operations.get(operator)

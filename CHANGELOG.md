@@ -11,7 +11,7 @@ Core audit of `src/fsm_llm` dated 2026-09-21 (`plans/plan-2026-09-21T203800-8a03
 15 fix steps, one commit per step). 45 audit ids: 42 fixed, 2 partly fixed (D9, D12),
 1 skipped (D7). Every fixed id is pinned by a `test_<id>_*` regression test in
 `tests/test_fsm_llm/test_audit_2026_09_21.py` that fails on the pre-fix code. Full
-suite: 6,448 tests collected (was 6,177). `ruff` and `mypy` clean across all 6 packages.
+suite: 6,509 tests collected (was 6,177). `ruff` and `mypy` clean across all 6 packages.
 
 ### Behaviour changes to know about
 
@@ -25,14 +25,18 @@ suite: 6,448 tests collected (was 6,177). `ruff` and `mypy` clean across all 6 p
   (farewell p0, conversation p1) and now goes to `farewell` on every turn. Authors who
   want the classifier to choose between intent-routed transitions must give them
   equal priority. The eval baseline in CLAUDE.md is stale until re-run.
-- **B1-B4: one None/missing rule for JsonLogic.** Ordering (`<`, `<=`, `>`, `>=`) and
-  arithmetic (`+ - * / % min max`) are False when any operand is `None`; `-` is unary
-  only with exactly one operand. `missing`, `missing_some` and `requires_context_keys`
+- **B1-B4: one None/missing rule for JsonLogic.** Ordering (`<`, `<=`, `>`, `>=`) is
+  False when any operand is `None`. Arithmetic (`+ - * / % min max`) returns `None`
+  when any operand is `None`, so `{"<": [{"-": [total, discount]}, 100]}` with
+  `discount` unset is False (it used to compare `False` as 0 and pass), and a bare
+  arithmetic condition on an unset operand does not fire. `-` is unary only with
+  exactly one operand. `missing`, `missing_some` and `requires_context_keys`
   treat absent, `None` and `""` as missing, and an extracted `None` no longer
   overwrites a stored value during transition evaluation. `==`/`!=` coerce
-  numerically only for a mixed number/string pair (`1.0 == "1"` is True); two strings
-  are never coerced (`"01" == "1"` stays False), bools are never coerced, and
-  `null == null` stays True.
+  numerically only for a mixed number/string pair whose string is a plain decimal or
+  scientific literal (`1.0 == "1"` is True; `"1_000" == 1000` and `" 1 " == 1` are
+  False); two strings are never coerced (`"01" == "1"` stays False), bools are never
+  coerced, and `null == null` stays True.
 - **B5, B6, B10: new load-time errors.** A JsonLogic operator object with more than one
   key, or nesting deeper than `MAX_JSONLOGIC_DEPTH`, fails to load (B5).
   `context_scope` is now a `ContextScope` model (`read_keys`/`write_keys` lists,

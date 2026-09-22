@@ -1866,16 +1866,18 @@ def _b4_evaluate(
 class TestStep09B1B4:
     """B1-B4: None/missing is one documented rule across every operator family."""
 
-    def test_b1_minus_with_none_second_operand_is_false(self):
+    def test_b1_minus_with_none_second_operand_is_none(self):
+        """Never ``-total`` (the pre-fix unary reading). Step 9.2 (D-048):
+        None, not False, so an enclosing comparison cannot read it as 0."""
         from fsm_llm.expressions import evaluate_logic
 
         logic = {"-": [{"var": "total"}, {"var": "discount"}]}
-        assert evaluate_logic(logic, {"total": 50}) is False
-        assert evaluate_logic(logic, {"total": 50, "discount": None}) is False
-        assert evaluate_logic({"-": [5, None]}) is False
-        # Guard: the rest of the arithmetic family is False on a None operand too.
+        assert evaluate_logic(logic, {"total": 50}) is None
+        assert evaluate_logic(logic, {"total": 50, "discount": None}) is None
+        assert evaluate_logic({"-": [5, None]}) is None
+        # Guard: the rest of the arithmetic family is None on a None operand too.
         for op in ("+", "*", "/", "%", "min", "max"):
-            assert evaluate_logic({op: [{"var": "a"}, 2]}, {}) is False, op
+            assert evaluate_logic({op: [{"var": "a"}, 2]}, {}) is None, op
 
     def test_b1_unary_minus_unchanged(self):
         from fsm_llm.expressions import evaluate_logic
@@ -1885,7 +1887,7 @@ class TestStep09B1B4:
         assert evaluate_logic({"-": 5}) == -5
         assert evaluate_logic({"-": [5, 2]}) == 3
         assert evaluate_logic({"-": [{"var": "x"}]}, {"x": 4}) == -4
-        assert evaluate_logic({"-": [{"var": "x"}]}, {}) is False
+        assert evaluate_logic({"-": [{"var": "x"}]}, {}) is None  # D-048
 
     def test_b2_le_ge_false_when_both_unset(self):
         from fsm_llm.expressions import evaluate_logic
@@ -2015,6 +2017,79 @@ class TestStep09B1B4:
             condition, {"email": "ada@example.com"}, extracted={"email": "bob@x.y"}
         )
         assert result.result_type == TransitionEvaluationResult.BLOCKED
+
+
+# ---------------------------------------------------------------------------
+# Step 9.2: None propagates through arithmetic; strict numeric strings in ==
+# ---------------------------------------------------------------------------
+
+
+class TestStep09_2:
+    """B1/B3 completion: arithmetic on a None operand is None (not False, which
+    ordering operators coerced to 0), so an enclosing comparison stays False;
+    ``==`` coerces only plain decimal/scientific numeric strings
+    (plan-2026-09-21T203800-8a03483a/D-048)."""
+
+    def test_b1_nested_arithmetic_with_unset_operand_compares_false(self):
+        from fsm_llm.expressions import evaluate_logic
+
+        audit = {"<": [{"-": [{"var": "total"}, {"var": "discount"}]}, 100]}
+        assert evaluate_logic(audit, {"total": 150}) is False
+        assert evaluate_logic(audit, {"total": 150, "discount": 60}) is True
+        assert evaluate_logic({"<": [{"+": [{"var": "score"}, 0]}, 50]}, {}) is False
+        assert evaluate_logic({">": [{"-": [{"var": "a"}, 5]}, -10]}, {}) is False
+        assert evaluate_logic({"==": [{"-": [{"var": "a"}, 5]}, 0]}, {}) is False
+        assert (
+            evaluate_logic({"<": [{"max": [{"var": "a"}, {"var": "b"}]}, 5]}, {})
+            is False
+        )
+        # None propagates through nested arithmetic too.
+        nested = {"-": [{"+": [{"var": "a"}, 1]}, 2]}
+        assert evaluate_logic(nested, {}) is None
+        assert evaluate_logic({"<=": [nested, 0]}, {}) is False
+
+    def test_b1_bare_arithmetic_condition_with_unset_operand_fails(self):
+        """A bare arithmetic condition is None -> falsy -> the gate stays shut."""
+        condition = TransitionCondition(
+            description="net positive",
+            logic={"-": [{"var": "total"}, {"var": "discount"}]},
+        )
+        result = _b4_evaluate(condition, {"total": 150})
+        assert result.result_type == TransitionEvaluationResult.BLOCKED
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("1_000", 1000),
+            (1000, "1_000"),
+            (" 1 ", 1),
+            ("1\n", 1),
+            ("inf", float("inf")),
+            ("Infinity", float("inf")),
+            ("nan", float("nan")),
+            ("0x10", 16),
+            ("1e1_0", 1e10),
+        ],
+    )
+    def test_b3_underscore_and_nonstandard_numeric_strings_not_coerced(self, a, b):
+        from fsm_llm.expressions import _numeric_equal, evaluate_logic
+
+        assert _numeric_equal(a, b) is False
+        if str(a) != str(b):
+            # (`"inf" == inf` and `"nan" == nan` stay True through the older
+            # mixed str/number rule, `str(a) == str(b)`; that is not coercion.)
+            assert evaluate_logic({"==": [a, b]}) is False
+            assert evaluate_logic({"!=": [a, b]}) is True
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [("1", 1), ("-2.5", -2.5), ("+3", 3), ("1e3", 1000), (".5", 0.5), ("5.", 5)],
+    )
+    def test_b3_plain_numeric_strings_still_coerced(self, a, b):
+        """Guard (passes on the pre-step source)."""
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic({"==": [a, b]}) is True
 
 
 # ---------------------------------------------------------------------------
