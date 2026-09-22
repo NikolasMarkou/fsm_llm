@@ -14,6 +14,7 @@ from .definitions import (
     State,
     Transition,
     TransitionCondition,
+    logic_referenced_keys,
 )
 from .logging import logger
 
@@ -185,6 +186,16 @@ class FSMValidator:
         # Stage 0: Pydantic schema validation (catches type errors, missing fields)
         self._validate_pydantic_schema()
 
+        # DECISION plan-2026-09-21T203800-8a03483a/D-017 (B12): every later
+        # stage reads the RAW dicts with `.get()` / `in`, so a type-invalid
+        # shape (a state that is a string, `transitions: "x"`, a dict target)
+        # used to crash `validate()` instead of returning a result. Do NOT run
+        # them on such input and do NOT add an error here: stage 0 has already
+        # reported what the loader rejects, and an extra error for a shape the
+        # loader accepts would make this validator stricter than the loader.
+        if not self._structure_is_well_typed():
+            return self.result
+
         # Stage 1: Basic structure validation
         self._validate_fsm_structure()
 
@@ -318,7 +329,36 @@ class FSMValidator:
                 else:
                     self.result.add_warning(f"Schema: {loc}: {error['msg']}")
         except Exception as e:
-            self.result.add_warning(f"Schema validation failed: {e!s}")
+            # DECISION plan-2026-09-21T203800-8a03483a/D-017 (B12): the loader
+            # (`FSMDefinition(**data)` in `API` and `load_fsm_definition`)
+            # raises this same exception, so it is an ERROR. Do NOT downgrade
+            # it to a warning: that reported is_valid=True for files
+            # `API.from_file` refuses. The `else: add_warning` fail-safe above
+            # is about unknown pydantic error TYPES inside a ValidationError,
+            # not about construction failing outright.
+            self.result.add_error(
+                f"Schema validation failed: {type(e).__name__}: {e!s}"
+            )
+
+    def _structure_is_well_typed(self) -> bool:
+        """True when the raw dicts have the container types every later stage
+        reads: ``initial_state`` a str, ``states`` a dict of dicts, each
+        ``transitions`` (if present) a list of dicts whose ``target_state`` is
+        a str or absent/None."""
+        if not isinstance(self.initial_state, str) or not isinstance(self.states, dict):
+            return False
+        for state in self.states.values():
+            if not isinstance(state, dict):
+                return False
+            transitions = state.get("transitions", [])
+            if not isinstance(transitions, list):
+                return False
+            for transition in transitions:
+                if not isinstance(transition, dict):
+                    return False
+                if not isinstance(transition.get("target_state"), str | None):
+                    return False
+        return True
 
     def _validate_fsm_structure(self):
         """
@@ -405,7 +445,9 @@ class FSMValidator:
 
         Checks:
         - Each declared required_context_key is actually named by some transition
-          condition's requires_context_keys
+          condition, either in its requires_context_keys or read by its logic
+          (``definitions.logic_referenced_keys``: ``var`` including the first
+          segment of a dotted path, ``missing``, ``missing_some``)
         - Warns (never errors) if a declared key is gated on by nothing
 
         F-15: this used to ask only "does ANY transition have ANY non-empty
@@ -435,6 +477,7 @@ class FSMValidator:
             for transition in state.get("transitions", []):
                 for condition in transition.get("conditions") or []:
                     gated_keys.update(condition.get("requires_context_keys") or [])
+                    gated_keys |= logic_referenced_keys(condition.get("logic"))
 
             ungated = [key for key in required_keys if key not in gated_keys]
             if not ungated:
@@ -462,16 +505,17 @@ class FSMValidator:
         that is a ``classification_extractions`` field name (the
         classification channel is not covered by the list).
 
-        "References" is deliberately generous (``json.dumps`` of each
-        condition's ``logic``) so the rule warns less, not more. It only
-        runs for a non-empty list.
+        A condition's ``logic`` references the keys
+        ``definitions.logic_referenced_keys`` returns (``var`` names including
+        the first segment of a dotted path, ``missing``/``missing_some``
+        names); a key that only appears as a compared literal is not read.
+        It only runs for a non-empty list.
         """
         listed = self.fsm_data.get("handler_only_keys") or []
         if not listed:
             return
         referenced: set[str] = set()
         classified: set[str] = set()
-        blob = []
         for state in self.states.values():
             referenced.update(state.get("required_context_keys") or [])
             for fe in state.get("field_extractions") or []:
@@ -481,16 +525,15 @@ class FSMValidator:
             for transition in state.get("transitions") or []:
                 for cond in transition.get("conditions") or []:
                     referenced.update(cond.get("requires_context_keys") or [])
-                    blob.append(json.dumps(cond.get("logic") or {}, default=str))
+                    referenced |= logic_referenced_keys(cond.get("logic"))
         referenced |= classified
-        logic_text = "\n".join(blob)
         for key in listed:
             if key in classified:
                 self.result.add_warning(
                     f"handler_only_keys lists '{key}', a classification_extractions "
                     "field name: classification writes are not covered by the list"
                 )
-            elif key not in referenced and f'"{key}"' not in logic_text:
+            elif key not in referenced:
                 self.result.add_warning(
                     f"handler_only_keys lists '{key}' but no state references it "
                     "(unless a handler sets it, the entry protects nothing; "
@@ -581,48 +624,113 @@ class FSMValidator:
 
     def _detect_cycles(self):
         """
-        Detect cycles in the FSM that don't lead to terminal states.
+        Report cycles (INFO) and trap regions (WARNING).
 
-        Cycles are sequences of states that form a loop. This method:
-        1. Identifies all cycles in the FSM
-        2. Determines which cycles have no escape path to a terminal state
-        3. Reports both normal and problematic cycles
+        A trap is a strongly connected component of reachable states that
+        loops (two or more states, or a self-loop) and from which no terminal
+        state can be reached: a conversation that enters it can never end.
+        One WARNING per trap component; cycles outside traps are INFO.
         """
-        # Find all cycles using DFS
         cycles = self._find_cycles()
+        traps = self._find_trap_components()
+        trapped = {state_id for component in traps for state_id in component}
 
-        if not cycles:
+        if not cycles and not traps:
             self.result.add_info("No cycles detected in the FSM")
             return
 
-        # Check if cycles can escape to terminal states
-        problematic_cycles = []
         for cycle in cycles:
-            can_escape = False
-            for state in cycle:
-                state_obj = self.states.get(state, {})
-                transitions = state_obj.get("transitions", [])
+            if not set(cycle) <= trapped:
+                self.result.add_info(f"Cycle detected: {' → '.join(cycle)}")
+        for component in traps:
+            states_str = ", ".join(f"'{state_id}'" for state_id in component)
+            self.result.add_warning(
+                f"Trap cycle with no path to a terminal state: {states_str} "
+                "(a conversation that enters it can never end)"
+            )
 
-                # Check if any transition leads outside the cycle
-                for transition in transitions:
-                    target = transition.get("target_state", "")
-                    if target not in cycle:
-                        can_escape = True
-                        break
+    def _find_trap_components(self) -> list[list[str]]:
+        """Return every looping SCC of reachable states that cannot reach a
+        terminal state, members and components in state-definition order.
 
-            # Mark cycles with no escape path as problematic
-            if not can_escape:
-                problematic_cycles.append(cycle)
+        # DECISION plan-2026-09-21T203800-8a03483a/D-017 (B7)
+        # Do NOT go back to checking each simple cycle for an edge leaving
+        # it: two interlocking cycles (a<->b, b<->c) each "escape" into the
+        # other, so neither was flagged although {a, b, c} has no way out.
+        # The trap set is "reachable minus can-reach-a-terminal" (reverse
+        # BFS), grouped by SCC. Tarjan is iterative on purpose: do NOT make
+        # it recursive (long chained FSMs hit the Python recursion limit, the
+        # same reason `_find_cycles` is iterative). See decisions.md D-017.
+        """
+        order = {state_id: i for i, state_id in enumerate(self.states)}
+        adjacency: dict[str, list[str]] = {
+            state_id: [
+                target
+                for transition in state.get("transitions", [])
+                if (target := transition.get("target_state")) in order
+            ]
+            for state_id, state in self.states.items()
+        }
 
-        # Report findings
-        for cycle in cycles:
-            cycle_str = " → ".join(cycle)
-            if cycle in problematic_cycles:
-                self.result.add_warning(
-                    f"Problematic cycle with no escape: {cycle_str}"
-                )
-            else:
-                self.result.add_info(f"Cycle detected: {cycle_str}")
+        reverse: dict[str, list[str]] = {state_id: [] for state_id in adjacency}
+        for state_id, targets in adjacency.items():
+            for target in targets:
+                reverse[target].append(state_id)
+        can_finish = set(self._get_terminal_states())
+        queue = deque(can_finish)
+        while queue:
+            for source in reverse[queue.popleft()]:
+                if source not in can_finish:
+                    can_finish.add(source)
+                    queue.append(source)
+
+        reachable = self._get_reachable_states()
+        trapped = [s for s in self.states if s in reachable and s not in can_finish]
+        trapped_set = set(trapped)
+        successors = {s: [t for t in adjacency[s] if t in trapped_set] for s in trapped}
+
+        # Iterative Tarjan: work frames are (node, index of next successor).
+        index: dict[str, int] = {}
+        low: dict[str, int] = {}
+        stack: list[str] = []
+        on_stack: set[str] = set()
+        components: list[list[str]] = []
+        for root in trapped:
+            if root in index:
+                continue
+            index[root] = low[root] = len(index)
+            stack.append(root)
+            on_stack.add(root)
+            work = [(root, 0)]
+            while work:
+                node, i = work[-1]
+                if i < len(successors[node]):
+                    work[-1] = (node, i + 1)
+                    nxt = successors[node][i]
+                    if nxt not in index:
+                        index[nxt] = low[nxt] = len(index)
+                        stack.append(nxt)
+                        on_stack.add(nxt)
+                        work.append((nxt, 0))
+                    elif nxt in on_stack:
+                        low[node] = min(low[node], index[nxt])
+                    continue
+                work.pop()
+                if work:
+                    parent = work[-1][0]
+                    low[parent] = min(low[parent], low[node])
+                if low[node] == index[node]:
+                    component: list[str] = []
+                    while True:
+                        member = stack.pop()
+                        on_stack.discard(member)
+                        component.append(member)
+                        if member == node:
+                            break
+                    components.append(sorted(component, key=order.__getitem__))
+
+        looping = [c for c in components if len(c) > 1 or c[0] in successors[c[0]]]
+        return sorted(looping, key=lambda c: order[c[0]])
 
     def _analyze_paths(self):
         """

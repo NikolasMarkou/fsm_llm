@@ -93,8 +93,13 @@ class TransitionEvaluatorConfig:
     ambiguity_threshold: float = 0.1  # Deprecated: no effect on the outcome
     minimum_confidence: float = 0.5  # Deprecated: no effect on the outcome
 
-    # Evaluation modes
-    strict_condition_matching: bool = True  # Require all conditions to pass
+    # DECISION plan-2026-09-21T203800-8a03483a/D-018 (B13): diagnostics only.
+    # A transition passes only if ALL its conditions pass, whatever this flag
+    # says; it never changes the outcome. True stops at the first failing
+    # condition, False evaluates the rest so ``failed_conditions`` and the
+    # notes list every failure. Do NOT invent a "non-strict" outcome (some
+    # conditions may fail) and do NOT delete the field: callers pass it.
+    strict_condition_matching: bool = True
 
     # Evidence weighting
     evidence_conditions_normalizer: float = (

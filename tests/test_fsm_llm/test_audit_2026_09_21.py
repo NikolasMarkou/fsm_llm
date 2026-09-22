@@ -2042,3 +2042,253 @@ class TestStep10B5B6B9B10:
         _assert_loader_and_validator_accept(
             _b10_fsm_data(required_context_keys=["email", "user_name", "systemic"])
         )
+
+
+# ---------------------------------------------------------------------------
+# Step 11: B7, B11, B12, B13 (validator and evaluator honesty)
+# ---------------------------------------------------------------------------
+
+
+def _b7_state(state_id: str, *targets: str) -> dict[str, Any]:
+    return {
+        "id": state_id,
+        "description": state_id,
+        "purpose": state_id,
+        "transitions": [
+            {"target_state": target, "description": f"to {target}"}
+            for target in targets
+        ],
+    }
+
+
+def _b7_fsm_data(edges: dict[str, tuple[str, ...]]) -> dict[str, Any]:
+    """An FSM starting at ``start`` with the given adjacency; ``end`` is the
+    terminal and is always present."""
+    states = {sid: _b7_state(sid, *targets) for sid, targets in edges.items()}
+    states["end"] = _b7_state("end")
+    return {
+        "name": "B7",
+        "description": "Trap detection probe",
+        "initial_state": "start",
+        "states": states,
+    }
+
+
+def _b7_trap_warnings(data: dict[str, Any]) -> list[str]:
+    from fsm_llm.validator import FSMValidator
+
+    result = FSMValidator(data).validate()
+    assert result.is_valid is True, result.errors
+    return [w for w in result.warnings if "terminal" in w and "cycle" in w.lower()]
+
+
+def _b12_warnings(data: dict[str, Any], needle: str) -> list[str]:
+    from fsm_llm.validator import FSMValidator
+
+    result = FSMValidator(data).validate()
+    assert result.is_valid is True, result.errors
+    return [w for w in result.warnings if needle in w]
+
+
+class TestStep11B7B11B12B13:
+    """Trap regions are reported per SCC, the validator never crashes on
+    type-invalid input and never downgrades a loader failure, logic-only
+    gating counts, and ``strict_condition_matching`` never changes outcomes."""
+
+    def test_b7_interlocking_cycles_without_exit_warned(self):
+        # start -> a; a <-> b, b <-> c, no path from {a, b, c} to a terminal.
+        # Each simple cycle "escapes" into the other, so a per-cycle check
+        # accepts both; the SCC {a, b, c} is a closed trap.
+        data = _b7_fsm_data(
+            {
+                "start": ("a", "end"),
+                "a": ("b",),
+                "b": ("a", "c"),
+                "c": ("b",),
+            }
+        )
+        warnings = _b7_trap_warnings(data)
+        assert len(warnings) == 1, warnings
+        for state_id in ("a", "b", "c"):
+            assert f"'{state_id}'" in warnings[0]
+        assert "'start'" not in warnings[0]
+
+    def test_b7_self_loop_trap_warned(self):
+        data = _b7_fsm_data({"start": ("a", "end"), "a": ("a",)})
+        warnings = _b7_trap_warnings(data)
+        assert len(warnings) == 1 and "'a'" in warnings[0]
+
+    def test_b7_two_separate_trap_sccs_warned_once_each(self):
+        data = _b7_fsm_data(
+            {
+                "start": ("a", "end"),
+                "a": ("b",),
+                "b": ("a", "c"),
+                "c": ("d",),
+                "d": ("c",),
+            }
+        )
+        warnings = _b7_trap_warnings(data)
+        assert len(warnings) == 2, warnings
+
+    def test_b7_cycle_with_exit_not_warned(self):
+        """GUARD: interlocking cycles with one exit to the terminal are fine."""
+        data = _b7_fsm_data(
+            {
+                "start": ("a",),
+                "a": ("b",),
+                "b": ("a", "c"),
+                "c": ("b", "end"),
+            }
+        )
+        assert _b7_trap_warnings(data) == []
+
+    def test_b7_deep_chain_does_not_recurse(self):
+        """GUARD: SCC grouping is iterative (1,500 chained states in a loop)."""
+        count = 1500
+        edges: dict[str, tuple[str, ...]] = {"start": ("s0", "end")}
+        for i in range(count):
+            edges[f"s{i}"] = (f"s{(i + 1) % count}",)
+        warnings = _b7_trap_warnings(_b7_fsm_data(edges))
+        assert len(warnings) == 1
+
+    def test_b11_dead_branch_removed(self):
+        import inspect
+
+        from fsm_llm import definitions
+
+        source = inspect.getsource(definitions.FSMDefinition)
+        assert "unreachable_terminals" not in source
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda d: d["states"].__setitem__("done", "not-a-dict"),
+            lambda d: d["states"]["start"].__setitem__("transitions", "nope"),
+            lambda d: d["states"]["start"].__setitem__("transitions", ["nope"]),
+            lambda d: d["states"]["start"].__setitem__("transitions", None),
+            lambda d: d["states"]["start"]["transitions"][0].__setitem__(
+                "target_state", {"x": 1}
+            ),
+            lambda d: d.__setitem__("states", ["start", "done"]),
+            lambda d: d.__setitem__("initial_state", ["start"]),
+        ],
+        ids=[
+            "state_str",
+            "transitions_str",
+            "transition_str",
+            "transitions_none",
+            "target_dict",
+            "states_list",
+            "initial_list",
+        ],
+    )
+    def test_b12_type_invalid_states_returns_result_not_raises(self, mutate):
+        from pydantic import ValidationError
+
+        from fsm_llm.validator import FSMValidationResult, FSMValidator
+
+        data = _b10_fsm_data()
+        mutate(data)
+        with pytest.raises((ValidationError, TypeError, ValueError)):
+            FSMDefinition(**data)
+        result = FSMValidator(data).validate()
+        assert isinstance(result, FSMValidationResult)
+        assert result.is_valid is False
+        assert result.errors
+
+    def test_b12_non_validation_error_is_error(self):
+        from fsm_llm.validator import FSMValidator
+
+        data: dict[Any, Any] = _b10_fsm_data()
+        data[1] = "non-string key"
+        with pytest.raises(TypeError):
+            FSMDefinition(**data)
+        result = FSMValidator(data).validate()
+        assert result.is_valid is False
+        assert any("keywords must be strings" in e for e in result.errors)
+
+    def test_b12_logic_only_gating_not_flagged(self):
+        data = _b10_fsm_data(required_context_keys=["email"])
+        data["states"]["start"]["transitions"][0]["conditions"] = [
+            {"description": "has email", "logic": {"!!": [{"var": "email"}]}}
+        ]
+        assert _b12_warnings(data, "required_context_keys") == []
+
+    def test_b12_logic_only_gating_other_key_still_flagged(self):
+        """GUARD: a logic reference to a DIFFERENT key does not gate."""
+        data = _b10_fsm_data(required_context_keys=["email"])
+        data["states"]["start"]["transitions"][0]["conditions"] = [
+            {"description": "has phone", "logic": {"!!": [{"var": "phone"}]}}
+        ]
+        assert _b12_warnings(data, "required_context_keys")
+
+    def test_b12_dotted_var_counts_as_reference(self):
+        data = _b10_fsm_data(required_context_keys=["profile"])
+        data["handler_only_keys"] = ["account"]
+        data["states"]["start"]["transitions"][0]["conditions"] = [
+            {
+                "description": "nested",
+                "logic": {
+                    "and": [
+                        {"==": [{"var": "profile.email"}, "x"]},
+                        {"==": [{"var": ["account.tier", "free"]}, "gold"]},
+                    ]
+                },
+            }
+        ]
+        assert _b12_warnings(data, "required_context_keys") == []
+        assert _b12_warnings(data, "handler_only_keys") == []
+
+    def test_b12_literal_value_is_not_a_reference(self):
+        """GUARD: a key name appearing only as a compared literal is not read."""
+        data = _b10_fsm_data()
+        data["handler_only_keys"] = ["account"]
+        data["states"]["start"]["transitions"][0]["conditions"] = [
+            {"description": "lit", "logic": {"==": [{"var": "kind"}, "account"]}}
+        ]
+        assert _b12_warnings(data, "handler_only_keys")
+
+    def test_b13_strict_false_same_outcome_more_diagnostics(self):
+        state = State(
+            id="s",
+            description="d",
+            purpose="p",
+            transitions=[
+                Transition(
+                    target_state="t",
+                    description="both fail",
+                    conditions=[
+                        TransitionCondition(
+                            description="first", requires_context_keys=["a"]
+                        ),
+                        TransitionCondition(
+                            description="second", requires_context_keys=["b"]
+                        ),
+                    ],
+                )
+            ],
+        )
+        outcomes = {}
+        for strict in (True, False):
+            evaluator = TransitionEvaluator(
+                TransitionEvaluatorConfig(strict_condition_matching=strict)
+            )
+            scores = evaluator._evaluate_individual_transitions(state.transitions, {})
+            evaluation = evaluator.evaluate_transitions(state, FSMContext())
+            outcomes[strict] = (evaluation.result_type, scores[0])
+        assert outcomes[True][0] == outcomes[False][0]
+        assert outcomes[True][0] == TransitionEvaluationResult.BLOCKED
+        assert outcomes[True][1]["passes_conditions"] is False
+        assert outcomes[False][1]["passes_conditions"] is False
+        assert outcomes[True][1]["failed_conditions"] == ["first"]
+        assert outcomes[False][1]["failed_conditions"] == ["first", "second"]
+
+    def test_b13_flag_documented_as_diagnostics_only(self):
+        import inspect
+
+        from fsm_llm import transition_evaluator
+
+        source = inspect.getsource(transition_evaluator.TransitionEvaluatorConfig)
+        assert "diagnostic" in source.lower()
+        assert "never" in source.lower()

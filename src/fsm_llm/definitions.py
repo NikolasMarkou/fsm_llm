@@ -542,9 +542,9 @@ class ClassificationExtractionConfig(BaseModel):
 # --------------------------------------------------------------
 
 
-def _walk_logic_operators(node: Any, _depth: int = 0) -> Iterator[str]:
-    """Yield every operator key in a JsonLogic `node`, visiting exactly the
-    positions `evaluate_logic` evaluates as logic.
+def _walk_logic_nodes(node: Any, _depth: int = 0) -> Iterator[tuple[str, Any]]:
+    """Yield every `(operator, arguments)` pair in a JsonLogic `node`, visiting
+    exactly the positions `evaluate_logic` evaluates as logic.
 
     A JsonLogic object is a dict whose single key is an operator mapping to its
     argument value(s): a list/tuple of arguments, or one bare argument. Each
@@ -584,7 +584,9 @@ def _walk_logic_operators(node: Any, _depth: int = 0) -> Iterator[str]:
         node: a JsonLogic position that `evaluate_logic` evaluates (the root
             logic dict, or one operator argument).
         _depth: the `evaluate_logic` depth of `node` (0 for the root).
-    Yields: each operator key (str) encountered, in traversal order.
+    Yields: each `(operator key, raw argument value)` pair encountered, in
+        traversal order. Callers: `_walk_logic_operators` (load-time operator
+        allow-list) and `logic_referenced_keys` (validator gating checks).
     Raises: ValueError if an evaluated position is deeper than
         MAX_JSONLOGIC_DEPTH, or an operator dict has zero keys (D-007) or more
         than one key.
@@ -604,13 +606,60 @@ def _walk_logic_operators(node: Any, _depth: int = 0) -> Iterator[str]:
             "object must have exactly one key"
         )
     operator, arguments = next(iter(node.items()))
-    yield operator
+    yield operator, arguments
     if operator in JSONLOGIC_RAW_ARGUMENT_OPERATIONS:
         return
     if not isinstance(arguments, (list, tuple)):
         arguments = [arguments]
     for argument in arguments:
-        yield from _walk_logic_operators(argument, _depth + 1)
+        yield from _walk_logic_nodes(argument, _depth + 1)
+
+
+def _walk_logic_operators(node: Any, _depth: int = 0) -> Iterator[str]:
+    """Yield every operator key in a JsonLogic `node` (see `_walk_logic_nodes`
+    for which positions are visited and what raises)."""
+    for operator, _arguments in _walk_logic_nodes(node, _depth):
+        yield operator
+
+
+def logic_referenced_keys(logic: Any) -> set[str]:
+    """Return the top-level context keys a JsonLogic expression reads.
+
+    A key counts when it is named literally by `var` (a dotted path counts as
+    its first segment: `profile.email` reads `profile`), by `missing` /
+    `missing_some`, or by the one-argument `has_context` shorthand. A value
+    that only appears as a compared literal is not a reference, and a computed
+    name (`{"var": {"cat": ...}}`) cannot be resolved statically and is skipped.
+
+    Contract:
+        logic: a `TransitionCondition.logic` value (dict, or None/falsy).
+    Returns: the set of referenced first-segment key names (empty for None).
+    Raises: ValueError exactly when `_walk_logic_nodes` does (malformed logic,
+        which the loader already rejects).
+    """
+    keys: set[str] = set()
+    if not logic:
+        return keys
+
+    def _add(name: Any) -> None:
+        if isinstance(name, str) and name:
+            keys.add(name.split(".", 1)[0])
+
+    for operator, arguments in _walk_logic_nodes(logic):
+        args = list(arguments) if isinstance(arguments, (list, tuple)) else [arguments]
+        if operator == "var" and args:
+            _add(args[0])
+        elif operator == "missing":
+            for arg in args:
+                for name in arg if isinstance(arg, (list, tuple)) else [arg]:
+                    _add(name)
+        elif operator == "missing_some" and len(args) == 2:
+            names = args[1]
+            for name in names if isinstance(names, (list, tuple)) else [names]:
+                _add(name)
+        elif operator == "has_context" and len(args) == 1:
+            _add(args[0])
+    return keys
 
 
 class TransitionCondition(BaseModel):
@@ -995,13 +1044,6 @@ class FSMDefinition(BaseModel):
         reachable_terminals = terminal_states.intersection(reachable_states)
         if not reachable_terminals:
             raise ValueError("No terminal states are reachable from initial state")
-
-        unreachable_terminals = terminal_states - reachable_states
-        if unreachable_terminals:
-            logger.warning(
-                f"Unreachable terminal states in FSM '{self.name}': "
-                f"{sorted(unreachable_terminals)}"
-            )
 
         logger.debug(f"FSM '{self.name}' validation successful")
         return self
