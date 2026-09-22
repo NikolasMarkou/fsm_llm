@@ -7,6 +7,7 @@ landed, and names the audit id it pins (``test_p0_1_*``, ``test_p1_4_*``, ...).
 
 from __future__ import annotations
 
+import copy
 import datetime
 import decimal
 import json
@@ -633,78 +634,65 @@ class TestStep4ConfigPassthrough:
         assert not hasattr(constants, "DEFAULT_HANDLER_TIMEOUT")
 
 
-class TestStep4ReadOnlyProbe:
-    @staticmethod
-    def _mutating_condition(t, s, ts, ctx, uk) -> bool:
-        ctx["probed"] = True
-        return True
+class TestStep4LiveDictProbe:
+    """D-039 reverts the P1-3 read-only probe: the uncopied-phase probe gets
+    the caller's live dict again, per the pure-predicate contract (D-020)."""
 
-    def test_p1_3_mutating_condition_raises_and_leaves_context_alone(self):
-        from fsm_llm.handlers import (
-            HandlerExecutionError,
-            HandlerSystem,
-            HandlerTiming,
-            create_handler,
-        )
-
-        system = HandlerSystem(error_mode="raise")
-        system.register_handler(
-            create_handler("mutator")
-            .when(self._mutating_condition)
-            .do(lambda ctx: {"ran": True})
-        )
-        context = {"existing": 1}
-        with pytest.raises(HandlerExecutionError) as exc_info:
-            system.execute_handlers(HandlerTiming.PRE_PROCESSING, "s", None, context)
-        assert context == {"existing": 1}
-        assert not isinstance(exc_info.value.original_error, HandlerExecutionError)
-        assert isinstance(exc_info.value.__cause__, TypeError)
-
-    def test_p1_3_continue_mode_skips_the_mutating_handler(self):
+    @pytest.mark.parametrize("error_mode", ["continue", "raise"])
+    @pytest.mark.parametrize(
+        "condition",
+        [
+            lambda t, s, ts, ctx, uk: len(json.dumps(ctx)) > 0,
+            lambda t, s, ts, ctx, uk: copy.deepcopy(ctx) == {"existing": 1},
+            lambda t, s, ts, ctx, uk: isinstance(ctx, dict),
+        ],
+        ids=["json_dumps", "deepcopy", "isinstance_dict"],
+    )
+    def test_step_4_1_serialising_read_only_condition_fires(
+        self, condition, error_mode
+    ):
         from fsm_llm.handlers import HandlerSystem, HandlerTiming, create_handler
 
-        system = HandlerSystem(error_mode="continue")
-        system.register_handler(
-            create_handler("mutator")
-            .with_priority(10)
-            .when(self._mutating_condition)
-            .do(lambda ctx: {"ran": True})
-        )
-        system.register_handler(
-            create_handler("reader")
-            .with_priority(20)
-            .when(lambda t, s, ts, ctx, uk: ctx.get("existing") == 1 and "x" not in ctx)
-            .do(lambda ctx: {"read": sorted(ctx)})
-        )
+        fired: list[int] = []
+
+        def _action(ctx):
+            fired.append(1)
+            return {"logged": True}
+
+        system = HandlerSystem(error_mode=error_mode)
+        system.register_handler(create_handler("reader").when(condition).do(_action))
         context = {"existing": 1}
         result = system.execute_handlers(
             HandlerTiming.PRE_PROCESSING, "s", None, context
         )
-        assert result == {"read": ["existing"]}
+        assert result == {"logged": True}
+        assert fired == [1]
         assert context == {"existing": 1}
 
-    def test_p1_3_probe_after_first_runner_sees_cascaded_dict(self):
-        from fsm_llm.handlers import HandlerSystem, HandlerTiming, create_handler
 
-        seen: list[Any] = []
+class TestStep4CacheSizeValidation:
+    """Review concern 4: a cache bound below 1 made every start fail with a
+    cryptic popitem error; it is now rejected at construction."""
 
-        def _record(t, s, ts, ctx, uk) -> bool:
-            seen.append((type(ctx), dict(ctx)))
-            return True
+    @pytest.mark.parametrize("size", [0, -1])
+    def test_step_4_1_manager_rejects_cache_size_below_one(self, size):
+        from fsm_llm.fsm import FSMManager
 
-        system = HandlerSystem()
-        system.register_handler(
-            create_handler("first")
-            .with_priority(10)
-            .when(_record)
-            .do(lambda ctx: {"a": 1})
+        with pytest.raises(ValueError, match="max_fsm_cache_size"):
+            FSMManager(llm_interface=_mock_llm(), max_fsm_cache_size=size)
+
+    def test_step_4_1_api_rejects_cache_size_zero_at_construction(self):
+        with pytest.raises(ValueError, match="max_fsm_cache_size"):
+            API.from_definition(
+                _blocked_fsm(), llm_interface=_mock_llm(), max_fsm_cache_size=0
+            )
+
+    def test_step_4_1_cache_size_one_is_accepted(self):
+        api = API.from_definition(
+            _blocked_fsm(), llm_interface=_mock_llm(), max_fsm_cache_size=1
         )
-        system.register_handler(
-            create_handler("second").with_priority(20).when(_record).do(lambda ctx: {})
-        )
-        system.execute_handlers(HandlerTiming.PRE_PROCESSING, "s", None, {"z": 0})
-        assert seen[0] == (types.MappingProxyType, {"z": 0})
-        assert seen[1] == (dict, {"z": 0, "a": 1})
+        conv_id, _ = api.start_conversation()
+        assert api.get_current_state(conv_id) == "start"
 
 
 # ---------------------------------------------------------------------------

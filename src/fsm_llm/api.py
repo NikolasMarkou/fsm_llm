@@ -233,6 +233,7 @@ class API:
                 ``constants.MAX_TIMED_HANDLER_STRAGGLERS`` cap is shared by
                 every conversation of this API (one ``HandlerSystem``).
             max_fsm_cache_size: Bound of the FSM definition LRU cache
+                (at least 1; a smaller value raises ``ValueError``)
             **llm_kwargs: Additional LLM parameters
         """
         # Handle LLM interface initialization

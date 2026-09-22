@@ -142,6 +142,10 @@ class FSMManager:
     ):
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
+        if max_fsm_cache_size < 1:
+            raise ValueError(
+                f"max_fsm_cache_size must be >= 1, got {max_fsm_cache_size}"
+            )
 
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface

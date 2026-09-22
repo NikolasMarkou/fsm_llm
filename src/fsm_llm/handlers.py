@@ -77,8 +77,7 @@ import threading
 import traceback
 from collections.abc import Callable
 from enum import Enum
-from types import MappingProxyType
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 # --------------------------------------------------------------
 # Local imports
@@ -437,16 +436,7 @@ class HandlerSystem:
         # Execute applicable handlers in priority order (lower priority numbers first)
         for handler in candidates:
             handler_name = getattr(handler, "name", handler.__class__.__name__)
-            # DECISION plan-2026-09-22T080837-8b258a25/D-006
-            # Before the first runner the probe sees a read-only view of the
-            # caller's LIVE context: a mutating condition raises TypeError
-            # (wrapped once). Do NOT deep-copy per candidate (D-020) and do NOT
-            # hand over the live dict. After the first runner it probes the copy.
-            probe_context = (
-                cast(dict[str, Any], MappingProxyType(context))
-                if updated_context is None
-                else updated_context
-            )
+            probe_context = context if updated_context is None else updated_context
 
             try:
                 # Check if this handler should execute based on current conditions
