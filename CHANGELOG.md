@@ -7,7 +7,134 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(nothing yet)
+Core audit of `src/fsm_llm` dated 2026-09-21 (`plans/plan-2026-09-21T203800-8a03483a`,
+15 fix steps, one commit per step). 45 audit ids: 42 fixed, 2 partly fixed (D9, D12),
+1 skipped (D7). Every fixed id is pinned by a `test_<id>_*` regression test in
+`tests/test_fsm_llm/test_audit_2026_09_21.py` that fails on the pre-fix code. Full
+suite: 6,448 tests collected (was 6,177). `ruff` and `mypy` clean across all 6 packages.
+
+### Behaviour changes to know about
+
+- **A2: transition priority now decides.** When several transitions pass, the one
+  with the unique lowest `priority` wins deterministically, whatever the gap between
+  priorities or the number of conditions. Only a tie at the lowest priority is
+  AMBIGUOUS and goes to the classifier (tied group only). `minimum_confidence` and
+  `ambiguity_threshold` are kept as deprecated no-ops. 10 shipped example FSMs now
+  resolve some formerly ambiguous turns deterministically (87 state/passing-set
+  combinations). `examples/basic/simple_greeting` has two unconditioned transitions
+  (farewell p0, conversation p1) and now goes to `farewell` on every turn. Authors who
+  want the classifier to choose between intent-routed transitions must give them
+  equal priority. The eval baseline in CLAUDE.md is stale until re-run.
+- **B1-B4: one None/missing rule for JsonLogic.** Ordering (`<`, `<=`, `>`, `>=`) and
+  arithmetic (`+ - * / % min max`) are False when any operand is `None`; `-` is unary
+  only with exactly one operand. `missing`, `missing_some` and `requires_context_keys`
+  treat absent, `None` and `""` as missing, and an extracted `None` no longer
+  overwrites a stored value during transition evaluation. `==`/`!=` coerce
+  numerically only for a mixed number/string pair (`1.0 == "1"` is True); two strings
+  are never coerced (`"01" == "1"` stays False), bools are never coerced, and
+  `null == null` stays True.
+- **B5, B6, B10: new load-time errors.** A JsonLogic operator object with more than one
+  key, or nesting deeper than `MAX_JSONLOGIC_DEPTH`, fails to load (B5).
+  `context_scope` is now a `ContextScope` model (`read_keys`/`write_keys` lists,
+  unknown keys rejected); a string instead of a list or a misspelled key is an error
+  (B6). A `field_name` declared twice in `field_extractions`, or twice in
+  `classification_extractions`, is an error, and so is a blank or internal-prefixed
+  `required_context_keys` entry (B10). `fsm-llm-validate` reports the same errors.
+- **C3: framework-reserved context keys.** Handler deltas can no longer set or delete
+  the keys in `constants.RESERVED_CONTEXT_KEYS` (`_conversation_id`,
+  `_current_state`, `_fsm_id`, `_previous_state`, and 8 more framework-seeded keys).
+  An attempted change logs a WARNING; an equal echo is ignored silently.
+  Handler-owned internal keys (for example agents' `_replan_count`) still merge.
+- **C8: CLI exit codes and output streams.** `fsm-llm`, `fsm-llm-validate` and
+  `fsm-llm-visualize` exit 0 on success, 1 on failure (a turn error used to exit 255)
+  and 130 on Ctrl-C (mid-turn Ctrl-C used to print a traceback). The validation
+  report and the diagram now go to stdout; diagnostics stay on stderr.
+- **C12: `end_conversation` raises on lock timeout.** If the conversation lock cannot
+  be taken within `END_CONVERSATION_LOCK_TIMEOUT_SECONDS` (30 s),
+  `FSMManager.end_conversation` raises `FSMError` and changes nothing, instead of
+  tearing the conversation down while a turn may still be running. Retry after the
+  turn ends.
+- **D5: more credential names are stripped from prompts.** `passwd`, `pwd`, `pass`,
+  `passcode`, `passphrase`, `pin`, `otp`, `mfa_code`, `cvv`, `ssn`, `credit_card`,
+  `card_number`, `cookie`, `jwt`, `bearer`, `authorization`, `auth_header` and
+  `recovery_code` (whole name segments, optional plural) are now filtered out of
+  prompt context. Policy-style tails (`password_min_length`) and `bool` values are
+  kept. Names such as `pass_id`, `pin_code` or `cookie_consent` are now stripped too.
+- **D6: no reasoning fallback.** A Pass-2 reply with an empty or missing `message`
+  no longer shows the model's internal `reasoning` to the user; it produces the
+  generic apology and the pipeline's one retry.
+- **D10: removed dead Pass-1 prompt API.** `DataExtractionPromptBuilder.build_extraction_prompt`
+  and `build_refinement_prompt` had no caller and are deleted, together with the five
+  `DataExtractionPromptConfig` fields only they read (`include_context_data`,
+  `include_state_instructions`, `enable_detailed_guidelines`, `enable_format_rules`,
+  `enable_extraction_guidance`). Passing those fields now raises `TypeError`.
+- **New export:** `fsm_llm.ContextScope`.
+
+### Fixed
+
+A. Decision-making (classification / memory)
+
+- A1: the transition classifier's `confidence_threshold` is enforced; a result below it stays in the current state (WARNING, record flagged `low_confidence`).
+- A2: priority spread alone no longer bypasses the classifier inconsistently; the unique lowest priority wins and only ties are ambiguous (see above).
+- A3: `Classifier.classify`/`classify_multi` accept a context (last 3 exchanges, state purpose, scoped visible data), rendered sanitized and security-filtered; the pipeline feeds it at both call sites.
+- A4: every classification-extraction result is kept in `context.metadata["classification_results"]` and the ambiguous-transition record in `context.metadata["transition_classification"]`, readable via `get_complete_conversation`.
+- A5: after a transition, the new state's unset `classification_extractions` run on the same message.
+- A6: `Conversation.summary` is rendered as `<conversation_summary>` in prompts and persisted in sessions (`SessionState.conversation_summary`).
+- A7: `WorkingMemory` buffers reach the transition evaluator and the Pass-2 prompt context (`FSMContext.get_merged_data`).
+- A8: `_transition_classification_result` is cleared at the start of every turn.
+
+B. Rules engine (expressions / evaluator / definitions / validator)
+
+- B1: `-` with a `None` second operand no longer becomes unary negation.
+- B2: `<=`/`>=` are False when both operands are unset.
+- B3: `==` agrees with `<=`/`>=` for mixed number/string operands.
+- B4: `missing` and `requires_context_keys` treat `None`/`""` as missing; an extracted `None` does not mask a stored value.
+- B5: multi-key operator objects and over-deep logic are rejected at load time.
+- B6: `context_scope` is validated (`ContextScope` model).
+- B7: the validator detects trap cycles per strongly connected component, so interlocking cycles with no exit are reported.
+- B8: `missing_some` with a non-integer minimum is a clean error; an integer needle `in` a string haystack is matched as text; `%` sign semantics are documented.
+- B9: the load-time logic walk no longer recurses into data lists, and its depth is bounded.
+- B10: duplicate `field_name` within one extraction list and blank or internal-prefixed `required_context_keys` are load errors.
+- B11: dead "unreachable terminal" warning branch removed.
+- B12: the validator's structure pass no longer crashes on type-invalid input; a non-validation loader exception is an ERROR, not a warning with `is_valid=True`; key references are read from the logic tree, including dotted `var` paths.
+- B13: `strict_condition_matching` is documented as diagnostics only.
+
+C. Handlers / sessions / logging / CLI
+
+- C1: `register_handler` is copy-on-write under a lock; concurrent `execute_handlers` never sees an empty handler list.
+- C2: a timed handler runs on its own copy of the context in a daemon thread; a timed-out handler's writes never reach later handlers and never block exit.
+- C3: handler deltas cannot overwrite framework-reserved context keys (see above).
+- C4: `FileSessionStore` ids use a full match; `load`/`exists`/`delete` return None/False on `OSError`; `list_sessions` returns only loadable ids; `save` fsyncs before replace.
+- C5: file logging is marked initialized only after `logger.add` succeeds; the JSON sink no longer stashes the rendered line in the shared record.
+- C6: non-dict handler returns log a WARNING; `priority` is validated at registration; condition errors are wrapped once; `HandlerExecutionError` pickles.
+- C7: JSON log lines never `str()` unknown values (`<non-serializable: TypeName>`); the session store's lossy coercions are documented.
+- C8: consistent CLI exit codes and stdout payloads (see above).
+- C9: the visualizer handles `"transitions": null` and multi-line FSM names.
+- C10: `get_workflows()` and siblings re-raise inner `ImportError`s; `disable_warnings()` only silences `fsm_llm` warnings.
+- C11: `_sub_conversation_summary.fsm_type` is the definition name.
+- C12: `end_conversation` refuses to tear down on lock timeout (see above).
+
+D. LLM interface / prompts / context filters
+
+- D1: the Pass-2 embedded-JSON fallback strips `<think>` blocks before scanning.
+- D2: context filters redact non-JSON-native leaves as `<redacted:TypeName>` (stdlib date/time, `Decimal` and `UUID` values are kept).
+- D3: context filters drop reference cycles and cap work at `MAX_CONTEXT_FILTER_NODES` (100,000), failing closed.
+- D4: a flat bulk-extraction reply drops top-level `confidence`/`reasoning` instead of merging them into context.
+- D5: 18 more credential names are stripped from prompts (see above).
+- D6: internal `reasoning` is never shown as the reply (see above).
+- D8: a non-string `reasoning` from the classifier model no longer raises a pydantic error; intent names match case-insensitively when the match is unique.
+- D9 (partly): the prompt sanitizer escapes tag names starting with `_`, `!` or `?` (`<_task>`, `<!--`, `<![CDATA[`, `<?xml`) and unterminated closers at the end of text.
+- D10: dead Pass-1 builders and their unread config fields removed (see above).
+- D11: `{"value": null, "<field_name>": ...}` falls back to the field-name key.
+- D12 (partly): `stream` and `response_format` are reserved LLM call kwargs (`constants.RESERVED_LLM_CALL_KWARGS`), ignored with a WARNING in `LiteLLMInterface` and `Classifier`.
+
+### Not fixed (with reasons)
+
+- D7 skipped: the `...key` value-scan names (`monkey`, `primary_key`, `cache_key`) strip only for a bare high-entropy hex value, the same verdict `passkey` gets; bare `token` is a corpus must-strip row and `secret_santa` strips by design. Changing it would loosen the shared secret filter.
+- D9, attribute part skipped: escaping `<b onclick>` also escaped benign prose such as `a < b and c > d` that is pinned as safe, and attributes are inert to an LLM. The audit's `<Think>` claim was false (already escaped).
+- D12, `/nothink` gating skipped: every Ollama call already sets `reasoning_effort="none"`, the harness depends on the prefix, and the effect is live-model behaviour offline tests cannot measure.
+- D12, `<original_input>` truncation skipped: truncating at `max_message_length` (1,000) would cut long agent tasks and reasoning problems, and the same raw message also reaches Pass 1 and the classifier.
+- B10, cross-list duplicates kept legal: a `field_name` in both `field_extractions` and `classification_extractions` is a supported fallback pattern (the explicit extractor fills the key when the classifier is below threshold), so only same-list duplicates are rejected.
 
 ## [0.8.0] - 2026-09-21
 
