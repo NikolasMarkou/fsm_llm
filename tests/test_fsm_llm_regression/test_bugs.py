@@ -193,32 +193,26 @@ class TestMissingCommasInPrompts:
     """B-NEW-1: Missing commas cause implicit string concatenation in list literals."""
 
     def test_response_format_list_elements_are_separate(self):
-        """Each instruction in the response format list should be a separate element."""
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        """Each instruction in the response format list should be a separate element.
 
-        builder = DataExtractionPromptBuilder()
-        sections = builder._build_extraction_response_format()
+        Retargeted to the live Pass-2 format: the Pass-1 builder this pinned
+        was dead code and was deleted (plan-2026-09-21T203800-8a03483a/D-041).
+        """
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
 
-        # Check that no single element contains both the key names instruction
-        # AND the _extra instruction (they should be separate list items)
-        # Note: use "`_extra`" (with backticks) to avoid matching "_extract" in "_to_extract"
-        for element in sections:
-            assert not ("key names" in element and "`_extra`" in element), (
-                f"Implicit string concatenation detected: {element!r}"
-            )
+        sections = ResponseGenerationPromptBuilder()._build_response_format_section()
 
-        # Check that </response_format> is its own element, not concatenated
         for element in sections:
             assert not (
-                "Do NOT generate" in element and "</response_format>" in element
+                "</response_format>" in element
+                and element.strip() != "</response_format>"
             ), f"Closing tag concatenated with instruction: {element!r}"
 
     def test_response_format_closing_tag_standalone(self):
         """The </response_format> closing tag should be its own list element."""
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
 
-        builder = DataExtractionPromptBuilder()
-        sections = builder._build_extraction_response_format()
+        sections = ResponseGenerationPromptBuilder()._build_response_format_section()
 
         # Find the element containing </response_format>
         closing_tags = [e for e in sections if "</response_format>" in e]

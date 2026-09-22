@@ -80,6 +80,15 @@ MAX_CONTEXT_FILTER_NODES = 100_000
 DEFAULT_LLM_MODEL = "ollama_chat/qwen3.5:4b"
 DEFAULT_TEMPERATURE = 0.5
 
+# litellm.completion() kwargs the framework owns on every call. A constructor's
+# pass-through ``**kwargs`` may not set them: ``stream`` would hand a
+# non-streaming parser a stream object, and ``response_format`` would force (or
+# silently lose) structured output the parser does not expect (audit D12).
+# Shared by ``LiteLLMInterface`` and ``Classifier``.
+RESERVED_LLM_CALL_KWARGS = frozenset(
+    {"model", "messages", "temperature", "max_tokens", "stream", "response_format"}
+)
+
 # --------------------------------------------------------------
 # Conversation Management Constants
 # --------------------------------------------------------------

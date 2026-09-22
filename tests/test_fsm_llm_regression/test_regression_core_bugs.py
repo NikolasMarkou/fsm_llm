@@ -104,9 +104,13 @@ class TestVB1SelfTransitionSuppressed:
 class TestVB2EmptyMessageLeaksReasoning:
     """VB2: message field should NOT fall back to reasoning when message is present."""
 
-    def test_message_none_falls_back_to_reasoning(self):
-        """When message is None/missing, reasoning is an acceptable fallback."""
-        from fsm_llm.llm import LiteLLMInterface
+    def test_message_none_does_not_fall_back_to_reasoning(self):
+        """When message is None/missing, reasoning is still never shown.
+
+        Re-baselined by plan-2026-09-21T203800-8a03483a/D-039 (audit D6): the
+        reply degrades to the generic apology instead of internal reasoning.
+        """
+        from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 
@@ -117,8 +121,8 @@ class TestVB2EmptyMessageLeaksReasoning:
         )
 
         result = llm._parse_response_generation_response(mock_response)
-        # message key is absent (None), so reasoning fallback is OK
-        assert result.message == "Internal thinking..."
+        assert result.message == _GENERIC_FALLBACK_MESSAGE
+        assert "Internal thinking" not in result.message
 
     def test_message_present_does_not_leak_reasoning(self):
         """When message field IS present (even short), reasoning should NOT replace it."""

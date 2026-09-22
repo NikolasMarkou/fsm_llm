@@ -152,9 +152,13 @@ class TestStructuredReplyWithReasoningKey:
         body = json.dumps({"message": "hi there", "reasoning": "polite"})
         assert _generate(body, _STRUCTURED_FORMAT) == "hi there"
 
-    def test_unstructured_reasoning_only_reply_still_returns_the_reasoning(self):
+    def test_unstructured_reasoning_only_reply_is_not_shown(self):
+        # Re-baselined by plan-2026-09-21T203800-8a03483a/D-039 (audit D6):
+        # `reasoning` is internal and never becomes the user-facing reply.
+        from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE
+
         body = json.dumps({"reasoning": "because x"})
-        assert _generate(body, None) == "because x"
+        assert _generate(body, None) == _GENERIC_FALLBACK_MESSAGE
 
 
 # ══════════════════════════════════════════════════════════════

@@ -24,8 +24,6 @@ from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handle
 from fsm_llm.logging import logger
 from fsm_llm.pipeline import _PROVENANCE_KEY
 from fsm_llm.prompts import (
-    DataExtractionPromptBuilder,
-    DataExtractionPromptConfig,
     FieldExtractionPromptBuilder,
     FieldExtractionPromptConfig,
     ResponseGenerationPromptBuilder,
@@ -415,14 +413,6 @@ class TestCurrentContextIsBounded:
     def _big_context(self) -> dict:
         return {f"field_{i:04d}": f"value_{i:04d}" for i in range(self._TOTAL)}
 
-    def _build_extraction(self, context_data, **cfg):
-        builder = DataExtractionPromptBuilder(DataExtractionPromptConfig(**cfg))
-        return builder.build_extraction_prompt(
-            _make_prompt_instance(context_data=context_data),
-            _make_prompt_state(),
-            _make_prompt_fsm_definition(),
-        )
-
     def _build_response(self, context_data, **cfg):
         builder = ResponseGenerationPromptBuilder(ResponsePromptConfig(**cfg))
         return builder.build_response_prompt(
@@ -431,20 +421,11 @@ class TestCurrentContextIsBounded:
             _make_prompt_fsm_definition(),
         )
 
-    def test_extraction_prompt_context_is_capped(self):
-        block = _context_block(
-            self._build_extraction(self._big_context(), max_context_keys=self._CAP)
-        )
-        assert block.count("field_") <= self._CAP, (
-            f"context section carried {block.count('field_')} keys despite a "
-            f"configured cap of {self._CAP}"
-        )
-
     def test_response_prompt_context_is_capped(self):
-        """The fix belongs at the shared base method, so BOTH builders inherit it.
+        """The cap lives in the shared base method ``_build_enhanced_context_section``.
 
-        A fix applied only inside DataExtractionPromptBuilder would pass the
-        test above and fail this one.
+        (Its Pass-1 twin went with the dead ``build_extraction_prompt``,
+        plan-2026-09-21T203800-8a03483a/D-041.)
         """
         block = _context_block(
             self._build_response(self._big_context(), max_context_keys=self._CAP)
@@ -462,7 +443,7 @@ class TestCurrentContextIsBounded:
         model would lose the conversation state entirely.
         """
         block = _context_block(
-            self._build_extraction(self._big_context(), max_context_keys=self._CAP)
+            self._build_response(self._big_context(), max_context_keys=self._CAP)
         )
         retained = re.findall(r'"(field_\d{4})": "(value_\d{4})"', block)
 
@@ -479,8 +460,8 @@ class TestCurrentContextIsBounded:
         """The cap must bound a pathological tail, not reshape the happy path."""
         small = {f"field_{i:04d}": f"value_{i:04d}" for i in range(5)}
 
-        default_prompt = self._build_extraction(small)
-        capped_prompt = self._build_extraction(small, max_context_keys=self._CAP)
+        default_prompt = self._build_response(small)
+        capped_prompt = self._build_response(small, max_context_keys=self._CAP)
 
         assert capped_prompt == default_prompt, (
             "a context smaller than the cap produced different output"
@@ -494,7 +475,7 @@ class TestCurrentContextIsBounded:
         being re-run in this plan, so the default must not alter any prompt a
         real FSM produces."""
         realistic = {f"field_{i:04d}": f"value_{i:04d}" for i in range(50)}
-        block = _context_block(self._build_extraction(realistic))
+        block = _context_block(self._build_response(realistic))
         assert block.count("field_") == 50
 
 

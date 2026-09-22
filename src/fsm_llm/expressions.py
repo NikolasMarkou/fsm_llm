@@ -599,11 +599,39 @@ def _safe_div(a: Any, b: Any) -> float:
 
 
 def _safe_mod(a: Any, b: Any) -> float:
-    """Modulo with error on zero divisor."""
+    """Modulo with error on zero divisor.
+
+    Python floored-modulo semantics: the result takes the sign of the
+    DIVISOR, so ``{"%": [-7, 3]}`` is ``2.0`` (JavaScript's ``%``, and so
+    reference JsonLogic, gives ``-1``: the sign of the dividend). Kept on
+    purpose: changing it would silently flip deployed conditions on negative
+    operands (audit B8).
+    """
     divisor = float(b)
     if divisor == 0:
         raise TransitionEvaluationError("Modulo by zero in JsonLogic expression")
     return float(a) % divisor
+
+
+def _membership(needle: Any, haystack: Any) -> bool:
+    """``in``: is *needle* in *haystack*.
+
+    On a ``str`` haystack an ``int`` needle (never a ``bool``) is matched by
+    its decimal text, as JavaScript does (``{"in": [5, "a5b"]}`` is True);
+    any other non-``str`` needle is False there. Elsewhere Python membership,
+    False for a haystack without ``__contains__`` or an unhashable probe.
+    Never raises (audit B8).
+    """
+    if isinstance(haystack, str):
+        if isinstance(needle, int) and not isinstance(needle, bool):
+            needle = str(needle)
+        return isinstance(needle, str) and needle in haystack
+    if not hasattr(haystack, "__contains__"):
+        return False
+    try:
+        return needle in haystack
+    except TypeError:
+        return False
 
 
 def _minus(*args: Any) -> float:
@@ -674,8 +702,8 @@ operations: dict[str, Callable[..., Any]] = {
     # Note: Access operators handled directly in evaluate_logic()
     # "var", "missing", "missing_some", "has_context", "context_length"
     # Membership operators
-    "in": lambda a, b: a in b if hasattr(b, "__contains__") else False,
-    "contains": lambda a, b: b in a if hasattr(a, "__contains__") else False,
+    "in": lambda a, b: _membership(a, b),
+    "contains": lambda a, b: _membership(b, a),
     # Arithmetic operators
     "+": lambda *args: sum(float(arg) for arg in args),
     "-": _minus,
@@ -734,7 +762,16 @@ def _op_missing_some(values: list, data: dict[str, Any], _depth: int) -> list[st
     if len(values) != 2:
         logger.error(f"missing_some requires exactly 2 arguments, got {len(values)}")
         return []
-    return missing_some(data, values[0], values[1])
+    minimum = values[0]
+    if isinstance(minimum, float) and minimum.is_integer():
+        minimum = int(minimum)
+    if not isinstance(minimum, int) or isinstance(minimum, bool):
+        # A clean, catchable error (the condition fails) instead of a bare
+        # TypeError from `min_required < 1` (audit B8).
+        raise TransitionEvaluationError(
+            f"missing_some minimum must be an integer, got {type(values[0]).__name__}"
+        )
+    return missing_some(data, minimum, values[1])
 
 
 def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:

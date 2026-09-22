@@ -14,7 +14,11 @@ from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from .constants import DEFAULT_LLM_MODEL, MAX_MULTI_INTENTS
+from .constants import (
+    DEFAULT_LLM_MODEL,
+    MAX_MULTI_INTENTS,
+    RESERVED_LLM_CALL_KWARGS,
+)
 from .definitions import (
     ClassificationError,
     ClassificationResponseError,
@@ -54,6 +58,16 @@ from .utilities import (
 # correct — such a handler would crash at runtime on a `None` entity. See
 # decisions.md D-001.
 HandlerFn = Callable[[str, dict[str, str | None]], Any]
+
+
+def _reasoning_text(value: Any) -> str:
+    """A model-supplied ``reasoning`` as the required ``str`` field.
+
+    A ``str`` is returned as-is; ``null`` or any other type becomes ``""``
+    (audit D8: it used to raise a raw pydantic ``ValidationError`` out of
+    ``classify``). Never raises.
+    """
+    return value if isinstance(value, str) else ""
 
 
 # --------------------------------------------------------------
@@ -191,8 +205,9 @@ class Classifier:
             {"role": "user", "content": user_message},
         ]
 
-        reserved = {"model", "messages", "temperature", "max_tokens"}
-        safe_kwargs = {k: v for k, v in self._kwargs.items() if k not in reserved}
+        safe_kwargs = {
+            k: v for k, v in self._kwargs.items() if k not in RESERVED_LLM_CALL_KWARGS
+        }
         call_params = {
             **safe_kwargs,
             "model": self.model,
@@ -320,11 +335,30 @@ class Classifier:
     # Response Parsing
     # ----------------------------------------------------------
 
+    def _resolve_intent(self, raw: Any) -> str | None:
+        """Map a model-supplied intent onto a declared intent name.
+
+        Contract: an exact match wins; otherwise a case- and
+        surrounding-whitespace-insensitive match is accepted only when it
+        folds onto exactly ONE declared name (``"BUY"`` -> ``"buy"``). Returns
+        None for a non-``str`` value, an unknown name, or an ambiguous fold,
+        so the caller applies the fallback intent. Never raises.
+        """
+        if not isinstance(raw, str):
+            return None
+        names = self.schema.intent_names
+        if raw in names:
+            return raw
+        folded = raw.strip().casefold()
+        matches = [n for n in names if n.casefold() == folded]
+        return matches[0] if len(matches) == 1 else None
+
     def _parse_single(self, data: dict) -> ClassificationResult:
-        intent = data.get("intent", "")
-        if intent not in self.schema.intent_names:
+        raw_intent = data.get("intent", "")
+        intent = self._resolve_intent(raw_intent)
+        if intent is None:
             logger.warning(
-                f"LLM returned unknown intent '{intent}', "
+                f"LLM returned unknown intent {raw_intent!r}, "
                 f"falling back to '{self.schema.fallback_intent}'"
             )
             intent = self.schema.fallback_intent
@@ -341,7 +375,7 @@ class Classifier:
             )
             confidence = 0.0
         return ClassificationResult(
-            reasoning=data.get("reasoning", ""),
+            reasoning=_reasoning_text(data.get("reasoning")),
             intent=intent,
             confidence=confidence,
             entities=data.get("entities", {})
@@ -356,7 +390,6 @@ class Classifier:
                 "Multi-intent response contained no intents"
             )
 
-        valid_names = set(self.schema.intent_names)
         scored: list[IntentScore] = []
         for item in raw_intents:
             if not isinstance(item, dict):
@@ -364,11 +397,12 @@ class Classifier:
                     f"Skipping non-dict item in multi-intent response: {item!r}"
                 )
                 continue
-            name = item.get("intent", "")
-            if name not in valid_names:
+            raw_name = item.get("intent", "")
+            name = self._resolve_intent(raw_name)
+            if name is None:
                 logger.warning(
-                    f"LLM returned unknown intent '{name}' in multi-intent response, "
-                    f"falling back to '{self.schema.fallback_intent}'"
+                    f"LLM returned unknown intent {raw_name!r} in multi-intent "
+                    f"response, falling back to '{self.schema.fallback_intent}'"
                 )
                 name = self.schema.fallback_intent
             raw_confidence = item.get("confidence", 0.0)
@@ -422,7 +456,7 @@ class Classifier:
         scored = scored[:MAX_MULTI_INTENTS]
 
         return MultiClassificationResult(
-            reasoning=data.get("reasoning", ""),
+            reasoning=_reasoning_text(data.get("reasoning")),
             intents=scored,
         )
 

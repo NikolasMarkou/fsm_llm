@@ -125,7 +125,7 @@ class BasePromptBuilder:
     # Do NOT reintroduce a `_CRITICAL_TAGS` enumeration of structural tags to
     # escape. That design was a live injection bypass: the denylist and the tags
     # prompts.py actually emits were two hand-maintained lists, and they drifted —
-    # `previously_extracted`/`still_missing` are emitted by build_refinement_prompt
+    # `previously_extracted`/`still_missing` were emitted by build_refinement_prompt
     # but were never added to the 48-entry denylist, so a user message carrying
     # them reached the built prompt unescaped and indistinguishable from the
     # framework's own wrappers. Escaping every tag EXCEPT a tiny known-inert set
@@ -187,8 +187,21 @@ class BasePromptBuilder:
     # the bounded arm alone (a padded closer regresses), and do NOT drop the
     # D-038 guard in the substitution below: it stays load-bearing for a safe
     # tag whose tail holds a second `<`. See D-047 in decisions.md.
+    #
+    # DECISION plan-2026-09-21T203800-8a03483a/D-040
+    # Two widenings (audit D9). (1) A name may also start with `_`, `!` or `?`,
+    # so `<_task>`, `<!-- -->`, `<![CDATA[` and `<?xml ?>` are escaped; digits
+    # still may not (`<3`, `<1s` are prose, and no XML name starts with one).
+    # (2) A THIRD, zero-width arm `(?=[^>]{0,256}\Z)` matches a `<name` with no
+    # `>` after it and fewer than 257 characters left, which the two arms above
+    # never matched; the substitution escapes it only when it is a CLOSER
+    # (`bye </task` must not meet the builder's own `</original_input>`) and
+    # keeps an opener raw exactly as before (`x<y`, `a < b`). Do NOT make this
+    # arm consuming or unbounded (`[^>]*$` is quadratic on `</a</a...`), and do
+    # NOT keep closers raw here. See decisions.md D-040 (differential results).
     _TAG_PATTERN = re.compile(
-        r"<(?:\s*/)?\s*([A-Za-z][A-Za-z0-9._:-]*)(?:[^>]{0,256}/?>|(?=[^>]{257}))"
+        r"<(?:\s*/)?\s*([A-Za-z_!?][A-Za-z0-9._:-]*)"
+        r"(?:[^>]{0,256}/?>|(?=[^>]{257})|(?=[^>]{0,256}\Z))"
     )
 
     def __init__(self, config: BasePromptConfig | None = None):
@@ -242,11 +255,15 @@ class BasePromptBuilder:
                 if (
                     # D-047/D-054: an overflow-only match holds no `>`; with a
                     # space after `<`, no `/`, and no `>` anywhere after it,
-                    # it is a comparison (`latency < threshold`), not a tag
+                    # it is a comparison (`latency < threshold`), not a tag.
+                    # D-040: an end-arm OPENER stays raw when the old pattern
+                    # could not match it at all, i.e. fewer than 257 characters
+                    # follow the FIRST name character (the overflow arm used to
+                    # backtrack the name to reach 257; that case still escapes).
                     ">" not in m.group(0)
-                    and m.group(0)[1:2].isspace()
                     and "/" not in m.group(0)
                     and m.end() > last
+                    and (m.group(0)[1:2].isspace() or len(flat) - m.start(1) <= 257)
                 )
                 or (
                     m.group(1).lower() in self._SAFE_TAGS
@@ -621,16 +638,6 @@ class BasePromptBuilder:
             "",
         ]
 
-    @staticmethod
-    def _build_format_rules(rules_text: str) -> list[str]:
-        """Build a ``<format_rules>`` section wrapping the given text."""
-        return [
-            "<format_rules>",
-            textwrap.dedent(rules_text).strip(),
-            "</format_rules>",
-            "",
-        ]
-
     def _build_summary_block(self, summary: str | None) -> str:
         """Render ``Conversation.summary`` as one sanitized line.
 
@@ -716,308 +723,30 @@ class BasePromptBuilder:
 
 @dataclass(frozen=True)
 class DataExtractionPromptConfig(BasePromptConfig):
-    """Configuration for data extraction prompts."""
-
-    # Content inclusion
-    include_context_data: bool = True
-    include_state_instructions: bool = True
-
-    # Prompt structure
-    enable_detailed_guidelines: bool = True
-    enable_format_rules: bool = True
-    enable_extraction_guidance: bool = True
+    """Configuration for the Pass-1 builder (the shared base settings only)."""
 
 
 class DataExtractionPromptBuilder(BasePromptBuilder):
     """
-    Builds prompts for data extraction focused on understanding user input.
+    The Pass-1 builder slot of ``FSMManager``/``MessagePipeline``.
 
-    This builder creates prompts that focus purely on extracting and understanding
-    information from user input without generating any user-facing responses.
+    It carries the shared ``BasePromptBuilder`` machinery (sanitizer, security
+    filter, history and context sections); the pipeline builds its bulk
+    extraction prompt inline and calls this builder for sanitization.
     """
+
+    # DECISION plan-2026-09-21T203800-8a03483a/D-041
+    # `build_extraction_prompt` and `build_refinement_prompt` were deleted: no
+    # code in any package called them, and their response format promised
+    # `extra`/`additional_info_needed` keys that no grammar or parser reads
+    # (audit D10). Do NOT restore a second Pass-1 prompt here; change the one
+    # the pipeline actually sends. See decisions.md D-041.
 
     config: DataExtractionPromptConfig
 
     def __init__(self, config: DataExtractionPromptConfig | None = None):
         """Initialize data extraction prompt builder with configuration."""
         super().__init__(config or DataExtractionPromptConfig())
-
-    def build_extraction_prompt(
-        self, instance: FSMInstance, state: State, fsm_definition: FSMDefinition
-    ) -> str:
-        """
-        Build comprehensive system prompt for data extraction.
-
-        Args:
-            instance: FSM instance with context and history
-            state: Current state definition
-            fsm_definition: FSM definition for persona
-
-        Returns:
-            System prompt focused on data extraction
-        """
-        logger.debug(f"Building data extraction prompt for state: {state.id}")
-
-        # Build comprehensive prompt sections
-        sections = []
-
-        # Task definition (enhanced for extraction)
-        sections.extend(self._build_extraction_task_section())
-
-        # Data extraction wrapper
-        sections.append("<data_extraction>")
-
-        # Current state context (enhanced for extraction)
-        sections.extend(self._build_extraction_state_context_section(state))
-
-        # Conversation history (with advanced management)
-        if self.config.include_conversation_history:
-            sections.extend(self._build_enhanced_history_section(instance))
-
-        # Current context data (filtered and enhanced)
-        if self.config.include_context_data:
-            sections.extend(self._build_enhanced_context_section(instance))
-
-        # Response format (comprehensive for extraction)
-        sections.extend(self._build_extraction_response_format())
-
-        # Guidelines (detailed for extraction)
-        if self.config.enable_detailed_guidelines:
-            sections.extend(self._build_extraction_guidelines_section())
-
-        # Format rules
-        if self.config.enable_format_rules:
-            sections.extend(self._build_format_rules_section())
-
-        sections.append("</data_extraction>")
-
-        prompt = "\n".join(sections)
-        logger.debug(f"Data Extraction prompt built ({len(prompt)} characters)")
-
-        return prompt
-
-    def _build_extraction_task_section(self) -> list[str]:
-        """Build enhanced task definition section for data extraction."""
-        return self._build_task_section("""
-            You are the data extraction component.
-            Instructions:
-            - Analyze and understand user input thoroughly.
-            - Extract relevant information and data from the user input.
-            - Provide confidence ratings for extracted information.
-            - The required values to extract from the context and the user input are in <information_to_extract>
-            """)
-
-    def _build_extraction_state_context_section(self, state: State) -> list[str]:
-        """Build enhanced current state context section for extraction."""
-        sections = [
-            "<extraction_focus>",
-            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>",
-        ]
-
-        # Add state-specific extraction instructions
-        if self.config.include_state_instructions and state.extraction_instructions:
-            sections.extend(
-                [
-                    "<extraction_instructions>",
-                    textwrap.dedent(
-                        self._sanitize_text_for_prompt(state.extraction_instructions)
-                    ).strip(),
-                    "</extraction_instructions>",
-                ]
-            )
-
-        # Add required information collection guidance
-        if state.required_context_keys:
-            sections.append("<information_to_extract>")
-            for key in state.required_context_keys:
-                sections.append(f"<collect>{key}</collect>")
-            sections.append("</information_to_extract>")
-
-            # Add detailed extraction instructions
-            if self.config.enable_extraction_guidance:
-                instructions = textwrap.dedent("""
-                    Extraction Guidelines:
-                    - Extract information explicitly mentioned by the user.
-                    - If information is ambiguous, note the ambiguity in your reasoning and confidence.
-                    - Don't make assumptions about information not provided.
-                    - If the user provides extra relevant information, include it as well in the extra field.
-                    - Rate your confidence in each piece of extracted information.
-                    """).strip()
-
-                sections.extend(
-                    ["<extraction_guidance>", instructions, "</extraction_guidance>"]
-                )
-
-        sections.extend(["</extraction_focus>", ""])
-
-        return sections
-
-    def _build_extraction_response_format(self) -> list[str]:
-        """Build comprehensive response format section for data extraction."""
-        return self._build_response_format(
-            json_schema="""
-            {
-                "extracted_data": {
-                    "key1": "value1",
-                    "key2": "value2",
-                    "extra": {}
-                },
-                "confidence": 0.95,
-                "reasoning": "Brief explanation of extraction decisions"
-            }""",
-            field_descriptions=[
-                "`extracted_data` is REQUIRED, containing information extracted from user input.",
-                "key names can be found in <information_to_extract>",
-                "`extra` is for storing relevant information not explicitly requested.",
-                "`confidence` is REQUIRED (0.0 to 1.0) representing your confidence in the extraction.",
-                "`reasoning` is OPTIONAL, explaining your extraction decisions (not shown to user).",
-            ],
-            notes=[
-                "Critical Points:",
-                "Return ONLY valid JSON - no markdown code fences, no additional text",
-                "Include empty object {} for extracted_data if no information was extracted",
-                "Set `additional_info_needed` to true if more information is required from the user.",
-                "Do NOT generate any other messages",
-            ],
-        )
-
-    def _build_extraction_guidelines_section(self) -> list[str]:
-        """Build detailed guidelines section for data extraction."""
-        return self._build_guidelines("""
-            Data Extraction Guidelines:
-            - Focus on explicit information provided by the user.
-            - Do not create or populate keys with no values or empty strings.
-            - Extract implied information only when confidence is high.
-            - Always provide confidence ratings for your extractions.
-            - Don't make assumptions about missing information.
-            - Extract all relevant information, even if unexpected.
-            - Note ambiguities and unclear statements in reasoning.
-            - Consider context from previous conversation exchanges.
-            """)
-
-    def _build_format_rules_section(self) -> list[str]:
-        """Build format rules section for proper JSON output."""
-        return self._build_format_rules("""
-            Critical Format Rules:
-            - Return ONLY valid JSON - no markdown code fences, no additional explanations.
-            - Do not add keys not specified in the schema.
-            - Do not create or populate keys with no values or empty strings.
-            - Ensure all values are properly quoted and formatted according to JSON standards.
-            - Use double quotes for all strings, not single quotes.
-            - Do not include trailing commas in JSON objects or arrays.
-            - Escape special characters in strings (quotes, backslashes, newlines).
-            - Confidence must be a number between 0.0 and 1.0.
-            """)
-
-    def build_refinement_prompt(
-        self,
-        instance: FSMInstance,
-        state: State,
-        fsm_definition: FSMDefinition,
-        previous_extraction: dict[str, Any],
-        missing_keys: list[str],
-    ) -> str:
-        """
-        Build a focused re-extraction prompt for a refinement pass.
-
-        Used when the first extraction pass had low confidence or did not
-        capture all ``required_context_keys``.  The refinement prompt
-        tells the LLM what was already found and asks it to focus on the
-        missing fields.
-
-        Args:
-            instance: FSM instance with context and history
-            state: Current state definition
-            fsm_definition: FSM definition for persona
-            previous_extraction: Data already extracted in the first pass
-            missing_keys: Context keys still missing after the first pass
-
-        Returns:
-            System prompt focused on extracting the missing data
-        """
-        logger.debug(
-            f"Building refinement prompt for state {state.id}: missing={missing_keys}"
-        )
-
-        sections: list[str] = []
-
-        # Task definition — emphasise refinement
-        sections.extend(
-            self._build_task_section(
-                """
-            You are the data extraction component performing a REFINEMENT pass.
-            A previous extraction already captured some information.  Your job
-            is to re-examine the user input and extract ONLY the fields that
-            are still missing.
-            """
-            )
-        )
-
-        sections.append("<data_extraction_refinement>")
-
-        # What was already found
-        sections.append("<previously_extracted>")
-        if previous_extraction:
-            for key, value in previous_extraction.items():
-                sections.append(
-                    f'  <found key="{self._sanitize_text_for_prompt(str(key))}">'
-                    f"{self._sanitize_text_for_prompt(str(value))}</found>"
-                )
-        else:
-            sections.append("  (nothing was extracted in the first pass)")
-        sections.append("</previously_extracted>")
-
-        # What is still missing
-        sections.append("<still_missing>")
-        for key in missing_keys:
-            sections.append(
-                f"  <collect>{self._sanitize_text_for_prompt(key)}</collect>"
-            )
-        sections.append("</still_missing>")
-
-        # State context — purpose and extraction instructions
-        sections.append("<extraction_focus>")
-        sections.append(
-            f"<purpose>{self._sanitize_text_for_prompt(state.purpose)}</purpose>"
-        )
-        if state.extraction_instructions:
-            sections.extend(
-                [
-                    "<extraction_instructions>",
-                    textwrap.dedent(
-                        self._sanitize_text_for_prompt(state.extraction_instructions)
-                    ).strip(),
-                    "</extraction_instructions>",
-                ]
-            )
-        sections.append("</extraction_focus>")
-
-        # Conversation history (limited)
-        if self.config.include_conversation_history:
-            sections.extend(self._build_enhanced_history_section(instance))
-
-        # Response format
-        sections.extend(self._build_extraction_response_format())
-
-        # Focused guidelines
-        sections.extend(
-            self._build_guidelines(
-                """
-            Refinement Guidelines:
-            - Focus ONLY on the fields listed in <still_missing>.
-            - Do NOT re-extract fields already listed in <previously_extracted>.
-            - Re-read the full user message carefully for any overlooked details.
-            - If a missing field genuinely cannot be found, omit it from extracted_data.
-            - Set confidence based on how certain you are about the NEW extractions.
-            """
-            )
-        )
-
-        sections.append("</data_extraction_refinement>")
-
-        prompt = "\n".join(sections)
-        logger.debug(f"Refinement prompt built ({len(prompt)} characters)")
-        return prompt
 
 
 # ============================================================================
@@ -1242,8 +971,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         # Do NOT "simplify" by passing `extracted_data` through unfiltered (it is
         # shown even outside `read_keys`, D-005, but never unfiltered), and keep
         # `default=str` on the dumps below: without it one datetime/Decimal value
-        # raises and drops the whole section. (`build_refinement_prompt` has no
-        # caller in src/; its `previous_extraction` half is dead code.)
+        # raises and drops the whole section.
         data = self._filter_context_for_security(extracted_data)
         if not data:
             return []

@@ -21,12 +21,11 @@ from fsm_llm.definitions import (
 from fsm_llm.prompts import (
     BasePromptBuilder,
     BasePromptConfig,
-    DataExtractionPromptBuilder,
-    DataExtractionPromptConfig,
     FieldExtractionPromptBuilder,
     FieldExtractionPromptConfig,
     HistoryManagementStrategy,
     ResponseGenerationPromptBuilder,
+    ResponsePromptConfig,
 )
 
 # ============================================================================
@@ -237,122 +236,6 @@ class TestEstimateTokenCount:
         default_builder = BasePromptBuilder()
         count_default = default_builder._estimate_token_count("a" * 100)
         assert count_wide < count_default
-
-
-# ============================================================================
-# 6-8. DataExtractionPromptBuilder
-# ============================================================================
-
-
-class TestDataExtractionPromptBuilder:
-    """Tests for data extraction prompt building."""
-
-    def setup_method(self):
-        self.builder = DataExtractionPromptBuilder()
-        self.fsm_def = _make_fsm_definition()
-
-    def test_builds_extraction_prompt_with_state_context(self):
-        state = _make_state(purpose="Collect user email")
-        instance = _make_instance()
-        prompt = self.builder.build_extraction_prompt(instance, state, self.fsm_def)
-
-        assert "<data_extraction>" in prompt
-        assert "</data_extraction>" in prompt
-        assert "<task>" in prompt
-        assert "data extraction component" in prompt.lower()
-        assert "Collect user email" in prompt
-
-    def test_includes_required_context_keys(self):
-        state = _make_state(
-            purpose="Collect info",
-            required_context_keys=["email", "phone"],
-        )
-        instance = _make_instance()
-        prompt = self.builder.build_extraction_prompt(instance, state, self.fsm_def)
-
-        assert "<information_to_extract>" in prompt
-        assert "<collect>email</collect>" in prompt
-        assert "<collect>phone</collect>" in prompt
-
-    def test_handles_empty_required_context_keys(self):
-        state = _make_state(purpose="Greet user", required_context_keys=None)
-        instance = _make_instance()
-        prompt = self.builder.build_extraction_prompt(instance, state, self.fsm_def)
-
-        # No <collect> items should be present when no keys are required
-        assert "<collect>" not in prompt
-        # Should still produce a valid prompt
-        assert "<data_extraction>" in prompt
-
-    def test_includes_extraction_instructions(self):
-        state = _make_state(
-            purpose="Collect data",
-            extraction_instructions="Focus on extracting the user's preferred language.",
-        )
-        instance = _make_instance()
-        prompt = self.builder.build_extraction_prompt(instance, state, self.fsm_def)
-
-        assert "<extraction_instructions>" in prompt
-        assert "preferred language" in prompt
-
-    def test_handles_missing_extraction_instructions(self):
-        state = _make_state(purpose="Greet", extraction_instructions=None)
-        instance = _make_instance()
-        prompt = self.builder.build_extraction_prompt(instance, state, self.fsm_def)
-        assert "<extraction_instructions>" not in prompt
-
-    def test_includes_conversation_history(self):
-        instance = _make_instance(
-            exchanges=[
-                {"user": "Hi there"},
-                {"system": "Hello! How can I help?"},
-            ]
-        )
-        state = _make_state()
-        prompt = self.builder.build_extraction_prompt(instance, state, self.fsm_def)
-        assert "<conversation_history>" in prompt
-        assert "Hi there" in prompt
-
-    def test_includes_context_data(self):
-        instance = _make_instance(context_data={"name": "Alice"})
-        state = _make_state()
-        prompt = self.builder.build_extraction_prompt(instance, state, self.fsm_def)
-
-        assert "<current_context>" in prompt
-        assert "Alice" in prompt
-
-    def test_filters_internal_context_keys(self):
-        instance = _make_instance(
-            context_data={"name": "Alice", "_secret": "hidden", "system_flag": True}
-        )
-        state = _make_state()
-        prompt = self.builder.build_extraction_prompt(instance, state, self.fsm_def)
-
-        assert "Alice" in prompt
-        assert "_secret" not in prompt
-        assert "system_flag" not in prompt
-
-    def test_response_format_section_present(self):
-        state = _make_state()
-        instance = _make_instance()
-        prompt = self.builder.build_extraction_prompt(instance, state, self.fsm_def)
-
-        assert "<response_format>" in prompt
-        assert "extracted_data" in prompt
-        assert "confidence" in prompt
-
-    def test_disabling_guidelines_and_format_rules(self):
-        cfg = DataExtractionPromptConfig(
-            enable_detailed_guidelines=False,
-            enable_format_rules=False,
-        )
-        builder = DataExtractionPromptBuilder(config=cfg)
-        state = _make_state()
-        instance = _make_instance()
-        prompt = builder.build_extraction_prompt(instance, state, self.fsm_def)
-
-        assert "<guidelines>" not in prompt
-        assert "<format_rules>" not in prompt
 
 
 # ============================================================================
@@ -615,15 +498,6 @@ class TestHistoryManagement:
 class TestPromptOutputFormat:
     """Tests that prompt output has expected structural sections."""
 
-    def test_extraction_prompt_returns_string(self):
-        builder = DataExtractionPromptBuilder()
-        fsm_def = _make_fsm_definition()
-        state = _make_state()
-        instance = _make_instance()
-        prompt = builder.build_extraction_prompt(instance, state, fsm_def)
-        assert isinstance(prompt, str)
-        assert len(prompt) > 0
-
     def test_response_prompt_returns_string(self):
         builder = ResponseGenerationPromptBuilder()
         fsm_def = _make_fsm_definition()
@@ -634,40 +508,6 @@ class TestPromptOutputFormat:
         )
         assert isinstance(prompt, str)
         assert len(prompt) > 0
-
-    def test_extraction_prompt_has_expected_sections(self):
-        builder = DataExtractionPromptBuilder()
-        fsm_def = _make_fsm_definition()
-        state = _make_state(
-            required_context_keys=["name"],
-            extraction_instructions="Get name",
-        )
-        instance = _make_instance(
-            context_data={"email": "a@b.com"},
-            exchanges=[{"user": "hi"}, {"system": "hey"}],
-        )
-        prompt = builder.build_extraction_prompt(instance, state, fsm_def)
-
-        expected_sections = [
-            "<task>",
-            "</task>",
-            "<data_extraction>",
-            "</data_extraction>",
-            "<extraction_focus>",
-            "</extraction_focus>",
-            "<response_format>",
-            "</response_format>",
-            "<guidelines>",
-            "</guidelines>",
-            "<format_rules>",
-            "</format_rules>",
-            "<conversation_history>",
-            "</conversation_history>",
-            "<current_context>",
-            "</current_context>",
-        ]
-        for section in expected_sections:
-            assert section in prompt, f"Missing section: {section}"
 
     def test_response_prompt_has_expected_sections(self):
         builder = ResponseGenerationPromptBuilder()
@@ -826,7 +666,7 @@ class TestFieldExtractionHistoryCapping:
     it must apply the same `history_strategy` / token-budget capping the base
     builders get. Before the fix it emitted `get_recent()` whole -- all five
     turns, uncapped `User:` lines -- under a budget that trimmed
-    `DataExtractionPromptBuilder` to a single turn."""
+    the shared history section to a single turn."""
 
     _TIGHT: ClassVar[dict] = {
         "history_strategy": HistoryManagementStrategy.TOKEN_BUDGET,
@@ -841,10 +681,12 @@ class TestFieldExtractionHistoryCapping:
             user_message="I want to go to Paris",
         )
 
-    def _data_prompt(self, instance, **cfg):
-        builder = DataExtractionPromptBuilder(DataExtractionPromptConfig(**cfg))
-        return builder.build_extraction_prompt(
-            instance, _make_state(), _make_fsm_definition()
+    def _shared_history_prompt(self, instance, **cfg):
+        # The Pass-2 builder uses the shared, already-capped history section
+        # (the Pass-1 twin was deleted, plan-2026-09-21T203800-8a03483a/D-041).
+        builder = ResponseGenerationPromptBuilder(ResponsePromptConfig(**cfg))
+        return builder.build_response_prompt(
+            instance, _make_state(), _make_fsm_definition(), user_message="hi"
         )
 
     def test_tight_token_budget_drops_the_oldest_turn(self):
@@ -906,10 +748,10 @@ class TestFieldExtractionHistoryCapping:
         assert "User: UUU-user" in prompt
         assert "Assistant: SSS-system" in prompt
 
-    def test_length_tracks_the_data_extraction_builder(self):
+    def test_length_tracks_the_shared_history_builder(self):
         instance = _instance_with_big_history()
         field_prompt = self._field_prompt(instance, **self._TIGHT)
-        data_prompt = self._data_prompt(instance, **self._TIGHT)
+        data_prompt = self._shared_history_prompt(instance, **self._TIGHT)
 
         # Same order of magnitude as the builder that was already capped.
         # Un-fixed, the field prompt is the larger of the two.
@@ -971,19 +813,6 @@ class TestNestedContextSecurityFiltering:
             {"user": {"password": "hunter2", "name": "bob"}}
         )
         assert filtered == {"user": {"name": "bob"}}
-
-    def test_nested_secret_absent_from_the_built_extraction_prompt(self):
-        # The point of the fix: assert through the real prompt-building entry
-        # point, not only the private helper.
-        builder = DataExtractionPromptBuilder()
-        instance = _make_instance(
-            context_data={"user": {"password": "hunter2", "name": "bob"}}
-        )
-        prompt = builder.build_extraction_prompt(
-            instance, _make_state(), _make_fsm_definition()
-        )
-        assert "hunter2" not in prompt
-        assert "bob" in prompt
 
     def test_nested_secret_absent_from_the_built_response_prompt(self):
         builder = ResponseGenerationPromptBuilder()
@@ -1076,12 +905,12 @@ class TestNestedContextSecurityFiltering:
         # Ordering invariant: capping first would let the cap decide whether a
         # secret is seen. The nested secret must be removed even though its
         # holder key survives the cap.
-        builder = DataExtractionPromptBuilder()
+        builder = ResponseGenerationPromptBuilder()
         context_data = {f"filler_{i}": i for i in range(250)}
         context_data["profile"] = {"password": "hunter2", "nickname": "bo"}
         instance = _make_instance(context_data=context_data)
-        prompt = builder.build_extraction_prompt(
-            instance, _make_state(), _make_fsm_definition()
+        prompt = builder.build_response_prompt(
+            instance, _make_state(), _make_fsm_definition(), user_message="hi"
         )
         # Holder key survived the 200-key cap (it is the newest key)...
         assert "nickname" in prompt

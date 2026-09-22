@@ -58,6 +58,7 @@ from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
+from .constants import RESERVED_LLM_CALL_KWARGS
 from .definitions import (
     BulkExtractionRequest,
     DataExtractionResponse,
@@ -107,6 +108,18 @@ _GENERIC_FALLBACK_MESSAGE = (
 # (`{"extracted_data": {...}, "confidence": ..., "reasoning": ...}`). Dropped
 # from a FLAT reply's data in `extract_bulk_data` (D-009, audit D4).
 _BULK_ENVELOPE_KEYS = frozenset({"confidence", "reasoning"})
+
+
+def _field_value(data: dict[str, Any], field_name: str) -> Any:
+    """Read a single-field extraction value from a parsed reply.
+
+    Returns ``data["value"]`` unless it is absent or ``None``, else
+    ``data[field_name]`` (``None`` when neither is set). ``dict.get``'s default
+    only covers an ABSENT key, so ``{"value": null, "<field>": "a@b"}`` used to
+    return ``None`` (audit D11). Never raises for a ``dict``.
+    """
+    value = data.get("value")
+    return data.get(field_name) if value is None else value
 
 
 def _safe_str(value: Any) -> str | None:
@@ -319,6 +332,12 @@ class LiteLLMInterface(LLMInterface):
         self.timeout = timeout
         self.retries = retries
         self.kwargs = kwargs
+        dropped = sorted(RESERVED_LLM_CALL_KWARGS.intersection(kwargs))
+        if dropped:
+            logger.warning(
+                f"LiteLLMInterface ignores reserved call kwargs {dropped}; "
+                "the framework sets them per call"
+            )
 
         # Configure API keys based on model type
         self._configure_api_keys(api_key)
@@ -706,8 +725,9 @@ class LiteLLMInterface(LLMInterface):
 
         # Configure parameters based on call type
         # kwargs go first so explicit params cannot be overridden
-        reserved_keys = {"model", "messages", "temperature", "max_tokens"}
-        safe_kwargs = {k: v for k, v in self.kwargs.items() if k not in reserved_keys}
+        safe_kwargs = {
+            k: v for k, v in self.kwargs.items() if k not in RESERVED_LLM_CALL_KWARGS
+        }
         call_params: dict[str, Any] = {
             **safe_kwargs,
             "model": self.model,
@@ -971,15 +991,15 @@ class LiteLLMInterface(LLMInterface):
                 if not isinstance(data, dict):
                     raise ValueError("Expected JSON object, got array or primitive")
 
+                # DECISION plan-2026-09-21T203800-8a03483a/D-039
+                # `reasoning` is NEVER the user-facing reply. Do NOT restore the
+                # empty-`message` -> `reasoning` fallback: it showed the model's
+                # internal chain of thought to the end user verbatim. An empty
+                # message now degrades to the apology (and the pipeline's
+                # one-shot retry); a structured reply without a `message` key
+                # is still the caller's schema (D-020 below, and
+                # plan-2026-09-19T175721-21cd7f8e/D-028). See decisions.md D-039.
                 message = data.get("message")
-                if not isinstance(message, str) or not message.strip():
-                    # DECISION plan-2026-09-19T175721-21cd7f8e/D-028
-                    # A structured reply with no `message` key is the caller's
-                    # own schema: its `reasoning` field is part of the answer.
-                    # Do NOT fall back to `reasoning` here, the D-020 branch
-                    # below returns the whole JSON verbatim. See decisions.md.
-                    if not (structured and "message" not in data):
-                        message = data.get("reasoning")
                 if not isinstance(message, str) or not message.strip():
                     # DECISION plan-2026-09-19T175721-21cd7f8e/D-020: a caller-
                     # requested schema without a `message` key makes the JSON
@@ -997,7 +1017,7 @@ class LiteLLMInterface(LLMInterface):
                         return ResponseGenerationResponse(
                             message=as_text, message_type="response"
                         )
-                    raise ValueError("No usable message or reasoning in response")
+                    raise ValueError("No usable message in response")
                 return ResponseGenerationResponse(
                     message=message[:_RESPONSE_MESSAGE_MAX_LEN],
                     message_type=_safe_str(data.get("message_type")) or "response",
@@ -1173,7 +1193,7 @@ class LiteLLMInterface(LLMInterface):
                 if not isinstance(data, dict):
                     raise ValueError("Expected JSON object")
 
-                value = data.get("value", data.get(request.field_name))
+                value = _field_value(data, request.field_name)
                 # Handle extracted_data wrapper: some models nest the value
                 if value is None and "extracted_data" in data:
                     ed = data["extracted_data"]
@@ -1220,7 +1240,7 @@ class LiteLLMInterface(LLMInterface):
         if isinstance(content, str):
             data = extract_json_from_text(content)
             if isinstance(data, dict):
-                value = data.get("value", data.get(request.field_name))
+                value = _field_value(data, request.field_name)
                 # Nested key search: look through nested dicts (depth ≤ 3)
                 if value is None:
                     value = self._find_nested_key(data, request.field_name, max_depth=3)

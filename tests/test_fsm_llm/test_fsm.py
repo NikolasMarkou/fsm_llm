@@ -388,17 +388,6 @@ def test_prompt_builders():
         fsm_id="test_fsm", current_state="collect_name", persona="A friendly assistant"
     )
 
-    # Test data extraction prompt builder
-    data_extraction_builder = DataExtractionPromptBuilder()
-    extraction_prompt = data_extraction_builder.build_extraction_prompt(
-        instance, collect_name_state, fsm_def
-    )
-
-    # Verify the extraction prompt contains key elements
-    assert "<data_extraction>" in extraction_prompt
-    assert "</data_extraction>" in extraction_prompt
-    assert "extraction_focus" in extraction_prompt.lower()
-
     # Test response generation prompt builder
     response_builder = ResponseGenerationPromptBuilder()
     response_prompt = response_builder.build_response_prompt(
