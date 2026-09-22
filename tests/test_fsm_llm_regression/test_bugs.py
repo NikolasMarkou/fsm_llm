@@ -471,6 +471,10 @@ class TestConversationMemoryLeak:
         api._pending_push_ids = set()
         api._stack_lock = __import__("threading").Lock()
         api._last_accessed = {"conv1": 0.0}
+        # end_conversation writes the ended-conversation cache after the frames
+        # end (D-050), no longer inside a swallow-everything try; mirror __init__.
+        api._ended_conversations = {}
+        api._MAX_ENDED_CACHE = 10_000
 
         # Bypass the decorator by calling the underlying logic
         api.end_conversation.__wrapped__(api, "conv1")

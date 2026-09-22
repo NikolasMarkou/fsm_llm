@@ -285,7 +285,7 @@ The harness gates are JSON rules over values counted from the plan directory, so
 
 ```bash
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
-make test           # Run full test suite (6,509 tests)
+make test           # Run full test suite (6,515 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages

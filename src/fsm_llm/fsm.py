@@ -680,21 +680,49 @@ class FSMManager:
     # Conversation query methods
     # ----------------------------------------------------------
 
+    @staticmethod
+    def _acquire_or_refuse(conv_lock: Any, conversation_id: str) -> None:
+        """Acquire ``conv_lock`` for an end-of-conversation step, bounded.
+
+        Interface contract:
+          - Parameters: the conversation's lock and its id (for the message).
+          - Returns: None with the lock HELD; the caller must release it.
+          - Failure: if the lock is not acquired within
+            ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS`` (read at call time), logs
+            ERROR and raises ``FSMError`` ("... still processing a turn ...");
+            the lock is not held and nothing has been changed.
+        """
+        if not conv_lock.acquire(timeout=END_CONVERSATION_LOCK_TIMEOUT_SECONDS):
+            logger.error(
+                f"Timed out after {END_CONVERSATION_LOCK_TIMEOUT_SECONDS}s waiting "
+                f"for conversation lock on {conversation_id}; a turn is still "
+                "running, conversation NOT ended"
+            )
+            raise FSMError(
+                f"Conversation {conversation_id} is still processing a turn; "
+                "end_conversation refused (retry after the turn completes)"
+            )
+
     def _read_under_lock(
         self,
         conversation_id: str,
         snapshot_fn: Callable[[FSMInstance], _SnapshotT],
+        *,
+        bounded: bool = False,
     ) -> _SnapshotT:
         """Run ``snapshot_fn`` against a conversation under its ``conv_lock``.
 
         Interface contract:
           - Parameters: ``conversation_id`` (must be an active conversation) and
             ``snapshot_fn``, a callable taking the ``FSMInstance`` and returning
-            a point-in-time in-memory snapshot.
+            a point-in-time in-memory snapshot. ``bounded=True`` waits for the
+            lock at most ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS`` (the end
+            path); the default waits as long as the running turn takes.
           - Returns: whatever ``snapshot_fn`` returns.
           - Failure: raises ``FSMError`` if the conversation is unknown, or if
             its instance is present but its per-conversation lock is missing
-            (a broken create-together / remove-together invariant — L11).
+            (a broken create-together / remove-together invariant — L11), or
+            (``bounded`` only) if the lock is not acquired in time.
 
         HARD RULE: ``snapshot_fn`` runs while holding ``conv_lock`` and MUST do
         only fast in-memory work. It MUST NOT call ``resolve_state_definition`` /
@@ -724,8 +752,42 @@ class FSMManager:
                 "per-conversation lock (broken invariant)"
             )
 
-        with conv_lock:
+        if not bounded:
+            with conv_lock:
+                return snapshot_fn(instance)
+        self._acquire_or_refuse(conv_lock, conversation_id)
+        try:
             return snapshot_fn(instance)
+        finally:
+            conv_lock.release()
+
+    def get_end_snapshot(self, conversation_id: str) -> dict[str, Any]:
+        """Read what ``API.end_conversation`` caches, under ONE bounded hold.
+
+        Interface contract:
+          - Parameters: ``conversation_id`` (an active conversation).
+          - Returns: ``{"data": <get_conversation_data view>, "state": str,
+            "history": <get_conversation_history view>}``, one consistent
+            point-in-time read.
+          - Failure: ``FSMError`` for an unknown conversation, or when a turn
+            holds the lock past ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS`` (the
+            same refusal ``end_conversation`` raises).
+        """
+        # DECISION plan-2026-09-21T203800-8a03483a/D-050
+        # The end path's cache read is BOUNDED like the end itself. Do NOT
+        # switch API.end_conversation back to get_conversation_data/state/
+        # history: those wait for the turn indefinitely, so the documented
+        # 30 s refusal was never what an API caller saw (review W2). Do NOT
+        # bound the ordinary getters: a read during a long turn must wait.
+        return self._read_under_lock(
+            conversation_id,
+            lambda inst: {
+                "data": _strip_internal_mapping(inst.context.data),
+                "state": inst.current_state,
+                "history": inst.context.conversation.get_recent(),
+            },
+            bounded=True,
+        )
 
     @with_conversation_context
     def has_conversation_ended(self, conversation_id: str, log: Any = None) -> bool:
@@ -1024,18 +1086,8 @@ class FSMManager:
         # turn still holds the lock, so END handlers and the instance teardown
         # ran under a live turn (C12), and the `finally` then released a lock
         # this thread never acquired. The caller may retry once the turn ends.
-        if conv_lock is not None and not conv_lock.acquire(
-            timeout=END_CONVERSATION_LOCK_TIMEOUT_SECONDS
-        ):
-            logger.error(
-                f"Timed out after {END_CONVERSATION_LOCK_TIMEOUT_SECONDS}s waiting "
-                f"for conversation lock on {conversation_id}; a turn is still "
-                "running, conversation NOT ended"
-            )
-            raise FSMError(
-                f"Conversation {conversation_id} is still processing a turn; "
-                "end_conversation refused (retry after the turn completes)"
-            )
+        if conv_lock is not None:
+            self._acquire_or_refuse(conv_lock, conversation_id)
         try:
             self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
         finally:

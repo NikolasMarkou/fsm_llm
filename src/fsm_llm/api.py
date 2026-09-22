@@ -1166,36 +1166,84 @@ class API:
         )
         return history
 
+    def _frame_instance_present(self, frame_id: str) -> bool:
+        """True if the FSMManager still holds ``frame_id``'s instance. After a
+        failed end this means the end was refused and nothing was torn down."""
+        with self.fsm_manager._lock:
+            return frame_id in self.fsm_manager.instances
+
+    def _drop_ended_frames(self, conversation_id: str, ended: set[str]) -> None:
+        """Remove already-ended frames from a conversation's live stack."""
+        if not ended:
+            return
+        with self._stack_lock:
+            stack = self.conversation_stacks.get(conversation_id)
+            if stack is not None:
+                stack[:] = [f for f in stack if f.conversation_id not in ended]
+
     @handle_conversation_errors("Failed to end conversation")
     def end_conversation(self, conversation_id: str) -> None:
-        """End conversation and clean up all FSMs in stack."""
-        # Cache data and state before cleanup so get_data/get_current_state
-        # still work after the conversation ends.
+        """End conversation and clean up all FSMs in stack.
+
+        If a turn holds a frame's lock past
+        ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS``, raises ``FSMError`` and the
+        conversation stays active with its remaining frames; retry after the
+        turn. Frames above the refusing one that were already ended are
+        removed from the stack.
+        """
+        # DECISION plan-2026-09-21T203800-8a03483a/D-050
+        # Read the cache, then end the frames, and only THEN drop the API
+        # bookkeeping. Do NOT pop conversation_stacks / active_conversations /
+        # _last_accessed first: a refused end (C12) then vanished from the API
+        # while its FSMManager instance stayed allocated, and no sweep could
+        # find it again (review W2). Do NOT swallow a refusal: a frame whose
+        # end raised while its instance is still present was refused and
+        # nothing was torn down, so the caller must see the FSMError. Do NOT
+        # use the unbounded getters for the cache: they waited forever.
         try:
-            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            self._ended_conversations[conversation_id] = {
-                "data": self.fsm_manager.get_conversation_data(current_fsm_id),
-                "state": self.fsm_manager.get_conversation_state(current_fsm_id),
-                "history": self.fsm_manager.get_conversation_history(current_fsm_id),
-            }
-            if len(self._ended_conversations) > self._MAX_ENDED_CACHE:
-                self._ended_conversations.pop(next(iter(self._ended_conversations)))
-        except Exception:
-            pass  # best-effort cache
+            current_fsm_id: str | None = self._get_current_fsm_conversation_id(
+                conversation_id
+            )
+        except ValueError:
+            current_fsm_id = None
+        ended_cache: dict[str, Any] | None = None
+        if current_fsm_id is not None:
+            try:
+                ended_cache = self.fsm_manager.get_end_snapshot(current_fsm_id)
+            except Exception:
+                if self._frame_instance_present(current_fsm_id):
+                    raise  # refused: a turn is running; nothing changed
+                ended_cache = None  # best-effort cache
 
         with self._stack_lock:
-            stack = self.conversation_stacks.pop(conversation_id, None)
+            stack = list(self.conversation_stacks.get(conversation_id) or [])
+        frame_ids = [f.conversation_id for f in reversed(stack)] or [conversation_id]
+        ended: set[str] = set()
+        unstacked_error: Exception | None = None
+        for frame_id in frame_ids:
+            try:
+                self.fsm_manager.end_conversation(frame_id)
+                ended.add(frame_id)
+            except Exception as e:
+                if self._frame_instance_present(frame_id):
+                    self._drop_ended_frames(conversation_id, ended)
+                    raise
+                ended.add(frame_id)
+                if not stack:
+                    unstacked_error = e
+                else:
+                    logger.warning(f"Error ending FSM {frame_id}: {e!s}")
+
+        with self._stack_lock:
+            self.conversation_stacks.pop(conversation_id, None)
             self.active_conversations.pop(conversation_id, None)
             self._last_accessed.pop(conversation_id, None)
-
-        if stack:
-            for frame in reversed(stack):
-                try:
-                    self.fsm_manager.end_conversation(frame.conversation_id)
-                except Exception as e:
-                    logger.warning(f"Error ending FSM {frame.conversation_id}: {e!s}")
-        else:
-            self.fsm_manager.end_conversation(conversation_id)
+        if ended_cache is not None:
+            self._ended_conversations[conversation_id] = ended_cache
+            if len(self._ended_conversations) > self._MAX_ENDED_CACHE:
+                self._ended_conversations.pop(next(iter(self._ended_conversations)))
+        if unstacked_error is not None:
+            raise unstacked_error
 
         # D-011: pushed sub-FSM defs now live in _temp_fsm_definitions for the
         # frame's lifetime (the post-push pop was removed). This conversation's

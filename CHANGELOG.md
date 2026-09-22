@@ -11,7 +11,7 @@ Core audit of `src/fsm_llm` dated 2026-09-21 (`plans/plan-2026-09-21T203800-8a03
 15 fix steps, one commit per step). 45 audit ids: 42 fixed, 2 partly fixed (D9, D12),
 1 skipped (D7). Every fixed id is pinned by a `test_<id>_*` regression test in
 `tests/test_fsm_llm/test_audit_2026_09_21.py` that fails on the pre-fix code. Full
-suite: 6,509 tests collected (was 6,177). `ruff` and `mypy` clean across all 6 packages.
+suite: 6,515 tests collected (was 6,177). `ruff` and `mypy` clean across all 6 packages.
 
 ### Behaviour changes to know about
 
@@ -57,7 +57,12 @@ suite: 6,509 tests collected (was 6,177). `ruff` and `mypy` clean across all 6 p
   be taken within `END_CONVERSATION_LOCK_TIMEOUT_SECONDS` (30 s),
   `FSMManager.end_conversation` raises `FSMError` and changes nothing, instead of
   tearing the conversation down while a turn may still be running. Retry after the
-  turn ends.
+  turn ends. `API.end_conversation` propagates that `FSMError` (it used to log it and
+  return) and keeps the conversation active with its stack, idle tracking and data;
+  frames above the refusing one that already ended are removed from the stack. Its
+  data/state/history cache read is bounded by the same timeout (it used to wait
+  forever). `cleanup_stale_conversations` and `close()` log a refusal and continue
+  with the other conversations.
 - **D5: more credential names are stripped from prompts.** `passwd`, `pwd`, `pass`,
   `passcode`, `passphrase`, `pin`, `otp`, `mfa_code`, `cvv`, `ssn`, `credit_card`,
   `card_number`, `cookie`, `jwt`, `bearer`, `authorization`, `auth_header` and
