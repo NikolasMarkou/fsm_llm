@@ -158,6 +158,8 @@ class FSMManager:
         # Cache and instance management
         self.fsm_cache: OrderedDict[str, FSMDefinition] = OrderedDict()
         self._max_fsm_cache_size = max_fsm_cache_size
+        # Leaf lock for ``fsm_cache`` only (see the anchor in get_fsm_definition).
+        self._fsm_cache_lock = threading.Lock()
         self.instances: dict[str, FSMInstance] = {}
 
         # Configuration
@@ -212,17 +214,36 @@ class FSMManager:
     # ----------------------------------------------------------
 
     def get_fsm_definition(self, fsm_id: str) -> FSMDefinition:
-        """Get FSM definition with caching and LRU eviction."""
-        with self._lock:
-            if fsm_id not in self.fsm_cache:
-                logger.info(f"Loading FSM definition: {fsm_id}")
-                if len(self.fsm_cache) >= self._max_fsm_cache_size:
-                    evicted_key, _ = self.fsm_cache.popitem(last=False)
-                    logger.debug(f"Evicted FSM definition from cache: {evicted_key}")
-                self.fsm_cache[fsm_id] = self.fsm_loader(fsm_id)
-            else:
+        """Get FSM definition with caching and LRU eviction.
+
+        Takes only ``_fsm_cache_lock`` (never ``_lock``); the loader runs
+        outside it. When two threads miss at once, both load and the first
+        inserted definition wins; the second load is discarded.
+        """
+        # DECISION plan-2026-09-22T080837-8b258a25/D-036
+        # _fsm_cache_lock is a LEAF lock: while holding it do NOT take `_lock`,
+        # a conv_lock, log, or call fsm_loader (a custom loader may do anything).
+        # Do NOT go back to `_lock` here: every turn resolves its def through this
+        # method, so that serialised all conversations on one lock. See D-036.
+        with self._fsm_cache_lock:
+            if fsm_id in self.fsm_cache:
                 self.fsm_cache.move_to_end(fsm_id)
-            return self.fsm_cache[fsm_id]
+                return self.fsm_cache[fsm_id]
+
+        logger.info(f"Loading FSM definition: {fsm_id}")
+        loaded = self.fsm_loader(fsm_id)
+
+        evicted_key = None
+        with self._fsm_cache_lock:
+            if fsm_id in self.fsm_cache:
+                self.fsm_cache.move_to_end(fsm_id)
+                return self.fsm_cache[fsm_id]
+            if len(self.fsm_cache) >= self._max_fsm_cache_size:
+                evicted_key, _ = self.fsm_cache.popitem(last=False)
+            self.fsm_cache[fsm_id] = loaded
+        if evicted_key is not None:
+            logger.debug(f"Evicted FSM definition from cache: {evicted_key}")
+        return loaded
 
     # ----------------------------------------------------------
     # Instance lifecycle

@@ -2260,3 +2260,174 @@ class TestStep14LLM:
         ):
             assert llm.generate_response(request).message == "hello"
         assert llm.apology_retry_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Step 14.2: the FSM definition cache has its own leaf lock
+# ---------------------------------------------------------------------------
+
+
+class _Step14Tracker:
+    """Per-thread held-lock stacks plus a shared log of every acquire."""
+
+    def __init__(self) -> None:
+        self._local = threading.local()
+        self._guard = threading.Lock()
+        self.acquires: list[tuple[str, tuple[str, ...]]] = []
+
+    def held(self) -> list[str]:
+        if not hasattr(self._local, "held"):
+            self._local.held = []
+        return self._local.held
+
+    def record(self, name: str) -> None:
+        with self._guard:
+            self.acquires.append((name, tuple(self.held())))
+
+    def under_cache_lock(self) -> list[tuple[str, tuple[str, ...]]]:
+        with self._guard:
+            return [(n, h) for n, h in self.acquires if "cache" in h]
+
+
+class _Step14Lock:
+    """Recording wrapper; a blocking acquire is bounded so a deadlock fails."""
+
+    def __init__(self, inner: Any, name: str, tracker: _Step14Tracker) -> None:
+        self._inner = inner
+        self._name = name
+        self._tracker = tracker
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        self._tracker.record(self._name)
+        if blocking and timeout == -1:
+            timeout = _JOIN_TIMEOUT_S
+        got = self._inner.acquire(blocking, timeout)
+        if blocking and not got:
+            raise AssertionError(f"{self._name} not acquired: possible deadlock")
+        if got:
+            self._tracker.held().append(self._name)
+        return got
+
+    def release(self) -> None:
+        self._tracker.held().remove(self._name)
+        self._inner.release()
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, *exc: Any) -> None:
+        self.release()
+
+
+class _Step14ConvLocks(dict):
+    def __init__(self, tracker: _Step14Tracker, existing: dict) -> None:
+        super().__init__()
+        self._tracker = tracker
+        for key, value in existing.items():
+            self[key] = value
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, _Step14Lock(value, f"conv:{key}", self._tracker))
+
+
+class TestStep14CacheLock:
+    def test_cache_hit_does_not_take_manager_lock(self):
+        api = _api()
+        conv_id, _ = api.start_conversation()
+        manager = api.fsm_manager
+        manager.get_fsm_definition(api.fsm_id)
+        tracker = _Step14Tracker()
+        manager._lock = _Step14Lock(manager._lock, "manager", tracker)
+
+        fsm_def = manager.get_fsm_definition(api.fsm_id)
+        state = manager.resolve_state_definition(manager.instances[conv_id], conv_id)
+
+        assert fsm_def is api.fsm_definition
+        assert state.id == "start"
+        assert [n for n, _ in tracker.acquires if n == "manager"] == []
+
+    def test_lock_order_under_concurrent_start_and_converse(self):
+        api = _api()
+        manager = api.fsm_manager
+        convs = [api.start_conversation()[0] for _ in range(3)]
+        tracker = _Step14Tracker()
+        manager._lock = _Step14Lock(manager._lock, "manager", tracker)
+        manager._fsm_cache_lock = _Step14Lock(manager._fsm_cache_lock, "cache", tracker)
+        manager._conversation_locks = _Step14ConvLocks(
+            tracker, manager._conversation_locks
+        )
+        inner_loader = manager.fsm_loader
+        loader_held: list[tuple[str, ...]] = []
+
+        def _loader(fsm_id: str) -> FSMDefinition:
+            loader_held.append(tuple(tracker.held()))
+            return inner_loader(fsm_id)
+
+        manager.fsm_loader = _loader
+        stop = threading.Event()
+        errors: list[BaseException] = []
+
+        def _guarded(fn) -> Any:
+            def _run() -> None:
+                try:
+                    fn()
+                except BaseException as exc:  # surfaced below
+                    errors.append(exc)
+
+            return threading.Thread(target=_run, daemon=True)
+
+        def _evict() -> None:
+            while not stop.is_set():
+                with manager._fsm_cache_lock:
+                    manager.fsm_cache.clear()
+
+        def _start() -> None:
+            for _ in range(10):
+                api.start_conversation()
+
+        def _converse(conv_id: str) -> Any:
+            def _run() -> None:
+                for i in range(10):
+                    api.converse(f"turn {i}", conv_id)
+
+            return _run
+
+        evictor = _guarded(_evict)
+        workers = [_guarded(_start) for _ in range(2)]
+        workers += [_guarded(_converse(c)) for c in convs]
+        evictor.start()
+        for t in workers:
+            t.start()
+        _join_all(workers)
+        stop.set()
+        _join_all([evictor])
+
+        assert errors == []
+        assert loader_held, "the evictor never forced a cache miss"
+        assert all("cache" not in held for held in loader_held)
+        assert tracker.under_cache_lock() == []
+
+    def test_concurrent_miss_keeps_first_inserted_definition(self):
+        api = _api()
+        manager = api.fsm_manager
+        manager.fsm_cache.clear()
+        first = api.fsm_definition.model_copy()
+        second = api.fsm_definition.model_copy()
+        calls: list[int] = []
+
+        def _loader(fsm_id: str) -> FSMDefinition:
+            calls.append(1)
+            if len(calls) == 1:
+                other = threading.Thread(
+                    target=manager.get_fsm_definition, args=(fsm_id,), daemon=True
+                )
+                other.start()
+                other.join(timeout=1.0)
+                return first
+            return second
+
+        manager.fsm_loader = _loader
+        result = manager.get_fsm_definition(api.fsm_id)
+        assert len(calls) == 2
+        assert result is second
+        assert manager.fsm_cache[api.fsm_id] is second
