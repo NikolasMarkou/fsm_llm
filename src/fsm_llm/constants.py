@@ -121,6 +121,26 @@ TRANSITION_CLASSIFICATION_FALLBACK_INTENT = "_stay_in_state"
 CONTEXT_KEY_CLASSIFICATION_RESULT = "_transition_classification_result"
 CONTEXT_KEY_AGENT_TRACE = "agent_trace"
 
+# Framework-seeded context keys a handler delta may neither set nor delete
+# (MessagePipeline.execute_handlers merge_delta, C3). Closed on purpose: other
+# internal-prefixed keys a handler owns (agents' `_replan_count`) still merge.
+RESERVED_CONTEXT_KEYS: frozenset[str] = frozenset(
+    {
+        "_conversation_id",
+        "_conversation_start",
+        "_timestamp",
+        "_fsm_id",
+        "_previous_state",
+        "_current_state",
+        "_transition_timestamp",
+        "_error",
+        "_traceback",
+        "_inherited_history",
+        "_sub_conversation_summary",
+        CONTEXT_KEY_CLASSIFICATION_RESULT,
+    }
+)
+
 # `context.metadata` keys for full classification records (A4, D-005): the
 # latest result per classification-extraction field, and the current turn's
 # transition-classification record (mirror of CONTEXT_KEY_CLASSIFICATION_RESULT).

@@ -31,7 +31,9 @@ from .constants import (
     MAX_CLASSIFIER_CACHE_SIZE,
     METADATA_KEY_CLASSIFICATION_RESULTS,
     METADATA_KEY_TRANSITION_CLASSIFICATION,
+    RESERVED_CONTEXT_KEYS,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+    has_internal_prefix,
     is_forbidden_context_entry,
 )
 from .context import clean_context_keys
@@ -385,6 +387,22 @@ class MessagePipeline:
             # persisted session file (findings/residual-findings-verify.md
             # #8). See decisions.md D-018.
             for key, value in delta.items():
+                # DECISION plan-2026-09-21T203800-8a03483a/D-020
+                # Framework-seeded keys (constants.RESERVED_CONTEXT_KEYS) are
+                # never set or deleted by a handler delta. Do NOT widen this to
+                # every `has_internal_prefix` key: agents handlers own internal
+                # keys (`_replan_count`, `_max_iterations`) that must merge.
+                # An unchanged echo (a handler returning its whole context) is
+                # skipped silently; only a real overwrite/delete warns (D-035).
+                if has_internal_prefix(key) and key in RESERVED_CONTEXT_KEYS:
+                    stored = instance.context.data.get(key)
+                    if value is None or value != stored:
+                        logger.warning(
+                            f"Handler delta at {timing.name} tried to "
+                            f"{'delete' if value is None else 'overwrite'} "
+                            f"reserved context key '{key}'; ignored"
+                        )
+                    continue
                 if value is None:
                     instance.context.data.pop(key, None)
                     prov = instance.context.metadata.get(_PROVENANCE_KEY)

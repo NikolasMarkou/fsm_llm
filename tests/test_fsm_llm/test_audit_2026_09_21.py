@@ -8,6 +8,7 @@ against the pre-step source before the fix landed.
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -37,7 +38,12 @@ from fsm_llm.definitions import (
     TransitionEvaluation,
     TransitionEvaluationResult,
 )
-from fsm_llm.handlers import HandlerTiming
+from fsm_llm.handlers import (
+    BaseHandler,
+    HandlerSystem,
+    HandlerTiming,
+    create_handler,
+)
 from fsm_llm.llm import LLMInterface
 from fsm_llm.prompts import build_classification_system_prompt
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
@@ -2292,3 +2298,272 @@ class TestStep11B7B11B12B13:
         source = inspect.getsource(transition_evaluator.TransitionEvaluatorConfig)
         assert "diagnostic" in source.lower()
         assert "never" in source.lower()
+
+
+# ---------------------------------------------------------------------------
+# Step 12: C1 (registration race), C2 (timed-handler isolation), C3 (reserved
+# context keys in handler deltas)
+# ---------------------------------------------------------------------------
+
+
+class _C1SortProbe:
+    """A handler whose ``priority`` read can block once, inside a sort.
+
+    ``HandlerSystem.register_handler`` reads ``priority`` from its sort key.
+    Armed, the first read signals ``in_sort`` and waits for ``release``, so a
+    reader thread observes ``handlers`` from inside the registration's sort.
+    """
+
+    name = "c1_probe"
+    timings = None
+
+    def __init__(self) -> None:
+        self._in_sort: threading.Event | None = None
+        self._release: threading.Event | None = None
+
+    def arm(self, in_sort: threading.Event, release: threading.Event) -> None:
+        self._in_sort, self._release = in_sort, release
+
+    @property
+    def priority(self) -> int:
+        in_sort, release = self._in_sort, self._release
+        if in_sort is not None and release is not None:
+            self._in_sort = self._release = None
+            in_sort.set()
+            release.wait(2.0)
+        return 100
+
+    def should_execute(self, *args: Any, **kwargs: Any) -> bool:
+        return False
+
+    def execute(self, context: dict[str, Any]) -> dict[str, Any]:
+        return {}
+
+
+class _C2Handler(BaseHandler):
+    """Always runs; ``action(context)`` supplies the returned delta."""
+
+    def __init__(self, name: str, priority: int, action: Any) -> None:
+        super().__init__(name=name, priority=priority)
+        self._action = action
+
+    def should_execute(self, *args: Any, **kwargs: Any) -> bool:
+        return True
+
+    def execute(self, context: dict[str, Any]) -> dict[str, Any]:
+        return self._action(context)
+
+
+class _C2CopyOnce:
+    """Deep-copyable exactly once (the second ``deepcopy`` raises)."""
+
+    copies = 0
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> _C2CopyOnce:
+        type(self).copies += 1
+        if type(self).copies > 1:
+            raise TypeError("cannot copy twice")
+        return _C2CopyOnce()
+
+
+def _c3_fsm() -> FSMDefinition:
+    """``start`` -> ``mid`` deterministically; ``mid`` is BLOCKED forever."""
+    never = TransitionCondition(
+        description="never set",
+        logic={"==": [{"var": "never_set_flag"}, True]},
+    )
+    states = {
+        "start": State(
+            id="start",
+            description="Start",
+            purpose="Begin",
+            response_instructions="Respond",
+            transitions=[Transition(target_state="mid", description="Go on")],
+        ),
+        "mid": State(
+            id="mid",
+            description="Mid",
+            purpose="Wait",
+            response_instructions="Respond",
+            transitions=[
+                Transition(target_state="end", description="Done", conditions=[never])
+            ],
+        ),
+        "end": State(id="end", description="End", purpose="End", transitions=[]),
+    }
+    return FSMDefinition(
+        name="c3_fsm", description="C3 FSM", initial_state="start", states=states
+    )
+
+
+def _c3_api(delta_fn: Any, *, state: str = "start") -> tuple[API, str]:
+    """An API whose one PRE_PROCESSING handler, in ``state``, returns
+    ``delta_fn(context)``. The conversation is advanced to ``state`` first."""
+    api = API.from_definition(_c3_fsm(), llm_interface=_mock_llm())
+    api.register_handler(
+        create_handler("c3_handler")
+        .at(HandlerTiming.PRE_PROCESSING)
+        .on_state(state)
+        .do(delta_fn)
+    )
+    conv_id, _ = api.start_conversation(initial_context={"note": "keep me"})
+    if state != "start":
+        api.converse("advance", conv_id)
+        assert api.get_current_state(conv_id) == state
+    return api, conv_id
+
+
+class TestStep12C1C3:
+    def test_c1_concurrent_register_never_yields_empty_view(self):
+        # Straddles the race window: the reader runs while registration is
+        # inside its sort. The old in-place ``list.sort`` empties the list for
+        # the duration of the sort, so the reader saw zero handlers.
+        for _ in range(20):
+            system = HandlerSystem()
+            probe = _C1SortProbe()
+            system.register_handler(probe)
+            system.register_handler(_C2Handler("second", 200, lambda ctx: {}))
+            in_sort, release = threading.Event(), threading.Event()
+            probe.arm(in_sort, release)
+            views: list[int] = []
+
+            def _reader(in_sort=in_sort, release=release, system=system, views=views):
+                entered = in_sort.wait(2.0)
+                views.append(
+                    len(system.handlers_at(HandlerTiming.PRE_PROCESSING))
+                    if entered
+                    else -1
+                )
+                release.set()
+
+            reader = threading.Thread(target=_reader, daemon=True)
+            reader.start()
+            system.register_handler(_C2Handler("third", 300, lambda ctx: {}))
+            reader.join(5.0)
+            assert views == [2]
+            assert len(system.handlers) == 3
+
+    def test_c1_register_rebinds_list(self):
+        system = HandlerSystem()
+        first = _C2Handler("first", 50, lambda ctx: {})
+        system.register_handler(first)
+        before = system.handlers
+        second = _C2Handler("second", 10, lambda ctx: {})
+        system.register_handler(second)
+        assert system.handlers is not before
+        assert before == [first]
+        assert system.handlers == [second, first]
+
+    def test_c2_straggler_write_not_seen_by_next_handler(self):
+        may_write, wrote = threading.Event(), threading.Event()
+
+        def _straggler(context: dict[str, Any]) -> dict[str, Any]:
+            may_write.wait(5.0)
+            context["leak"] = True
+            wrote.set()
+            return {"straggler": True}
+
+        def _reader(context: dict[str, Any]) -> dict[str, Any]:
+            may_write.set()
+            wrote.wait(5.0)
+            return {"saw_leak": "leak" in context}
+
+        system = HandlerSystem(handler_timeout=0.5)
+        system.register_handler(_C2Handler("straggler", 1, _straggler))
+        system.register_handler(_C2Handler("reader", 2, _reader))
+        result = system.execute_handlers(
+            timing=HandlerTiming.PRE_PROCESSING,
+            current_state="start",
+            target_state=None,
+            context={"x": 1},
+        )
+        assert wrote.wait(5.0)
+        assert result == {"saw_leak": False}
+        system.close()
+
+    def test_c2_timeout_thread_is_daemon(self):
+        seen: list[tuple[bool, bool]] = []
+
+        def _record(context: dict[str, Any]) -> dict[str, Any]:
+            current = threading.current_thread()
+            seen.append((current is not threading.main_thread(), current.daemon))
+            return {"ran": True}
+
+        system = HandlerSystem(handler_timeout=5.0)
+        system.register_handler(_C2Handler("record", 1, _record))
+        result = system.execute_handlers(
+            timing=HandlerTiming.PRE_PROCESSING,
+            current_state="start",
+            target_state=None,
+            context={},
+        )
+        assert result == {"ran": True}
+        assert seen == [(True, True)]
+        system.close()
+        system.close()  # stays a safe no-op
+
+    def test_c2_uncopyable_context_falls_back_to_shallow_copy(self):
+        _C2CopyOnce.copies = 0
+
+        def _write(context: dict[str, Any]) -> dict[str, Any]:
+            context["scratch"] = True
+            return {"saw_value": isinstance(context.get("value"), _C2CopyOnce)}
+
+        def _after(context: dict[str, Any]) -> dict[str, Any]:
+            return {"saw_scratch": "scratch" in context}
+
+        system = HandlerSystem(handler_timeout=5.0)
+        system.register_handler(_C2Handler("write", 1, _write))
+        system.register_handler(_C2Handler("after", 2, _after))
+        result = system.execute_handlers(
+            timing=HandlerTiming.PRE_PROCESSING,
+            current_state="start",
+            target_state=None,
+            context={"value": _C2CopyOnce()},
+        )
+        assert result == {"saw_value": True, "saw_scratch": False}
+
+    def test_c3_handler_cannot_overwrite_conversation_id(self):
+        api, conv_id = _c3_api(
+            lambda ctx: {
+                "_conversation_id": "hijacked",
+                "_fsm_id": "other_fsm",
+                "normal": "written",
+            }
+        )
+        api.converse("hello", conv_id)
+        data = _raw_data(api, conv_id)
+        assert data["_conversation_id"] == conv_id
+        assert data["_fsm_id"] != "other_fsm"
+        assert data["normal"] == "written"
+
+    def test_c3_handler_cannot_delete_current_state(self):
+        api, conv_id = _c3_api(
+            lambda ctx: {"_current_state": None, "_previous_state": "forged"},
+            state="mid",
+        )
+        api.converse("again", conv_id)
+        data = _raw_data(api, conv_id)
+        assert data["_current_state"] == "mid"
+        assert data["_previous_state"] == "start"
+
+    def test_c3_handler_owned_internal_key_still_merges(self):
+        api, conv_id = _c3_api(
+            lambda ctx: {"_replan_count": ctx.get("_replan_count", 0) + 1}
+        )
+        api.converse("hello", conv_id)
+        assert _raw_data(api, conv_id)["_replan_count"] == 1
+
+    def test_c3_none_delete_of_normal_key_unchanged(self):
+        api, conv_id = _c3_api(lambda ctx: {"note": None})
+        assert _raw_data(api, conv_id)["note"] == "keep me"
+        api.converse("hello", conv_id)
+        assert "note" not in _raw_data(api, conv_id)
+
+    def test_c3_reserved_set_is_internal_and_closed(self):
+        from fsm_llm.constants import RESERVED_CONTEXT_KEYS, has_internal_prefix
+
+        assert CONTEXT_KEY_CLASSIFICATION_RESULT in RESERVED_CONTEXT_KEYS
+        assert all(has_internal_prefix(key) for key in RESERVED_CONTEXT_KEYS)
+        assert "_replan_count" not in RESERVED_CONTEXT_KEYS
+        assert isinstance(RESERVED_CONTEXT_KEYS, frozenset)

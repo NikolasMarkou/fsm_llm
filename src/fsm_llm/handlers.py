@@ -70,8 +70,8 @@ Advanced Conditional Logic::
 
 from __future__ import annotations
 
-import concurrent.futures
 import copy
+import threading
 import traceback
 from collections.abc import Callable
 from enum import Enum
@@ -267,10 +267,11 @@ class HandlerSystem:
         :type handler_timeout: float | None
         :raises ValueError: If error_mode is not one of: continue, raise
         """
+        # Rebound, never mutated in place (copy-on-write, see register_handler).
         self.handlers: list[FSMHandler] = []
+        self._registration_lock = threading.Lock()
         self.error_mode = error_mode
         self.handler_timeout = handler_timeout
-        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
 
         # Validate error mode parameter
         valid_modes = ["continue", "raise"]
@@ -286,9 +287,17 @@ class HandlerSystem:
         :param handler: The handler instance to register
         :type handler: FSMHandler
         """
-        self.handlers.append(handler)
-        # Maintain sorted order by priority after adding new handler
-        self.handlers.sort(key=lambda h: getattr(h, "priority", 100))
+        # DECISION plan-2026-09-21T203800-8a03483a/D-019
+        # Copy-on-write under a lock: build a NEW sorted list and rebind
+        # `self.handlers` in one assignment. Do NOT go back to
+        # `self.handlers.append(); self.handlers.sort()`: CPython empties a list
+        # for the whole duration of an in-place sort, so a concurrent reader
+        # (`handlers_at`, every turn) saw zero handlers and skipped them (C1).
+        # Readers take one reference without the lock; do NOT lock them.
+        with self._registration_lock:
+            self.handlers = sorted(
+                [*self.handlers, handler], key=lambda h: getattr(h, "priority", 100)
+            )
 
     def handlers_at(self, timing: HandlerTiming) -> list[FSMHandler]:
         """Return the registered handlers that subscribe to ``timing``.
@@ -298,9 +307,10 @@ class HandlerSystem:
         attribute, or ``timings is None``, subscribes to every timing. An empty
         result means ``execute_handlers`` would do nothing at this timing.
         """
+        registered = self.handlers  # one snapshot reference (D-019)
         return [
             h
-            for h in self.handlers
+            for h in registered
             if not hasattr(h, "timings") or h.timings is None or timing in h.timings
         ]
 
@@ -441,32 +451,54 @@ class HandlerSystem:
     ) -> dict[str, Any] | None:
         """Execute a single handler, optionally with timeout protection.
 
-        When ``handler_timeout`` is set, the handler runs in a shared thread
-        pool and is interrupted if it exceeds the timeout.
+        When ``handler_timeout`` is set, the handler runs on a private copy of
+        ``context`` in a daemon thread joined with the timeout. On timeout its
+        result is discarded and ``TimeoutError`` is raised; the thread keeps
+        running until the handler returns, but only ever touches its own copy.
         """
         if self.handler_timeout is None:
             return handler.execute(context)
 
-        if self._executor is None:
-            self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-        future = self._executor.submit(handler.execute, context)
+        # DECISION plan-2026-09-21T203800-8a03483a/D-019
+        # A timed handler gets its OWN deep copy and runs in a per-call DAEMON
+        # thread. Do NOT hand it the shared `context` (a timed-out straggler
+        # kept writing into the dict the next handler was reading, C2), and do
+        # NOT go back to a ThreadPoolExecutor: its workers are non-daemon, so a
+        # straggler blocked interpreter exit. Deepcopy failure falls back to a
+        # shallow copy (top-level writes stay isolated) with a WARNING.
         try:
-            return future.result(timeout=self.handler_timeout)
-        except concurrent.futures.TimeoutError as e:
-            # Cancel so a still-queued task does not later occupy a worker. A task
-            # already running cannot be interrupted, but cancelling prevents the
-            # 4-worker pool from being starved by queued work after repeated
-            # timeouts (CB3-002).
-            future.cancel()
+            private = copy.deepcopy(context)
+        except Exception as exc:
+            logger.warning(
+                f"Handler '{handler_name}': context not deep-copyable ({exc!s}); "
+                f"running on a shallow copy"
+            )
+            private = dict(context)
+
+        outcome: dict[str, Any] = {}
+
+        def _run() -> None:
+            try:
+                outcome["result"] = handler.execute(private)
+            except BaseException as exc:  # re-raised on the caller's thread
+                outcome["error"] = exc
+
+        worker = threading.Thread(
+            target=_run, name=f"fsm-handler-{handler_name}", daemon=True
+        )
+        worker.start()
+        worker.join(self.handler_timeout)
+        if worker.is_alive():
             raise TimeoutError(
                 f"Handler '{handler_name}' timed out after {self.handler_timeout}s"
-            ) from e
+            )
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome.get("result")
 
     def close(self) -> None:
-        """Shut down the handler executor pool, if active."""
-        if self._executor is not None:
-            self._executor.shutdown(wait=False)
-            self._executor = None
+        """Release handler-system resources. A safe no-op, kept for API
+        compatibility: timed handlers run in per-call daemon threads."""
 
 
 # --------------------------------------------------------------
