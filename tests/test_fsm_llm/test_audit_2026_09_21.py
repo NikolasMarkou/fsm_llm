@@ -2842,7 +2842,10 @@ class TestStep12C1C3:
             target_state=None,
             context={"value": _C2CopyOnce()},
         )
-        assert result == {"saw_value": True, "saw_scratch": False}
+        # Step 12.1 (D-049): a timed handler that completes has its in-place
+        # writes adopted, so the shallow-copy fallback's top-level write is
+        # visible to the next handler, as it is without a timeout.
+        assert result == {"saw_value": True, "saw_scratch": True}
 
     def test_c3_handler_cannot_overwrite_conversation_id(self):
         api, conv_id = _c3_api(
@@ -2888,6 +2891,115 @@ class TestStep12C1C3:
         assert all(has_internal_prefix(key) for key in RESERVED_CONTEXT_KEYS)
         assert "_replan_count" not in RESERVED_CONTEXT_KEYS
         assert isinstance(RESERVED_CONTEXT_KEYS, frozenset)
+
+
+def _c2_run(system: HandlerSystem, context: dict[str, Any]) -> dict[str, Any]:
+    return system.execute_handlers(
+        timing=HandlerTiming.PRE_PROCESSING,
+        current_state="start",
+        target_state=None,
+        context=context,
+    )
+
+
+class TestStep12_1:
+    """Review-iter-1 W3 (straggler bound) and W4 (in-place write parity)."""
+
+    def test_c2_straggler_threads_are_capped(self):
+        from fsm_llm.constants import MAX_TIMED_HANDLER_STRAGGLERS
+
+        release = threading.Event()
+        started: list[threading.Thread] = []
+
+        def _hang(context: dict[str, Any]) -> dict[str, Any]:
+            started.append(threading.current_thread())
+            release.wait(30.0)
+            return {}
+
+        system = HandlerSystem(handler_timeout=0.02)
+        system.register_handler(_C2Handler("hang", 1, _hang))
+        base = threading.active_count()
+        peak = 0
+        try:
+            with _c_log_capture() as logs:
+                for _ in range(200):
+                    assert _c2_run(system, {"k": 1}) == {}
+                    peak = max(peak, threading.active_count() - base)
+            assert peak <= MAX_TIMED_HANDLER_STRAGGLERS + 1
+            assert len(started) <= MAX_TIMED_HANDLER_STRAGGLERS + 1
+            assert any(
+                m.startswith("WARNING|") and str(MAX_TIMED_HANDLER_STRAGGLERS) in m
+                for m in logs
+            )
+            # A refused call fails the timeout way, honouring error_mode.
+            from fsm_llm.handlers import HandlerExecutionError
+
+            strict = HandlerSystem(error_mode="raise", handler_timeout=0.02)
+            strict.register_handler(_C2Handler("hang", 1, _hang))
+            errors = []
+            for _ in range(MAX_TIMED_HANDLER_STRAGGLERS + 1):
+                with pytest.raises(HandlerExecutionError) as info:
+                    _c2_run(strict, {})
+                errors.append(info.value.original_error)
+            assert all(isinstance(err, TimeoutError) for err in errors)
+            assert "straggler" in str(errors[-1])
+            assert len(started) <= 2 * MAX_TIMED_HANDLER_STRAGGLERS + 1
+        finally:
+            release.set()
+            for worker in started:
+                worker.join(5.0)
+        # Once the stragglers finish, timed handlers run again.
+        system_ok = HandlerSystem(handler_timeout=5.0)
+        system_ok.register_handler(_C2Handler("ok", 1, lambda ctx: {"ok": True}))
+        assert _c2_run(system_ok, {}) == {"ok": True}
+        assert _c2_run(system, {}) == {}
+
+    def test_c2_completed_timed_handler_in_place_writes_visible(self):
+        def _a(context: dict[str, Any]) -> dict[str, Any]:
+            context["shared_scratch"] = "from_a"
+            context["nested"]["x"] = 2
+            del context["gone"]
+            return {}
+
+        def _b(context: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "b_saw": context.get("shared_scratch"),
+                "b_nested": context["nested"]["x"],
+                "b_gone": "gone" in context,
+            }
+
+        results = []
+        for timeout in (None, 5.0):
+            system = HandlerSystem(handler_timeout=timeout)
+            system.register_handler(_C2Handler("a", 1, _a))
+            system.register_handler(_C2Handler("b", 2, _b))
+            original = {"nested": {"x": 1}, "gone": True}
+            results.append(_c2_run(system, original))
+            # The caller's dict is never mutated; only the returned delta leaves.
+            assert original == {"nested": {"x": 1}, "gone": True}
+        untimed, timed = results
+        assert timed == untimed == {"b_saw": "from_a", "b_nested": 2, "b_gone": False}
+
+    def test_c2_timed_out_handler_writes_still_invisible(self):
+        release, wrote = threading.Event(), threading.Event()
+
+        def _slow(context: dict[str, Any]) -> dict[str, Any]:
+            context["early"] = True  # written before the timeout
+            release.wait(5.0)
+            context["late"] = True
+            wrote.set()
+            return {"slow": True}
+
+        def _reader(context: dict[str, Any]) -> dict[str, Any]:
+            release.set()
+            wrote.wait(5.0)
+            return {"saw": sorted(k for k in ("early", "late") if k in context)}
+
+        system = HandlerSystem(handler_timeout=0.2)
+        system.register_handler(_C2Handler("slow", 1, _slow))
+        system.register_handler(_C2Handler("reader", 2, _reader))
+        assert _c2_run(system, {"x": 1}) == {"saw": []}
+        assert wrote.wait(5.0)
 
 
 # ---------------------------------------------------------------------------

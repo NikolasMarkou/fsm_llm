@@ -1888,5 +1888,10 @@ LOG_DEFAULT_CONVERSATION_ID = "GENERAL"
 # HandlerSystem for safety against handlers that block indefinitely.
 DEFAULT_HANDLER_TIMEOUT = 30.0
 
+# Per-HandlerSystem cap on timed-handler threads still running after their
+# timeout (stragglers). At the cap a new timed call fails like a timeout
+# instead of starting another thread (the pre-C2 pool also had 4 workers).
+MAX_TIMED_HANDLER_STRAGGLERS = 4
+
 # Workflow step execution timeout (seconds). None = no timeout.
 DEFAULT_STEP_TIMEOUT = 120.0

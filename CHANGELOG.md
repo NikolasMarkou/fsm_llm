@@ -111,7 +111,7 @@ B. Rules engine (expressions / evaluator / definitions / validator)
 C. Handlers / sessions / logging / CLI
 
 - C1: `register_handler` is copy-on-write under a lock; concurrent `execute_handlers` never sees an empty handler list.
-- C2: a timed handler runs on its own copy of the context in a daemon thread; a timed-out handler's writes never reach later handlers and never block exit.
+- C2: a timed handler runs on its own copy of the context in a daemon thread; a timed-out handler's writes never reach later handlers and never block exit. A timed handler that finishes in time has its in-place writes adopted, so later handlers see the same context with or without `handler_timeout`. At most `MAX_TIMED_HANDLER_STRAGGLERS` (4) timed-out threads per `HandlerSystem` may still be running; past that a timed call fails at once as a timeout (WARNING) instead of starting another thread.
 - C3: handler deltas cannot overwrite framework-reserved context keys (see above).
 - C4: `FileSessionStore` ids use a full match; `load`/`exists`/`delete` return None/False on `OSError`; `list_sessions` returns only loadable ids; `save` fsyncs before replace.
 - C5: file logging is marked initialized only after `logger.add` succeeds; the JSON sink no longer stashes the rendered line in the shared record.

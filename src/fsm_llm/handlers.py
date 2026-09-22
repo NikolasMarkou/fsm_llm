@@ -82,6 +82,7 @@ from typing import Any, Protocol
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
+from .constants import MAX_TIMED_HANDLER_STRAGGLERS
 from .definitions import FSMError
 from .logging import logger
 
@@ -285,6 +286,9 @@ class HandlerSystem:
         self._registration_lock = threading.Lock()
         self.error_mode = error_mode
         self.handler_timeout = handler_timeout
+        # Timed-handler threads still running after their timeout (D-049).
+        self._stragglers: list[threading.Thread] = []
+        self._stragglers_lock = threading.Lock()
 
         # Validate error mode parameter
         valid_modes = ["continue", "raise"]
@@ -492,12 +496,39 @@ class HandlerSystem:
         """Execute a single handler, optionally with timeout protection.
 
         When ``handler_timeout`` is set, the handler runs on a private copy of
-        ``context`` in a daemon thread joined with the timeout. On timeout its
-        result is discarded and ``TimeoutError`` is raised; the thread keeps
-        running until the handler returns, but only ever touches its own copy.
+        ``context`` in a daemon thread joined with the timeout. A handler that
+        finishes in time (returning or raising) has its in-place writes to the
+        copy adopted back into ``context``, exactly as if it had run untimed.
+        On timeout its result and writes are discarded and ``TimeoutError`` is
+        raised; the thread keeps running until the handler returns, but only
+        ever touches its own copy. While ``MAX_TIMED_HANDLER_STRAGGLERS`` such
+        threads are still alive, a new timed call raises ``TimeoutError``
+        at once without starting a thread.
         """
         if self.handler_timeout is None:
             return handler.execute(context)
+
+        # DECISION plan-2026-09-21T203800-8a03483a/D-049
+        # Bound the timed-out threads that are still running. Do NOT drop this
+        # check to "just start another daemon thread": a handler hung on a
+        # network call or a lock leaked one thread per turn for the life of
+        # the process (review W3). Do NOT count in-flight threads that have not
+        # timed out: one HandlerSystem serves every conversation of an API, so
+        # concurrent healthy turns must never be refused.
+        with self._stragglers_lock:
+            self._stragglers = [t for t in self._stragglers if t.is_alive()]
+            straggling = len(self._stragglers)
+        if straggling >= MAX_TIMED_HANDLER_STRAGGLERS:
+            logger.warning(
+                f"Handler '{handler_name}' not started: {straggling} timed-out "
+                f"handler threads are still running (cap "
+                f"MAX_TIMED_HANDLER_STRAGGLERS={MAX_TIMED_HANDLER_STRAGGLERS})"
+            )
+            raise TimeoutError(
+                f"Handler '{handler_name}' refused: {straggling} timed-out "
+                f"straggler threads still running (cap "
+                f"{MAX_TIMED_HANDLER_STRAGGLERS})"
+            )
 
         # DECISION plan-2026-09-21T203800-8a03483a/D-019
         # A timed handler gets its OWN deep copy and runs in a per-call DAEMON
@@ -529,9 +560,17 @@ class HandlerSystem:
         worker.start()
         worker.join(self.handler_timeout)
         if worker.is_alive():
+            with self._stragglers_lock:
+                self._stragglers.append(worker)
             raise TimeoutError(
                 f"Handler '{handler_name}' timed out after {self.handler_timeout}s"
             )
+        # D-049: the thread is done, so `private` is final. Adopt it wholesale
+        # (sets, nested edits and deletes), so turning a timeout on does not
+        # change what later handlers see. Do NOT adopt before the join says
+        # the thread finished: a straggler's writes must stay invisible (C2).
+        context.clear()
+        context.update(private)
         if "error" in outcome:
             raise outcome["error"]
         return outcome.get("result")
