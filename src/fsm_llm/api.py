@@ -1140,15 +1140,27 @@ class API:
         with self._stack_lock:
             return self._ended_conversations.get(conversation_id)
 
+    def _conversation_gone(self, conversation_id: str) -> bool:
+        """True when ``conversation_id`` no longer resolves to a live FSM
+        instance (its stack is gone, or the top frame's instance was torn
+        down). Contract: the licence for a getter's ended-cache fallback;
+        takes ``_stack_lock`` then ``fsm_manager._lock`` (each for one read,
+        never nested); never raises."""
+        try:
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+        except ValueError:
+            return True
+        return not self.fsm_manager.has_instance(current_fsm_id)
+
     @handle_conversation_errors
     def get_data(self, conversation_id: str) -> dict[str, Any]:
         """Get collected data from current FSM."""
         # DECISION plan-2026-09-22T080837-8b258a25/D-004
-        # All four getters re-raise ConversationBusyError BEFORE the fallback
-        # catch. Do NOT fold it into `except FSMError`: a busy refusal means
-        # "retry later", not "ended", so a stale cache read would hide it. Do
-        # NOT narrow the catch back to (ValueError, KeyError): an instance torn
-        # down mid-read raises the not-found FSMError. See D-004.
+        # All four getters: busy re-raises first; any other error answers from
+        # the ended cache ONLY if `_conversation_gone` (stack or instance torn
+        # down). Do NOT fall back on a live conversation: a StateNotFoundError
+        # there is a real failure, not "ended". Do NOT drop the catch-all:
+        # teardown mid-read raises a not-found FSMError. See D-004, D-039.
         try:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             data: dict[str, Any] = self.fsm_manager.get_conversation_data(
@@ -1158,9 +1170,8 @@ class API:
         except ConversationBusyError:
             raise
         except (ValueError, KeyError, FSMError):
-            # Conversation ended — return cached data if available
             cached = self._ended_cache_entry(conversation_id)
-            if cached:
+            if cached and self._conversation_gone(conversation_id):
                 return cast(dict[str, Any], cached.get("data", {}))
             raise
 
@@ -1174,8 +1185,9 @@ class API:
         except ConversationBusyError:
             raise
         except (ValueError, KeyError, FSMError):
-            # Conversation ended — check cache
-            return self._ended_cache_entry(conversation_id) is not None
+            if self._conversation_gone(conversation_id):
+                return self._ended_cache_entry(conversation_id) is not None
+            raise
 
     @handle_conversation_errors
     def get_current_state(self, conversation_id: str) -> str:
@@ -1188,7 +1200,7 @@ class API:
             raise
         except (ValueError, KeyError, FSMError):
             cached = self._ended_cache_entry(conversation_id)
-            if cached:
+            if cached and self._conversation_gone(conversation_id):
                 return cast(str, cached.get("state", "unknown"))
             raise
 
@@ -1205,7 +1217,7 @@ class API:
             raise
         except (ValueError, KeyError, FSMError):
             cached = self._ended_cache_entry(conversation_id)
-            if cached:
+            if cached and self._conversation_gone(conversation_id):
                 return cast(list[dict[str, str]], cached.get("history", []))
             raise
 

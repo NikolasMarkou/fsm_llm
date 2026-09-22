@@ -25,6 +25,7 @@ from fsm_llm.definitions import (
     FSMDefinition,
     FSMError,
     State,
+    StateNotFoundError,
     Transition,
     TransitionCondition,
 )
@@ -258,8 +259,56 @@ class TestStep2GetterFallbacks:
             "history": [{"user": "hi"}],
         }
         err = FSMError(f"Conversation {conv_id} not found")
-        with patch.object(api.fsm_manager, manager_method, side_effect=err):
+        # The instance is torn down (gone), which is what licenses the cache.
+        with (
+            patch.object(api.fsm_manager, manager_method, side_effect=err),
+            patch.object(api.fsm_manager, "has_instance", return_value=False),
+        ):
             assert getattr(api, getter)(conv_id) == expected
+
+    @pytest.mark.parametrize(
+        ("getter", "manager_method"),
+        [
+            ("get_data", "get_conversation_data"),
+            ("has_conversation_ended", "has_conversation_ended"),
+            ("get_current_state", "get_conversation_state"),
+            ("get_conversation_history", "get_conversation_history"),
+        ],
+    )
+    def test_step_2_1_live_conversation_error_propagates_despite_cache(
+        self, getter, manager_method
+    ):
+        """A non-busy FSMError on a LIVE conversation is a real failure, not
+        "ended": it re-raises even when a stale cache entry exists."""
+        api = _api()
+        conv_id, _ = api.start_conversation()
+        api._ended_conversations[conv_id] = {
+            "data": {"note": "stale"},
+            "state": "end",
+            "history": [],
+        }
+        err = StateNotFoundError("state vanished")
+        with patch.object(api.fsm_manager, manager_method, side_effect=err):
+            with pytest.raises(StateNotFoundError) as info:
+                getattr(api, getter)(conv_id)
+        assert info.value is err
+
+    def test_step_2_1_has_conversation_ended_state_resolution_failure_raises(
+        self,
+    ):
+        """Review concern 2: a live conversation whose state resolution fails
+        must raise, not report "not ended"."""
+        api = _api()
+        conv_id, _ = api.start_conversation()
+
+        def _boom(*args: Any, **kwargs: Any) -> Any:
+            raise StateNotFoundError("gone")
+
+        with patch.object(
+            api.fsm_manager, "resolve_state_definition", side_effect=_boom
+        ):
+            with pytest.raises(StateNotFoundError):
+                api.has_conversation_ended(conv_id)
 
     @pytest.mark.parametrize(
         ("getter", "manager_method"),
