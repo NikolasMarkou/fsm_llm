@@ -50,7 +50,6 @@ from .definitions import (
     ConversationBusyError,
     # Improved 2-pass architecture models
     DataExtractionResponse,
-    DomainSchema,
     # Field extraction models
     FieldExtractionConfig,
     FieldExtractionRequest,
@@ -66,8 +65,6 @@ from .definitions import (
     IntentDefinition,
     IntentScore,
     InvalidTransitionError,
-    # Enums and types
-    LLMRequestType,
     LLMResponseError,
     MultiClassificationResult,
     ResponseGenerationRequest,
@@ -157,7 +154,6 @@ from .utilities import (
     get_fsm_summary,
     load_fsm_definition,
     load_fsm_from_file,
-    validate_json_structure,
 )
 
 # --------------------------------------------------------------
@@ -197,7 +193,6 @@ __all__ = [
     "TransitionOption",
     "TransitionEvaluation",
     "TransitionEvaluationResult",
-    "LLMRequestType",
     # Field extraction
     "FieldExtractionConfig",
     "FieldExtractionRequest",
@@ -213,7 +208,6 @@ __all__ = [
     "ClassificationResult",
     "IntentScore",
     "MultiClassificationResult",
-    "DomainSchema",
     "HierarchicalSchema",
     "HierarchicalResult",
     "ClassificationPromptConfig",
@@ -258,7 +252,6 @@ __all__ = [
     "load_fsm_definition",
     "load_fsm_from_file",
     "extract_json_from_text",
-    "validate_json_structure",
     "get_fsm_summary",
     "evaluate_logic",
     # Validation

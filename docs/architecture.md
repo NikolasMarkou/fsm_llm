@@ -50,8 +50,8 @@ Pass 2: POST_PROCESSING handlers → LLM generate response → Return
 
 ### Prompt Builders (`prompts.py`)
 
-Three builders produce structured XML-like prompts:
-- `DataExtractionPromptBuilder` -- Pass 1: data extraction from user input
+Two builders produce structured XML-like prompts, plus the Pass-1 builder slot:
+- `DataExtractionPromptBuilder` -- the Pass-1 slot of `FSMManager`/`MessagePipeline`; the pipeline builds the bulk extraction prompt inline and uses this builder only for the shared sanitizer
 - `ResponseGenerationPromptBuilder` -- Pass 2: user-facing response generation
 - `FieldExtractionPromptBuilder` -- Targeted single-field extraction
 

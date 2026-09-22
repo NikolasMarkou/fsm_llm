@@ -58,7 +58,7 @@ from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from .constants import RESERVED_LLM_CALL_KWARGS
+from .constants import DEFAULT_TEMPERATURE, RESERVED_LLM_CALL_KWARGS
 from .definitions import (
     BulkExtractionRequest,
     DataExtractionResponse,
@@ -270,7 +270,7 @@ class LiteLLMInterface(LLMInterface):
         self,
         model: str,
         api_key: str | None = None,
-        temperature: float = 0.5,
+        temperature: float = DEFAULT_TEMPERATURE,
         max_tokens: int = 1000,
         timeout: float | None = 120.0,
         retries: int = 0,

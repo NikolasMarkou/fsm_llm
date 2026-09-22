@@ -52,11 +52,9 @@ class ContextCompactor:
         self,
         transient_keys: set[str] | None = None,
         prune_on_entry: dict[str, set[str]] | None = None,
-        summarize_on_trim: bool = False,
     ) -> None:
         self.transient_keys: set[str] = transient_keys or set()
         self.prune_on_entry: dict[str, set[str]] = prune_on_entry or {}
-        self.summarize_on_trim: bool = summarize_on_trim
 
     def compact(self, context: dict[str, Any]) -> dict[str, Any]:
         """Clear transient keys from the previous turn.

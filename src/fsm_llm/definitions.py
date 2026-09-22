@@ -55,17 +55,8 @@ ASCII_IDENTIFIER_PATTERN = r"^[a-zA-Z_][a-zA-Z0-9_]*$"
 _ASCII_IDENTIFIER = re.compile(ASCII_IDENTIFIER_PATTERN)
 
 # --------------------------------------------------------------
-# Enums for LLM Request Types
+# Enums
 # --------------------------------------------------------------
-
-
-class LLMRequestType(str, Enum):
-    """Types of requests that can be sent to LLM."""
-
-    DATA_EXTRACTION = "data_extraction"
-    RESPONSE_GENERATION = "response_generation"
-    CLASSIFICATION = "classification"
-    FIELD_EXTRACTION = "field_extraction"
 
 
 class TransitionEvaluationResult(str, Enum):
@@ -1670,20 +1661,6 @@ class MultiClassificationResult(BaseModel):
     @property
     def primary(self) -> IntentScore:
         return self.intents[0]
-
-
-class DomainSchema(BaseModel):
-    """
-    Maps a domain to its intent sub-schema for hierarchical classification.
-
-    Use when the total intent count exceeds ~15. Stage 1 classifies domain,
-    stage 2 classifies intent within that domain.
-    """
-
-    domain: str = Field(description="Domain identifier (snake_case)")
-    intent_schema: ClassificationSchema = Field(
-        description="Intent schema for this domain"
-    )
 
 
 class HierarchicalSchema(BaseModel):

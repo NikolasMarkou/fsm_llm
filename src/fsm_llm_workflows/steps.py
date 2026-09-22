@@ -33,8 +33,8 @@ class WorkflowStep(BaseModel, ABC):
     name: str
     description: str = ""
     timeout: float | None = None
-    """Maximum seconds this step may run. ``None`` disables timeout (default).
-    Use ``constants.DEFAULT_STEP_TIMEOUT`` (120 s) for safety."""
+    """Maximum seconds this step may run. ``None`` (the default) disables the
+    timeout; set a finite value for steps that call out to slow services."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

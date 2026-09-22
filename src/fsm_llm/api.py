@@ -102,6 +102,7 @@ from .constants import (
     DEFAULT_LLM_MODEL,
     DEFAULT_MAX_FSM_CACHE_SIZE,
     DEFAULT_MAX_STACK_DEPTH,
+    DEFAULT_TEMPERATURE,
     FSM_ID_HASH_LENGTH,
 )
 from .definitions import ConversationBusyError, FSMDefinition, FSMError
@@ -245,7 +246,9 @@ class API:
         else:
             # Create default interface
             model = model or os.environ.get("LLM_MODEL", DEFAULT_LLM_MODEL)
-            temperature = temperature if temperature is not None else 0.5
+            temperature = (
+                temperature if temperature is not None else DEFAULT_TEMPERATURE
+            )
             max_tokens = max_tokens if max_tokens is not None else 1000
 
             self.llm_interface = LiteLLMInterface(

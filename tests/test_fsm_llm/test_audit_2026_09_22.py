@@ -1240,3 +1240,80 @@ class TestStep8LoadTimeValidation:
         config = fsm.states["greeting"].transition_classification
         assert config is not None
         assert config["confidence_threshold"] == 0.7
+
+
+# ---------------------------------------------------------------------------
+# Step 9.1: dead core symbols removed; DEFAULT_TEMPERATURE is the one source
+# ---------------------------------------------------------------------------
+
+
+class TestStep9DeadCoreSymbols:
+    @pytest.mark.parametrize(
+        "name", ["DomainSchema", "LLMRequestType", "validate_json_structure"]
+    )
+    def test_removed_public_names_are_gone(self, name):
+        import fsm_llm
+
+        assert name not in fsm_llm.__all__
+        assert not hasattr(fsm_llm, name)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "LOG_FIELD_TIMESTAMP",
+            "LOG_FIELD_PACKAGE",
+            "LOG_MESSAGE_PREVIEW_LENGTH",
+            "LOG_RESPONSE_PREVIEW_LENGTH",
+            "DEFAULT_STEP_TIMEOUT",
+        ],
+    )
+    def test_removed_constants_are_gone(self, name):
+        from fsm_llm import constants
+
+        assert not hasattr(constants, name)
+
+    def test_context_compactor_has_no_summarize_on_trim(self):
+        from fsm_llm.context import ContextCompactor
+
+        with pytest.raises(TypeError):
+            ContextCompactor(summarize_on_trim=True)
+        assert not hasattr(ContextCompactor(), "summarize_on_trim")
+
+
+class TestStep9DefaultTemperature:
+    def test_api_default_temperature_comes_from_constant(self, monkeypatch):
+        from fsm_llm import api as api_module
+        from fsm_llm.constants import DEFAULT_TEMPERATURE
+
+        api = API(fsm_definition=_step9_fsm_dict(), model="gpt-4o-mini")
+        assert api.llm_interface.temperature == DEFAULT_TEMPERATURE
+        # The API reads the name, not a literal: rebinding it changes the default.
+        monkeypatch.setattr(api_module, "DEFAULT_TEMPERATURE", 0.25)
+        api = API(fsm_definition=_step9_fsm_dict(), model="gpt-4o-mini")
+        assert api.llm_interface.temperature == 0.25
+
+    def test_litellm_interface_default_is_the_constant(self):
+        import inspect
+
+        from fsm_llm.constants import DEFAULT_TEMPERATURE
+        from fsm_llm.llm import LiteLLMInterface
+
+        param = inspect.signature(LiteLLMInterface.__init__).parameters["temperature"]
+        assert param.default is DEFAULT_TEMPERATURE
+        assert LiteLLMInterface(model="gpt-4o-mini").temperature == DEFAULT_TEMPERATURE
+
+
+def _step9_fsm_dict() -> dict[str, Any]:
+    return {
+        "name": "t",
+        "description": "d",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "s",
+                "purpose": "p",
+                "response_instructions": "r",
+            }
+        },
+    }

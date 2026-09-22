@@ -98,10 +98,6 @@ DEFAULT_MAX_STACK_DEPTH = 10
 # LLM Interface Constants
 # --------------------------------------------------------------
 
-# Log preview lengths
-LOG_MESSAGE_PREVIEW_LENGTH = 100
-LOG_RESPONSE_PREVIEW_LENGTH = 200
-
 # FSM ID generation
 FSM_ID_HASH_LENGTH = 8
 
@@ -294,16 +290,6 @@ LOG_FILE_FORMAT = (
     "{message}"
 )
 
-# Standard context field names for structured logging
-LOG_FIELD_TIMESTAMP = "timestamp"
-LOG_FIELD_LEVEL = "level"
-LOG_FIELD_MESSAGE = "message"
-LOG_FIELD_MODULE = "module"
-LOG_FIELD_FUNCTION = "function"
-LOG_FIELD_LINE = "line"
-LOG_FIELD_CONVERSATION_ID = "conversation_id"
-LOG_FIELD_PACKAGE = "package"
-
 # Default value for unbound context fields
 LOG_DEFAULT_CONVERSATION_ID = "GENERAL"
 
@@ -317,6 +303,3 @@ LOG_DEFAULT_CONVERSATION_ID = "GENERAL"
 # One HandlerSystem serves every conversation of an `API`, so the cap is
 # shared API-wide, not per conversation.
 MAX_TIMED_HANDLER_STRAGGLERS = 4
-
-# Workflow step execution timeout (seconds). None = no timeout.
-DEFAULT_STEP_TIMEOUT = 120.0

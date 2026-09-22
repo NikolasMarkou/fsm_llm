@@ -1,16 +1,14 @@
 """
 Unit tests for workflow step timeout functionality.
 
-Tests cover: step-level timeout via _with_timeout(), DEFAULT_STEP_TIMEOUT
-constant, and timeout behavior for AutoTransitionStep, APICallStep,
-ConditionStep, and ParallelStep.
+Tests cover: step-level timeout via _with_timeout() and timeout behavior
+for AutoTransitionStep, APICallStep, ConditionStep, and ParallelStep.
 """
 
 import asyncio
 
 import pytest
 
-from fsm_llm.constants import DEFAULT_STEP_TIMEOUT
 from fsm_llm_workflows.exceptions import WorkflowStepError
 from fsm_llm_workflows.steps import (
     APICallStep,
@@ -20,26 +18,7 @@ from fsm_llm_workflows.steps import (
 )
 
 # ══════════════════════════════════════════════════════════════
-# 1. DEFAULT_STEP_TIMEOUT constant
-# ══════════════════════════════════════════════════════════════
-
-
-class TestDefaultStepTimeout:
-    """Verify the DEFAULT_STEP_TIMEOUT constant exists and is sensible."""
-
-    def test_constant_exists(self):
-        assert DEFAULT_STEP_TIMEOUT is not None
-
-    def test_constant_is_positive_float(self):
-        assert isinstance(DEFAULT_STEP_TIMEOUT, float)
-        assert DEFAULT_STEP_TIMEOUT > 0
-
-    def test_constant_value(self):
-        assert DEFAULT_STEP_TIMEOUT == 120.0
-
-
-# ══════════════════════════════════════════════════════════════
-# 2. Steps without timeout (None) work normally
+# 1. Steps without timeout (None) work normally
 # ══════════════════════════════════════════════════════════════
 
 
@@ -112,7 +91,7 @@ class TestStepsWithoutTimeout:
 
 
 # ══════════════════════════════════════════════════════════════
-# 3. AutoTransitionStep with timeout
+# 2. AutoTransitionStep with timeout
 # ══════════════════════════════════════════════════════════════
 
 
@@ -220,7 +199,7 @@ class TestAutoTransitionStepTimeout:
 
 
 # ══════════════════════════════════════════════════════════════
-# 4. APICallStep with timeout
+# 3. APICallStep with timeout
 # ══════════════════════════════════════════════════════════════
 
 
@@ -270,7 +249,7 @@ class TestAPICallStepTimeout:
 
 
 # ══════════════════════════════════════════════════════════════
-# 5. ConditionStep with timeout
+# 4. ConditionStep with timeout
 # ══════════════════════════════════════════════════════════════
 
 
@@ -341,7 +320,7 @@ class TestConditionStepTimeout:
 
 
 # ══════════════════════════════════════════════════════════════
-# 6. ParallelStep with timeout
+# 5. ParallelStep with timeout
 # ══════════════════════════════════════════════════════════════
 
 
@@ -444,7 +423,7 @@ class TestParallelStepTimeout:
 
 
 # ══════════════════════════════════════════════════════════════
-# 7. _with_timeout method directly
+# 6. _with_timeout method directly
 # ══════════════════════════════════════════════════════════════
 
 

@@ -881,29 +881,6 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
     return None
 
 
-def validate_json_structure(data: dict[str, Any], required_keys: list[str]) -> bool:
-    """
-    Validate that JSON data contains required keys.
-
-    Args:
-        data: JSON data to validate
-        required_keys: List of required key names
-
-    Returns:
-        True if all required keys are present, False otherwise
-    """
-    if not isinstance(data, dict):
-        return False
-
-    missing_keys = [key for key in required_keys if key not in data]
-
-    if missing_keys:
-        logger.debug(f"JSON validation failed: missing keys {missing_keys}")
-        return False
-
-    return True
-
-
 # --------------------------------------------------------------
 # FSM Definition Loading
 # --------------------------------------------------------------
