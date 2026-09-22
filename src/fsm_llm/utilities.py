@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from .constants import CONTEXT_FILTER_CYCLIC_WORK_FACTOR, MAX_CONTEXT_FILTER_NODES
 from .definitions import FSMDefinition
 
 # --------------------------------------------------------------
@@ -164,8 +165,49 @@ def strip_think_and_fences(content: str) -> str:
 # only the filtered result and the reason string.
 _TOO_DEEP = object()
 _CYCLE = object()
-_OVER_BUDGET = object()
 _DROP_REASONS = ((_TOO_DEEP, "too_deep"), (_CYCLE, "cycle"))
+
+
+class ContextFilterWorkError(ValueError):
+    """``filter_context_tree`` refused a cyclic input whose aliasing would
+    unfold past its work ceiling. Raised instead of returning a partial value
+    (see ``filter_context_tree``'s contract)."""
+
+
+def _container_graph_shape(source: Any) -> tuple[bool, int]:
+    """Return ``(acyclic, distinct_items)`` for the dict/list/tuple graph under
+    *source*: whether any container reaches itself, and the summed length of
+    every DISTINCT container. Iterative (no recursion limit), linear in the
+    distinct graph, never calls anything on a leaf."""
+    containers = (dict, list, tuple)
+    state: dict[int, bool] = {}  # id -> True while on the DFS path
+    acyclic = True
+    distinct_items = 0
+    stack: list[tuple[int, Any]] = []
+
+    def _enter(node: Any) -> None:
+        nonlocal distinct_items
+        state[id(node)] = True
+        distinct_items += len(node)
+        children = node.values() if isinstance(node, dict) else node
+        stack.append((id(node), iter(children)))
+
+    _enter(source)
+    while stack:
+        node_id, children = stack[-1]
+        for child in children:
+            if not isinstance(child, containers):
+                continue
+            seen = state.get(id(child))
+            if seen is None:
+                _enter(child)
+                break
+            if seen:
+                acyclic = False
+        else:
+            state[node_id] = False
+            stack.pop()
+    return acyclic, distinct_items
 
 
 def _drop_reason(value: Any) -> str | None:
@@ -237,7 +279,6 @@ def filter_context_tree(
     should_drop: Callable[[Any, Any, str], str | None],
     on_drop: Callable[[str, str], None] = lambda _path, _reason: None,
     leaf: Callable[[Any], Any] | None = None,
-    max_nodes: int | None = None,
 ) -> dict[Any, Any]:
     """Recursively filter a mapping's keys, bounded at ``max_depth``.
 
@@ -296,11 +337,18 @@ def filter_context_tree(
           caller: it is a closure, like ``should_drop``.
         - Cycles: a container already on the ACTIVE recursion path is dropped
           with reason ``"cycle"``. A container reached twice WITHOUT a cycle
-          (shared, acyclic) is filtered at every occurrence, as before.
-        - ``max_nodes``: every value visited (container or scalar) costs one
-          node; once the budget is spent the remaining values are dropped
-          (fail-closed) and ``on_drop`` is called once per truncated container
-          with reason ``"over_budget"``. ``None`` = no budget.
+          (shared, acyclic) is filtered at every occurrence and gives the
+          same value at each (equal, and when the input graph is acyclic the
+          SAME object, like ``copy.deepcopy`` preserves aliasing).
+        - Never truncates: the result is either the whole filtered value or
+          an exception. Acyclic input (checked by a linear pre-scan) is
+          memoised per ``(container, depth)``, so aliasing costs linear work
+          and ``should_drop``/``on_drop`` run once per distinct container per
+          depth, not once per path. Cyclic input is walked per path (the
+          active-path guard makes the result path-dependent, so it cannot be
+          memoised); if that walk visits more than
+          ``MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR *
+          distinct_items`` values it raises ``ContextFilterWorkError``.
         - Two call sites today: `fsm.py::_strip_internal_mapping` (silent,
           bare-prefix predicate) and `context.py::clean_mapping` (5-reason
           predicate, logging `on_drop`) -- a "same shape, different
@@ -308,51 +356,68 @@ def filter_context_tree(
 
     # DECISION plan-2026-09-21T203800-8a03483a/D-011
     # The depth bound alone does not bound WORK: 3-way aliasing at 14 levels
-    # is 3**14 paths and never finished. Two guards sit NEXT TO the bound
-    # (neither replaces it, per D-010): an active-path `id()` set drops a
-    # true cycle, and a node budget caps total work. Do NOT memoise a shared
-    # container's filtered result and reuse it (that changes output shape
-    # for shared-but-acyclic data) and do NOT keep a global `seen` set (that
-    # drops the second occurrence of a shared list). See decisions.md D-011.
+    # is 3**14 paths and never finished. Guards sit NEXT TO the bound
+    # (never replacing it, per D-010): an active-path `id()` set drops a true
+    # cycle. Do NOT keep a global `seen` set (that drops the second
+    # occurrence of a shared list). See decisions.md D-011.
+    #
+    # DECISION plan-2026-09-21T203800-8a03483a/D-045
+    # Both callers return or COMMIT data (`get_data`, `save_session`, the
+    # extracted-data commit), so this walker must NEVER truncate: do NOT put
+    # a node budget back here (it silently cut a 150,000-item list and
+    # dropped every later key). Aliasing is bounded by memoising per
+    # (container, depth) ONLY when the pre-scan proves the graph acyclic; do
+    # NOT memoise cyclic input (a cached subtree can reach a container that
+    # is active at the reuse site, which must then be a cycle drop). Cyclic
+    # input over the work ceiling RAISES, never returns a partial value. The
+    # truncating budget belongs to the prompt walker only. See D-045.
     """
+    acyclic, distinct_items = _container_graph_shape(source)
     active: set[int] = set()
-    remaining = [max_nodes or 0]
-
-    def _spend() -> bool:
-        """Charge one node; False once the budget is exhausted."""
-        if max_nodes is None:
-            return True
-        remaining[0] -= 1
-        return remaining[0] >= 0
+    # Acyclic: (id, depth) -> filtered value. Cyclic: never memoised.
+    memo: dict[tuple[int, int], Any] | None = {} if acyclic else None
+    remaining = [
+        MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR * distinct_items
+    ]
 
     def _filter_value(value: Any, path: str, depth: int) -> Any:
-        if not _spend():
-            return _OVER_BUDGET
+        if memo is None:
+            remaining[0] -= 1
+            if remaining[0] < 0:
+                raise ContextFilterWorkError(
+                    "context has cyclic references aliased too heavily to "
+                    f"filter (more than {CONTEXT_FILTER_CYCLIC_WORK_FACTOR}x "
+                    "its distinct size); refusing to return a partial value"
+                )
         if not isinstance(value, (dict, list, tuple)):
             return value if leaf is None else leaf(value)
         if depth > max_depth:
             return _TOO_DEEP
         if id(value) in active:
             return _CYCLE
+        memo_key = (id(value), depth)
+        if memo is not None and memo_key in memo:
+            return memo[memo_key]
         active.add(id(value))
         try:
             if isinstance(value, dict):
-                return _filter_mapping(value, path, depth)
-            items = []
-            for index, item in enumerate(value):
-                element_path = f"{path}[{index}]"
-                filtered_item = _filter_value(item, element_path, depth + 1)
-                if filtered_item is _OVER_BUDGET:
-                    on_drop(path, "over_budget")
-                    break
-                dropped = _drop_reason(filtered_item)
-                if dropped is not None:
-                    on_drop(element_path, dropped)
-                    continue
-                items.append(filtered_item)
-            return tuple(items) if isinstance(value, tuple) else items
+                filtered: Any = _filter_mapping(value, path, depth)
+            else:
+                items = []
+                for index, item in enumerate(value):
+                    element_path = f"{path}[{index}]"
+                    filtered_item = _filter_value(item, element_path, depth + 1)
+                    dropped = _drop_reason(filtered_item)
+                    if dropped is not None:
+                        on_drop(element_path, dropped)
+                        continue
+                    items.append(filtered_item)
+                filtered = tuple(items) if isinstance(value, tuple) else items
         finally:
             active.discard(id(value))
+        if memo is not None:
+            memo[memo_key] = filtered
+        return filtered
 
     def _filter_mapping(
         mapping: dict[Any, Any], path: str, depth: int
@@ -365,9 +430,6 @@ def filter_context_tree(
                 on_drop(full_key, reason)
                 continue
             filtered = _filter_value(value, full_key, depth + 1)
-            if filtered is _OVER_BUDGET:
-                on_drop(path or full_key, "over_budget")
-                break
             dropped = _drop_reason(filtered)
             if dropped is not None:
                 on_drop(full_key, dropped)

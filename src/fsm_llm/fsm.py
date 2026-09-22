@@ -23,7 +23,6 @@ from .constants import (
     DEFAULT_MAX_MESSAGE_LENGTH,
     END_CONVERSATION_LOCK_TIMEOUT_SECONDS,
     MAX_CONTEXT_FILTER_DEPTH,
-    MAX_CONTEXT_FILTER_NODES,
     has_internal_prefix,
 )
 from .definitions import (
@@ -100,12 +99,10 @@ def _strip_internal_mapping(source: dict[Any, Any]) -> dict[Any, Any]:
 
     # No `leaf` hook here (D-010 of plan-2026-09-21T203800-8a03483a): a
     # handler-stored object is application data for `get_data`, not a leak.
-    return filter_context_tree(
-        source,
-        MAX_CONTEXT_FILTER_DEPTH,
-        _should_drop,
-        max_nodes=MAX_CONTEXT_FILTER_NODES,
-    )
+    # DECISION plan-2026-09-21T203800-8a03483a/D-045
+    # No node budget either: this feeds `get_data` and `save_session`, which
+    # must return the whole value or raise, never a truncated one. See D-045.
+    return filter_context_tree(source, MAX_CONTEXT_FILTER_DEPTH, _should_drop)
 
 
 # Return type of a read snapshot (see FSMManager._read_under_lock).

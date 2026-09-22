@@ -60,6 +60,11 @@ suite: 6,448 tests collected (was 6,177). `ruff` and `mypy` clean across all 6 p
   `recovery_code` (whole name segments, optional plural) are now filtered out of
   prompt context. Policy-style tails (`password_min_length`) and `bool` values are
   kept. Names such as `pass_id`, `pin_code` or `cookie_consent` are now stripped too.
+  `cvc`, digit-suffixed terms (`cvv2`, `pin2`) and camelCase/acronym forms
+  (`pinCode`, `PINCode`) match as well. A policy-suffix name (`pin_attempts`,
+  `authorization_status`) keeps only a value that cannot be a credential (None, a
+  `bool`, a number below 1,000, or a short plain-word string not starting with an auth
+  scheme); `pin_enabled: "1234"` or `authorization_status: "Bearer ..."` is stripped.
 - **D6: no reasoning fallback.** A Pass-2 reply with an empty or missing `message`
   no longer shows the model's internal `reasoning` to the user; it produces the
   generic apology and the pipeline's one retry.
@@ -118,7 +123,7 @@ D. LLM interface / prompts / context filters
 
 - D1: the Pass-2 embedded-JSON fallback strips `<think>` blocks before scanning.
 - D2: context filters redact non-JSON-native leaves as `<redacted:TypeName>` (stdlib date/time, `Decimal` and `UUID` values are kept).
-- D3: context filters drop reference cycles and cap work at `MAX_CONTEXT_FILTER_NODES` (100,000), failing closed.
+- D3: context filters drop reference cycles. The prompt filter caps work at `MAX_CONTEXT_FILTER_NODES` (100,000), failing closed. `get_data`, `save_session` and the extracted-data commit never truncate: acyclic aliasing is memoised, and cyclic input that would unfold past the work ceiling raises `utilities.ContextFilterWorkError` instead of returning a partial value.
 - D4: a flat bulk-extraction reply drops top-level `confidence`/`reasoning` instead of merging them into context.
 - D5: 18 more credential names are stripped from prompts (see above).
 - D6: internal `reasoning` is never shown as the reply (see above).

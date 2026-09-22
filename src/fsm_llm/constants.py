@@ -63,14 +63,19 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
 MAX_CONTEXT_FILTER_DEPTH = 16
 
 # DECISION plan-2026-09-21T203800-8a03483a/D-011
-# Work bound shared by the context walkers (`utilities.filter_context_tree`,
-# used by `clean_context_keys` and `get_data`, and the prompt builder's own
-# walker): every value visited costs one node, and past the budget the rest is
-# DROPPED (fail-closed, like the depth bound). The depth bound does not bound
+# DECISION plan-2026-09-21T203800-8a03483a/D-045
+# Work bound for the PROMPT walker (`prompts.BasePromptBuilder`): every value
+# visited costs one node, and past the budget the rest is DROPPED from the
+# prompt (fail-closed, like the depth bound). The depth bound does not bound
 # work on aliased input (3-way aliasing at 14 levels never finished). Do NOT
-# lower this toward "typical" context sizes: a legitimate context this large
-# is truncated, which is the accepted cost. See decisions.md D-011.
+# apply this truncating budget to `utilities.filter_context_tree` (`get_data`,
+# `save_session`, the extracted-data commit): truncating DATA silently cut a
+# 150,000-item list and dropped later keys. That walker memoises acyclic input
+# and raises `ContextFilterWorkError` on cyclic input that unfolds past
+# `MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR * distinct
+# items`. See decisions.md D-011, D-045.
 MAX_CONTEXT_FILTER_NODES = 100_000
+CONTEXT_FILTER_CYCLIC_WORK_FACTOR = 16
 
 
 # --------------------------------------------------------------
@@ -1629,16 +1634,38 @@ _TOKEN_VALUE_SCAN_NAME_RE = re.compile(
 #      True`, the harness REFLECT gate flag). Numbers are NOT exempt: a PIN,
 #      CVV, OTP or card number is routinely stored as an int.
 # A name-only caller (`value=None`) strips. See decisions.md D-012, D-031.
+#
+# DECISION plan-2026-09-21T203800-8a03483a/D-046
+# Rule 1 is NAME-only no longer: a policy-suffix name KEEPS only a value that
+# cannot be credential material (`_policy_tail_value_is_credential`), so
+# `pin_enabled: "1234"` and `authorization_status: "Bearer ..."` strip while
+# `pin_attempts: 3` and `pin_status: "locked"` stay. A term may carry a digit
+# suffix (`cvv2`, `pin2`), `cvc` is a term, and an acronym run is split
+# (`PINCode` -> `PIN_Code`) for THIS rule only. Do NOT apply the acronym split
+# to layer 1 (unmeasured there) and do NOT make the policy-suffix tail
+# name-only again. See decisions.md D-046.
 _CREDENTIAL_NAME_TERMS = (
-    r"passwd|pwd|pass|passcode|passphrase|pin|otp|mfa[\W_]?code|cvv|ssn"
+    r"passwd|pwd|pass|passcode|passphrase|pin|otp|mfa[\W_]?code|cvv|cvc|ssn"
     r"|credit[\W_]?card|card[\W_]?number|cookie|jwt|bearer|authorization"
     r"|auth[\W_]?header|recovery[\W_]?code"
 )
+_CREDENTIAL_NAME_HEAD = rf"(?:^|.*[\W_])(?:{_CREDENTIAL_NAME_TERMS})(?:s|\d+)?"
+# Matches a credential name whose tail is NOT only policy suffixes.
 _CREDENTIAL_NAME_RE = re.compile(
-    rf"(?:^|.*[\W_])(?:{_CREDENTIAL_NAME_TERMS})s?"
+    rf"{_CREDENTIAL_NAME_HEAD}"
     rf"(?!(?:[-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))+$){_WORD_END}",
     re.IGNORECASE,
 )
+# Matches every credential name, policy-suffix tails included.
+_CREDENTIAL_NAME_ANY_RE = re.compile(
+    rf"{_CREDENTIAL_NAME_HEAD}{_WORD_END}", re.IGNORECASE
+)
+# Upper-case run followed by a capitalised word: `PINCode` -> `PIN_Code`.
+_ACRONYM_BOUNDARY = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
+# A short run of plain letter words (`locked`, `accept all`, `sms_only`).
+_POLICY_TAIL_WORD_VALUE_RE = re.compile(r"[A-Za-z]+(?:[ _-][A-Za-z]+)*")
+_POLICY_TAIL_WORD_VALUE_MAX_CHARS = 40
+_POLICY_TAIL_MAX_COUNT = 1000
 
 
 def _token_value_is_credential(value: object, name: str = "") -> bool:
@@ -1670,6 +1697,32 @@ def _token_value_is_credential(value: object, name: str = "") -> bool:
     if not isinstance(value, str):
         return True
     return _looks_like_credential_value(value, name)
+
+
+def _policy_tail_value_is_credential(value: object) -> bool:
+    """Is *value* credential material under a policy-suffix credential name
+    (``pin_attempts``, ``authorization_status``)? KEEP (False) only for a value
+    that cannot carry one: ``None``, a ``bool``, a number below
+    ``_POLICY_TAIL_MAX_COUNT`` in magnitude (a count, length or score), or an
+    exact ``str`` of at most ``_POLICY_TAIL_WORD_VALUE_MAX_CHARS`` plain letter
+    words whose first word is not an auth scheme and whose shape the value
+    layer does not flag. Everything else (digit strings, ``Bearer ...``,
+    ``k=v`` cookies, containers, ``str`` subclasses) is True. Never raises.
+    """
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return not abs(value) < _POLICY_TAIL_MAX_COUNT
+    if type(value) is not str:
+        return True
+    if len(value) > _POLICY_TAIL_WORD_VALUE_MAX_CHARS:
+        return True
+    if not _POLICY_TAIL_WORD_VALUE_RE.fullmatch(value):
+        return True
+    first_word = re.split(r"[ _-]", value, maxsplit=1)[0].lower()
+    if first_word in _AUTH_SCHEME_WORDS:
+        return True
+    return _looks_like_credential_value(value)
 
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -1732,10 +1785,17 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     # DECISION plan-2026-09-21T203800-8a03483a/D-031 -- tested BEFORE the token
     # referral so a name matching both (`pin_token`) gets the stricter verdict
     # (same rule as D-021 below). Only a `bool` value keeps a matched name.
-    if _CREDENTIAL_NAME_RE.match(key) or (
-        snake_key != key and _CREDENTIAL_NAME_RE.match(snake_key)
-    ):
+    # DECISION plan-2026-09-21T203800-8a03483a/D-046 -- a policy-suffix tail
+    # keeps only a non-credential-shaped value; acronym split for this rule only.
+    # A tuple, not a set: hashing a hostile `str` subclass key would dispatch
+    # to its `__hash__` (D-006 polarity). The acronym split is exact-`str` only.
+    name_forms: tuple[str, ...] = (key, snake_key)
+    if type(key) is str:
+        name_forms += (_ACRONYM_BOUNDARY.sub("_", snake_key),)
+    if any(_CREDENTIAL_NAME_RE.match(form) for form in name_forms):
         return not isinstance(value, bool)
+    if any(_CREDENTIAL_NAME_ANY_RE.match(form) for form in name_forms):
+        return _policy_tail_value_is_credential(value)
 
     # DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE] -- the TOKEN referral is
     # tested FIRST, and deliberately: a name matching both shapes (`foo_key_token`)

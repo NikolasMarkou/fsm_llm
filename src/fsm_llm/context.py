@@ -11,7 +11,6 @@ from typing import Any
 
 from .constants import (
     MAX_CONTEXT_FILTER_DEPTH,
-    MAX_CONTEXT_FILTER_NODES,
     has_internal_prefix,
     is_forbidden_context_entry,
 )
@@ -294,30 +293,26 @@ def clean_context_keys(
         elif reason == "cycle":
             removed_keys.append(f"{full_key} (reference cycle)")
             log.warning(f"Context value '{full_key}' dropped: reference cycle")
-        elif reason == "over_budget":
-            removed_keys.append(f"{full_key} (over node budget)")
-            log.warning(
-                f"Context values under '{full_key or '<root>'}' dropped: more than "
-                f"{MAX_CONTEXT_FILTER_NODES} values to security-filter"
-            )
         else:
             removed_keys.append(f"{full_key} ({reason})")
             log.debug(f"Context key '{full_key}' removed: {reason}")
 
     # DECISION plan-2026-09-21T203800-8a03483a/D-010
     # DECISION plan-2026-09-21T203800-8a03483a/D-011
+    # DECISION plan-2026-09-21T203800-8a03483a/D-045
     # The leaf hook redacts non-JSON-native values (their str() carried object
     # fields past the key filter); do NOT drop it to "keep values as-is". The
-    # node budget and the walker's active-path cycle guard bound work on
-    # aliased input; they sit NEXT TO the depth bound (D-010 above), never
-    # instead of it. See decisions.md D-010, D-011.
+    # walker's active-path cycle guard and acyclic memoisation bound work on
+    # aliased input next to the depth bound (D-010 above). Do NOT pass a
+    # truncating node budget here: the result is COMMITTED to context (the
+    # extracted-data commit), so a cut value would be silently lost data.
+    # See decisions.md D-010, D-011, D-045.
     cleaned = filter_context_tree(
         data,
         MAX_CONTEXT_FILTER_DEPTH,
         should_drop,
         on_drop,
         leaf=redact_non_json_leaf,
-        max_nodes=MAX_CONTEXT_FILTER_NODES,
     )
 
     if warned_keys:
