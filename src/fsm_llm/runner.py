@@ -123,8 +123,11 @@ def _redact_context(data: dict) -> dict:
     their values become ``"<redacted>"``. Recursion is bounded at
     ``MAX_CONTEXT_FILTER_DEPTH``; anything deeper is redacted wholesale. A
     container already on the recursion path (a cycle) becomes
-    ``"<redacted:cycle>"``. Work is linear in the distinct (container, depth)
-    pairs, so aliased input does not blow up. The result may share one
+    ``"<redacted:cycle>"``. On ACYCLIC input, work is linear in the distinct
+    (container, depth) pairs, so aliased input does not blow up. A subtree
+    that meets a cycle is not memoised, so input that aliases every level AND
+    cycles can still cost exponential time; the runner only redacts
+    ``get_data()`` output, which is always acyclic. The result may share one
     redacted subtree between the places an input subtree was aliased.
     """
     walk = _RedactionWalk()
