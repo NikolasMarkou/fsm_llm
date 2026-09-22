@@ -289,7 +289,9 @@ def redact_non_json_leaf(value: Any) -> Any:
         - Never raises; never calls ``str()``/``repr()`` on *value*.
         - Shared by ``prompts.BasePromptBuilder``'s walker and
           ``context.clean_context_keys`` (as ``filter_context_tree``'s
-          ``leaf`` hook); ``fsm._strip_internal_mapping`` does NOT use it.
+          ``leaf`` hook) and by ``session._session_json_default`` (the
+          ``FileSessionStore.save`` ``default=`` hook);
+          ``fsm._strip_internal_mapping`` does NOT use it.
 
     # DECISION plan-2026-09-21T203800-8a03483a/D-010
     # Redact, do NOT drop (the model still learns the key exists) and do NOT

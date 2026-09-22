@@ -37,10 +37,25 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .logging import logger
+from .utilities import redact_non_json_leaf
 
 # One id rule for _path and list_sessions, matched with fullmatch: ``$`` in a
 # ``re.match`` pattern also matches before a trailing newline ("abc\n").
 _SESSION_ID_RE = re.compile(r"[a-zA-Z0-9_\-]+")
+
+
+def _session_json_default(value: Any) -> str:
+    """``json.dumps`` ``default=`` hook for ``FileSessionStore.save``.
+
+    Returns ``str(value)`` only for an exact stdlib value scalar (the
+    ``utilities.redact_non_json_leaf`` keep-set; json never calls ``default``
+    for its other kept types), else ``"<redacted:TypeName>"``. Never raises.
+    """
+    # DECISION plan-2026-09-22T080837-8b258a25/D-008
+    # Do NOT go back to `default=str`: an object's `__str__` wrote its secret
+    # to disk. Do NOT copy the scalar type set here; reuse the leaf hook.
+    redacted = redact_non_json_leaf(value)
+    return str(value) if redacted is value else redacted
 
 
 class SessionState(BaseModel):
@@ -165,12 +180,15 @@ class FileSessionStore(SessionStore):
         """Persist a session via an atomic temp-file write + rename.
 
         Note: the JSON round-trip is lossy for non-JSON-native context
-        values. A tuple loads back as a list; a set, bytes, datetime or custom
-        object is written as its ``str()`` (``default=str``) and loads back as
-        that string, not its original type. The file holds the FULL context,
-        unfiltered: secret-looking keys are removed only from LLM prompts, and
-        an object whose ``__str__`` exposes a secret writes that secret here.
-        Keep the session directory as private as the data it stores.
+        values. A tuple loads back as a list. A value whose EXACT type is
+        ``datetime``/``date``/``time``/``timedelta``/``Decimal``/``UUID`` is
+        written as its ``str()`` and loads back as that string. Anything else
+        that is not JSON-native (set, bytes, a subclass of those scalars, a
+        custom object) is written as ``"<redacted:TypeName>"``; its
+        ``str()`` is never called (see ``_session_json_default``). The file
+        still holds the FULL context: secret-looking KEYS are removed only
+        from LLM prompts. Keep the session directory as private as the data
+        it stores.
         """
         path = self._path(session_id)
         data = state.model_dump()
@@ -179,7 +197,7 @@ class FileSessionStore(SessionStore):
         fd, tmp_name = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
-                f.write(json.dumps(data, indent=2, default=str))
+                f.write(json.dumps(data, indent=2, default=_session_json_default))
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_name, str(path))

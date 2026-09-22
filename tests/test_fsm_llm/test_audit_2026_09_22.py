@@ -7,8 +7,12 @@ landed, and names the audit id it pins (``test_p0_1_*``, ``test_p1_4_*``, ...).
 
 from __future__ import annotations
 
+import datetime
+import decimal
+import json
 import threading
 import types
+import uuid
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -815,3 +819,114 @@ class TestStep5NamedConstants:
         assert PROVENANCE_METADATA_KEY == "_pipeline_extracted"
         assert pipeline._PROVENANCE_KEY is PROVENANCE_METADATA_KEY
         assert fsm.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
+
+
+# ---------------------------------------------------------------------------
+# Step 6: FileSessionStore.save never calls str() on an arbitrary object
+# ---------------------------------------------------------------------------
+
+
+class _Leaky:
+    """An object whose ``__str__`` exposes a secret (the D-008 leak path)."""
+
+    def __str__(self) -> str:
+        return "password=zzS3CRETzz"
+
+    __repr__ = __str__
+
+
+class _SubDatetime(datetime.datetime):
+    """Not the exact scalar type, so it may override ``__str__``."""
+
+    def __str__(self) -> str:
+        return "sub=zzS3CRETzz"
+
+
+def _save_with(tmp_path: Any, values: dict[str, Any]) -> tuple[API, str, str]:
+    """Start a conversation, put *values* into its context, save to disk."""
+    from fsm_llm.session import FileSessionStore
+
+    store = FileSessionStore(tmp_path)
+    api = API.from_definition(
+        _blocked_fsm(), llm_interface=_mock_llm(), session_store=store
+    )
+    conv_id, _ = api.start_conversation()
+    api.fsm_manager.instances[conv_id].context.data.update(values)
+    api.save_session(conv_id)
+    text = (tmp_path / f"{conv_id}.json").read_text()
+    return api, conv_id, text
+
+
+class TestStep6SessionSaveDefaultHook:
+    """P1 session: the ``default=`` hook redacts every non-scalar object."""
+
+    def test_leaky_object_saved_as_placeholder(self, tmp_path):
+        _, _, text = _save_with(
+            tmp_path, {"profile": _Leaky(), "nested": {"deep": [_Leaky()]}}
+        )
+        assert "zzS3CRETzz" not in text
+        saved = json.loads(text)["context_data"]
+        assert saved["profile"] == "<redacted:_Leaky>"
+        assert saved["nested"] == {"deep": ["<redacted:_Leaky>"]}
+
+    def test_set_bytes_frozenset_and_scalar_subclass_are_placeholders(self, tmp_path):
+        _, _, text = _save_with(
+            tmp_path,
+            {
+                "tags": {"a"},
+                "raw": b"zzS3CRETzz",
+                "frozen": frozenset({"b"}),
+                "sub": _SubDatetime(2026, 1, 2),
+            },
+        )
+        assert "zzS3CRETzz" not in text
+        saved = json.loads(text)["context_data"]
+        assert saved["tags"] == "<redacted:set>"
+        assert saved["raw"] == "<redacted:bytes>"
+        assert saved["frozen"] == "<redacted:frozenset>"
+        assert saved["sub"] == "<redacted:_SubDatetime>"
+
+    def test_exact_value_scalars_byte_identical_to_default_str(self, tmp_path):
+        from fsm_llm.session import SessionState
+
+        scalars = {
+            "when": datetime.datetime(2026, 1, 2, 3, 4, 5),
+            "day": datetime.date(2026, 1, 2),
+            "at": datetime.time(3, 4, 5),
+            "span": datetime.timedelta(seconds=90),
+            "amount": decimal.Decimal("9.99"),
+            "uid": uuid.UUID("12345678-1234-5678-1234-567812345678"),
+        }
+        _, _, text = _save_with(tmp_path, scalars)
+        state = SessionState.model_validate_json(text)
+        assert state.context_data == {k: str(v) for k, v in scalars.items()}
+        # The whole file is exactly what the old `default=str` would write.
+        state.context_data.update(scalars)
+        old_bytes = json.dumps(state.model_dump(), indent=2, default=str)
+        assert text == old_bytes
+
+    def test_restore_round_trip(self, tmp_path):
+        from fsm_llm.session import FileSessionStore
+
+        when = datetime.datetime(2026, 1, 2, 3, 4, 5)
+        uid = uuid.UUID("12345678-1234-5678-1234-567812345678")
+        _, conv_id, _ = _save_with(
+            tmp_path,
+            {
+                "when": when,
+                "amount": decimal.Decimal("9.99"),
+                "uid": uid,
+                "profile": _Leaky(),
+            },
+        )
+        api2 = API.from_definition(
+            _blocked_fsm(),
+            llm_interface=_mock_llm(),
+            session_store=FileSessionStore(tmp_path),
+        )
+        rid, _ = api2.restore_session(conv_id)
+        data = api2.get_data(rid)
+        assert data["when"] == str(when)
+        assert data["amount"] == "9.99"
+        assert data["uid"] == str(uid)
+        assert data["profile"] == "<redacted:_Leaky>"
