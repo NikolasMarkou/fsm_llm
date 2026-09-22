@@ -209,7 +209,8 @@ class TestRedactContextRecurses:
 
     def test_no_secret_pattern_is_inlined_in_the_runner(self):
         """D-015's single-sourcing constraint, still in force after the
-        recursion was added: the REGEX list must stay in `constants.py`."""
+        recursion was added: the REGEX list must stay in `security.py`
+        (re-exported by `constants.py`)."""
         import inspect
 
         from fsm_llm import runner

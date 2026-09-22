@@ -2344,8 +2344,11 @@ class TestValueShapeLayer:
         restatement of the measured 1.00. If it ever drops below half, the class
         argument in the D-019 block has become false and the block must be
         rewritten before the filter is.
+
+        Patches `fsm_llm.security`, the module whose globals the function
+        reads; assigning on the `constants` re-export would not reach it.
         """
-        from fsm_llm import constants as c
+        from fsm_llm import security as c
 
         credentials: list[tuple[str, object]] = []
         credentials += list(CRYPTO_KEY_SECRET_VALUES.items())
