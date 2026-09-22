@@ -2431,3 +2431,241 @@ class TestStep14CacheLock:
         assert len(calls) == 2
         assert result is second
         assert manager.fsm_cache[api.fsm_id] is second
+
+
+# ---------------------------------------------------------------------------
+# Step 14.3: filter_context_tree flat-root fast path; P1-8 history unit
+# ---------------------------------------------------------------------------
+
+
+class _Step14Opaque:
+    """A leaf the walker must pass to ``leaf`` untouched (never walked)."""
+
+    def __repr__(self) -> str:
+        return "<opaque>"
+
+
+class _Step14DictSubclass(dict):
+    """A dict subclass: the fast path must NOT take it (full path instead)."""
+
+
+_STEP14_LEAVES: list[Any] = [
+    None,
+    0,
+    7,
+    -1.5,
+    True,
+    False,
+    "",
+    "text",
+    "_internal",
+    b"bytes",
+    {1, 2},
+    frozenset({"x"}),
+    types.MappingProxyType({"inner": [1, 2]}),
+    datetime.date(2026, 9, 22),
+    decimal.Decimal("1.5"),
+    _Step14Opaque(),
+]
+_STEP14_KEYS: list[Any] = [
+    "a",
+    "_hidden",
+    "password",
+    "b.c",
+    1,
+    2.5,
+    None,
+    True,
+    ("t", 1),
+    frozenset({"k"}),
+]
+
+
+def _step14_flat_inputs() -> list[dict[Any, Any]]:
+    """Deterministic flat roots: every value is a leaf, keys of mixed types."""
+    import random
+
+    rng = random.Random(143)
+    inputs: list[dict[Any, Any]] = [{}]
+    for size in (1, 2, 3, 5, 10):
+        for _ in range(12):
+            keys = rng.sample(_STEP14_KEYS, k=min(size, len(_STEP14_KEYS)))
+            inputs.append({key: rng.choice(_STEP14_LEAVES) for key in keys})
+    return inputs
+
+
+def _step14_run(
+    source: dict[Any, Any], max_depth: int, *, raise_at: int = -1
+) -> tuple[Any, list[tuple[str, Any]]]:
+    """Run the walker with recording hooks; return (result-or-exc, events)."""
+    from fsm_llm.utilities import filter_context_tree
+
+    events: list[tuple[str, Any]] = []
+
+    def _should_drop(key: Any, value: Any, full_key: str) -> str | None:
+        events.append(("should_drop", (repr(key), full_key)))
+        if len([e for e in events if e[0] == "should_drop"]) - 1 == raise_at:
+            raise ValueError(f"boom at {full_key}")
+        if not isinstance(key, str):
+            return "non_str"
+        if key.startswith("_") or value is None:
+            return "policy"
+        return None
+
+    def _on_drop(full_key: str, reason: str) -> None:
+        events.append(("on_drop", (full_key, reason)))
+
+    def _leaf(value: Any) -> Any:
+        events.append(("leaf", repr(value)))
+        return ("leafed", repr(value))
+
+    try:
+        result: Any = filter_context_tree(
+            source, max_depth, _should_drop, _on_drop, _leaf
+        )
+    except Exception as exc:  # compared by type and message
+        result = (type(exc), str(exc))
+    return result, events
+
+
+class TestStep14FastPath:
+    """The flat-root fast path skips the Tarjan pre-scan with identical output."""
+
+    def test_flat_root_skips_prescan(self):
+        from fsm_llm import utilities
+
+        with patch.object(
+            utilities,
+            "_cycle_reaching_containers",
+            wraps=utilities._cycle_reaching_containers,
+        ) as spy:
+            out = utilities.filter_context_tree(
+                {"a": 1, "b": "x", 3: None}, 16, lambda k, v, f: None
+            )
+        assert out == {"a": 1, "b": "x", 3: None}
+        assert spy.call_count == 0
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            {"a": {"b": 1}},
+            {"a": [1, 2]},
+            {"a": (1,)},
+            _Step14DictSubclass(a=1),
+            types.MappingProxyType({"a": 1}),
+        ],
+        ids=["nested-dict", "list", "tuple", "dict-subclass", "mapping-proxy"],
+    )
+    def test_non_flat_or_non_dict_root_keeps_prescan(self, source):
+        from fsm_llm import utilities
+
+        with patch.object(
+            utilities,
+            "_cycle_reaching_containers",
+            wraps=utilities._cycle_reaching_containers,
+        ) as spy:
+            utilities.filter_context_tree(source, 16, lambda k, v, f: None)
+        assert spy.call_count == 1
+
+    def test_prescan_values_the_fast_path_substitutes_are_exact(self):
+        from fsm_llm.utilities import _cycle_reaching_containers
+
+        for source in _step14_flat_inputs():
+            assert _cycle_reaching_containers(source) == (set(), len(source))
+
+    @pytest.mark.parametrize("max_depth", [-1, 0, 1, 16])
+    def test_fast_path_matches_full_path(self, max_depth):
+        compared = 0
+        for source in _step14_flat_inputs():
+            fast = _step14_run(source, max_depth)
+            full = _step14_run(_Step14DictSubclass(source), max_depth)
+            assert fast == full, source
+            compared += 1
+            for raise_at in range(min(len(source), 2)):
+                fast = _step14_run(source, max_depth, raise_at=raise_at)
+                full = _step14_run(
+                    _Step14DictSubclass(source), max_depth, raise_at=raise_at
+                )
+                assert fast == full, (source, raise_at)
+                assert fast[0][0] is ValueError
+        assert compared == len(_step14_flat_inputs())
+
+    def test_predicate_rebinding_a_value_to_a_cycle_matches_full_path(self):
+        def _run(source: dict[Any, Any]) -> tuple[Any, list[Any]]:
+            from fsm_llm.utilities import filter_context_tree
+
+            drops: list[Any] = []
+
+            def _should_drop(key: Any, value: Any, full_key: str) -> None:
+                if key == "a":
+                    source["b"] = source
+                return None
+
+            out = filter_context_tree(
+                source, 16, _should_drop, lambda k, r: drops.append((k, r))
+            )
+            return out, drops
+
+        fast_out, fast_drops = _run({"a": 1, "b": 2})
+        full_out, full_drops = _run(_Step14DictSubclass({"a": 1, "b": 2}))
+        assert fast_out == full_out == {"a": 1}
+        assert fast_drops == full_drops == [("b", "cycle")]
+
+
+def _step14_history_instance(length: int) -> Any:
+    from fsm_llm.definitions import FSMInstance
+
+    instance = FSMInstance(fsm_id="f", current_state="s")
+    instance.context.conversation.exchanges = [
+        {"user": f"u{k}"} if k % 2 == 0 else {"system": f"s{k}"} for k in range(length)
+    ]
+    return instance
+
+
+class TestStep14HistoryUnit:
+    """P1-8 SKIPPED (decisions.md D-038): the exchange-count fetch cannot give
+    identical output under ``TOKEN_BUDGET``, which trusts the fetch window as
+    its only count bound. These pin today's window and the counter-example."""
+
+    @pytest.mark.parametrize("max_messages", [0, 1, 2, 3, 5, 10])
+    @pytest.mark.parametrize("length", [0, 1, 4, 11])
+    def test_fetch_window_is_max_history_messages_exchanges(self, max_messages, length):
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        instance = _step14_history_instance(length)
+        conversation = instance.context.conversation
+        seen: list[Any] = []
+        original = type(conversation).get_summary_and_recent
+
+        def _spy(n: Any = None) -> Any:
+            seen.append(n)
+            return original(conversation, n)
+
+        object.__setattr__(conversation, "get_summary_and_recent", _spy)
+        builder = ResponseGenerationPromptBuilder()
+        builder.config = type(builder.config)(max_history_messages=max_messages)
+        builder._build_enhanced_history_section(instance)
+        assert seen == [max_messages]
+
+    def test_token_budget_renders_more_than_an_exchange_window_would(self):
+        import math
+
+        from fsm_llm.prompts import (
+            HistoryManagementStrategy,
+            ResponseGenerationPromptBuilder,
+            ResponsePromptConfig,
+        )
+
+        builder = ResponseGenerationPromptBuilder(
+            ResponsePromptConfig(
+                max_history_messages=2,
+                history_strategy=HistoryManagementStrategy.TOKEN_BUDGET,
+            )
+        )
+        rendered = "\n".join(
+            builder._build_enhanced_history_section(_step14_history_instance(4))
+        )
+        assert all(f'"{tag}"' in rendered for tag in ("u0", "s1", "u2", "s3"))
+        # The P1-8 expression would fetch only ceil(2 / 2) = 1 exchange.
+        conversation = _step14_history_instance(4).context.conversation
+        assert len(conversation.get_recent(math.ceil(2 / 2))) == 2

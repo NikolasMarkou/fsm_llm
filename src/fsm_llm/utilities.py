@@ -382,7 +382,8 @@ def filter_context_tree(
           SAME object, like ``copy.deepcopy`` preserves aliasing).
         - Never truncates: the result is either the whole filtered value or
           an exception. A linear pre-scan (``_cycle_reaching_containers``)
-          finds every container that lies on or can reach a cycle. Every
+          finds every container that lies on or can reach a cycle (skipped
+          for a plain ``dict`` whose values are all leaves). Every
           OTHER container is memoised per ``(container, depth)`` wherever it
           sits, even when the context holds a cycle elsewhere, so aliasing
           costs linear work and ``should_drop``/``on_drop`` run once per
@@ -421,7 +422,17 @@ def filter_context_tree(
     # reach a container that is active at the reuse site, which must then be
     # a cycle drop), and do NOT go back to one global acyclic bit. See D-052.
     """
-    reaching, distinct_items = _cycle_reaching_containers(source)
+    # DECISION plan-2026-09-22T080837-8b258a25/D-037
+    # A plain dict of leaves reaches no container, so `reaching` is empty and
+    # `distinct_items` is len(source) either way: skip only the pre-scan. Do
+    # NOT widen to Mapping/dict subclasses (the pre-scan walks a non-dict
+    # Mapping's keys) and do NOT add a truncating shortcut (D-045). See D-037.
+    if type(source) is dict and not any(
+        isinstance(value, (dict, list, tuple)) for value in source.values()
+    ):
+        reaching, distinct_items = set(), len(source)
+    else:
+        reaching, distinct_items = _cycle_reaching_containers(source)
     active: set[int] = set()
     # (id, depth) -> filtered value, for containers that reach no cycle.
     memo: dict[tuple[int, int], Any] = {}
