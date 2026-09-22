@@ -22,6 +22,17 @@ from .logging import logger, setup_file_logging
 # --------------------------------------------------------------
 
 _REDACTED = "<redacted>"
+_CYCLE_PLACEHOLDER = "<redacted:cycle>"
+
+
+class _RedactionWalk:
+    """Per-call state of one ``_redact_context`` walk (never shared)."""
+
+    def __init__(self) -> None:
+        self.active: set[int] = set()  # ids of containers on the current path
+        # (id, depth) -> redacted result, only for subtrees that met no cycle.
+        self.memo: dict[tuple[int, int], object] = {}
+        self.met_cycle = False
 
 
 # DECISION plan-2026-07-18T162030-a02151fe/D-015 [STALE]
@@ -46,21 +57,43 @@ _REDACTED = "<redacted>"
 # Behavior AT the bound is fail-CLOSED for the same reason as D-010: a subtree
 # too deep to inspect is redacted wholesale rather than logged verbatim,
 # otherwise burying a secret 17 levels down prints it. See decisions.md D-014.
-def _redact_value(value: object, depth: int) -> object:
+#
+# DECISION plan-2026-09-22T080837-8b258a25/D-016
+# A cycle is REPLACED by `_CYCLE_PLACEHOLDER`, never dropped (the rule above).
+# The (id, depth) memo caches ONLY a subtree whose walk met no placeholder: a
+# placeholder depends on the active path, so sharing it is wrong (D-052). Do
+# NOT key the memo by id alone (the depth bound truncates per depth), and do
+# NOT route this through `utilities.filter_context_tree` (it drops, D-023).
+def _redact_value(value: object, depth: int, walk: _RedactionWalk) -> object:
     """Redact one context value; recurses into dicts and into lists/tuples."""
+    if not isinstance(value, (dict, list, tuple)):
+        return value
+    if depth > MAX_CONTEXT_FILTER_DEPTH:
+        return _REDACTED
+    node = id(value)
+    if node in walk.active:
+        walk.met_cycle = True
+        return _CYCLE_PLACEHOLDER
+    memo_key = (node, depth)
+    if memo_key in walk.memo:
+        return walk.memo[memo_key]
+    # Each subtree reports its OWN cycle flag; it is OR-ed back into the
+    # parent's afterwards, so an ancestor of a placeholder is never cached.
+    outer_met_cycle, walk.met_cycle = walk.met_cycle, False
+    walk.active.add(node)
     if isinstance(value, dict):
-        if depth > MAX_CONTEXT_FILTER_DEPTH:
-            return _REDACTED
-        return _redact_mapping(value, depth)
-    if isinstance(value, (list, tuple)):
-        if depth > MAX_CONTEXT_FILTER_DEPTH:
-            return _REDACTED
-        items = [_redact_value(item, depth + 1) for item in value]
-        return tuple(items) if isinstance(value, tuple) else items
-    return value
+        result: object = _redact_mapping(value, depth, walk)
+    else:
+        items = [_redact_value(item, depth + 1, walk) for item in value]
+        result = tuple(items) if isinstance(value, tuple) else items
+    walk.active.discard(node)
+    if not walk.met_cycle:
+        walk.memo[memo_key] = result
+    walk.met_cycle = walk.met_cycle or outer_met_cycle
+    return result
 
 
-def _redact_mapping(source: dict, depth: int) -> dict:
+def _redact_mapping(source: dict, depth: int, walk: _RedactionWalk) -> dict:
     """Apply the key match at one level, then recurse into the values kept."""
     result = {}
     for key, value in source.items():
@@ -73,11 +106,11 @@ def _redact_mapping(source: dict, depth: int) -> dict:
                 f"Log-redaction skipped for context key {key!r} "
                 f"({type(key).__name__}): only str keys can be pattern-matched"
             )
-            result[key] = _redact_value(value, depth + 1)
+            result[key] = _redact_value(value, depth + 1, walk)
         elif is_forbidden_context_entry(key, value):
             result[key] = _REDACTED
         else:
-            result[key] = _redact_value(value, depth + 1)
+            result[key] = _redact_value(value, depth + 1, walk)
     return result
 
 
@@ -88,9 +121,15 @@ def _redact_context(data: dict) -> dict:
     inside dicts nested in lists/tuples — so ``{"user": {"password": "x"}}``
     is redacted like its flat equivalent. Matched KEYS stay visible and only
     their values become ``"<redacted>"``. Recursion is bounded at
-    ``MAX_CONTEXT_FILTER_DEPTH``; anything deeper is redacted wholesale.
+    ``MAX_CONTEXT_FILTER_DEPTH``; anything deeper is redacted wholesale. A
+    container already on the recursion path (a cycle) becomes
+    ``"<redacted:cycle>"``. Work is linear in the distinct (container, depth)
+    pairs, so aliased input does not blow up. The result may share one
+    redacted subtree between the places an input subtree was aliased.
     """
-    return _redact_mapping(data, 0)
+    walk = _RedactionWalk()
+    walk.active.add(id(data))
+    return _redact_mapping(data, 0, walk)
 
 
 # DECISION plan-2026-09-20T114608-a8e47b88/D-014
@@ -233,9 +272,12 @@ def main(fsm_path, max_history_size, max_message_length):
                 # (datetime, set, ...) must not crash the CLI's debug/dump
                 # logging path -- but the fallback must never str()/repr()
                 # the object (see _json_default's own docstring/D-014).
-                logger.debug(
-                    "Context data: "
-                    f"{json.dumps(_redact_context(data), default=_json_default)}"
+                # Lazy (D-016): no redaction or dump runs unless DEBUG is on.
+                logger.opt(lazy=True).debug(
+                    "Context data: {}",
+                    lambda data=data: json.dumps(
+                        _redact_context(data), default=_json_default
+                    ),
                 )
 
             except KeyboardInterrupt:
@@ -250,9 +292,9 @@ def main(fsm_path, max_history_size, max_message_length):
                 return CLI_EXIT_FAILURE
 
         data = fsm.get_data(conversation_id)
-        logger.info(
-            "Data: \n"
-            f"{json.dumps(_redact_context(data), indent=3, default=_json_default)}"
+        logger.opt(lazy=True).info(
+            "Data: \n{}",
+            lambda: json.dumps(_redact_context(data), indent=3, default=_json_default),
         )
     finally:
         # Clean up when done — always runs even on exception
