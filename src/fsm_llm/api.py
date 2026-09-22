@@ -134,7 +134,7 @@ from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 class FSMStackFrame(BaseModel):
     """Represents a single FSM in the conversation stack."""
 
-    fsm_definition: FSMDefinition | dict[str, Any] | str
+    fsm_definition: FSMDefinition
     conversation_id: str
     return_context: dict[str, Any] = Field(default_factory=dict)
     shared_context_keys: list[str] = Field(default_factory=list)
@@ -919,16 +919,9 @@ class API:
             )
             # C11: the definition's NAME, not `str(definition)` (the whole
             # pydantic repr: every state, persona and instruction text).
-            definition = current_frame.fsm_definition
-            if isinstance(definition, FSMDefinition):
-                fsm_type = definition.name
-            elif isinstance(definition, dict):
-                fsm_type = str(definition.get("name", ""))
-            else:
-                fsm_type = definition
             summary_context = {
                 "_sub_conversation_summary": {
-                    "fsm_type": fsm_type,
+                    "fsm_type": current_frame.fsm_definition.name,
                     "final_context": current_fsm_context,
                     "exchange_count": len(current_history),
                 }

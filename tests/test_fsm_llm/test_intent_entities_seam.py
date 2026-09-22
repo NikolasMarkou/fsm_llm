@@ -352,9 +352,10 @@ class TestSiblingCoercersAgree:
     """Fails loudly if a future edit re-splits the two coercers.
 
     `IntentScore.coerce_entity_values` and
-    `ClassificationResult.coerce_entity_values` are intentionally textually
-    identical modulo the return annotation. This is the DRY convergence S5
-    established; the original defect was precisely their divergence.
+    `ClassificationResult.coerce_entity_values` both delegate to the shared
+    `definitions._coerce_entity_values` (D-010 of plan-2026-09-22T080837-8b258a25,
+    pinned in test_audit_2026_09_22.py). The original defect was precisely
+    their divergence.
     """
 
     @pytest.mark.parametrize(
@@ -379,5 +380,5 @@ class TestSiblingCoercersAgree:
         )
         assert score.entities == single.entities, (
             "IntentScore and ClassificationResult entity coercion have DIVERGED; "
-            "they must remain textually identical (see decisions.md D-010)"
+            "both must delegate to definitions._coerce_entity_values"
         )

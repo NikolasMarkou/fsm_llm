@@ -6,6 +6,8 @@ import pytest
 
 from fsm_llm.definitions import (
     FSMContext,
+    FSMDefinition,
+    State,
     TransitionCondition,
 )
 from fsm_llm.expressions import (
@@ -17,6 +19,15 @@ from fsm_llm.expressions import (
 )
 from fsm_llm.prompts import BasePromptBuilder, BasePromptConfig
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+
+
+def _frame_definition(name: str) -> FSMDefinition:
+    """A minimal one-state frame definition; these tests never read its states."""
+    only = State(id="s", description="d", purpose="p")
+    return FSMDefinition(
+        name=name, description="d", initial_state="s", states={"s": only}
+    )
+
 
 # ── VB1: evaluate_logic silently ignores extra keys ────
 
@@ -173,13 +184,13 @@ class TestUpdateMergeReturnContext:
         api.conversation_stacks = {
             "conv1": [
                 FSMStackFrame(
-                    fsm_definition="fsm1",
+                    fsm_definition=_frame_definition("fsm1"),
                     conversation_id="inner1",
                     shared_context_keys=["shared_key"],
                     return_context={},
                 ),
                 FSMStackFrame(
-                    fsm_definition="fsm2",
+                    fsm_definition=_frame_definition("fsm2"),
                     conversation_id="inner2",
                     shared_context_keys=["shared_key"],
                     return_context={"custom_result": "value"},
@@ -224,9 +235,15 @@ class TestEndConversationStackOrder:
         api.fsm_manager.end_conversation.side_effect = track_end
         api.conversation_stacks = {
             "root": [
-                FSMStackFrame(fsm_definition="fsm1", conversation_id="bottom"),
-                FSMStackFrame(fsm_definition="fsm2", conversation_id="middle"),
-                FSMStackFrame(fsm_definition="fsm3", conversation_id="top"),
+                FSMStackFrame(
+                    fsm_definition=_frame_definition("fsm1"), conversation_id="bottom"
+                ),
+                FSMStackFrame(
+                    fsm_definition=_frame_definition("fsm2"), conversation_id="middle"
+                ),
+                FSMStackFrame(
+                    fsm_definition=_frame_definition("fsm3"), conversation_id="top"
+                ),
             ]
         }
         api.active_conversations = {"root": True}

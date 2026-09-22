@@ -456,12 +456,21 @@ class TestConversationMemoryLeak:
     def test_end_conversation_cleans_up_stacks(self):
         """end_conversation should remove entries from conversation_stacks."""
         from fsm_llm.api import API, FSMStackFrame
+        from fsm_llm.definitions import FSMDefinition, State
 
         api = API.__new__(API)
         api.active_conversations = {"conv1": True}
         api.conversation_stacks = {
             "conv1": [
-                FSMStackFrame(fsm_definition="test", conversation_id="conv1_inner")
+                FSMStackFrame(
+                    fsm_definition=FSMDefinition(
+                        name="test",
+                        description="d",
+                        initial_state="s",
+                        states={"s": State(id="s", description="d", purpose="p")},
+                    ),
+                    conversation_id="conv1_inner",
+                )
             ]
         }
         api.fsm_manager = MagicMock()

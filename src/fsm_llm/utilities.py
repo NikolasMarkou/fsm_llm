@@ -23,7 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .constants import CONTEXT_FILTER_CYCLIC_WORK_FACTOR, MAX_CONTEXT_FILTER_NODES
-from .definitions import FSMDefinition
+from .definitions import FSMDefinition, FSMDefinitionNotFoundError
 
 # --------------------------------------------------------------
 # Local imports
@@ -977,7 +977,9 @@ def load_fsm_definition(fsm_id_or_path: str) -> FSMDefinition:
         Loaded FSM definition
 
     Raises:
-        ValueError: If FSM cannot be loaded
+        FSMDefinitionNotFoundError: If a non-path id is given (no registry;
+            also a ``ValueError``)
+        ValueError: If the file cannot be loaded
     """
     # Check if input looks like a file path
     if (
@@ -988,9 +990,10 @@ def load_fsm_definition(fsm_id_or_path: str) -> FSMDefinition:
     ):
         return load_fsm_from_file(fsm_id_or_path)
 
-    # Otherwise treat as FSM ID - no built-in FSM registry for now
-    logger.error(f"Unknown FSM ID: {fsm_id_or_path}")
-    raise ValueError(f"Unknown FSM ID: {fsm_id_or_path}")
+    # Otherwise treat as FSM ID - there is no FSM registry
+    error = FSMDefinitionNotFoundError(fsm_id_or_path)
+    logger.error(str(error))
+    raise error
 
 
 # --------------------------------------------------------------

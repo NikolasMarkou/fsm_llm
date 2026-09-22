@@ -1201,6 +1201,7 @@ class Conversation(BaseModel):
         """
         limit = self.max_history_size * 2
         if limit == 0:
+            self._append_to_summary(self.exchanges)
             self.exchanges.clear()
             return
         if len(self.exchanges) > limit:
@@ -1518,6 +1519,29 @@ class ClassificationSchema(BaseModel):
         return [i.name for i in self.intents]
 
 
+def _coerce_entity_values(v: Any) -> dict[str, str | None]:
+    """Coerce raw LLM ``entities`` into ``{name: str | None}``.
+
+    Shared by the ``IntentScore`` and ``ClassificationResult`` validators.
+    A non-dict becomes ``{}``; a list joins with ``", "``; ``None`` stays
+    ``None``; anything else is ``str()``'d. Never raises.
+    """
+    # DECISION plan-2026-09-22T080837-8b258a25/D-010 (supersedes 80b0bd4d D-010)
+    # Both entity validators MUST call this one function; do not inline a copy.
+    # Do NOT map None to str(None): "None" is truthy and defeats a handler's
+    # `if entities.get(k):` check. Do NOT narrow `entities` to dict[str, str].
+    if not isinstance(v, dict):
+        return {}
+    return {
+        k: (
+            ", ".join(str(i) for i in val)
+            if isinstance(val, list)
+            else (str(val) if val is not None else None)
+        )
+        for k, val in v.items()
+    }
+
+
 class IntentScore(BaseModel):
     """A single scored intent within a classification result."""
 
@@ -1529,24 +1553,10 @@ class IntentScore(BaseModel):
         default_factory=dict, description="Extracted entities relevant to this intent"
     )
 
-    # DECISION plan-2026-07-18T051819-80b0bd4d/D-010 [STALE]: this body MUST stay textually identical
-    # to ClassificationResult.coerce_entity_values below. Do NOT "simplify" back to a
-    # bare str(val) and do NOT narrow `entities` to dict[str, str] to appease mypy --
-    # str(None) == "None" is a TRUTHY string that silently defeats a handler's
-    # `if entities.get(k):` check downstream of IntentRouter.route_multi.
     @field_validator("entities", mode="before")
     @classmethod
     def coerce_entity_values(cls, v: Any) -> dict[str, str | None]:
-        if not isinstance(v, dict):
-            return {}
-        return {
-            k: (
-                ", ".join(str(i) for i in val)
-                if isinstance(val, list)
-                else (str(val) if val is not None else None)
-            )
-            for k, val in v.items()
-        }
+        return _coerce_entity_values(v)
 
 
 class ClassificationResult(BaseModel):
@@ -1566,16 +1576,7 @@ class ClassificationResult(BaseModel):
     @field_validator("entities", mode="before")
     @classmethod
     def coerce_entity_values(cls, v: Any) -> dict[str, str | None]:
-        if not isinstance(v, dict):
-            return {}
-        return {
-            k: (
-                ", ".join(str(i) for i in val)
-                if isinstance(val, list)
-                else (str(val) if val is not None else None)
-            )
-            for k, val in v.items()
-        }
+        return _coerce_entity_values(v)
 
     #: Default threshold for is_low_confidence when no schema is available.
     #: For schema-aware checks, use Classifier.is_low_confidence() instead.
@@ -1668,6 +1669,28 @@ class ConversationBusyError(FSMError):
     def __init__(self, message: str, conversation_id: str | None = None, **kwargs):
         super().__init__(message, **kwargs)
         self.conversation_id = conversation_id
+
+
+class FSMDefinitionNotFoundError(FSMError, ValueError):
+    """No FSM definition is resolvable for a non-path id.
+
+    Raised by ``utilities.load_fsm_definition`` (and so by the ``API`` loader
+    fallback) for an id that is neither a file path nor cached: there is no
+    FSM registry. Also a ``ValueError`` so existing handlers keep catching it.
+    """
+
+    def __init__(self, fsm_id: str):
+        super().__init__(
+            f"Unknown FSM ID '{fsm_id}': no FSM registry: only file paths are "
+            f"loadable; id '{fsm_id}' is not cached",
+            details={"fsm_id": fsm_id},
+        )
+        self.fsm_id = fsm_id
+
+    def __reduce__(self):
+        # Pickling replays ``cls(*self.args)``; ``args`` holds the formatted
+        # message, not ``fsm_id``. Rebuild from the real argument.
+        return (self.__class__, (self.fsm_id,), self.__dict__.copy())
 
 
 class StateNotFoundError(FSMError):

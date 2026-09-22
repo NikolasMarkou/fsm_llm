@@ -66,7 +66,13 @@ class SessionState(BaseModel):
     current_state: str
     context_data: dict[str, Any] = Field(default_factory=dict)
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
-    stack_depth: int = 1
+    stack_depth: int = Field(
+        default=1,
+        description=(
+            "advisory; written by save_session, never read by restore "
+            "(stacks are not restorable; only the root frame is saved)."
+        ),
+    )
     # Optional carrier for a conversation's WorkingMemory. When populated the
     # shape is {"buffers": {name: {k: v}, ..., "_hidden_buffers": [name, ...]},
     # "hidden_buffers": [name, ...]}. "buffers" is WorkingMemory.to_dict()'s

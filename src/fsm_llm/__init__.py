@@ -57,6 +57,7 @@ from .definitions import (
     FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
+    FSMDefinitionNotFoundError,
     # Exception classes
     FSMError,
     FSMInstance,
@@ -269,6 +270,7 @@ __all__ = [
     "visualize_fsm_from_file",
     # Exceptions
     "FSMError",
+    "FSMDefinitionNotFoundError",
     "ConversationBusyError",
     "StateNotFoundError",
     "InvalidTransitionError",
@@ -383,7 +385,7 @@ def get_version_info():
     """Get detailed version information."""
     return {
         "package_version": __version__,
-        "architecture": "improved-2-pass",
+        "architecture": "2-pass",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "features": {
             "data_extraction_phase": True,
