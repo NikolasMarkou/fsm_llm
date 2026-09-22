@@ -38,6 +38,10 @@ from pydantic import BaseModel, Field
 
 from .logging import logger
 
+# One id rule for _path and list_sessions, matched with fullmatch: ``$`` in a
+# ``re.match`` pattern also matches before a trailing newline ("abc\n").
+_SESSION_ID_RE = re.compile(r"[a-zA-Z0-9_\-]+")
+
 
 class SessionState(BaseModel):
     """Serializable snapshot of a conversation's state."""
@@ -150,7 +154,7 @@ class FileSessionStore(SessionStore):
 
     def _path(self, session_id: str) -> Path:
         # Validate session_id to prevent path traversal
-        if not re.match(r"^[a-zA-Z0-9_\-]+$", session_id):
+        if not _SESSION_ID_RE.fullmatch(session_id):
             raise ValueError(
                 f"Invalid session_id: {session_id!r}. "
                 "Only alphanumeric characters, hyphens, and underscores are allowed."
@@ -172,6 +176,8 @@ class FileSessionStore(SessionStore):
         try:
             with os.fdopen(fd, "w") as f:
                 f.write(json.dumps(data, indent=2, default=str))
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp_name, str(path))
             logger.debug(f"Session saved: {session_id}")
         finally:
@@ -190,28 +196,45 @@ class FileSessionStore(SessionStore):
 
     def load(self, session_id: str) -> SessionState | None:
         path = self._path(session_id)
-        if not path.exists():
-            return None
         try:
+            if not path.exists():
+                return None
             data = json.loads(path.read_text())
             return SessionState.model_validate(data)
         except (json.JSONDecodeError, ValueError, OSError) as e:
-            # OSError covers PermissionError and the TOCTOU window where the file
-            # is deleted between exists() and read_text(); contract is to return
+            # OSError covers PermissionError, ENAMETOOLONG from exists() and the
+            # TOCTOU window where the file is deleted between exists() and
+            # read_text(); contract is to return
             # None on any unreadable/invalid session, never raise (CB3-001).
             logger.warning(f"Failed to load session {session_id}: {e}")
             return None
 
     def delete(self, session_id: str) -> bool:
         path = self._path(session_id)
-        if path.exists():
+        # Unlink directly: an exists()-then-unlink() pair races a concurrent
+        # delete. A missing file is False; any other OSError is logged, False.
+        try:
             path.unlink()
-            logger.debug(f"Session deleted: {session_id}")
-            return True
-        return False
+        except FileNotFoundError:
+            return False
+        except OSError as e:
+            logger.warning(f"Failed to delete session {session_id}: {e}")
+            return False
+        logger.debug(f"Session deleted: {session_id}")
+        return True
 
     def list_sessions(self) -> list[str]:
-        return [p.stem for p in self._dir.glob("*.json") if p.is_file()]
+        # Only ids _path accepts, so every listed id round-trips through load.
+        return [
+            p.stem
+            for p in self._dir.glob("*.json")
+            if _SESSION_ID_RE.fullmatch(p.stem) and p.is_file()
+        ]
 
     def exists(self, session_id: str) -> bool:
-        return self._path(session_id).exists()
+        path = self._path(session_id)
+        try:
+            return path.exists()
+        except OSError as e:
+            logger.warning(f"Failed to check session {session_id}: {e}")
+            return False

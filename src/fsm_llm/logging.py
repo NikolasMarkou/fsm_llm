@@ -172,26 +172,30 @@ def setup_logging(
         global _file_handler_initialized
         if _file_handler_initialized:
             return -1
-        _file_handler_initialized = True
         os.makedirs(log_dir, exist_ok=True)
         file_path = os.path.join(log_dir, LOG_DEFAULT_FILE_PATTERN)
 
         if resolved_format == LOG_FORMAT_JSON:
             # JSON file logging: use custom _record_to_json for flat JSONL
             # compatible with log aggregation systems (Loki, ELK, Datadog).
-            def _json_file_filter(record):
-                prepare_log_record(record)
-                record["extra"]["_jsonl"] = _record_to_json(record)
-                return record
+            # DECISION plan-2026-09-21T203800-8a03483a/D-021
+            # Do NOT stash the rendered line in record["extra"] (the old
+            # "_jsonl" key): loguru hands every handler the SAME record dict,
+            # so a later JSON sink copied that key into its own line. The line
+            # is rendered in a callable format and returned as a literal
+            # template (braces escaped), so it never touches the record.
+            def _json_file_format(record):
+                line = _record_to_json(record)
+                return line.replace("{", "{{").replace("}", "}}") + "\n{exception}"
 
             handler_id = logger.add(
                 file_path,
-                format="{extra[_jsonl]}",
+                format=_json_file_format,
                 rotation=rotation,
                 retention=retention,
                 compression=compression,
                 level=resolved_level,
-                filter=_json_file_filter,
+                filter=prepare_log_record,
             )
         else:
             handler_id = logger.add(
@@ -203,6 +207,9 @@ def setup_logging(
                 level=resolved_level,
                 filter=prepare_log_record,
             )
+        # Set only once logger.add succeeded: a failed add (bad level, bad
+        # log_dir) must not block every later file-logging attempt.
+        _file_handler_initialized = True
     else:
         # DECISION plan-2026-07-18T162030-a02151fe/D-012 [STALE]
         # Liveness check, not a plain boolean: the guard must self-heal when a
