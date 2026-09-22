@@ -60,8 +60,22 @@ _TOO_DEEP = object()
 # Sentinel: the walk's node budget (MAX_CONTEXT_FILTER_NODES) is spent.
 _OVER_BUDGET = object()
 
-# Per-line cap for the compact history block in field-extraction prompts.
-_FIELD_HISTORY_LINE_CHARS = 150
+# Per-line cap for the compact history blocks (field-extraction prompt and the
+# classifier's <classification_context>), applied after sanitization.
+_HISTORY_LINE_CHARS = 150
+
+
+def _cap_history_line(text: str) -> str:
+    """Cap one already-sanitized history line at ``_HISTORY_LINE_CHARS``.
+
+    Contract: takes the sanitized text; returns it unchanged when short,
+    else its first ``_HISTORY_LINE_CHARS`` characters plus ``"..."``. Never
+    raises. Shared by the field-extraction history and
+    ``build_classification_context_block`` so the two caps cannot drift.
+    """
+    if len(text) > _HISTORY_LINE_CHARS:
+        return text[:_HISTORY_LINE_CHARS] + "..."
+    return text
 
 
 class HistoryManagementStrategy(str, Enum):
@@ -1328,7 +1342,8 @@ def build_classification_context_block(context: dict[str, Any] | None) -> str:
       ``{"user"|"system": text}`` exchanges, oldest first), ``purpose`` (str),
       ``data`` (dict of context values).
     - Every history message and the purpose pass through
-      ``_sanitize_text_for_prompt``; ``data`` first passes the same
+      ``_sanitize_text_for_prompt``; each history line is then capped by
+      ``_cap_history_line`` (``_HISTORY_LINE_CHARS``); ``data`` first passes the same
       ``_filter_context_for_security`` and key cap as Pass-2
       ``<current_context>``, then its JSON is sanitized too.
     - Returns ``""`` when ``context`` is None/empty or nothing survives
@@ -1343,7 +1358,7 @@ def build_classification_context_block(context: dict[str, Any] | None) -> str:
 
     lines = [
         f"{'user' if str(role).lower() == 'user' else 'assistant'}: "
-        f"{sanitize(str(text))}"
+        f"{_cap_history_line(sanitize(str(text)))}"
         for exchange in context.get("history") or []
         for role, text in exchange.items()
     ]
@@ -1523,9 +1538,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                         continue
                     # Sanitize BEFORE the per-line cap so the cap still bounds
                     # the text actually emitted into the prompt.
-                    msg = self._sanitize_text_for_prompt(message)
-                    if len(msg) > _FIELD_HISTORY_LINE_CHARS:
-                        msg = msg[:_FIELD_HISTORY_LINE_CHARS] + "..."
+                    msg = _cap_history_line(self._sanitize_text_for_prompt(message))
                     formatted.append({"user" if role == "user" else "system": msg})
 
             managed = self._manage_conversation_history(formatted)

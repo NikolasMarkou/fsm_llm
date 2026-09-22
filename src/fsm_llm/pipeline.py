@@ -2542,9 +2542,11 @@ class MessagePipeline:
         ``history`` is the last ``CLASSIFIER_HISTORY_EXCHANGES`` exchanges
         without the in-flight user message (the classifier receives that as
         its user turn). ``data`` is ``get_user_visible_data()`` (WorkingMemory
-        included, data wins) scoped by ``context_keys`` when given, else by
-        the state's ``read_keys``. Security filtering and sanitization happen
-        where it is rendered (``prompts.build_classification_context_block``).
+        included, data wins) scoped by the state's ``read_keys`` and then, when
+        given, narrowed to ``context_keys`` (the intersection: ``context_keys``
+        can never expose a key ``read_keys`` hides). Security filtering,
+        sanitization and the per-line history cap happen where it is rendered
+        (``prompts.build_classification_context_block``).
         """
         # DECISION plan-2026-09-21T203800-8a03483a/D-004: one builder for
         # both classifier call sites (extraction and ambiguous transition).
@@ -2554,11 +2556,14 @@ class MessagePipeline:
         history = instance.context.conversation.get_recent(CLASSIFIER_HISTORY_EXCHANGES)
         if history and "user" in history[-1]:
             history = history[:-1]
+        # DECISION plan-2026-09-21T203800-8a03483a/D-047: read_keys ALWAYS
+        # applies first; context_keys only narrows it. Do NOT return to
+        # "context_keys replaces read_keys" (it sent a read_keys-hidden salary
+        # to the classifier). See decisions.md D-047.
         visible = instance.context.get_user_visible_data()
+        data = self._apply_context_scope(visible, state, conversation_id)
         if context_keys is not None:
-            data = {k: v for k, v in visible.items() if k in context_keys}
-        else:
-            data = self._apply_context_scope(visible, state, conversation_id)
+            data = {k: v for k, v in data.items() if k in context_keys}
         return {"history": history, "purpose": state.purpose, "data": data}
 
     # ----------------------------------------------------------

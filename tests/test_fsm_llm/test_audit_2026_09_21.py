@@ -603,6 +603,56 @@ class TestStep03A3:
 
 
 # ---------------------------------------------------------------------------
+# Step 3.1: context_keys narrowed by read_keys; classifier history lines capped
+# ---------------------------------------------------------------------------
+
+
+class TestStep03_1:
+    """A3 completion: an extraction's ``context_keys`` can only narrow what
+    the state's ``read_keys`` already exposes, and every classifier history
+    line is capped like the field-extraction history
+    (plan-2026-09-21T203800-8a03483a/D-004, D-047)."""
+
+    def test_a3_context_keys_cannot_bypass_read_keys(self):
+        fsm = _a3_extraction_fsm(context_keys=["other", "topic"])
+        fsm.states["triage"] = fsm.states["triage"].model_copy(
+            update={"context_scope": ContextScope(read_keys=["topic"])}
+        )
+        api, conv_id = _a3_api(fsm)
+        with _ClassifierCapture("browse") as cap:
+            api.converse("hello", conv_id)
+        assert "running shoes" in cap.system()
+        assert "hidden-value-xyz" not in cap.system()
+
+    def test_a3_context_keys_without_read_keys_unchanged(self):
+        """Guard (passes on the pre-step source): no context_scope, so
+        ``context_keys`` alone scopes the data."""
+        api, conv_id = _a3_api(_a3_extraction_fsm(context_keys=["other"]))
+        with _ClassifierCapture("browse") as cap:
+            api.converse("hello", conv_id)
+        assert "hidden-value-xyz" in cap.system()
+        assert "running shoes" not in cap.system()
+
+    def test_a3_history_lines_are_capped(self):
+        from fsm_llm.prompts import build_classification_context_block
+
+        long_turn = "q" * 400 + "TAILMARK"
+        api, conv_id = _a3_api(_a3_extraction_fsm())
+        with _ClassifierCapture("browse") as cap:
+            api.converse(long_turn, conv_id)
+            api.converse("the second one", conv_id)
+        assert "q" * 100 in cap.system(1)
+        assert "TAILMARK" not in cap.system(1)
+
+        block = build_classification_context_block(
+            {"history": [{"user": "short"}, {"system": "s" * 500 + "TAILMARK"}]}
+        )
+        assert "user: short" in block
+        assert "TAILMARK" not in block
+        assert max(len(line) for line in block.splitlines()) < 200
+
+
+# ---------------------------------------------------------------------------
 # Step 4: A4 (full classification result persisted in context.metadata)
 # ---------------------------------------------------------------------------
 

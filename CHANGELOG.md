@@ -81,7 +81,7 @@ A. Decision-making (classification / memory)
 
 - A1: the transition classifier's `confidence_threshold` is enforced; a result below it stays in the current state (WARNING, record flagged `low_confidence`).
 - A2: priority spread alone no longer bypasses the classifier inconsistently; the unique lowest priority wins and only ties are ambiguous (see above).
-- A3: `Classifier.classify`/`classify_multi` accept a context (last 3 exchanges, state purpose, scoped visible data), rendered sanitized and security-filtered; the pipeline feeds it at both call sites.
+- A3: `Classifier.classify`/`classify_multi` accept a context (last 3 exchanges with each line capped at 150 characters, state purpose, scoped visible data), rendered sanitized and security-filtered; the pipeline feeds it at both call sites. An extraction's `context_keys` only narrows the state's `context_scope.read_keys`; it can no longer expose a key `read_keys` hides.
 - A4: every classification-extraction result is kept in `context.metadata["classification_results"]` and the ambiguous-transition record in `context.metadata["transition_classification"]`, readable via `get_complete_conversation`.
 - A5: after a transition, the new state's unset `classification_extractions` run on the same message.
 - A6: `Conversation.summary` is rendered as `<conversation_summary>` in prompts and persisted in sessions (`SessionState.conversation_summary`).
