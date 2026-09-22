@@ -1304,24 +1304,8 @@ class TestStep9DefaultTemperature:
 
 
 class TestStep9LeafDeadCode:
-    def test_short_circuit_operators_never_reach_operations(self):
-        from fsm_llm.expressions import _SHORT_CIRCUIT_OPERATORS, operations
-
-        assert _SHORT_CIRCUIT_OPERATORS == {"and", "or", "if"}
-        assert _SHORT_CIRCUIT_OPERATORS.isdisjoint(operations)
-
-    def test_every_allowed_operator_has_exactly_one_dispatcher(self):
-        from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
-        from fsm_llm.expressions import (
-            _SHORT_CIRCUIT_OPERATORS,
-            _data_operators,
-            operations,
-        )
-
-        tables = [set(operations), set(_data_operators), set(_SHORT_CIRCUIT_OPERATORS)]
-        assert set().union(*tables) == ALLOWED_JSONLOGIC_OPERATIONS
-        assert sum(len(t) for t in tables) == len(ALLOWED_JSONLOGIC_OPERATIONS)
-
+    # The operator disjointness / one-dispatcher pins moved to
+    # test_audit_sweeps.py::TestOperatorSweep (plan step 15).
     def test_short_circuit_still_lazy_and_if_still_works(self):
         from fsm_llm.expressions import evaluate_logic
 
