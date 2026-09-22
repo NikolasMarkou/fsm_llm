@@ -43,7 +43,13 @@ def _check_id(session_id: str) -> None:
 
 
 def save_working_memory(memory: WorkingMemory, path: str) -> None:
-    """Atomically write a WorkingMemory snapshot to a JSON file."""
+    """Atomically write a WorkingMemory snapshot to a JSON file.
+
+    Values are serialised through ``fsm_llm.session.session_json_default``:
+    a non-JSON value outside its exact stdlib scalar keep-set is written as
+    ``"<redacted:TypeName>"``, NOT as its ``str()`` (a ``set`` or a ``Path``
+    does not survive the round trip as usable text).
+    """
     target = os.path.expanduser(path)
     parent = os.path.dirname(target)
     if parent:

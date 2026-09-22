@@ -60,10 +60,6 @@ def session_json_default(value: Any) -> str:
     return str(value) if redacted is value else redacted
 
 
-# Private alias kept for existing references.
-_session_json_default = session_json_default
-
-
 class SessionState(BaseModel):
     """Serializable snapshot of a conversation's state."""
 

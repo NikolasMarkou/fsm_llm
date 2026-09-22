@@ -237,35 +237,40 @@ class TestStep2GetterFallbacks:
         assert _api().has_conversation_ended("never-started") is False
 
     @pytest.mark.parametrize(
-        ("getter", "manager_method", "expected"),
+        "getter",
         [
-            ("get_data", "get_conversation_data", {"note": "cached"}),
-            ("has_conversation_ended", "has_conversation_ended", True),
-            ("get_current_state", "get_conversation_state", "end"),
-            (
-                "get_conversation_history",
-                "get_conversation_history",
-                [{"user": "hi"}],
-            ),
+            "get_data",
+            "has_conversation_ended",
+            "get_current_state",
+            "get_conversation_history",
         ],
     )
-    def test_p1_5_not_found_fsm_error_falls_back_to_the_cache(
-        self, getter, manager_method, expected
-    ):
+    def test_p1_5_not_found_fsm_error_falls_back_to_the_cache(self, getter):
+        """The real "API stack intact, FSM instance torn down" shape: the
+        manager's own ``end_conversation`` removes the instance while the API
+        keeps the conversation stack, so every getter raises a not-found
+        ``FSMError`` internally and must answer from the ended cache."""
         api = _api()
         conv_id, _ = api.start_conversation()
-        api._ended_conversations[conv_id] = {
-            "data": {"note": "cached"},
-            "state": "end",
-            "history": [{"user": "hi"}],
-        }
-        err = FSMError(f"Conversation {conv_id} not found")
-        # The instance is torn down (gone), which is what licenses the cache.
-        with (
-            patch.object(api.fsm_manager, manager_method, side_effect=err),
-            patch.object(api.fsm_manager, "has_instance", return_value=False),
-        ):
-            assert getattr(api, getter)(conv_id) == expected
+        api.converse("hello", conv_id)
+        frame_id = api._get_current_fsm_conversation_id(conv_id)
+        # Cache the same snapshot API.end_conversation would, then tear only
+        # the FSM instance down (no patching of the manager or the getters).
+        snapshot = api.fsm_manager.get_end_snapshot(frame_id)
+        api._ended_conversations[conv_id] = snapshot
+        api.fsm_manager.end_conversation(frame_id)
+        assert api.fsm_manager.has_instance(frame_id) is False
+        assert api._get_current_fsm_conversation_id(conv_id) == frame_id
+
+        if getter == "has_conversation_ended":
+            assert api.has_conversation_ended(conv_id) is True
+        else:
+            key = {
+                "get_data": "data",
+                "get_current_state": "state",
+                "get_conversation_history": "history",
+            }[getter]
+            assert getattr(api, getter)(conv_id) == snapshot[key]
 
     @pytest.mark.parametrize(
         ("getter", "manager_method"),

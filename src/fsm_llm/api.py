@@ -1469,8 +1469,12 @@ class API:
 
         Starts a new conversation pre-populated with the saved context
         and conversation history. Note: the persisted JSON round-trip is
-        lossy for non-JSON-native context values (datetime/set/custom
-        objects are restored as strings, not their original type).
+        lossy for non-JSON-native context values, per
+        ``session.session_json_default``: an exact stdlib scalar
+        (datetime/date/time/timedelta/Decimal/UUID) comes back as its
+        ``str()``, while anything else (set, bytes, Path, Enum, a custom
+        object) comes back as the placeholder ``"<redacted:TypeName>"``,
+        not as its ``str()`` text.
 
         Note: the ``fsm_id``-mismatch WARNING this method logs (D-011) is
         only observable if the ``fsm_llm`` logger namespace has been

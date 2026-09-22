@@ -142,6 +142,13 @@ class FSMManager:
     ):
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
+        # DECISION plan-2026-09-22T080837-8b258a25/D-041
+        # Do NOT relax this to `>= 0` to mean "caching disabled": the eviction
+        # branch in `_load_fsm_definition` runs `self.fsm_cache.popitem()` once
+        # the size bound is reached, so a bound of 0 (or negative) pops an empty
+        # OrderedDict and every start_conversation dies with a cryptic
+        # "dictionary is empty" KeyError. Disabling the cache needs the eviction
+        # branch fixed first. See D-041.
         if max_fsm_cache_size < 1:
             raise ValueError(
                 f"max_fsm_cache_size must be >= 1, got {max_fsm_cache_size}"
