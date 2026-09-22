@@ -44,8 +44,10 @@ from .utilities import redact_non_json_leaf
 _SESSION_ID_RE = re.compile(r"[a-zA-Z0-9_\-]+")
 
 
-def _session_json_default(value: Any) -> str:
-    """``json.dumps`` ``default=`` hook for ``FileSessionStore.save``.
+def session_json_default(value: Any) -> str:
+    """``json.dumps`` ``default=`` hook for every on-disk writer of context or
+    memory values (``FileSessionStore.save``, and
+    ``fsm_llm_agents.memory_persistence.save_working_memory``).
 
     Returns ``str(value)`` only for an exact stdlib value scalar (the
     ``utilities.redact_non_json_leaf`` keep-set; json never calls ``default``
@@ -56,6 +58,10 @@ def _session_json_default(value: Any) -> str:
     # to disk. Do NOT copy the scalar type set here; reuse the leaf hook.
     redacted = redact_non_json_leaf(value)
     return str(value) if redacted is value else redacted
+
+
+# Private alias kept for existing references.
+_session_json_default = session_json_default
 
 
 class SessionState(BaseModel):
@@ -191,7 +197,7 @@ class FileSessionStore(SessionStore):
         written as its ``str()`` and loads back as that string. Anything else
         that is not JSON-native (set, bytes, a subclass of those scalars, a
         custom object) is written as ``"<redacted:TypeName>"``; its
-        ``str()`` is never called (see ``_session_json_default``). The file
+        ``str()`` is never called (see ``session_json_default``). The file
         still holds the FULL context: secret-looking KEYS are removed only
         from LLM prompts. Keep the session directory as private as the data
         it stores.
@@ -203,7 +209,7 @@ class FileSessionStore(SessionStore):
         fd, tmp_name = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
-                f.write(json.dumps(data, indent=2, default=_session_json_default))
+                f.write(json.dumps(data, indent=2, default=session_json_default))
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_name, str(path))

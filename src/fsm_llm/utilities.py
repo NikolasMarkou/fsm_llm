@@ -289,7 +289,7 @@ def redact_non_json_leaf(value: Any) -> Any:
         - Never raises; never calls ``str()``/``repr()`` on *value*.
         - Shared by ``prompts.BasePromptBuilder``'s walker and
           ``context.clean_context_keys`` (as ``filter_context_tree``'s
-          ``leaf`` hook) and by ``session._session_json_default`` (the
+          ``leaf`` hook) and by ``session.session_json_default`` (the
           ``FileSessionStore.save`` ``default=`` hook);
           ``fsm._strip_internal_mapping`` does NOT use it.
 

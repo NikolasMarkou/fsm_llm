@@ -24,7 +24,12 @@ import tempfile
 from pathlib import Path
 
 from fsm_llm.memory import WorkingMemory
-from fsm_llm.session import FileSessionStore, SessionState, SessionStore
+from fsm_llm.session import (
+    FileSessionStore,
+    SessionState,
+    SessionStore,
+    session_json_default,
+)
 
 # Mirror FileSessionStore's id policy (path-traversal protection).
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -56,7 +61,16 @@ def save_working_memory(memory: WorkingMemory, path: str) -> None:
     fd, tmp = tempfile.mkstemp(dir=parent or ".", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(memory.to_dict(), fh, ensure_ascii=False, indent=2, default=str)
+            # DECISION plan-2026-09-22T080837-8b258a25/D-008
+            # Do NOT use `default=str`: an object's `__str__` (a secret) would
+            # reach disk. Share FileSessionStore's hook, never a local copy.
+            json.dump(
+                memory.to_dict(),
+                fh,
+                ensure_ascii=False,
+                indent=2,
+                default=session_json_default,
+            )
         os.replace(tmp, target)
     finally:
         if os.path.exists(tmp):

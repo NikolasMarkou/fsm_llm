@@ -67,6 +67,33 @@ class TestWorkingMemoryFileHelpers:
         assert "name" in all_data
 
 
+class _SecretBearing:
+    """An object whose ``str()`` would leak a secret if written to disk."""
+
+    def __str__(self) -> str:
+        return "sk-live-SECRET-TOKEN"
+
+
+class TestSaveNeverStrsArbitraryObjects:
+    """plan-2026-09-22T080837-8b258a25 D-039: the WorkingMemory file writer
+    shares ``fsm_llm.session``'s default hook instead of ``default=str``."""
+
+    def test_object_is_written_as_a_type_placeholder(self, tmp_path):
+        import datetime
+        import json
+
+        m = WorkingMemory()
+        m.set(BUFFER_CORE, "creds", _SecretBearing())
+        m.set(BUFFER_CORE, "when", datetime.date(2026, 9, 22))
+        path = tmp_path / "mem.json"
+        save_working_memory(m, str(path))
+        text = path.read_text(encoding="utf-8")
+        assert "SECRET" not in text
+        core = json.loads(text)[BUFFER_CORE]
+        assert core["creds"] == "<redacted:_SecretBearing>"
+        assert core["when"] == "2026-09-22"
+
+
 class TestMemorySessionStore:
     def test_requires_base_or_directory(self):
         with pytest.raises(ValueError):
