@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any, TypeVar
 
 from .constants import (
+    DEFAULT_MAX_FSM_CACHE_SIZE,
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
     END_CONVERSATION_LOCK_TIMEOUT_SECONDS,
@@ -135,7 +136,7 @@ class FSMManager:
         max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
         handler_system: HandlerSystem | None = None,
         handler_error_mode: str = "continue",
-        max_fsm_cache_size: int = 64,
+        max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
     ):
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")

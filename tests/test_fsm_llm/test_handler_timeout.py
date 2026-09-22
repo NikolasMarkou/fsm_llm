@@ -1,7 +1,7 @@
 """
 Unit tests for handler timeout functionality in the HandlerSystem.
 
-Tests cover: handler_timeout parameter, DEFAULT_HANDLER_TIMEOUT constant,
+Tests cover: handler_timeout parameter,
 timeout with error_mode interaction, and backward compatibility with
 handler_timeout=None.
 """
@@ -10,7 +10,6 @@ import time
 
 import pytest
 
-from fsm_llm.constants import DEFAULT_HANDLER_TIMEOUT
 from fsm_llm.handlers import (
     BaseHandler,
     HandlerExecutionError,
@@ -53,25 +52,6 @@ class SlowHandler(BaseHandler):
     def execute(self, context):
         time.sleep(self._sleep_seconds)
         return self._result.copy()
-
-
-# ══════════════════════════════════════════════════════════════
-# 1. DEFAULT_HANDLER_TIMEOUT constant
-# ══════════════════════════════════════════════════════════════
-
-
-class TestDefaultHandlerTimeout:
-    """Verify the DEFAULT_HANDLER_TIMEOUT constant exists and is sensible."""
-
-    def test_constant_exists(self):
-        assert DEFAULT_HANDLER_TIMEOUT is not None
-
-    def test_constant_is_positive_float(self):
-        assert isinstance(DEFAULT_HANDLER_TIMEOUT, float)
-        assert DEFAULT_HANDLER_TIMEOUT > 0
-
-    def test_constant_value(self):
-        assert DEFAULT_HANDLER_TIMEOUT == 30.0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -326,10 +306,6 @@ class TestHandlerTimeoutParameter:
     def test_handler_timeout_accepts_int(self):
         hs = HandlerSystem(handler_timeout=10)
         assert hs.handler_timeout == 10
-
-    def test_handler_timeout_accepts_default_constant(self):
-        hs = HandlerSystem(handler_timeout=DEFAULT_HANDLER_TIMEOUT)
-        assert hs.handler_timeout == DEFAULT_HANDLER_TIMEOUT
 
 
 if __name__ == "__main__":

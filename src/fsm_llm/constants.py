@@ -160,8 +160,12 @@ MAX_MULTI_INTENTS = 5
 # Upper bound on cached `Classifier` instances per `MessagePipeline`
 # (`MessagePipeline._get_classifier`), keyed on a content hash of schema +
 # model + prompt config + connection kwargs; the oldest entry is evicted at
-# the bound. Matches `FSMManager`'s `max_fsm_cache_size` default (fsm.py).
+# the bound. Matches `DEFAULT_MAX_FSM_CACHE_SIZE`.
 MAX_CLASSIFIER_CACHE_SIZE = 64
+
+# Default bound of `FSMManager`'s FSM definition LRU cache (`max_fsm_cache_size`,
+# also settable through `API(max_fsm_cache_size=...)`).
+DEFAULT_MAX_FSM_CACHE_SIZE = 64
 
 # How long FSMManager.end_conversation waits for a running turn to release the
 # conversation lock before refusing with FSMError (see the anchor in
@@ -296,14 +300,11 @@ LOG_DEFAULT_CONVERSATION_ID = "GENERAL"
 # Timeout Defaults
 # --------------------------------------------------------------
 
-# Handler execution timeout (seconds). None = no timeout.
-# Recommended: set handler_timeout=DEFAULT_HANDLER_TIMEOUT when creating
-# HandlerSystem for safety against handlers that block indefinitely.
-DEFAULT_HANDLER_TIMEOUT = 30.0
-
 # Per-HandlerSystem cap on timed-handler threads still running after their
 # timeout (stragglers). At the cap a new timed call fails like a timeout
 # instead of starting another thread (the pre-C2 pool also had 4 workers).
+# One HandlerSystem serves every conversation of an `API`, so the cap is
+# shared API-wide, not per conversation.
 MAX_TIMED_HANDLER_STRAGGLERS = 4
 
 # Workflow step execution timeout (seconds). None = no timeout.

@@ -77,7 +77,8 @@ import threading
 import traceback
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Protocol
+from types import MappingProxyType
+from typing import Any, Protocol, cast
 
 # --------------------------------------------------------------
 # Local imports
@@ -265,6 +266,11 @@ class HandlerSystem:
 
     This class manages the registration and execution of handlers, providing error
     handling and context management.
+
+    One ``HandlerSystem`` serves every conversation of an ``API``, so the
+    timed-handler straggler cap (``constants.MAX_TIMED_HANDLER_STRAGGLERS``)
+    is shared API-wide: stragglers left by one conversation can make a timed
+    handler of another fail fast as a timeout.
     """
 
     def __init__(
@@ -276,8 +282,8 @@ class HandlerSystem:
         :param error_mode: How to handle errors during handler execution
         :type error_mode: str
         :param handler_timeout: Maximum seconds a handler may run before timeout.
-            ``None`` disables timeout (default). Use
-            ``constants.DEFAULT_HANDLER_TIMEOUT`` (30 s) for safety.
+            ``None`` disables timeout (default). Reachable through
+            ``API(handler_timeout=...)``.
         :type handler_timeout: float | None
         :raises ValueError: If error_mode is not one of: continue, raise
         """
@@ -431,7 +437,16 @@ class HandlerSystem:
         # Execute applicable handlers in priority order (lower priority numbers first)
         for handler in candidates:
             handler_name = getattr(handler, "name", handler.__class__.__name__)
-            probe_context = context if updated_context is None else updated_context
+            # DECISION plan-2026-09-22T080837-8b258a25/D-006
+            # Before the first runner the probe sees a read-only view of the
+            # caller's LIVE context: a mutating condition raises TypeError
+            # (wrapped once). Do NOT deep-copy per candidate (D-020) and do NOT
+            # hand over the live dict. After the first runner it probes the copy.
+            probe_context = (
+                cast(dict[str, Any], MappingProxyType(context))
+                if updated_context is None
+                else updated_context
+            )
 
             try:
                 # Check if this handler should execute based on current conditions
@@ -502,8 +517,9 @@ class HandlerSystem:
         On timeout its result and writes are discarded and ``TimeoutError`` is
         raised; the thread keeps running until the handler returns, but only
         ever touches its own copy. While ``MAX_TIMED_HANDLER_STRAGGLERS`` such
-        threads are still alive, a new timed call raises ``TimeoutError``
-        at once without starting a thread.
+        threads are still alive (counted across every conversation this
+        system serves), a new timed call raises ``TimeoutError`` at once
+        without starting a thread.
         """
         if self.handler_timeout is None:
             return handler.execute(context)

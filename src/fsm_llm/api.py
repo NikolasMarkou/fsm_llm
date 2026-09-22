@@ -98,7 +98,12 @@ from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
-from .constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_STACK_DEPTH, FSM_ID_HASH_LENGTH
+from .constants import (
+    DEFAULT_LLM_MODEL,
+    DEFAULT_MAX_FSM_CACHE_SIZE,
+    DEFAULT_MAX_STACK_DEPTH,
+    FSM_ID_HASH_LENGTH,
+)
 from .definitions import ConversationBusyError, FSMDefinition, FSMError
 
 # --------------------------------------------------------------
@@ -201,6 +206,8 @@ class API:
         handler_error_mode: str = "continue",
         transition_config: TransitionEvaluatorConfig | None = None,
         session_store: SessionStore | None = None,
+        handler_timeout: float | None = None,
+        max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
         **llm_kwargs,
     ):
         """
@@ -218,6 +225,13 @@ class API:
             handlers: Optional list of handlers
             handler_error_mode: Handler error handling mode
             transition_config: Configuration for transition evaluation
+            session_store: Optional store used by save_session/restore_session
+            handler_timeout: Seconds a handler may run before it times out
+                (``None``, the default, disables the timeout). A timed-out
+                handler's thread keeps running as a straggler; the
+                ``constants.MAX_TIMED_HANDLER_STRAGGLERS`` cap is shared by
+                every conversation of this API (one ``HandlerSystem``).
+            max_fsm_cache_size: Bound of the FSM definition LRU cache
             **llm_kwargs: Additional LLM parameters
         """
         # Handle LLM interface initialization
@@ -283,7 +297,9 @@ class API:
                 return load_fsm_definition(fsm_id)
 
         # Initialize handler system (single instance shared with FSMManager)
-        self.handler_system = HandlerSystem(error_mode=handler_error_mode)
+        self.handler_system = HandlerSystem(
+            error_mode=handler_error_mode, handler_timeout=handler_timeout
+        )
 
         # Initialize enhanced FSM manager with improved 2-pass architecture
         self.fsm_manager = FSMManager(
@@ -296,6 +312,7 @@ class API:
             max_history_size=max_history_size,
             max_message_length=max_message_length,
             handler_system=self.handler_system,
+            max_fsm_cache_size=max_fsm_cache_size,
         )
 
         # Register provided handlers
