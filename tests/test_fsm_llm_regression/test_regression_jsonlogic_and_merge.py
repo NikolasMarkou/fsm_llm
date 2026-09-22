@@ -88,11 +88,10 @@ class TestTransitionDecisionExcludedFromJsonMode:
     `_apply_model_specific_params`' `is_structured` gate (`llm.py:616`) — both
     list only `data_extraction` and `field_extraction`.
 
-    `ollama.py` nevertheless still registers a `"transition_decision"` schema,
-    and `build_ollama_response_format("transition_decision")` is public and
-    directly tested (`test_ollama.py`). That schema is reachable ONLY through
-    that public helper, never through `llm.py`. This section pins both halves:
-    the exclusion, and the helper that survives it.
+    `ollama.py` no longer registers a `"transition_decision"` schema (step
+    9.2 deleted the unreachable entry), so the public helper returns its
+    documented unknown-call-type fallback, ``None``. This section pins both:
+    the exclusion in `llm.py`, and the helper's fallback.
     """
 
     @staticmethod
@@ -140,15 +139,13 @@ class TestTransitionDecisionExcludedFromJsonMode:
         structured = self._call("ollama_chat/qwen3.5:4b", "data_extraction")
         assert structured["temperature"] == 0
 
-    def test_the_ollama_schema_helper_still_serves_transition_decision(self):
-        """The exclusion is `llm.py`'s, NOT `ollama.py`'s. The public helper
-        keeps working — deleting the registry entry is a breaking change, not
-        a cleanup. Mirrors `test_ollama.py::test_transition_format`."""
-        from fsm_llm.ollama import TRANSITION_JSON_SCHEMA, build_ollama_response_format
+    def test_the_ollama_schema_helper_has_no_transition_schema(self):
+        """The helper treats transition_decision as an unknown call type and
+        returns the documented fallback, ``None``. Mirrors
+        `test_ollama.py::test_transition_decision_has_no_schema`."""
+        from fsm_llm.ollama import build_ollama_response_format
 
-        fmt = build_ollama_response_format("transition_decision")
-        assert fmt is not None
-        assert fmt["json_schema"]["schema"] is TRANSITION_JSON_SCHEMA
+        assert build_ollama_response_format("transition_decision") is None
 
     def test_no_first_party_caller_passes_transition_decision(self):
         """Why the schema is unreachable: nothing ever supplies that call_type.

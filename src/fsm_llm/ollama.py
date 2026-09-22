@@ -43,19 +43,6 @@ EXTRACTION_JSON_SCHEMA: dict = {
     "required": ["extracted_data", "confidence"],
 }
 
-TRANSITION_JSON_SCHEMA: dict = {
-    "type": "object",
-    "properties": {
-        "selected_transition": {
-            "type": "string",
-        },
-        "reasoning": {
-            "type": "string",
-        },
-    },
-    "required": ["selected_transition"],
-}
-
 # DECISION plan-2026-09-19T175721-21cd7f8e/D-001
 # The `value` schema MUST carry a TYPE; do NOT restore `"value": {}` ("any type").
 # The schema is sent as an Ollama grammar AND pasted into the user message
@@ -100,12 +87,6 @@ FIELD_EXTRACTION_JSON_SCHEMA: dict = {
 # Map call types to their schemas
 _CALL_TYPE_SCHEMAS: dict[str, tuple[dict, str]] = {
     "data_extraction": (EXTRACTION_JSON_SCHEMA, "data_extraction"),
-    # NOT reachable from llm.py: `_make_llm_call` gates structured output on
-    # `call_type in ["data_extraction", "field_extraction"]`, and no caller ever
-    # passes "transition_decision" (transitions are decided by rules, not by the
-    # LLM). Kept because `build_ollama_response_format` is public and tested;
-    # the exclusion is pinned by test_regression_jsonlogic_and_merge.py's VB3.
-    "transition_decision": (TRANSITION_JSON_SCHEMA, "transition_decision"),
     "field_extraction": (FIELD_EXTRACTION_JSON_SCHEMA, "field_extraction"),
 }
 
@@ -244,8 +225,9 @@ def build_ollama_response_format(
     """Build a ``json_schema`` response format for the given call type.
 
     Args:
-        call_type: ``"data_extraction"``, ``"transition_decision"`` or
-            ``"field_extraction"``.
+        call_type: ``"data_extraction"`` or ``"field_extraction"``. Any other
+            value (``"response_generation"``, ``"transition_decision"``) has no
+            schema: transitions are decided by rules, never by an LLM call.
         field_type: Only read for ``"field_extraction"``: the declared
             ``FieldExtractionConfig.field_type`` selects the ``value`` type union
             (see ``_VALUE_TYPES_BY_FIELD_TYPE``). ``None`` or an unknown type

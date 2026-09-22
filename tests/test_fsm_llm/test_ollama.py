@@ -9,7 +9,6 @@ import pytest
 from fsm_llm.ollama import (
     EXTRACTION_JSON_SCHEMA,
     FIELD_EXTRACTION_JSON_SCHEMA,
-    TRANSITION_JSON_SCHEMA,
     apply_ollama_params,
     build_ollama_response_format,
     is_ollama_model,
@@ -95,12 +94,10 @@ class TestBuildOllamaResponseFormat:
         assert fmt["json_schema"]["name"] == "data_extraction"
         assert fmt["json_schema"]["schema"] is EXTRACTION_JSON_SCHEMA
 
-    def test_transition_format(self):
-        fmt = build_ollama_response_format("transition_decision")
-        assert fmt is not None
-        assert fmt["type"] == "json_schema"
-        assert fmt["json_schema"]["name"] == "transition_decision"
-        assert fmt["json_schema"]["schema"] is TRANSITION_JSON_SCHEMA
+    def test_transition_decision_has_no_schema(self):
+        """The transition schema was removed (step 9.2): a transition_decision
+        call type gets the documented unknown-call-type fallback, ``None``."""
+        assert build_ollama_response_format("transition_decision") is None
 
     def test_response_generation_returns_none(self):
         assert build_ollama_response_format("response_generation") is None
@@ -162,7 +159,3 @@ class TestJsonSchemaConstants:
         assert "confidence" in EXTRACTION_JSON_SCHEMA["properties"]
         assert "extracted_data" in EXTRACTION_JSON_SCHEMA["required"]
         assert "confidence" in EXTRACTION_JSON_SCHEMA["required"]
-
-    def test_transition_schema_has_required_fields(self):
-        assert "selected_transition" in TRANSITION_JSON_SCHEMA["properties"]
-        assert "selected_transition" in TRANSITION_JSON_SCHEMA["required"]

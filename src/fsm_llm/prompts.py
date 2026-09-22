@@ -308,7 +308,7 @@ class BasePromptBuilder:
     # HISTORY MANAGEMENT (From old version)
     # ========================================================================
 
-    def _estimate_token_count(self, text: str, is_json: bool = False) -> int:
+    def _estimate_token_count(self, text: str) -> int:
         """Estimate token count using conservative estimates."""
         char_count = len(text)
         adjusted_count = (
@@ -349,7 +349,7 @@ class BasePromptBuilder:
 
         for exchange in reversed(exchanges):
             exchange_json = json.dumps(exchange, separators=(",", ": "))
-            exchange_tokens = self._estimate_token_count(exchange_json, is_json=True)
+            exchange_tokens = self._estimate_token_count(exchange_json)
 
             if current_tokens + exchange_tokens > available_tokens and result:
                 break
@@ -616,7 +616,6 @@ class BasePromptBuilder:
         json_schema: str,
         field_descriptions: list[str],
         notes: list[str] | None = None,
-        field_heading: str = "Where:",
     ) -> list[str]:
         """Build a ``<response_format>`` section with schema + field docs.
 
@@ -624,14 +623,13 @@ class BasePromptBuilder:
             json_schema: The JSON schema example (will be dedented).
             field_descriptions: Lines describing each field (tab-prefixed).
             notes: Optional extra notes appended after the field descriptions.
-            field_heading: Heading before field descriptions (default "Where:").
         """
         sections = [
             "<response_format>",
             "Your response must be valid JSON with the following structure:",
             textwrap.dedent(json_schema).strip(),
             "",
-            field_heading,
+            "Where:",
         ]
         sections.extend(f"\t- {d}" for d in field_descriptions)
         if notes:

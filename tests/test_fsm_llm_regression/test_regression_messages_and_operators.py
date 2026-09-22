@@ -103,28 +103,6 @@ class TestV4OperatorNames:
         assert "context_length" in ALLOWED_JSONLOGIC_OPERATIONS
         assert "context_count" not in ALLOWED_JSONLOGIC_OPERATIONS
 
-    def test_all_expression_operators_in_allowed_set(self):
-        """Every operator implemented in expressions.py should be in the allowed set."""
-        from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
-        from fsm_llm.expressions import operations
-
-        # Operators handled directly in evaluate_logic (not in operations dict)
-        special_operators = {
-            "var",
-            "missing",
-            "missing_some",
-            "has_context",
-            "context_length",
-        }
-
-        all_implemented = set(operations.keys()) | special_operators
-        missing_from_allowed = all_implemented - ALLOWED_JSONLOGIC_OPERATIONS
-        # !! and !!! are internal aliases, not user-facing
-        missing_from_allowed -= {"!!"}
-        assert not missing_from_allowed, (
-            f"Operators implemented but not in ALLOWED_JSONLOGIC_OPERATIONS: {missing_from_allowed}"
-        )
-
 
 class TestV11WordBoundaryMatching:
     """V11: Transition matching must use word boundaries."""

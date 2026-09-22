@@ -1303,6 +1303,77 @@ class TestStep9DefaultTemperature:
         assert LiteLLMInterface(model="gpt-4o-mini").temperature == DEFAULT_TEMPERATURE
 
 
+class TestStep9LeafDeadCode:
+    def test_short_circuit_operators_never_reach_operations(self):
+        from fsm_llm.expressions import _SHORT_CIRCUIT_OPERATORS, operations
+
+        assert _SHORT_CIRCUIT_OPERATORS == {"and", "or", "if"}
+        assert _SHORT_CIRCUIT_OPERATORS.isdisjoint(operations)
+
+    def test_every_allowed_operator_has_exactly_one_dispatcher(self):
+        from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
+        from fsm_llm.expressions import (
+            _SHORT_CIRCUIT_OPERATORS,
+            _data_operators,
+            operations,
+        )
+
+        tables = [set(operations), set(_data_operators), set(_SHORT_CIRCUIT_OPERATORS)]
+        assert set().union(*tables) == ALLOWED_JSONLOGIC_OPERATIONS
+        assert sum(len(t) for t in tables) == len(ALLOWED_JSONLOGIC_OPERATIONS)
+
+    def test_short_circuit_still_lazy_and_if_still_works(self):
+        from fsm_llm.expressions import evaluate_logic
+
+        guard = {
+            "and": [{"!=": [{"var": "x"}, 0]}, {"<": [{"/": [1, {"var": "x"}]}, 5]}]
+        }
+        assert evaluate_logic(guard, {"x": 0}) is False
+        assert evaluate_logic({"or": [0, "", "last"]}) == "last"
+        assert evaluate_logic({"if": [False, "a", True, "b", "c"]}) == "b"
+        assert evaluate_logic({"if": [False, "a", "default"]}) == "default"
+
+    def test_if_condition_is_gone(self):
+        import fsm_llm.expressions as expressions
+
+        assert not hasattr(expressions, "if_condition")
+
+    def test_ollama_transition_schema_is_gone(self):
+        import fsm_llm.ollama as ollama
+
+        assert not hasattr(ollama, "TRANSITION_JSON_SCHEMA")
+        assert "transition_decision" not in ollama._CALL_TYPE_SCHEMAS
+        assert ollama.build_ollama_response_format("transition_decision") is None
+
+    def test_visualizer_unused_glyphs_are_gone(self):
+        from fsm_llm.visualizer import ARROW_STYLES, BOX_STYLES, ICONS
+
+        assert "note" not in ICONS
+        assert "section" not in BOX_STYLES
+        for key in ("down_arrow", "right_arrow", "diamond"):
+            assert key not in ARROW_STYLES
+
+    def test_prompt_helper_params_are_gone(self):
+        import inspect
+
+        from fsm_llm.prompts import BasePromptBuilder
+
+        est = inspect.signature(BasePromptBuilder._estimate_token_count).parameters
+        assert list(est) == ["self", "text"]
+        fmt = inspect.signature(BasePromptBuilder._build_response_format).parameters
+        assert "field_heading" not in fmt
+        lines = BasePromptBuilder._build_response_format("{}", ["a: b"])
+        assert "Where:" in lines
+
+    def test_additional_info_needed_is_gone(self):
+        from fsm_llm.definitions import DataExtractionResponse
+
+        assert "additional_info_needed" not in DataExtractionResponse.model_fields
+        # Pydantic's default extra="ignore": an old payload still validates.
+        resp = DataExtractionResponse.model_validate({"additional_info_needed": True})
+        assert not hasattr(resp, "additional_info_needed")
+
+
 def _step9_fsm_dict() -> dict[str, Any]:
     return {
         "name": "t",

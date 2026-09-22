@@ -386,53 +386,6 @@ def greater_or_equal(a: Any, b: Any, *args: Any) -> bool:
 
 
 # --------------------------------------------------------------
-# Logical operators
-# --------------------------------------------------------------
-
-
-def if_condition(*args: Any) -> Any:
-    """
-    Implement the 'if' operator with support for multiple elseif branches.
-
-    This function processes if/then/else logic with support for multiple
-    condition-result pairs, similar to a switch statement.
-
-    Args:
-        *args: Variable number of arguments representing if/then/else branches.
-               Format: [condition1, result1, condition2, result2, ..., default_result]
-
-    Returns:
-        Any: The value of the first matching condition's result, or default if provided
-
-    Example:
-        >>> if_condition(True, "first", False, "second", "default")
-        'first'
-        >>> if_condition(False, "first", False, "second", "default")
-        'default'
-        >>> if_condition(False, "first", True, "second")
-        'second'
-
-    Note:
-        - Arguments are processed in pairs: (condition, result)
-        - If the number of arguments is odd, the last argument is the default result
-        - Returns None if no conditions match and no default is provided
-    """
-    # Process condition-result pairs
-    for i in range(0, len(args) - 1, 2):
-        condition = args[i]
-        result = args[i + 1]
-
-        if condition:
-            return result
-
-    # Check for default value (odd number of arguments)
-    if len(args) % 2:
-        return args[-1]
-
-    return None
-
-
-# --------------------------------------------------------------
 # Data access operators
 # --------------------------------------------------------------
 
@@ -733,9 +686,7 @@ operations: dict[str, Callable[..., Any]] = {
     # Logical operators
     "!": _logical_not,  # Logical NOT (unary; warns on extra args)
     "!!": bool,  # Double negation (convert to boolean)
-    "and": lambda *args: next((a for a in args if not a), args[-1]) if args else True,
-    "or": lambda *args: next((a for a in args if a), args[-1]) if args else False,
-    "if": if_condition,
+    # "and", "or", "if": short-circuit, see `_SHORT_CIRCUIT_OPERATORS` below
     # Note: Access operators handled directly in evaluate_logic()
     # "var", "missing", "missing_some", "has_context", "context_length"
     # Membership operators
@@ -900,7 +851,15 @@ _data_operators: dict[str, Any] = {
 }
 
 #: Operators that MUST evaluate their operands lazily (reference JsonLogic).
-_SHORT_CIRCUIT_OPERATORS: set[str] = {"and", "or", "if"}
+_SHORT_CIRCUIT_OPERATORS: frozenset[str] = frozenset({"and", "or", "if"})
+
+# DECISION plan-2026-09-22T080837-8b258a25/D-012
+# and/or/if live ONLY in `_evaluate_short_circuit`. Do NOT add eager entries for
+# them to `operations` (the old unreachable fallbacks): the eager path evaluates
+# every operand first, which breaks the D-006 guard idiom. This check fails the
+# import if one is ever re-added. See decisions.md D-012.
+if not _SHORT_CIRCUIT_OPERATORS.isdisjoint(operations):
+    raise RuntimeError("short-circuit operators must not be in `operations`")
 
 
 def _evaluate_short_circuit(
@@ -1086,8 +1045,7 @@ def _evaluate_logic(
     # Short-circuit operators evaluate operands lazily (only the taken branch).
     # Intercept BEFORE the eager list-comp below so an untaken branch that would
     # raise (e.g. a div-by-zero guard) is never evaluated. See D-006 at
-    # `_evaluate_short_circuit`. The `operations` entries for and/or/if remain as
-    # harmless fallbacks and are intentionally not routed through here.
+    # `_evaluate_short_circuit`; `operations` has no entry for and/or/if.
     if operator in _SHORT_CIRCUIT_OPERATORS:
         return _evaluate_short_circuit(operator, values, data, _depth)
 

@@ -51,15 +51,6 @@ BOX_STYLES = {
         "vertical": "║",
         "title_sep": "═",
     },
-    "section": {
-        "topleft": "╭",
-        "topright": "╮",
-        "bottomleft": "╰",
-        "bottomright": "╯",
-        "horizontal": "─",
-        "vertical": "│",
-        "title_sep": "─",
-    },
 }
 
 # Arrow styles for transitions
@@ -69,9 +60,6 @@ ARROW_STYLES = {
     "self": "⟲",
     "connector": "→",
     "bidirectional": "↔",
-    "down_arrow": "▼",
-    "right_arrow": "▶",
-    "diamond": "◆",
 }
 
 # Icons for different state attributes
@@ -80,7 +68,6 @@ ICONS = {
     "branching": "+",  # States with multiple outbound transitions
     "merge": "o",  # States with multiple inbound transitions
     "key": "#",  # Used for required keys
-    "note": ">",  # For notes and observations
 }
 
 # Width, in characters, of the content area BETWEEN the two vertical glyphs of a

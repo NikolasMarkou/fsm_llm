@@ -1735,27 +1735,10 @@ class MessagePipeline:
                                 rejected[key] = value
                                 log.debug(f"Bulk correction rejected: {key}")
 
-        # Build final response — check all sources for missing required fields
-        all_required_names: list[str] = []
-        if has_field_configs:
-            all_required_names.extend(
-                cfg.field_name for cfg in all_configs if cfg.required
-            )
-        if has_classification_configs:
-            all_required_names.extend(
-                cfg.field_name
-                for cfg in (current_state.classification_extractions or [])
-                if cfg.required
-            )
-
         min_confidence = min(confidences) if confidences else 0.0
         response = DataExtractionResponse(
             extracted_data=extracted_data,
             confidence=min_confidence,
-            additional_info_needed=any(
-                name not in extracted_data and name not in instance.context.data
-                for name in all_required_names
-            ),
             rejected_corrections=rejected,
             extraction_failed=bulk_failed,
         )

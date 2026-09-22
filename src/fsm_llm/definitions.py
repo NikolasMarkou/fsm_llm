@@ -121,11 +121,6 @@ class DataExtractionResponse(BaseModel):
         max_length=5000,
     )
 
-    additional_info_needed: bool | None = Field(
-        default=None,
-        description="Whether additional information is needed from the user",
-    )
-
     rejected_corrections: dict[str, Any] = Field(
         default_factory=dict,
         description=(
