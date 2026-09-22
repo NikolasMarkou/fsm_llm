@@ -121,7 +121,6 @@ def _make_ambiguous_evaluation(*targets: str) -> TransitionEvaluation:
     return TransitionEvaluation(
         result_type=TransitionEvaluationResult.AMBIGUOUS,
         available_options=options,
-        confidence=0.5,
     )
 
 

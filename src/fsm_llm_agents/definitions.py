@@ -145,8 +145,9 @@ class AgentConfig(BaseModel):
     """Optional ``TransitionEvaluatorConfig`` to tune FSM transition evaluation.
 
     Controls strict matching and diagnostic logging; transition ranking is
-    by priority alone, so ``ambiguity_threshold``/``minimum_confidence`` are
-    no-ops.
+    by priority alone, so ``ambiguity_threshold``/``minimum_confidence``/
+    ``evidence_conditions_normalizer`` are deprecated no-ops (a non-default
+    value warns).
     When None (default), uses the core library defaults.
     """
 

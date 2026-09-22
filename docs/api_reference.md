@@ -169,9 +169,11 @@ class TransitionEvaluatorConfig:
     ambiguity_threshold: float = 0.1   # deprecated, no effect
     minimum_confidence: float = 0.5    # deprecated, no effect
     strict_condition_matching: bool = True
-    evidence_conditions_normalizer: float = 5.0
+    evidence_conditions_normalizer: float = 5.0  # deprecated, no effect
     detailed_logging: bool = False
 ```
+
+Transitions are ranked by `priority` alone; no confidence score is computed (`TransitionEvaluation` has no `confidence` field). Setting any of the three deprecated fields to a non-default value emits a `DeprecationWarning`; they are removed in 1.0.
 
 ## Classification (`fsm_llm`)
 

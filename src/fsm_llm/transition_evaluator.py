@@ -37,27 +37,22 @@ The evaluator produces three distinct outcomes:
    - Only the tied-lowest group is offered to the classifier: a transition
      with a higher priority value can never beat a lower one
 
-The per-transition ``confidence`` (derived from priority plus a condition-count
-boost) is still computed and reported for diagnostics, but it does not decide
-the outcome. ``TransitionEvaluatorConfig.minimum_confidence`` and
-``ambiguity_threshold`` are kept for backward compatibility and have no effect.
-
 3. **BLOCKED**: No valid transition paths available
    - All transitions fail their required conditions
    - Context lacks necessary data for any path
    - May trigger error handling or user clarification prompts
+
+No confidence score is computed. ``TransitionEvaluatorConfig.minimum_confidence``,
+``ambiguity_threshold`` and ``evidence_conditions_normalizer`` have no effect;
+setting one to a non-default value emits a ``DeprecationWarning`` (removal in 1.0).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import warnings
+from dataclasses import dataclass, fields
 from typing import Any
 
-from .constants import (
-    CONDITION_SUCCESS_RATE_BOOST,
-    MIN_BASE_CONFIDENCE,
-    PRIORITY_SCALING_DIVISOR,
-)
 from .definitions import (
     FSMContext,
     State,
@@ -101,13 +96,33 @@ class TransitionEvaluatorConfig:
     # conditions may fail) and do NOT delete the field: callers pass it.
     strict_condition_matching: bool = True
 
-    # Evidence weighting
-    evidence_conditions_normalizer: float = (
-        5.0  # Number of conditions for max evidence weight
-    )
+    evidence_conditions_normalizer: float = 5.0  # Deprecated: no effect
 
     # Debugging
     detailed_logging: bool = False  # Enable detailed evaluation logging
+
+    def __post_init__(self) -> None:
+        # DECISION plan-2026-09-22T080837-8b258a25/D-013: warn, do NOT delete
+        # the three no-op fields before 1.0 (callers would get a TypeError),
+        # and do NOT warn when a value equals its declared default. stacklevel
+        # 3 points past the generated __init__ at the caller.
+        changed = [
+            f.name
+            for f in fields(self)
+            if f.name in _DEPRECATED_NOOP_FIELDS and getattr(self, f.name) != f.default
+        ]
+        if changed:
+            warnings.warn(
+                f"TransitionEvaluatorConfig {', '.join(changed)}: no effect "
+                "(transitions are ranked by priority alone); removed in 1.0",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+
+
+_DEPRECATED_NOOP_FIELDS = frozenset(
+    {"ambiguity_threshold", "minimum_confidence", "evidence_conditions_normalizer"}
+)
 
 
 # --------------------------------------------------------------
@@ -228,7 +243,6 @@ class TransitionEvaluator:
                 results.append(
                     {
                         "transition": transition,
-                        "confidence": 0.0,
                         "passes_conditions": False,
                         "failed_conditions": [str(e)],
                         "evaluation_notes": [
@@ -238,7 +252,7 @@ class TransitionEvaluator:
                 )
 
         # Rank by priority only; the sort is stable, so ties keep definition
-        # order. Confidence is diagnostic and must not reorder (D-003).
+        # order (D-003).
         results.sort(key=lambda x: x["transition"].priority)
 
         if self.config.detailed_logging:
@@ -246,7 +260,7 @@ class TransitionEvaluator:
             for result in results[:3]:  # Log top 3 results
                 logger.debug(
                     f"  {result['transition'].target_state}: "
-                    f"confidence={result['confidence']:.2f}, "
+                    f"priority={result['transition'].priority}, "
                     f"passes={result['passes_conditions']}"
                 )
 
@@ -263,16 +277,10 @@ class TransitionEvaluator:
         """
         evaluation_result: dict[str, Any] = {
             "transition": transition,
-            "confidence": 0.0,
             "passes_conditions": True,
             "failed_conditions": [],
             "evaluation_notes": [],
         }
-
-        # Base confidence from priority (inverted - lower priority = higher confidence)
-        base_confidence = max(
-            MIN_BASE_CONFIDENCE, 1.0 - (transition.priority / PRIORITY_SCALING_DIVISOR)
-        )
 
         # Evaluate conditions if present
         if transition.conditions:
@@ -283,22 +291,7 @@ class TransitionEvaluator:
             evaluation_result["passes_conditions"] = condition_results["all_pass"]
             evaluation_result["failed_conditions"] = condition_results["failed"]
             evaluation_result["evaluation_notes"].extend(condition_results["notes"])
-
-            # Adjust confidence based on condition results
-            if condition_results["all_pass"]:
-                # Additive boost that preserves gradient between transitions
-                # Uses diminishing returns: boost * (1 - base) so high-confidence
-                # transitions still differentiate instead of all collapsing to 1.0
-                boost = condition_results["confidence_factor"]
-                evaluation_result["confidence"] = min(
-                    1.0, base_confidence + boost * (1.0 - base_confidence)
-                )
-            else:
-                # Significantly reduce confidence for failed conditions
-                evaluation_result["confidence"] = base_confidence * 0.1
         else:
-            # No conditions - base confidence applies
-            evaluation_result["confidence"] = base_confidence
             evaluation_result["evaluation_notes"].append("No conditions to evaluate")
         return evaluation_result
 
@@ -315,11 +308,7 @@ class TransitionEvaluator:
             "all_pass": True,
             "failed": [],
             "notes": [],
-            "confidence_factor": 0.0,
         }
-
-        passed_conditions = 0
-        total_conditions = len(conditions)
 
         # Sort conditions by evaluation priority
         sorted_conditions = sorted(conditions, key=lambda c: c.evaluation_priority)
@@ -329,7 +318,6 @@ class TransitionEvaluator:
                 condition_passes = self._evaluate_single_condition(condition, context)
 
                 if condition_passes:
-                    passed_conditions += 1
                     result["notes"].append(f"✓ {condition.description}")
                 else:
                     result["all_pass"] = False
@@ -347,17 +335,6 @@ class TransitionEvaluator:
 
                 if self.config.strict_condition_matching:
                     break
-
-        # Scale confidence boost by absolute condition count to differentiate
-        # transitions. More conditions passing = richer evidence = higher boost.
-        # A transition with 5 passing conditions gets a higher boost than one with 1.
-        if total_conditions > 0 and result["all_pass"]:
-            evidence_weight = min(
-                1.0, total_conditions / self.config.evidence_conditions_normalizer
-            )
-            result["confidence_factor"] = CONDITION_SUCCESS_RATE_BOOST * (
-                0.5 + 0.5 * evidence_weight
-            )
 
         return result
 
@@ -413,7 +390,7 @@ class TransitionEvaluator:
         Among the passing transitions, the unique lowest ``priority`` value is
         DETERMINISTIC. Two or more tied at the lowest priority are AMBIGUOUS,
         and only that tied group becomes the classifier's candidate set. None
-        passing is BLOCKED. Confidence does not take part (D-003).
+        passing is BLOCKED (D-003).
 
         Args:
             transition_scores: Evaluated transitions with scores
@@ -458,7 +435,6 @@ class TransitionEvaluator:
         return TransitionEvaluation(
             result_type=TransitionEvaluationResult.DETERMINISTIC,
             deterministic_transition=winner["transition"].target_state,
-            confidence=winner["confidence"],
         )
 
     def _create_ambiguous_result(
@@ -491,7 +467,6 @@ class TransitionEvaluator:
         return TransitionEvaluation(
             result_type=TransitionEvaluationResult.AMBIGUOUS,
             available_options=options,
-            confidence=max(score["confidence"] for score in passing_transitions),
         )
 
     def _create_blocked_result(
@@ -513,5 +488,4 @@ class TransitionEvaluator:
         return TransitionEvaluation(
             result_type=TransitionEvaluationResult.BLOCKED,
             blocked_reason=reason_summary,
-            confidence=0.0,
         )

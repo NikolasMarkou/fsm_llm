@@ -723,7 +723,7 @@ def build_react_fsm(
     )
 
     # Think state transitions
-    # NOTE: Lower priority number = higher confidence in TransitionEvaluator.
+    # NOTE: the lowest passing priority number wins in TransitionEvaluator.
     # Terminal transitions (conclude) get lowest priority numbers.
     think_transitions: list[dict[str, Any]] = [
         {

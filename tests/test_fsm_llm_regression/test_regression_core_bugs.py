@@ -74,7 +74,6 @@ class TestVB1SelfTransitionSuppressed:
         eval_result = TransitionEvaluation(
             result_type=TransitionEvaluationResult.DETERMINISTIC,
             deterministic_transition="retry",
-            confidence=1.0,
         )
 
         with patch.object(
@@ -540,11 +539,10 @@ class TestVB14dStateIdMismatch:
 
 
 class TestVB14eConfidenceSaturation:
-    """VB14e: Different priorities should produce different confidences (not all 1.0).
+    """VB14e: Two passing transitions with different priorities are DETERMINISTIC.
 
-    With the additive confidence boost, priority differences produce real confidence
-    gaps instead of collapsing to 1.0. Wide priority gaps (0 vs 500) produce gaps
-    above the ambiguity threshold and result in DETERMINISTIC evaluation.
+    The confidence score is gone (plan 8b258a25 D-013); the unique lowest
+    priority value wins (8a03483a D-003).
     """
 
     def test_wide_priority_gap_is_deterministic(self):
@@ -584,34 +582,11 @@ class TestVB14eConfidenceSaturation:
         ctx = FSMContext()
         ctx.update({"x": True})
         result = evaluator.evaluate_transitions(state, ctx)
-        # Wide priority gap (0 vs 500) produces confidence gap > ambiguity_threshold
+        # The unique lowest priority value wins.
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC, (
             f"Expected DETERMINISTIC, got {result.result_type}"
         )
         assert result.deterministic_transition == "a"
-
-    def test_priorities_produce_different_confidences(self):
-        """Verify that the additive boost doesn't collapse confidences to 1.0."""
-        from fsm_llm.transition_evaluator import TransitionEvaluator
-
-        evaluator = TransitionEvaluator()
-        cond = TransitionCondition(description="ok", requires_context_keys=["x"])
-        # Evaluate individual transitions to see their confidence scores differ
-        t_high = Transition(
-            target_state="a", description="A", priority=0, conditions=[cond]
-        )
-        t_low = Transition(
-            target_state="b", description="B", priority=100, conditions=[cond]
-        )
-        ctx_data = {"x": True}
-        score_high = evaluator._evaluate_single_transition(t_high, ctx_data)
-        score_low = evaluator._evaluate_single_transition(t_low, ctx_data)
-        # Different priorities must produce different confidences
-        assert score_high["confidence"] != score_low["confidence"], (
-            f"Confidences should differ: {score_high['confidence']} vs {score_low['confidence']}"
-        )
-        # Higher priority (lower value) gets higher confidence
-        assert score_high["confidence"] > score_low["confidence"]
 
 
 # ── VB15: Validator cascading orphan errors ─────────────────────

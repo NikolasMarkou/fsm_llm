@@ -1473,13 +1473,6 @@ class TransitionEvaluation(BaseModel):
         None, description="Reason if transitions are blocked"
     )
 
-    confidence: float = Field(
-        default=0.0,
-        description="Confidence in the evaluation result (0.0-1.0, or -1.0 for evaluation errors)",
-        ge=-1.0,
-        le=1.0,
-    )
-
     @model_validator(mode="after")
     def validate_result_consistency(self) -> TransitionEvaluation:
         """Ensure populated fields match result_type."""

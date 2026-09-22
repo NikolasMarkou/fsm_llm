@@ -85,9 +85,7 @@ class TestFloatingPointTiebreaker:
 
     def test_near_zero_confidence_gap_triggers_tiebreaker(self):
         """Two transitions with nearly-equal confidence should still use priority tiebreaker."""
-        config = TransitionEvaluatorConfig(
-            ambiguity_threshold=0.1, minimum_confidence=0.5
-        )
+        config = TransitionEvaluatorConfig()
         evaluator = TransitionEvaluator(config)
 
         t1 = Transition(target_state="state_a", description="A", priority=50)

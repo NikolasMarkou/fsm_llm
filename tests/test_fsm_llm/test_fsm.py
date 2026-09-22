@@ -276,7 +276,7 @@ def test_transition_evaluator():
     )
 
     # Create a transition evaluator
-    config = TransitionEvaluatorConfig(minimum_confidence=0.7, ambiguity_threshold=0.2)
+    config = TransitionEvaluatorConfig(strict_condition_matching=True)
     evaluator = TransitionEvaluator(config)
 
     # Create a simple state with transitions

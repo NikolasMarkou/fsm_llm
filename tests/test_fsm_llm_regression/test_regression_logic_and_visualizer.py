@@ -171,7 +171,7 @@ class TestEarlyTerminationRemoved:
         from fsm_llm.transition_evaluator import TransitionEvaluator
 
         # Create a state with 2 transitions, all with conditions that pass.
-        # Priority gap must be wide enough that confidence gap >= ambiguity_threshold.
+        # Distinct priorities: the unique lowest value wins (D-003).
         state = State(
             id="test_state",
             description="Test",

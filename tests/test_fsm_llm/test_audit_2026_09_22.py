@@ -1388,3 +1388,141 @@ def _step9_fsm_dict() -> dict[str, Any]:
             }
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Step 10: transition confidence removed, no-op config fields deprecated
+# ---------------------------------------------------------------------------
+
+
+def _step10_state(priorities: list[int], passing: list[bool]) -> State:
+    return State(
+        id="s",
+        description="d",
+        purpose="p",
+        transitions=[
+            Transition(
+                target_state=f"t{i}",
+                description=f"to t{i}",
+                priority=priority,
+                conditions=[
+                    TransitionCondition(
+                        description=f"c{i}",
+                        logic={"==": [{"var": "go"}, ok]},
+                    )
+                ],
+            )
+            for i, (priority, ok) in enumerate(zip(priorities, passing, strict=True))
+        ],
+    )
+
+
+def _step10_evaluate(state: State, config: Any = None) -> Any:
+    from fsm_llm.definitions import FSMContext
+    from fsm_llm.transition_evaluator import TransitionEvaluator
+
+    return TransitionEvaluator(config).evaluate_transitions(
+        state, FSMContext(data={"go": True})
+    )
+
+
+class TestStep10ConfidenceRemoved:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "MIN_BASE_CONFIDENCE",
+            "PRIORITY_SCALING_DIVISOR",
+            "CONDITION_SUCCESS_RATE_BOOST",
+        ],
+    )
+    def test_confidence_constants_are_gone(self, name):
+        from fsm_llm import constants
+
+        assert not hasattr(constants, name)
+
+    def test_transition_evaluation_has_no_confidence_field(self):
+        from fsm_llm.definitions import TransitionEvaluation
+
+        assert "confidence" not in TransitionEvaluation.model_fields
+        ev = _step10_evaluate(_step10_state([100], [True]))
+        assert not hasattr(ev, "confidence")
+        assert "confidence" not in ev.model_dump()
+
+    def test_per_transition_scores_carry_no_confidence(self):
+        from fsm_llm.transition_evaluator import TransitionEvaluator
+
+        evaluator = TransitionEvaluator()
+        state = _step10_state([100, 200], [True, False])
+        scores = evaluator._evaluate_individual_transitions(
+            state.transitions, {"go": True}
+        )
+        assert all("confidence" not in s for s in scores)
+        cond = evaluator._evaluate_transition_conditions(
+            state.transitions[0].conditions, {"go": True}
+        )
+        assert "confidence_factor" not in cond
+
+    def test_priority_outcomes_unchanged(self):
+        from fsm_llm.definitions import TransitionEvaluationResult as R
+
+        det = _step10_evaluate(_step10_state([200, 100], [True, True]))
+        assert det.result_type == R.DETERMINISTIC
+        assert det.deterministic_transition == "t1"
+        amb = _step10_evaluate(_step10_state([100, 100, 300], [True, True, True]))
+        assert amb.result_type == R.AMBIGUOUS
+        assert [o.target_state for o in amb.available_options] == ["t0", "t1"]
+        blocked = _step10_evaluate(_step10_state([100], [False]))
+        assert blocked.result_type == R.BLOCKED
+        assert blocked.blocked_reason == "c0"
+
+
+class TestStep10ConfigDeprecation:
+    def test_defaults_are_silent(self):
+        import warnings
+
+        from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            TransitionEvaluatorConfig()
+            TransitionEvaluatorConfig(
+                ambiguity_threshold=0.1,
+                minimum_confidence=0.5,
+                evidence_conditions_normalizer=5.0,
+                strict_condition_matching=False,
+                detailed_logging=True,
+            )
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("minimum_confidence", 0.9),
+            ("ambiguity_threshold", 0.5),
+            ("evidence_conditions_normalizer", 2.0),
+        ],
+    )
+    def test_non_default_deprecated_field_warns_at_caller(self, field, value):
+        from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
+
+        with pytest.warns(DeprecationWarning, match="no effect") as record:
+            TransitionEvaluatorConfig(**{field: value})
+        assert len(record) == 1
+        assert field in str(record[0].message)
+        assert "1.0" in str(record[0].message)
+        assert record[0].filename == __file__
+
+    def test_deprecated_fields_do_not_change_outcomes(self):
+        from fsm_llm.definitions import TransitionEvaluationResult as R
+        from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
+
+        with pytest.warns(DeprecationWarning):
+            config = TransitionEvaluatorConfig(
+                ambiguity_threshold=0.9,
+                minimum_confidence=0.99,
+                evidence_conditions_normalizer=1.0,
+            )
+        state = _step10_state([100, 101], [True, True])
+        ev = _step10_evaluate(state, config)
+        assert ev.result_type == R.DETERMINISTIC
+        assert ev.deterministic_transition == "t0"
+        assert ev == _step10_evaluate(state)

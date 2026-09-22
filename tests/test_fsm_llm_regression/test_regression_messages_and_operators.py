@@ -6,8 +6,6 @@ Tests verify that the issues found in pass 12 remain fixed.
 
 import re
 
-import pytest
-
 
 class TestV1MessageTruncation:
     """V1: Message truncation must not exceed max_message_length."""
@@ -58,32 +56,6 @@ class TestV1MessageTruncation:
         msg = "Hello world"
         conv.add_user_message(msg)
         assert conv.exchanges[-1]["user"] == msg
-
-
-class TestV2ConfidenceConstant:
-    """V2: Confidence factor scales with condition count using CONDITION_SUCCESS_RATE_BOOST."""
-
-    def test_confidence_factor_scales_with_conditions(self):
-        """Confidence factor uses CONDITION_SUCCESS_RATE_BOOST scaled by condition count."""
-        from fsm_llm.constants import CONDITION_SUCCESS_RATE_BOOST
-        from fsm_llm.definitions import TransitionCondition
-        from fsm_llm.transition_evaluator import TransitionEvaluator
-
-        evaluator = TransitionEvaluator()
-        conditions = [
-            TransitionCondition(
-                description="Key exists", requires_context_keys=["name"]
-            )
-        ]
-        context = {"name": "Alice"}
-
-        result = evaluator._evaluate_transition_conditions(conditions, context)
-        assert result["all_pass"] is True
-        # 1 condition / 5.0 cap = 0.2, so factor = BOOST * (0.5 + 0.5 * 0.2) = BOOST * 0.6
-        expected = CONDITION_SUCCESS_RATE_BOOST * 0.6
-        assert result["confidence_factor"] == pytest.approx(expected), (
-            f"Expected {expected}, got {result['confidence_factor']}"
-        )
 
 
 class TestV4OperatorNames:

@@ -352,11 +352,16 @@ class TestStep02A2:
             Transition(target_state="a", description="a", priority=100),
             Transition(target_state="b", description="b", priority=110),
         ]
-        for config in (
-            TransitionEvaluatorConfig(ambiguity_threshold=0.9),
-            TransitionEvaluatorConfig(minimum_confidence=0.99),
-            TransitionEvaluatorConfig(ambiguity_threshold=0.0, minimum_confidence=0.0),
-        ):
+        # Non-default values warn (plan 8b258a25 D-013) and change nothing.
+        with pytest.warns(DeprecationWarning, match="no effect"):
+            configs = (
+                TransitionEvaluatorConfig(ambiguity_threshold=0.9),
+                TransitionEvaluatorConfig(minimum_confidence=0.99),
+                TransitionEvaluatorConfig(
+                    ambiguity_threshold=0.0, minimum_confidence=0.0
+                ),
+            )
+        for config in configs:
             result = _a2_evaluate(transitions, config=config)
             assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
             assert result.deterministic_transition == "a"
@@ -364,12 +369,11 @@ class TestStep02A2:
             Transition(target_state="a", description="a", priority=100),
             Transition(target_state="b", description="b", priority=100),
         ]
-        result = _a2_evaluate(
-            tied,
-            config=TransitionEvaluatorConfig(
+        with pytest.warns(DeprecationWarning, match="no effect"):
+            config = TransitionEvaluatorConfig(
                 ambiguity_threshold=0.0, minimum_confidence=0.0
-            ),
-        )
+            )
+        result = _a2_evaluate(tied, config=config)
         assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
 
 

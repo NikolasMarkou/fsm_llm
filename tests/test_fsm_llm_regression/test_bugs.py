@@ -247,7 +247,7 @@ class TestTransitionEvaluatorLowConfidence:
             TransitionEvaluatorConfig,
         )
 
-        config = TransitionEvaluatorConfig(minimum_confidence=0.5)
+        config = TransitionEvaluatorConfig()
         evaluator = TransitionEvaluator(config)
 
         # Create a state with one transition
@@ -277,7 +277,6 @@ class TestTransitionEvaluatorLowConfidence:
             {
                 "transition": state.transitions[0],
                 "passes_conditions": True,
-                "confidence": 0.3,  # Below minimum_confidence, but it's the only option
                 "evaluation_notes": [],
                 "failed_conditions": [],
             }

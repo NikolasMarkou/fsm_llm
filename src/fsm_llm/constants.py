@@ -105,12 +105,6 @@ FSM_ID_HASH_LENGTH = 8
 # Transition Evaluation Constants
 # --------------------------------------------------------------
 
-# Transition evaluation internals: diagnostic confidence only; the outcome is
-# decided by priority alone (transition_evaluator.py, D-003).
-PRIORITY_SCALING_DIVISOR = 1000.0
-MIN_BASE_CONFIDENCE = 0.1
-CONDITION_SUCCESS_RATE_BOOST = 0.5
-
 # Classification-aware transition defaults
 DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE = 0.6
 # Reserved key of `State.transition_classification`: its value is the threshold,

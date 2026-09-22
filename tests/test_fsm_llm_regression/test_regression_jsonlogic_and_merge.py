@@ -8,7 +8,6 @@ from fsm_llm.definitions import (
     FSMContext,
     FSMDefinition,
     State,
-    TransitionCondition,
 )
 from fsm_llm.expressions import (
     evaluate_logic,
@@ -18,7 +17,6 @@ from fsm_llm.expressions import (
     less_or_equal,
 )
 from fsm_llm.prompts import BasePromptBuilder, BasePromptConfig
-from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 
 def _frame_definition(name: str) -> FSMDefinition:
@@ -427,37 +425,6 @@ class TestHistoryRoleHandling:
         # Test that sanitization works for system role content
         result = builder._sanitize_text_for_prompt("Hello from system")
         assert isinstance(result, str)
-
-
-# ── VB14: confidence_factor uses additive boost ────
-
-
-class TestConfidenceFactorSimplified:
-    """VB14: confidence_factor scales with condition count when all pass."""
-
-    def test_all_pass_confidence_factor(self):
-        """When all conditions pass, confidence_factor scales by condition count."""
-        evaluator = TransitionEvaluator(TransitionEvaluatorConfig())
-        cond = TransitionCondition(
-            description="always passes", requires_context_keys=[]
-        )
-        result = evaluator._evaluate_transition_conditions([cond], {})
-        assert result["all_pass"] is True
-        # 1 condition: 0.5 * (0.5 + 0.5 * min(1.0, 1/5)) = 0.3
-        assert result["confidence_factor"] == pytest.approx(0.3)
-
-    def test_more_conditions_higher_confidence(self):
-        """Transitions with more passing conditions get higher confidence."""
-        evaluator = TransitionEvaluator(TransitionEvaluatorConfig())
-        one_cond = [TransitionCondition(description="c1", requires_context_keys=[])]
-        three_conds = [
-            TransitionCondition(description=f"c{i}", requires_context_keys=[])
-            for i in range(3)
-        ]
-        r1 = evaluator._evaluate_transition_conditions(one_cond, {})
-        r3 = evaluator._evaluate_transition_conditions(three_conds, {})
-        assert r1["all_pass"] and r3["all_pass"]
-        assert r3["confidence_factor"] > r1["confidence_factor"]
 
 
 # ── VB15: has_keys/get_missing_keys dead code ────

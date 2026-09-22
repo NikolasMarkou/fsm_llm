@@ -699,12 +699,11 @@ def _iter_vars(node: Any) -> list[str]:
 class TestPrioritySpacing:
     """Simultaneously passing edges must resolve DETERMINISTIC, never AMBIGUOUS.
 
-    ``TransitionEvaluator`` derives base confidence from priority as
-    ``max(0.1, 1.0 - priority / 1000)`` and only calls a multi-candidate race
-    DETERMINISTIC when the leader clears the runner-up by
-    ``ambiguity_threshold`` (0.1).  Priority slots closer than ~150 apart would
-    therefore hand a HARD gate decision to the LLM classifier -- exactly what
-    invariant I1 forbids.  These tests pin the spacing.
+    ``TransitionEvaluator`` ranks by priority alone: the unique lowest value is
+    DETERMINISTIC and only a tie goes AMBIGUOUS, which would hand a HARD gate
+    decision to the LLM classifier -- exactly what invariant I1 forbids.  The
+    slots also keep the historical > 100 spacing of the removed confidence-gap
+    rule (so an edge can be squeezed in between).  These tests pin both.
     """
 
     @pytest.mark.parametrize(
@@ -784,14 +783,16 @@ class TestPrioritySpacing:
         assert target == HarnessStates.EXECUTE
 
     def test_priority_slots_are_spaced_wide_enough(
-        self, harness_fsm: FSMDefinition, evaluator: TransitionEvaluator
+        self, harness_fsm: FSMDefinition
     ) -> None:
         """Adjacent priorities in one state differ by more than the threshold.
 
         Stated as a property of the graph so a new edge squeezed in at, say,
         priority 250 fails here rather than in a live run months later.
         """
-        threshold = evaluator.config.ambiguity_threshold
+        # Historical 0.1 confidence-gap threshold; the config field is a
+        # deprecated no-op (plan 8b258a25 D-013), so the value is pinned here.
+        threshold = 0.1
         for state_id, state in harness_fsm.states.items():
             priorities = sorted(t.priority for t in state.transitions)
             for lower, upper in pairwise(priorities):
