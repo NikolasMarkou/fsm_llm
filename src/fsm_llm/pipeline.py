@@ -841,19 +841,10 @@ class MessagePipeline:
             extraction_failed=extraction_response.extraction_failed,
         )
 
-        context_for_llm = self._apply_context_scope(
-            instance.context.get_user_visible_data(),
-            current_state,
-            conversation_id,
-        )
-
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
             user_message=user_message,
-            extracted_data=extraction_response.extracted_data,
-            context=context_for_llm,
             transition_occurred=transition_occurred,
-            previous_state=previous_state,
             response_format=output_response_format,
         )
 
@@ -959,10 +950,8 @@ class MessagePipeline:
             request = ResponseGenerationRequest(
                 system_prompt=".",
                 user_message="",
-                extracted_data={},
-                context={},
                 transition_occurred=False,
-                previous_state=None,
+                skip_generation=True,
             )
             self.llm_interface.generate_response(request)
             synthetic = f"[{current_state.id}]"
@@ -990,14 +979,7 @@ class MessagePipeline:
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
             user_message="",
-            extracted_data={},
-            context=self._apply_context_scope(
-                instance.context.get_user_visible_data(),
-                current_state,
-                conversation_id,
-            ),
             transition_occurred=False,
-            previous_state=None,
         )
 
         response = self.llm_interface.generate_response(request)
@@ -2714,18 +2696,21 @@ class MessagePipeline:
         # Fast-path for states with empty response_instructions (e.g. agent
         # intermediate states).  We build a minimal prompt and let the LLM
         # interface decide whether to skip the API call (LiteLLMInterface
-        # returns a synthetic response for short system prompts).
+        # returns a synthetic response without calling litellm).
         if (
             current_state.response_instructions is not None
             and not current_state.response_instructions
         ):
+            # DECISION plan-2026-09-22T080837-8b258a25/D-034: send BOTH skip
+            # signals, here and at the greeting. Do NOT drop `system_prompt="."`
+            # before 1.0 (custom interfaces may test only the sentinel) and do
+            # NOT fold the sites into a helper (D-006). The stream site makes no
+            # call, so it has no request to mark.
             request = ResponseGenerationRequest(
                 system_prompt=".",
                 user_message=user_message,
-                extracted_data=extraction_response.extracted_data,
-                context={},
                 transition_occurred=transition_occurred,
-                previous_state=previous_state,
+                skip_generation=True,
             )
             response = self.llm_interface.generate_response(request)
             synthetic = f"[{current_state.id}]"
@@ -2744,13 +2729,13 @@ class MessagePipeline:
             previous_state=previous_state,
             user_message=user_message,
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-005: scope the
-            # PROMPT, not only request.context (llm.py never reads it). Do NOT
+            # PROMPT, the only context channel (request.context is gone). Do NOT
             # revert to full instance.context.data: read_keys would then
             # promise scoping the prompt never delivered (hidden values leaked).
             # DECISION plan-2026-09-21T203800-8a03483a/D-008: the prompt gets
             # WorkingMemory under data (get_merged_data), scoped the same way,
             # at all three Pass-2 sites (sync, stream, greeting). Do NOT feed
-            # WM through request.context only, and do NOT merge hidden buffers.
+            # WM through a request field only, and do NOT merge hidden buffers.
             context=self._apply_context_scope(
                 instance.context.get_merged_data(), current_state, conversation_id
             ),
@@ -2764,13 +2749,6 @@ class MessagePipeline:
             extraction_failed=extraction_response.extraction_failed,
         )
 
-        # Apply context scoping if the state defines read_keys
-        context_for_llm = self._apply_context_scope(
-            instance.context.get_user_visible_data(),
-            current_state,
-            conversation_id,
-        )
-
         # Only enforce structured output format on terminal states
         output_response_format = None
         if not current_state.transitions:
@@ -2781,10 +2759,7 @@ class MessagePipeline:
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
             user_message=user_message,
-            extracted_data=extraction_response.extracted_data,
-            context=context_for_llm,
             transition_occurred=transition_occurred,
-            previous_state=previous_state,
             response_format=output_response_format,
         )
 

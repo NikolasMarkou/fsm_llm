@@ -525,10 +525,8 @@ class TestGenerateInitialResponseSkipsEmptyInstructions:
         assert request.system_prompt == "."
         assert "Decide which tool to call" not in request.system_prompt
         assert request.user_message == ""
-        assert request.extracted_data == {}
-        assert request.context == {}
+        assert request.skip_generation is True
         assert request.transition_occurred is False
-        assert request.previous_state is None
         history = api.get_conversation_history(conv_id)
         assert history[0] == {"system": "[think]"}
 
@@ -1162,11 +1160,12 @@ class TestApplyContextScope:
 
         pipeline.process(instance, "test", "conv-1")
 
-        # Verify the LLM was called with scoped context
+        # Verify the Pass-2 prompt (the only context channel) is scoped
         gen_call = llm.generate_response.call_args
         request = gen_call[0][0] if gen_call[0] else gen_call.kwargs.get("request")
-        assert "visible_key" in request.context
-        assert "hidden_key" not in request.context
+        assert "visible_key" in request.system_prompt
+        assert "hidden_key" not in request.system_prompt
+        assert "hide" not in request.system_prompt
 
 
 class TestContextScopeInFSMDefinition:

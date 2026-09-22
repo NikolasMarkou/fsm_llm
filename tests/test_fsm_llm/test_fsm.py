@@ -531,15 +531,12 @@ def test_response_generation_request_response_models():
     request = ResponseGenerationRequest(
         system_prompt="Generate a friendly greeting using the user's name",
         user_message="Hello",
-        extracted_data={"name": "John"},
-        context={"current_state": "welcome"},
         transition_occurred=False,
-        previous_state=None,
     )
 
     assert request.system_prompt == "Generate a friendly greeting using the user's name"
     assert request.user_message == "Hello"
-    assert request.extracted_data["name"] == "John"
+    assert request.skip_generation is False
 
     # Create a response generation response
     response = ResponseGenerationResponse(

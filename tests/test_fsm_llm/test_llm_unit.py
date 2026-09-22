@@ -75,10 +75,7 @@ class TestGenerateResponse:
         request = ResponseGenerationRequest(
             system_prompt="You are a helpful assistant",
             user_message="Hi",
-            extracted_data={},
-            context={},
             transition_occurred=False,
-            previous_state=None,
         )
         response = llm.generate_response(request)
         assert response.message == "Hello! How can I help you?"
@@ -90,10 +87,7 @@ class TestGenerateResponse:
         request = ResponseGenerationRequest(
             system_prompt="test",
             user_message="test",
-            extracted_data={},
-            context={},
             transition_occurred=False,
-            previous_state=None,
         )
         with pytest.raises(LLMResponseError, match="Response generation failed"):
             llm.generate_response(request)
@@ -326,10 +320,7 @@ class TestRetryWiring:
         return ResponseGenerationRequest(
             system_prompt=prompt,
             user_message="Hi",
-            extracted_data={},
-            context={},
             transition_occurred=False,
-            previous_state=None,
         )
 
     @pytest.fixture
@@ -578,8 +569,6 @@ class TestStreamEmptyContentGuard:
         return ResponseGenerationRequest(
             system_prompt="You are a helpful assistant",
             user_message="hi",
-            extracted_data={},
-            context={},
             transition_occurred=False,
         )
 
@@ -652,8 +641,6 @@ class TestStreamMalformedChunksSkipped:
         return ResponseGenerationRequest(
             system_prompt="You are a helpful assistant",
             user_message="hi",
-            extracted_data={},
-            context={},
             transition_occurred=False,
         )
 
@@ -747,8 +734,6 @@ class TestStreamReasoningFragmentAccumulation:
         return ResponseGenerationRequest(
             system_prompt="You are a helpful assistant",
             user_message="hi",
-            extracted_data={},
-            context={},
             transition_occurred=False,
         )
 

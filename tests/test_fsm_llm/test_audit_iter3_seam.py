@@ -120,10 +120,7 @@ def _generate(content: str, response_format=None):
     req = ResponseGenerationRequest(
         system_prompt="s",
         user_message="u",
-        extracted_data={},
-        context={},
         transition_occurred=False,
-        previous_state=None,
         response_format=response_format,
     )
     with (
@@ -397,10 +394,7 @@ def _generate_counted(content: str):
     req = ResponseGenerationRequest(
         system_prompt="s",
         user_message="u",
-        extracted_data={},
-        context={},
         transition_occurred=False,
-        previous_state=None,
     )
     with (
         patch("fsm_llm.llm.completion") as mock_comp,

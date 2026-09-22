@@ -1526,3 +1526,128 @@ class TestStep10ConfigDeprecation:
         assert ev.result_type == R.DETERMINISTIC
         assert ev.deterministic_transition == "t0"
         assert ev == _step10_evaluate(state)
+
+
+# ---------------------------------------------------------------------------
+# Step 11: skip_generation flag and the write-only request fields (D-034)
+# ---------------------------------------------------------------------------
+
+
+class _SkipRecordingLLM(LLMInterface):
+    """A custom interface that decides the skip from ``skip_generation`` only."""
+
+    def __init__(self) -> None:
+        self.requests: list[Any] = []
+        self.stream_requests: list[Any] = []
+
+    def generate_response(self, request):
+        from fsm_llm.definitions import ResponseGenerationResponse
+
+        self.requests.append(request)
+        skipped = getattr(request, "skip_generation", False)
+        return ResponseGenerationResponse(message="" if skipped else "real reply")
+
+    def generate_response_stream(self, request):
+        self.stream_requests.append(request)
+        yield "real reply"
+
+
+def _step11_fsm(initial_instructions: str) -> FSMDefinition:
+    """``start`` moves unconditionally to ``think`` (empty instructions)."""
+    states = {
+        "start": State(
+            id="start",
+            description="Start",
+            purpose="Start",
+            response_instructions=initial_instructions,
+            transitions=[Transition(target_state="think", description="Always")],
+        ),
+        "think": State(
+            id="think",
+            description="Think",
+            purpose="Think",
+            response_instructions="",
+            transitions=[Transition(target_state="end", description="Done")],
+        ),
+        "end": State(id="end", description="End", purpose="End", transitions=[]),
+    }
+    return FSMDefinition(
+        name="step11",
+        description="Pass-2 skip sites",
+        initial_state="start",
+        states=states,
+    )
+
+
+def _step11_request(**overrides: Any) -> Any:
+    from fsm_llm.definitions import ResponseGenerationRequest
+
+    fields: dict[str, Any] = {"system_prompt": "A real prompt", "user_message": "hi"}
+    fields.update(overrides)
+    return ResponseGenerationRequest(**fields)
+
+
+class TestStep11SkipGeneration:
+    def test_greeting_skip_site_sets_flag(self):
+        llm = _SkipRecordingLLM()
+        api = API.from_definition(_step11_fsm(""), llm_interface=llm)
+        _, greeting = api.start_conversation()
+        assert greeting == "[start]"
+        assert len(llm.requests) == 1
+        assert llm.requests[0].skip_generation is True
+        assert llm.requests[0].system_prompt == "."
+
+    def test_sync_skip_site_sets_flag(self):
+        llm = _SkipRecordingLLM()
+        api = API.from_definition(_step11_fsm("Greet"), llm_interface=llm)
+        conv_id, greeting = api.start_conversation()
+        assert greeting == "real reply"
+        assert llm.requests[0].skip_generation is False
+        assert api.converse("go", conv_id) == "[think]"
+        assert len(llm.requests) == 2
+        assert llm.requests[1].skip_generation is True
+        assert llm.requests[1].system_prompt == "."
+
+    def test_stream_skip_site_makes_no_call(self):
+        """The stream skip site builds no request (D-034): nothing to mark."""
+        llm = _SkipRecordingLLM()
+        api = API.from_definition(_step11_fsm("Greet"), llm_interface=llm)
+        conv_id, _ = api.start_conversation()
+        assert list(api.converse_stream("go", conv_id)) == ["[think]"]
+        assert len(llm.requests) == 1
+        assert llm.stream_requests == []
+
+    def test_normal_pass2_request_is_not_marked(self):
+        llm = _SkipRecordingLLM()
+        api = API.from_definition(_step11_fsm("Greet"), llm_interface=llm)
+        api.start_conversation()
+        assert llm.requests[0].skip_generation is False
+        assert llm.requests[0].system_prompt != "."
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"skip_generation": True},
+            {"system_prompt": "."},
+            {"system_prompt": ".", "skip_generation": True},
+        ],
+    )
+    def test_litellm_skips_on_either_signal(self, overrides):
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="gpt-4o-mini")
+        request = _step11_request(**overrides)
+        with patch("fsm_llm.llm.completion") as completion:
+            response = llm.generate_response(request)
+            chunks = list(llm.generate_response_stream(request))
+        completion.assert_not_called()
+        assert response.message == ""
+        assert chunks == [""]
+
+    def test_write_only_fields_are_gone_and_old_kwargs_are_ignored(self):
+        request = _step11_request(
+            extracted_data={"a": 1}, context={"b": 2}, previous_state="s"
+        )
+        for name in ("extracted_data", "context", "previous_state"):
+            assert not hasattr(request, name)
+        assert request.skip_generation is False

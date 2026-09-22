@@ -150,6 +150,12 @@ class ResponseGenerationRequest(BaseModel):
 
     This request generates the actual message shown to users after
     data extraction and transition evaluation are complete.
+
+    ``skip_generation`` is True when the state has empty
+    ``response_instructions``: the caller discards the reply, so an
+    interface should return any cheap response without calling a model.
+    For one release the same requests also carry ``system_prompt="."``
+    (the older sentinel); honour either signal.
     """
 
     system_prompt: str = Field(
@@ -166,20 +172,16 @@ class ResponseGenerationRequest(BaseModel):
         max_length=10000,
     )
 
-    extracted_data: dict[str, Any] = Field(
-        default_factory=dict, description="Data extracted in Pass 1"
-    )
-
-    context: dict[str, Any] = Field(
-        default_factory=dict, description="Current conversation context"
-    )
-
     transition_occurred: bool = Field(
         default=False, description="Whether a state transition occurred"
     )
 
-    previous_state: str | None = Field(
-        None, description="Previous state if transition occurred"
+    skip_generation: bool = Field(
+        default=False,
+        description=(
+            "True when Pass 2 is skipped (empty response_instructions); the "
+            "reply is discarded, so no model call is needed"
+        ),
     )
 
     response_format: dict[str, Any] | None = Field(
@@ -1311,10 +1313,10 @@ class FSMContext(BaseModel):
     ``_stream_response_generation_pass``, ``generate_initial_response``),
     scoped by ``read_keys``. ``get_user_visible_data()`` (the same merge
     without internal keys) feeds the Pass-1 per-field extraction prompt (a
-    field whose ``context_keys`` is left at its default), both classifier
-    call sites (through ``MessagePipeline._build_classifier_context``), and
-    ``ResponseGenerationRequest.context``. The bulk extraction pass sees
-    ``data`` only. ``update_context`` and handlers write ``data`` only. See
+    field whose ``context_keys`` is left at its default) and both classifier
+    call sites (through ``MessagePipeline._build_classifier_context``). The
+    bulk extraction pass sees ``data`` only. ``update_context`` and handlers
+    write ``data`` only. See
     ``fsm_llm.memory.WorkingMemory`` for the full statement.
     """
 

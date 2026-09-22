@@ -250,10 +250,7 @@ class TestLLMInterfaceDirect:
                     'Return ONLY this JSON: {"message": "Hello! How can I help you today?"}'
                 ),
                 user_message="Hello!",
-                extracted_data={},
-                context={},
                 transition_occurred=False,
-                previous_state=None,
             )
             response = llm.generate_response(request)
             assert isinstance(response, ResponseGenerationResponse)

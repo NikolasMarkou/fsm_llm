@@ -167,7 +167,11 @@ class LLMInterface(abc.ABC):
         extraction and transition evaluation are complete.
 
         Args:
-            request: Response generation request with final state context
+            request: Response generation request with final state context.
+                When ``request.skip_generation`` is True (the state has empty
+                ``response_instructions``), the pipeline discards the reply:
+                return any cheap response and do not call a model. The same
+                requests also carry ``system_prompt="."`` until 1.0.
 
         Returns:
             Response generation response with user-facing message
@@ -208,7 +212,11 @@ class LLMInterface(abc.ABC):
         compatible.
 
         Args:
-            request: Field extraction request with focused instructions
+            request: Field extraction request with focused instructions.
+                ``request.context`` and ``request.validation_rules`` are a
+                contract for third-party interfaces: the pipeline fills them,
+                but ``LiteLLMInterface`` does not read them (the prompt
+                already carries the context; the pipeline applies the rules).
 
         Returns:
             Field extraction response with typed value and confidence
@@ -362,13 +370,15 @@ class LiteLLMInterface(LLMInterface):
         This method creates prompts that generate appropriate user-facing responses
         based on the final state context and all extracted information.
 
-        When the system_prompt is empty, returns a synthetic response without
-        making an LLM call. This supports the fast-path for intermediate agent
+        When ``request.skip_generation`` is set (or the system prompt is the
+        older ``"."`` sentinel), returns a synthetic response without making
+        an LLM call. This supports the fast-path for intermediate agent
         states that skip response generation.
         """
-        # Fast-path: minimal system_prompt ("." sentinel) signals skipped
-        # response generation for intermediate agent states
-        if request.system_prompt == ".":
+        # DECISION plan-2026-09-22T080837-8b258a25/D-034: honour EITHER skip
+        # signal. Do NOT test only skip_generation before 1.0: a caller built
+        # on the sentinel alone would then pay a real completion.
+        if request.skip_generation or request.system_prompt == ".":
             return ResponseGenerationResponse(
                 message="",
                 message_type="response",
@@ -443,8 +453,8 @@ class LiteLLMInterface(LLMInterface):
         for transition evaluation.  This method only streams Pass 2
         (user-facing response generation).
         """
-        # Fast-path: sentinel prompt — no streaming needed
-        if request.system_prompt == ".":
+        # Fast-path: skipped Pass 2 (flag or "." sentinel, D-034) — no stream
+        if request.skip_generation or request.system_prompt == ".":
             yield ""
             return
 

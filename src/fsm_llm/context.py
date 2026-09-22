@@ -143,8 +143,6 @@ class ContextCompactor:
                 request = ResponseGenerationRequest(
                     system_prompt="You are a conversation summarizer.",
                     user_message=prompt,
-                    extracted_data={},
-                    context={},
                 )
                 response = llm_interface.generate_response(request)
                 summary = response.message
