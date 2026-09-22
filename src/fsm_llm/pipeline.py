@@ -27,10 +27,13 @@ from .constants import (
     CLASSIFIER_HISTORY_EXCHANGES,
     CONTEXT_KEY_AGENT_TRACE,
     CONTEXT_KEY_CLASSIFICATION_RESULT,
+    CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     MAX_CLASSIFIER_CACHE_SIZE,
+    MAX_CONTEXT_FILTER_DEPTH,
     METADATA_KEY_CLASSIFICATION_RESULTS,
     METADATA_KEY_TRANSITION_CLASSIFICATION,
+    PROVENANCE_METADATA_KEY,
     RESERVED_CONTEXT_KEYS,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
     has_internal_prefix,
@@ -69,6 +72,7 @@ from .prompts import (
     ResponseGenerationPromptBuilder,
 )
 from .transition_evaluator import TransitionEvaluator
+from .utilities import filter_context_tree
 
 # --- Type coercion dispatch for field extraction validation ---
 
@@ -159,8 +163,9 @@ _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
 _CLASSIFIER_BOUND_NAMES = frozenset({"schema", "model", "config"})
 
 # `context.metadata` key holding {context key: _value_digest(value)} for every
-# value the pipeline itself extracted (never the values). D-015.
-_PROVENANCE_KEY = "_pipeline_extracted"
+# value the pipeline itself extracted (never the values). D-015. Alias kept for
+# existing importers; the constant lives in `constants`.
+_PROVENANCE_KEY = PROVENANCE_METADATA_KEY
 
 # DECISION plan-2026-09-20T165703-0d9c218e/D-001
 # The ONE exception tuple both classifier call sites degrade on (D-004 of
@@ -240,10 +245,18 @@ def _record_transition_classification(
     )
 
 
+def _drop_forbidden_entry(key: Any, value: Any, _full_key: str) -> str | None:
+    """``filter_context_tree`` predicate: drop a secret-shaped entry."""
+    if isinstance(key, str) and is_forbidden_context_entry(key, value):
+        return "forbidden security pattern"
+    return None
+
+
 def _json_native_values(data: dict[str, Any], keys: list[str]) -> dict[str, Any]:
     """Independent JSON-native copies of ``data[k]`` for each present ``k``;
     a value that does not survive ``json.dumps`` is left out (never
-    stringified, so no object repr lands in metadata)."""
+    stringified, so no object repr lands in metadata). Secret-shaped entries
+    are then dropped at every depth (``is_forbidden_context_entry``)."""
     out: dict[str, Any] = {}
     for key in keys:
         if key in data:
@@ -251,7 +264,12 @@ def _json_native_values(data: dict[str, Any], keys: list[str]) -> dict[str, Any]
                 out[key] = json.loads(json.dumps(data[key], allow_nan=False))
             except (TypeError, ValueError, RecursionError):
                 continue
-    return out
+    # DECISION plan-2026-09-22T080837-8b258a25/D-031
+    # Filter the STORED JSON copy with the never-truncating data walker. Do NOT
+    # use the prompt walker (its node budget truncates), filter only the top
+    # level (nested secrets leak to the monitor), or filter before the round
+    # trip (a cycle would then be cut and stored instead of omitted). D-007.
+    return filter_context_tree(out, MAX_CONTEXT_FILTER_DEPTH, _drop_forbidden_entry)
 
 
 class _BulkFailed(dict):
@@ -793,7 +811,7 @@ class MessagePipeline:
         output_response_format = None
         if not current_state.transitions:
             output_response_format = instance.context.data.get(
-                "_output_response_format"
+                CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
             )
 
         # DECISION plan-2026-09-19T175721-21cd7f8e/D-003: stream plain text
@@ -1485,6 +1503,8 @@ class MessagePipeline:
         rejected: dict[str, Any] = {}
         confidences: list[float] = []
         cfg_by_name: dict[str, FieldExtractionConfig] = {}
+        # Bound on every path: the retry loop below reads it.
+        memo: dict[tuple[str, str], FieldExtractionResponse] | None = None
 
         # --- Field extractions ---
         if has_field_configs:
@@ -1500,9 +1520,7 @@ class MessagePipeline:
             # `isinstance(str)` test is load-bearing: a Mock interface's
             # `.model` is truthy and must not enable it.
             model = getattr(self.llm_interface, "model", None)
-            memo: dict[tuple[str, str], FieldExtractionResponse] | None = (
-                {} if isinstance(model, str) and is_ollama_model(model) else None
-            )
+            memo = {} if isinstance(model, str) and is_ollama_model(model) else None
             existing = instance.context.data
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-046: for an agent FSM an
             # EMPTY list/dict counts as unset. A builder seeds `[]` so a
@@ -2773,7 +2791,7 @@ class MessagePipeline:
         output_response_format = None
         if not current_state.transitions:
             output_response_format = instance.context.data.get(
-                "_output_response_format"
+                CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
             )
 
         request = ResponseGenerationRequest(

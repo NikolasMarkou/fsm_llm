@@ -390,10 +390,11 @@ def filter_context_tree(
           ``MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR *
           distinct_items`` items it raises ``ContextFilterWorkError`` (only a
           cycle that is itself heavily aliased gets there).
-        - Two call sites today: `fsm.py::_strip_internal_mapping` (silent,
-          bare-prefix predicate) and `context.py::clean_mapping` (5-reason
-          predicate, logging `on_drop`) -- a "same shape, different
-          behavior" extraction, not a policy merge.
+        - Three call sites today: `fsm.py::_strip_internal_mapping` (silent,
+          bare-prefix predicate), `context.py::clean_mapping` (5-reason
+          predicate, logging `on_drop`) and `pipeline.py::_json_native_values`
+          (forbidden-entry predicate on the classification `context_snapshot`)
+          -- a "same shape, different behavior" extraction, not a policy merge.
 
     # DECISION plan-2026-09-21T203800-8a03483a/D-011
     # The depth bound alone does not bound WORK: 3-way aliasing at 14 levels

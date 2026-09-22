@@ -24,6 +24,7 @@ from .constants import (
     DEFAULT_MAX_MESSAGE_LENGTH,
     END_CONVERSATION_LOCK_TIMEOUT_SECONDS,
     MAX_CONTEXT_FILTER_DEPTH,
+    PROVENANCE_METADATA_KEY,
     has_internal_prefix,
 )
 from .definitions import (
@@ -42,7 +43,7 @@ from .handlers import HandlerSystem, HandlerTiming
 # --------------------------------------------------------------
 from .llm import LLMInterface
 from .logging import logger, with_conversation_context
-from .pipeline import _PROVENANCE_KEY, MessagePipeline
+from .pipeline import MessagePipeline
 from .prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
@@ -906,7 +907,7 @@ class FSMManager:
             conversation has no working memory configured),
             ``hidden_buffers`` (sorted list of hidden buffer names, ``[]``
             if none/none configured), ``provenance`` (a shallow copy of
-            ``context.metadata[_PROVENANCE_KEY]``, ``{}`` if absent), and
+            ``context.metadata[PROVENANCE_METADATA_KEY]``, ``{}`` if absent), and
             ``conversation_summary`` (``Conversation.summary``, str or
             ``None``).
           - Failure: same as ``_read_under_lock`` (``FSMError`` for an
@@ -965,7 +966,9 @@ class FSMManager:
                 "conversation_history": inst.context.conversation.get_recent(),
                 "working_memory": working_memory,
                 "hidden_buffers": hidden_buffers,
-                "provenance": dict(inst.context.metadata.get(_PROVENANCE_KEY) or {}),
+                "provenance": dict(
+                    inst.context.metadata.get(PROVENANCE_METADATA_KEY) or {}
+                ),
                 # DECISION plan-2026-09-21T203800-8a03483a/D-007 (A6): the
                 # summary is read in this SAME hold as the history it
                 # complements (a trim moves exchanges from one to the other).
@@ -991,7 +994,7 @@ class FSMManager:
             started by ``API.restore_session``); ``summary`` (set when not
             ``None``); ``history`` (``{"user": ...}`` / ``{"system": ...}``
             exchanges, appended in order); ``provenance`` (a shallow copy is
-            stored under ``_PROVENANCE_KEY`` when not ``None``);
+            stored under ``PROVENANCE_METADATA_KEY`` when not ``None``);
             ``working_memory`` (a built ``WorkingMemory``, assigned when not
             ``None``). ``None`` means "keep the fresh conversation's value".
           - Returns: None; mutates the instance in place.
@@ -1019,7 +1022,7 @@ class FSMManager:
                 if "system" in exchange:
                     conversation.add_system_message(exchange["system"])
             if provenance is not None:
-                inst.context.metadata[_PROVENANCE_KEY] = dict(provenance)
+                inst.context.metadata[PROVENANCE_METADATA_KEY] = dict(provenance)
             if working_memory is not None:
                 inst.context.working_memory = working_memory
 

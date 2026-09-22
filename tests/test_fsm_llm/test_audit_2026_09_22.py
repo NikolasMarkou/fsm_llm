@@ -652,3 +652,166 @@ class TestStep4ReadOnlyProbe:
         system.execute_handlers(HandlerTiming.PRE_PROCESSING, "s", None, {"z": 0})
         assert seen[0] == (types.MappingProxyType, {"z": 0})
         assert seen[1] == (dict, {"z": 0, "a": 1})
+
+
+# ---------------------------------------------------------------------------
+# Step 5: classification context_snapshot never carries a secret
+# ---------------------------------------------------------------------------
+
+
+def _snapshot_fsm(context_keys: list[str]) -> FSMDefinition:
+    """``triage`` owns one classification field whose record snapshots
+    ``context_keys``; ``browse`` is the fallback, so the turn stays put."""
+    from fsm_llm.definitions import ClassificationExtractionConfig, IntentDefinition
+
+    triage = State(
+        id="triage",
+        description="Triage",
+        purpose="Route the shopper",
+        response_instructions="Respond",
+        classification_extractions=[
+            ClassificationExtractionConfig(
+                field_name="intent",
+                intents=[
+                    IntentDefinition(name="buy", description="wants to buy"),
+                    IntentDefinition(name="browse", description="just looking"),
+                ],
+                fallback_intent="browse",
+                confidence_threshold=0.5,
+                context_keys=context_keys,
+            )
+        ],
+        transitions=[
+            Transition(
+                target_state="done",
+                description="Buy",
+                conditions=[
+                    TransitionCondition(
+                        description="buy", logic={"==": [{"var": "intent"}, "buy"]}
+                    )
+                ],
+            )
+        ],
+    )
+    done = State(id="done", description="Done", purpose="End", transitions=[])
+    return FSMDefinition(
+        name="snapshot_fsm",
+        description="Snapshot FSM",
+        initial_state="triage",
+        states={"triage": triage, "done": done},
+    )
+
+
+def _classify_browse() -> Any:
+    """Patch the classifier's litellm boundary to answer ``browse``."""
+    import json
+
+    resp = MagicMock()
+    resp.choices = [MagicMock()]
+    resp.choices[0].message.content = json.dumps(
+        {"reasoning": "r", "intent": "browse", "confidence": 0.95, "entities": {}}
+    )
+    return (
+        patch("fsm_llm.classification.completion", return_value=resp),
+        patch("fsm_llm.classification.get_supported_openai_params", return_value=[]),
+    )
+
+
+_TOP_SECRET = "sk-live-TOPSECRET123456"
+_NESTED_SECRET = "sk-proj-NESTEDSECRET987"
+_LIST_SECRET = "rt-LISTSECRET-9f8e7d6c5b4a"
+_DEEP_SECRET = "hunter2-DEEPSECRET"
+
+
+class TestStep5ContextSnapshotFilter:
+    """Security (D-007): ``classification_results[f]["context_snapshot"]`` is
+    built from security-filtered values: a forbidden entry is dropped at every
+    depth (top level, nested dict, dict inside a list), allowed values are kept
+    exactly. Driven through ``API.converse`` and
+    ``FSMManager.get_complete_conversation`` (the monitor's read path)."""
+
+    def _run(self, context: dict[str, Any], keys: list[str]) -> tuple[API, str]:
+        api = API.from_definition(_snapshot_fsm(keys), llm_interface=_mock_llm())
+        conv_id, _ = api.start_conversation(initial_context=context)
+        completion, params = _classify_browse()
+        with completion, params:
+            api.converse("just looking", conv_id)
+        return api, conv_id
+
+    def _context(self) -> dict[str, Any]:
+        return {
+            "api_key": _TOP_SECRET,
+            "topic": "running shoes",
+            "profile": {
+                "session_token": _NESTED_SECRET,
+                "tier": "gold",
+                "history": [{"refresh_token": _LIST_SECRET, "label": "a"}, 7],
+                "deep": {"password": _DEEP_SECRET, "ok": 1},
+            },
+        }
+
+    def test_secret_absent_from_snapshot_at_every_depth(self):
+        import json
+
+        api, conv_id = self._run(
+            self._context(), ["api_key", "profile", "topic", "missing"]
+        )
+        # The fixture reaches the branch: the secrets are really in context.
+        raw = api.fsm_manager.instances[conv_id].context.data
+        assert raw["api_key"] == _TOP_SECRET
+        assert raw["profile"]["session_token"] == _NESTED_SECRET
+
+        metadata = api.fsm_manager.get_complete_conversation(conv_id)["metadata"]
+        snapshot = metadata["classification_results"]["intent"]["context_snapshot"]
+        assert snapshot == {
+            "topic": "running shoes",
+            "profile": {
+                "tier": "gold",
+                "history": [{"label": "a"}, 7],
+                "deep": {"ok": 1},
+            },
+        }
+        dumped = json.dumps(metadata)
+        for secret in (_TOP_SECRET, _NESTED_SECRET, _LIST_SECRET, _DEEP_SECRET):
+            assert secret not in dumped
+        for name in ("api_key", "session_token", "refresh_token", "password"):
+            assert name not in dumped
+
+    def test_allowed_values_kept_exactly(self):
+        context = {
+            "topic": "running shoes",
+            "prefs": {"sizes": [9, 9.5], "colour": None, "tags": ("a", "b")},
+        }
+        api, conv_id = self._run(context, ["topic", "prefs"])
+        metadata = api.fsm_manager.get_complete_conversation(conv_id)["metadata"]
+        snapshot = metadata["classification_results"]["intent"]["context_snapshot"]
+        # JSON-native round trip unchanged (tuple -> list), nothing dropped.
+        assert snapshot == {
+            "topic": "running shoes",
+            "prefs": {"sizes": [9, 9.5], "colour": None, "tags": ["a", "b"]},
+        }
+
+    def test_cyclic_value_still_omitted(self):
+        cyclic: dict[str, Any] = {"tier": "gold"}
+        cyclic["self"] = cyclic
+        api, conv_id = self._run({"topic": "t", "loop": cyclic}, ["topic", "loop"])
+        metadata = api.fsm_manager.get_complete_conversation(conv_id)["metadata"]
+        snapshot = metadata["classification_results"]["intent"]["context_snapshot"]
+        assert snapshot == {"topic": "t"}
+
+
+class TestStep5NamedConstants:
+    """The two cross-module context/metadata keys are named constants."""
+
+    def test_output_response_format_constant(self):
+        from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
+
+        assert CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT == "_output_response_format"
+
+    def test_provenance_constant_and_pipeline_alias(self):
+        from fsm_llm import fsm, pipeline
+        from fsm_llm.constants import PROVENANCE_METADATA_KEY
+
+        assert PROVENANCE_METADATA_KEY == "_pipeline_extracted"
+        assert pipeline._PROVENANCE_KEY is PROVENANCE_METADATA_KEY
+        assert fsm.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY

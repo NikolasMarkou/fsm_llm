@@ -147,6 +147,14 @@ RESERVED_CONTEXT_KEYS: frozenset[str] = frozenset(
 METADATA_KEY_CLASSIFICATION_RESULTS = "classification_results"
 METADATA_KEY_TRANSITION_CLASSIFICATION = "transition_classification"
 
+# `context.metadata` key holding {context key: value digest} for every value the
+# pipeline itself extracted (never the values). D-015 of the pipeline.
+PROVENANCE_METADATA_KEY = "_pipeline_extracted"
+
+# Context key an agent (`fsm_llm_agents.BaseAgent._init_context`) sets to the
+# structured-output schema; Pass 2 enforces it on terminal states only.
+CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT = "_output_response_format"
+
 # Recent exchanges (user+assistant pairs) the pipeline gives each classifier
 # call as history (MessagePipeline._build_classifier_context, D-004).
 CLASSIFIER_HISTORY_EXCHANGES = 3

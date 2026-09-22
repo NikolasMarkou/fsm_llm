@@ -15,7 +15,7 @@ from typing import Any, cast
 from pydantic import BaseModel
 
 from fsm_llm import API
-from fsm_llm.constants import has_internal_prefix
+from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
 from fsm_llm.context import ContextCompactor
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
@@ -216,7 +216,7 @@ class BaseAgent(ABC):
         # the LLM for constrained decoding on the conclude state.
         response_format = _output_response_format(self.config.output_schema)
         if response_format is not None:
-            context["_output_response_format"] = response_format
+            context[CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT] = response_format
 
         if extra:
             context.update(extra)
