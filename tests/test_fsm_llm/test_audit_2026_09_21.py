@@ -3760,6 +3760,68 @@ class TestStep14_1:
         assert sorted(ends) == sorted([*idle_ids, other_id, busy_id])
 
 
+def _c12_pathological_graph() -> list[Any]:
+    """Review pass 2 p2_cyc.py: a 3-way aliased 14-level list chain with a
+    back-edge (a cycle that is itself heavily aliased)."""
+    nodes: list[list[Any]] = [[] for _ in range(14)]
+    for i in range(13):
+        nodes[i].extend([nodes[i + 1]] * 3)
+    nodes[13].append(nodes[0])
+    return nodes[0]
+
+
+class TestStep14_2:
+    """Review pass 2 concern 1 (API half): only the lock-timeout refusal
+    (``ConversationBusyError``) blocks ``API.end_conversation``; any other
+    failure of the ended-cache snapshot is logged and the end proceeds
+    (plan-2026-09-21T203800-8a03483a/D-053)."""
+
+    @pytest.mark.usefixtures("_c12_short_lock_timeout")
+    def test_c12_refusal_is_conversation_busy_error(self):
+        import fsm_llm
+        from fsm_llm import ConversationBusyError
+
+        assert issubclass(ConversationBusyError, FSMError)
+        assert "ConversationBusyError" in fsm_llm.__all__
+        api, _ = _c12_api()
+        conv_id, _ = api.start_conversation()
+        with _c12_turn_holding(api, conv_id):
+            with pytest.raises(ConversationBusyError):
+                api.fsm_manager.end_conversation(conv_id)
+            with pytest.raises(ConversationBusyError):
+                api.end_conversation(conv_id)
+        assert conv_id in api.list_active_conversations()
+
+    def test_c12_end_proceeds_when_snapshot_fails(self):
+        api, ends = _c12_api()
+        conv_id, _ = api.start_conversation()
+        with patch.object(
+            api.fsm_manager, "get_end_snapshot", side_effect=RuntimeError("boom")
+        ):
+            api.end_conversation(conv_id)
+        assert api.list_active_conversations() == []
+        assert conv_id not in api.fsm_manager.instances
+        assert ends == [conv_id]
+        assert conv_id not in api._ended_conversations
+
+    def test_c12_pathological_cyclic_context_can_be_ended_and_swept(self):
+        from fsm_llm.utilities import ContextFilterWorkError
+
+        api, ends = _c12_api()
+        ended_id, _ = api.start_conversation()
+        swept_id, _ = api.start_conversation()
+        for cid in (ended_id, swept_id):
+            _raw_data(api, cid)["graph"] = _c12_pathological_graph()
+        with pytest.raises(ContextFilterWorkError):
+            api.get_data(ended_id)
+        api.end_conversation(ended_id)
+        assert ended_id not in api.fsm_manager.instances
+        assert api.cleanup_stale_conversations(max_idle_seconds=0) == [swept_id]
+        assert api.list_active_conversations() == []
+        assert swept_id not in api.fsm_manager.instances
+        assert sorted(ends) == sorted([ended_id, swept_id])
+
+
 # ---------------------------------------------------------------------------
 # Step 15: D6, D8, D9, D10, D11, D12 (reserved kwargs), B8
 # ---------------------------------------------------------------------------

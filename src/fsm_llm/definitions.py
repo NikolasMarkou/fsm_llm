@@ -1660,6 +1660,16 @@ class FSMError(Exception):
         self.details = details or {}
 
 
+class ConversationBusyError(FSMError):
+    """A turn held the conversation's lock past
+    ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS``, so ending it was refused.
+    Nothing was changed; retry after the turn completes."""
+
+    def __init__(self, message: str, conversation_id: str | None = None, **kwargs):
+        super().__init__(message, **kwargs)
+        self.conversation_id = conversation_id
+
+
 class StateNotFoundError(FSMError):
     """Exception for non-existent state references."""
 

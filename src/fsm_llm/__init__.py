@@ -47,6 +47,7 @@ from .definitions import (
     # Context and conversation management
     ContextScope,
     Conversation,
+    ConversationBusyError,
     # Improved 2-pass architecture models
     DataExtractionResponse,
     DomainSchema,
@@ -268,6 +269,7 @@ __all__ = [
     "visualize_fsm_from_file",
     # Exceptions
     "FSMError",
+    "ConversationBusyError",
     "StateNotFoundError",
     "InvalidTransitionError",
     "LLMResponseError",

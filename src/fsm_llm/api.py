@@ -99,7 +99,7 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 
 from .constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_STACK_DEPTH, FSM_ID_HASH_LENGTH
-from .definitions import FSMDefinition, FSMError
+from .definitions import ConversationBusyError, FSMDefinition, FSMError
 
 # --------------------------------------------------------------
 # local imports
@@ -1186,10 +1186,12 @@ class API:
         """End conversation and clean up all FSMs in stack.
 
         If a turn holds a frame's lock past
-        ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS``, raises ``FSMError`` and the
-        conversation stays active with its remaining frames; retry after the
-        turn. Frames above the refusing one that were already ended are
-        removed from the stack.
+        ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS``, raises
+        ``ConversationBusyError`` (an ``FSMError``) and the conversation stays
+        active with its remaining frames; retry after the turn. Frames above
+        the refusing one that were already ended are removed from the stack.
+        Any other failure while reading the ended-conversation cache is
+        logged and the end proceeds without a cache entry.
         """
         # DECISION plan-2026-09-21T203800-8a03483a/D-050
         # Read the cache, then end the frames, and only THEN drop the API
@@ -1208,12 +1210,22 @@ class API:
             current_fsm_id = None
         ended_cache: dict[str, Any] | None = None
         if current_fsm_id is not None:
+            # DECISION plan-2026-09-21T203800-8a03483a/D-053
+            # Only the lock-timeout refusal blocks the end. Do NOT re-raise
+            # every snapshot error while the instance is present: a context the
+            # data walker refuses (`ContextFilterWorkError`) or any other read
+            # failure then made the conversation impossible to end or sweep
+            # (review pass 2). The ended cache is best-effort. See D-053.
             try:
                 ended_cache = self.fsm_manager.get_end_snapshot(current_fsm_id)
-            except Exception:
-                if self._frame_instance_present(current_fsm_id):
-                    raise  # refused: a turn is running; nothing changed
-                ended_cache = None  # best-effort cache
+            except ConversationBusyError:
+                raise  # refused: a turn is running; nothing changed
+            except Exception as e:
+                logger.warning(
+                    f"Ending {conversation_id} without an ended-conversation "
+                    f"cache entry: snapshot failed ({type(e).__name__}: {e!s})"
+                )
+                ended_cache = None
 
         with self._stack_lock:
             stack = list(self.conversation_stacks.get(conversation_id) or [])

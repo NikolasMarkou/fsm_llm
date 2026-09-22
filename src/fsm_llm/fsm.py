@@ -26,6 +26,7 @@ from .constants import (
     has_internal_prefix,
 )
 from .definitions import (
+    ConversationBusyError,
     FSMContext,
     FSMDefinition,
     FSMError,
@@ -689,8 +690,9 @@ class FSMManager:
           - Returns: None with the lock HELD; the caller must release it.
           - Failure: if the lock is not acquired within
             ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS`` (read at call time), logs
-            ERROR and raises ``FSMError`` ("... still processing a turn ...");
-            the lock is not held and nothing has been changed.
+            ERROR and raises ``ConversationBusyError`` (an ``FSMError``, "...
+            still processing a turn ..."); the lock is not held and nothing
+            has been changed.
         """
         if not conv_lock.acquire(timeout=END_CONVERSATION_LOCK_TIMEOUT_SECONDS):
             logger.error(
@@ -698,9 +700,10 @@ class FSMManager:
                 f"for conversation lock on {conversation_id}; a turn is still "
                 "running, conversation NOT ended"
             )
-            raise FSMError(
+            raise ConversationBusyError(
                 f"Conversation {conversation_id} is still processing a turn; "
-                "end_conversation refused (retry after the turn completes)"
+                "end_conversation refused (retry after the turn completes)",
+                conversation_id=conversation_id,
             )
 
     def _read_under_lock(
