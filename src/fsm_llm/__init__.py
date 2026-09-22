@@ -48,7 +48,7 @@ from .definitions import (
     ContextScope,
     Conversation,
     ConversationBusyError,
-    # Improved 2-pass architecture models
+    # 2-pass architecture models
     DataExtractionResponse,
     # Field extraction models
     FieldExtractionConfig,
@@ -186,7 +186,7 @@ __all__ = [
     "TransitionCondition",
     "ContextScope",
     "Conversation",
-    # Improved 2-pass architecture components
+    # 2-pass architecture components
     "DataExtractionResponse",
     "ResponseGenerationRequest",
     "ResponseGenerationResponse",

@@ -2,7 +2,7 @@
 LLM Interface Module for FSM-Driven Conversational AI.
 
 This module provides the core interface and implementation for Large Language Model (LLM)
-communication within the fsm-llm library's improved 2-pass architecture. It defines how
+communication within the fsm-llm library's 2-pass architecture. It defines how
 FSM-driven applications interact with various LLM providers while maintaining clear
 separation of concerns between data extraction, response generation, and transition decisions.
 
@@ -157,7 +157,7 @@ def _safe_str(value: Any) -> str | None:
 
 class LLMInterface(abc.ABC):
     """
-    Abstract interface for LLM communication supporting improved 2-pass architecture.
+    Abstract interface for LLM communication supporting the 2-pass architecture.
 
     This interface defines methods for data extraction, response generation, and
     transition decision making, allowing implementations to optimize for different use cases.
@@ -278,7 +278,7 @@ class LiteLLMInterface(LLMInterface):
     LiteLLM-based implementation supporting multiple providers.
 
     This implementation uses LiteLLM to communicate with various LLM providers
-    while maintaining the improved 2-pass architecture interface.
+    while maintaining the 2-pass architecture interface.
     """
 
     # (model, result) of the last successful get_supported_openai_params call.

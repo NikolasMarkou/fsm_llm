@@ -427,6 +427,7 @@ def filter_context_tree(
     # `distinct_items` is len(source) either way: skip only the pre-scan. Do
     # NOT widen to Mapping/dict subclasses (the pre-scan walks a non-dict
     # Mapping's keys) and do NOT add a truncating shortcut (D-045). See D-037.
+    reaching: set[int]
     if type(source) is dict and not any(
         isinstance(value, (dict, list, tuple)) for value in source.values()
     ):

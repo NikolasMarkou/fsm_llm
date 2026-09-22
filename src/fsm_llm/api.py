@@ -189,7 +189,7 @@ class API:
     Enhanced API for Improved 2-Pass FSM-LLM Architecture.
 
     This class provides a backward-compatible interface while internally
-    implementing the improved 2-pass architecture for better conversation quality
+    implementing the 2-pass architecture for better conversation quality
     and response generation after transition evaluation.
     """
 
@@ -212,7 +212,7 @@ class API:
         **llm_kwargs,
     ):
         """
-        Initialize API with improved 2-pass architecture.
+        Initialize API with the 2-pass architecture.
 
         Args:
             fsm_definition: FSM definition (object, dict, or file path)
@@ -305,7 +305,7 @@ class API:
             error_mode=handler_error_mode, handler_timeout=handler_timeout
         )
 
-        # Initialize enhanced FSM manager with improved 2-pass architecture
+        # Initialize enhanced FSM manager with the 2-pass architecture
         self.fsm_manager = FSMManager(
             fsm_loader=custom_fsm_loader,
             llm_interface=self.llm_interface,
@@ -335,7 +335,7 @@ class API:
         # Session persistence
         self._session_store = session_store
 
-        logger.info("Enhanced API fully initialized with improved 2-pass architecture")
+        logger.info("Enhanced API fully initialized with the 2-pass architecture")
 
     @classmethod
     def process_fsm_definition(
@@ -433,7 +433,7 @@ class API:
         _suppress_start: bool = False,
     ) -> tuple[str, str]:
         """
-        Start new conversation with improved 2-pass architecture.
+        Start new conversation with the 2-pass architecture.
 
         Args:
             initial_context: Optional initial context data
@@ -476,7 +476,7 @@ class API:
 
     def converse(self, user_message: str, conversation_id: str) -> str:
         """
-        Process message using improved 2-pass architecture.
+        Process message using the 2-pass architecture.
 
         Args:
             user_message: User's message

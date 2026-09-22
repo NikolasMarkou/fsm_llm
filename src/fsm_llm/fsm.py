@@ -197,7 +197,7 @@ class FSMManager:
         )
 
         logger.info(
-            f"Enhanced FSM Manager initialized with improved 2-pass architecture - "
+            f"Enhanced FSM Manager initialized with the 2-pass architecture - "
             f"history_size={max_history_size}, message_length={max_message_length}"
         )
 

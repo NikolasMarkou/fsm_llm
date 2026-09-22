@@ -7,6 +7,250 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Core audit of `src/fsm_llm` dated 2026-09-22 (`plans/plan-2026-09-22T080837-8b258a25`,
+16 steps in 21 commits, one commit per step or substep). Every behaviour change has a
+test in `tests/test_fsm_llm/test_audit_2026_09_22.py` that fails on the parent commit;
+four cross-cutting sweeps live in `tests/test_fsm_llm/test_audit_sweeps.py`. Full suite:
+6,849 tests collected (was 6,564). `ruff` and `mypy` clean across all 6 packages. No
+prompt text changed, so the stale eval baseline was not re-measured.
+
+### Behaviour changes to know about -- core audit 2026-09-22
+
+- **Load-time validation of `prompt_config` and `transition_classification`.** A
+  `classification_extractions[].prompt_config` with an unknown key or an out-of-range
+  value (`max_tokens < 1`, `temperature` outside 0.0-2.0, `max_intents` outside
+  1-`MAX_MULTI_INTENTS`) now fails when the FSM loads, with the same rules
+  `ClassificationPromptConfig` applies at extraction time (it used to fail, softly,
+  mid-conversation). `State.transition_classification` must be None or a dict: the
+  reserved `confidence_threshold` key must be a non-bool number in [0, 1], and every
+  other key must map to a dict whose only key is `description` (str or None). `{}` is
+  accepted. `fsm-llm-validate` gives the same verdict. All shipped examples still load.
+- **Session files hold placeholders for non-JSON objects.** `FileSessionStore.save`
+  no longer calls `str()` on an arbitrary value. An exact `datetime`, `date`, `time`,
+  `timedelta`, `Decimal` or `UUID` is still written as `str(value)` (byte-identical to
+  before); anything else (`set`, `bytes`, `frozenset`, a subclass of those scalars, a
+  custom object) is written as `"<redacted:TypeName>"`, so a restore reads the
+  placeholder string.
+- **`context_snapshot` is filtered.** `get_complete_conversation(...)["metadata"]
+  ["classification_results"][field]["context_snapshot"]` drops every secret-shaped
+  entry (`is_forbidden_context_entry`) at any depth, including inside lists. The verdict
+  is taken on the stored JSON form (tuples as lists, non-str keys as strings), and a
+  value nested deeper than `MAX_CONTEXT_FILTER_DEPTH` is dropped. A cyclic value is
+  still omitted, as before.
+- **Read-only `should_execute` probe.** During the uncopied phase of
+  `HandlerSystem.execute_handlers` a handler condition receives a
+  `types.MappingProxyType` over the context. A condition that assigns into it raises
+  `TypeError` (wrapped once as `HandlerExecutionError`) and the context is unchanged;
+  `isinstance(ctx, dict)` is False there. Probes after the first handler ran still get
+  a private deep copy (a real `dict`).
+- **`FSMStackFrame.fsm_definition` is typed `FSMDefinition`.** A frame built from an id
+  string, or from anything else that does not validate as an `FSMDefinition`, is now a
+  validation error.
+- **Typed "unknown FSM id" error.** `load_fsm_definition("<id>")` for an id that is not
+  a file path raises `FSMDefinitionNotFoundError`, which is both an `FSMError` and a
+  `ValueError`; the message keeps the `Unknown FSM ID` prefix and names the missing
+  registry.
+- **`API(handler_timeout=..., max_fsm_cache_size=...)` are consumed.** Both used to fall
+  into `**llm_kwargs` and reach the LLM interface; they now configure `HandlerSystem`
+  and `FSMManager`. Defaults (`None`, 64) behave as before. The
+  `MAX_TIMED_HANDLER_STRAGGLERS` cap is shared by every conversation of one `API`
+  (documented, unchanged).
+- **Bulk extraction ignores a sanitiser override.** Bulk Pass-1 extraction sanitises the
+  user message through `prompts.sanitize_text_for_prompt` (the shared default
+  sanitiser), so a custom `data_extraction_prompt_builder` subclass that overrides
+  `_sanitize_text_for_prompt` no longer affects that call.
+- **Restore into a missing instance raises.** `restore_session` seeds summary, history,
+  provenance and working memory in one `FSMManager.seed_restored_conversation` call. If
+  the FSM instance is gone it raises a typed `FSMError` (and the half-restored
+  conversation is torn down) instead of logging a warning and skipping the history
+  replay.
+- **A failed FSM load no longer evicts a cache entry.** `get_fsm_definition` evicts only
+  when it inserts a loaded definition (same `len >= max_fsm_cache_size` rule). On a
+  concurrent miss of the same id the loader may run twice; the first-inserted
+  definition is returned to both callers.
+- **Getters on ended conversations agree.** `get_data`, `get_current_state`,
+  `has_conversation_ended` and `get_conversation_history` fall back to the ended-
+  conversation cache on `ValueError`, `KeyError` or a not-found `FSMError`, and re-raise
+  `ConversationBusyError`. `get_conversation_history` now returns the cached history
+  after `end_conversation` (it used to raise). An id that was never started still
+  raises `ValueError`.
+- **`max_history_size=0` keeps a summary.** Exchanges are digested into
+  `Conversation.summary` (same 2,000-character cap) before they are cleared.
+- **`get_version_info()["architecture"]`** is `"2-pass"` (was `"improved-2-pass"`).
+
+### Fixed -- core audit 2026-09-22
+
+- P0-1: the ended-conversation cache (`API._ended_conversations`) is written, evicted
+  and read only under `API._stack_lock`. A reader during a concurrent end no longer
+  sees an evicted-but-not-inserted entry, and concurrent evictions no longer fail with
+  `KeyError`.
+- P0-3: `restore_session` no longer takes `FSMManager._lock` while holding a
+  conversation lock (4 sites, C-NEW-007). The seeds run in the canonical order
+  (`_lock` for the lookup only, then the conversation lock). `api.py` has no remaining
+  access to `fsm_manager._lock`, `._conversation_locks` or `.instances`.
+- P0-4: `handler_timeout` and `max_fsm_cache_size` are reachable through `API` (see
+  above).
+- P1-1: the Pass-1 memo name is bound on every path (defensive; no `NameError` was
+  reachable).
+- P1-2: `max_history_size=0` summarises before clearing (see above).
+- P1-3: `should_execute` probes see a read-only mapping (see above).
+- P1-4: `get_conversation_history` falls back to the ended cache (see above).
+- P1-5: `get_data` falls back on a not-found `FSMError` and propagates
+  `ConversationBusyError` (see above).
+- P1-6: `SessionState.stack_depth` is documented as advisory (written by
+  `save_session`, never read by restore).
+- P1-7: the Pass-2 apology retry is counted (`LiteLLMInterface.apology_retry_count`);
+  the retry itself is unchanged.
+- Security: secret-shaped entries no longer reach the `context_snapshot` metadata (see
+  above), and a value's `__str__` no longer reaches a saved session file (see above).
+- `runner._redact_context` (the `fsm-llm` CLI's debug context dump) terminates on a
+  self-cycle (the cycle becomes `"<redacted:cycle>"`) and runs in linear time on aliased
+  input: a 3-way-aliased tower 16 levels deep went from more than 25 s to under 1 ms.
+  Output on acyclic input is unchanged.
+- `DEFAULT_TEMPERATURE` is the single source of the 0.5 default in `API.__init__` and
+  `LiteLLMInterface.__init__` (it was defined but unused next to two literals).
+- Stale comments in `fsm.py` said `get_fsm_definition` re-takes `_lock`; they now give
+  the real reason (the loader runs on a cache miss).
+
+### Added -- core audit 2026-09-22
+
+- `src/fsm_llm/security.py`: the credential/forbidden-context filter and
+  `has_internal_prefix` moved there verbatim (`constants.py` 1,978 -> 310 lines).
+  `fsm_llm.constants` re-exports every public name and every private name used in
+  `src/` or `tests/`; no filter verdict changed.
+- `ResponseGenerationRequest.skip_generation` (default False), set by the greeting and
+  synchronous Pass-2 skip sites and honoured by `LiteLLMInterface.generate_response`
+  and its streaming path. The streaming skip site still makes no interface call.
+- `FSMDefinitionNotFoundError` (exported, pickles with `fsm_id` and details).
+- `FSMManager.seed_restored_conversation`, `FSMManager.has_instance`,
+  `FSMManager.copy_raw_context_data`, `FSMManager.prune_orphaned_locks`.
+- `ClassificationResult.is_below_default_threshold` (property).
+- `WorkingMemory.hidden_buffers` (read-only property, returns the instance's own
+  `frozenset`).
+- `fsm_llm.logging.reset_handlers()` and `fsm_llm.logging.register_stream_handler()`;
+  `enable_debug_logging` uses them and touches no logging private.
+- `fsm_llm.prompts.sanitize_text_for_prompt(text)`, the public entry to the shared
+  prompt sanitiser (output identical).
+- Constants: `DEFAULT_MAX_FSM_CACHE_SIZE` (64, shared by `API` and `FSMManager`),
+  `CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT`, `PROVENANCE_METADATA_KEY` (`pipeline._PROVENANCE_KEY`
+  stays as an alias), `TRANSITION_CLASSIFICATION_THRESHOLD_KEY`.
+- `LiteLLMInterface.apology_retry_count`.
+- `API.__init__` parameters `handler_timeout` and `max_fsm_cache_size`.
+- Tests: `tests/test_fsm_llm/test_audit_2026_09_22.py` and
+  `tests/test_fsm_llm/test_audit_sweeps.py` (JsonLogic operator partition and dispatch,
+  agreement of the four context filters, reachability of every `HandlerSystem` and
+  `FSMManager` option from `API`, an exhaustive small-alphabet prompt-sanitiser sweep
+  with 255/256/257/300 padding cases). The sweeps found no defect.
+- Docs: `CONTRIBUTING.md` (setup, commands, count pins, frozen examples, the `plans/`
+  convention, DECISION anchor format, the 6-line rule, `[STALE]` versus
+  `[SUPERSEDED BY D-nnn]`); a README "Behaviour details" section (LLM calls per turn,
+  `handler_timeout` and the straggler cap, what the extractor can write, JsonLogic
+  differences, `extraction_retries` on Ollama).
+- `expressions.py` checks at import time that no short-circuit operator (`and`, `or`,
+  `if`) re-enters the eager `operations` table.
+
+### Deprecated -- core audit 2026-09-22 (removal in 1.0)
+
+- `FSMManager.cleanup_stale_conversations`: use `prune_orphaned_locks` (warns).
+  `API.cleanup_stale_conversations` is a different method and is not deprecated.
+- `ClassificationResult.is_low_confidence`: use `is_below_default_threshold` (warns).
+  `Classifier.is_low_confidence` is not deprecated.
+- `TransitionEvaluatorConfig.ambiguity_threshold`, `minimum_confidence` and
+  `evidence_conditions_normalizer`: no effect since priority-only ranking; setting any
+  of them to a non-default value emits `DeprecationWarning`. Defaults stay silent.
+- The `system_prompt="."` Pass-2 skip sentinel: still sent and still honoured by
+  `LiteLLMInterface`; custom interfaces should read `skip_generation` instead (no
+  runtime warning).
+
+### Removed -- core audit 2026-09-22 (breaking)
+
+- `fsm_llm.DomainSchema`, `fsm_llm.LLMRequestType` and
+  `fsm_llm.validate_json_structure` (and their `__all__` entries).
+- Constants: `LOG_FIELD_TIMESTAMP`, `LOG_FIELD_LEVEL`, `LOG_FIELD_MESSAGE`,
+  `LOG_FIELD_MODULE`, `LOG_FIELD_FUNCTION`, `LOG_FIELD_LINE`,
+  `LOG_FIELD_CONVERSATION_ID`, `LOG_FIELD_PACKAGE`, `LOG_MESSAGE_PREVIEW_LENGTH`,
+  `LOG_RESPONSE_PREVIEW_LENGTH`, `DEFAULT_STEP_TIMEOUT`, `DEFAULT_HANDLER_TIMEOUT`,
+  `MIN_BASE_CONFIDENCE`, `PRIORITY_SCALING_DIVISOR`, `CONDITION_SUCCESS_RATE_BOOST`.
+- `fsm_llm.constants` no longer exposes the credential filter's unreferenced private
+  helpers (import them from `fsm_llm.security`): `_ACRONYM_BOUNDARY`,
+  `_AMBIGUOUS_CREDENTIAL_ABBREVIATIONS`, `_CAMEL_BOUNDARY`,
+  `_CREDENTIAL_MATERIAL_HEADS_SHARED`, `_CREDENTIAL_NAME_ANY_RE`,
+  `_CREDENTIAL_NAME_HEAD`, `_CREDENTIAL_NAME_TERMS`, `_CRYPTO_AT_WORD`,
+  `_CRYPTO_GAP_REACH`, `_ISO_DATE_RE`, `_KEY_TRIGGER`, `_MIN_CREDENTIAL_VALUE_ENTROPY`,
+  `_NAME_TOKEN_SPLIT_RE`, `_PATH_SEGMENT_TRIGGER`, `_PEM_PREFIX`,
+  `_POLICY_TAIL_COUNT_END_RE`, `_POLICY_TAIL_DURATION_END_RE`, `_POLICY_TAIL_MAX_COUNT`,
+  `_POLICY_TAIL_RE`, `_POLICY_TAIL_STATE_WORDS`, `_POLICY_TAIL_WORD_SPLIT`,
+  `_POLICY_TAIL_WORD_VALUE_MAX_CHARS`, `_PURE_HEX_RE`, `_TOKEN_ONLY_MATERIAL_HEADS`,
+  `_TOKEN_TRIGGER`, `_TRIGGER_PLURAL`, `_ULID_VALUE_RE`, `_UUID_VALUE_RE`,
+  `_VALUE_SCAN_NAME_RE`, `_WORD_END`, `_is_path_shaped`,
+  `_policy_tail_scalar_is_credential`, `_policy_tail_value_is_credential`; nor the
+  stdlib names `re`, `math`, `unquote` and `Iterable`.
+- `TransitionEvaluation.confidence`, the evaluator's `"confidence"` score key and
+  `"confidence_factor"` condition-result key, and the confidence computation behind
+  them (an old `confidence=` kwarg is ignored).
+- `ResponseGenerationRequest.context`, `.extracted_data` and `.previous_state`, and
+  their per-turn computation (a caller still passing them is ignored, `extra="ignore"`).
+- `DataExtractionResponse.additional_info_needed` (and the required-names scan that
+  fed it).
+- `ContextCompactor(summarize_on_trim=...)` and the attribute.
+- `BasePromptBuilder._estimate_token_count(is_json=...)` and
+  `_build_response_format(field_heading=...)` parameters (the heading is always
+  `"Where:"`).
+- `expressions.operations["and"]`, `["or"]`, `["if"]` (unreachable eager fallbacks) and
+  `expressions.if_condition`. `_SHORT_CIRCUIT_OPERATORS` is now a `frozenset`.
+- `ollama.TRANSITION_JSON_SCHEMA` and the `"transition_decision"` entry of
+  `_CALL_TYPE_SCHEMAS`; `build_ollama_response_format("transition_decision")` returns
+  the unknown-call-type fallback, `None`.
+- Visualizer: `ICONS["note"]`, `ARROW_STYLES["down_arrow"]`, `["right_arrow"]`,
+  `["diamond"]`, `BOX_STYLES["section"]`.
+- `API._replay_history` (private; folded into `seed_restored_conversation`).
+
+### Performance -- core audit 2026-09-22
+
+- `LiteLLMInterface` calls `litellm.get_supported_openai_params` once per instance and
+  model string (a raised lookup is not memoised).
+- The FSM definition cache has its own leaf lock, so turn-path definition lookups no
+  longer take `FSMManager._lock`; the loader runs outside the lock.
+- `utilities.filter_context_tree` skips the cycle pre-scan for a plain `dict` root whose
+  values are all leaves (output identical).
+- Runner redaction is linear on aliased input, and its debug context dumps are lazy
+  (no redaction when debug logging is off).
+- The removed `ResponseGenerationRequest` fields are no longer computed on every turn.
+
+### Not changed (considered and declined) -- core audit 2026-09-22
+
+- P0-2, Ollama null memo across retries: kept. Structured Ollama calls run at
+  temperature 0, so a retry of the same prompt is pure waste; documented in the README
+  instead (D-021).
+- Unifying the 4 tie-break rules of `extract_json_from_text`: all four or none, no
+  failing case, and it radiates to every package (D-022).
+- One shared context walker with a budget parameter: the prompt walker truncates, the
+  data walker must never truncate, the runner redacts instead of dropping (D-023).
+- Splitting `pipeline.py` into three modules: high churn, no behaviour value (D-024).
+- Per-FSM `secret_context_keys`/`public_context_keys`: needs plumbing into all four
+  filter seams; its own plan (D-025).
+- `FSMDefinition.agent_managed` instead of sniffing `agent_trace`: agent FSMs are built
+  at many sites; deferred (D-026).
+- Splitting `is_forbidden_context_entry` by arity: every production caller passes the
+  value, and one decision point stays one name (D-027).
+- `setup_logging`'s `-1` sentinel: test-pinned intended behaviour (D-028).
+- `handle_conversation_errors` union parameter: local convention, no defect (D-028).
+- Renaming `HandlerBuilder.critical`: not a real name collision (D-028).
+- `_CLASSIFICATION_CONTEXT_BUILDER` visibility: module-private, no reach-in (D-028).
+- Transition-snapshot reuse: would touch the rollback contracts (D-028).
+- A classifier digest cache: minor gain (D-028).
+- Session `strip_forbidden_keys` opt-in: needs a walker on the save path; the `str()`
+  leak is fixed instead (D-028).
+- Relocating the 281 existing DECISION anchor bodies: mass churn; the convention now
+  applies to new anchors (D-028).
+- Per-conversation straggler keying: would thread `conversation_id` into
+  `execute_handlers`; the shared cap is documented instead (D-028).
+- P1-8, one unit for `max_history_messages` (fetch `ceil(n / 2)` exchanges): changes
+  the rendered history under the `TOKEN_BUDGET` strategy, so not output-identical; the
+  fetch still passes an exchange count (D-038).
+
+### Core audit 2026-09-21
+
 Core audit of `src/fsm_llm` dated 2026-09-21 (`plans/plan-2026-09-21T203800-8a03483a`,
 15 fix steps, one commit per step). 45 audit ids: 42 fixed, 2 partly fixed (D9, D12),
 1 skipped (D7). Every fixed id is pinned by a `test_<id>_*` regression test in

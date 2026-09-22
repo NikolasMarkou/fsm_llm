@@ -1,5 +1,5 @@
 """
-Enhanced FSM-LLM definitions with improved 2-pass architecture.
+Enhanced FSM-LLM definitions with the 2-pass architecture.
 
 This module defines the core data structures for a refined 2-pass FSM-LLM system:
 1. Pass 1: Data extraction + transition evaluation
@@ -809,7 +809,7 @@ class ContextScope(BaseModel):
 
 class State(BaseModel):
     """
-    Enhanced state definition for improved 2-pass architecture.
+    Enhanced state definition for the 2-pass architecture.
 
     Separates data extraction concerns from response generation.
     """
@@ -1008,7 +1008,7 @@ class State(BaseModel):
 
 class FSMDefinition(BaseModel):
     """
-    Complete FSM definition for improved 2-pass architecture.
+    Complete FSM definition for the 2-pass architecture.
 
     Enhanced with separate extraction and response capabilities.
     """
@@ -1057,7 +1057,7 @@ class FSMDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_fsm_structure(self) -> FSMDefinition:
-        """Comprehensive FSM validation for improved 2-pass architecture."""
+        """Comprehensive FSM validation for the 2-pass architecture."""
         logger.debug(f"Validating FSM: {self.name}")
 
         # Basic structure validation
@@ -1127,7 +1127,7 @@ class FSMDefinition(BaseModel):
 
 
 class Conversation(BaseModel):
-    """Enhanced conversation management for improved 2-pass architecture."""
+    """Enhanced conversation management for the 2-pass architecture."""
 
     exchanges: list[dict[str, str]] = Field(
         default_factory=list, description="Conversation history in chronological order"
@@ -1300,7 +1300,7 @@ class Conversation(BaseModel):
 
 
 class FSMContext(BaseModel):
-    """Enhanced context management for improved 2-pass architecture.
+    """Enhanced context management for the 2-pass architecture.
 
     Supports an optional ``working_memory`` for structured buffer-based
     context management. When set, ``get_user_visible_data()`` includes
@@ -1413,7 +1413,7 @@ class FSMContext(BaseModel):
 
 
 class FSMInstance(BaseModel):
-    """Enhanced FSM instance for improved 2-pass architecture."""
+    """Enhanced FSM instance for the 2-pass architecture."""
 
     fsm_id: str = Field(
         ...,
