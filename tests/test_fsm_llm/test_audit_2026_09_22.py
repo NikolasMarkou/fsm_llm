@@ -2154,3 +2154,109 @@ class TestStep13RunnerRedaction:
         assert any(m.startswith("Context data: ") for m in messages)
         assert any(m.startswith("Data: \n") for m in messages)
         assert not any("SECRET" in m for m in messages)
+
+
+# ---------------------------------------------------------------------------
+# Step 14.1: supported-params memo and apology retry counter (P1-7)
+# ---------------------------------------------------------------------------
+
+
+class TestStep14LLM:
+    @staticmethod
+    def _completion(content: str) -> MagicMock:
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = content
+        return resp
+
+    def test_supported_params_looked_up_once_per_instance(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="gpt-4o-mini")
+        msgs = [{"role": "user", "content": "hi"}]
+        with patch(
+            "fsm_llm.llm.get_supported_openai_params", return_value=["response_format"]
+        ) as spy:
+            first = llm._build_call_params(msgs, "response_generation")
+            second = llm._build_call_params(msgs, "data_extraction")
+        assert spy.call_count == 1
+        assert first["model"] == second["model"] == "gpt-4o-mini"
+
+    def test_none_result_is_memoised(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="unknown-model-xyz")
+        msgs = [{"role": "user", "content": "hi"}]
+        with patch("fsm_llm.llm.get_supported_openai_params", return_value=None) as spy:
+            llm._build_call_params(msgs, "response_generation")
+            llm._build_call_params(msgs, "response_generation")
+        assert spy.call_count == 1
+
+    def test_failed_lookup_is_not_memoised(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="gpt-4o-mini")
+        msgs = [{"role": "user", "content": "hi"}]
+        with patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            side_effect=[RuntimeError("boom"), ["response_format"]],
+        ) as spy:
+            with pytest.raises(RuntimeError):
+                llm._build_call_params(msgs, "response_generation")
+            llm._build_call_params(msgs, "response_generation")
+            llm._build_call_params(msgs, "response_generation")
+        assert spy.call_count == 2
+
+    def test_memo_is_per_instance_and_keyed_by_model(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        a = LiteLLMInterface(model="gpt-4o-mini")
+        b = LiteLLMInterface(model="gpt-4o-mini")
+        msgs = [{"role": "user", "content": "hi"}]
+        with patch("fsm_llm.llm.get_supported_openai_params", return_value=[]) as spy:
+            a._build_call_params(msgs, "response_generation")
+            b._build_call_params(msgs, "response_generation")
+            a.model = "gpt-4o"
+            a._build_call_params(msgs, "response_generation")
+        assert [c.kwargs["model"] for c in spy.call_args_list] == [
+            "gpt-4o-mini",
+            "gpt-4o-mini",
+            "gpt-4o",
+        ]
+
+    def test_p1_7_apology_retry_is_counted(self):
+        from fsm_llm.definitions import ResponseGenerationRequest
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="gpt-4o-mini")
+        request = ResponseGenerationRequest(system_prompt="sys", user_message="hi")
+        with (
+            patch(
+                "fsm_llm.llm.completion",
+                side_effect=[
+                    self._completion('{"message": ""}'),
+                    self._completion('{"message": "hello"}'),
+                ],
+            ) as comp,
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        ):
+            result = llm.generate_response(request)
+        assert comp.call_count == 2
+        assert result.message == "hello"
+        assert llm.apology_retry_count == 1
+
+    def test_no_retry_leaves_counter_at_zero(self):
+        from fsm_llm.definitions import ResponseGenerationRequest
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="gpt-4o-mini")
+        request = ResponseGenerationRequest(system_prompt="sys", user_message="hi")
+        with (
+            patch(
+                "fsm_llm.llm.completion",
+                return_value=self._completion('{"message": "hello"}'),
+            ),
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        ):
+            assert llm.generate_response(request).message == "hello"
+        assert llm.apology_retry_count == 0

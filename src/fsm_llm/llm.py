@@ -52,6 +52,7 @@ from __future__ import annotations
 import abc
 import json
 import re
+import threading
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -100,6 +101,12 @@ _RESPONSE_MESSAGE_MAX_LEN = 5000
 # model response.  Referenced from two places in
 # _parse_response_generation_response (the non-text-content branch and the
 # terminal rung's envelope guard) — one string, one place to change it.
+# DECISION plan-2026-09-22T080837-8b258a25/D-035: guards apology_retry_count.
+# Do NOT move it into __init__: tests build LiteLLMInterface via __new__, and the
+# D-020 branch would then raise AttributeError. Increments are rare, so one
+# process-wide lock costs nothing.
+_APOLOGY_COUNT_LOCK = threading.Lock()
+
 _GENERIC_FALLBACK_MESSAGE = (
     "I'm sorry, I couldn't generate a proper response. Please try again."
 )
@@ -274,6 +281,11 @@ class LiteLLMInterface(LLMInterface):
     while maintaining the improved 2-pass architecture interface.
     """
 
+    # (model, result) of the last successful get_supported_openai_params call.
+    _supported_params_memo: tuple[str, list[str] | None] | None = None
+    # Times the D-020 apology retry fired on this instance (read-only for callers).
+    apology_retry_count: int = 0
+
     def __init__(
         self,
         model: str,
@@ -422,6 +434,8 @@ class LiteLLMInterface(LLMInterface):
                 logger.warning(
                     "Response generation yielded no usable text; retrying once"
                 )
+                with _APOLOGY_COUNT_LOCK:
+                    self.apology_retry_count += 1
                 try:
                     return self._parse_response_generation_response(
                         self._make_llm_call(
@@ -685,6 +699,20 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
+    def _supported_openai_params(self) -> list[str] | None:
+        """Return litellm's supported-param list for ``self.model``, memoised.
+
+        Only a successful result is memoised (a ``None`` "unknown model" answer
+        included); an exception propagates and the next call retries. The memo
+        is keyed by the model string, so reassigning ``self.model`` refreshes it.
+        """
+        memo = self._supported_params_memo
+        if memo is not None and memo[0] == self.model:
+            return memo[1]
+        result = get_supported_openai_params(model=self.model)
+        self._supported_params_memo = (self.model, result)
+        return result
+
     def _build_call_params(
         self,
         messages: list[dict[str, str]],
@@ -731,7 +759,7 @@ class LiteLLMInterface(LLMInterface):
             The kwargs dict ready to pass to ``litellm.completion(**...)``.
         """
         # Check for structured output support
-        supported_params = get_supported_openai_params(model=self.model)
+        supported_params = self._supported_openai_params()
 
         # Configure parameters based on call type
         # kwargs go first so explicit params cannot be overridden
