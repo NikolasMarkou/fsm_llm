@@ -1117,18 +1117,36 @@ class API:
     # CONVERSATION MANAGEMENT METHODS
     # ==========================================
 
+    def _ended_cache_entry(self, conversation_id: str) -> dict[str, Any] | None:
+        """The ended-conversation cache entry for ``conversation_id``, or None.
+
+        Contract: reads ``_ended_conversations`` under ``_stack_lock`` (held for
+        the dict read only; never call it with ``_stack_lock`` held). Returns
+        the cached ``{"data", "state", "history"}`` snapshot; never raises.
+        """
+        with self._stack_lock:
+            return self._ended_conversations.get(conversation_id)
+
     @handle_conversation_errors
     def get_data(self, conversation_id: str) -> dict[str, Any]:
         """Get collected data from current FSM."""
+        # DECISION plan-2026-09-22T080837-8b258a25/D-004
+        # All four getters re-raise ConversationBusyError BEFORE the fallback
+        # catch. Do NOT fold it into `except FSMError`: a busy refusal means
+        # "retry later", not "ended", so a stale cache read would hide it. Do
+        # NOT narrow the catch back to (ValueError, KeyError): an instance torn
+        # down mid-read raises the not-found FSMError. See D-004.
         try:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             data: dict[str, Any] = self.fsm_manager.get_conversation_data(
                 current_fsm_id
             )
             return data
-        except (ValueError, KeyError):
+        except ConversationBusyError:
+            raise
+        except (ValueError, KeyError, FSMError):
             # Conversation ended — return cached data if available
-            cached = self._ended_conversations.get(conversation_id)
+            cached = self._ended_cache_entry(conversation_id)
             if cached:
                 return cast(dict[str, Any], cached.get("data", {}))
             raise
@@ -1140,9 +1158,11 @@ class API:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             ended: bool = self.fsm_manager.has_conversation_ended(current_fsm_id)
             return ended
-        except (ValueError, KeyError):
+        except ConversationBusyError:
+            raise
+        except (ValueError, KeyError, FSMError):
             # Conversation ended — check cache
-            return conversation_id in self._ended_conversations
+            return self._ended_cache_entry(conversation_id) is not None
 
     @handle_conversation_errors
     def get_current_state(self, conversation_id: str) -> str:
@@ -1151,20 +1171,30 @@ class API:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             state: str = self.fsm_manager.get_conversation_state(current_fsm_id)
             return state
-        except (ValueError, KeyError):
-            cached = self._ended_conversations.get(conversation_id)
+        except ConversationBusyError:
+            raise
+        except (ValueError, KeyError, FSMError):
+            cached = self._ended_cache_entry(conversation_id)
             if cached:
                 return cast(str, cached.get("state", "unknown"))
             raise
 
     @handle_conversation_errors
     def get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]:
-        """Get conversation history for current FSM."""
-        current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        history: list[dict[str, str]] = self.fsm_manager.get_conversation_history(
-            current_fsm_id
-        )
-        return history
+        """Get conversation history for current FSM (cached history once ended)."""
+        try:
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+            history: list[dict[str, str]] = self.fsm_manager.get_conversation_history(
+                current_fsm_id
+            )
+            return history
+        except ConversationBusyError:
+            raise
+        except (ValueError, KeyError, FSMError):
+            cached = self._ended_cache_entry(conversation_id)
+            if cached:
+                return cast(list[dict[str, str]], cached.get("history", []))
+            raise
 
     def _frame_instance_present(self, frame_id: str) -> bool:
         """True if the FSMManager still holds ``frame_id``'s instance. After a
@@ -1246,14 +1276,20 @@ class API:
                 else:
                     logger.warning(f"Error ending FSM {frame_id}: {e!s}")
 
+        # DECISION plan-2026-09-22T080837-8b258a25/D-003
+        # The cache write and FIFO eviction share the bookkeeping drop's hold.
+        # Do NOT move them after this block: a reader in between saw neither
+        # the live conversation nor its cache entry, and two ends evicting at
+        # once popped the same key (KeyError). Only dict ops here: never call
+        # FSMManager under _stack_lock (the snapshot was taken above). D-003.
         with self._stack_lock:
             self.conversation_stacks.pop(conversation_id, None)
             self.active_conversations.pop(conversation_id, None)
             self._last_accessed.pop(conversation_id, None)
-        if ended_cache is not None:
-            self._ended_conversations[conversation_id] = ended_cache
-            if len(self._ended_conversations) > self._MAX_ENDED_CACHE:
-                self._ended_conversations.pop(next(iter(self._ended_conversations)))
+            if ended_cache is not None:
+                self._ended_conversations[conversation_id] = ended_cache
+                if len(self._ended_conversations) > self._MAX_ENDED_CACHE:
+                    self._ended_conversations.pop(next(iter(self._ended_conversations)))
         if unstacked_error is not None:
             raise unstacked_error
 
