@@ -163,6 +163,11 @@ MAX_MULTI_INTENTS = 5
 # the bound. Matches `FSMManager`'s `max_fsm_cache_size` default (fsm.py).
 MAX_CLASSIFIER_CACHE_SIZE = 64
 
+# How long FSMManager.end_conversation waits for a running turn to release the
+# conversation lock before refusing with FSMError (see the anchor in
+# FSMManager.end_conversation).
+END_CONVERSATION_LOCK_TIMEOUT_SECONDS = 30.0
+
 # --------------------------------------------------------------
 # Environment Variable Keys
 # --------------------------------------------------------------
@@ -171,6 +176,15 @@ ENV_LLM_MODEL = "LLM_MODEL"
 ENV_LLM_TEMPERATURE = "LLM_TEMPERATURE"
 ENV_LLM_MAX_TOKENS = "LLM_MAX_TOKENS"
 ENV_FSM_PATH = "FSM_PATH"
+
+# --------------------------------------------------------------
+# CLI Exit Codes (fsm-llm, fsm-llm-validate, fsm-llm-visualize)
+# --------------------------------------------------------------
+
+CLI_EXIT_OK = 0
+CLI_EXIT_FAILURE = 1
+# 128 + SIGINT, the shell convention for a Ctrl-C'd process.
+CLI_EXIT_INTERRUPTED = 130
 
 # --------------------------------------------------------------
 # Validation and Safety Constants

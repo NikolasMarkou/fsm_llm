@@ -7,6 +7,9 @@ import dotenv
 
 from .api import API
 from .constants import (
+    CLI_EXIT_FAILURE,
+    CLI_EXIT_INTERRUPTED,
+    CLI_EXIT_OK,
     ENV_FSM_PATH,
     ENV_LLM_MAX_TOKENS,
     ENV_LLM_MODEL,
@@ -235,9 +238,16 @@ def main(fsm_path, max_history_size, max_message_length):
                     f"{json.dumps(_redact_context(data), default=_json_default)}"
                 )
 
+            except KeyboardInterrupt:
+                # C8: Ctrl-C mid-turn ends the session cleanly (the finally
+                # below still ends the conversation) instead of a traceback.
+                logger.info("Interrupted during a turn")
+                return CLI_EXIT_INTERRUPTED
             except Exception as e:
                 logger.exception(e)
-                return -1
+                # C8: was -1, which the shell sees as 255; every other
+                # failure path of the three CLIs exits 1.
+                return CLI_EXIT_FAILURE
 
         data = fsm.get_data(conversation_id)
         logger.info(
@@ -249,7 +259,7 @@ def main(fsm_path, max_history_size, max_message_length):
         fsm.end_conversation(conversation_id)
         logger.info("Conversation ended")
 
-    return 0
+    return CLI_EXIT_OK
 
 
 # --------------------------------------------------------------

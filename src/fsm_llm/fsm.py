@@ -21,6 +21,7 @@ from typing import Any, TypeVar
 from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
+    END_CONVERSATION_LOCK_TIMEOUT_SECONDS,
     MAX_CONTEXT_FILTER_DEPTH,
     MAX_CONTEXT_FILTER_NODES,
     has_internal_prefix,
@@ -1020,12 +1021,24 @@ class FSMManager:
 
         # Acquire per-conversation lock to ensure no concurrent process_message.
         # Use timeout to prevent indefinite blocking if a thread is stuck.
-        if conv_lock is not None:
-            if not conv_lock.acquire(timeout=30):
-                logger.warning(
-                    f"Timed out waiting for conversation lock on {conversation_id}, "
-                    "proceeding with cleanup"
-                )
+        # DECISION plan-2026-09-21T203800-8a03483a/D-036
+        # On timeout, REFUSE: log and raise FSMError, leaving the instance and
+        # its lock untouched. Do NOT go back to "proceeding with cleanup": a
+        # turn still holds the lock, so END handlers and the instance teardown
+        # ran under a live turn (C12), and the `finally` then released a lock
+        # this thread never acquired. The caller may retry once the turn ends.
+        if conv_lock is not None and not conv_lock.acquire(
+            timeout=END_CONVERSATION_LOCK_TIMEOUT_SECONDS
+        ):
+            logger.error(
+                f"Timed out after {END_CONVERSATION_LOCK_TIMEOUT_SECONDS}s waiting "
+                f"for conversation lock on {conversation_id}; a turn is still "
+                "running, conversation NOT ended"
+            )
+            raise FSMError(
+                f"Conversation {conversation_id} is still processing a turn; "
+                "end_conversation refused (retry after the turn completes)"
+            )
         try:
             self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
         finally:
@@ -1034,10 +1047,7 @@ class FSMManager:
             # acquisition, so _lock→conv_lock never creates circular wait.
             self._cleanup_conversation_resources(conversation_id)
             if conv_lock is not None:
-                try:
-                    conv_lock.release()
-                except RuntimeError:
-                    pass  # Lock was not acquired (timeout) or already released
+                conv_lock.release()
         log.info(f"Conversation {conversation_id} ended")
 
     def cleanup_stale_conversations(self) -> list[str]:

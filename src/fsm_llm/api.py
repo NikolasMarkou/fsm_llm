@@ -903,9 +903,18 @@ class API:
             current_history = self.fsm_manager.get_conversation_history(
                 current_frame.conversation_id
             )
+            # C11: the definition's NAME, not `str(definition)` (the whole
+            # pydantic repr: every state, persona and instruction text).
+            definition = current_frame.fsm_definition
+            if isinstance(definition, FSMDefinition):
+                fsm_type = definition.name
+            elif isinstance(definition, dict):
+                fsm_type = str(definition.get("name", ""))
+            else:
+                fsm_type = definition
             summary_context = {
                 "_sub_conversation_summary": {
-                    "fsm_type": str(current_frame.fsm_definition),
+                    "fsm_type": fsm_type,
                     "final_context": current_fsm_context,
                     "exchange_count": len(current_history),
                 }

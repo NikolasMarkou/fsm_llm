@@ -165,8 +165,12 @@ class FileSessionStore(SessionStore):
         """Persist a session via an atomic temp-file write + rename.
 
         Note: the JSON round-trip is lossy for non-JSON-native context
-        values (datetime/set/custom objects are coerced to strings via
-        ``default=str`` and load back as strings, not their original type).
+        values. A tuple loads back as a list; a set, bytes, datetime or custom
+        object is written as its ``str()`` (``default=str``) and loads back as
+        that string, not its original type. The file holds the FULL context,
+        unfiltered: secret-looking keys are removed only from LLM prompts, and
+        an object whose ``__str__`` exposes a secret writes that secret here.
+        Keep the session directory as private as the data it stores.
         """
         path = self._path(session_id)
         data = state.model_dump()

@@ -71,6 +71,8 @@ Advanced Conditional Logic::
 from __future__ import annotations
 
 import copy
+import math
+import numbers
 import threading
 import traceback
 from collections.abc import Callable
@@ -239,6 +241,17 @@ class HandlerExecutionError(HandlerSystemError):
         self.partial_context: dict[str, Any] = {}
         super().__init__(f"Error in handler {handler_name}: {original_error!s}")
 
+    def __reduce__(self):
+        # Exception pickling replays ``cls(*self.args)`` and ``args`` holds only
+        # the formatted message, so the default protocol could not rebuild this
+        # two-argument constructor (C6). Rebuild from the real arguments and
+        # restore the instance attributes (``partial_context``, ``details``).
+        return (
+            self.__class__,
+            (self.handler_name, self.original_error),
+            self.__dict__.copy(),
+        )
+
 
 # --------------------------------------------------------------
 # Core System Classes
@@ -294,6 +307,20 @@ class HandlerSystem:
         # for the whole duration of an in-place sort, so a concurrent reader
         # (`handlers_at`, every turn) saw zero handlers and skipped them (C1).
         # Readers take one reference without the lock; do NOT lock them.
+        # C6: reject an unorderable priority HERE, naming this handler. Left to
+        # `sorted()`, a string priority registered first was accepted and the
+        # TypeError surfaced on the NEXT (innocent) registration; a NaN never
+        # raised and silently scrambled the order.
+        priority = getattr(handler, "priority", 100)
+        if isinstance(priority, bool) or not isinstance(priority, numbers.Real):
+            raise TypeError(
+                f"Handler {getattr(handler, 'name', handler)!r}: priority must be "
+                f"a real number, got {type(priority).__name__}"
+            )
+        if math.isnan(priority):
+            raise ValueError(
+                f"Handler {getattr(handler, 'name', handler)!r}: priority is NaN"
+            )
         with self._registration_lock:
             self.handlers = sorted(
                 [*self.handlers, handler], key=lambda h: getattr(h, "priority", 100)
@@ -382,11 +409,19 @@ class HandlerSystem:
             Raises ``HandlerExecutionError`` (critical or error_mode="raise");
             otherwise returns normally (error_mode="continue").
             """
-            error = HandlerExecutionError(handler_name, exc)
+            # C6: a condition lambda's failure arrives already wrapped by
+            # `LambdaHandler.should_execute`; wrapping it again doubled the
+            # message and hid the real cause behind `original_error`.
+            if isinstance(exc, HandlerExecutionError):
+                error = exc
+            else:
+                error = HandlerExecutionError(handler_name, exc)
             logger.error(f"{error!s}\n{traceback.format_exc()}")
             is_critical = getattr(handler, "critical", False)
             if self.error_mode == "raise" or is_critical:
                 error.partial_context = dict(output_context)
+                if error is exc:
+                    raise error
                 raise error from exc
 
         # Execute applicable handlers in priority order (lower priority numbers first)
@@ -434,9 +469,14 @@ class HandlerSystem:
                 )
 
                 # Update context with handler result if valid
-                if result and isinstance(result, dict):
+                if isinstance(result, dict):
                     updated_context.update(result)
                     output_context.update(result)
+                elif result is not None:
+                    logger.warning(
+                        f"Handler {handler_name} returned a non-dict result "
+                        f"({type(result).__name__}); it was ignored"
+                    )
 
                 logger.debug(f"Handler {handler_name} completed successfully")
 

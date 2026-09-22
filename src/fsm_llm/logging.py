@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import sys
@@ -62,6 +63,22 @@ _file_handler_initialized = False
 _stream_handler_ids: dict[str, int] = {}
 
 
+def _log_json_default(obj: object) -> str:
+    """``json.dumps(default=...)`` fallback for a JSON log line.
+
+    Dates and times render as ISO-8601; every other non-JSON-native value
+    renders as a type-name placeholder, never its ``str()``.
+    """
+    # DECISION plan-2026-09-21T203800-8a03483a/D-038
+    # Do NOT go back to `default=str` here: a bound extra's `__str__` (a
+    # credentials object, a request) went verbatim into shipped JSON logs (C7).
+    # Do NOT reuse `runner._json_default` either: it logs a WARNING, and this
+    # runs inside a log sink, so it would re-enter the logger.
+    if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+        return obj.isoformat()
+    return f"<non-serializable: {type(obj).__name__}>"
+
+
 def _record_to_json(record) -> str:
     """Convert a log record to a flat JSON string (JSONL).
 
@@ -87,7 +104,7 @@ def _record_to_json(record) -> str:
             exc.type.__name__ if exc.type is not None else "Unknown"
         )
         entry["exception_message"] = str(exc.value) if exc.value is not None else ""
-    return json.dumps(entry, default=str)
+    return json.dumps(entry, default=_log_json_default)
 
 
 def _make_json_sink(target):

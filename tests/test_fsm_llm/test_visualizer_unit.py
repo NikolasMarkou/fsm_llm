@@ -14,7 +14,7 @@ import json
 import os
 import subprocess
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -458,7 +458,12 @@ def _cli_capture():
     logger.disable("fsm_llm")
     sink_id = logger.add(buffer, format="{message}", level="DEBUG")
     try:
-        yield buffer
+        # Step-14 C8 re-baseline: the primary payload (report / diagram) now
+        # goes to stdout via print() and diagnostics stay on the logger, so
+        # both streams land in the one buffer "the user sees". The stdout
+        # routing itself is pinned by test_audit_2026_09_21 test_c8_*.
+        with redirect_stdout(buffer):
+            yield buffer
     finally:
         logger.remove(sink_id)
         logger.disable("fsm_llm")

@@ -308,17 +308,34 @@ def has_workflows():
     return importlib.util.find_spec("fsm_llm_workflows") is not None
 
 
+def _import_extension(package: str, hint: str):
+    """Import an optional extension package, or raise ``ImportError(hint)``.
+
+    Contract: returns the imported module. Only the package's OWN absence
+    (``ModuleNotFoundError`` naming ``package`` or a parent) becomes the
+    install hint; any other ``ImportError`` raised while the package imports
+    (a missing third-party dependency, a bug inside the package) propagates
+    unchanged (C10: it used to be rewritten as "install the extra").
+    """
+    import importlib
+
+    try:
+        return importlib.import_module(package)
+    except ModuleNotFoundError as e:
+        if e.name is None or not (
+            e.name == package or package.startswith(f"{e.name}.")
+        ):
+            raise
+        raise ImportError(hint) from e
+
+
 def get_workflows():
     """Get workflows module if available, otherwise raise ImportError."""
-    try:
-        import fsm_llm_workflows
-
-        return fsm_llm_workflows
-    except ImportError as e:
-        raise ImportError(
-            "Workflows functionality requires the workflows extra. "
-            "Install with: pip install fsm-llm[workflows]"
-        ) from e
+    return _import_extension(
+        "fsm_llm_workflows",
+        "Workflows functionality requires the workflows extra. "
+        "Install with: pip install fsm-llm[workflows]",
+    )
 
 
 @lru_cache(maxsize=1)
@@ -331,15 +348,11 @@ def has_reasoning():
 
 def get_reasoning():
     """Get reasoning module if available, otherwise raise ImportError."""
-    try:
-        import fsm_llm_reasoning
-
-        return fsm_llm_reasoning
-    except ImportError as e:
-        raise ImportError(
-            "Reasoning functionality requires the reasoning extra. "
-            "Install with: pip install fsm-llm[reasoning]"
-        ) from e
+    return _import_extension(
+        "fsm_llm_reasoning",
+        "Reasoning functionality requires the reasoning extra. "
+        "Install with: pip install fsm-llm[reasoning]",
+    )
 
 
 @lru_cache(maxsize=1)
@@ -352,15 +365,11 @@ def has_agents():
 
 def get_agents():
     """Get agents module if available, otherwise raise ImportError."""
-    try:
-        import fsm_llm_agents
-
-        return fsm_llm_agents
-    except ImportError as e:
-        raise ImportError(
-            "Agents functionality requires the fsm_llm_agents package. "
-            "Install with: pip install fsm-llm[agents]"
-        ) from e
+    return _import_extension(
+        "fsm_llm_agents",
+        "Agents functionality requires the fsm_llm_agents package. "
+        "Install with: pip install fsm-llm[agents]",
+    )
 
 
 # --------------------------------------------------------------
@@ -476,7 +485,10 @@ def enable_debug_logging():
 
 def disable_warnings():
     """Disable framework warnings."""
-    warnings.filterwarnings("ignore", category=UserWarning, module=r"fsm_llm")
+    # C10: the module pattern is a prefix match, so a bare "fsm_llm" also
+    # silenced fsm_llm_agents, fsm_llm_workflows, ... Match the package and
+    # its submodules only.
+    warnings.filterwarnings("ignore", category=UserWarning, module=r"fsm_llm(\.|$)")
 
 
 # --------------------------------------------------------------

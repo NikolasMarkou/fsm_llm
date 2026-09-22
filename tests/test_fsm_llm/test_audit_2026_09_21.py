@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -2733,3 +2734,334 @@ class TestStep13C4C5:
         assert file_entry["message"] == "c5 probe"
         assert file_entry["conversation_id"] == "c5"
         assert "_jsonl" not in file_entry
+
+
+# ---------------------------------------------------------------------------
+# Step 14: C6-C12 (LOW items)
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _c_log_capture():
+    """Enable the library logger; collect every record as ``LEVEL|message``."""
+    from loguru import logger
+
+    messages: list[str] = []
+    logger.enable("fsm_llm")
+    hid = logger.add(
+        lambda m: messages.append(f"{m.record['level'].name}|{m.record['message']}"),
+        level="DEBUG",
+    )
+    try:
+        yield messages
+    finally:
+        logger.remove(hid)
+        logger.disable("fsm_llm")
+
+
+class _C6Handler(BaseHandler):
+    """Runs everywhere and returns whatever it was given."""
+
+    def __init__(self, name: str, priority: Any, result: Any = None) -> None:
+        super().__init__(name=name, priority=priority)
+        self._result = result
+
+    def should_execute(self, *args: Any, **kwargs: Any) -> bool:
+        return True
+
+    def execute(self, context: dict[str, Any]) -> Any:
+        return self._result
+
+
+def _c9_fsm_data(name: str = "C9", end_transitions: Any = None) -> dict[str, Any]:
+    return {
+        "name": name,
+        "description": "C9",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "description": "Start",
+                "purpose": "Begin",
+                "transitions": [{"target_state": "end", "description": "Finish"}],
+            },
+            "end": {
+                "description": "End",
+                "purpose": "Stop",
+                "transitions": end_transitions,
+            },
+        },
+    }
+
+
+def _c8_mock_api(converse_effect: Any) -> MagicMock:
+    api = MagicMock()
+    api.start_conversation.return_value = ("conv-1", "Hello!")
+    api.has_conversation_ended.side_effect = [False, True]
+    api.converse.side_effect = converse_effect
+    api.get_data.return_value = {}
+    return api
+
+
+def _c8_run(api: MagicMock) -> Any:
+    import os
+
+    from fsm_llm.runner import main
+
+    with (
+        patch.dict(os.environ, {"LLM_MODEL": "test-model"}, clear=True),
+        patch("fsm_llm.runner.dotenv.load_dotenv"),
+        patch("fsm_llm.runner.API.from_file", return_value=api),
+        patch("fsm_llm.runner.setup_file_logging"),
+        patch("builtins.input", return_value="hi"),
+    ):
+        return main("/tmp/c8.json", 5, 1000)
+
+
+class _C10RaisingFinder:
+    """A meta-path finder that fails the import of one top-level module."""
+
+    def __init__(self, target: str, missing: str) -> None:
+        self.target, self.missing = target, missing
+
+    def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
+        if fullname == self.target:
+            raise ModuleNotFoundError(
+                f"No module named {self.missing!r}", name=self.missing
+            )
+        return None
+
+
+@contextmanager
+def _c10_failing_import(missing: str):
+    import sys
+
+    saved = sys.modules.pop("fsm_llm_workflows")
+    finder = _C10RaisingFinder("fsm_llm_workflows", missing)
+    sys.meta_path.insert(0, finder)
+    try:
+        yield
+    finally:
+        sys.meta_path.remove(finder)
+        sys.modules["fsm_llm_workflows"] = saved
+
+
+def _c11_sub_fsm() -> FSMDefinition:
+    return FSMDefinition(
+        name="c11_sub",
+        description="C11 sub FSM with a secret-looking default",
+        initial_state="ask",
+        persona="internal persona text",
+        states={
+            "ask": State(
+                id="ask",
+                description="Ask",
+                purpose="Ask",
+                response_instructions="Respond",
+                transitions=[Transition(target_state="done", description="Done")],
+            ),
+            "done": State(id="done", description="Done", purpose="Done"),
+        },
+    )
+
+
+class TestStep14C6C12:
+    # -- C6 ---------------------------------------------------------------
+    def test_c6_non_dict_handler_return_warns(self):
+        system = HandlerSystem()
+        system.register_handler(_C6Handler("listy", 10, result=["x"]))
+        with _c_log_capture() as messages:
+            out = system.execute_handlers(HandlerTiming.PRE_PROCESSING, "s", None, {})
+        assert out == {}
+        warnings = [m for m in messages if m.startswith("WARNING|")]
+        assert any("listy" in m and "list" in m for m in warnings), messages
+
+    def test_c6_unorderable_priority_rejected_at_registration(self):
+        system = HandlerSystem()
+        with pytest.raises(TypeError, match="priority"):
+            system.register_handler(_C6Handler("stringy", "high"))
+        with pytest.raises(ValueError, match="priority"):
+            system.register_handler(_C6Handler("nan", float("nan")))
+        assert system.handlers == []
+        ok = _C6Handler("ok", 5)
+        system.register_handler(ok)
+        system.register_handler(_C6Handler("ok2", 1.5))
+        assert [h.name for h in system.handlers] == ["ok2", "ok"]
+
+    def test_c6_condition_lambda_error_wrapped_once(self):
+        from fsm_llm.handlers import HandlerExecutionError
+
+        def _boom(*args: Any) -> bool:
+            raise ValueError("cond boom")
+
+        system = HandlerSystem(error_mode="raise")
+        system.register_handler(create_handler("cond").when(_boom).do(lambda c: {}))
+        with pytest.raises(HandlerExecutionError) as exc_info:
+            system.execute_handlers(HandlerTiming.PRE_PROCESSING, "s", None, {})
+        err = exc_info.value
+        assert not isinstance(err.original_error, HandlerExecutionError)
+        assert str(err).count("Error in handler") == 1
+        assert "cond boom" in str(err)
+
+    def test_c6_handler_execution_error_pickles(self):
+        import pickle
+
+        from fsm_llm.handlers import HandlerExecutionError
+
+        err = HandlerExecutionError("h", ValueError("bad"))
+        err.partial_context = {"a": 1}
+        back = pickle.loads(pickle.dumps(err))
+        assert type(back) is HandlerExecutionError
+        assert back.handler_name == "h"
+        assert isinstance(back.original_error, ValueError)
+        assert back.original_error.args == ("bad",)
+        assert back.partial_context == {"a": 1}
+        assert str(back) == str(err)
+
+    # -- C7 ---------------------------------------------------------------
+    def test_c7_json_log_never_str_of_unknown_objects(self):
+        import datetime as dt
+
+        from fsm_llm.logging import _record_to_json
+
+        class _Creds:
+            def __str__(self) -> str:
+                return "SECRET-TOKEN-VALUE"
+
+        record = {
+            "extra": {
+                "creds": _Creds(),
+                "when": dt.datetime(2026, 9, 22, 1, 2, 3),
+            },
+            "time": dt.datetime(2026, 9, 22),
+            "level": MagicMock(name="INFO"),
+            "message": "m",
+            "name": "mod",
+            "function": "f",
+            "line": 1,
+            "exception": None,
+        }
+        record["level"].name = "INFO"
+        line = _record_to_json(record)
+        assert "SECRET-TOKEN-VALUE" not in line
+        entry = json.loads(line)
+        assert "_Creds" in entry["creds"]
+        assert entry["when"] == "2026-09-22T01:02:03"
+
+    # -- C8 ---------------------------------------------------------------
+    def test_c8_turn_error_exit_code_is_1(self):
+        api = _c8_mock_api(RuntimeError("turn failed"))
+        assert _c8_run(api) == 1
+        api.end_conversation.assert_called_once_with("conv-1")
+
+    def test_c8_ctrl_c_mid_converse_exits_130_after_cleanup(self):
+        api = _c8_mock_api(KeyboardInterrupt())
+        assert _c8_run(api) == 130
+        api.end_conversation.assert_called_once_with("conv-1")
+
+    def test_c8_cli_entry_catches_keyboard_interrupt(self):
+        import sys
+
+        from fsm_llm.__main__ import main_cli
+
+        with (
+            patch.object(sys, "argv", ["fsm-llm", "--fsm", "x.json"]),
+            patch("fsm_llm.runner.main", side_effect=KeyboardInterrupt()),
+        ):
+            assert main_cli() == 130
+
+    def test_c8_validate_report_on_stdout(self, tmp_path, capsys):
+        from fsm_llm.validator import main
+
+        path = tmp_path / "c8.json"
+        path.write_text(json.dumps(_c9_fsm_data(end_transitions=[])))
+        code = main(str(path))
+        report = json.loads(capsys.readouterr().out)
+        assert report["is_valid"] is (code == 0)
+        assert report["fsm_name"] == "C9"
+
+    def test_c8_visualize_diagram_on_stdout(self, tmp_path, capsys):
+        from fsm_llm.visualizer import main
+
+        path = tmp_path / "c8.json"
+        path.write_text(json.dumps(_c9_fsm_data(name="C8Viz", end_transitions=[])))
+        assert main(str(path)) == 0
+        out = capsys.readouterr().out
+        assert "C8Viz" in out and "─" in out
+
+    # -- C9 ---------------------------------------------------------------
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_c9_null_transitions_render(self, style):
+        from fsm_llm.visualizer import visualize_fsm_ascii
+
+        output = visualize_fsm_ascii(_c9_fsm_data(), style)
+        assert "Could not generate diagram" not in output
+        assert "end" in output
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_c9_newline_in_name_keeps_header_one_line(self, style):
+        from fsm_llm.visualizer import visualize_fsm_ascii
+
+        output = visualize_fsm_ascii(
+            _c9_fsm_data(name="Evil\nName\r\x0bX", end_transitions=[]), style
+        )
+        lines = output.split("\n")
+        if style == "minimal":
+            assert lines[0] == "FSM: Evil Name X"
+        else:
+            assert "Evil Name X" in lines[1]
+            assert len(lines[1]) == len(lines[0]) == 62
+
+    # -- C10 --------------------------------------------------------------
+    def test_c10_inner_import_error_not_rewritten(self):
+        from fsm_llm import get_workflows
+
+        with _c10_failing_import("yaml"):
+            with pytest.raises(ImportError) as exc_info:
+                get_workflows()
+        assert exc_info.value.name == "yaml"
+        assert "workflows extra" not in str(exc_info.value)
+
+    def test_c10_missing_package_still_gets_install_hint(self):
+        from fsm_llm import get_workflows
+
+        with _c10_failing_import("fsm_llm_workflows"):
+            with pytest.raises(ImportError, match=r"fsm-llm\[workflows\]"):
+                get_workflows()
+
+    def test_c10_disable_warnings_scoped_to_fsm_llm(self):
+        import warnings
+
+        from fsm_llm import disable_warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            disable_warnings()
+            for module in ("fsm_llm", "fsm_llm.pipeline", "fsm_llm_agents.react"):
+                warnings.warn_explicit(
+                    f"from {module}", UserWarning, "f.py", 1, module=module
+                )
+        assert [str(w.message) for w in caught] == ["from fsm_llm_agents.react"]
+
+    # -- C11 --------------------------------------------------------------
+    def test_c11_sub_conversation_summary_uses_fsm_name(self):
+        api = API.from_definition(_c3_fsm(), llm_interface=_mock_llm())
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _c11_sub_fsm(), preserve_history=True)
+        api.pop_fsm(conv_id)
+        data = api.fsm_manager.instances[conv_id].context.data
+        assert data["_sub_conversation_summary"]["fsm_type"] == "c11_sub"
+
+    # -- C12 --------------------------------------------------------------
+    def test_c12_lock_timeout_refuses_cleanup(self):
+        api = API.from_definition(_c3_fsm(), llm_interface=_mock_llm())
+        conv_id, _ = api.start_conversation()
+        manager = api.fsm_manager
+        busy = MagicMock()
+        busy.acquire.return_value = False
+        manager._conversation_locks[conv_id] = busy
+        with _c_log_capture() as messages:
+            with pytest.raises(FSMError, match="still"):
+                manager.end_conversation(conv_id)
+        assert conv_id in manager.instances
+        busy.release.assert_not_called()
+        assert any(m.startswith("ERROR|") and conv_id in m for m in messages)

@@ -69,7 +69,11 @@ from .__version__ import __version__
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from .constants import DEFAULT_MAX_HISTORY_SIZE, DEFAULT_MAX_MESSAGE_LENGTH
+from .constants import (
+    CLI_EXIT_INTERRUPTED,
+    DEFAULT_MAX_HISTORY_SIZE,
+    DEFAULT_MAX_MESSAGE_LENGTH,
+)
 
 # --------------------------------------------------------------
 
@@ -122,19 +126,24 @@ def main_cli():
     if not args.fsm:
         parser.error("the following arguments are required: --fsm/-f")
 
-    # Run with the provided parameters
-    if args.mode == "run":
-        return main_runner(
-            fsm_path=args.fsm,
-            max_history_size=args.history_size,
-            max_message_length=args.message_length,
-        )
-    elif args.mode == "validate":
-        return main_validator(fsm_path=args.fsm)
-    elif args.mode == "visualize":
-        return main_visualizer(fsm_path=args.fsm, style=args.style)
-    else:
-        raise ValueError(f"Invalid mode {args.mode}")
+    # Run with the provided parameters. Ctrl-C anywhere (model load, first
+    # turn, ...) exits with the shell's SIGINT code, not a traceback (C8).
+    try:
+        if args.mode == "run":
+            return main_runner(
+                fsm_path=args.fsm,
+                max_history_size=args.history_size,
+                max_message_length=args.message_length,
+            )
+        elif args.mode == "validate":
+            return main_validator(fsm_path=args.fsm)
+        elif args.mode == "visualize":
+            return main_visualizer(fsm_path=args.fsm, style=args.style)
+        else:
+            raise ValueError(f"Invalid mode {args.mode}")
+    except KeyboardInterrupt:
+        print("Interrupted", file=sys.stderr)
+        return CLI_EXIT_INTERRUPTED
 
 
 # --------------------------------------------------------------

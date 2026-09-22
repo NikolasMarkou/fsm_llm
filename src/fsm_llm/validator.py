@@ -9,6 +9,7 @@ from pydantic import BaseModel, ValidationError
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
+from .constants import CLI_EXIT_FAILURE, CLI_EXIT_OK
 from .definitions import (
     FSMDefinition,
     State,
@@ -996,12 +997,20 @@ def main(fsm_path):
     # Format output based on user preference
     output = json.dumps(validation_result.as_dict(), indent=2)
 
-    logger.info(f"Validation result:\n{output}")
+    # DECISION plan-2026-09-21T203800-8a03483a/D-037
+    # The report is the tool's PRIMARY output: it goes to stdout so
+    # `fsm-llm-validate ... | jq` works (C8). Do NOT route it back through
+    # `logger` (stderr, stdout stayed empty). The logger keeps the diagnostics:
+    # the verdict line below and each error/warning as it is found, which is
+    # why the D-014 `logger.enable` above is still required.
+    print(output)
+    verdict = "valid" if validation_result.is_valid else "invalid"
+    logger.info(f"Validation result: {verdict}")
 
     # Return exit code based on validation result
     if validation_result.is_valid:
-        return 0
-    return 1
+        return CLI_EXIT_OK
+    return CLI_EXIT_FAILURE
 
 
 def main_cli():

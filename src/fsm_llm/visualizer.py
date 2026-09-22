@@ -8,6 +8,7 @@ from typing import Any
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
+from .constants import CLI_EXIT_FAILURE, CLI_EXIT_OK
 from .logging import logger
 
 # --------------------------------------------------------------
@@ -194,6 +195,19 @@ def _section_box_row(content: str) -> str:
     return "│ " + _fit(content, width).ljust(width) + " │"
 
 
+def _transitions_of(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """A state's transitions, with an explicit ``"transitions": null`` read as
+    none (C9: ``.get(k, [])`` returns that ``None`` and every style crashed)."""
+    return state.get("transitions") or []
+
+
+def _one_line(value: Any, default: str) -> str:
+    """``value`` as a single display line: whitespace runs (newlines included)
+    collapse to one space, so a multi-line FSM name cannot break the header
+    box (C9); a missing/blank value falls back to ``default``."""
+    return " ".join(str(value).split()) if value else default
+
+
 def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:
     """Reject an FSM whose ``initial_state`` is not a key of ``states``.
 
@@ -259,7 +273,7 @@ def _require_valid_transition_targets(states: dict[str, Any]) -> None:
     # ("do not hide a malformed definition behind a plausible-looking diagram") applied
     # to the same shape, and it is a deliberate tightening. See decisions.md D-013.
     for state_id, state in states.items():
-        for transition in state.get("transitions", []):
+        for transition in _transitions_of(state):
             target = transition.get("target_state", "")
             if target in states:
                 continue
@@ -295,9 +309,7 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
 
     # Find terminal states (those with no outgoing transitions)
     terminal_states = {
-        state_id
-        for state_id, state in states.items()
-        if not state.get("transitions", [])
+        state_id for state_id, state in states.items() if not _transitions_of(state)
     }
 
     # Build a representation of the graph structure and analyze it
@@ -308,10 +320,10 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
 
     # Create header based on style
     if style != "minimal":
-        lines.extend(create_fancy_header(fsm_data.get("name", "FSM")))
+        lines.extend(create_fancy_header(_one_line(fsm_data.get("name"), "FSM")))
     else:
         # Simple header for minimal style
-        lines.append(f"FSM: {fsm_data.get('name', 'Unnamed FSM')}")
+        lines.append(f"FSM: {_one_line(fsm_data.get('name'), 'Unnamed FSM')}")
         lines.append("")
 
     # Add metadata based on style
@@ -723,7 +735,7 @@ def build_graph_representation(
     # First pass: build the basic graph
     for state_id, state in states.items():
         targets = []
-        for transition in state.get("transitions", []):
+        for transition in _transitions_of(state):
             target = transition.get("target_state", "")
             desc = transition.get("description", "")
             # Extract required context keys if available
@@ -1390,10 +1402,13 @@ def main(fsm_path, style: str = "full"):
 
     if ascii_diagram.startswith("Error:"):
         logger.error(ascii_diagram)
-        return 1
+        return CLI_EXIT_FAILURE
 
-    logger.info(f"Visualizing FSM definition:\n{ascii_diagram}")
-    return 0
+    # DECISION plan-2026-09-21T203800-8a03483a/D-037
+    # The diagram is the primary output and goes to stdout (pipeable);
+    # errors stay on the logger (stderr). Do NOT move it back to `logger`.
+    print(ascii_diagram)
+    return CLI_EXIT_OK
 
 
 def main_cli():
