@@ -70,8 +70,9 @@ MAX_CONTEXT_FILTER_DEPTH = 16
 # work on aliased input (3-way aliasing at 14 levels never finished). Do NOT
 # apply this truncating budget to `utilities.filter_context_tree` (`get_data`,
 # `save_session`, the extracted-data commit): truncating DATA silently cut a
-# 150,000-item list and dropped later keys. That walker memoises acyclic input
-# and raises `ContextFilterWorkError` on cyclic input that unfolds past
+# 150,000-item list and dropped later keys. That walker memoises every
+# container that cannot reach a cycle (D-052) and raises
+# `ContextFilterWorkError` when cycle-reaching containers unfold past
 # `MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR * distinct
 # items`. See decisions.md D-011, D-045.
 MAX_CONTEXT_FILTER_NODES = 100_000
@@ -372,6 +373,9 @@ _PASSWORD_POLICY_SUFFIXES = (
     # `password_strength_score` and `password_policy_version` reaching the prompt.
     "|at|on|in|date|time|today|after|since|until|rotated|rotation"
     "|score|version|len"
+    # D-052 duration/limit group: a cookie or PIN TTL, timeout or limit is a
+    # number of seconds or tries, never a credential, even as a whole suffix.
+    "|ttl|timeout|limit"
     # D-030 status group, added by the SAME rule that already admits
     # `enabled`/`disabled`/`status`/`changed`: these words denote an outcome or a
     # lifecycle event, never a value. `recovery` was probed and REFUSED --
@@ -1662,10 +1666,54 @@ _CREDENTIAL_NAME_ANY_RE = re.compile(
 )
 # Upper-case run followed by a capitalised word: `PINCode` -> `PIN_Code`.
 _ACRONYM_BOUNDARY = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
-# A short run of plain letter words (`locked`, `accept all`, `sms_only`).
-_POLICY_TAIL_WORD_VALUE_RE = re.compile(r"[A-Za-z]+(?:[ _-][A-Za-z]+)*")
-_POLICY_TAIL_WORD_VALUE_MAX_CHARS = 40
+# DECISION plan-2026-09-21T203800-8a03483a/D-052
+# What a policy-suffix credential name (`pin_status`, `cookie_max_age`) may
+# hold and still reach a prompt. Do NOT reopen the D-046 allowances these
+# replace: "any number below 1,000" kept every 3-digit CVV (`cvv_status:
+# 737`) and "any plain letter words" kept letter-only secrets (`pin_status:
+# "hunter"`). A number is kept only under a count suffix (below
+# `_POLICY_TAIL_MAX_COUNT`) or a duration suffix (any size), a string only
+# when EVERY word is in `_POLICY_TAIL_STATE_WORDS` or it is an ISO date, and a
+# dict (or a list of dicts / safe scalars) is kept so the walker filters its
+# inner keys by their own names. See decisions.md D-052.
+_POLICY_TAIL_RE = re.compile(
+    rf"{_CREDENTIAL_NAME_HEAD}(?P<tail>(?:[-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))+)$",
+    re.IGNORECASE,
+)
+# Tail endings that make a number a count (small) or a duration (any size).
+_POLICY_TAIL_COUNT_END_RE = re.compile(
+    r"(?:^|[-_.])(?:attempts?|retry|retries|count|length|len|min|max|minimum"
+    r"|maximum|limit|days?|score|version)$",
+    re.IGNORECASE,
+)
+_POLICY_TAIL_DURATION_END_RE = re.compile(
+    r"(?:^|[-_.])(?:age|ttl|timeout|expires[-_.]?in)$", re.IGNORECASE
+)
 _POLICY_TAIL_MAX_COUNT = 1000
+# Closed vocabulary of state/outcome words a policy-suffix value may use.
+_POLICY_TAIL_STATE_WORDS = frozenset(
+    {
+        "enabled", "disabled", "active", "inactive", "on", "off", "true",
+        "false", "yes", "no", "set", "unset", "required", "optional",
+        "pending", "verified", "expired", "locked", "unlocked", "none",
+        # Outcome and consent words already pinned by the step-8 guards
+        # (`pass_status: "ok"`, `authorization_status: "approved"`,
+        # `cookie_banner: "shown"`, `cookie_settings: "accept all"`).
+        "ok", "approved", "denied", "rejected", "accepted", "declined",
+        "shown", "hidden", "sent", "failed", "passed", "complete",
+        "completed", "blocked", "allowed", "valid", "invalid", "accept",
+        "reject", "all", "only", "necessary", "essential",
+        # Delivery channels (`mfa_code_sent: "sms"`).
+        "sms", "email", "voice", "push",
+    }
+)  # fmt: skip
+_POLICY_TAIL_WORD_SPLIT = re.compile(r"[ _-]")
+_POLICY_TAIL_WORD_VALUE_MAX_CHARS = 40
+_ISO_DATE_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}"
+    r"(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?",
+    re.ASCII,
+)
 
 
 def _token_value_is_credential(value: object, name: str = "") -> bool:
@@ -1699,30 +1747,54 @@ def _token_value_is_credential(value: object, name: str = "") -> bool:
     return _looks_like_credential_value(value, name)
 
 
-def _policy_tail_value_is_credential(value: object) -> bool:
-    """Is *value* credential material under a policy-suffix credential name
-    (``pin_attempts``, ``authorization_status``)? KEEP (False) only for a value
-    that cannot carry one: ``None``, a ``bool``, a number below
-    ``_POLICY_TAIL_MAX_COUNT`` in magnitude (a count, length or score), or an
-    exact ``str`` of at most ``_POLICY_TAIL_WORD_VALUE_MAX_CHARS`` plain letter
-    words whose first word is not an auth scheme and whose shape the value
-    layer does not flag. Everything else (digit strings, ``Bearer ...``,
-    ``k=v`` cookies, containers, ``str`` subclasses) is True. Never raises.
-    """
+def _policy_tail_scalar_is_credential(value: object, tail: str) -> bool:
+    """Scalar half of :func:`_policy_tail_value_is_credential` (no containers)."""
     if value is None or isinstance(value, bool):
         return False
     if isinstance(value, (int, float)):
-        return not abs(value) < _POLICY_TAIL_MAX_COUNT
-    if type(value) is not str:
+        if _POLICY_TAIL_DURATION_END_RE.search(tail):
+            return False
+        if _POLICY_TAIL_COUNT_END_RE.search(tail):
+            return not abs(value) < _POLICY_TAIL_MAX_COUNT
         return True
-    if len(value) > _POLICY_TAIL_WORD_VALUE_MAX_CHARS:
+    if type(value) is not str or len(value) > _POLICY_TAIL_WORD_VALUE_MAX_CHARS:
         return True
-    if not _POLICY_TAIL_WORD_VALUE_RE.fullmatch(value):
-        return True
-    first_word = re.split(r"[ _-]", value, maxsplit=1)[0].lower()
-    if first_word in _AUTH_SCHEME_WORDS:
-        return True
-    return _looks_like_credential_value(value)
+    if _ISO_DATE_RE.fullmatch(value):
+        return False
+    words = _POLICY_TAIL_WORD_SPLIT.split(str.lower(value))
+    return not all(word in _POLICY_TAIL_STATE_WORDS for word in words)
+
+
+def _policy_tail_value_is_credential(value: object, tail: str) -> bool:
+    """Is *value* credential material under a policy-suffix credential name
+    whose policy tail is *tail* (``"_status"`` for ``pin_status``)?
+
+    Contract:
+        - KEEP (False): ``None``; a ``bool``; a number when *tail* ends in a
+          duration suffix (``age``, ``ttl``, ``timeout``, ``expires_in``) or
+          ends in a count suffix and is below ``_POLICY_TAIL_MAX_COUNT`` in
+          magnitude; an exact ``str`` of at most 40 chars that is an ISO date
+          or whose every word is in ``_POLICY_TAIL_STATE_WORDS``; a ``dict``
+          (the walker then filters its keys by their own names); a
+          ``list``/``tuple`` whose every element is a ``dict`` or a scalar
+          this rule keeps.
+        - Everything else is True (strip): other numbers, digit or letter
+          strings outside the word set, ``str`` subclasses, nested lists,
+          other types.
+        - Never raises; never calls anything on a ``str`` subclass value.
+    """
+    if isinstance(value, dict):
+        return False
+    if isinstance(value, (list, tuple)):
+        return not all(
+            isinstance(item, dict)
+            or (
+                not isinstance(item, (list, tuple))
+                and not _policy_tail_scalar_is_credential(item, tail)
+            )
+            for item in value
+        )
+    return _policy_tail_scalar_is_credential(value, tail)
 
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -1795,7 +1867,16 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     if any(_CREDENTIAL_NAME_RE.match(form) for form in name_forms):
         return not isinstance(value, bool)
     if any(_CREDENTIAL_NAME_ANY_RE.match(form) for form in name_forms):
-        return _policy_tail_value_is_credential(value)
+        # The value is kept if it clears the rule under some form's tail
+        # (`pinMaxAge` parses only in its snake form); no parseable policy
+        # tail fails closed.
+        for form in name_forms:
+            tail_match = _POLICY_TAIL_RE.match(form)
+            if tail_match is None:
+                continue
+            if not _policy_tail_value_is_credential(value, tail_match["tail"]):
+                return False
+        return True
 
     # DECISION plan-2026-07-20T040150-876e7164/D-021 [STALE] -- the TOKEN referral is
     # tested FIRST, and deliberately: a name matching both shapes (`foo_key_token`)

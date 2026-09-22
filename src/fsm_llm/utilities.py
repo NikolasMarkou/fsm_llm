@@ -174,40 +174,78 @@ class ContextFilterWorkError(ValueError):
     (see ``filter_context_tree``'s contract)."""
 
 
-def _container_graph_shape(source: Any) -> tuple[bool, int]:
-    """Return ``(acyclic, distinct_items)`` for the dict/list/tuple graph under
-    *source*: whether any container reaches itself, and the summed length of
-    every DISTINCT container. Iterative (no recursion limit), linear in the
-    distinct graph, never calls anything on a leaf."""
+def _cycle_reaching_containers(source: Any) -> tuple[set[int], int]:
+    """Return ``(reaching, distinct_items)`` for the dict/list/tuple graph
+    under *source*.
+
+    Contract:
+        - ``reaching``: the ``id()`` of every container that lies on a cycle
+          or can reach one. Every other container's subtree is acyclic, so
+          nothing under it can be on the walker's active path wherever it is
+          met (it would then reach itself).
+        - ``distinct_items``: the summed length of every DISTINCT container.
+        - Iterative Tarjan SCC (no recursion limit), linear in the distinct
+          graph; never calls anything on a leaf. Never raises for a
+          dict/list/tuple graph.
+    """
     containers = (dict, list, tuple)
-    state: dict[int, bool] = {}  # id -> True while on the DFS path
-    acyclic = True
+    index: dict[int, int] = {}
+    low: dict[int, int] = {}
+    on_stack: set[int] = set()
+    scc: list[int] = []
+    # `hot`: the container has an edge into its own SCC-in-progress (a cycle)
+    # or into a finished container that reaches one.
+    hot: set[int] = set()
+    reaching: set[int] = set()
     distinct_items = 0
     stack: list[tuple[int, Any]] = []
 
     def _enter(node: Any) -> None:
         nonlocal distinct_items
-        state[id(node)] = True
+        node_id = id(node)
+        index[node_id] = low[node_id] = len(index)
+        on_stack.add(node_id)
+        scc.append(node_id)
         distinct_items += len(node)
         children = node.values() if isinstance(node, dict) else node
-        stack.append((id(node), iter(children)))
+        stack.append((node_id, iter(children)))
 
     _enter(source)
     while stack:
         node_id, children = stack[-1]
+        descended = False
         for child in children:
             if not isinstance(child, containers):
                 continue
-            seen = state.get(id(child))
-            if seen is None:
+            child_id = id(child)
+            if child_id not in index:
                 _enter(child)
+                descended = True
                 break
-            if seen:
-                acyclic = False
-        else:
-            state[node_id] = False
-            stack.pop()
-    return acyclic, distinct_items
+            if child_id in on_stack:
+                low[node_id] = min(low[node_id], index[child_id])
+                hot.add(node_id)
+            elif child_id in reaching:
+                hot.add(node_id)
+        if descended:
+            continue
+        stack.pop()
+        if low[node_id] == index[node_id]:
+            members = []
+            while True:
+                member = scc.pop()
+                on_stack.discard(member)
+                members.append(member)
+                if member == node_id:
+                    break
+            if len(members) > 1 or any(member in hot for member in members):
+                reaching.update(members)
+        if stack:
+            parent_id = stack[-1][0]
+            low[parent_id] = min(low[parent_id], low[node_id])
+            if node_id in on_stack or node_id in reaching:
+                hot.add(parent_id)
+    return reaching, distinct_items
 
 
 def _drop_reason(value: Any) -> str | None:
@@ -338,17 +376,20 @@ def filter_context_tree(
         - Cycles: a container already on the ACTIVE recursion path is dropped
           with reason ``"cycle"``. A container reached twice WITHOUT a cycle
           (shared, acyclic) is filtered at every occurrence and gives the
-          same value at each (equal, and when the input graph is acyclic the
+          same value at each (equal, and when it cannot reach a cycle the
           SAME object, like ``copy.deepcopy`` preserves aliasing).
         - Never truncates: the result is either the whole filtered value or
-          an exception. Acyclic input (checked by a linear pre-scan) is
-          memoised per ``(container, depth)``, so aliasing costs linear work
-          and ``should_drop``/``on_drop`` run once per distinct container per
-          depth, not once per path. Cyclic input is walked per path (the
-          active-path guard makes the result path-dependent, so it cannot be
-          memoised); if that walk visits more than
+          an exception. A linear pre-scan (``_cycle_reaching_containers``)
+          finds every container that lies on or can reach a cycle. Every
+          OTHER container is memoised per ``(container, depth)`` wherever it
+          sits, even when the context holds a cycle elsewhere, so aliasing
+          costs linear work and ``should_drop``/``on_drop`` run once per
+          distinct container per depth, not once per path. Cycle-reaching
+          containers are walked per path (the active-path guard makes their
+          result path-dependent); if those walks charge more than
           ``MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR *
-          distinct_items`` values it raises ``ContextFilterWorkError``.
+          distinct_items`` items it raises ``ContextFilterWorkError`` (only a
+          cycle that is itself heavily aliased gets there).
         - Two call sites today: `fsm.py::_strip_internal_mapping` (silent,
           bare-prefix predicate) and `context.py::clean_mapping` (5-reason
           predicate, logging `on_drop`) -- a "same shape, different
@@ -366,38 +407,44 @@ def filter_context_tree(
     # extracted-data commit), so this walker must NEVER truncate: do NOT put
     # a node budget back here (it silently cut a 150,000-item list and
     # dropped every later key). Aliasing is bounded by memoising per
-    # (container, depth) ONLY when the pre-scan proves the graph acyclic; do
-    # NOT memoise cyclic input (a cached subtree can reach a container that
-    # is active at the reuse site, which must then be a cycle drop). Cyclic
-    # input over the work ceiling RAISES, never returns a partial value. The
-    # truncating budget belongs to the prompt walker only. See D-045.
+    # (container, depth). Cyclic input over the work ceiling RAISES, never
+    # returns a partial value. The truncating budget belongs to the prompt
+    # walker only. See D-045.
+    #
+    # DECISION plan-2026-09-21T203800-8a03483a/D-052
+    # Memoise per SUBTREE, not per graph: one unrelated self-referential dict
+    # must not turn a 1,000-alias list into 200,000 visits and a raise. Do
+    # NOT memoise a container that can reach a cycle (a cached subtree can
+    # reach a container that is active at the reuse site, which must then be
+    # a cycle drop), and do NOT go back to one global acyclic bit. See D-052.
     """
-    acyclic, distinct_items = _container_graph_shape(source)
+    reaching, distinct_items = _cycle_reaching_containers(source)
     active: set[int] = set()
-    # Acyclic: (id, depth) -> filtered value. Cyclic: never memoised.
-    memo: dict[tuple[int, int], Any] | None = {} if acyclic else None
+    # (id, depth) -> filtered value, for containers that reach no cycle.
+    memo: dict[tuple[int, int], Any] = {}
     remaining = [
         MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR * distinct_items
     ]
 
     def _filter_value(value: Any, path: str, depth: int) -> Any:
-        if memo is None:
-            remaining[0] -= 1
-            if remaining[0] < 0:
-                raise ContextFilterWorkError(
-                    "context has cyclic references aliased too heavily to "
-                    f"filter (more than {CONTEXT_FILTER_CYCLIC_WORK_FACTOR}x "
-                    "its distinct size); refusing to return a partial value"
-                )
         if not isinstance(value, (dict, list, tuple)):
             return value if leaf is None else leaf(value)
         if depth > max_depth:
             return _TOO_DEEP
         if id(value) in active:
             return _CYCLE
+        memoisable = id(value) not in reaching
         memo_key = (id(value), depth)
-        if memo is not None and memo_key in memo:
+        if memoisable and memo_key in memo:
             return memo[memo_key]
+        if not memoisable:
+            remaining[0] -= len(value) + 1
+            if remaining[0] < 0:
+                raise ContextFilterWorkError(
+                    "context has cyclic references aliased too heavily to "
+                    f"filter (more than {CONTEXT_FILTER_CYCLIC_WORK_FACTOR}x "
+                    "its distinct size); refusing to return a partial value"
+                )
         active.add(id(value))
         try:
             if isinstance(value, dict):
@@ -415,7 +462,7 @@ def filter_context_tree(
                 filtered = tuple(items) if isinstance(value, tuple) else items
         finally:
             active.discard(id(value))
-        if memo is not None:
+        if memoisable:
             memo[memo_key] = filtered
         return filtered
 

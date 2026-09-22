@@ -302,7 +302,7 @@ def clean_context_keys(
     # DECISION plan-2026-09-21T203800-8a03483a/D-045
     # The leaf hook redacts non-JSON-native values (their str() carried object
     # fields past the key filter); do NOT drop it to "keep values as-is". The
-    # walker's active-path cycle guard and acyclic memoisation bound work on
+    # walker's active-path cycle guard and per-subtree memoisation bound work on
     # aliased input next to the depth bound (D-010 above). Do NOT pass a
     # truncating node budget here: the result is COMMITTED to context (the
     # extracted-data commit), so a cut value would be silently lost data.

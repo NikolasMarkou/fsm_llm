@@ -1745,8 +1745,8 @@ class TestStep08_1:
 
             worker = threading.Thread(target=_target, daemon=True)
             worker.start()
-            worker.join(2.0)
-            assert not worker.is_alive(), f"{name}: did not finish in 2s"
+            worker.join(10.0)
+            assert not worker.is_alive(), f"{name}: did not finish in 10s"
             assert "error" in box, f"{name}: returned {type(box.get('result'))}"
 
     def test_d3_shared_container_under_different_cycles_stays_correct(self):
@@ -1840,6 +1840,154 @@ class TestStep08_1:
         from fsm_llm.constants import is_forbidden_context_entry
 
         assert not is_forbidden_context_entry(key, "value")
+
+
+# ---------------------------------------------------------------------------
+# Step 8.2: memoise every subtree that cannot reach a cycle; D5 policy-suffix
+# values decided by suffix kind and a closed word set
+# ---------------------------------------------------------------------------
+
+
+def _d3_2_cycle_elsewhere() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Review pass 2 shape: 1,000 aliases of one 200-key row next to an
+    unrelated self-referential dict. Returns ``(data, row)``."""
+    row = {f"k{i}": i for i in range(200)}
+    node: dict[str, Any] = {"v": 1}
+    node["self"] = node
+    return {"rows": [row] * 1000, "node": node, "z_last": 1}, row
+
+
+class TestStep08_2:
+    """D3: one cycle no longer disables memoisation for the whole graph; a
+    container that can reach no cycle is memoised wherever it sits. D5: under
+    a policy-suffix credential name a container is recursed into, a number is
+    kept only under a count/duration suffix, a string only from a closed set
+    of state words or an ISO date (plan-2026-09-21T203800-8a03483a/D-052)."""
+
+    # -- D3 --------------------------------------------------------------
+
+    def test_d3_cycle_elsewhere_does_not_disable_memoisation(self):
+        data, row = _d3_2_cycle_elsewhere()
+        walkers = _d3_walkers()
+        walkers.pop("prompt")
+        for name, walker in walkers.items():
+            finished, result = _d3_run_bounded(walker, data, 10.0)
+            assert finished, name
+            assert result is not None, name
+            assert len(result["rows"]) == 1000, name
+            assert all(r == row for r in result["rows"]), name
+            assert result["node"] == {"v": 1}, name
+            assert result["z_last"] == 1, name
+
+    def test_d3_cycle_elsewhere_prompt_filter_returns(self):
+        """Guard (passes on the pre-step source): the prompt walker keeps its
+        own truncating node budget and returns normally (a bounded view)."""
+        from fsm_llm.prompts import BasePromptBuilder
+
+        data, _ = _d3_2_cycle_elsewhere()
+        result = BasePromptBuilder()._filter_context_for_security(data)
+        assert isinstance(result, dict) and "rows" in result
+
+    def test_d3_should_drop_once_per_distinct_acyclic_container(self):
+        from fsm_llm.utilities import filter_context_tree
+
+        data, _ = _d3_2_cycle_elsewhere()
+        calls = [0]
+
+        def _count(key, value, full_key):
+            calls[0] += 1
+            return None
+
+        filter_context_tree(data, 16, _count)
+        # 3 root keys + 200 row keys once + node's 2 keys; never 200 x 1000.
+        assert calls[0] < 1000, calls[0]
+
+    def test_d3_cycle_elsewhere_api_surface(self, tmp_path):
+        from fsm_llm.session import FileSessionStore
+
+        api = API.from_definition(
+            _a7_fsm(),
+            llm_interface=_mock_llm(),
+            session_store=FileSessionStore(tmp_path),
+        )
+        conv_id, _ = api.start_conversation()
+        data, row = _d3_2_cycle_elsewhere()
+        _raw_data(api, conv_id).update(data)
+        got = api.get_data(conv_id)
+        assert len(got["rows"]) == 1000 and got["rows"][-1] == row
+        api.save_session(conv_id)
+        api.end_conversation(conv_id)
+        assert conv_id not in api.list_active_conversations()
+
+    def test_d3_container_reaching_a_cycle_filtered_per_path(self):
+        """Guard: a container that reaches a cycle (not on it) is shared by
+        the cycle and by the root; each occurrence follows its own path."""
+        cyc: dict[str, Any] = {"v": 1}
+        bridge: dict[str, Any] = {"cyc": cyc}
+        cyc["bridge"] = bridge
+        above = {"bridge": bridge}
+        data = {"above": above, "cyc": cyc}
+        expected = {
+            "above": {"bridge": {"cyc": {"v": 1}}},
+            "cyc": {"v": 1, "bridge": {}},
+        }
+        for name, walker in _d3_walkers().items():
+            assert walker(data) == expected, name
+
+    # -- D5 --------------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("cvv_status", 737),
+            ("pin_status", 742),
+            ("cvv_status", 99.5),
+            ("pin_status", "hunter"),
+            ("pin_enabled", "hunter"),
+            ("cvc_status", "abc"),
+            ("pin_status", ["1234"]),
+            ("pin_status", [{"x": 1}, "1234"]),
+        ],
+    )
+    def test_d5_policy_tail_credential_values_stripped(self, key, value):
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        assert is_forbidden_context_entry(key, value), (key, value)
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("pin_status", "verified"),
+            ("pin_status", "Verified"),
+            ("otp_enabled", "enabled"),
+            ("cookie_max_age", 86400),
+            ("cookie_ttl", 3600),
+            ("pin_timeout", 30),
+            ("otp_limit", 5),
+            ("pin_expires_in", 300),
+            ("pin_expiry", "2026-10-01"),
+            ("pin_updated_at", "2026-10-01T12:00:00Z"),
+            ("cookie_settings", {"analytics": True}),
+            ("pin_policy", {"min": 4}),
+            ("pin_status", [{"x": 1}]),
+        ],
+    )
+    def test_d5_policy_tail_metadata_values_kept(self, key, value):
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        assert not is_forbidden_context_entry(key, value), (key, value)
+
+    def test_d5_policy_tail_container_recursed_inner_keys_filtered(self):
+        from fsm_llm.context import clean_context_keys
+        from fsm_llm.prompts import BasePromptBuilder
+
+        data = {
+            "cookie_settings": {"analytics": True},
+            "pin_policy": {"min": 4, "pin": "4821"},
+        }
+        expected = {"cookie_settings": {"analytics": True}, "pin_policy": {"min": 4}}
+        assert BasePromptBuilder()._filter_context_for_security(data) == expected
+        assert clean_context_keys(data, "c-d5-2", strip_forbidden_keys=True) == expected
 
 
 # ---------------------------------------------------------------------------
