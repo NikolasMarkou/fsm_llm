@@ -383,3 +383,61 @@ class TestGetFsmSummary:
         assert "end" in summary["terminal_states"]
         assert summary["terminal_count"] == 1
         assert summary["total_transitions"] == 1
+
+
+# ==================================================================
+# redacting_json_default (shared json.dumps default= hook)
+# ==================================================================
+
+
+class TestRedactingJsonDefault:
+    """The one `default=` hook for every writer that emits context values out
+    of the process: disk, LLM prompt, dashboard websocket.
+    """
+
+    def test_exact_value_scalars_keep_their_str(self):
+        import datetime
+        import decimal
+        import uuid
+
+        from fsm_llm.utilities import redacting_json_default
+
+        moment = datetime.datetime(2026, 9, 22, 12, 0, 0)
+        assert redacting_json_default(moment) == str(moment)
+        assert redacting_json_default(decimal.Decimal("1.5")) == "1.5"
+        uid = uuid.uuid4()
+        assert redacting_json_default(uid) == str(uid)
+
+    def test_arbitrary_object_becomes_a_placeholder(self):
+        from fsm_llm.utilities import redacting_json_default
+
+        class Creds:
+            def __str__(self):  # pragma: no cover - must never be called
+                raise AssertionError("__str__ must not be called on an object")
+
+        assert redacting_json_default(Creds()) == "<redacted:Creds>"
+
+    def test_set_and_bytes_are_placeholders(self):
+        from fsm_llm.utilities import redacting_json_default
+
+        assert redacting_json_default({1, 2}) == "<redacted:set>"
+        assert redacting_json_default(b"x") == "<redacted:bytes>"
+
+    def test_session_hook_is_the_same_function(self):
+        from fsm_llm.session import session_json_default
+        from fsm_llm.utilities import redacting_json_default
+
+        assert session_json_default is redacting_json_default
+
+    def test_json_dumps_never_leaks_an_objects_str(self):
+        import json as _json
+
+        from fsm_llm.utilities import redacting_json_default
+
+        class Leaky:
+            def __str__(self):
+                return "password=hunter2"
+
+        text = _json.dumps({"creds": Leaky()}, default=redacting_json_default)
+        assert "hunter2" not in text
+        assert "<redacted:Leaky>" in text

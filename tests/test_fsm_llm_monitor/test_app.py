@@ -1085,3 +1085,35 @@ class TestApiKeyGate:
         client = TestClient(app)
         resp = getattr(client, method)(path, json={})
         assert resp.status_code != 401
+
+
+class TestDashboardWebsocketRedaction:
+    """The dashboard push must not send an arbitrary object's __str__ to the
+    browser: a context value whose repr carries a secret would be broadcast to
+    every connected viewer.
+    """
+
+    def test_server_uses_the_shared_redacting_hook(self):
+        import inspect
+        import re
+
+        from fsm_llm_monitor import server as server_mod
+
+        source = inspect.getsource(server_mod)
+        assert "default=redacting_json_default" in source
+        # A call site, not the anchor comment that names the old hook.
+        assert re.search(r"default=str[,)\s]", source) is None
+
+    def test_payload_with_a_leaky_object_is_redacted(self):
+        import json
+
+        from fsm_llm.utilities import redacting_json_default
+
+        class Leaky:
+            def __str__(self):
+                return "api_key=sk-secret"
+
+        payload = {"instances": [{"context": {"creds": Leaky()}}]}
+        text = json.dumps(payload, default=redacting_json_default)
+        assert "sk-secret" not in text
+        assert "<redacted:Leaky>" in text

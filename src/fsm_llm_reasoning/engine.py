@@ -14,6 +14,7 @@ from typing import Any
 from fsm_llm import API, ContextMergeStrategy
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
+from fsm_llm.utilities import redacting_json_default
 
 from .constants import (
     ContextKeys,
@@ -197,8 +198,11 @@ class ReasoningEngine:
                         f"Classification did not converge after {Defaults.MAX_CLASSIFICATION_ITERATIONS} iterations",
                         details={"context_keys": list(classification_context.keys())},
                     )
+                rendered_context = json.dumps(
+                    classification_context, indent=2, default=redacting_json_default
+                )
                 self.classifier.converse(
-                    user_message=f"Continue:\n{json.dumps(classification_context, indent=2, default=str)}",
+                    user_message=f"Continue:\n{rendered_context}",
                     conversation_id=conv_id,
                 )
 
@@ -509,7 +513,7 @@ class ReasoningEngine:
                 else:
                     # Normal orchestrator progression
                     response = self.orchestrator.converse(
-                        user_message=f"Continue reasoning: {json.dumps(current_context, indent=2, default=str)}",
+                        user_message=f"Continue reasoning: {json.dumps(current_context, indent=2, default=redacting_json_default)}",
                         conversation_id=conv_id,
                     )
                     responses.append(response)

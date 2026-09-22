@@ -26,6 +26,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
 from fsm_llm.logging import logger
+from fsm_llm.utilities import redacting_json_default
 
 from .bridge import MonitorBridge
 from .definitions import (
@@ -1378,7 +1379,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     else {"active": False, "config": None}
                 )
 
-            await websocket.send_text(json.dumps(data, default=str))
+            # DECISION plan-2026-09-22T080837-8b258a25/D-044
+            # `default=str` pushed an arbitrary object's `__str__` (a secret in
+            # a context value) to every dashboard browser. Share the core hook;
+            # do NOT re-implement the scalar keep-set here.
+            await websocket.send_text(json.dumps(data, default=redacting_json_default))
     except WebSocketDisconnect:
         pass
     except Exception as e:

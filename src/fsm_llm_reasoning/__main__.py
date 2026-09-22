@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fsm_llm.logging import logger
+from fsm_llm.utilities import redacting_json_default
 
 from .__version__ import __version__
 from .constants import ContextKeys, Defaults, ReasoningType
@@ -255,7 +256,9 @@ def _format_json_output(solution: str, trace_info: dict[str, Any]) -> str:
         "summary": trace_info.get("summary", "No summary available"),
     }
 
-    return json.dumps(output_data, indent=2, ensure_ascii=False, default=str)
+    return json.dumps(
+        output_data, indent=2, ensure_ascii=False, default=redacting_json_default
+    )
 
 
 def _format_detailed_output(solution: str, trace_info: dict[str, Any]) -> str:
@@ -364,7 +367,7 @@ def _save_as_json(
     }
 
     with save_path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+        json.dump(data, f, indent=2, ensure_ascii=False, default=redacting_json_default)
 
 
 def _save_as_text(

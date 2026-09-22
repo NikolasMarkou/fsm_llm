@@ -269,19 +269,69 @@ class TestNoHardcodedKeys:
 
 
 # ---------------------------------------------------------------------------
-# Senior review: json.dumps with default=str for safety
+# Senior review: a non-serializable context value must not break the prompt,
+# and (2026-09-22 follow-up) must not reach it as its __str__ either
 # ---------------------------------------------------------------------------
 
 
 class TestJsonDumpsSafety:
-    """The orchestrator continuation message must use default=str
-    to handle non-serializable context values."""
+    """Every reasoning writer that emits context out of the process (LLM
+    prompt, CLI stdout, saved results file) serializes through the shared
+    redacting hook, never `default=str`.
+    """
 
-    def test_continue_reasoning_uses_default_str(self):
+    def test_continue_reasoning_uses_the_redacting_hook(self):
         import inspect
 
         from fsm_llm_reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._solve_problem_locked)
-        # Find the "Continue reasoning" line and check it has default=str
-        assert "default=str" in source
+        assert "default=redacting_json_default" in source
+        assert "default=str" not in source
+
+    def test_classification_prompt_uses_the_redacting_hook(self):
+        import inspect
+        import re
+
+        from fsm_llm_reasoning import engine as engine_mod
+
+        source = inspect.getsource(engine_mod)
+        # The two prompt sites are the only json.dumps calls in this module
+        # that render context into a user_message.
+        assert re.search(r"default=str[,)\s]", source) is None
+        assert source.count("default=redacting_json_default") >= 2
+
+    def test_size_measurements_may_still_use_default_str(self):
+        """`handlers.py` only measures `len()` of the serialized text and never
+        emits it, so its `default=str` is not a leak; the comment must say so.
+        """
+        import inspect
+
+        from fsm_llm_reasoning import handlers as handlers_mod
+
+        source = inspect.getsource(handlers_mod)
+        assert "never emitted" in source
+
+    def test_cli_json_output_redacts_an_objects_str(self):
+        from fsm_llm_reasoning.__main__ import _format_json_output
+
+        class Leaky:
+            def __str__(self):
+                return "password=hunter2"
+
+        text = _format_json_output("done", {"summary": Leaky()})
+        assert "hunter2" not in text
+        assert "<redacted:Leaky>" in text
+
+    def test_saved_results_file_redacts_an_objects_str(self, tmp_path):
+        from fsm_llm_reasoning.__main__ import _save_as_json
+
+        class Leaky:
+            def __str__(self):
+                return "password=hunter2"
+
+        target = tmp_path / "results.json"
+        _save_as_json(target, "problem", "solution", {"leak": Leaky()})
+        written = target.read_text()
+        assert "hunter2" not in written
+        assert "<redacted:Leaky>" in written

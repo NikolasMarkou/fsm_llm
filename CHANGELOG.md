@@ -222,6 +222,21 @@ prompt text changed, so the stale eval baseline was not re-measured.
   (no redaction when debug logging is off).
 - The removed `ResponseGenerationRequest` fields are no longer computed on every turn.
 
+### Fixed -- follow-up 2026-09-22
+
+- `json.dumps(default=str)` is gone from every writer that emits context or trace values
+  out of the process, closing the same `__str__`-leak class the session fix closed on
+  disk. An object whose text carries a secret is now written as
+  `"<redacted:TypeName>"`, and its `__str__` is never called:
+  - `fsm_llm_monitor`'s dashboard websocket push, which broadcast to every connected
+    browser;
+  - the two `fsm_llm_reasoning` engine sites that render context into an LLM prompt;
+  - the `fsm_llm_reasoning` CLI's JSON output and its saved results file.
+- The hook itself moved to `fsm_llm.utilities.redacting_json_default`, since it now
+  serves disk, prompt and socket writers. `fsm_llm.session.session_json_default` is the
+  same object under its on-disk name, so existing imports keep working. An exact
+  `datetime`/`date`/`time`/`timedelta`/`Decimal`/`UUID` is still written as its `str()`.
+
 ### Not changed (considered and declined) -- core audit 2026-09-22
 
 - P0-2, Ollama null memo across retries: kept. Structured Ollama calls run at
@@ -259,10 +274,10 @@ prompt text changed, so the stale eval baseline was not re-measured.
   `copy.deepcopy`, `pickle`, `isinstance(ctx, dict)`), and under the default
   `error_mode="continue"` such a handler was silently skipped. The probe again gets the
   live context; a condition must not mutate it (the documented pure-predicate contract).
-- `json.dumps(default=str)` outside core: the monitor websocket push
-  (`fsm_llm_monitor/server.py`) and the `fsm_llm_reasoning` engine, handlers and CLI
-  still `str()` unknown values. They render to a browser or a terminal, not to disk;
-  recorded as a follow-up finding (D-039).
+- `json.dumps(default=str)` in the three `fsm_llm_reasoning` size measurements
+  (`handlers.py`): the serialized text is only measured with `len()` and never emitted,
+  so no `__str__` reaches a prompt, a file or a socket. The emitting writers were fixed
+  (see "Fixed", below).
 - `context_snapshot` keeps internal-prefixed keys named in `context_keys`
   (pre-existing): whether `context_keys` may name internal keys needs its own decision
   (D-039).

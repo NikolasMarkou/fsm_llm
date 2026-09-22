@@ -313,6 +313,25 @@ def redact_non_json_leaf(value: Any) -> Any:
     return f"<redacted:{type(value).__name__}>"
 
 
+def redacting_json_default(value: Any) -> str:
+    """``json.dumps`` ``default=`` hook for every writer that emits context or
+    trace values outside the process: on disk (``FileSessionStore.save``,
+    ``fsm_llm_agents.memory_persistence``), into an LLM prompt
+    (``fsm_llm_reasoning.engine``) or over a socket
+    (``fsm_llm_monitor``'s dashboard websocket).
+
+    Returns ``str(value)`` only for an exact stdlib value scalar (the
+    ``redact_non_json_leaf`` keep-set; json never calls ``default`` for its
+    other kept types), else ``"<redacted:TypeName>"``. Never raises.
+    """
+    # DECISION plan-2026-09-22T080837-8b258a25/D-008
+    # Do NOT go back to `default=str`: an object's `__str__` is the path that
+    # carried a secret to disk, to a prompt and to the dashboard. Do NOT copy
+    # the scalar type set here; reuse the leaf hook.
+    redacted = redact_non_json_leaf(value)
+    return str(value) if redacted is value else redacted
+
+
 def filter_context_tree(
     source: dict[Any, Any],
     max_depth: int,

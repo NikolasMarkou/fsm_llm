@@ -37,27 +37,18 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .logging import logger
-from .utilities import redact_non_json_leaf
+from .utilities import redacting_json_default
 
 # One id rule for _path and list_sessions, matched with fullmatch: ``$`` in a
 # ``re.match`` pattern also matches before a trailing newline ("abc\n").
 _SESSION_ID_RE = re.compile(r"[a-zA-Z0-9_\-]+")
 
 
-def session_json_default(value: Any) -> str:
-    """``json.dumps`` ``default=`` hook for every on-disk writer of context or
-    memory values (``FileSessionStore.save``, and
-    ``fsm_llm_agents.memory_persistence.save_working_memory``).
-
-    Returns ``str(value)`` only for an exact stdlib value scalar (the
-    ``utilities.redact_non_json_leaf`` keep-set; json never calls ``default``
-    for its other kept types), else ``"<redacted:TypeName>"``. Never raises.
-    """
-    # DECISION plan-2026-09-22T080837-8b258a25/D-008
-    # Do NOT go back to `default=str`: an object's `__str__` wrote its secret
-    # to disk. Do NOT copy the scalar type set here; reuse the leaf hook.
-    redacted = redact_non_json_leaf(value)
-    return str(value) if redacted is value else redacted
+# The on-disk writers' name for the shared hook (`FileSessionStore.save` and
+# `fsm_llm_agents.memory_persistence.save_working_memory` import it from here).
+# The body lives in `utilities` because the prompt and websocket writers need
+# the same rule; do NOT re-implement it per writer.
+session_json_default = redacting_json_default
 
 
 class SessionState(BaseModel):

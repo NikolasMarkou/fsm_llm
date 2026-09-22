@@ -64,6 +64,11 @@ Exports: `ReasoningEngine`, `ReasoningType`, `ReasoningStep`, `ReasoningTrace`, 
 - `ReasoningEngine(model=Defaults.MODEL (fsm_llm DEFAULT_LLM_MODEL), **api_kwargs)`: builds `orchestrator` and `classifier` via `API.from_definition(..., model=model, **api_kwargs)`.
 - `solve_problem(problem: str, initial_context: dict | None = None) -> tuple[str, dict]`; dict keys `reasoning_trace` (ReasoningTrace dump), `summary` (str), `final_context`, `all_responses`. Raises `ReasoningExecutionError` (wrapping any loop failure, after ending the conversation).
 - `load_fsm_definition(name) -> dict` (deep copy; `KeyError` if unknown). `map_reasoning_type(s) -> str` (aliases like `math`, `logic`, `explain`, `analogy`; unknown -> `analytical` with WARNING). `get_available_reasoning_types() -> {value: description}`.
+- Every writer that renders context out of the process (the two engine prompt sites, the
+  CLI's `--output json` and its `--save` file) serializes with
+  `fsm_llm.utilities.redacting_json_default`, so a value whose `__str__` carries a secret
+  is written as `"<redacted:TypeName>"`. `handlers.py` keeps `default=str` in its three
+  size checks: that text is only measured with `len()` and never emitted.
 - CLI: `python -m fsm_llm_reasoning PROBLEM [--type {9 values}] [--context JSON] [--model M] [--output text|json|detailed] [--save FILE] [--verbose|-v] [--quiet] [--list-types] [--version]`. `--type` sets `ContextKeys.PREFERRED_REASONING_TYPE`. Returns exit code 0/1.
 
 ## Data shapes
