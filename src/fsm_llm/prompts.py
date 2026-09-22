@@ -1326,9 +1326,20 @@ def build_classification_system_prompt(
 
 
 # One default-config builder lends its sanitizer and security filter to the
-# classifier context block, so classifier prompts use exactly the helpers the
-# Pass-1/Pass-2 builders use (no third filter copy).
+# classifier context block and to ``sanitize_text_for_prompt``, so every
+# caller uses exactly the helpers the Pass-1/Pass-2 builders use (no third
+# filter copy).
 _CLASSIFICATION_CONTEXT_BUILDER = BasePromptBuilder()
+
+
+def sanitize_text_for_prompt(text: str | None) -> str:
+    """Escape XML-like tags and flatten newlines in *text* for a prompt.
+
+    Public entry point to the one sanitiser every prompt builder uses
+    (``BasePromptBuilder._sanitize_text_for_prompt``); output is identical.
+    ``None`` becomes ``""``. Never raises for ``str`` or ``None`` input.
+    """
+    return _CLASSIFICATION_CONTEXT_BUILDER._sanitize_text_for_prompt(text)
 
 
 def build_classification_context_block(context: dict[str, Any] | None) -> str:

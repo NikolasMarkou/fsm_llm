@@ -63,6 +63,11 @@ _file_handler_initialized = False
 _stream_handler_ids: dict[str, int] = {}
 
 
+def _stream_key(sink: str, format: str, context: bool) -> str:
+    """The one key shape ``_stream_handler_ids`` is indexed by."""
+    return f"{sink}|{format}|{context}"
+
+
 def _log_json_default(obj: object) -> str:
     """``json.dumps(default=...)`` fallback for a JSON log line.
 
@@ -235,7 +240,7 @@ def setup_logging(
         # Do NOT reduce this to a module-level bool mirroring
         # _file_handler_initialized — that flag needs manual resetting in two
         # places already, and a third would be a latent staleness bug.
-        stream_key = f"{sink}|{resolved_format}|{context}"
+        stream_key = _stream_key(sink, resolved_format, context)
         existing_id = _stream_handler_ids.get(stream_key)
         if existing_id is not None and existing_id in _library_handler_ids:
             return -1
@@ -265,6 +270,41 @@ def setup_logging(
 
     _library_handler_ids.append(handler_id)
     return handler_id
+
+
+# --------------------------------------------------------------
+
+
+def reset_handlers() -> None:
+    """Remove every handler this library registered and reset its bookkeeping.
+
+    Handlers the caller added with ``logger.add`` are left alone. An id that
+    is already gone is skipped. Afterwards ``setup_logging`` and
+    ``setup_file_logging`` register fresh handlers again. Never raises.
+    """
+    global _file_handler_initialized
+    for handler_id in _library_handler_ids:
+        try:
+            logger.remove(handler_id)
+        except ValueError:
+            pass
+    # Cleared in place, never rebound: callers hold these by reference.
+    _library_handler_ids.clear()
+    _stream_handler_ids.clear()
+    _file_handler_initialized = False
+
+
+def register_stream_handler(
+    handler_id: int, sink: str, format: str, context: bool = False
+) -> None:
+    """Track a library-owned stream handler added outside ``setup_logging``.
+
+    ``reset_handlers`` will remove it, and a later ``setup_logging`` call with
+    the same ``(sink, format, context)`` returns ``-1`` instead of adding a
+    duplicate handler.
+    """
+    _library_handler_ids.append(handler_id)
+    _stream_handler_ids[_stream_key(sink, format, context)] = handler_id
 
 
 # --------------------------------------------------------------

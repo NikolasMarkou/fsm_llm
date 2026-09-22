@@ -41,15 +41,15 @@ Lock order is `FSMManager._lock -> conv_lock` everywhere; never take `_lock` whi
 | `handlers.py` | `HandlerSystem`, `HandlerBuilder`, `BaseHandler`, `LambdaHandler`, `HandlerTiming`, `FSMHandler` protocol | |
 | `llm.py` | `LLMInterface` ABC, `LiteLLMInterface` | Parsing ladders for structured replies |
 | `ollama.py` | `is_ollama_model`, `apply_ollama_params`, JSON schemas | `ollama/` and `ollama_chat/` prefixes |
-| `prompts.py` | Prompt builders + classification schema/prompt | XML-tag sanitization (tag names may start with a letter, `_`, `!`, `?`; a closer with no `>` after it is escaped; `<b>`/`<i>` pass); `DataExtractionPromptBuilder` has no prompt method, the pipeline builds the bulk prompt inline |
+| `prompts.py` | Prompt builders + classification schema/prompt, `sanitize_text_for_prompt(text)` | XML-tag sanitization (tag names may start with a letter, `_`, `!`, `?`; a closer with no `>` after it is escaped; `<b>`/`<i>` pass); `DataExtractionPromptBuilder` has no prompt method, the pipeline builds the bulk prompt inline |
 | `context.py` | `clean_context_keys`, `ContextCompactor` | |
-| `memory.py` | `WorkingMemory`, `BUFFER_*`, `DEFAULT_BUFFERS`, `DEFAULT_HIDDEN_BUFFERS` | |
+| `memory.py` | `WorkingMemory`, `BUFFER_*`, `DEFAULT_BUFFERS`, `DEFAULT_HIDDEN_BUFFERS` | `hidden_buffers` is a read-only `frozenset` property |
 | `session.py` | `SessionState`, `SessionStore`, `FileSessionStore` | Atomic temp + `os.replace` |
 | `utilities.py` | `extract_json_from_text`, `load_fsm_from_file`, `load_fsm_definition`, `filter_context_tree`, `strip_think_and_fences`, `coerce_confidence`, `get_fsm_summary` | |
 | `validator.py`, `visualizer.py` | `FSMValidator`, ASCII diagrams | Own `main_cli` entry points |
 | `runner.py`, `__main__.py` | Interactive CLI | Redacts secret-shaped context values in logs |
 | `constants.py` | Defaults, security regexes, prompt text, env names | ~1,700 lines, mostly prompt strings |
-| `logging.py` | `setup_logging`, `setup_file_logging`, decorators | `logger.disable("fsm_llm")` at import |
+| `logging.py` | `setup_logging`, `setup_file_logging`, `reset_handlers`, `register_stream_handler`, decorators | `logger.disable("fsm_llm")` at import |
 
 ## Public interface
 

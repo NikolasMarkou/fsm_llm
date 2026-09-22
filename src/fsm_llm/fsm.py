@@ -960,7 +960,7 @@ class FSMManager:
             # Assumptions.
             if wm_obj is not None and hasattr(wm_obj, "to_dict"):
                 working_memory = wm_obj.to_dict()
-                hidden_buffers = sorted(getattr(wm_obj, "_hidden_buffers", frozenset()))
+                hidden_buffers = sorted(getattr(wm_obj, "hidden_buffers", frozenset()))
             return {
                 "current_state": inst.current_state,
                 "context_data": _strip_internal_mapping(inst.context.data),

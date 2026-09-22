@@ -71,6 +71,7 @@ from .prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
+    sanitize_text_for_prompt,
 )
 from .transition_evaluator import TransitionEvaluator
 from .utilities import filter_context_tree
@@ -1276,9 +1277,7 @@ class MessagePipeline:
         """
         log = logger.bind(conversation_id=conversation_id)
 
-        safe_message = self.data_extraction_prompt_builder._sanitize_text_for_prompt(
-            user_message
-        )
+        safe_message = sanitize_text_for_prompt(user_message)
         prompt = (
             f"Extract information from the user's message.\n\n"
             f"Instructions: {state.extraction_instructions}\n\n"

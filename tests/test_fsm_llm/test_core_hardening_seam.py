@@ -1234,7 +1234,7 @@ def _old_shape_snapshot_reads(fsm_manager, conversation_id: str) -> dict:
     hidden_buffers: list[str] = []
     if wm_obj is not None and hasattr(wm_obj, "to_dict"):
         working_memory = wm_obj.to_dict()
-        hidden_buffers = sorted(getattr(wm_obj, "_hidden_buffers", frozenset()))
+        hidden_buffers = sorted(getattr(wm_obj, "hidden_buffers", frozenset()))
 
     return {
         "current_state": current_state,

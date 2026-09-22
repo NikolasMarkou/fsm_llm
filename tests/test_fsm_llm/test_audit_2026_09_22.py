@@ -494,7 +494,7 @@ class TestStep3RestoreLockOrder:
         conv_id, _ = api.restore_session("saved")
         wm = _restored_instance(api, conv_id).context.working_memory
         assert wm.list_buffers() == []
-        assert wm._hidden_buffers == frozenset()
+        assert wm.hidden_buffers == frozenset()
 
     def test_p0_3_seed_failure_tears_down_the_new_conversation(self):
         api, _ = _restore_api()
@@ -1759,3 +1759,198 @@ def _step12_fsm_dict() -> dict:
             }
         },
     }
+
+
+def _module_source(module: Any) -> str:
+    import inspect
+
+    return inspect.getsource(module)
+
+
+class TestStep12Accessors:
+    """Step 12.2: public accessors replace three private reach-ins
+    (``WorkingMemory._hidden_buffers``, the logging handler registry, and a
+    prompt builder's ``_sanitize_text_for_prompt``)."""
+
+    def test_hidden_buffers_returns_the_same_frozenset_object(self):
+        from fsm_llm.memory import WorkingMemory
+
+        wm = WorkingMemory(hidden_buffers={"metadata", "audit"})
+        assert type(wm.hidden_buffers) is frozenset
+        assert wm.hidden_buffers is wm._hidden_buffers
+        assert wm.hidden_buffers == frozenset({"metadata", "audit"})
+
+    def test_hidden_buffers_is_read_only(self):
+        from fsm_llm.memory import WorkingMemory
+
+        wm = WorkingMemory()
+        before = wm.hidden_buffers
+        with pytest.raises(AttributeError):
+            wm.hidden_buffers = frozenset({"x"})  # type: ignore[misc]
+        with pytest.raises(AttributeError):
+            del wm.hidden_buffers  # type: ignore[misc]
+        assert WorkingMemory.hidden_buffers.fset is None
+        assert wm.hidden_buffers is before
+
+    @pytest.mark.parametrize("how", ["copy", "deepcopy", "pickle"])
+    def test_hidden_buffers_stays_a_frozenset_on_every_copy_path(self, how):
+        import copy
+        import pickle
+
+        from fsm_llm.memory import WorkingMemory
+
+        wm = WorkingMemory(hidden_buffers={"metadata"})
+        clone = {
+            "copy": copy.copy,
+            "deepcopy": copy.deepcopy,
+            "pickle": lambda m: pickle.loads(pickle.dumps(m)),
+        }[how](wm)
+        assert type(clone.hidden_buffers) is frozenset
+        assert clone.hidden_buffers == frozenset({"metadata"})
+
+    def test_snapshot_reads_the_public_property(self):
+        from fsm_llm.memory import WorkingMemory
+
+        class _Override(WorkingMemory):
+            @property
+            def hidden_buffers(self) -> frozenset[str]:
+                return frozenset({"via_property"})
+
+        api = _api()
+        conv_id, _ = api.start_conversation()
+        instance = api.fsm_manager.instances[conv_id]
+        instance.context.working_memory = _Override()
+        snapshot = api.fsm_manager.get_conversation_snapshot(conv_id)
+        assert snapshot["hidden_buffers"] == ["via_property"]
+
+    def test_snapshot_keeps_a_default_for_foreign_memory_objects(self):
+        class _Foreign:
+            def to_dict(self) -> dict[str, Any]:
+                return {"core": {}}
+
+        api = _api()
+        conv_id, _ = api.start_conversation()
+        api.fsm_manager.instances[conv_id].context.working_memory = _Foreign()
+        snapshot = api.fsm_manager.get_conversation_snapshot(conv_id)
+        assert snapshot["hidden_buffers"] == []
+
+    def test_fsm_source_has_no_hidden_buffers_reach_in(self):
+        import fsm_llm.fsm as fsm_module
+
+        assert "_hidden_buffers" not in _module_source(fsm_module)
+
+    def test_reset_handlers_drops_library_state_and_keeps_user_handlers(self):
+        import io
+
+        from loguru import logger
+
+        import fsm_llm.logging as log_module
+        from fsm_llm.constants import LOG_SINK_STDOUT
+
+        user_buf = io.StringIO()
+        user_id = logger.add(user_buf, level="DEBUG")
+        try:
+            lib_id = log_module.setup_logging(sink=LOG_SINK_STDOUT)
+            assert lib_id in log_module._library_handler_ids
+            assert log_module._stream_handler_ids
+            log_module._file_handler_initialized = True
+            ids_list = log_module._library_handler_ids
+            stream_dict = log_module._stream_handler_ids
+
+            log_module.reset_handlers()
+
+            assert log_module._library_handler_ids == []
+            assert log_module._stream_handler_ids == {}
+            assert log_module._file_handler_initialized is False
+            # Cleared in place: tests import these containers by reference.
+            assert log_module._library_handler_ids is ids_list
+            assert log_module._stream_handler_ids is stream_dict
+            with pytest.raises(ValueError):
+                logger.remove(lib_id)
+            logger.info("user handler survives")
+            assert "user handler survives" in user_buf.getvalue()
+        finally:
+            logger.remove(user_id)
+            log_module.reset_handlers()
+
+    def test_reset_handlers_tolerates_an_already_removed_handler(self):
+        from loguru import logger
+
+        import fsm_llm.logging as log_module
+        from fsm_llm.constants import LOG_SINK_STDOUT
+
+        lib_id = log_module.setup_logging(sink=LOG_SINK_STDOUT)
+        logger.remove(lib_id)
+        log_module.reset_handlers()
+        assert log_module._library_handler_ids == []
+
+    def test_enable_debug_logging_dedup_is_unchanged(self):
+        import fsm_llm.logging as log_module
+        from fsm_llm import enable_debug_logging
+        from fsm_llm.constants import LOG_FORMAT_HUMAN, LOG_SINK_STDERR
+
+        try:
+            enable_debug_logging()
+            count = len(log_module._library_handler_ids)
+            assert count == 1
+            assert (
+                log_module.setup_logging(sink=LOG_SINK_STDERR, format=LOG_FORMAT_HUMAN)
+                == -1
+            )
+            assert len(log_module._library_handler_ids) == count
+            # A different handler shape still registers.
+            assert (
+                log_module.setup_logging(
+                    sink=LOG_SINK_STDERR, format=LOG_FORMAT_HUMAN, context=True
+                )
+                != -1
+            )
+        finally:
+            log_module.reset_handlers()
+
+    def test_init_does_not_touch_logging_private_state(self):
+        import fsm_llm
+
+        source = _module_source(fsm_llm)
+        for name in (
+            "_library_handler_ids",
+            "_stream_handler_ids",
+            "_file_handler_initialized",
+        ):
+            assert name not in source, name
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            None,
+            "",
+            "plain text",
+            "line one\nline two\r\n",
+            "<task>do it</task>",
+            "bye </task",
+            "latency < threshold",
+            "<b>bold</b> and <i>it</i>",
+            "<b </task>",
+            "< name" + "x" * 300 + ">",
+            "<!-- c --> <![CDATA[x]]> <?xml ?>",
+            "<a<a<a<a",
+        ],
+    )
+    def test_sanitize_text_for_prompt_matches_the_builder(self, text):
+        from fsm_llm.prompts import (
+            DataExtractionPromptBuilder,
+            ResponseGenerationPromptBuilder,
+            sanitize_text_for_prompt,
+        )
+
+        expected = DataExtractionPromptBuilder()._sanitize_text_for_prompt(text)
+        assert sanitize_text_for_prompt(text) == expected
+        assert (
+            ResponseGenerationPromptBuilder()._sanitize_text_for_prompt(text)
+            == expected
+        )
+
+    def test_pipeline_source_has_no_private_sanitiser_reach_in(self):
+        import fsm_llm.pipeline as pipeline_module
+
+        assert "._sanitize_text_for_prompt" not in _module_source(pipeline_module)

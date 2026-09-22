@@ -150,6 +150,18 @@ class WorkingMemory:
                     f"(buffers={list(buffer_names)})"
                 )
 
+    @property
+    def hidden_buffers(self) -> frozenset[str]:
+        """Buffer names excluded from aggregate views (read-only).
+
+        Returns the instance's own ``frozenset``, which is already immutable.
+        """
+        # DECISION plan-2026-09-22T080837-8b258a25/D-015
+        # Do NOT add a setter: every write must go through the frozenset
+        # re-wrap in __init__/__setstate__ (D-032). No copy is needed either,
+        # because a frozenset cannot be mutated in place.
+        return self._hidden_buffers
+
     # ------------------------------------------------------------------
     # CRUD operations
     # ------------------------------------------------------------------
