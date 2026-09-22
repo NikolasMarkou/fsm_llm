@@ -857,7 +857,7 @@ class FSMManager:
         # threading.Lock and `get_fsm_definition` re-acquires it, so `_lock` MUST
         # be released before resolving the def / acquiring `conv_lock`. Acquiring
         # `conv_lock` only AFTER `_lock` is released preserves the canonical
-        # `_lock -> conv_lock` order and keeps the C-NEW-007 note intact. See
+        # `_lock -> conv_lock` order that restore_session relies on. See
         # decisions.md D-004.
         with self._lock:
             if conversation_id not in self.instances:
@@ -973,6 +973,71 @@ class FSMManager:
             }
 
         return self._read_under_lock(conversation_id, _snapshot)
+
+    def seed_restored_conversation(
+        self,
+        conversation_id: str,
+        *,
+        summary: str | None,
+        history: list[dict[str, str]],
+        provenance: dict[str, Any] | None,
+        working_memory: Any,
+    ) -> None:
+        """Apply a restored session's four seeds under ONE ``conv_lock`` hold.
+
+        Interface contract:
+          - Parameters: ``conversation_id`` (an active conversation, freshly
+            started by ``API.restore_session``); ``summary`` (set when not
+            ``None``); ``history`` (``{"user": ...}`` / ``{"system": ...}``
+            exchanges, appended in order); ``provenance`` (a shallow copy is
+            stored under ``_PROVENANCE_KEY`` when not ``None``);
+            ``working_memory`` (a built ``WorkingMemory``, assigned when not
+            ``None``). ``None`` means "keep the fresh conversation's value".
+          - Returns: None; mutates the instance in place.
+          - Failure: same as ``_read_under_lock`` (``FSMError`` for an unknown
+            conversation or a missing per-conversation lock).
+
+        The restore-side twin of ``get_conversation_snapshot``: it reuses
+        ``_read_under_lock`` (``_lock`` for the lookup only, released before
+        ``conv_lock``), so the seed body does in-memory work only.
+        """
+
+        def _seed(inst: FSMInstance) -> None:
+            conversation = inst.context.conversation
+            # DECISION plan-2026-09-21T203800-8a03483a/D-007 (A6, order per
+            # D-029): seed the saved summary BEFORE replaying history, not
+            # after. If this API keeps fewer exchanges than the saver did, the
+            # replay trims and `_append_to_summary` appends the trimmed
+            # exchanges after the saved digest, in order; setting it after the
+            # replay would overwrite those.
+            if summary is not None:
+                conversation.summary = summary
+            for exchange in history:
+                if "user" in exchange:
+                    conversation.add_user_message(exchange["user"])
+                if "system" in exchange:
+                    conversation.add_system_message(exchange["system"])
+            if provenance is not None:
+                inst.context.metadata[_PROVENANCE_KEY] = dict(provenance)
+            if working_memory is not None:
+                inst.context.working_memory = working_memory
+
+        self._read_under_lock(conversation_id, _seed)
+
+    def has_instance(self, conversation_id: str) -> bool:
+        """True if an FSM instance is registered for ``conversation_id``
+        (read under ``_lock``; never raises)."""
+        with self._lock:
+            return conversation_id in self.instances
+
+    def copy_raw_context_data(self, conversation_id: str) -> dict[str, Any] | None:
+        """A shallow copy of the UNFILTERED ``context.data`` (internal keys
+        included), taken under ``_lock`` only; ``None`` for an unknown
+        conversation. For explicit key requests that bypass the internal-key
+        filter (``API`` pop-context merge); never returned to a caller as-is."""
+        with self._lock:
+            instance = self.instances.get(conversation_id)
+            return None if instance is None else dict(instance.context.data)
 
     @with_conversation_context
     def update_conversation_context(

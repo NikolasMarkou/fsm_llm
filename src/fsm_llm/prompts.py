@@ -1527,7 +1527,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             # single-key entries (`Conversation.add_user_message` /
             # `add_system_message`), but `Conversation.exchanges` is a plain
             # `list[dict[str, str]]` field, so restored/injected history can
-            # carry multi-key entries -- `API._replay_history` explicitly
+            # carry multi-key entries -- `FSMManager.seed_restored_conversation`
             # handles that shape. Splitting also makes the budget below count
             # MESSAGES rather than entries, which is what D-012 asked for.
             # See decisions.md D-019.

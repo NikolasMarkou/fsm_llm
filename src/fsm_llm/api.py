@@ -115,7 +115,6 @@ from .handlers import (
 )
 from .llm import LiteLLMInterface, LLMInterface
 from .logging import handle_conversation_errors, logger
-from .pipeline import _PROVENANCE_KEY
 from .prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
@@ -872,11 +871,9 @@ class API:
         # Explicitly-requested shared keys are honored regardless of prefix:
         # fall back to the sub-FSM's raw context.data for internal-prefixed
         # keys that get_conversation_data() filters out.
-        raw_context: dict[str, Any] = {}
-        with self.fsm_manager._lock:
-            instance = self.fsm_manager.instances.get(frame.conversation_id)
-            if instance is not None:
-                raw_context = dict(instance.context.data)
+        raw_context = (
+            self.fsm_manager.copy_raw_context_data(frame.conversation_id) or {}
+        )
         missing_keys = []
         for key in frame.shared_context_keys or []:
             if key in fsm_context:
@@ -1199,8 +1196,7 @@ class API:
     def _frame_instance_present(self, frame_id: str) -> bool:
         """True if the FSMManager still holds ``frame_id``'s instance. After a
         failed end this means the end was refused and nothing was torn down."""
-        with self.fsm_manager._lock:
-            return frame_id in self.fsm_manager.instances
+        return self.fsm_manager.has_instance(frame_id)
 
     def _drop_ended_frames(self, conversation_id: str, ended: set[str]) -> None:
         """Remove already-ended frames from a conversation's live stack."""
@@ -1498,74 +1494,7 @@ class API:
             initial_context=state.context_data, _suppress_start=True
         )
 
-        # Restore conversation history (and H10: WorkingMemory) under the
-        # per-conversation lock.
-        # NOTE (C-NEW-007): restore_session acquires conv_lock then
-        # _replay_history briefly takes _lock (conv_lock → _lock), the reverse
-        # of the codebase's canonical _lock → conv_lock order. This is a LATENT
-        # ordering inversion only — restore_session operates on a freshly
-        # created conversation id whose conv_lock no other thread can yet hold,
-        # so a circular wait is not currently reachable. Do NOT change the
-        # _replay_history signature/guard without updating its regression test.
         current_fsm_id = self._get_current_fsm_conversation_id(conv_id)
-        conv_lock = self.fsm_manager._conversation_locks.get(current_fsm_id)
-
-        def _replay_and_restore_wm() -> None:
-            # DECISION plan-2026-09-21T203800-8a03483a/D-007 (A6, order per
-            # D-029): seed the saved summary BEFORE replaying history, not
-            # after. If this API keeps fewer exchanges than the saver did, the
-            # replay trims and `_append_to_summary` appends the trimmed
-            # exchanges after the saved digest, in order; setting it after the
-            # replay would overwrite those. A legacy file (no summary) leaves
-            # the fresh conversation's None untouched.
-            if state.conversation_summary:
-                with self.fsm_manager._lock:
-                    summary_instance = self.fsm_manager.instances.get(current_fsm_id)
-                if summary_instance is not None:
-                    summary_instance.context.conversation.summary = (
-                        state.conversation_summary
-                    )
-            self._replay_history(current_fsm_id, state.conversation_history)
-            # D-031: re-seed provenance; an old file has no key -> empty map
-            saved_prov = state.metadata.get("pipeline_extracted")
-            if isinstance(saved_prov, dict) and saved_prov:
-                with self.fsm_manager._lock:
-                    prov_instance = self.fsm_manager.instances.get(current_fsm_id)
-                if prov_instance is not None:
-                    prov_instance.context.metadata[_PROVENANCE_KEY] = dict(saved_prov)
-            if state.working_memory:
-                # Single definition (not duplicated across the if/else arms):
-                # duplicating the hidden_buffers carry risks fixing one arm and
-                # not the other, re-opening the D-032 hidden-buffer downgrade.
-                from .memory import WorkingMemory
-
-                with self.fsm_manager._lock:
-                    wm_instance = self.fsm_manager.instances.get(current_fsm_id)
-                if wm_instance is not None:
-                    wm = state.working_memory
-                    # Review N8 (plan-2026-09-20T165703-0d9c218e): no `buffers`
-                    # signal (key missing or JSON null) means the DEFAULT
-                    # buffers; an explicit `{}` keeps meaning zero buffers
-                    # (the tested `from_dict({})` contract). Do not collapse
-                    # both into `wm.get("buffers") or {}` again.
-                    buffers_raw = wm.get("buffers")
-                    # DECISION plan-2026-09-20T165703-0d9c218e/D-001
-                    # Same None-vs-empty rule for `hidden_buffers`: a missing
-                    # or null key passes `None` so `WorkingMemory` applies
-                    # `DEFAULT_HIDDEN_BUFFERS` ({"metadata"}) and `from_dict`
-                    # lets the embedded `_hidden_buffers` key decide; an
-                    # explicit list (including `[]`) is honoured verbatim. Do
-                    # NOT write `frozenset(wm.get("hidden_buffers") or [])`:
-                    # that collapsed "absent" into "none hidden" and leaked
-                    # `metadata` into the aggregate views (review-iter-2
-                    # concern 3). See decisions.md D-001.
-                    hidden_raw = wm.get("hidden_buffers")
-                    hidden = None if hidden_raw is None else frozenset(hidden_raw)
-                    wm_instance.context.working_memory = (
-                        WorkingMemory(hidden_buffers=hidden)
-                        if buffers_raw is None
-                        else WorkingMemory.from_dict(buffers_raw, hidden_buffers=hidden)
-                    )
 
         # DECISION plan-2026-07-21T072826-e3131cc2/D-003: restore_session must
         # NOT leak a half-registered conversation on partial-setup failure. Once
@@ -1588,18 +1517,28 @@ class API:
         # any failed conversation setup fires END on teardown. Do NOT suppress END
         # handlers here — that would diverge from the failed-start precedent.
         try:
-            if conv_lock is not None:
-                with conv_lock:
-                    _replay_and_restore_wm()
-            else:
-                _replay_and_restore_wm()
+            # DECISION plan-2026-09-22T080837-8b258a25/D-005
+            # All four seeds (summary, history, provenance, H10 WorkingMemory)
+            # go through ONE manager call that takes `_lock` only for the
+            # lookup, then `conv_lock`. Do NOT take `conv_lock` here, and do NOT
+            # reach into `fsm_manager._lock`/`.instances` in a seed: that was
+            # the C-NEW-007 inversion (`_lock` taken under `conv_lock`).
+            saved_prov = state.metadata.get("pipeline_extracted")
+            self.fsm_manager.seed_restored_conversation(
+                current_fsm_id,
+                summary=state.conversation_summary or None,
+                history=state.conversation_history,
+                # D-031: re-seed provenance; an old file has no key -> empty map
+                provenance=(
+                    saved_prov if isinstance(saved_prov, dict) and saved_prov else None
+                ),
+                working_memory=self._restored_working_memory(state.working_memory),
+            )
 
-            # C3: reinstate the saved current_state AFTER the conv_lock block.
-            # set_conversation_state takes _lock then conv_lock, so calling it
-            # OUTSIDE the conv_lock block here preserves the canonical
-            # _lock → conv_lock order and does not weaken C-NEW-007. It also
-            # validates the state against the FSM def, raising FSMError for a
-            # corrupted/foreign session.
+            # C3: reinstate the saved current_state AFTER the seeds.
+            # set_conversation_state takes _lock then conv_lock (canonical
+            # order). It also validates the state against the FSM def,
+            # raising FSMError for a corrupted/foreign session.
             self.fsm_manager.set_conversation_state(current_fsm_id, state.current_state)
         except Exception:
             # Best-effort teardown of the just-created conversation. end_conversation
@@ -1617,20 +1556,35 @@ class API:
 
         return conv_id, state
 
-    def _replay_history(self, fsm_id: str, history: list[dict[str, str]]) -> None:
-        """Replay saved conversation history into an FSM instance."""
-        with self.fsm_manager._lock:
-            if fsm_id not in self.fsm_manager.instances:
-                logger.warning(
-                    f"Cannot replay history: FSM instance '{fsm_id}' not found"
-                )
-                return
-            instance = self.fsm_manager.instances[fsm_id]
-        for exchange in history:
-            if "user" in exchange:
-                instance.context.conversation.add_user_message(exchange["user"])
-            if "system" in exchange:
-                instance.context.conversation.add_system_message(exchange["system"])
+    @staticmethod
+    def _restored_working_memory(wm: dict[str, Any] | None) -> Any:
+        """Build the H10 ``WorkingMemory`` a saved session carries, or ``None``
+        when it carries none (the fresh conversation's value is kept)."""
+        if not wm:
+            return None
+        # Single definition (not duplicated across if/else arms): duplicating
+        # the hidden_buffers carry risks fixing one arm and not the other,
+        # re-opening the D-032 hidden-buffer downgrade.
+        from .memory import WorkingMemory
+
+        # Review N8 (plan-2026-09-20T165703-0d9c218e): no `buffers` signal (key
+        # missing or JSON null) means the DEFAULT buffers; an explicit `{}`
+        # keeps meaning zero buffers (the tested `from_dict({})` contract). Do
+        # not collapse both into `wm.get("buffers") or {}` again.
+        buffers_raw = wm.get("buffers")
+        # DECISION plan-2026-09-20T165703-0d9c218e/D-001
+        # Same None-vs-empty rule for `hidden_buffers`: a missing or null key
+        # passes `None` so `WorkingMemory` applies `DEFAULT_HIDDEN_BUFFERS`
+        # ({"metadata"}) and `from_dict` lets the embedded `_hidden_buffers` key
+        # decide; an explicit list (including `[]`) is honoured verbatim. Do NOT
+        # write `frozenset(wm.get("hidden_buffers") or [])`: that collapsed
+        # "absent" into "none hidden" and leaked `metadata` into the aggregate
+        # views (review-iter-2 concern 3). See decisions.md D-001.
+        hidden_raw = wm.get("hidden_buffers")
+        hidden = None if hidden_raw is None else frozenset(hidden_raw)
+        if buffers_raw is None:
+            return WorkingMemory(hidden_buffers=hidden)
+        return WorkingMemory.from_dict(buffers_raw, hidden_buffers=hidden)
 
     def get_llm_interface(self) -> LLMInterface:
         """Get current LLM interface."""

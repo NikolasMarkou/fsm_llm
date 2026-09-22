@@ -450,23 +450,33 @@ class TestSessionPathValidation:
 
 
 # ============================================================================
-# H5: API _replay_history Guard
+# H5: restore history-replay guard
 # ============================================================================
 
 
 class TestReplayHistoryGuard:
-    """Verify _replay_history handles missing FSM instances."""
+    """Verify the restore seed handles missing FSM instances.
 
-    def test_missing_instance_returns_gracefully(self):
-        """_replay_history warns and returns if fsm_id not in instances."""
-        from fsm_llm import API
+    History replay moved from ``API._replay_history`` into
+    ``FSMManager.seed_restored_conversation`` (plan-2026-09-22T080837-8b258a25
+    step 3); a missing instance is now a typed ``FSMError`` (never a bare
+    ``KeyError``), which ``restore_session`` turns into a teardown."""
 
-        api = Mock(spec=API)
-        api.fsm_manager = Mock()
-        api.fsm_manager.instances = {}
+    def test_missing_instance_raises_typed_error(self):
+        """The seed raises FSMError, not KeyError, for an unknown fsm_id."""
+        from fsm_llm.definitions import FSMError
+        from fsm_llm.fsm import FSMManager
 
-        # Should not raise KeyError
-        API._replay_history(api, "nonexistent-fsm-id", [{"user": "hi"}])
+        manager = FSMManager(llm_interface=Mock())
+
+        with pytest.raises(FSMError, match="not found"):
+            manager.seed_restored_conversation(
+                "nonexistent-fsm-id",
+                summary=None,
+                history=[{"user": "hi"}],
+                provenance=None,
+                working_memory=None,
+            )
 
 
 # ============================================================================

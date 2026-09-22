@@ -717,7 +717,7 @@ class TestFieldExtractionHistoryCapping:
         message whenever an entry carried two non-`user` roles. In-tree writers
         emit single-key entries, but `Conversation.exchanges` is a plain
         `list[dict[str, str]]` -- restored/injected history can be multi-key,
-        and `API._replay_history` explicitly handles that shape."""
+        and `FSMManager.seed_restored_conversation` handles that shape."""
         # NOTE: `_make_instance` routes through `add_user_message`/
         # `add_system_message`, which SPLIT a multi-key entry into two
         # single-key ones -- so it cannot build this shape. Assign
@@ -735,7 +735,7 @@ class TestFieldExtractionHistoryCapping:
         assert "SSS-system" in prompt
 
     def test_multi_key_user_and_system_entry_keeps_both(self):
-        """The `{"user": ..., "system": ...}` shape `_replay_history` accepts."""
+        """The `{"user": ..., "system": ...}` shape `seed_restored_conversation` accepts."""
         instance = _make_instance()
         instance.context.conversation.exchanges = [
             {"user": "UUU-user", "system": "SSS-system"}

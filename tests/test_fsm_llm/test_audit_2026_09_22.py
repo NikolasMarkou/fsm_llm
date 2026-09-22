@@ -288,3 +288,218 @@ class TestStep2GetterFallbacks:
             with pytest.raises(FSMError) as info:
                 api.get_data(conv_id)
         assert info.value is err
+
+
+# ---------------------------------------------------------------------------
+# Step 3: restore_session lock order (P0-3, C-NEW-007)
+# ---------------------------------------------------------------------------
+
+
+class _LockOrderTracker:
+    """Records, per thread, which tracked locks are held, and every time the
+    manager ``_lock`` is acquired while a ``conv_lock`` is held."""
+
+    def __init__(self) -> None:
+        self._local = threading.local()
+        self.violations: list[str] = []
+
+    def held(self) -> list[str]:
+        if not hasattr(self._local, "held"):
+            self._local.held = []
+        return self._local.held
+
+
+class _RecordingLock:
+    """Wraps a Lock/RLock; blocking acquires are bounded so a real deadlock
+    fails the test instead of hanging the suite."""
+
+    def __init__(self, inner: Any, name: str, tracker: _LockOrderTracker) -> None:
+        self._inner = inner
+        self._name = name
+        self._tracker = tracker
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        held = self._tracker.held()
+        if self._name == "manager" and any(h.startswith("conv:") for h in held):
+            self._tracker.violations.append(f"_lock under {held}")
+        if blocking and timeout == -1:
+            timeout = _JOIN_TIMEOUT_S
+        got = self._inner.acquire(blocking, timeout)
+        if blocking and not got:
+            raise AssertionError(f"{self._name} not acquired: possible deadlock")
+        if got:
+            held.append(self._name)
+        return got
+
+    def release(self) -> None:
+        self._tracker.held().remove(self._name)
+        self._inner.release()
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, *exc: Any) -> None:
+        self.release()
+
+
+class _WrapNewLocks(dict):
+    """``_conversation_locks`` replacement that wraps each new conv_lock."""
+
+    def __init__(self, tracker: _LockOrderTracker) -> None:
+        super().__init__()
+        self._tracker = tracker
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, _RecordingLock(value, f"conv:{key}", self._tracker))
+
+
+class _OneSessionStore:
+    """In-memory store that hands back one prepared ``SessionState``."""
+
+    def __init__(self, state: Any) -> None:
+        self.state = state
+
+    def save(self, session_id: str, state: Any) -> None:
+        self.state = state
+
+    def load(self, session_id: str) -> Any:
+        return self.state
+
+    def delete(self, session_id: str) -> bool:
+        return True
+
+
+def _saved_state(api: API, **overrides: Any) -> Any:
+    from fsm_llm.session import SessionState
+
+    fields: dict[str, Any] = {
+        "conversation_id": "saved",
+        "fsm_id": api.fsm_id,
+        "current_state": "start",
+        "context_data": {"name": "Ada"},
+        "conversation_history": [{"user": "hi"}, {"system": "hello"}],
+        "conversation_summary": "earlier: talked about tea",
+        "metadata": {"pipeline_extracted": {"name": {"turn": 1}}},
+        "working_memory": {"buffers": {"core": {"k": "v"}}},
+    }
+    fields.update(overrides)
+    return SessionState(**fields)
+
+
+def _restore_api(**overrides: Any) -> tuple[API, _OneSessionStore]:
+    api = _api()
+    store = _OneSessionStore(None)
+    api._session_store = store
+    store.state = _saved_state(api, **overrides)
+    return api, store
+
+
+def _restored_instance(api: API, conv_id: str) -> Any:
+    fsm_id = api._get_current_fsm_conversation_id(conv_id)
+    return api.fsm_manager.instances[fsm_id]
+
+
+class TestStep3RestoreLockOrder:
+    def test_p0_3_restore_never_takes_manager_lock_under_conv_lock(self):
+        api, _ = _restore_api()
+        tracker = _LockOrderTracker()
+        manager = api.fsm_manager
+        manager._lock = _RecordingLock(manager._lock, "manager", tracker)
+        manager._conversation_locks = _WrapNewLocks(tracker)
+
+        outcome: dict[str, Any] = {}
+
+        def _run() -> None:
+            try:
+                outcome["result"] = api.restore_session("saved")
+            except BaseException as exc:  # surfaced below
+                outcome["error"] = exc
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+        _join_all([worker])
+        assert "error" not in outcome, outcome.get("error")
+        assert tracker.violations == []
+
+        conv_id, _ = outcome["result"]
+        inst = _restored_instance(api, conv_id)
+        assert inst.context.conversation.summary == "earlier: talked about tea"
+        assert api.get_conversation_history(conv_id) == [
+            {"user": "hi"},
+            {"system": "hello"},
+        ]
+        from fsm_llm.pipeline import _PROVENANCE_KEY
+
+        assert inst.context.metadata[_PROVENANCE_KEY] == {"name": {"turn": 1}}
+        assert inst.context.working_memory.get("core", "k") == "v"
+
+    def test_p0_3_api_has_no_manager_lock_reach_in(self):
+        import ast
+        import inspect
+
+        from fsm_llm import api as api_module
+
+        tree = ast.parse(inspect.getsource(api_module))
+        reach_ins = [
+            f"{node.lineno}: fsm_manager.{node.attr}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and node.attr in {"_lock", "_conversation_locks", "instances"}
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "fsm_manager"
+        ]
+        assert reach_ins == []
+
+    def test_p0_3_seed_on_unknown_conversation_raises_fsm_error(self):
+        api = _api()
+        with pytest.raises(FSMError, match="not found"):
+            api.fsm_manager.seed_restored_conversation(
+                "no-such-id",
+                summary=None,
+                history=[{"user": "hi"}],
+                provenance=None,
+                working_memory=None,
+            )
+
+    def test_p0_3_missing_summary_leaves_fresh_summary(self):
+        api, _ = _restore_api(conversation_summary=None)
+        conv_id, _ = api.restore_session("saved")
+        assert _restored_instance(api, conv_id).context.conversation.summary is None
+
+    def test_p0_3_absent_working_memory_keeps_fresh_default(self):
+        api, _ = _restore_api(working_memory=None)
+        conv_id, _ = api.restore_session("saved")
+        fresh = api.start_conversation()[0]
+        restored_wm = _restored_instance(api, conv_id).context.working_memory
+        fresh_wm = _restored_instance(api, fresh).context.working_memory
+        assert type(restored_wm) is type(fresh_wm)
+        if fresh_wm is not None:
+            assert restored_wm.list_buffers() == fresh_wm.list_buffers()
+
+    def test_p0_3_null_buffers_mean_default_buffers(self):
+        from fsm_llm.memory import DEFAULT_BUFFERS
+
+        api, _ = _restore_api(working_memory={"buffers": None})
+        conv_id, _ = api.restore_session("saved")
+        wm = _restored_instance(api, conv_id).context.working_memory
+        assert set(wm.list_buffers()) == set(DEFAULT_BUFFERS)
+
+    def test_p0_3_explicit_empty_buffers_are_honoured(self):
+        api, _ = _restore_api(working_memory={"buffers": {}, "hidden_buffers": []})
+        conv_id, _ = api.restore_session("saved")
+        wm = _restored_instance(api, conv_id).context.working_memory
+        assert wm.list_buffers() == []
+        assert wm._hidden_buffers == frozenset()
+
+    def test_p0_3_seed_failure_tears_down_the_new_conversation(self):
+        api, _ = _restore_api()
+        before = set(api.active_conversations)
+        with patch.object(
+            api.fsm_manager,
+            "seed_restored_conversation",
+            side_effect=FSMError("seed failed"),
+            create=True,
+        ):
+            with pytest.raises(FSMError, match="seed failed"):
+                api.restore_session("saved")
+        assert set(api.active_conversations) == before
