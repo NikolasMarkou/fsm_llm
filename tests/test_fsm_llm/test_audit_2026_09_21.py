@@ -2240,6 +2240,85 @@ class TestStep09_2:
         assert evaluate_logic({"==": [a, b]}) is True
 
 
+_B93_A = {"-": [{"var": "a"}, 5]}  # arithmetic on an unset operand
+
+
+class TestStep09_3:
+    """Review pass 2 concern 2: arithmetic on a missing operand is an internal
+    UNDEFINED value that no comparison (``==``, ``!=``, ``===``, ``!==``,
+    ordering, ``in``, ``contains``) can satisfy; logical operators treat it as
+    falsy; ``evaluate_logic`` returns it as None. ``_PLAIN_NUMBER_RE`` is ASCII
+    (plan-2026-09-21T203800-8a03483a/D-054)."""
+
+    @pytest.mark.parametrize(
+        ("logic", "data"),
+        [
+            (
+                {"!=": [{"-": [{"var": "balance"}, {"var": "paid"}]}, 0]},
+                {"balance": 10},
+            ),
+            ({"==": [{"+": [{"var": "a"}, 1]}, {"var": "b"}]}, {}),
+            ({"==": [_B93_A, None]}, {}),
+            ({"===": [_B93_A, None]}, {}),
+            ({"!=": [_B93_A, 0]}, {}),
+            ({"!==": [_B93_A, 0]}, {}),
+            ({"in": [_B93_A, [None, 1]]}, {}),
+            ({"contains": [[None, 1], _B93_A]}, {}),
+            ({"<=": [_B93_A, 0]}, {}),
+            ({">": [_B93_A, -10]}, {}),
+            ({"!=": [{"-": [{"+": [{"var": "a"}, 1]}, 2]}, 0]}, {}),
+            ({"!=": [{"max": [_B93_A, 1]}, 0]}, {}),
+        ],
+    )
+    def test_b1_comparison_with_undefined_arithmetic_is_false(self, logic, data):
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic(logic, data) is False
+
+    def test_b1_undefined_is_falsy_in_logical_operators(self):
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic({"!": [_B93_A]}, {}) is True
+        assert evaluate_logic({"!!": [_B93_A]}, {}) is False
+        assert evaluate_logic({"and": [_B93_A]}, {}) is None
+        assert evaluate_logic({"or": [_B93_A, "x"]}, {}) == "x"
+        assert evaluate_logic({"if": [_B93_A, "y", "n"]}, {}) == "n"
+        # A top-level UNDEFINED comes back as None, nested arithmetic too.
+        assert evaluate_logic(_B93_A, {}) is None
+        assert evaluate_logic({"*": [{"+": [_B93_A, 1]}, 2]}, {}) is None
+
+    def test_b1_undefined_arithmetic_gate_does_not_fire(self):
+        """The review's "outstanding balance" gate with ``paid`` unset."""
+        condition = TransitionCondition(
+            description="balance outstanding",
+            logic={"!=": [{"-": [{"var": "balance"}, {"var": "paid"}]}, 0]},
+        )
+        result = _b4_evaluate(condition, {"balance": 10})
+        assert result.result_type == TransitionEvaluationResult.BLOCKED
+
+    def test_b1_real_nulls_unchanged(self):
+        """Guard (passes on the pre-step source): D-017 ``null == null`` for
+        real nulls and set arithmetic are unchanged."""
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic({"==": [{"var": "x"}, None]}, {}) is True
+        assert evaluate_logic({"==": [{"var": "x"}, {"var": "y"}]}, {}) is True
+        assert evaluate_logic({"!=": [{"var": "x"}, None]}, {}) is False
+        assert evaluate_logic({"in": [{"var": "x"}, [None, 1]]}, {}) is True
+        assert evaluate_logic({"!=": [_B93_A, 0]}, {"a": 6}) is True
+        assert evaluate_logic({"==": [_B93_A, 1]}, {"a": 6}) is True
+
+    @pytest.mark.parametrize(
+        ("a", "b"), [("١٠٠٠", 1000), ("１", 1), ("٣", 3), ("1٠", 10)]
+    )
+    def test_b3_unicode_digits_not_numeric(self, a, b):
+        from fsm_llm.expressions import _numeric_equal, evaluate_logic
+
+        assert _numeric_equal(a, b) is False
+        assert evaluate_logic({"==": [a, b]}) is False
+        assert evaluate_logic({"<=": [a, b]}) is False
+
+
 # ---------------------------------------------------------------------------
 # Step 10: B5 + B9, B6, B10 (load-time validation)
 # ---------------------------------------------------------------------------

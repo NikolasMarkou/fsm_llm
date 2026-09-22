@@ -43,22 +43,31 @@ None / missing rule (one rule, applied by ``evaluate_logic``):
 
     * ``{"var": ...}`` resolves an absent key to ``None``, so "unset" and
       "explicitly None" behave the same in every operator below.
-    * Arithmetic (``+``, ``-``, ``*``, ``/``, ``%``, ``min``, ``max``)
-      returns ``None`` when ANY operand is ``None``, so the unset value
-      propagates through nested arithmetic. Ordering (``<``, ``<=``, ``>``,
-      ``>=``) returns ``False`` when ANY operand is ``None``, so
-      ``{"<": [{"-": [total, discount]}, 100]}`` with ``discount`` unset is
-      ``False``, and a bare arithmetic condition on an unset operand is falsy
-      (the transition does not fire). ``-`` is unary only when it has exactly
-      one operand (``{"-": [5]}`` is ``-5``); ``{"-": [5, null]}`` is
-      ``None``.
+    * Arithmetic (``+``, ``-``, ``*``, ``/``, ``%``, ``min``, ``max``) on
+      a ``None`` operand yields a module-private UNDEFINED value, which
+      propagates through nested arithmetic. Every comparison, equality and
+      membership operator (``==``, ``!=``, ``===``, ``!==``, ``<``, ``<=``,
+      ``>``, ``>=``, ``in``, ``contains``) is ``False`` when an operand is
+      UNDEFINED, and ``!``, ``!!``, ``and``, ``or``, ``if`` treat it as
+      falsy. So ``{"<": [{"-": [total, discount]}, 100]}`` and
+      ``{"!=": [{"-": [balance, paid]}, 0]}`` with the second operand unset
+      are both ``False``. ``evaluate_logic`` returns a top-level UNDEFINED as
+      ``None``, so a bare arithmetic condition on an unset operand is falsy
+      (the transition does not fire). Any other operator (``cat``) sees it
+      as ``None``. Gate arithmetic operands with ``requires_context_keys``
+      when "unset" should mean something specific.
+    * Ordering (``<``, ``<=``, ``>``, ``>=``) returns ``False`` when ANY
+      operand is ``None``. ``-`` is unary only when it has exactly one
+      operand (``{"-": [5]}`` is ``-5``); ``{"-": [5, null]}`` is undefined.
     * ``==`` / ``!=`` keep ``null == null`` True (JsonLogic), a ``None``
       never equals a non-``None`` value (so an unset var never equals the
       string ``"None"``), and numerically equal operands are equal
       (``{"==": [1.0, "1"]}`` is True), so ``==``, ``<=`` and ``>=`` agree.
-      Only plain decimal/scientific strings are numeric (``"1"``, ``"-2.5"``,
-      ``"1e3"``, ``".5"``); Python-only forms (``"1_000"``, ``" 1 "``,
-      ``"inf"``, ``"nan"``) are not.
+      Only plain ASCII decimal/scientific strings are numeric (``"1"``,
+      ``"-2.5"``, ``"1e3"``, ``".5"``); Python-only forms (``"1_000"``,
+      ``" 1 "``, ``"inf"``, ``"nan"``) and non-ASCII digits (Arabic-Indic,
+      fullwidth) are not. ``null == null`` is about real nulls (a
+      ``{"var"}`` miss), never about UNDEFINED.
       A ``bool`` operand is never numerically coerced by ``==``
       (``true == "1"`` is False; ``true == 1`` stays True via ``bool()``),
       and neither are two strings (``"01" == "1"`` is False, as in JS).
@@ -315,7 +324,11 @@ def _numeric_equal(a: Any, b: Any) -> bool:
 # JSON-style number text only: optional sign, digits with an optional
 # fraction (or a leading-dot fraction), optional exponent. No `_`, no
 # surrounding whitespace, no inf/nan, no hex. Used with `fullmatch`.
-_PLAIN_NUMBER_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
+# `re.ASCII`: `\d` must not match Unicode digits (Arabic-Indic "1000" == 1000
+# was True).
+_PLAIN_NUMBER_RE = re.compile(
+    r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", re.ASCII
+)
 
 
 def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
@@ -744,11 +757,36 @@ operations: dict[str, Callable[..., Any]] = {
 #: Ordering operators: False when ANY evaluated operand is None (module
 #: docstring, "None / missing rule"). ``==``/``!=`` are NOT here.
 _NONE_IS_FALSE_OPERATORS: frozenset[str] = frozenset({"<", "<=", ">", ">="})
-#: Arithmetic operators: None when ANY evaluated operand is None, so the unset
-#: value reaches the enclosing operator (an ordering one then gives False).
-_NONE_PROPAGATING_OPERATORS: frozenset[str] = frozenset(
+#: Arithmetic operators: UNDEFINED when ANY evaluated operand is None or
+#: UNDEFINED, so the unset value reaches the enclosing operator.
+_UNDEFINED_PROPAGATING_OPERATORS: frozenset[str] = frozenset(
     {"+", "-", "*", "/", "%", "min", "max"}
 )
+#: Every comparison, equality and membership operator: False when ANY
+#: evaluated operand is UNDEFINED (an unset value can never satisfy one).
+_UNDEFINED_IS_FALSE_OPERATORS: frozenset[str] = frozenset(
+    {"==", "!=", "===", "!==", "<", "<=", ">", ">=", "in", "contains"}
+)
+
+
+class _Undefined:
+    """Type of ``_UNDEFINED``: the result of arithmetic on a missing operand.
+
+    Module-private. Falsy (so ``!``, ``!!``, ``and``, ``or`` and ``if`` treat
+    it as false), never equal to anything but itself, and turned into
+    ``None`` by ``evaluate_logic`` before it leaves the module.
+    """
+
+    __slots__ = ()
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return "<undefined>"
+
+
+_UNDEFINED = _Undefined()
 
 # --------------------------------------------------------------
 # Data-access operator handlers
@@ -930,6 +968,10 @@ def evaluate_logic(
     """
     Evaluate a JsonLogic expression against provided data.
 
+    Arithmetic on a missing operand evaluates to a module-private UNDEFINED
+    value inside the expression (see the module docstring); the outermost
+    call (``_depth == 0``) returns it as ``None``.
+
     This is the main entry point for evaluating JsonLogic expressions. It recursively
     processes the expression structure and applies the appropriate operators.
 
@@ -986,6 +1028,17 @@ def evaluate_logic(
         - "has_context": Check key existence
         - "context_length": Get length of context value
     """
+    result = _evaluate_logic(logic, data, _depth)
+    if _depth == 0 and result is _UNDEFINED:
+        return None
+    return result
+
+
+def _evaluate_logic(
+    logic: JsonLogicExpression, data: dict[str, Any] | None, _depth: int
+) -> Any:
+    """Body of ``evaluate_logic``; may return ``_UNDEFINED``. Recursion goes
+    through ``evaluate_logic`` with ``_depth + 1`` (no conversion there)."""
     # Guard against deeply nested logic (DoS protection)
     if _depth > MAX_JSONLOGIC_DEPTH:
         raise TransitionEvaluationError(
@@ -1047,13 +1100,25 @@ def evaluate_logic(
     # None as 0 or as "operand omitted" (`{"-": [a, null]}` was `-a`, and
     # `<=`/`>=` were True for two unset vars through `soft_equals(None, None)`).
     # DECISION plan-2026-09-21T203800-8a03483a/D-048: arithmetic on an unset
-    # operand returns None, NOT False: a False result was read as 0 by the
+    # operand does NOT return False: a False result was read as 0 by the
     # enclosing comparison (`{"<": [{"-": [150, null]}, 100]}` was True).
+    # DECISION plan-2026-09-21T203800-8a03483a/D-054: nor does it return None:
+    # None satisfied `null == null`, `!= 0` and `in [null]`, so an "outstanding
+    # balance" gate fired on a missing `paid`. It returns the private
+    # `_UNDEFINED`, which every comparison/equality/membership operator treats
+    # as unsatisfiable. Do NOT let `_UNDEFINED` reach `soft_equals` & co, and
+    # do NOT make a `{"var"}` miss UNDEFINED (real nulls keep D-017). See D-054.
+    if any(v is _UNDEFINED for v in evaluated_values):
+        if operator in _UNDEFINED_IS_FALSE_OPERATORS:
+            return False
+        if operator in _UNDEFINED_PROPAGATING_OPERATORS:
+            return _UNDEFINED
+        evaluated_values = [None if v is _UNDEFINED else v for v in evaluated_values]
     if any(v is None for v in evaluated_values):
         if operator in _NONE_IS_FALSE_OPERATORS:
             return False
-        if operator in _NONE_PROPAGATING_OPERATORS:
-            return None
+        if operator in _UNDEFINED_PROPAGATING_OPERATORS:
+            return _UNDEFINED
 
     # Get the operation function from the registry
     operation = operations.get(operator)
