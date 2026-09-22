@@ -8,10 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Core audit of `src/fsm_llm` dated 2026-09-22 (`plans/plan-2026-09-22T080837-8b258a25`,
-16 steps in 21 commits, one commit per step or substep). Every behaviour change has a
+16 steps in 26 commits, one commit per step or substep, the last five being fixes from
+the iteration review). Every behaviour change has a
 test in `tests/test_fsm_llm/test_audit_2026_09_22.py` that fails on the parent commit;
 four cross-cutting sweeps live in `tests/test_fsm_llm/test_audit_sweeps.py`. Full suite:
-6,849 tests collected (was 6,564). `ruff` and `mypy` clean across all 6 packages. No
+6,862 tests collected (was 6,564). `ruff` and `mypy` clean across all 6 packages. No
 prompt text changed, so the stale eval baseline was not re-measured.
 
 ### Behaviour changes to know about -- core audit 2026-09-22
@@ -28,21 +29,18 @@ prompt text changed, so the stale eval baseline was not re-measured.
 - **Session files hold placeholders for non-JSON objects.** `FileSessionStore.save`
   no longer calls `str()` on an arbitrary value. An exact `datetime`, `date`, `time`,
   `timedelta`, `Decimal` or `UUID` is still written as `str(value)` (byte-identical to
-  before); anything else (`set`, `bytes`, `frozenset`, a subclass of those scalars, a
-  custom object) is written as `"<redacted:TypeName>"`, so a restore reads the
-  placeholder string.
+  before); anything else (`set`, `bytes`, `frozenset`, a subclass of those scalars,
+  `pathlib.Path` (`"<redacted:PosixPath>"`), an `Enum` member, a numpy scalar such as
+  `numpy.int64`, a custom object) is written as `"<redacted:TypeName>"`, so a restore
+  reads the placeholder string. `fsm_llm_agents.memory_persistence.save_working_memory`
+  (and so `MemorySessionStore`) writes WorkingMemory with the same hook, now public as
+  `fsm_llm.session.session_json_default`.
 - **`context_snapshot` is filtered.** `get_complete_conversation(...)["metadata"]
   ["classification_results"][field]["context_snapshot"]` drops every secret-shaped
   entry (`is_forbidden_context_entry`) at any depth, including inside lists. The verdict
   is taken on the stored JSON form (tuples as lists, non-str keys as strings), and a
   value nested deeper than `MAX_CONTEXT_FILTER_DEPTH` is dropped. A cyclic value is
   still omitted, as before.
-- **Read-only `should_execute` probe.** During the uncopied phase of
-  `HandlerSystem.execute_handlers` a handler condition receives a
-  `types.MappingProxyType` over the context. A condition that assigns into it raises
-  `TypeError` (wrapped once as `HandlerExecutionError`) and the context is unchanged;
-  `isinstance(ctx, dict)` is False there. Probes after the first handler ran still get
-  a private deep copy (a real `dict`).
 - **`FSMStackFrame.fsm_definition` is typed `FSMDefinition`.** A frame built from an id
   string, or from anything else that does not validate as an `FSMDefinition`, is now a
   validation error.
@@ -52,7 +50,9 @@ prompt text changed, so the stale eval baseline was not re-measured.
   registry.
 - **`API(handler_timeout=..., max_fsm_cache_size=...)` are consumed.** Both used to fall
   into `**llm_kwargs` and reach the LLM interface; they now configure `HandlerSystem`
-  and `FSMManager`. Defaults (`None`, 64) behave as before. The
+  and `FSMManager`. Defaults (`None`, 64) behave as before. `max_fsm_cache_size` below
+  1 raises `ValueError` when the `API` or `FSMManager` is constructed (0 used to make
+  every `start_conversation` fail with `dictionary is empty`). The
   `MAX_TIMED_HANDLER_STRAGGLERS` cap is shared by every conversation of one `API`
   (documented, unchanged).
 - **Bulk extraction ignores a sanitiser override.** Bulk Pass-1 extraction sanitises the
@@ -69,11 +69,14 @@ prompt text changed, so the stale eval baseline was not re-measured.
   concurrent miss of the same id the loader may run twice; the first-inserted
   definition is returned to both callers.
 - **Getters on ended conversations agree.** `get_data`, `get_current_state`,
-  `has_conversation_ended` and `get_conversation_history` fall back to the ended-
-  conversation cache on `ValueError`, `KeyError` or a not-found `FSMError`, and re-raise
-  `ConversationBusyError`. `get_conversation_history` now returns the cached history
-  after `end_conversation` (it used to raise). An id that was never started still
-  raises `ValueError`.
+  `has_conversation_ended` and `get_conversation_history` re-raise
+  `ConversationBusyError`. On any other error they answer from the ended-conversation
+  cache only when the conversation is gone (its stack or its FSM instance was torn
+  down); on a live conversation the original error re-raises, so a failing state
+  lookup is no longer reported as "not ended". A cache miss re-raises too, except that
+  `has_conversation_ended` returns False for an id it does not know.
+  `get_conversation_history` now returns the cached history after `end_conversation`
+  (it used to raise). An id that was never started still raises `ValueError`.
 - **`max_history_size=0` keeps a summary.** Exchanges are digested into
   `Conversation.summary` (same 2,000-character cap) before they are cleared.
 - **`get_version_info()["architecture"]`** is `"2-pass"` (was `"improved-2-pass"`).
@@ -93,19 +96,21 @@ prompt text changed, so the stale eval baseline was not re-measured.
 - P1-1: the Pass-1 memo name is bound on every path (defensive; no `NameError` was
   reachable).
 - P1-2: `max_history_size=0` summarises before clearing (see above).
-- P1-3: `should_execute` probes see a read-only mapping (see above).
 - P1-4: `get_conversation_history` falls back to the ended cache (see above).
-- P1-5: `get_data` falls back on a not-found `FSMError` and propagates
-  `ConversationBusyError` (see above).
+- P1-5: `get_data` falls back to the ended cache when the conversation is gone and
+  propagates `ConversationBusyError` (see above).
 - P1-6: `SessionState.stack_depth` is documented as advisory (written by
   `save_session`, never read by restore).
 - P1-7: the Pass-2 apology retry is counted (`LiteLLMInterface.apology_retry_count`);
   the retry itself is unchanged.
 - Security: secret-shaped entries no longer reach the `context_snapshot` metadata (see
-  above), and a value's `__str__` no longer reaches a saved session file (see above).
+  above), and a value's `__str__` no longer reaches a saved session file or a saved
+  WorkingMemory file (see above).
 - `runner._redact_context` (the `fsm-llm` CLI's debug context dump) terminates on a
   self-cycle (the cycle becomes `"<redacted:cycle>"`) and runs in linear time on aliased
-  input: a 3-way-aliased tower 16 levels deep went from more than 25 s to under 1 ms.
+  acyclic input: a 3-way-aliased tower 16 levels deep went from more than 25 s to
+  under 1 ms. Input that aliases every level and also cycles is not memoised and can
+  still be slow; the runner only redacts `get_data()` output, which is always acyclic.
   Output on acyclic input is unchanged.
 - `DEFAULT_TEMPERATURE` is the single source of the 0.5 default in `API.__init__` and
   `LiteLLMInterface.__init__` (it was defined but unused next to two literals).
@@ -115,7 +120,7 @@ prompt text changed, so the stale eval baseline was not re-measured.
 ### Added -- core audit 2026-09-22
 
 - `src/fsm_llm/security.py`: the credential/forbidden-context filter and
-  `has_internal_prefix` moved there verbatim (`constants.py` 1,978 -> 310 lines).
+  `has_internal_prefix` moved there verbatim (`constants.py` 1,978 -> 299 lines).
   `fsm_llm.constants` re-exports every public name and every private name used in
   `src/` or `tests/`; no filter verdict changed.
 - `ResponseGenerationRequest.skip_generation` (default False), set by the greeting and
@@ -213,7 +218,7 @@ prompt text changed, so the stale eval baseline was not re-measured.
   longer take `FSMManager._lock`; the loader runs outside the lock.
 - `utilities.filter_context_tree` skips the cycle pre-scan for a plain `dict` root whose
   values are all leaves (output identical).
-- Runner redaction is linear on aliased input, and its debug context dumps are lazy
+- Runner redaction is linear on aliased acyclic input, and its debug context dumps are lazy
   (no redaction when debug logging is off).
 - The removed `ResponseGenerationRequest` fields are no longer computed on every turn.
 
@@ -248,6 +253,19 @@ prompt text changed, so the stale eval baseline was not re-measured.
 - P1-8, one unit for `max_history_messages` (fetch `ceil(n / 2)` exchanges): changes
   the rendered history under the `TOKEN_BUDGET` strategy, so not output-identical; the
   fetch still passes an exchange count (D-038).
+- P1-3, a read-only `should_execute` probe: landed in step 4 as a
+  `types.MappingProxyType` view, then reverted in the same release. It broke conditions
+  that only read the context but serialise, copy or type-check it (`json.dumps`,
+  `copy.deepcopy`, `pickle`, `isinstance(ctx, dict)`), and under the default
+  `error_mode="continue"` such a handler was silently skipped. The probe again gets the
+  live context; a condition must not mutate it (the documented pure-predicate contract).
+- `json.dumps(default=str)` outside core: the monitor websocket push
+  (`fsm_llm_monitor/server.py`) and the `fsm_llm_reasoning` engine, handlers and CLI
+  still `str()` unknown values. They render to a browser or a terminal, not to disk;
+  recorded as a follow-up finding (D-039).
+- `context_snapshot` keeps internal-prefixed keys named in `context_keys`
+  (pre-existing): whether `context_keys` may name internal keys needs its own decision
+  (D-039).
 
 ### Core audit 2026-09-21
 

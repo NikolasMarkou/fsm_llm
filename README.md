@@ -290,7 +290,7 @@ On Ollama models (`ollama/` and `ollama_chat/`), extraction and classification c
 `API(handler_timeout=..., max_fsm_cache_size=...)` passes both settings through to the handler system and the FSM manager:
 
 - `handler_timeout` (seconds, default `None`, meaning no timeout): each handler runs in its own thread on a copy of the context and fails as a timeout when it overruns (`handler_error_mode` decides whether that raises). Python cannot stop a thread, so a timed-out handler keeps running in the background. While 4 such stragglers (`constants.MAX_TIMED_HANDLER_STRAGGLERS`) are still running, every new timed handler call fails at once as a timeout. That limit belongs to the one `HandlerSystem` an `API` owns, so it is shared by every conversation of that `API`: one conversation with stuck handlers makes timed handlers of all the others fail too. Use a separate `API` to isolate them.
-- `max_fsm_cache_size` (default `64`): the size of the least-recently-used cache of FSM definitions (the root FSM plus FSMs pushed with `push_fsm`).
+- `max_fsm_cache_size` (default `64`): the size of the least-recently-used cache of FSM definitions (the root FSM plus FSMs pushed with `push_fsm`). A value below 1 raises `ValueError` when the `API` is constructed.
 
 ### What the extractor can write
 
@@ -346,7 +346,7 @@ Transition conditions use JsonLogic, evaluated in Python by `fsm_llm.expressions
 
 ```bash
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
-make test           # Run full test suite (6,849 tests)
+make test           # Run full test suite (6,862 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
