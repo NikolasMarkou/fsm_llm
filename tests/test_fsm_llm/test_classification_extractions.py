@@ -1075,7 +1075,7 @@ class TestClassifierReasoningContentRecovery:
 
 class TestClassificationNaNConfidence:
     """G6: a ``NaN`` confidence must NOT be silently promoted to ``1.0`` (max
-    certainty), which would defeat ``is_low_confidence``. ``float('nan')`` is
+    certainty), which would defeat ``is_below_default_threshold``. ``float('nan')`` is
     what real ``json.loads('{"confidence": NaN}')`` yields, so it is passed to
     the already-parsed ``data`` dict exactly as production would.
     """
@@ -1084,7 +1084,7 @@ class TestClassificationNaNConfidence:
         clf = _classifier()
         result = clf._parse_single({"intent": "positive", "confidence": float("nan")})
         assert result.confidence == 0.0
-        assert result.is_low_confidence
+        assert result.is_below_default_threshold
 
     def test_parse_single_infinity_confidence_is_low_confidence(self):
         clf = _classifier()

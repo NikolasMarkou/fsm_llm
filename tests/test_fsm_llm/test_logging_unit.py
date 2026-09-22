@@ -240,8 +240,8 @@ class TestWorkflowStatusTransitions:
 class TestConversationLockCleanup:
     """Tests for conversation lock cleanup."""
 
-    def test_cleanup_stale_conversations(self):
-        """cleanup_stale_conversations should remove orphaned locks."""
+    def test_prune_orphaned_locks(self):
+        """prune_orphaned_locks should remove orphaned locks."""
         import threading
         from unittest.mock import MagicMock
 
@@ -254,13 +254,13 @@ class TestConversationLockCleanup:
         manager._conversation_locks["orphan1"] = threading.Lock()
         manager._conversation_locks["orphan2"] = threading.Lock()
 
-        cleaned = manager.cleanup_stale_conversations()
+        cleaned = manager.prune_orphaned_locks()
         assert set(cleaned) == {"orphan1", "orphan2"}
         assert "orphan1" not in manager._conversation_locks
         assert "orphan2" not in manager._conversation_locks
 
     def test_cleanup_preserves_active_locks(self):
-        """cleanup_stale_conversations should keep locks for active instances."""
+        """prune_orphaned_locks should keep locks for active instances."""
         import threading
         from unittest.mock import MagicMock
 
@@ -273,7 +273,7 @@ class TestConversationLockCleanup:
         manager._conversation_locks["active"] = threading.Lock()
         manager.instances["active"] = MagicMock()
 
-        cleaned = manager.cleanup_stale_conversations()
+        cleaned = manager.prune_orphaned_locks()
         assert cleaned == []
         assert "active" in manager._conversation_locks
 

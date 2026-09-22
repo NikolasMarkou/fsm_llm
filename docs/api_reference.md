@@ -71,9 +71,11 @@ api.get_data(conv_id)                    # -> dict
 api.get_conversation_history(conv_id)    # -> list[dict]
 api.list_active_conversations()          # -> list[str]
 api.update_context(conv_id, {"k": "v"})
-api.cleanup_stale_conversations(max_idle_seconds=3600)  # -> list[str]
+api.cleanup_stale_conversations(max_idle_seconds=3600)  # -> list[str] (ends idle conversations)
 api.get_llm_interface()                  # -> LLMInterface
 ```
+
+`API.cleanup_stale_conversations` ends conversations idle longer than `max_idle_seconds`. It is unrelated to `FSMManager.prune_orphaned_locks()`, which only drops per-conversation locks that have no live instance and ends nothing. The old `FSMManager.cleanup_stale_conversations()` name still works but emits `DeprecationWarning` and is removed in 1.0.
 
 ### FSM Stacking
 
@@ -196,7 +198,7 @@ if classifier.is_low_confidence(result):  # compares against schema.confidence_t
     ...
 ```
 
-The `ClassificationResult.is_low_confidence` property compares against a fixed default of 0.6 (`DEFAULT_CONFIDENCE_THRESHOLD`), not the schema's `confidence_threshold`; use `classifier.is_low_confidence(result)` for the schema-aware check.
+The `ClassificationResult.is_below_default_threshold` property compares against a fixed default of 0.6 (`DEFAULT_CONFIDENCE_THRESHOLD`), not the schema's `confidence_threshold`; use `classifier.is_low_confidence(result)` for the schema-aware check. The old property name `ClassificationResult.is_low_confidence` still works but emits `DeprecationWarning` and is removed in 1.0.
 
 ```python
 # Multi-intent

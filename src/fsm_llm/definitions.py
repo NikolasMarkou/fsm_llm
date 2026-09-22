@@ -14,6 +14,7 @@ Key Changes:
 from __future__ import annotations
 
 import re
+import warnings
 from collections import deque
 from collections.abc import Iterator
 from enum import Enum
@@ -1626,14 +1627,30 @@ class ClassificationResult(BaseModel):
     def coerce_entity_values(cls, v: Any) -> dict[str, str | None]:
         return _coerce_entity_values(v)
 
-    #: Default threshold for is_low_confidence when no schema is available.
+    #: Fixed threshold for is_below_default_threshold (no schema available).
     #: For schema-aware checks, use Classifier.is_low_confidence() instead.
     DEFAULT_CONFIDENCE_THRESHOLD: ClassVar[float] = 0.6
 
     @property
-    def is_low_confidence(self) -> bool:
-        """Check against the default threshold. Use schema-aware check in Classifier."""
+    def is_below_default_threshold(self) -> bool:
+        """True when confidence is below the fixed DEFAULT_CONFIDENCE_THRESHOLD.
+
+        Ignores the schema's ``confidence_threshold``; use
+        ``Classifier.is_low_confidence(result)`` for the schema-aware check.
+        """
         return self.confidence < self.DEFAULT_CONFIDENCE_THRESHOLD
+
+    @property
+    def is_low_confidence(self) -> bool:
+        """Deprecated alias of :attr:`is_below_default_threshold`; removed in 1.0."""
+        warnings.warn(
+            "ClassificationResult.is_low_confidence is deprecated; use "
+            "is_below_default_threshold, or Classifier.is_low_confidence(result) "
+            "for the schema-aware check (removed in 1.0)",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.is_below_default_threshold
 
 
 class MultiClassificationResult(BaseModel):

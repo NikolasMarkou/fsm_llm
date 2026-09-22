@@ -13,6 +13,7 @@ import threading
 import time
 import traceback
 import uuid
+import warnings
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from datetime import datetime
@@ -1171,8 +1172,13 @@ class FSMManager:
                 conv_lock.release()
         log.info(f"Conversation {conversation_id} ended")
 
-    def cleanup_stale_conversations(self) -> list[str]:
-        """Remove locks for conversations that no longer have active instances."""
+    def prune_orphaned_locks(self) -> list[str]:
+        """Remove locks for conversations that no longer have active instances.
+
+        Pure lock bookkeeping: no handler runs and no conversation ends. Not
+        to be confused with ``API.cleanup_stale_conversations``, the idle-time
+        reaper that ends conversations. Returns the pruned conversation ids.
+        """
         with self._lock:
             stale_ids = [
                 cid for cid in self._conversation_locks if cid not in self.instances
@@ -1182,6 +1188,16 @@ class FSMManager:
         if stale_ids:
             logger.info(f"Cleaned up {len(stale_ids)} stale conversation locks")
         return stale_ids
+
+    def cleanup_stale_conversations(self) -> list[str]:
+        """Deprecated alias of :meth:`prune_orphaned_locks`; removed in 1.0."""
+        warnings.warn(
+            "FSMManager.cleanup_stale_conversations is deprecated; use "
+            "prune_orphaned_locks (removed in 1.0)",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.prune_orphaned_locks()
 
     @with_conversation_context
     def get_complete_conversation(
