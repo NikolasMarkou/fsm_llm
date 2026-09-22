@@ -946,8 +946,13 @@ def _maximal_fsm_data():
                             {"name": "browse", "description": "Just looking."},
                         ],
                         "fallback_intent": "browse",
+                        "prompt_config": {"max_intents": 2, "temperature": 0.1},
                     }
                 ],
+                "transition_classification": {
+                    "done": {"description": "The name is known."},
+                    "confidence_threshold": 0.7,
+                },
                 "context_scope": {"read_keys": ["name"], "write_keys": ["name"]},
             },
             "done": {
@@ -1010,6 +1015,17 @@ _VALIDATOR_VIOLATIONS = {
     ("ClassificationExtractionConfig", "validate_fallback_in_intents"): (
         ("states", "start", "classification_extractions", 0, "fallback_intent"),
         "not_a_declared_intent",
+    ),
+    # Step 8 (plan-2026-09-22T080837-8b258a25/D-011): the key set and bounds of
+    # `ClassificationPromptConfig` and the `transition_classification` shape
+    # are checked at load (ValueError -> value_error).
+    ("ClassificationExtractionConfig", "_validate_prompt_config"): (
+        ("states", "start", "classification_extractions", 0, "prompt_config"),
+        {"max_intents": 99},
+    ),
+    ("State", "_validate_transition_classification"): (
+        ("states", "start", "transition_classification"),
+        {"done": "not a dict"},
     ),
     ("IntentDefinition", "validate_name_format"): (
         ("states", "start", "classification_extractions", 0, "intents", 0, "name"),

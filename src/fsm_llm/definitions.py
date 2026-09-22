@@ -29,6 +29,7 @@ from .constants import (
     MAX_JSONLOGIC_DEPTH,
     MAX_MULTI_INTENTS,
     MESSAGE_TRUNCATION_SUFFIX,
+    TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
     has_internal_prefix,
 )
 
@@ -508,10 +509,8 @@ class ClassificationExtractionConfig(BaseModel):
             "Override ClassificationPromptConfig fields as a dict. "
             "Keys: include_reasoning, max_tokens, temperature, include_entities, "
             "multi_intent, max_intents. Bounds (max_tokens >= 1, "
-            "0.0 <= temperature <= 2.0, 1 <= max_intents <= 5) are checked when "
-            "the config is built at extraction time; an out-of-range value is "
-            "logged and leaves the field key unset (or raises ClassificationError "
-            "when required=True)."
+            "0.0 <= temperature <= 2.0, 1 <= max_intents <= 5) and the key set "
+            "are checked at load: an unknown key or out-of-range value raises."
         ),
     )
 
@@ -524,6 +523,29 @@ class ClassificationExtractionConfig(BaseModel):
             "no snapshot is stored."
         ),
     )
+
+    @field_validator("prompt_config")
+    @classmethod
+    def _validate_prompt_config(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Reject a ``prompt_config`` that ``ClassificationPromptConfig`` refuses.
+
+        # DECISION plan-2026-09-22T080837-8b258a25/D-011
+        # The verdict IS `ClassificationPromptConfig(**value)`, the object the
+        # extraction site builds. Do NOT copy its keys or bounds into Field
+        # constraints here: a second copy drifts and load and extraction would
+        # disagree. Lazy import because prompts imports this module.
+        """
+        if value is None:
+            return value
+        from .prompts import ClassificationPromptConfig
+
+        try:
+            ClassificationPromptConfig(**value)
+        except TypeError as e:
+            raise ValueError(f"invalid prompt_config: {e}") from e
+        return value
 
     @model_validator(mode="after")
     def validate_fallback_in_intents(self) -> ClassificationExtractionConfig:
@@ -902,6 +924,51 @@ class State(BaseModel):
             "When None, all user-visible context is injected (default behavior)."
         ),
     )
+
+    @field_validator("transition_classification")
+    @classmethod
+    def _validate_transition_classification(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Check the shape ``_build_transition_classification_schema`` reads.
+
+        The reserved key ``TRANSITION_CLASSIFICATION_THRESHOLD_KEY`` maps to a
+        real number (not a bool) in [0, 1]. Every other key names a target state
+        and maps to a dict whose only allowed key is ``description`` (a str or
+        None). None (auto mode) and an empty dict pass.
+        """
+        if value is None:
+            return value
+        for key, entry in value.items():
+            if key == TRANSITION_CLASSIFICATION_THRESHOLD_KEY:
+                if (
+                    isinstance(entry, bool)
+                    or not isinstance(entry, int | float)
+                    or not 0.0 <= entry <= 1.0
+                ):
+                    raise ValueError(
+                        f"transition_classification {key!r} must be a number "
+                        f"within 0.0..1.0, got {entry!r}"
+                    )
+                continue
+            if not isinstance(entry, dict):
+                raise ValueError(
+                    f"transition_classification {key!r} must be a dict like "
+                    f'{{"description": "..."}}, got {entry!r}'
+                )
+            unknown = sorted(str(k) for k in set(entry) - {"description"})
+            if unknown:
+                raise ValueError(
+                    f"transition_classification {key!r} has unknown keys "
+                    f"{unknown}; only 'description' is allowed"
+                )
+            description = entry.get("description")
+            if description is not None and not isinstance(description, str):
+                raise ValueError(
+                    f"transition_classification {key!r} 'description' must be "
+                    f"a str, got {description!r}"
+                )
+        return value
 
     @model_validator(mode="after")
     def _validate_extraction_configs(self) -> State:

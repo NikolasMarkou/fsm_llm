@@ -1072,3 +1072,171 @@ class TestStep7VersionAndSessionDocs:
         description = SessionState.model_fields["stack_depth"].description or ""
         assert "advisory" in description
         assert "never read by restore" in description
+
+
+# ---------------------------------------------------------------------------
+# Step 8: load-time validation of prompt_config / transition_classification
+# ---------------------------------------------------------------------------
+
+
+def _step8_fsm_data(
+    *,
+    prompt_config: Any = None,
+    transition_classification: Any = None,
+) -> dict[str, Any]:
+    """A valid FSM dict carrying the two configs under test on state ``start``."""
+    classification: dict[str, Any] = {
+        "field_name": "intent",
+        "intents": [
+            {"name": "buy", "description": "Wants to purchase."},
+            {"name": "browse", "description": "Just looking."},
+        ],
+        "fallback_intent": "browse",
+    }
+    if prompt_config is not None:
+        classification["prompt_config"] = prompt_config
+    start: dict[str, Any] = {
+        "id": "start",
+        "description": "Start",
+        "purpose": "Start",
+        "classification_extractions": [classification],
+        "transitions": [{"target_state": "done", "description": "Go", "priority": 100}],
+    }
+    if transition_classification is not None:
+        start["transition_classification"] = transition_classification
+    return {
+        "name": "Step8",
+        "description": "Step 8 fixture",
+        "initial_state": "start",
+        "states": {
+            "start": start,
+            "done": {"id": "done", "description": "End", "purpose": "End"},
+        },
+    }
+
+
+def _loader_rejects(data: dict[str, Any]) -> bool:
+    from pydantic import ValidationError
+
+    try:
+        FSMDefinition(**data)
+    except ValidationError:
+        return True
+    return False
+
+
+def _validator_rejects(data: dict[str, Any]) -> bool:
+    from fsm_llm.validator import FSMValidator
+
+    return FSMValidator(data).validate().is_valid is False
+
+
+_STEP8_BAD_PROMPT_CONFIGS = [
+    pytest.param({"max_intent": 2}, id="unknown-key-typo"),
+    pytest.param({"max_intents": 99}, id="max-intents-over-cap"),
+    pytest.param({"max_intents": 0}, id="max-intents-zero"),
+    pytest.param({"max_tokens": 0}, id="max-tokens-zero"),
+    pytest.param({"temperature": 2.5}, id="temperature-over"),
+    pytest.param({"max_tokens": "5"}, id="max-tokens-str"),
+]
+
+_STEP8_BAD_TRANSITION_CLASSIFICATIONS = [
+    pytest.param({"done": "str"}, id="entry-not-dict"),
+    pytest.param({"confidence_threshold": 1.5}, id="threshold-over"),
+    pytest.param({"confidence_threshold": -0.1}, id="threshold-under"),
+    pytest.param({"confidence_threshold": True}, id="threshold-bool"),
+    pytest.param({"confidence_threshold": "0.7"}, id="threshold-str"),
+    pytest.param({"done": {"desc": "typo"}}, id="entry-unknown-key"),
+    pytest.param({"done": {"description": 3}}, id="description-not-str"),
+]
+
+
+class TestStep8LoadTimeValidation:
+    @pytest.mark.parametrize("prompt_config", _STEP8_BAD_PROMPT_CONFIGS)
+    def test_bad_prompt_config_fails_at_load_and_in_validator(self, prompt_config):
+        data = _step8_fsm_data(prompt_config=prompt_config)
+        assert _loader_rejects(data)
+        assert _validator_rejects(data)
+
+    @pytest.mark.parametrize("config", _STEP8_BAD_TRANSITION_CLASSIFICATIONS)
+    def test_bad_transition_classification_fails_at_load_and_in_validator(self, config):
+        data = _step8_fsm_data(transition_classification=config)
+        assert _loader_rejects(data)
+        assert _validator_rejects(data)
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            pytest.param({}, id="empty"),
+            pytest.param({"confidence_threshold": 0}, id="threshold-0"),
+            pytest.param({"confidence_threshold": 1}, id="threshold-1"),
+            pytest.param({"confidence_threshold": 0.7}, id="threshold-float"),
+            pytest.param({"done": {"description": None}}, id="description-none"),
+            pytest.param({"done": {}}, id="entry-empty"),
+            pytest.param(
+                {"done": {"description": "Go"}, "confidence_threshold": 0.5},
+                id="full",
+            ),
+        ],
+    )
+    def test_valid_transition_classification_loads(self, config):
+        data = _step8_fsm_data(transition_classification=config)
+        assert not _loader_rejects(data)
+        assert not _validator_rejects(data)
+
+    def test_auto_mode_none_loads(self):
+        state = State(
+            id="s", description="d", purpose="p", transition_classification=None
+        )
+        assert state.transition_classification is None
+
+    @pytest.mark.parametrize(
+        "prompt_config",
+        [
+            {},
+            {"max_intents": 5, "temperature": 2.0, "max_tokens": 1},
+            {"include_reasoning": False, "multi_intent": True},
+        ],
+    )
+    def test_valid_prompt_config_loads_unchanged(self, prompt_config):
+        data = _step8_fsm_data(prompt_config=dict(prompt_config))
+        fsm = FSMDefinition(**data)
+        loaded = fsm.states["start"].classification_extractions[0].prompt_config
+        assert loaded == prompt_config
+        assert not _validator_rejects(data)
+
+    @pytest.mark.parametrize(
+        "prompt_config",
+        [
+            {"max_intents": 3},
+            {"max_intents": 6},
+            {"bogus": True},
+            {"temperature": -0.01},
+            {"max_tokens": None},
+        ],
+    )
+    def test_load_verdict_equals_extraction_time_verdict(self, prompt_config):
+        """Single source: load rejects exactly what the dataclass rejects."""
+        from fsm_llm.prompts import ClassificationPromptConfig
+
+        try:
+            ClassificationPromptConfig(**prompt_config)
+            extraction_rejects = False
+        except (TypeError, ValueError):
+            extraction_rejects = True
+        data = _step8_fsm_data(prompt_config=prompt_config)
+        assert _loader_rejects(data) is extraction_rejects
+
+    def test_shipped_manual_mode_example_loads(self):
+        from pathlib import Path
+
+        from fsm_llm.utilities import load_fsm_from_file
+
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "examples/classification/classified_transitions/fsm_manual.json"
+        )
+        fsm = load_fsm_from_file(str(path))
+        config = fsm.states["greeting"].transition_classification
+        assert config is not None
+        assert config["confidence_threshold"] == 0.7

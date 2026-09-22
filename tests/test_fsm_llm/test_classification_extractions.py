@@ -880,16 +880,23 @@ class TestClassificationPromptConfigValidation:
         with pytest.raises(ValueError, match="max_intents"):
             ClassificationPromptConfig(max_intents=cap + 1)
 
+    def test_bad_prompt_config_is_rejected_at_load(self):
+        """Step 8 (D-011): the same bound now fails when the config is built."""
+        with pytest.raises(ValueError, match="max_intents"):
+            _make_config(prompt_config={"max_intents": 0})
+
     def test_bad_prompt_config_on_a_state_is_a_warning_at_converse_time(
         self, mock_llm2_interface
     ):
-        """Public path: `prompt_config={"max_intents": 0}` on a soft field.
+        """Defence in depth: a bad `prompt_config` that bypassed load
+        validation (plain attribute assignment) on a soft field.
 
         The `ClassificationPromptConfig(**prompt_config)` call sits inside the
         extraction site's narrow `try`, whose tuple carries `ValueError`, so the
         turn completes, the key stays unset and the failure is logged.
         """
-        config = _make_config(prompt_config={"max_intents": 0})
+        config = _make_config()
+        config.prompt_config = {"max_intents": 0}
         fsm = _make_fsm(
             {
                 "triage": _make_state(classification_extractions=[config]),

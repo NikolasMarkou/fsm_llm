@@ -36,6 +36,7 @@ from .constants import (
     PROVENANCE_METADATA_KEY,
     RESERVED_CONTEXT_KEYS,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+    TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
     has_internal_prefix,
     is_forbidden_context_entry,
 )
@@ -2615,7 +2616,7 @@ class MessagePipeline:
                     IntentDefinition(name=opt.target_state, description=description)
                 )
             confidence_threshold = config.get(
-                "confidence_threshold",
+                TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
                 DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
             )
         else:

@@ -117,6 +117,9 @@ CONDITION_SUCCESS_RATE_BOOST = 0.5
 
 # Classification-aware transition defaults
 DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE = 0.6
+# Reserved key of `State.transition_classification`: its value is the threshold,
+# every other key names a target state (validated in definitions.State).
+TRANSITION_CLASSIFICATION_THRESHOLD_KEY = "confidence_threshold"
 TRANSITION_CLASSIFICATION_FALLBACK_INTENT = "_stay_in_state"
 CONTEXT_KEY_CLASSIFICATION_RESULT = "_transition_classification_result"
 CONTEXT_KEY_AGENT_TRACE = "agent_trace"
