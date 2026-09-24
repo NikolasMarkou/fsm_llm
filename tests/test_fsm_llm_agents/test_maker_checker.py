@@ -2,8 +2,16 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.maker_checker module."""
 
+from typing import Any
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.llm import LLMInterface
 from fsm_llm_agents.constants import (
     ContextKeys,
     Defaults,
@@ -426,3 +434,82 @@ class TestMakerCheckerHandlers:
         )
         answer = agent._extract_answer({}, ["", ""])
         assert "could not" in answer.lower()
+
+
+# -------------------------------------------------------------------------
+# FB-01: the check state must not BLOCK when checker_passed never extracts
+# -------------------------------------------------------------------------
+
+
+class _CheckerSilentLLM(LLMInterface):
+    """Mock LLM whose checker never yields ``checker_passed`` or ``quality_score``.
+
+    Every other field extracts as a plain string, so the maker produces a draft
+    and the checker produces text feedback, but the gating boolean is always
+    missing (as a weak model's malformed checker JSON would leave it).
+    """
+
+    _SILENT = frozenset({ContextKeys.CHECKER_PASSED, "quality_score"})
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        silent = request.field_name in self._SILENT
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=None if silent else "a draft answer",
+            confidence=0.0 if silent else 0.9,
+            reasoning="mock",
+            is_valid=not silent,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="final answer", message_type="response", reasoning="mock"
+        )
+
+
+class TestCheckStateNeverBlocks:
+    """Plan plan-2026-09-24T045559-3e4eb3e5 step 2 (FB-01)."""
+
+    def test_check_has_unconditional_fallback_edge(self):
+        fsm = build_maker_checker_fsm(
+            maker_instructions="Write", checker_instructions="Check"
+        )
+        transitions = fsm["states"]["check"]["transitions"]
+        fallbacks = [t for t in transitions if not t.get("conditions")]
+        assert len(fallbacks) == 1
+        assert fallbacks[0]["priority"] > max(
+            t["priority"] for t in transitions if t.get("conditions")
+        )
+
+    def test_missing_checker_passed_reaches_output(self):
+        # Pre-fix: check had only checker_passed == True/False edges, so a
+        # missing value BLOCKED check every turn; no PRE_TRANSITION limiter
+        # runs on a BLOCKED turn, and the run raised BudgetExhaustedError.
+        max_iterations = 6
+        agent = MakerCheckerAgent(
+            maker_instructions="Write a haiku",
+            checker_instructions="Check the syllables",
+            config=AgentConfig(max_iterations=max_iterations),
+            llm_interface=_CheckerSilentLLM(),
+        )
+
+        loop_counts: list[int] = []
+        real_loop = agent._run_conversation_loop
+
+        def _recording_loop(*args: Any, **kwargs: Any):
+            responses, final_context, iteration = real_loop(*args, **kwargs)
+            loop_counts.append(iteration)
+            return responses, final_context, iteration
+
+        agent._run_conversation_loop = _recording_loop  # type: ignore[method-assign]
+
+        result = agent.run("Write a haiku about rain")
+
+        # The loop only returns once the terminal ``output`` state is reached.
+        assert loop_counts, "conversation loop never completed"
+        assert result.answer
+        # Measured 8 turns: the limiter forces checker_passed at iteration 6,
+        # then revise -> check -> output. The hard ceiling is 3 x 6 = 18.
+        assert loop_counts[0] <= max_iterations + 2

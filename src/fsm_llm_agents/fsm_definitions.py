@@ -1482,6 +1482,14 @@ def build_maker_checker_fsm(
                         }
                     ],
                 },
+                # Without this edge a missing checker_passed BLOCKS check, and
+                # no PRE_TRANSITION limiter runs on a BLOCKED turn (FB-01).
+                {
+                    "target_state": "revise",
+                    "description": "Fallback: revise if checker result unclear",
+                    "priority": 900,
+                    "conditions": [],
+                },
             ],
         },
         "revise": {
