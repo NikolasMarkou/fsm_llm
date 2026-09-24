@@ -299,18 +299,36 @@ _UNKNOWN_THEN_REAL_CASES = [
 ]
 
 
+def _dict_form_add(calls: list[dict[str, Any]]):
+    def _add(params: dict[str, Any]) -> str:
+        calls.append(params)
+        return _add_numbers(params)
+
+    return _add
+
+
+def _keyword_form_add(calls: list[dict[str, Any]]):
+    def _add(a: int, b: int) -> str:
+        calls.append({"a": a, "b": b})
+        return str(a + b)
+
+    return _add
+
+
 class TestUnknownToolThenRealTool:
+    # D-024: the real call must also SUCCEED. The params-dict form is annotated
+    # ``dict[str, Any]`` under ``from __future__ import annotations`` (a string
+    # annotation), which every call failed on before step 10.4; plan_execute
+    # recorded every step as failed before step 10.5.
+    @pytest.mark.parametrize(
+        "make_tool", [_dict_form_add, _keyword_form_add], ids=["dict", "keyword"]
+    )
     @pytest.mark.parametrize("factory", _UNKNOWN_THEN_REAL_CASES)
-    def test_real_tool_runs_after_unknown_name(self, factory):
+    def test_real_tool_runs_after_unknown_name(self, factory, make_tool):
         calls: list[dict[str, Any]] = []
-
-        def _add(params: dict[str, Any]) -> str:
-            calls.append(params)
-            return _add_numbers(params)
-
         registry = ToolRegistry()
         registry.register_function(
-            _add,
+            make_tool(calls),
             name="add_numbers",
             description="Add two numbers",
             parameter_schema={
@@ -318,9 +336,19 @@ class TestUnknownToolThenRealTool:
             },
         )
         agent = factory(registry, AgentConfig(max_iterations=8), _UnknownThenRealLLM())
-        agent.run("What is 1 + 2?")
+        result = agent.run("What is 1 + 2?")
 
         assert calls, "add_numbers never ran after one unknown tool name"
+        assert all(c == {"a": 1, "b": 2} for c in calls), calls
+        assert result.success, result.final_context
+        observations = [str(o) for o in result.final_context.get("observations", [])]
+        assert any("add_numbers" in o and "Result: 3" in o for o in observations), (
+            observations
+        )
+        assert not any("[TOOL FAILED]" in o for o in observations), observations
+        steps = result.final_context.get("step_results")
+        if steps is not None:  # plan_execute: the add step records success
+            assert any(e["success"] is True for e in steps), steps
 
     def test_unknown_name_clears_selection(self):
         from fsm_llm_agents.handlers import AgentHandlers
