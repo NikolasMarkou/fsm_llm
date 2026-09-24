@@ -53,7 +53,7 @@ Harness status in brief: gates are JsonLogic terms over values counted from disk
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (6,873 tests)
+make test           # pytest -v (6,915 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -147,30 +147,30 @@ Rules: `required_context_keys` only tells Pass 1 what to extract, it never block
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (6,873 collected)
+pytest                                 # Run all tests (6,915 collected)
 pytest tests/test_fsm_llm/            # Core package tests (2,706 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (119 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (156 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (1,005 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (1,044 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (301 tests)
-pytest tests/test_fsm_llm_meta/       # Meta tests (213 tests)
+pytest tests/test_fsm_llm_meta/       # Meta tests (216 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,981 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (277 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 6,801. The remaining 72 are three root-level files:
+# The 9 suites above sum to 6,843. The remaining 72 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (26)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
 
-Counts are `pytest --collect-only -q` after the 2026-09-22 core audit fixes (unreleased). `tests/test_packaging.py` (slow class) re-measures the collection and pins every count literal above, the `make test` line, the README's `make test` line, and the harness package doc's count tokens; update them together when tests are added. It also derives the package list from `src/*/__init__.py` and asserts every package appears in all 14 build/CI slots (pyproject, Makefile, tox, CI workflow). `tests/test_fsm_llm/test_docs_snippets.py` loads every full FSM JSON snippet in this file, `README.md`, `docs/quickstart.md`, and `src/fsm_llm/README.md`.
+Counts are `pytest --collect-only -q` after the 2026-09-24 agents audit (unreleased). `tests/test_packaging.py` (slow class) re-measures the collection and pins every count literal above, the `make test` line, the README's `make test` line, and the harness package doc's count tokens; update them together when tests are added. It also derives the package list from `src/*/__init__.py` and asserts every package appears in all 14 build/CI slots (pyproject, Makefile, tox, CI workflow). `tests/test_fsm_llm/test_docs_snippets.py` loads every full FSM JSON snippet in this file, `README.md`, `docs/quickstart.md`, and `src/fsm_llm/README.md`.
 
 - Conventions: `test_<module>.py` and `test_<module>_elaborate.py`; classes `Test<Feature>`; helpers prefixed `_` (`_make_state()`, `_minimal_fsm_dict()`).
 - Markers: `slow`, `integration`, `examples`, `real_llm`. Env: `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`, `TEST_LLM_MODEL`, `OPENAI_API_KEY`, `FSM_LLM_HARNESS_LIVE`.
 - Mocks in `tests/conftest.py`: `Mock(spec=LLMInterface)` and `MockLLM2Interface` (2-pass); fixtures `sample_fsm_definition` (v3.0), `sample_fsm_definition_v2` (v4.1), `mock_llm_interface`, `mock_llm2_interface`.
 - Workflows tests auto-skip without the extension. Harness live tests are double-gated (`FSM_LLM_HARNESS_LIVE=1` checked first, then a reachable Ollama). Core live tests (`test_live_classification_memory.py`) and `tests/test_integration_ollama.py` self-skip without Ollama.
-- Known open issue F-LIVE-02: an agents-package post-tool stall on live small models; the live suite reports it as its one remaining failure.
+- F-LIVE-02 (agents post-tool stall on live small models): the stall mechanism is fixed (2026-09-24 agents audit: `think` falls back to `act` instead of BLOCKING on a null or unknown tool, so the stall detector and iteration limiter run). Still open: the live `TestLiveMemoryAgent` check passed 1 of 2 runs (the other hit the 120 s agent timeout), so treat it as flaky, not closed.
 
 ## Evaluation
 

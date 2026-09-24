@@ -7,6 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Agents audit 2026-09-24
+
+Audit of `src/fsm_llm_agents` dated 2026-09-24 (`plans/plan-2026-09-24T045559-3e4eb3e5`,
+13 steps, one commit per step). Finding ids below are the audit's own. Every behaviour
+change has a test that fails on the pre-fix code, except the logging and docstring
+items. Full suite: 6,915 tests collected (was 6,873). `ruff` and `mypy` clean across
+all 6 packages. The ReAct-family routing change (first item) changes how a live model's
+turns are routed, so the already stale eval baseline was not re-measured.
+
+### Behaviour changes to know about -- agents audit 2026-09-24
+
+- **`think` can no longer stall on a bad tool name (CR-01, the F-LIVE-02 mechanism).**
+  In `build_react_fsm` (and so `ReasoningReactAgent`), `build_reflexion_fsm` and
+  `build_parallel_react_fsm`, the `think->act` edge used to require a valid tool
+  selection. A null or unknown tool name left `think` BLOCKED, and on a BLOCKED turn
+  neither the `act` entry handler nor any PRE_TRANSITION handler runs, so the run
+  burned the 3x loop ceiling and raised `BudgetExhaustedError`. `think->act` is now the
+  unconditional lowest-priority (300) fallback, so the existing no-tool feedback,
+  stall detector and iteration limiter run and the agent concludes. The `conclude` and
+  `await_approval` edges are unchanged. Every non-concluding `think` turn now goes
+  through `act`, which records a corrective observation where the turn used to sit in
+  `think` silently.
+- **`maker_checker` has a fallback out of `check` (FB-01).** A turn where
+  `checker_passed` was never extracted used to BLOCK `check` until the budget ran out;
+  an unconditional priority-900 `check->revise` edge now continues the loop.
+- **Iteration limiters signal one iteration earlier (PT-05/PT-06/FB-06).** The 8
+  hand-rolled PRE_TRANSITION limiters (plan_execute, rewoo, evaluator_optimizer,
+  maker_checker, prompt_chain, debate, orchestrator, adapt) now share
+  `fsm_llm_agents.handlers.make_iteration_limiter`, which forces termination at
+  `count >= max_iterations - 1` on all 8 patterns. Only adapt did this before; the other
+  7 now stop one iteration earlier. `DebateAgent.run()` no longer stores
+  `_max_fsm_iterations` on the instance (PT-02).
+- **Empty `tool_input` recovery checks the parameter type (CR-02).** When a tool with a
+  single required parameter is called with no input, the task string is used as that
+  parameter only when its schema type is absent, `"string"`, or a list containing
+  `"string"`. An integer parameter used to receive prose and fail with a `TypeError`;
+  the call now fails with `Tool requires parameters: [...]`, naming what the model must
+  supply.
+- **MCP calls time out (MM-06).** `MCPToolProvider`, `from_stdio` and `from_url` take
+  `timeout` (default `Defaults.MCP_TIMEOUT_SECONDS = 30.0`; `None` means no limit). A
+  discovery that runs past it raises `AgentTimeoutError`; a hung tool call raises
+  `ToolExecutionError`, which `ToolRegistry.execute` turns into a failed `ToolResult`.
+  Before, both could hang forever.
+- **Unknown workflow `step_type` is a validation error (MM-01/MM-02).**
+  `WorkflowBuilder.validate_complete` reports a step whose `step_type` is not in
+  `VALID_STEP_TYPES` as an error (`add_step` still only warns). The meta-builder's
+  extraction schema types `step_type` as a free string, so a live model that invents a
+  step type now gets `MetaBuilderResult.is_valid == False` where it used to get True
+  (visible as `artifact_valid` in `examples/meta/build_workflow`). `is_valid` for
+  workflow and agent artifacts means a structurally complete spec, not a directly
+  loadable object; the docstrings now say so.
+- **Duplicate tool registration warns (FB-07).** `ToolRegistry.register` logs a warning
+  when a name is already registered. The last registration still wins.
+- **`SkillLoader` loads a skill once (PT-07).** A name already provided through a
+  module's `SKILLS` list is no longer registered a second time by the `@tool` scan.
+- **HITL logs a late callback error (CR-05).** An approval callback that raises after
+  the approval timeout (the request was already denied) is now logged instead of
+  dropped.
+
+### Removed -- agents audit 2026-09-24
+
+- `MetaBuilderConfig.output_path` (MM-07): declared and documented but never read. A
+  caller that still passes it is ignored, as before (pydantic `extra="ignore"`).
+- `fsm_llm_agents.prompts.build_think_response_instructions`,
+  `build_act_response_instructions`, `build_evalopt_evaluate_response_instructions` and
+  `build_checker_response_instructions` (FB-04): no caller anywhere in the repository.
+- The `".." in Path(path).parts` check in `meta_output.save_artifact` (MM-03): it ran
+  after `.resolve()` and so never fired. `save_artifact` trusts its caller and writes to
+  the resolved path; the docstring says so. There was never any path confinement.
+
+### Fixed -- agents audit 2026-09-24
+
+- `test_reasoning_react.py` handler-reset tests no longer make a live LLM call when
+  Ollama is reachable (RB-05). New smoke tests for `fsm-llm-meta` and
+  `python -m fsm_llm_agents` (MM-09); their docstrings drop options that do not exist
+  (CR-04).
+- Internal cleanup with identical FSM output: `ContextKeys` constants replace 56 context
+  key literals in `fsm_definitions.py` and one `_finalize_fsm` helper applies the
+  description truncation rule (FB-02/FB-03); shared persona and meta-tool factories
+  (FB-08/MM-08); unreachable branches removed in `native_fc.py` and `hitl.py` (CR-03).
+
+### Known open -- agents audit 2026-09-24
+
+- F-LIVE-02 live check, raw outcome, not a fix claim: `TestLiveMemoryAgent` on `ollama_chat/qwen3.5:9b-q8_0` ran twice on the final
+  commit. Run 1 failed with `AgentTimeoutError` (120 s) after the first `remember`
+  call (a cold model, with test collection running on the same machine); run 2 passed
+  in 85 s. Both agents in run 2 reached `Iteration 5/5` before concluding. 1 of 2 is
+  not enough to call the issue closed, and the base commit was not re-run.
+- `AgentServer` (A2A) has no authentication and no request size limit (MM-05). Fine for
+  local use; it needs its own design before it is exposed.
+- FB-05: `all_collected` and `consensus_reached` are read by transitions but not
+  declared for extraction; confirming whether this bites needs a live extraction check.
+- CR-06: a list `tool_input` value is stringified (the known trade-off of the `any`
+  union type).
+- Core: PRE_TRANSITION handlers do not run on a BLOCKED turn. This fix works around it
+  in the agents package; changing it would change handler timing for every FSM.
+- Reflexion's `think->conclude` has no evidence guard, and ReWOO has no stall guard.
+- `scripts/eval.py` was not re-run; the baseline in `CLAUDE.md` is staler after the
+  routing change above.
+
+### Core audit 2026-09-22
+
 Core audit of `src/fsm_llm` dated 2026-09-22 (`plans/plan-2026-09-22T080837-8b258a25`,
 16 steps in 26 commits, one commit per step or substep, the last five being fixes from
 the iteration review). Every behaviour change has a
