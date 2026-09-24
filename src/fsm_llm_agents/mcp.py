@@ -195,12 +195,17 @@ class MCPToolProvider:
         Executors reconnect to the MCP server per-call rather than
         capturing a session reference that may be closed.
         """
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-025
+        # mcp 2.x renamed Tool.inputSchema to input_schema; the 2.x name is read
+        # only when the 1.x one is absent. Do NOT read just one: a tool with no
+        # schema is called with one positional dict and every call fails.
+        raw_schema = getattr(
+            mcp_tool, "inputSchema", getattr(mcp_tool, "input_schema", None)
+        )
         input_schema: dict[str, Any] = {}
-        if hasattr(mcp_tool, "inputSchema") and mcp_tool.inputSchema:
+        if raw_schema:
             input_schema = (
-                mcp_tool.inputSchema
-                if isinstance(mcp_tool.inputSchema, dict)
-                else mcp_tool.inputSchema.model_dump()
+                raw_schema if isinstance(raw_schema, dict) else raw_schema.model_dump()
             )
 
         param_schema = _mcp_schema_to_parameter_schema(input_schema)
