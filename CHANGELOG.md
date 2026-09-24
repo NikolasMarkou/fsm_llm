@@ -62,7 +62,9 @@ turns are routed, so the already stale eval baseline was not re-measured.
   is restored. When `checker_passed` is already True (a forced pass from the quality
   auto-pass or `max_revisions`), entering `revise` changes nothing, so the draft the
   checker judged is the one that ships; the forced pass still costs one extra
-  `revise` turn. `previous_draft`/`previous_output` stay in `final_context` and in
+  `revise` turn. One exception (see Known open): when the iteration limiter forces
+  the pass on a `revise` turn, the new draft skips `check` and ships unjudged; the run
+  reports `max_iterations_reached=True`. `previous_draft`/`previous_output` stay in `final_context` and in
   later prompts (the checker sees both drafts); answer extraction never reads them.
   `max_revisions` now ends the maker_checker loop (always-False checker at
   `max_iterations=10`: 12 turns with 1 verdict before, 8 turns with 3 verdicts now).
@@ -175,6 +177,14 @@ turns are routed, so the already stale eval baseline was not re-measured.
   Fix direction, for a follow-up plan: `execute_tool` refuses to run a real tool while
   `approval_required` is set and the grant did not come from the driver, and the
   grant moves to a driver-only internal key (for example `_approval_granted`).
+- maker_checker can ship an unjudged draft when the iteration limiter ends the run
+  (D-017/D-018). If the limiter forces `checker_passed=True` on a `revise` turn, the
+  draft written on that turn skips `check` and ships without a verdict; the run
+  reports `max_iterations_reached=True`. It depends on the budget: with an always-False
+  checker, odd `max_iterations` values ship an unjudged draft and even ones ship the
+  judged draft. Fix direction, for a follow-up plan: force the pass only while the
+  current state is `check`, and add a RED test at `max_iterations=3` asserting the
+  answer is the first (judged) draft.
 - Reflexion's and ParallelReact's `think->conclude` have no evidence guard (D-004), so
   they can conclude without a tool call (pre-existing). ReWOO has no stall guard.
 - `SkillLoader`'s `@tool` scan dedupes only against `SKILLS` names: a `@tool` function

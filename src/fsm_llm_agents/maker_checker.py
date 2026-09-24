@@ -145,6 +145,7 @@ class MakerCheckerAgent(BaseAgent):
         # overlays extracted data on context; kept, it routes check -> output.
         # With a True verdict do NOT move the draft either: the judged draft
         # must ship, not an unjudged redraft (step 3.2).
+        # DECISION plan-2026-09-24T045559-3e4eb3e5/D-017
         redraft_entry, on_exit = make_redraft_handlers(
             ContextKeys.DRAFT_OUTPUT,
             ContextKeys.PREVIOUS_DRAFT,
