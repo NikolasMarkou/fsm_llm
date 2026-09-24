@@ -6,13 +6,38 @@ from __future__ import annotations
 
 from typing import Any
 
-from .constants import Defaults
+from .constants import ContextKeys, Defaults
 from .definitions import ChainStep
 from .tools import ToolRegistry
 
 # Truncate task_description for FSM metadata (name/description fields),
 # while preserving the full text for prompt builders (semantic retrieval).
 _MAX_DESC = Defaults.MAX_TASK_PREVIEW_LENGTH
+
+
+def _finalize_fsm(
+    name: str,
+    task_description: str,
+    default_description: str,
+    initial_state: str,
+    persona: str,
+    states: dict[str, Any],
+) -> dict[str, Any]:
+    """Assemble the top-level FSM definition dict shared by every builder here.
+
+    Contract: returns ``{"name", "description", "initial_state", "persona",
+    "states"}`` where ``description`` is ``task_description[:_MAX_DESC]``, or
+    ``default_description`` when that slice is empty. ``states`` is stored by
+    reference, not copied. Never raises.
+    """
+    return {
+        "name": name,
+        "description": task_description[:_MAX_DESC] or default_description,
+        "initial_state": initial_state,
+        "persona": persona,
+        "states": states,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Orchestrator-Workers FSM
@@ -50,7 +75,7 @@ def build_orchestrator_fsm(
             "id": "orchestrate",
             "description": "Decompose the task into subtasks for delegation",
             "purpose": "Analyze the task and create a delegation plan",
-            "required_context_keys": ["subtasks"],
+            "required_context_keys": [ContextKeys.SUBTASKS],
             "extraction_instructions": build_orchestrate_extraction_instructions(),
             "response_instructions": build_orchestrate_response_instructions(),
             "transitions": [
@@ -61,7 +86,7 @@ def build_orchestrator_fsm(
                     "conditions": [
                         {
                             "description": "Subtasks have been generated",
-                            "logic": {"has_context": "subtasks"},
+                            "logic": {"has_context": ContextKeys.SUBTASKS},
                         }
                     ],
                 },
@@ -100,7 +125,7 @@ def build_orchestrator_fsm(
                     "conditions": [
                         {
                             "description": "All needed results are collected",
-                            "logic": {"==": [{"var": "all_collected"}, True]},
+                            "logic": {"==": [{"var": ContextKeys.ALL_COLLECTED}, True]},
                         }
                     ],
                 },
@@ -111,7 +136,9 @@ def build_orchestrator_fsm(
                     "conditions": [
                         {
                             "description": "More subtasks are needed",
-                            "logic": {"==": [{"var": "all_collected"}, False]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.ALL_COLLECTED}, False]
+                            },
                         }
                     ],
                 },
@@ -133,13 +160,14 @@ def build_orchestrator_fsm(
         },
     }
 
-    return {
-        "name": "orchestrator_agent",
-        "description": task_description[:_MAX_DESC] or "Orchestrator-Workers agent",
-        "initial_state": "orchestrate",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "orchestrator_agent",
+        task_description,
+        "Orchestrator-Workers agent",
+        "orchestrate",
+        persona,
+        states,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +211,7 @@ def build_adapt_fsm(
             "id": "attempt",
             "description": "Attempt to solve the task directly",
             "purpose": "Give a direct attempt at solving the task",
-            "required_context_keys": ["attempt_result"],
+            "required_context_keys": [ContextKeys.ATTEMPT_RESULT],
             "extraction_instructions": build_attempt_extraction_instructions(
                 registry, task_description=task_description
             ),
@@ -196,7 +224,9 @@ def build_adapt_fsm(
                     "conditions": [
                         {
                             "description": "Should terminate due to iteration limit",
-                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
+                            },
                         }
                     ],
                 },
@@ -211,7 +241,7 @@ def build_adapt_fsm(
             "id": "assess",
             "description": "Assess whether the attempt succeeded",
             "purpose": "Determine if the attempt is satisfactory or needs decomposition",
-            "required_context_keys": ["attempt_succeeded"],
+            "required_context_keys": [ContextKeys.ATTEMPT_SUCCEEDED],
             "extraction_instructions": build_assess_extraction_instructions(),
             "response_instructions": build_assess_response_instructions(),
             "transitions": [
@@ -222,7 +252,9 @@ def build_adapt_fsm(
                     "conditions": [
                         {
                             "description": "Should terminate due to iteration limit",
-                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
+                            },
                         }
                     ],
                 },
@@ -233,7 +265,9 @@ def build_adapt_fsm(
                     "conditions": [
                         {
                             "description": "The attempt was successful",
-                            "logic": {"==": [{"var": "attempt_succeeded"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.ATTEMPT_SUCCEEDED}, True]
+                            },
                         }
                     ],
                 },
@@ -246,10 +280,15 @@ def build_adapt_fsm(
                             "description": "Attempt failed and depth allows decomposition",
                             "logic": {
                                 "and": [
-                                    {"==": [{"var": "attempt_succeeded"}, False]},
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.ATTEMPT_SUCCEEDED},
+                                            False,
+                                        ]
+                                    },
                                     {
                                         "<": [
-                                            {"var": "current_depth"},
+                                            {"var": ContextKeys.CURRENT_DEPTH},
                                             max_depth,
                                         ]
                                     },
@@ -265,7 +304,9 @@ def build_adapt_fsm(
                     "conditions": [
                         {
                             "description": "Depth limit reached, force best effort",
-                            "logic": {"==": [{"var": "attempt_succeeded"}, False]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.ATTEMPT_SUCCEEDED}, False]
+                            },
                         }
                     ],
                 },
@@ -275,7 +316,7 @@ def build_adapt_fsm(
             "id": "decompose",
             "description": "Decompose the task into simpler subtasks",
             "purpose": "Break the task down for recursive solving",
-            "required_context_keys": ["subtasks"],
+            "required_context_keys": [ContextKeys.SUBTASKS],
             "extraction_instructions": build_decompose_extraction_instructions(),
             "response_instructions": build_decompose_response_instructions(),
             "transitions": [
@@ -286,7 +327,9 @@ def build_adapt_fsm(
                     "conditions": [
                         {
                             "description": "Should terminate due to iteration limit",
-                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
+                            },
                         }
                     ],
                 },
@@ -297,7 +340,7 @@ def build_adapt_fsm(
                     "conditions": [
                         {
                             "description": "Subtasks have been generated",
-                            "logic": {"has_context": "subtasks"},
+                            "logic": {"has_context": ContextKeys.SUBTASKS},
                         }
                     ],
                 },
@@ -307,21 +350,21 @@ def build_adapt_fsm(
             "id": "combine",
             "description": "Combine all results into the final answer",
             "purpose": "Synthesize attempt results and subtask results",
-            "required_context_keys": ["final_answer"],
+            "required_context_keys": [ContextKeys.FINAL_ANSWER],
             "extraction_instructions": build_combine_extraction_instructions(),
             "response_instructions": build_combine_response_instructions(),
             "transitions": [],
         },
     }
 
-    return {
-        "name": "adapt_agent",
-        "description": task_description[:_MAX_DESC]
-        or "ADaPT agent with recursive decomposition",
-        "initial_state": "attempt",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "adapt_agent",
+        task_description,
+        "ADaPT agent with recursive decomposition",
+        "attempt",
+        persona,
+        states,
+    )
 
 
 def _tool_selection_field_extractions(
@@ -398,7 +441,11 @@ def build_reflexion_fsm(
             "id": "think",
             "description": "Reason about the task and select the next tool to use",
             "purpose": "Analyze the task, episodic memory, and previous observations",
-            "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
+            "required_context_keys": [
+                ContextKeys.TOOL_NAME,
+                ContextKeys.TOOL_INPUT,
+                ContextKeys.SHOULD_TERMINATE,
+            ],
             "extraction_instructions": think_instructions,
             "field_extractions": _tool_selection_field_extractions(think_instructions),
             "response_instructions": "",
@@ -410,7 +457,9 @@ def build_reflexion_fsm(
                     "conditions": [
                         {
                             "description": "Agent decided to terminate",
-                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
+                            },
                         }
                     ],
                 },
@@ -439,7 +488,9 @@ def build_reflexion_fsm(
                     "conditions": [
                         {
                             "description": "Framework or agent decided to terminate",
-                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
+                            },
                         }
                     ],
                 },
@@ -454,7 +505,10 @@ def build_reflexion_fsm(
             "id": "evaluate",
             "description": "Assess whether gathered information is sufficient",
             "purpose": "Evaluate answer quality and decide whether to reflect or conclude",
-            "required_context_keys": ["evaluation_score", "evaluation_passed"],
+            "required_context_keys": [
+                ContextKeys.EVALUATION_SCORE,
+                ContextKeys.EVALUATION_PASSED,
+            ],
             "extraction_instructions": build_evaluate_extraction_instructions(),
             "response_instructions": build_evaluate_response_instructions(),
             "transitions": [
@@ -465,7 +519,9 @@ def build_reflexion_fsm(
                     "conditions": [
                         {
                             "description": "Evaluation passed",
-                            "logic": {"==": [{"var": "evaluation_passed"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.EVALUATION_PASSED}, True]
+                            },
                         }
                     ],
                 },
@@ -476,7 +532,9 @@ def build_reflexion_fsm(
                     "conditions": [
                         {
                             "description": "Evaluation did not pass",
-                            "logic": {"==": [{"var": "evaluation_passed"}, False]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.EVALUATION_PASSED}, False]
+                            },
                         }
                     ],
                 },
@@ -492,7 +550,7 @@ def build_reflexion_fsm(
             "id": "reflect",
             "description": "Self-critique and plan a revised approach",
             "purpose": "Analyze what went wrong and generate lessons for next attempt",
-            "required_context_keys": ["reflection"],
+            "required_context_keys": [ContextKeys.REFLECTION],
             "extraction_instructions": build_reflect_extraction_instructions(),
             "response_instructions": build_reflect_response_instructions(),
             "transitions": [
@@ -507,21 +565,21 @@ def build_reflexion_fsm(
             "id": "conclude",
             "description": "Formulate and present the final answer",
             "purpose": "Synthesize all observations into a complete answer",
-            "required_context_keys": ["final_answer"],
+            "required_context_keys": [ContextKeys.FINAL_ANSWER],
             "extraction_instructions": build_conclude_extraction_instructions(),
             "response_instructions": build_conclude_response_instructions(),
             "transitions": [],
         },
     }
 
-    return {
-        "name": "reflexion_agent",
-        "description": task_description[:_MAX_DESC]
-        or "Reflexion agent with self-evaluation",
-        "initial_state": "think",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "reflexion_agent",
+        task_description,
+        "Reflexion agent with self-evaluation",
+        "think",
+        persona,
+        states,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -563,7 +621,7 @@ def build_plan_execute_fsm(
             "id": "plan",
             "description": "Decompose the task into a sequence of steps",
             "purpose": "Create an actionable plan to solve the task",
-            "required_context_keys": ["plan_steps"],
+            "required_context_keys": [ContextKeys.PLAN_STEPS],
             "extraction_instructions": build_plan_extraction_instructions(
                 registry, task_description=task_description
             ),
@@ -579,7 +637,7 @@ def build_plan_execute_fsm(
                     "conditions": [
                         {
                             "description": "Plan steps have been generated",
-                            "logic": {"has_context": "plan_steps"},
+                            "logic": {"has_context": ContextKeys.PLAN_STEPS},
                         }
                     ],
                 }
@@ -617,7 +675,9 @@ def build_plan_execute_fsm(
                     "conditions": [
                         {
                             "description": "All plan steps are complete",
-                            "logic": {"==": [{"var": "all_steps_complete"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.ALL_STEPS_COMPLETE}, True]
+                            },
                         }
                     ],
                 },
@@ -628,7 +688,7 @@ def build_plan_execute_fsm(
                     "conditions": [
                         {
                             "description": "The step did not succeed",
-                            "logic": {"==": [{"var": "step_failed"}, True]},
+                            "logic": {"==": [{"var": ContextKeys.STEP_FAILED}, True]},
                         }
                     ],
                 },
@@ -667,13 +727,14 @@ def build_plan_execute_fsm(
         },
     }
 
-    return {
-        "name": "plan_execute_agent",
-        "description": task_description[:_MAX_DESC] or "Plan-and-Execute agent",
-        "initial_state": "plan",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "plan_execute_agent",
+        task_description,
+        "Plan-and-Execute agent",
+        "plan",
+        persona,
+        states,
+    )
 
 
 def build_react_fsm(
@@ -738,13 +799,18 @@ def build_react_fsm(
                     ),
                     "logic": {
                         "and": [
-                            {"==": [{"var": "should_terminate"}, True]},
+                            {"==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]},
                             {
                                 "or": [
-                                    {">": [{"var": ["observation_count", 0]}, 0]},
+                                    {
+                                        ">": [
+                                            {"var": [ContextKeys.OBSERVATION_COUNT, 0]},
+                                            0,
+                                        ]
+                                    },
                                     {
                                         "==": [
-                                            {"var": "max_iterations_reached"},
+                                            {"var": ContextKeys.MAX_ITERATIONS_REACHED},
                                             True,
                                         ]
                                     },
@@ -766,7 +832,7 @@ def build_react_fsm(
                 "conditions": [
                     {
                         "description": "Approval is required for this action",
-                        "logic": {"==": [{"var": "approval_required"}, True]},
+                        "logic": {"==": [{"var": ContextKeys.APPROVAL_REQUIRED}, True]},
                     }
                 ],
             }
@@ -792,7 +858,11 @@ def build_react_fsm(
         "id": "think",
         "description": "Reason about the task and select the next tool to use",
         "purpose": "Analyze the task and previous observations to decide the next action",
-        "required_context_keys": ["tool_name", "tool_input", "should_terminate"],
+        "required_context_keys": [
+            ContextKeys.TOOL_NAME,
+            ContextKeys.TOOL_INPUT,
+            ContextKeys.SHOULD_TERMINATE,
+        ],
         "extraction_instructions": think_instructions,
         "field_extractions": _tool_selection_field_extractions(
             think_instructions, include_tool_name=not use_classification
@@ -839,18 +909,30 @@ def build_react_fsm(
                             ),
                             "logic": {
                                 "and": [
-                                    {"==": [{"var": "should_terminate"}, True]},
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.SHOULD_TERMINATE},
+                                            True,
+                                        ]
+                                    },
                                     {
                                         "or": [
                                             {
                                                 ">": [
-                                                    {"var": ["observation_count", 0]},
+                                                    {
+                                                        "var": [
+                                                            ContextKeys.OBSERVATION_COUNT,
+                                                            0,
+                                                        ]
+                                                    },
                                                     0,
                                                 ]
                                             },
                                             {
                                                 "==": [
-                                                    {"var": "max_iterations_reached"},
+                                                    {
+                                                        "var": ContextKeys.MAX_ITERATIONS_REACHED
+                                                    },
                                                     True,
                                                 ]
                                             },
@@ -873,7 +955,7 @@ def build_react_fsm(
             "description": "Formulate and present the final answer",
             "purpose": "Synthesize all observations into a complete answer",
             "required_context_keys": (
-                ["final_answer"]
+                [ContextKeys.FINAL_ANSWER]
                 + (
                     list(output_schema.model_fields.keys())
                     if output_schema and hasattr(output_schema, "model_fields")
@@ -906,7 +988,9 @@ def build_react_fsm(
                     "conditions": [
                         {
                             "description": "Framework or agent decided to terminate",
-                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
+                            },
                         }
                     ],
                 },
@@ -917,7 +1001,9 @@ def build_react_fsm(
                     "conditions": [
                         {
                             "description": "User approved the action",
-                            "logic": {"==": [{"var": "approval_granted"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.APPROVAL_GRANTED}, True]
+                            },
                         }
                     ],
                 },
@@ -928,20 +1014,23 @@ def build_react_fsm(
                     "conditions": [
                         {
                             "description": "User denied the action",
-                            "logic": {"==": [{"var": "approval_granted"}, False]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.APPROVAL_GRANTED}, False]
+                            },
                         }
                     ],
                 },
             ],
         }
 
-    return {
-        "name": "react_agent",
-        "description": task_description[:_MAX_DESC] or "ReAct agent with tool use",
-        "initial_state": "think",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "react_agent",
+        task_description,
+        "ReAct agent with tool use",
+        "think",
+        persona,
+        states,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1002,13 +1091,14 @@ def build_prompt_chain_fsm(
         "transitions": [],
     }
 
-    return {
-        "name": "prompt_chain_agent",
-        "description": task_description[:_MAX_DESC] or "Prompt chain agent",
-        "initial_state": "step_0",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "prompt_chain_agent",
+        task_description,
+        "Prompt chain agent",
+        "step_0",
+        persona,
+        states,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1046,13 +1136,14 @@ def build_self_consistency_fsm(
         },
     }
 
-    return {
-        "name": "self_consistency_sample",
-        "description": task_description[:_MAX_DESC] or "Self-consistency single sample",
-        "initial_state": "generate",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "self_consistency_sample",
+        task_description,
+        "Self-consistency single sample",
+        "generate",
+        persona,
+        states,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1158,7 +1249,9 @@ def build_debate_fsm(
                     "conditions": [
                         {
                             "description": "Consensus has been reached",
-                            "logic": {"==": [{"var": "consensus_reached"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.CONSENSUS_REACHED}, True]
+                            },
                         }
                     ],
                 },
@@ -1179,13 +1272,9 @@ def build_debate_fsm(
         },
     }
 
-    return {
-        "name": "debate_agent",
-        "description": task_description[:_MAX_DESC] or "Debate agent",
-        "initial_state": "propose",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "debate_agent", task_description, "Debate agent", "propose", persona, states
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1224,7 +1313,7 @@ def build_rewoo_fsm(
             "id": "plan_all",
             "description": "Create a complete plan of all tool calls needed",
             "purpose": "Generate a full plan with tool calls and variable references",
-            "required_context_keys": ["plan_blueprint"],
+            "required_context_keys": [ContextKeys.PLAN_BLUEPRINT],
             "extraction_instructions": build_rewoo_plan_extraction_instructions(
                 registry, task_description=task_description
             ),
@@ -1260,14 +1349,14 @@ def build_rewoo_fsm(
         },
     }
 
-    return {
-        "name": "rewoo_agent",
-        "description": task_description[:_MAX_DESC]
-        or "REWOO agent with upfront planning",
-        "initial_state": "plan_all",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "rewoo_agent",
+        task_description,
+        "REWOO agent with upfront planning",
+        "plan_all",
+        persona,
+        states,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1309,7 +1398,7 @@ def build_evalopt_fsm(
             "purpose": "Produce the best possible first attempt at the task",
             "extraction_instructions": build_evalopt_generate_extraction_instructions(),
             "response_instructions": build_evalopt_generate_response_instructions(),
-            "required_context_keys": ["generated_output"],
+            "required_context_keys": [ContextKeys.GENERATED_OUTPUT],
             "transitions": [
                 {
                     "target_state": "evaluate",
@@ -1318,7 +1407,7 @@ def build_evalopt_fsm(
                     "conditions": [
                         {
                             "description": "Output has been generated",
-                            "logic": {"has_context": "generated_output"},
+                            "logic": {"has_context": ContextKeys.GENERATED_OUTPUT},
                         }
                     ],
                 }
@@ -1337,7 +1426,9 @@ def build_evalopt_fsm(
                     "conditions": [
                         {
                             "description": "Output passed evaluation",
-                            "logic": {"==": [{"var": "evaluation_passed"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.EVALUATION_PASSED}, True]
+                            },
                         }
                     ],
                 },
@@ -1348,7 +1439,9 @@ def build_evalopt_fsm(
                     "conditions": [
                         {
                             "description": "Output did not pass evaluation",
-                            "logic": {"==": [{"var": "evaluation_passed"}, False]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.EVALUATION_PASSED}, False]
+                            },
                         }
                     ],
                 },
@@ -1366,7 +1459,7 @@ def build_evalopt_fsm(
             "purpose": "Improve the output by addressing specific feedback points",
             "extraction_instructions": build_evalopt_refine_extraction_instructions(),
             "response_instructions": build_evalopt_refine_response_instructions(),
-            "required_context_keys": ["generated_output"],
+            "required_context_keys": [ContextKeys.GENERATED_OUTPUT],
             "transitions": [
                 {
                     "target_state": "evaluate",
@@ -1385,13 +1478,14 @@ def build_evalopt_fsm(
         },
     }
 
-    return {
-        "name": "evalopt_agent",
-        "description": task_description[:_MAX_DESC] or "Evaluator-Optimizer agent",
-        "initial_state": "generate",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "evalopt_agent",
+        task_description,
+        "Evaluator-Optimizer agent",
+        "generate",
+        persona,
+        states,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1451,8 +1545,8 @@ def build_maker_checker_fsm(
             "description": "Checker evaluates the draft",
             "purpose": "Critically evaluate the draft against quality criteria",
             "required_context_keys": [
-                "checker_passed",
-                "checker_feedback",
+                ContextKeys.CHECKER_PASSED,
+                ContextKeys.CHECKER_FEEDBACK,
                 "quality_score",
             ],
             "extraction_instructions": build_checker_extraction_instructions(
@@ -1467,7 +1561,9 @@ def build_maker_checker_fsm(
                     "conditions": [
                         {
                             "description": "Checker approved the draft",
-                            "logic": {"==": [{"var": "checker_passed"}, True]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.CHECKER_PASSED}, True]
+                            },
                         }
                     ],
                 },
@@ -1478,7 +1574,9 @@ def build_maker_checker_fsm(
                     "conditions": [
                         {
                             "description": "Checker found issues with the draft",
-                            "logic": {"==": [{"var": "checker_passed"}, False]},
+                            "logic": {
+                                "==": [{"var": ContextKeys.CHECKER_PASSED}, False]
+                            },
                         }
                     ],
                 },
@@ -1518,10 +1616,11 @@ def build_maker_checker_fsm(
         },
     }
 
-    return {
-        "name": "maker_checker_agent",
-        "description": task_description[:_MAX_DESC] or "Maker-Checker agent",
-        "initial_state": "make",
-        "persona": persona,
-        "states": states,
-    }
+    return _finalize_fsm(
+        "maker_checker_agent",
+        task_description,
+        "Maker-Checker agent",
+        "make",
+        persona,
+        states,
+    )
