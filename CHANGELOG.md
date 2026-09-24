@@ -13,7 +13,7 @@ Follow-up to the agents audit below (`plans/plan-2026-09-24T091842-c1d5bfbc`, on
 commit per step or completion fix, three adversarial review passes). It closes the
 audit's HITL security gaps and most of its Known open list, makes CI green on
 Python 3.10, 3.11 and 3.12, and changes the default model. Every behaviour change has a
-test that fails on the pre-fix code. Core `src/fsm_llm` changed only in
+test that fails on the pre-fix code. Full suite: 7,158 tests collected (was 6,940). Core `src/fsm_llm` changed only in
 `DEFAULT_LLM_MODEL` and one comment. Reviews and decisions: the plan's
 `findings/review-iter-1*.md` and `decisions.md` (D-001 to D-030).
 

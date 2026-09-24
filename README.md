@@ -346,7 +346,7 @@ Transition conditions use JsonLogic, evaluated in Python by `fsm_llm.expressions
 
 ```bash
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
-make test           # Run full test suite (6,940 tests)
+make test           # Run full test suite (7,158 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all packages
