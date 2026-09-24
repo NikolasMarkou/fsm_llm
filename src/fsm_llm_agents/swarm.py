@@ -36,6 +36,12 @@ class SwarmAgent(BaseAgent):
             max_handoffs=5,
         )
         result = swarm.run("I need help with my bill")
+
+    ``memory`` receives two metadata writes per hop (``current_agent``,
+    ``handoff_count``). Each ``set`` is atomic, but the pair is not: with
+    concurrent ``run()`` calls on one instance the last writer wins and the
+    two keys may come from different runs. Nothing in ``run()`` reads them
+    back; they exist for callers observing a shared ``WorkingMemory``.
     """
 
     def __init__(

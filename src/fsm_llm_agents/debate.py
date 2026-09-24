@@ -51,6 +51,11 @@ class DebateAgent(BaseAgent):
     to refine the answer. The judge decides when consensus is reached or
     the maximum number of rounds has been exhausted.
 
+    Trust: ``proposer_persona``, ``critic_persona`` and ``judge_persona`` are
+    developer-authored text interpolated unsanitized into the generated FSM's
+    prompts, like an FSM's own ``persona``. Do not pass raw end-user input;
+    put user-supplied content in the ``task`` instead.
+
     Usage::
 
         from fsm_llm_agents import DebateAgent

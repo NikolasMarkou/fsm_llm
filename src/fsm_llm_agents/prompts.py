@@ -1,5 +1,10 @@
 """
 Prompt builders for agent tool awareness and observation formatting.
+
+Trust boundary: builders that take constructor text (maker/checker
+instructions, debate personas) interpolate it unsanitized into static FSM
+definition text, the same class of content as an FSM's ``persona``. That text
+must be developer-authored; no builder here takes live end-user content.
 """
 
 from __future__ import annotations

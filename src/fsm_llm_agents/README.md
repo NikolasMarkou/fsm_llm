@@ -103,3 +103,6 @@ fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
 - Human approval: if a tool needs approval and no approval callback is set, the agent raises `ApprovalDeniedError` instead of approving silently.
 - Keys in the returned `final_context` that look internal (starting with `_`, `system_`, `internal_`, `__`) are removed.
 - `EvaluatorOptimizerAgent` and `MakerCheckerAgent` need arguments `create_agent` cannot guess (an evaluation function, maker and checker instructions); pass them yourself.
+- Maker and checker instructions and the three `DebateAgent` personas go into the prompts as written, with no sanitizing. Write them yourself; put user input in the task, not in these arguments.
+- MCP servers get a 30-second timeout per tool discovery and per tool call by default (`timeout=None` turns it off).
+- The meta-builder makes one LLM call to extract the whole design, then assembles it in Python. For workflows and agents, `is_valid` means the spec is complete, not that it loads as a runnable object; you still wire in the Python functions.

@@ -1,14 +1,18 @@
 """
-MetaBuilderAgent — agentic artifact builder with classification-based tool routing.
+MetaBuilderAgent: builds an FSM, workflow or agent artifact from a description.
 
-Uses a classify-then-extract loop to build artifacts incrementally:
-1. Classify which tool to call next (reliable on small models)
-2. Extract that tool's parameters via targeted prompts
-3. Execute the tool
-4. Loop until validate() passes or max iterations reached
+Pipeline (both ``run()`` and the turn-by-turn ``send("build it")`` path):
+1. Classify the artifact type (fsm, workflow, agent) with a ``Classifier``,
+   falling back to keyword aliases; for agents, classify the agent pattern too.
+2. Make ONE schema-constrained LLM call that extracts the whole artifact spec
+   as JSON (``_run_deterministic_pipeline``).
+3. Assemble the spec deterministically in Python on an ``ArtifactBuilder``
+   (``_assemble_fsm`` / ``_assemble_workflow`` / ``_assemble_agent``) and
+   validate it.
 
-This approach works with small models (4B+) because each LLM call
-is focused: either pick from a list OR extract one value.
+There is no per-tool classify-then-extract loop. The tool registries in
+``meta_tools.py`` (``create_fsm_tools`` and friends) are a separate public API
+for driving a builder programmatically; this agent does not use them.
 """
 
 from __future__ import annotations
@@ -40,15 +44,14 @@ from .meta_prompts import build_review_presentation
 
 
 class MetaBuilderAgent:
-    """Agentic meta-builder using classification-based tool routing.
+    """Meta-builder: classify the artifact type, extract, then assemble.
 
-    Each iteration:
-    1. LLM classifies which tool to call next (from a numbered list)
-    2. LLM extracts that tool's parameters (one focused prompt)
-    3. Tool is executed on the builder
-    4. Loop until validate() passes
-
-    Works reliably with small models (4B+) because each call is focused.
+    One build is a type classification plus a single schema-constrained
+    extraction call; the returned spec is assembled and validated in Python
+    (see the module docstring). In turn-by-turn mode, ``send()`` collects
+    requirements until a build trigger ("build it"); a build with validation
+    errors keeps the session open for another try. ``is_valid`` on a workflow
+    or agent result means a structurally complete spec, not a loadable object.
 
     Usage (single-shot)::
 

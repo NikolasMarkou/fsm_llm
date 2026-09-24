@@ -36,6 +36,11 @@ class MakerCheckerAgent(BaseAgent):
     persona evaluates it against quality criteria. The loop continues
     until the checker approves or max revisions are reached.
 
+    Trust: ``maker_instructions`` and ``checker_instructions`` are
+    developer-authored text interpolated unsanitized into the generated FSM's
+    prompts, like an FSM's own ``persona``. Do not pass raw end-user input;
+    put user-supplied content in the ``task`` instead.
+
     Usage::
 
         agent = MakerCheckerAgent(
