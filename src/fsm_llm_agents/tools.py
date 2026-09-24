@@ -95,7 +95,12 @@ class ToolRegistry:
                 f"Tool name '{tool.name}' is reserved (ContextKeys.NO_TOOL)"
             )
         with self._tools_lock:
+            replaced = tool.name in self._tools
             self._tools[tool.name] = tool
+        if replaced:
+            logger.warning(
+                f"Tool '{tool.name}' already registered; replacing it (last wins)"
+            )
         logger.debug(f"Registered tool: {tool.name}")
         return self
 

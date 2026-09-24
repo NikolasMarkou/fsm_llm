@@ -108,3 +108,78 @@ class TestHumanInTheLoop:
         # Should not raise
         result = hitl.request_approval(call, ctx)
         assert result is True
+
+
+class TestApprovalTimeoutCallbackErrors:
+    """CR-05: a callback exception after the timeout is logged, not lost."""
+
+    @staticmethod
+    def _capture_warnings():
+        from fsm_llm.logging import logger
+
+        # Library logging is opt-in (logger.disable("fsm_llm") at import).
+        logger.enable("fsm_llm")
+        captured: list[str] = []
+        sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
+        return logger, captured, sink_id
+
+    def test_exception_before_timeout_propagates(self):
+        import pytest
+
+        def _boom(request: ApprovalRequest) -> bool:
+            raise RuntimeError("early failure")
+
+        hitl = HumanInTheLoop(approval_callback=_boom, approval_timeout=5.0)
+        call = ToolCall(tool_name="delete", parameters={})
+        with pytest.raises(RuntimeError, match="early failure"):
+            hitl.request_approval(call, {})
+
+    def test_late_exception_after_timeout_is_logged(self):
+        import threading
+        import time
+
+        threads: list[threading.Thread] = []
+
+        def _slow_boom(request: ApprovalRequest) -> bool:
+            threads.append(threading.current_thread())
+            time.sleep(0.3)
+            raise RuntimeError("late failure")
+
+        hitl = HumanInTheLoop(approval_callback=_slow_boom, approval_timeout=0.05)
+        call = ToolCall(tool_name="delete", parameters={})
+        logger, captured, sink_id = self._capture_warnings()
+        try:
+            assert hitl.request_approval(call, {}) is False
+            assert threads, "callback thread never started"
+            threads[0].join(timeout=5.0)
+            assert not threads[0].is_alive()
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        late = [m for m in captured if "late failure" in m]
+        assert late, captured
+        assert "RuntimeError" in late[0]
+
+    def test_late_return_after_timeout_logs_no_error(self):
+        import threading
+        import time
+
+        threads: list[threading.Thread] = []
+
+        def _slow_ok(request: ApprovalRequest) -> bool:
+            threads.append(threading.current_thread())
+            time.sleep(0.3)
+            return True
+
+        hitl = HumanInTheLoop(approval_callback=_slow_ok, approval_timeout=0.05)
+        call = ToolCall(tool_name="delete", parameters={})
+        logger, captured, sink_id = self._capture_warnings()
+        try:
+            assert hitl.request_approval(call, {}) is False
+            threads[0].join(timeout=5.0)
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        assert not any("raised after" in m for m in captured), captured

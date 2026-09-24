@@ -116,18 +116,37 @@ class HumanInTheLoop:
             result_container: list[bool] = []
             error_container: list[Exception] = []
             callback = self._approval_callback  # Already validated non-None above
+            timeout = self._approval_timeout
+            # `abandoned` is set under `state_lock` once the join times out; a
+            # callback that raises afterwards logs instead of being lost (CR-05).
+            state_lock = threading.Lock()
+            abandoned: list[bool] = []
 
             def _run_callback() -> None:
                 try:
                     result_container.append(callback(request))
                 except Exception as exc:
-                    error_container.append(exc)
+                    with state_lock:
+                        if abandoned:
+                            logger.warning(
+                                f"Approval callback raised after the {timeout}s "
+                                f"timeout (already denied): {type(exc).__name__}: {exc}"
+                            )
+                            return
+                        error_container.append(exc)
 
             thread = threading.Thread(target=_run_callback, daemon=True)
             thread.start()
-            thread.join(timeout=self._approval_timeout)
+            thread.join(timeout=timeout)
 
-            if thread.is_alive():
+            with state_lock:
+                # A callback that finished before the lock counts as done even
+                # if the thread has not fully exited yet.
+                timed_out = not (result_container or error_container)
+                if timed_out:
+                    abandoned.append(True)
+
+            if timed_out:
                 logger.warning(
                     f"Approval timed out after {self._approval_timeout}s, "
                     "treating as denied"

@@ -53,6 +53,30 @@ class TestToolRegistry:
         result = registry.register_function(_add, name="add", description="Add")
         assert result is registry
 
+    def test_register_duplicate_name_warns_and_last_wins(self):
+        """FB-07: an overwrite is surfaced as a warning; behaviour stays last-wins."""
+        from fsm_llm.logging import logger
+
+        registry = ToolRegistry()
+        first = ToolDefinition(name="add", description="first", execute_fn=_add)
+        second = ToolDefinition(name="add", description="second", execute_fn=_add)
+        logger.enable("fsm_llm")
+        captured: list[str] = []
+        sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
+        try:
+            registry.register(first)
+            assert captured == []
+            registry.register(second)
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        assert len(registry) == 1
+        assert registry.get("add").description == "second"
+        assert len(captured) == 1
+        assert "add" in captured[0]
+        assert "already registered" in captured[0]
+
     def test_register_without_execute_fn_raises(self):
         registry = ToolRegistry()
         tool_def = ToolDefinition(name="bad", description="No fn")

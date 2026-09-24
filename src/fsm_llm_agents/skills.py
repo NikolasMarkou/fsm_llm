@@ -232,12 +232,17 @@ class SkillLoader:
                     if category_override:
                         skill.category = category_override
                     skills.append(skill)
+        # Names already provided via SKILLS win; the @tool scan skips them so
+        # one function listed in both places is not loaded twice (PT-07).
+        explicit_names = {skill.name for skill in skills}
 
         # Check for @tool decorated functions
         for attr_name in dir(module):
             obj = getattr(module, attr_name)
             if callable(obj) and hasattr(obj, "_tool_definition"):
                 tool_def = obj._tool_definition
+                if tool_def.name in explicit_names:
+                    continue
                 skills.append(
                     SkillDefinition(
                         name=tool_def.name,
