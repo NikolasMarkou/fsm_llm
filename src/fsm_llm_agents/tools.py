@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import threading
 import time
 import typing
@@ -17,6 +18,9 @@ from fsm_llm.logging import logger
 from .constants import ContextKeys, ErrorMessages
 from .definitions import ToolCall, ToolDefinition, ToolResult
 from .exceptions import ToolExecutionError, ToolNotFoundError
+
+# A string (``from __future__``) dict annotation: dict, dict[...], (typing.)Dict[...]
+_DICT_ANNOTATION_RE = re.compile(r"\s*(dict|(typing\.)?Dict)(\[.*\])?\s*")
 
 # Python type → JSON Schema type mapping for @tool auto-inference
 _PYTHON_TO_JSON_SCHEMA: dict[type, str] = {
@@ -247,11 +251,17 @@ class ToolRegistry:
             # Legacy pattern: single param with no schema -> pass dict
             return fn(parameters)
         # Detect legacy dict-param pattern: fn(params: dict) with schema
-        first_param = next(iter(sig.parameters.values()), None)
-        if (
-            param_count == 1
-            and first_param is not None
-            and first_param.annotation is dict
+        first_param = next(iter(sig.parameters.values()))  # param_count >= 1 here
+        ann = first_param.annotation
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-024
+        # A dict[...] generic or a string annotation (__future__) is the legacy
+        # form only when the schema does not name the parameter; do NOT widen
+        # the bare-`dict` rule, a schema-named dict param is called by keyword.
+        dict_like = typing.get_origin(ann) is dict or (
+            isinstance(ann, str) and _DICT_ANNOTATION_RE.fullmatch(ann) is not None
+        )
+        if param_count == 1 and (
+            ann is dict or (dict_like and first_param.name not in schema_props)
         ):
             # Legacy function expects a single dict; pass parameters directly
             return fn(parameters)

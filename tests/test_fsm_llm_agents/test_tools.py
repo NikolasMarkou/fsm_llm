@@ -5,7 +5,8 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from typing import Annotated
+import typing
+from typing import Annotated, Any
 
 import pytest
 
@@ -882,3 +883,108 @@ class TestListToolInput:
         driver = approval_grant("t", normalize_tool_input(raw))
         refusal = approval_grant("t", raw)
         assert driver == refusal == {"tool_name": "t", "parameters": {"input": raw}}
+
+
+_AB_SCHEMA = {"properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}}
+
+
+def _run_ab(fn, schema=None):
+    registry = ToolRegistry()
+    registry.register_function(fn, name="t", parameter_schema=schema or _AB_SCHEMA)
+    return registry.execute(ToolCall(tool_name="t", parameters={"a": 2, "b": 3}))
+
+
+class TestDictParamToolDetection:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-024: a single-``params``-dict
+    tool must be called with its dict also when the annotation is a ``dict[...]``
+    generic or a string (``from __future__ import annotations``, as in this
+    file). Keyword tools and a dict-typed parameter that the schema names keep
+    their existing calling convention."""
+
+    def test_string_generic_annotation(self):
+        def add(params: dict[str, Any]) -> int:
+            return params["a"] + params["b"]
+
+        assert add.__annotations__["params"] == "dict[str, Any]"
+        result = _run_ab(add)
+        assert result.success, result.error
+        assert result.result == 5
+
+    def test_string_bare_dict_annotation(self):
+        def add(params: dict) -> int:
+            return params["a"] + params["b"]
+
+        assert add.__annotations__["params"] == "dict"
+        result = _run_ab(add)
+        assert result.success, result.error
+        assert result.result == 5
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [dict[str, Any], typing.Dict[str, int], "Dict[str, int]"],  # noqa: UP006
+        ids=["builtin-generic", "typing-generic", "typing-string"],
+    )
+    def test_generic_annotation_objects(self, annotation):
+        def add(params):
+            return params["a"] + params["b"]
+
+        add.__annotations__["params"] = annotation
+        result = _run_ab(add)
+        assert result.success, result.error
+        assert result.result == 5
+
+    def test_keyword_tools_unchanged(self):
+        def add(a, b):
+            return a + b
+
+        def echo(text: str) -> str:
+            return text
+
+        assert _run_ab(add).result == 5
+        registry = ToolRegistry()
+        registry.register_function(
+            echo, parameter_schema={"properties": {"text": {"type": "string"}}}
+        )
+        out = registry.execute(ToolCall(tool_name="echo", parameters={"text": "hi"}))
+        assert out.success and out.result == "hi"
+
+    def test_schema_named_dict_param_gets_its_value(self):
+        """Pins the pre-existing behavior: a dict-typed parameter that the
+        schema names (string or generic annotation) is called by keyword."""
+        seen: list = []
+
+        def configure(config: dict[str, Any]) -> str:
+            seen.append(config)
+            return "ok"
+
+        def configure_bare(config: dict) -> str:
+            seen.append(config)
+            return "ok"
+
+        schema = {"properties": {"config": {"type": "object"}}}
+        for fn in (configure, configure_bare):
+            registry = ToolRegistry()
+            registry.register_function(fn, name="c", parameter_schema=schema)
+            out = registry.execute(
+                ToolCall(tool_name="c", parameters={"config": {"k": 1}})
+            )
+            assert out.success, out.error
+        assert seen == [{"k": 1}, {"k": 1}]
+
+    def test_class_dict_annotation_with_schema_named_param_unchanged(self):
+        """Pins the pre-existing (older) behavior for an evaluated ``dict``
+        class annotation: the whole parameters dict is passed, even when the
+        schema names the parameter."""
+        seen: list = []
+
+        def configure(config):
+            seen.append(config)
+            return "ok"
+
+        configure.__annotations__["config"] = dict
+        schema = {"properties": {"config": {"type": "object"}}}
+        registry = ToolRegistry()
+        registry.register_function(configure, name="c", parameter_schema=schema)
+        out = registry.execute(ToolCall(tool_name="c", parameters={"config": {"k": 1}}))
+        assert out.success, out.error
+        assert seen == [{"config": {"k": 1}}]
