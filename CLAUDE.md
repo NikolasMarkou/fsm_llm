@@ -134,6 +134,7 @@ Rules: `required_context_keys` only tells Pass 1 what to extract, it never block
 - Library logging is off until `setup_logging()` / `enable_debug_logging()` (`logger.disable("fsm_llm")` at import).
 - One turn per conversation at a time: a concurrent or re-entrant `converse` on the same conversation raises `FSMError`.
 - Non-obvious code carries `# DECISION plan-<full-plan-id>/D-NNN` anchors stating what NOT to do; read them before editing nearby and do not undo what they forbid.
+- Agents HITL approval is not a security boundary yet (open, pre-existing): single-use approval holds for `ReactAgent` only; Reflexion runs a gated tool before asking, ReasoningReact lets the model approve, and `approval_granted` is model-extractable in every agent. See the CHANGELOG agents audit Known open list.
 - Do NOT modify files under `examples/` unless explicitly asked: they are evaluation baselines for `scripts/eval.py`.
 
 ## Code Conventions

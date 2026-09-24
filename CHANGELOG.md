@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Agents audit 2026-09-24
 
 Audit of `src/fsm_llm_agents` dated 2026-09-24 (`plans/plan-2026-09-24T045559-3e4eb3e5`,
-13 steps and 6 completion fixes after review, one commit each). Finding ids below are
+13 steps and 9 completion fixes after review, one commit each). Finding ids below are
 the audit's own. Every behaviour change has a test that fails on the pre-fix code,
-except the logging and docstring items. Full suite: 6,934 tests collected (was 6,873). `ruff` and `mypy` clean across
+except the logging and docstring items. Full suite: 6,940 tests collected (was 6,873). `ruff` and `mypy` clean across
 all 6 packages. The ReAct-family routing change (first item) changes how a live model's
 turns are routed, so the already stale eval baseline was not re-measured.
 
@@ -36,14 +36,20 @@ turns are routed, so the already stale eval baseline was not re-measured.
   is recorded. Before, it recorded a `[TOOL FAILED]` observation that satisfied the
   `think->conclude` evidence guard, so a hallucinated tool plus `should_terminate=True`
   ended with `success=True`. The turn's `tool_status` is now `skipped`, not
-  `failed`. `ParallelReactAgent` is unchanged.
+  `failed`. Unknown-name and no-tool turns (including the literal `none`) now clear
+  `tool_name` and `tool_input` as a real tool call does, and the plain warning turn
+  also clears `should_terminate`. Core extracts a key only while it is unset, so a
+  kept name used to block every later real tool call. `ParallelReactAgent` is
+  unchanged.
 - **Fallback edges out of more loop states (FB-01, D-002).** A turn where the routing
   key was never extracted used to BLOCK the state until `BudgetExhaustedError`, because
   no PRE_TRANSITION limiter runs on a BLOCKED turn. Unconditional priority-900 edges now
   continue the loop: maker_checker `check->revise`, ADaPT `assess->combine` and
   `decompose->combine`, evaluator_optimizer `generate->evaluate`. Every agent loop state
   now has an unconditional fallback except plan_execute `plan` (its key is seeded) and
-  the react `await_approval` state (the ReactAgent driver always sets a bool).
+  `await_approval`. In ReactAgent the approval driver always writes a bool before
+  `await_approval` routes. ReasoningReactAgent uses the same state with no driver, so
+  it can BLOCK there until the 3x ceiling (see Known open).
 - **maker_checker and evaluator_optimizer re-judge every round (D-013).** Core extracts
   a key only while it is unset, so maker_checker judged `checker_passed` and
   `quality_score` once per run and `revise` never replaced `draft_output`; the
@@ -53,7 +59,12 @@ turns are routed, so the already stale eval baseline was not re-measured.
   in maker_checker, a False verdict), so the revised draft really replaces the previous
   one and is judged again. Leaving `revise` clears the consumed `checker_feedback`, so
   the next check writes fresh feedback; if no new draft was produced, the previous one
-  is restored. `max_revisions` now ends the maker_checker loop (always-False checker at
+  is restored. When `checker_passed` is already True (a forced pass from the quality
+  auto-pass or `max_revisions`), entering `revise` changes nothing, so the draft the
+  checker judged is the one that ships; the forced pass still costs one extra
+  `revise` turn. `previous_draft`/`previous_output` stay in `final_context` and in
+  later prompts (the checker sees both drafts); answer extraction never reads them.
+  `max_revisions` now ends the maker_checker loop (always-False checker at
   `max_iterations=10`: 12 turns with 1 verdict before, 8 turns with 3 verdicts now).
   Two prompt lines changed to point at the new keys (`Your previous output is in
   'previous_output'.`, `Your previous draft is in 'previous_draft'.`); this was not
@@ -74,8 +85,9 @@ turns are routed, so the already stale eval baseline was not re-measured.
   after one granted approval every later approval-required call skipped the callback
   and ran. This approval bypass predates the audit. `execute_tool` now deletes
   `approval_granted` at `act` entry once no approval is pending, so each gated call is
-  asked for exactly once. Applies to ReactAgent, ReflexionAgent and ReasoningReactAgent's
-  non-`reason` tools.
+  asked for exactly once. This holds for ReactAgent only. It does not make approval a
+  security boundary: ReflexionAgent, ReasoningReactAgent and model-written approvals
+  have open gaps (see Known open).
 - **Empty `tool_input` recovery checks the parameter type (CR-02).** When a tool with a
   single required parameter is called with no input, the task string is used as that
   parameter only when its schema type is absent, `"string"`, or a list containing
@@ -148,9 +160,21 @@ turns are routed, so the already stale eval baseline was not re-measured.
   union type).
 - Core: PRE_TRANSITION handlers do not run on a BLOCKED turn. This fix works around it
   in the agents package; changing it would change handler timing for every FSM.
-- `ReasoningReactAgent` builds an `await_approval` state when a policy and a
-  `requires_approval` tool are present, but it has no approval driver, so the callback
-  is never asked and the gate can never be granted (D-015, pre-existing).
+- **HITL approval gaps (security, pre-existing, not fixed).** Do not rely on
+  approval to guard a dangerous tool yet.
+  (a) ReflexionAgent has no `await_approval` state: an approval-required tool runs
+  first and the callback is asked afterwards, so a denial does not stop it.
+  (b) ReasoningReactAgent builds `await_approval` (a policy plus a
+  `requires_approval` tool) but has no approval driver: the callback is never asked,
+  and the model opens the gate by extracting `approval_granted` (the state's
+  extraction prompt asks for it). If the model never extracts it, the state BLOCKS
+  until the 3x ceiling.
+  (c) `approval_granted` is an ordinary context key the model can extract, so a bulk
+  extraction in any state (for example `think`) can approve a call itself, in
+  ReactAgent too; a callback that always denies is then never asked.
+  Fix direction, for a follow-up plan: `execute_tool` refuses to run a real tool while
+  `approval_required` is set and the grant did not come from the driver, and the
+  grant moves to a driver-only internal key (for example `_approval_granted`).
 - Reflexion's and ParallelReact's `think->conclude` have no evidence guard (D-004), so
   they can conclude without a tool call (pre-existing). ReWOO has no stall guard.
 - `SkillLoader`'s `@tool` scan dedupes only against `SKILLS` names: a `@tool` function
