@@ -46,8 +46,14 @@ def _mcp_schema_to_parameter_schema(input_schema: dict[str, Any]) -> dict[str, A
     return schema
 
 
-def _format_mcp_result(result: Any) -> str:
-    """Format an MCP tool result into a string."""
+def _format_mcp_result(result: Any, tool_name: str | None = None) -> str:
+    """Format an MCP tool result into a string.
+
+    Raises:
+        ToolExecutionError: the result carries the MCP error flag; the message
+            is the result's text, so ``ToolRegistry.execute`` reports it.
+    """
+    text = str(result)
     if hasattr(result, "content") and result.content:
         parts = []
         for item in result.content:
@@ -55,8 +61,15 @@ def _format_mcp_result(result: Any) -> str:
                 parts.append(item.text)
             else:
                 parts.append(str(item))
-        return "\n".join(parts)
-    return str(result)
+        text = "\n".join(parts)
+    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-026: raise on the error flag,
+    # read under BOTH spellings (1.x isError, 2.x is_error) and only when it
+    # `is True`. Do NOT return the text (a tool error became a success), and
+    # do NOT test truthiness: a Mock result's missing flag is a truthy Mock.
+    flags = (getattr(result, "isError", None), getattr(result, "is_error", None))
+    if any(flag is True for flag in flags):
+        raise ToolExecutionError(f"MCP tool error: {text}", tool_name=tool_name)
+    return text
 
 
 class MCPToolProvider:
@@ -218,13 +231,13 @@ class MCPToolProvider:
         ):
             """Create an executor that reconnects per call."""
 
-            async def call(**kwargs: Any) -> str:
+            async def call(**kwargs: Any) -> Any:
                 if server_params is not None:
                     async with stdio_client(server_params) as (rd, wr):
                         async with ClientSession(rd, wr) as sess:
                             await sess.initialize()
                             result = await sess.call_tool(tool_name, arguments=kwargs)
-                            return _format_mcp_result(result)
+                            return result
                 elif server_url is not None:
                     from mcp.client.sse import sse_client
 
@@ -232,18 +245,24 @@ class MCPToolProvider:
                         async with ClientSession(rd, wr) as sess:
                             await sess.initialize()
                             result = await sess.call_tool(tool_name, arguments=kwargs)
-                            return _format_mcp_result(result)
+                            return result
                 else:
                     raise ValueError("No server_params or server_url configured")
 
             async def execute(**kwargs: Any) -> str:
                 try:
-                    return await asyncio.wait_for(call(**kwargs), timeout=timeout)
+                    result = await asyncio.wait_for(call(**kwargs), timeout=timeout)
                 except asyncio.TimeoutError as e:
                     raise ToolExecutionError(
                         f"MCP tool '{tool_name}' timed out after {timeout}s",
                         tool_name=tool_name,
                     ) from e
+                # DECISION plan-2026-09-24T091842-c1d5bfbc/D-026: format (and
+                # raise on an error result) only here, after the stdio/SSE task
+                # groups closed. Do NOT move it back inside `call`: raised in
+                # there it arrives as "unhandled errors in a TaskGroup" and the
+                # server's error text is lost.
+                return _format_mcp_result(result, tool_name)
 
             return execute
 

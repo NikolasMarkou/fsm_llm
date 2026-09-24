@@ -59,19 +59,35 @@ class TestMCPStdio:
     def test_discover_register_and_call(self, tmp_path: Path) -> None:
         provider = _provider(tmp_path / "pid", _DISCOVERY_TIMEOUT)
         tools = asyncio.run(provider.discover_tools())
-        assert sorted(t.name for t in tools) == ["add", "slow"]
+        assert sorted(t.name for t in tools) == ["add", "fail", "slow"]
         # mcp 2.x names the field input_schema (D-025); both must yield it.
         add_tool = next(t for t in tools if t.name == "add")
         assert add_tool.parameter_schema["required"] == ["a", "b"]
 
         registry = ToolRegistry()
-        assert provider.register_tools(registry) == 2
+        assert provider.register_tools(registry) == 3
 
         result = registry.execute(
             ToolCall(tool_name="add", parameters={"a": 2, "b": 3})
         )
         assert result.success, result.error
         assert result.result == "5"
+
+    def test_tool_error_is_failed_call(self, tmp_path: Path) -> None:
+        """A raising server tool comes back as an MCP error result (D-026)."""
+        provider = _provider(tmp_path / "pid", _DISCOVERY_TIMEOUT)
+        asyncio.run(provider.discover_tools())
+        registry = ToolRegistry()
+        provider.register_tools(registry)
+
+        result = registry.execute(
+            ToolCall(tool_name="fail", parameters={"reason": "no-such-row"})
+        )
+
+        assert not result.success, result.result
+        # The server's own error text is kept; mcp 2.x drops the exception
+        # message (1.x appends it), so only the common prefix is asserted.
+        assert "error executing tool fail" in (result.error or "").lower()
 
     def test_slow_call_times_out_and_child_exits(self, tmp_path: Path) -> None:
         pid_file = tmp_path / "pid"

@@ -54,6 +54,71 @@ class TestMCPSessionLifecycle:
 
         assert _format_mcp_result("plain string") == "plain string"
 
+    @pytest.mark.parametrize("flag", ["isError", "is_error"])
+    def test_format_mcp_result_error_flag_raises(self, flag):
+        """An MCP error result (1.x isError, 2.x is_error) is a failed call (D-026)."""
+        from types import SimpleNamespace
+
+        from fsm_llm_agents.exceptions import ToolExecutionError
+        from fsm_llm_agents.mcp import _format_mcp_result
+
+        result = SimpleNamespace(content=[SimpleNamespace(text="boom")], **{flag: True})
+        with pytest.raises(ToolExecutionError, match="boom") as exc:
+            _format_mcp_result(result, "t")
+        assert exc.value.tool_name == "t"
+        ok = SimpleNamespace(content=[SimpleNamespace(text="fine")], **{flag: False})
+        assert _format_mcp_result(ok, "t") == "fine"
+
+    @pytest.mark.parametrize("flag", ["isError", "is_error"])
+    def test_mcp_error_result_is_failed_tool_result(self, flag):
+        """Through the executor and ToolRegistry: success False, error text kept."""
+        from contextlib import asynccontextmanager
+        from types import SimpleNamespace
+
+        from fsm_llm_agents import mcp as mcp_mod
+        from fsm_llm_agents.definitions import ToolCall
+        from fsm_llm_agents.tools import ToolRegistry
+
+        err = SimpleNamespace(
+            content=[SimpleNamespace(text="bad input")], **{flag: True}
+        )
+
+        @asynccontextmanager
+        async def fake_stdio(_params):
+            yield (None, None)
+
+        class FakeSession:
+            def __init__(self, *_a):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_a):
+                return False
+
+            async def initialize(self):
+                return None
+
+            async def call_tool(self, name, arguments):
+                return err
+
+        provider = mcp_mod.MCPToolProvider.__new__(mcp_mod.MCPToolProvider)
+        provider._server_params = "params"
+        provider._server_url = None
+        # A one-property schema keeps this off the zero-argument call path (W5).
+        schema = {"type": "object", "properties": {"x": {"type": "integer"}}}
+        tool = SimpleNamespace(name="t", description="d", inputSchema=schema)
+        with (
+            patch.object(mcp_mod, "stdio_client", fake_stdio, create=True),
+            patch.object(mcp_mod, "ClientSession", FakeSession, create=True),
+        ):
+            registry = ToolRegistry()
+            registry.register(provider._convert_mcp_tool(tool))
+            result = registry.execute(ToolCall(tool_name="t", parameters={"x": 1}))
+        assert not result.success
+        assert "bad input" in (result.error or "")
+
 
 # ============================================================================
 # C2: converse_stream() Auto-Save

@@ -4,7 +4,8 @@ Usage: ``python mcp_fixture_server.py <pid_file> [--hang]``
 
 Writes its own PID to ``pid_file`` on start. ``--hang`` sleeps before
 serving, so the client's ``initialize`` never gets an answer. Tools:
-``add`` (fast) and ``slow`` (sleeps far longer than any test timeout).
+``add`` (fast), ``slow`` (sleeps far longer than any test timeout) and
+``fail`` (raises, so the server answers with an MCP error result).
 """
 
 from __future__ import annotations
@@ -35,6 +36,12 @@ async def slow(seconds: int = SLOW_TOOL_SECONDS) -> str:
     """Sleep for a long time, then answer."""
     await asyncio.sleep(seconds)
     return "done"
+
+
+@server.tool()
+def fail(reason: str) -> str:
+    """Always raise; the server turns this into an error result."""
+    raise ValueError(f"fixture failure: {reason}")
 
 
 def main(argv: list[str]) -> None:
