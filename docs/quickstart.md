@@ -36,7 +36,7 @@ Environment variables used by the library and the `fsm-llm` command:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `LLM_MODEL` | none | litellm model id. **Required by the `fsm-llm` CLI**; the `API` class uses it when no `model=` is passed, then falls back to `ollama_chat/qwen3.5:4b` |
+| `LLM_MODEL` | none | litellm model id. **Required by the `fsm-llm` CLI**; the `API` class uses it when no `model=` is passed, then falls back to `ollama_chat/qwen3.5:9b-q8_0` |
 | `LLM_TEMPERATURE` | `0.5` | CLI only |
 | `LLM_MAX_TOKENS` | `1000` | CLI only |
 | `FSM_PATH` | none | not usable with `fsm-llm`: `--fsm` is checked first and is mandatory |

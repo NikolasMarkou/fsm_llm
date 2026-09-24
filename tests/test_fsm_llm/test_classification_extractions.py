@@ -1019,7 +1019,7 @@ class TestClassifierReasoningContentRecovery:
     `getattr(msg, "thinking", None)` only. The installed litellm range RENAMES
     the raw `thinking` field to `reasoning_content` and DELETES `thinking`
     before building the Message (see llm.py D-002 / C2). So on the project's own
-    `DEFAULT_LLM_MODEL = ollama_chat/qwen3.5:4b`, a classification reply that
+    `DEFAULT_LLM_MODEL = ollama_chat/qwen3.5:9b-q8_0`, a classification reply that
     puts its JSON in `reasoning_content` with empty `content` used to raise
     `ClassificationResponseError("LLM returned empty content")` instead of being
     recovered — crashing AMBIGUOUS-transition resolution.

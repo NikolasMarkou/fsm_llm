@@ -66,7 +66,7 @@ from fsm_llm_harness.tools import Workspace
 
 workspace = Workspace(".")
 agent = HarnessAgent(
-    worker_factory=build_default_worker_factory(workspace, model="ollama_chat/qwen3.5:4b"),
+    worker_factory=build_default_worker_factory(workspace, model="ollama_chat/qwen3.5:9b-q8_0"),
     approval_callback=lambda request: input("Approve? [y/N] ") == "y",
 )
 result = agent.run(

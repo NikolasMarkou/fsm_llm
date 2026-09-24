@@ -15,6 +15,7 @@ src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import after path adjustment
+from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.definitions import (
     FSMDefinition,
     ResponseGenerationRequest,
@@ -22,8 +23,9 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.llm import LLMInterface
 
-#: Default Ollama tag the repository's live suites are written against.
-OLLAMA_MODEL_TAG = "qwen3.5:4b"
+#: Ollama tag of the package default model (``DEFAULT_LLM_MODEL`` minus its
+#: ``ollama_chat/`` provider prefix). Live suites pass their own tag explicitly.
+OLLAMA_MODEL_TAG = DEFAULT_LLM_MODEL.split("/", 1)[1]
 #: Where a stock Ollama daemon publishes its model list.
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 

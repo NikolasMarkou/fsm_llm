@@ -11,7 +11,7 @@ Usage:
     .venv/bin/python scripts/eval.py
 
     # Custom model and parallelism
-    .venv/bin/python scripts/eval.py --model ollama_chat/qwen3.5:4b --workers 6
+    .venv/bin/python scripts/eval.py --model ollama_chat/qwen3.5:9b-q8_0 --workers 6
 
     # Filter by category
     .venv/bin/python scripts/eval.py --category agents
@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = ROOT / "examples"
 VENV_PYTHON = str(ROOT / ".venv" / "bin" / "python")
 
-DEFAULT_MODEL = os.environ.get("LLM_MODEL", "ollama_chat/qwen3.5:4b")
+DEFAULT_MODEL = os.environ.get("LLM_MODEL", "ollama_chat/qwen3.5:9b-q8_0")
 DEFAULT_WORKERS = 4
 DEFAULT_TIMEOUT = 120  # seconds
 

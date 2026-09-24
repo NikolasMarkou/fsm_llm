@@ -76,7 +76,7 @@ def add(a: int, b: int) -> int:
 registry = ToolRegistry()
 registry.register(add._tool_definition)
 
-agent = ReactAgent(tools=registry, config=AgentConfig(model="ollama_chat/qwen3.5:4b"))
+agent = ReactAgent(tools=registry, config=AgentConfig(model="ollama_chat/qwen3.5:9b-q8_0"))
 result = agent.run("What is 17 + 25?")
 print(result.answer, result.success, [c.tool_name for c in result.trace.tool_calls])
 ```
@@ -92,7 +92,7 @@ print(agent("What is 2 + 3?").answer)
 Build a new FSM by chatting:
 
 ```bash
-fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
+fsm-llm-meta --model ollama_chat/qwen3.5:9b-q8_0 --output my_bot.json
 ```
 
 ## Things to know

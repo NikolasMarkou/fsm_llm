@@ -8,7 +8,7 @@ This document defines the evaluation methodology for testing FSM-LLM examples ag
 
 ```bash
 # Automated parallel evaluation (recommended)
-.venv/bin/python scripts/eval.py --model ollama_chat/qwen3.5:4b --workers 4
+.venv/bin/python scripts/eval.py --model ollama_chat/qwen3.5:9b-q8_0 --workers 4
 
 # With more parallelism for higher GPU utilization
 .venv/bin/python scripts/eval.py --workers 8
@@ -71,7 +71,7 @@ Use `scripts/eval.py` to run all examples in parallel:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model` | `$LLM_MODEL` or `ollama_chat/qwen3.5:4b` | LLM model identifier |
+| `--model` | `$LLM_MODEL` or `ollama_chat/qwen3.5:9b-q8_0` | LLM model identifier |
 | `--workers` | 4 | Parallel worker processes (increase for GPU utilization) |
 | `--timeout` | 120 | Default timeout per example (seconds) |
 | `--category` | all | Filter by category (basic, agents, etc.) |
