@@ -3,12 +3,10 @@ from __future__ import annotations
 """Tests for fsm_llm_agents.prompts module."""
 
 from fsm_llm_agents.prompts import (
-    build_act_response_instructions,
     build_approval_extraction_instructions,
     build_conclude_extraction_instructions,
     build_conclude_response_instructions,
     build_think_extraction_instructions,
-    build_think_response_instructions,
 )
 from fsm_llm_agents.tools import ToolRegistry
 
@@ -61,16 +59,6 @@ class TestPromptBuilders:
             registry, include_observations=False
         )
         assert "previous observations" not in instructions.lower()
-
-    def test_think_response_instructions(self):
-        instructions = build_think_response_instructions()
-        assert isinstance(instructions, str)
-        assert len(instructions) > 10
-
-    def test_act_response_instructions(self):
-        instructions = build_act_response_instructions()
-        assert "tool" in instructions.lower()
-        assert "observ" in instructions.lower()
 
     def test_conclude_extraction_instructions(self):
         instructions = build_conclude_extraction_instructions()

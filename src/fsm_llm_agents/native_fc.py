@@ -537,10 +537,6 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         except AgentError:
             raise
         except Exception as e:
-            from .exceptions import AgentTimeoutError, BudgetExhaustedError
-
-            if isinstance(e, (AgentTimeoutError, BudgetExhaustedError)):
-                raise
             raise AgentError(
                 f"Native function-calling execution failed: {e}",
                 details={"task": task},

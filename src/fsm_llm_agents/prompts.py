@@ -134,22 +134,6 @@ def build_think_extraction_instructions(
     return "\n".join(parts)
 
 
-def build_think_response_instructions() -> str:
-    """Build response instructions for the think state."""
-    return (
-        "Briefly explain your reasoning and what action you are taking next. "
-        "If you have decided to terminate, explain why you have enough information."
-    )
-
-
-def build_act_response_instructions() -> str:
-    """Build response instructions for the act state."""
-    return (
-        "Summarize what tool was called and what was observed from the result. "
-        "Be concise but include all relevant information from the tool output."
-    )
-
-
 def build_conclude_extraction_instructions(
     output_schema: type | None = None,
 ) -> str:
@@ -520,14 +504,6 @@ def build_evalopt_generate_response_instructions() -> str:
     return "Present the output you have generated for the task."
 
 
-def build_evalopt_evaluate_response_instructions() -> str:
-    """Build response instructions for the EvalOpt evaluate state."""
-    return (
-        "Summarize the evaluation results. Describe whether the output "
-        "passed the evaluation and what feedback was provided."
-    )
-
-
 def build_evalopt_refine_extraction_instructions() -> str:
     """Build extraction instructions for the EvalOpt refine state."""
     return "\n".join(
@@ -621,14 +597,6 @@ def build_checker_extraction_instructions(
             '- "checker_feedback": detailed feedback on what is good and what needs improvement',
             '- "quality_score": a float between 0.0 and 1.0 rating overall quality',
         ]
-    )
-
-
-def build_checker_response_instructions() -> str:
-    """Build response instructions for the Maker-Checker check state."""
-    return (
-        "Present your evaluation of the draft. Explain what works well "
-        "and what needs improvement."
     )
 
 
@@ -942,16 +910,17 @@ def build_generate_response_instructions() -> str:
 # ---------------------------------------------------------------------------
 
 
+def _persona_line(persona: str) -> str:
+    """Return the ``Role:`` line for a debate persona, or ``""`` when unset."""
+    return f"\nRole: {persona}\n" if persona else ""
+
+
 def build_propose_extraction_instructions(proposer_persona: str = "") -> str:
     """Build extraction instructions for the debate propose state."""
-    persona_line = ""
-    if proposer_persona:
-        persona_line = f"\nRole: {proposer_persona}\n"
-
     return "\n".join(
         [
             "Generate a well-reasoned proposition or answer for the task.",
-            persona_line,
+            _persona_line(proposer_persona),
             "If previous debate rounds are available in context, improve upon "
             "the previous proposition by incorporating insights from the critique "
             "and counter-argument.",
@@ -973,14 +942,10 @@ def build_propose_response_instructions() -> str:
 
 def build_critique_extraction_instructions(critic_persona: str = "") -> str:
     """Build extraction instructions for the debate critique state."""
-    persona_line = ""
-    if critic_persona:
-        persona_line = f"\nRole: {critic_persona}\n"
-
     return "\n".join(
         [
             "Critically analyze the current proposition.",
-            persona_line,
+            _persona_line(critic_persona),
             "Identify weaknesses, logical gaps, missing evidence, "
             "and potential counterexamples.",
             "",
@@ -1001,15 +966,11 @@ def build_critique_response_instructions() -> str:
 
 def build_counter_extraction_instructions(proposer_persona: str = "") -> str:
     """Build extraction instructions for the debate counter state."""
-    persona_line = ""
-    if proposer_persona:
-        persona_line = f"\nRole: {proposer_persona}\n"
-
     return "\n".join(
         [
             "Address the critique with counter-arguments to strengthen "
             "the original proposition.",
-            persona_line,
+            _persona_line(proposer_persona),
             "Respond to each point raised in the critique. Concede valid points "
             "and refute invalid ones with evidence.",
             "",
@@ -1033,15 +994,11 @@ def build_judge_extraction_instructions(
     max_rounds: int = 3,
 ) -> str:
     """Build extraction instructions for the debate judge state."""
-    persona_line = ""
-    if judge_persona:
-        persona_line = f"\nRole: {judge_persona}\n"
-
     return "\n".join(
         [
             "Evaluate the full debate exchange: proposition, critique, "
             "and counter-argument.",
-            persona_line,
+            _persona_line(judge_persona),
             "Determine whether a strong consensus answer has been reached "
             f"or if another round of debate (max {max_rounds}) is needed.",
             "",

@@ -36,6 +36,37 @@ def _safe(fn: Any, *args: Any, **kwargs: Any) -> str:
         return f"Error: {e}"
 
 
+_AnyBuilder = FSMBuilder | WorkflowBuilder | AgentBuilder
+
+
+def _make_validate_tool(builder: _AnyBuilder) -> Any:
+    """Return the ``validate`` tool shared by all three factories, bound to *builder*."""
+
+    @tool
+    def validate() -> str:
+        """Validate the artifact. Returns errors and warnings. Call before concluding."""
+        errors = builder.validate_complete()
+        warnings = builder.validate_partial()
+        if errors:
+            return f"ERRORS: {'; '.join(errors)}"
+        if warnings:
+            return f"Valid (warnings: {'; '.join(warnings)})"
+        return "Valid: no errors or warnings"
+
+    return validate
+
+
+def _make_summary_tool(builder: _AnyBuilder) -> Any:
+    """Return the ``get_summary`` tool shared by all three factories, bound to *builder*."""
+
+    @tool
+    def get_summary() -> str:
+        """Get the current builder state as a human-readable summary."""
+        return builder.get_summary(detail_level="full")
+
+    return get_summary
+
+
 # ------------------------------------------------------------------
 # FSM tools
 # ------------------------------------------------------------------
@@ -149,22 +180,6 @@ def create_fsm_tools(builder: FSMBuilder) -> ToolRegistry:
             )
         )
 
-    @tool
-    def validate() -> str:
-        """Validate the artifact. Returns errors and warnings. Call before concluding."""
-        errors = builder.validate_complete()
-        warnings = builder.validate_partial()
-        if errors:
-            return f"ERRORS: {'; '.join(errors)}"
-        if warnings:
-            return f"Valid (warnings: {'; '.join(warnings)})"
-        return "Valid: no errors or warnings"
-
-    @tool
-    def get_summary() -> str:
-        """Get the current builder state as a human-readable summary."""
-        return builder.get_summary(detail_level="full")
-
     for fn in [
         set_overview,
         add_state,
@@ -173,8 +188,8 @@ def create_fsm_tools(builder: FSMBuilder) -> ToolRegistry:
         add_transition,
         remove_transition,
         set_initial_state,
-        validate,
-        get_summary,
+        _make_validate_tool(builder),
+        _make_summary_tool(builder),
     ]:
         registry.register(fn._tool_definition)
 
@@ -254,30 +269,14 @@ def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
             )
         )
 
-    @tool
-    def validate() -> str:
-        """Validate the artifact. Returns errors and warnings. Call before concluding."""
-        errors = builder.validate_complete()
-        warnings = builder.validate_partial()
-        if errors:
-            return f"ERRORS: {'; '.join(errors)}"
-        if warnings:
-            return f"Valid (warnings: {'; '.join(warnings)})"
-        return "Valid: no errors or warnings"
-
-    @tool
-    def get_summary() -> str:
-        """Get the current builder state as a human-readable summary."""
-        return builder.get_summary(detail_level="full")
-
     for fn in [
         set_overview,
         add_step,
         remove_step,
         set_step_transition,
         set_initial_step,
-        validate,
-        get_summary,
+        _make_validate_tool(builder),
+        _make_summary_tool(builder),
     ]:
         registry.register(fn._tool_definition)
 
@@ -350,30 +349,14 @@ def create_agent_tools(builder: AgentBuilder) -> ToolRegistry:
         warnings = builder.set_config(**kwargs)
         return _fmt("Config updated", warnings)
 
-    @tool
-    def validate() -> str:
-        """Validate the artifact. Returns errors and warnings. Call before concluding."""
-        errors = builder.validate_complete()
-        warnings = builder.validate_partial()
-        if errors:
-            return f"ERRORS: {'; '.join(errors)}"
-        if warnings:
-            return f"Valid (warnings: {'; '.join(warnings)})"
-        return "Valid: no errors or warnings"
-
-    @tool
-    def get_summary() -> str:
-        """Get the current builder state as a human-readable summary."""
-        return builder.get_summary(detail_level="full")
-
     for fn in [
         set_overview,
         set_agent_type,
         add_tool,
         remove_tool,
         set_config,
-        validate,
-        get_summary,
+        _make_validate_tool(builder),
+        _make_summary_tool(builder),
     ]:
         registry.register(fn._tool_definition)
 

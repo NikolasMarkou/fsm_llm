@@ -154,10 +154,8 @@ class HumanInTheLoop:
                 approved = False
             elif error_container:
                 raise error_container[0]
-            elif result_container:
-                approved = result_container[0]
             else:
-                approved = False
+                approved = result_container[0]
         else:
             approved = self._approval_callback(request)
 
