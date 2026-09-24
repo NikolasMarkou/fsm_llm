@@ -154,6 +154,9 @@ class ContextKeys:
     # HITL
     APPROVAL_REQUIRED = "approval_required"
     APPROVAL_GRANTED = "approval_granted"
+    # Driver-only grant: the exact approved call. Internal prefix, so core drops
+    # it from every model extraction; only the approval driver writes it.
+    DRIVER_APPROVAL = "_approval_granted"
 
     # Agent trace
     AGENT_TRACE = "agent_trace"

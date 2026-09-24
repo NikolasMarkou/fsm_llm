@@ -278,6 +278,7 @@ class BaseAgent(ABC):
         (ReactAgent, ReflexionAgent).  Subclasses must set ``self.hitl``
         to a :class:`HumanInTheLoop` instance (or ``None``).
         """
+        from .handlers import approval_grant
         from .hitl import HumanInTheLoop
         from .tools import normalize_tool_input
 
@@ -303,11 +304,18 @@ class BaseAgent(ABC):
         )
 
         approved = hitl.request_approval(tool_call, current_context)
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-004
+        # The public keys only route the FSM (the model can forge them). The
+        # driver-only grant, bound to the exact call the human saw, is what
+        # AgentHandlers.approval_refusal checks. Do NOT write a bare True here
+        # and do NOT write it on denial: a grant must name its one call.
+        grant = approval_grant(tool_name, tool_input) if approved else None
         api.update_context(
             conv_id,
             {
                 ContextKeys.APPROVAL_GRANTED: approved,
                 ContextKeys.APPROVAL_REQUIRED: False,
+                ContextKeys.DRIVER_APPROVAL: grant,
             },
         )
         if not approved:

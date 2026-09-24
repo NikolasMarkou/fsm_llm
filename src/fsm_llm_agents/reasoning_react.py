@@ -162,7 +162,13 @@ class ReasoningReactAgent(BaseAgent):
         # `_register_handlers` via `_standard_run`'s `handlers=` parameter.
         # A fresh instance needs no `.reset()`. Do NOT reintroduce
         # `self._handlers = AgentHandlers(...)` — see decisions.md D-012.
-        handlers = AgentHandlers(self.tools)
+        # plan-2026-09-24T091842-c1d5bfbc/D-004: the refusal is fed under the
+        # predicate that registers the gate in _register_handlers (fail
+        # closed: a gated call without a driver grant never runs).
+        hitl = self.hitl
+        gated = hitl is not None and hitl.has_approval_policy
+        predicate = hitl.requires_approval if hitl is not None and gated else None
+        handlers = AgentHandlers(self.tools, requires_approval=predicate)
 
         # Build FSM from tool registry
         has_approval_tools = any(t.requires_approval for t in self.tools.list_tools())
@@ -213,6 +219,15 @@ class ReasoningReactAgent(BaseAgent):
             if tool_name != reason_name:
                 return base_handler.execute_tool(context)
 
+            # plan-2026-09-24T091842-c1d5bfbc/D-004: the same refusal and
+            # one-call grant consumption as execute_tool; `reason` is a tool
+            # the HITL policy may gate too.
+            refusal = base_handler.approval_refusal(context)
+            if refusal is not None:
+                return refusal
+            return base_handler.consume_approval(context, run_reason(context))
+
+        def run_reason(context: dict[str, Any]) -> dict[str, Any]:
             # Extract problem from tool input
             tool_input = context.get(ContextKeys.TOOL_INPUT) or {}
             if isinstance(tool_input, str):

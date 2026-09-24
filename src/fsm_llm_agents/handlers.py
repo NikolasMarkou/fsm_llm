@@ -12,15 +12,42 @@ from fsm_llm.logging import logger
 
 from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import AgentStep, ToolCall
+from .hitl import ApprovalPolicy
 from .tools import ToolRegistry, normalize_tool_input
 from .truncation import smart_truncate
+
+
+def approval_grant(tool_name: Any, tool_input: Any) -> dict[str, Any]:
+    """The driver grant for one call: ``{"tool_name", "parameters"}``.
+
+    Shared by the approval driver (``BaseAgent._handle_hitl_approval``, which
+    writes it) and :meth:`AgentHandlers.approval_refusal` (which compares it),
+    so both normalize the call the same way. ``tool_input`` is normalized with
+    :func:`normalize_tool_input`; never raises.
+    """
+    return {
+        "tool_name": str(tool_name),
+        "parameters": normalize_tool_input(tool_input),
+    }
 
 
 class AgentHandlers:
     """Collection of handler functions for agent FSM operations."""
 
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        requires_approval: ApprovalPolicy | None = None,
+    ) -> None:
+        """
+        :param registry: Tools the agent may run.
+        :param requires_approval: The agent's HITL policy
+            (``hitl.requires_approval``), passed only under the predicate that
+            builds ``await_approval`` and registers the gate. When set, a
+            known tool it gates runs only on a matching driver grant.
+        """
         self.registry = registry
+        self.requires_approval = requires_approval
         self._current_iteration = 0
         self._consecutive_no_tool = 0
 
@@ -117,6 +144,10 @@ class AgentHandlers:
                 ContextKeys.TOOL_STATUS: "skipped",
                 **clear,
             }
+
+        refusal = self.approval_refusal(context)
+        if refusal is not None:
+            return refusal
 
         # Reset stall counter — a tool was actually selected
         self._consecutive_no_tool = 0
@@ -235,15 +266,68 @@ class AgentHandlers:
 
         Called as a POST_TRANSITION handler when entering the 'act' state.
         """
-        delta = self._run_selected_tool(context)
+        return self.consume_approval(context, self._run_selected_tool(context))
+
+    def approval_refusal(self, context: dict[str, Any]) -> dict[str, Any] | None:
+        """Refusal delta for a gated call without its driver grant, else None.
+
+        Only a known tool the ``requires_approval`` predicate gates is checked;
+        with no predicate this always returns None.
+        """
+        tool_name = context.get(ContextKeys.TOOL_NAME)
+        if self.requires_approval is None or not tool_name:
+            return None
+        if tool_name == ContextKeys.NO_TOOL or str(tool_name) not in self.registry:
+            return None
+        # Pre-recovery input: the driver approved the call as it was selected.
+        call = approval_grant(tool_name, context.get(ContextKeys.TOOL_INPUT))
+        tool_call = ToolCall(
+            tool_name=call["tool_name"],
+            parameters=call["parameters"],
+            reasoning=context.get(ContextKeys.REASONING, ""),
+        )
+        if not self.requires_approval(tool_call, context):
+            return None
+        if context.get(ContextKeys.DRIVER_APPROVAL) == call:
+            return None
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-004
+        # The security boundary is HERE, not the FSM route: a model can extract
+        # the public approval_granted from any state and route
+        # await_approval -> act. Do NOT trust approval_granted or
+        # approval_required here; call the predicate and require the driver-only
+        # grant for this exact call. Do NOT record an observation (a refused
+        # call is not conclude evidence) and do NOT clear the selection (the
+        # driver asks for it next iteration). A grant for another call is void.
+        logger.warning(f"Refused gated tool '{tool_name}': no approval for this call")
+        return {
+            ContextKeys.TOOL_RESULT: (
+                f"Tool '{tool_name}' needs human approval before it can run."
+            ),
+            ContextKeys.TOOL_STATUS: "awaiting_approval",
+            ContextKeys.APPROVAL_REQUIRED: True,
+            ContextKeys.APPROVAL_GRANTED: None,
+            ContextKeys.DRIVER_APPROVAL: None,
+        }
+
+    def consume_approval(
+        self, context: dict[str, Any], delta: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Add the approval clears to a tool-executor delta (one approval = one call)."""
         # DECISION plan-2026-09-24T045559-3e4eb3e5/D-015
         # Do NOT let an approval outlive the single tool call it was granted
         # for. The driver asks only while approval_granted is unset, so a stale
         # True skipped the callback and routed await_approval -> act unasked.
         # Kept while approval_required is set (the call is still pending).
+        # Extended by plan-2026-09-24T091842-c1d5bfbc/D-004: the driver grant is
+        # spent by any executor turn that is not a refusal, so it covers one
+        # call; a refusal clears it itself.
         pending = context.get(ContextKeys.APPROVAL_REQUIRED)
         if ContextKeys.APPROVAL_GRANTED in context and not pending:
             delta = {**delta, ContextKeys.APPROVAL_GRANTED: None}
+        if ContextKeys.DRIVER_APPROVAL in context:
+            refused = delta.get(ContextKeys.TOOL_STATUS) == "awaiting_approval"
+            if not refused:
+                delta = {**delta, ContextKeys.DRIVER_APPROVAL: None}
         return delta
 
     def classification_tool_override(self, context: dict[str, Any]) -> dict[str, Any]:

@@ -111,7 +111,14 @@ class ReflexionAgent(BaseAgent):
         # see the fuller note in react.py's ReactAgent.run() (D-014). A fresh
         # instance needs no `.reset()`. Do NOT reintroduce
         # `self._handlers = AgentHandlers(...)` — see decisions.md D-012.
-        handlers = AgentHandlers(self.tools)
+        # plan-2026-09-24T091842-c1d5bfbc/D-004: the refusal is fed under the
+        # predicate that registers the gate below; Reflexion has no
+        # await_approval state, so the refusal is what stops a gated tool
+        # from running on `act` entry before the driver asks.
+        hitl = self.hitl
+        gated = hitl is not None and hitl.has_approval_policy
+        predicate = hitl.requires_approval if hitl is not None and gated else None
+        handlers = AgentHandlers(self.tools, requires_approval=predicate)
 
         fsm_def = build_reflexion_fsm(
             self.tools,

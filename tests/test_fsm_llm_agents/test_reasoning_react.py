@@ -219,8 +219,8 @@ class TestReasoningReactAgentHandlerReset:
         created_instances = []
         real_agent_handlers = rr_module.AgentHandlers
 
-        def tracking_ctor(registry_arg):
-            instance = real_agent_handlers(registry_arg)
+        def tracking_ctor(registry_arg, **kwargs):
+            instance = real_agent_handlers(registry_arg, **kwargs)
             created_instances.append(instance)
             return instance
 

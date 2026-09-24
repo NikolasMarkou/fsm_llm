@@ -25,7 +25,7 @@ from .definitions import AgentConfig, AgentResult
 from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers
-from .hitl import HumanInTheLoop, make_hitl_checker
+from .hitl import ApprovalPolicy, HumanInTheLoop, make_hitl_checker
 from .tools import ToolRegistry
 
 
@@ -95,7 +95,7 @@ class ReactAgent(BaseAgent):
         # `run()` call can ever overwrite the reference this call is about
         # to use. Do NOT reintroduce `self._handlers = AgentHandlers(...)`
         # in this method — see decisions.md D-014.
-        handlers = AgentHandlers(self.tools)
+        handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
 
         # The await_approval state must be built under the SAME predicate that
         # registers the runtime approval gate (see _hitl_active / _register_handlers).
@@ -138,7 +138,7 @@ class ReactAgent(BaseAgent):
         # See D-014 note in run() above — call-local handlers, threaded
         # explicitly through `_standard_run_stream`'s `handlers=` parameter,
         # never assigned to `self._handlers`.
-        handlers = AgentHandlers(self.tools)
+        handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
         fsm_def = build_react_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
@@ -172,6 +172,15 @@ class ReactAgent(BaseAgent):
         # (hitl.approval_policy); the per-tool requires_approval attribute does
         # NOT drive runtime approval, so it must NOT gate this predicate.
         return self.hitl is not None and self.hitl.has_approval_policy
+
+    @property
+    def _approval_predicate(self) -> ApprovalPolicy | None:
+        # D-001 extended by plan-2026-09-24T091842-c1d5bfbc/D-004: the refusal
+        # in AgentHandlers is fed under the same _hitl_active predicate.
+        if not self._hitl_active:
+            return None
+        assert self.hitl is not None  # narrowed by _hitl_active
+        return self.hitl.requires_approval
 
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
         """Handle HITL approval gates before each converse()."""
