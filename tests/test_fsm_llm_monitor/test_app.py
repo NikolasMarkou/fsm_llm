@@ -1044,6 +1044,31 @@ class TestApiKeyGate:
         output = buf.getvalue()
         assert "previously configured API key is being cleared" not in output
 
+    @pytest.mark.parametrize("bad_key", ["", "   ", "\t\n"])
+    def test_configure_rejects_empty_api_key(self, bad_key):
+        """D-006 (P2-W5): an empty or whitespace-only programmatic key raises.
+        Accepting "" let an empty X-API-Key header authenticate
+        (compare_digest(b"", b"") is True); the prior key must stay in force."""
+        from fsm_llm_monitor import server as server_module
+
+        configure(manager=InstanceManager(), api_key="s3cr3t")
+        with pytest.raises(ValueError, match="api_key"):
+            configure(manager=InstanceManager(), api_key=bad_key)
+        assert server_module._api_key == "s3cr3t"
+        client = TestClient(app)
+        resp = client.delete("/api/dashboard/config", headers={"X-API-Key": ""})
+        assert resp.status_code == 401
+
+    def test_empty_env_api_key_still_means_unset(self, monkeypatch):
+        """D-006: FSM_LLM_MONITOR_API_KEY="" keeps its unset meaning (no auth)."""
+        from fsm_llm_monitor import server as server_module
+
+        monkeypatch.setenv("FSM_LLM_MONITOR_API_KEY", "")
+        configure(manager=InstanceManager())
+        assert server_module._api_key is None
+        client = TestClient(app)
+        assert client.delete("/api/dashboard/config").status_code == 200
+
     @pytest.mark.parametrize(
         "method,path",
         [

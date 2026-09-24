@@ -163,9 +163,17 @@ def configure(
         call in the same process, or auth will silently disable itself. A
         WARNING is logged (D-016) when this specific case — a previously-set
         key being cleared by a call that did not itself supply ``api_key`` —
-        is detected.
+        is detected. An empty or whitespace-only ``api_key`` raises
+        ``ValueError``; an empty env var still means no key.
     """
     global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX, _api_key
+    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006: raise on an empty or
+    # whitespace-only api_key, before any global changes. Do NOT store it
+    # (compare_digest(b"", b"") is True, so an empty header would authenticate)
+    # and do NOT map it to None (a caller passing os.getenv("KEY", "") would
+    # silently get an open monitor). The env var "" still means unset.
+    if api_key is not None and not api_key.strip():
+        raise ValueError("api_key must be a non-empty string, or None for no auth")
     new_api_key = (
         api_key
         if api_key is not None
