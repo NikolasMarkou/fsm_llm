@@ -320,9 +320,14 @@ class BaseAgent(ABC):
             return
 
         current_context = api.get_data(conv_id)
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-023
+        # Ask unless approval_granted is exactly True, and store a strict bool.
+        # Do NOT test truthiness: await_approval routes on == True / == False
+        # only, so a model-written "yes" or a callback's None parked the run
+        # there, unasked, until BudgetExhaustedError.
         if not (
             current_context.get(ContextKeys.APPROVAL_REQUIRED)
-            and not current_context.get(ContextKeys.APPROVAL_GRANTED)
+            and current_context.get(ContextKeys.APPROVAL_GRANTED) is not True
         ):
             return
 
@@ -336,7 +341,7 @@ class BaseAgent(ABC):
             reasoning=reasoning,
         )
 
-        approved = hitl.request_approval(tool_call, current_context)
+        approved = hitl.request_approval(tool_call, current_context) is True
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-004
         # The public keys only route the FSM (the model can forge them). The
         # driver-only grant, bound to the exact call the human saw, is what

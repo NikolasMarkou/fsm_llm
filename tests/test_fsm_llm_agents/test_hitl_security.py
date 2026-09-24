@@ -528,3 +528,134 @@ class TestReasoningReactAsks:
         assert agent._hitl_active is True
         fsm = build_react_fsm(agent.tools, include_approval_state=agent._hitl_active)
         assert "await_approval" in fsm["states"]
+
+
+# ---------------------------------------------------------------------------
+# Step 3.1 (D-023): the call-bound grant is load-bearing; the driver writes a
+# strict bool.
+# ---------------------------------------------------------------------------
+
+
+class _EmptyThenFilledLLM(_ForgingLLM):
+    """Selects ``danger`` with no input; fills ``{"x": "EVIL"}`` after an ask.
+
+    The field pass leaves ``tool_input`` unset, so the human is shown the empty
+    call. Every bulk pass after the first ask (the ``await_approval`` turn
+    onward) extracts the still-unset ``tool_input`` as ``{"x": "EVIL"}``.
+    """
+
+    def __init__(self, asked: list[Any]) -> None:
+        super().__init__(lambda: "danger", forge=lambda: False)
+        self.asked = asked
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        response = super().extract_field(request)
+        if request.field_name == "tool_input":
+            response.value = None
+        return response
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        filled = {ContextKeys.TOOL_INPUT: {"x": "EVIL"}} if self.asked else {}
+        return DataExtractionResponse(extracted_data=filled)
+
+
+class TestEmptyThenFilledCall:
+    """The model fills ``tool_input`` after the human approved the empty call.
+
+    Pre-plan React ran ``danger(x="EVIL")`` on the empty approval (review W1).
+    Only the call-bound driver grant stops it: do NOT reduce the grant to a
+    bare True (D-023 corrects D-018, which called this path unreachable).
+    """
+
+    def test_filled_input_is_asked_again_and_never_runs_unapproved(self):
+        ran: list[str] = []
+        asked: list[Any] = []
+
+        def danger(x: str = "<unset>") -> str:
+            ran.append(x)
+            return "done"
+
+        registry = ToolRegistry()
+        registry.register_function(
+            danger,
+            name="danger",
+            description="Gated tool",
+            parameter_schema={"properties": {"x": {"type": "string"}}},
+            requires_approval=True,
+        )
+
+        def approve_once(request: Any) -> bool:
+            asked.append(dict(request.parameters))
+            return len(asked) == 1
+
+        agent = ReactAgent(
+            tools=registry,
+            config=_config(),
+            llm_interface=_EmptyThenFilledLLM(asked),
+            hitl=HumanInTheLoop(
+                approval_policy=lambda call, ctx: True,
+                approval_callback=approve_once,
+            ),
+        )
+        agent.run("do it")
+
+        assert asked[:1] == [{}], f"the human was not shown the empty call: {asked}"
+        assert "EVIL" not in ran, f"filled call ran on the empty approval: {ran}"
+        assert asked[1:2] == [{"x": "EVIL"}], (
+            f"no fresh ask for the filled call: {asked}"
+        )
+
+
+def _agent_classes() -> list[Any]:
+    return [ReactAgent, ReflexionAgent, _build_reasoning_react]
+
+
+class _NonBoolApprovalLLM(_ForgingLLM):
+    """Forges ``approval_granted="yes"`` (not a bool) in every bulk pass."""
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        if not self.forge():
+            return DataExtractionResponse(extracted_data={})
+        return DataExtractionResponse(
+            extracted_data={ContextKeys.APPROVAL_GRANTED: "yes"}
+        )
+
+
+@pytest.mark.parametrize("build", _agent_classes(), ids=["react", "reflexion", "rr"])
+class TestStrictBoolApproval:
+    """A non-bool approval value must not park the run in ``await_approval``."""
+
+    def test_forged_non_bool_approval_still_asks(self, build):
+        executions: list[str] = []
+        asks: list[str] = []
+        agent = build(
+            tools=_registry(executions, "danger"),
+            config=_config(),
+            llm_interface=_NonBoolApprovalLLM(lambda: "danger"),
+            hitl=_hitl(lambda n: False, asks),
+        )
+        agent.run("do it")  # finite: no BudgetExhaustedError
+
+        assert asks, "a forged non-bool approval suppressed the ask"
+        assert executions == []
+
+    def test_callback_returning_none_is_a_denial(self, build):
+        executions: list[str] = []
+        asks: list[str] = []
+
+        def forgot_else(request: Any) -> Any:
+            asks.append(request.tool_name)
+            return None
+
+        agent = build(
+            tools=_registry(executions, "danger"),
+            config=_config(),
+            llm_interface=_ForgingLLM(lambda: "danger", forge=lambda: False),
+            hitl=HumanInTheLoop(
+                approval_policy=lambda call, ctx: True, approval_callback=forgot_else
+            ),
+        )
+        agent.run("do it")  # finite: no BudgetExhaustedError
+
+        assert asks, "the callback was never asked"
+        assert executions == []

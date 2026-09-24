@@ -298,6 +298,9 @@ class AgentHandlers:
         # grant for this exact call. Do NOT record an observation (a refused
         # call is not conclude evidence) and do NOT clear the selection (the
         # driver asks for it next iteration). A grant for another call is void.
+        # Do NOT reduce the grant to a bare True: the model can fill an empty
+        # tool_input on the await_approval turn after the human approved the
+        # empty call (D-023, pinned by TestEmptyThenFilledCall).
         logger.warning(f"Refused gated tool '{tool_name}': no approval for this call")
         return {
             ContextKeys.TOOL_RESULT: (
