@@ -229,7 +229,16 @@ class MetaBuilderAgent:
                     "type": "object",
                     "properties": {
                         "step_id": {"type": "string"},
-                        "step_type": {"type": "string"},
+                        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-010: the
+                        # enum is the grammar that steers the model (ollama's
+                        # ``format`` is this schema verbatim). Do NOT drop it
+                        # back to a free string or hand-copy the list: a free
+                        # string lets the model invent a type that only fails
+                        # later in ``validate_complete``.
+                        "step_type": {
+                            "type": "string",
+                            "enum": sorted(WorkflowBuilder.VALID_STEP_TYPES),
+                        },
                         "name": {"type": "string"},
                         "description": {"type": "string"},
                     },

@@ -449,3 +449,79 @@ class TestLlmCallProviderFailure:
 
         assert "Say 'build it' when ready" in reply
         assert reply.strip() != ""
+
+
+class TestWorkflowStepTypeEnum:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-010: the workflow extraction
+    schema constrains ``step_type`` to ``WorkflowBuilder.VALID_STEP_TYPES`` at
+    extraction time, and the enum survives into the ``response_format`` that
+    is actually sent (and into Ollama's ``format`` grammar)."""
+
+    @staticmethod
+    def _step_type_prop(schema: dict) -> dict:
+        return schema["properties"]["steps"]["items"]["properties"]["step_type"]
+
+    def test_schema_step_type_is_the_valid_set(self):
+        from fsm_llm_agents.meta_builders import WorkflowBuilder
+
+        prop = self._step_type_prop(MetaBuilderAgent._ARTIFACT_SCHEMAS["workflow"])
+        assert prop["type"] == "string"
+        assert prop["enum"] == sorted(WorkflowBuilder.VALID_STEP_TYPES)
+
+    def test_enum_reaches_response_format_and_ollama_format(self, monkeypatch):
+        import json
+
+        from litellm.llms.ollama.chat.transformation import OllamaChatConfig
+
+        from fsm_llm_agents.meta_builders import WorkflowBuilder
+
+        sent: list[dict] = []
+        spec = {
+            "name": "Flow",
+            "description": "A flow",
+            "workflow_id": "wf1",
+            "steps": [
+                {
+                    "step_id": "s1",
+                    "step_type": "auto_transition",
+                    "name": "Start",
+                    "description": "Begin",
+                }
+            ],
+        }
+
+        class _Msg:
+            content = json.dumps(spec)
+
+        class _Choice:
+            message = _Msg()
+
+        class _Resp:
+            choices: ClassVar[list] = [_Choice()]
+
+        def _completion(**kwargs):
+            sent.append(kwargs)
+            return _Resp()
+
+        monkeypatch.setattr("litellm.completion", _completion)
+        agent = MetaBuilderAgent(
+            config=MetaBuilderConfig(model="ollama_chat/qwen3.5:4b")
+        )
+        builder = agent._create_builder(ArtifactType.WORKFLOW)
+        agent._run_deterministic_pipeline(
+            "build a flow", ArtifactType.WORKFLOW, builder
+        )
+
+        assert len(sent) == 1
+        response_format = sent[0]["response_format"]
+        schema = response_format["json_schema"]["schema"]
+        expected = sorted(WorkflowBuilder.VALID_STEP_TYPES)
+        assert self._step_type_prop(schema)["enum"] == expected
+
+        mapped = OllamaChatConfig().map_openai_params(
+            {"response_format": response_format},
+            {},
+            "qwen3.5:4b",
+            False,
+        )
+        assert self._step_type_prop(mapped["format"])["enum"] == expected
