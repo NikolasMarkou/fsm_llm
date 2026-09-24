@@ -289,6 +289,7 @@ def make_iteration_limiter(
     forced: dict[str, Any],
     *,
     context_max_key: str | None = None,
+    early: bool = True,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """
     Build a PRE_TRANSITION iteration limiter that counts in context.
@@ -300,10 +301,13 @@ def make_iteration_limiter(
             is hit, e.g. ``{SHOULD_TERMINATE: True}``.
         context_max_key: Optional context key whose value overrides
             ``max_iterations`` at call time.
+        early: ``True`` (default) triggers at ``limit - 1``; ``False``
+            triggers at ``limit`` (maker_checker only, see D-014).
 
     Returns:
         A handler returning ``{ITERATION_COUNT: count}``, plus ``forced`` once
-        ``count >= limit - 1``. It never raises.
+        ``count >= limit - 1`` (``count >= limit`` when not ``early``). It
+        never raises.
 
     The transition decision is already made before a PRE_TRANSITION handler
     fires, so the limiter triggers one iteration early (``>= max - 1``) and
@@ -322,8 +326,55 @@ def make_iteration_limiter(
             else max_iterations
         )
         logger.debug(LogMessages.ITERATION.format(current=count, max=limit))
-        if count >= limit - 1:
+        if count >= (limit - 1 if early else limit):
             return {ContextKeys.ITERATION_COUNT: count, **forced_updates}
         return {ContextKeys.ITERATION_COUNT: count}
 
     return check_iteration_limit
+
+
+# DECISION plan-2026-09-24T045559-3e4eb3e5/D-013: core extracts a key only
+# while it is unset (pipeline skip-if-set), so a draft or verdict left in
+# context is never re-judged and
+# a redo loop replays round 1. Do NOT clear these keys on entry to the JUDGING
+# state instead: that erases the limiter's forced pass (PRE_TRANSITION runs
+# before entry) and the loop runs to the 3x ceiling. Do NOT delete the draft
+# without stashing it: the redo state's prompt must still see it.
+def make_redraft_handlers(
+    draft_key: str,
+    previous_key: str,
+    *,
+    clear_on_exit: tuple[str, ...] = (),
+) -> tuple[
+    Callable[[dict[str, Any]], dict[str, Any]],
+    Callable[[dict[str, Any]], dict[str, Any]],
+]:
+    """
+    Build the (entry, exit) handler pair for a state that redoes a draft.
+
+    Args:
+        draft_key: The key the redo state must re-extract.
+        previous_key: Visible key the old draft is moved to on entry.
+        clear_on_exit: Keys deleted on exit, once the redo state has
+            consumed them (e.g. feedback the next judge must rewrite).
+
+    Returns:
+        ``(on_entry, on_exit)``, for ``on_state_entry`` and ``on_state_exit``
+        of the redo state. Each returns a context delta in which ``None``
+        deletes a key; neither raises. ``on_exit`` restores ``draft_key``
+        from ``previous_key`` when the redo state produced no new draft.
+    """
+
+    def on_entry(context: dict[str, Any]) -> dict[str, Any]:
+        delta: dict[str, Any] = {draft_key: None}
+        if context.get(draft_key) is not None:
+            delta[previous_key] = context[draft_key]
+        return delta
+
+    def on_exit(context: dict[str, Any]) -> dict[str, Any]:
+        delta: dict[str, Any] = dict.fromkeys(clear_on_exit)
+        if context.get(draft_key) is None:
+            delta[draft_key] = context.get(previous_key)
+        return delta
+
+    return on_entry, on_exit

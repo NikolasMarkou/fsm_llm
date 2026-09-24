@@ -25,7 +25,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, EvaluationResult
 from .fsm_definitions import build_evalopt_fsm
-from .handlers import make_iteration_limiter
+from .handlers import make_iteration_limiter, make_redraft_handlers
 
 
 class EvaluatorOptimizerAgent(BaseAgent):
@@ -118,6 +118,27 @@ class EvaluatorOptimizerAgent(BaseAgent):
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(EvalOptStates.EVALUATE)
             .do(self._run_evaluation)
+        )
+
+        # DECISION plan-2026-09-24T045559-3e4eb3e5/D-013: refine must re-extract
+        # generated_output (core skips a set key), so entering refine moves
+        # the draft to previous_output and leaving it restores the draft if
+        # none was produced. Do NOT drop the stash: refine's prompt reads it.
+        # The evaluation keys need no clearing: _run_evaluation rewrites them.
+        on_entry, on_exit = make_redraft_handlers(
+            ContextKeys.GENERATED_OUTPUT, ContextKeys.PREVIOUS_OUTPUT
+        )
+        api.register_handler(
+            api.create_handler(HandlerNames.EVAL_OPT_REFINE_ENTRY)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_entry(EvalOptStates.REFINE)
+            .do(on_entry)
+        )
+        api.register_handler(
+            api.create_handler(HandlerNames.EVAL_OPT_REFINE_EXIT)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_exit(EvalOptStates.REFINE)
+            .do(on_exit)
         )
 
         # Iteration limiter

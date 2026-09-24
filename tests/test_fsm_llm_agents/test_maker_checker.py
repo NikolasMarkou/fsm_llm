@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from fsm_llm.definitions import (
+    BulkExtractionRequest,
+    DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     FSMDefinition,
@@ -513,3 +515,93 @@ class TestCheckStateNeverBlocks:
         # Measured 8 turns: the limiter forces checker_passed at iteration 6,
         # then revise -> check -> output. The hard ceiling is 3 x 6 = 18.
         assert loop_counts[0] <= max_iterations + 2
+
+
+# -------------------------------------------------------------------------
+# Step 3.1: each check round is judged afresh (core extracts a key only
+# when it is unset, so a stale verdict/draft used to stick for the run)
+# -------------------------------------------------------------------------
+
+
+class _TwoRoundLLM(LLMInterface):
+    """Maker drafts ``d1``, ``d2``, ...; the checker rejects round 1 and
+    approves round 2. Records every ``checker_passed`` extraction."""
+
+    def __init__(self) -> None:
+        self.drafts = 0
+        self.verdicts: list[bool] = []
+
+    def extract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
+        if "You are the MAKER" not in request.system_prompt:
+            return DataExtractionResponse(extracted_data={})
+        self.drafts += 1
+        return DataExtractionResponse(
+            extracted_data={ContextKeys.DRAFT_OUTPUT: f"d{self.drafts}"}
+        )
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        name = request.field_name
+        value: Any
+        if name == ContextKeys.CHECKER_PASSED:
+            value = len(self.verdicts) >= 1
+            self.verdicts.append(value)
+        elif name == "quality_score":
+            value = 0.1
+        else:
+            value = f"feedback {len(self.verdicts)}"
+        return FieldExtractionResponse(
+            field_name=name, value=value, confidence=0.9, reasoning="m", is_valid=True
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="final answer", message_type="response", reasoning="mock"
+        )
+
+
+class TestEachRoundIsRejudged:
+    def test_second_check_sees_revised_draft_and_new_verdict(self):
+        llm = _TwoRoundLLM()
+        agent = MakerCheckerAgent(
+            maker_instructions="Write a haiku",
+            checker_instructions="Check the syllables",
+            config=AgentConfig(max_iterations=10),
+            llm_interface=llm,
+        )
+        result = agent.run("Write a haiku about rain")
+
+        # Pre-fix: checker_passed was extracted once ([False]), revision_count
+        # stayed 1 and the draft stayed d1 until the limiter forced a pass.
+        assert llm.verdicts == [False, True]
+        assert result.final_context[ContextKeys.REVISION_COUNT] == 2
+        assert result.final_context[ContextKeys.DRAFT_OUTPUT] == "d2"
+        assert not result.final_context.get(ContextKeys.MAX_ITERATIONS_REACHED)
+
+    def test_checker_judges_at_smallest_budget(self):
+        # D-014: with the shared `-1` the limiter forced a pass before the
+        # first check turn at max_iterations=2, so the checker never judged.
+        llm = _TwoRoundLLM()
+        agent = MakerCheckerAgent(
+            maker_instructions="Write a haiku",
+            checker_instructions="Check the syllables",
+            config=AgentConfig(max_iterations=2),
+            llm_interface=llm,
+        )
+        agent.run("Write a haiku about rain")
+        assert llm.verdicts[:1] == [False]
+
+    def test_limiter_triggers_at_max_not_max_minus_one(self):
+        agent = MakerCheckerAgent(
+            maker_instructions="w",
+            checker_instructions="c",
+            config=AgentConfig(max_iterations=5),
+        )
+        limiter = agent._make_iteration_limiter()
+        assert ContextKeys.CHECKER_PASSED not in limiter(
+            {ContextKeys.ITERATION_COUNT: 3}
+        )
+        assert limiter({ContextKeys.ITERATION_COUNT: 4})[ContextKeys.CHECKER_PASSED]

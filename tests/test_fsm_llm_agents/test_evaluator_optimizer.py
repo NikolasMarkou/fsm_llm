@@ -463,3 +463,55 @@ class TestGenerateStateNeverBlocks:
         assert loop_counts[0] < 3 * max_iterations
         # No output was ever produced, so this is not a real completion.
         assert result.success is False
+
+
+class _VersionedLLM(LLMInterface):
+    """Generator that produces ``v1``, ``v2``, ... on each ``generated_output``
+    extraction."""
+
+    def __init__(self) -> None:
+        self.versions = 0
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        value = None
+        if request.field_name == ContextKeys.GENERATED_OUTPUT:
+            self.versions += 1
+            value = f"v{self.versions}"
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=0.9 if value else 0.0,
+            reasoning="mock",
+            is_valid=value is not None,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="ok", message_type="response", reasoning="mock"
+        )
+
+
+class TestRefineProducesANewDraft:
+    """Step 3.1: ``refine`` must re-extract ``generated_output`` so each
+    evaluation scores the refined draft, not the first one."""
+
+    def test_evaluation_fn_sees_each_refinement(self):
+        seen: list[str] = []
+
+        def _record(output: str, context: dict) -> EvaluationResult:
+            seen.append(output)
+            return EvaluationResult(passed=False, score=0.1, feedback="bad")
+
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=_record,
+            max_refinements=3,
+            config=AgentConfig(max_iterations=20),
+            llm_interface=_VersionedLLM(),
+        )
+        result = agent.run("Write a poem")
+
+        # Pre-fix: ['v1', 'v1', 'v1', 'v1'].
+        assert seen == ["v1", "v2", "v3", "v4"]
+        assert result.final_context[ContextKeys.GENERATED_OUTPUT] == "v4"

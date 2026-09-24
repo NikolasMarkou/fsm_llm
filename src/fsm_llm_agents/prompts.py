@@ -517,7 +517,7 @@ def build_evalopt_refine_extraction_instructions() -> str:
             "on the feedback provided.",
             "",
             "The feedback from the evaluator is available in the context as "
-            "'refinement_feedback'. Your previous output is in 'generated_output'.",
+            "'refinement_feedback'. Your previous output is in 'previous_output'.",
             "",
             "IMPORTANT: Address ALL feedback points. Do not just repeat the same output.",
             "",
@@ -617,7 +617,7 @@ def build_revise_extraction_instructions(
             f"Original instructions: {maker_instructions}",
             "",
             "The checker's feedback is in 'checker_feedback'. "
-            "Your previous draft is in 'draft_output'.",
+            "Your previous draft is in 'previous_draft'.",
             "",
             "IMPORTANT: Address ALL feedback points. Produce a complete revised draft.",
             "",

@@ -183,12 +183,14 @@ class ContextKeys:
     EVALUATION_RESULT = "evaluation_result"
     REFINEMENT_FEEDBACK = "refinement_feedback"
     REFINEMENT_COUNT = "refinement_count"
+    PREVIOUS_OUTPUT = "previous_output"
 
     # Maker-Checker
     DRAFT_OUTPUT = "draft_output"
     CHECKER_FEEDBACK = "checker_feedback"
     CHECKER_PASSED = "checker_passed"
     REVISION_COUNT = "revision_count"
+    PREVIOUS_DRAFT = "previous_draft"
 
     # Prompt Chaining
     CHAIN_STEP_INDEX = "chain_step_index"
@@ -257,7 +259,11 @@ class HandlerNames:
     PLAN_STEP_CHECKER = "PlanStepChecker"
     REWOO_EXECUTOR = "REWOOExecutor"
     EVAL_OPT_EVALUATOR = "EvalOptEvaluator"
+    EVAL_OPT_REFINE_ENTRY = "EvalOptRefineEntry"
+    EVAL_OPT_REFINE_EXIT = "EvalOptRefineExit"
     MAKER_CHECKER_CHECKER = "MakerCheckerChecker"
+    MAKER_CHECKER_REVISE_ENTRY = "MakerCheckerReviseEntry"
+    MAKER_CHECKER_REVISE_EXIT = "MakerCheckerReviseExit"
     CHAIN_GATE_CHECKER = "ChainGateChecker"
     ORCHESTRATOR_DELEGATOR = "OrchestratorDelegator"
     DEBATE_JUDGE = "DebateJudge"
