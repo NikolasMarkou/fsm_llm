@@ -1028,3 +1028,58 @@ class TestDictParamToolDetection:
         out = registry.execute(ToolCall(tool_name="c", parameters={"config": {"k": 1}}))
         assert out.success, out.error
         assert seen == [{"config": {"k": 1}}]
+
+
+class TestKwargsOnlyTool:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-024 (review W5): a tool whose
+    only parameter is ``**kwargs`` (a zero-argument MCP tool's ``execute``, the
+    monitor's stub tools) is called with keyword arguments, not with the
+    parameters dict as one positional argument."""
+
+    @pytest.mark.parametrize("schema", [None, {"properties": {}}])
+    @pytest.mark.parametrize("params", [{}, {"query": "x"}, {"input": "x"}])
+    def test_sync_kwargs_only_tool(self, schema, params):
+        seen: list[dict] = []
+
+        def stub_fn(**kwargs: Any) -> str:
+            seen.append(kwargs)
+            return "STUB"
+
+        registry = ToolRegistry()
+        registry.register_function(
+            stub_fn, name="stub", description="d", parameter_schema=schema
+        )
+        result = registry.execute(ToolCall(tool_name="stub", parameters=params))
+        assert result.success, result.error
+        assert result.result == "STUB"
+        assert seen == [params]
+
+    def test_async_zero_argument_mcp_style_tool(self):
+        async def execute(**kwargs: Any) -> str:
+            return f"time {sorted(kwargs)}"
+
+        registry = ToolRegistry()
+        registry.register_function(
+            execute,
+            name="get_time",
+            description="d",
+            parameter_schema={"properties": {}},
+        )
+        result = registry.execute(ToolCall(tool_name="get_time", parameters={}))
+        assert result.success, result.error
+        assert result.result == "time []"
+
+    def test_legacy_single_dict_param_still_gets_the_dict(self):
+        seen: list = []
+
+        def legacy(params):
+            seen.append(params)
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register_function(legacy, name="legacy", description="d")
+        result = registry.execute(
+            ToolCall(tool_name="legacy", parameters={"input": "x"})
+        )
+        assert result.success, result.error
+        assert seen == [{"input": "x"}]

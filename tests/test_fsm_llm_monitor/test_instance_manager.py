@@ -753,3 +753,45 @@ class TestAgentConcurrencyHardening:
         v0 = mgr.dashboard_config_version
         mgr.dashboard_config = DashboardConfig()
         assert mgr.dashboard_config_version == v0 + 1
+
+
+class TestStubToolExecution:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-024 (review W5): the stub
+    tools a launched agent gets (``stub_fn(**kwargs)``, no schema) must run."""
+
+    def test_launched_agent_stub_tool_returns_its_response(self, monkeypatch):
+        import pytest
+
+        pytest.importorskip("fsm_llm_agents")
+        from fsm_llm_agents.definitions import ToolCall
+        from fsm_llm_monitor import instance_manager as im
+        from fsm_llm_monitor.definitions import StubToolConfig
+
+        captured: dict = {}
+        done = threading.Event()
+
+        class _CapturingAgent:
+            def __init__(self, **kwargs):
+                captured["tools"] = kwargs["tools"]
+
+            def run(self, task):
+                done.set()
+                raise RuntimeError("stop after capture")
+
+        monkeypatch.setitem(im._AGENT_CLASSES, "ReactAgent", _CapturingAgent)
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+        mgr.launch_agent(
+            agent_type="ReactAgent",
+            task="x",
+            tools_config=[
+                StubToolConfig(name="lookup", description="d", stub_response="STUB")
+            ],
+        )
+        assert done.wait(5), "agent thread never ran"
+
+        registry = captured["tools"]
+        for params in ({}, {"query": "x"}, {"input": "x"}):
+            result = registry.execute(ToolCall(tool_name="lookup", parameters=params))
+            assert result.success, (params, result.error)
+            assert result.result == "STUB"

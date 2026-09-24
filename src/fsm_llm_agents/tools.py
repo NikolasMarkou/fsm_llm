@@ -257,11 +257,15 @@ class ToolRegistry:
         param_count = len(sig.parameters)
         if param_count == 0:
             return fn()
-        if param_count == 1 and not schema_props:
+        first_param = next(iter(sig.parameters.values()))  # param_count >= 1 here
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-024: a lone ``**kwargs``
+        # is not the legacy dict param. Do NOT pass it the dict positionally:
+        # every zero-argument MCP tool and monitor stub tool failed that way.
+        var_kw = first_param.kind is inspect.Parameter.VAR_KEYWORD
+        if param_count == 1 and not schema_props and not var_kw:
             # Legacy pattern: single param with no schema -> pass dict
             return fn(parameters)
         # Detect legacy dict-param pattern: fn(params: dict) with schema
-        first_param = next(iter(sig.parameters.values()))  # param_count >= 1 here
         ann = first_param.annotation
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-024
         # A dict[...] generic or a string annotation (__future__) is the legacy
