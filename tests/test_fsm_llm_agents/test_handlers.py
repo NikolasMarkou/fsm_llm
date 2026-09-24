@@ -2,8 +2,10 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.handlers module."""
 
+from typing import ClassVar
+
 from fsm_llm_agents.constants import ContextKeys, Defaults
-from fsm_llm_agents.handlers import AgentHandlers
+from fsm_llm_agents.handlers import AgentHandlers, make_iteration_limiter
 from fsm_llm_agents.tools import ToolRegistry
 
 
@@ -179,3 +181,61 @@ class TestAgentHandlers:
 
         assert result[ContextKeys.MAX_ITERATIONS_REACHED] is True
         assert result[ContextKeys.SHOULD_TERMINATE] is True
+
+
+class TestMakeIterationLimiter:
+    """Tests for the shared context-counting limiter factory (D-003)."""
+
+    _FORCED: ClassVar[dict[str, bool]] = {
+        ContextKeys.SHOULD_TERMINATE: True,
+        ContextKeys.CHECKER_PASSED: True,
+    }
+
+    def test_count_increments_below_threshold(self):
+        limiter = make_iteration_limiter(10, self._FORCED)
+        assert limiter({}) == {ContextKeys.ITERATION_COUNT: 1}
+        assert limiter({ContextKeys.ITERATION_COUNT: 3}) == {
+            ContextKeys.ITERATION_COUNT: 4
+        }
+
+    def test_triggers_at_max_minus_one(self):
+        limiter = make_iteration_limiter(5, self._FORCED)
+        assert limiter({ContextKeys.ITERATION_COUNT: 2}) == {
+            ContextKeys.ITERATION_COUNT: 3
+        }
+        assert limiter({ContextKeys.ITERATION_COUNT: 3}) == {
+            ContextKeys.ITERATION_COUNT: 4,
+            **self._FORCED,
+        }
+
+    def test_max_iterations_one_triggers_on_first_call(self):
+        limiter = make_iteration_limiter(1, self._FORCED)
+        assert limiter({})[ContextKeys.SHOULD_TERMINATE] is True
+
+    def test_max_iterations_two_triggers_on_first_call(self):
+        limiter = make_iteration_limiter(2, self._FORCED)
+        result = limiter({})
+        assert result[ContextKeys.ITERATION_COUNT] == 1
+        assert result[ContextKeys.CHECKER_PASSED] is True
+
+    def test_context_key_overrides_limit(self):
+        limiter = make_iteration_limiter(100, self._FORCED, context_max_key="_max")
+        assert ContextKeys.SHOULD_TERMINATE in limiter(
+            {"_max": 3, ContextKeys.ITERATION_COUNT: 1}
+        )
+
+    def test_context_key_absent_falls_back_to_max_iterations(self):
+        limiter = make_iteration_limiter(3, self._FORCED, context_max_key="_max")
+        assert ContextKeys.SHOULD_TERMINATE not in limiter({})
+        assert ContextKeys.SHOULD_TERMINATE in limiter({ContextKeys.ITERATION_COUNT: 1})
+
+    def test_forced_keys_returned_verbatim_and_copied(self):
+        forced = {ContextKeys.ALL_COLLECTED: True, ContextKeys.SHOULD_TERMINATE: True}
+        limiter = make_iteration_limiter(1, forced)
+        forced[ContextKeys.ALL_COLLECTED] = False
+        result = limiter({})
+        assert result == {
+            ContextKeys.ITERATION_COUNT: 1,
+            ContextKeys.ALL_COLLECTED: True,
+            ContextKeys.SHOULD_TERMINATE: True,
+        }

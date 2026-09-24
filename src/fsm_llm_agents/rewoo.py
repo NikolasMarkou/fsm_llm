@@ -8,6 +8,7 @@ execute them sequentially (no LLM), then synthesize from evidence.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
@@ -24,6 +25,7 @@ from .constants import (
 from .definitions import AgentConfig, AgentResult, ToolCall
 from .exceptions import AgentError
 from .fsm_definitions import build_rewoo_fsm
+from .handlers import make_iteration_limiter
 from .tools import ToolRegistry
 
 
@@ -100,7 +102,7 @@ class REWOOAgent(BaseAgent):
             .on_state_entry(REWOOStates.EXECUTE_PLANS)
             .do(self._execute_all_plans)
         )
-        self._register_iteration_limiter(api, self._check_iteration_limit)
+        self._register_iteration_limiter(api, self._make_iteration_limiter())
 
     def _execute_all_plans(self, context: dict[str, Any]) -> dict[str, Any]:
         """Execute all planned tool calls, substituting #EN variable references."""
@@ -206,23 +208,20 @@ class REWOOAgent(BaseAgent):
 
         return value
 
-    def _check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Check if the iteration limit has been reached."""
-        iteration = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-
-        if iteration >= self.config.max_iterations:
-            # Also set SHOULD_TERMINATE for consistency with every other
-            # pattern's limiter. REWOO's FSM is currently linear
-            # (plan_all -> execute_plans -> solve) so no transition reads it
-            # today; the flag prevents an unbounded loop if a cycling state is
-            # ever added (AP3-001).
-            return {
-                ContextKeys.ITERATION_COUNT: iteration,
+    def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create the iteration limiter handler (shared rule, see handlers)."""
+        # SHOULD_TERMINATE is set for consistency with every other pattern's
+        # limiter. REWOO's FSM is currently linear
+        # (plan_all -> execute_plans -> solve) so no transition reads it
+        # today; the flag prevents an unbounded loop if a cycling state is
+        # ever added (AP3-001).
+        return make_iteration_limiter(
+            self.config.max_iterations,
+            {
                 ContextKeys.MAX_ITERATIONS_REACHED: True,
                 ContextKeys.SHOULD_TERMINATE: True,
-            }
-
-        return {ContextKeys.ITERATION_COUNT: iteration}
+            },
+        )
 
     def _build_trace(self, final_context: dict[str, Any], iteration: int) -> Any:
         """Build agent trace from final context with REWOO-specific trace format."""

@@ -22,11 +22,11 @@ from .constants import (
     Defaults,
     HandlerNames,
     HandlerPriorities,
-    LogMessages,
     OrchestratorStates,
 )
 from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_orchestrator_fsm
+from .handlers import make_iteration_limiter
 from .tools import ToolRegistry
 
 
@@ -125,7 +125,7 @@ class OrchestratorAgent(BaseAgent):
         )
 
         # Iteration limiter: checks budget on every pre-transition
-        self._register_iteration_limiter(api, self._check_iteration_limit)
+        self._register_iteration_limiter(api, self._make_iteration_limiter())
 
     def _delegate_to_workers(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -202,18 +202,13 @@ class OrchestratorAgent(BaseAgent):
             ContextKeys.SUBTASKS: None,
         }
 
-    def _check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Check if the iteration limit has been reached."""
-        count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-        max_iterations = context.get("_max_iterations", Defaults.MAX_ITERATIONS)
-
-        logger.debug(LogMessages.ITERATION.format(current=count, max=max_iterations))
-
-        if count >= max_iterations:
-            return {
-                ContextKeys.ITERATION_COUNT: count,
+    def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create the iteration limiter handler (shared rule, see handlers)."""
+        return make_iteration_limiter(
+            Defaults.MAX_ITERATIONS,
+            {
                 ContextKeys.ALL_COLLECTED: True,
                 ContextKeys.SHOULD_TERMINATE: True,
-            }
-
-        return {ContextKeys.ITERATION_COUNT: count}
+            },
+            context_max_key="_max_iterations",
+        )

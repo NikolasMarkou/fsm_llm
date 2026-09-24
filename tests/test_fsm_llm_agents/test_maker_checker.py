@@ -382,7 +382,7 @@ class TestMakerCheckerHandlers:
             checker_instructions="review",
         )
         context = {ContextKeys.ITERATION_COUNT: 2}
-        result = agent._check_iteration_limit(context)
+        result = agent._make_iteration_limiter()(context)
         assert result[ContextKeys.ITERATION_COUNT] == 3
         assert ContextKeys.MAX_ITERATIONS_REACHED not in result
 
@@ -394,7 +394,7 @@ class TestMakerCheckerHandlers:
             config=config,
         )
         context = {ContextKeys.ITERATION_COUNT: 4}
-        result = agent._check_iteration_limit(context)
+        result = agent._make_iteration_limiter()(context)
         assert result[ContextKeys.MAX_ITERATIONS_REACHED] is True
         assert result[ContextKeys.CHECKER_PASSED] is True
 

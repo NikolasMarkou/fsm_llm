@@ -325,7 +325,7 @@ class TestEvalOptHandlers:
     def test_check_iteration_limit_under(self):
         agent = EvaluatorOptimizerAgent(evaluation_fn=_always_pass)
         context = {ContextKeys.ITERATION_COUNT: 2}
-        result = agent._check_iteration_limit(context)
+        result = agent._make_iteration_limiter()(context)
         assert result[ContextKeys.ITERATION_COUNT] == 3
         assert ContextKeys.MAX_ITERATIONS_REACHED not in result
 
@@ -333,7 +333,7 @@ class TestEvalOptHandlers:
         config = AgentConfig(max_iterations=5)
         agent = EvaluatorOptimizerAgent(evaluation_fn=_always_pass, config=config)
         context = {ContextKeys.ITERATION_COUNT: 4}
-        result = agent._check_iteration_limit(context)
+        result = agent._make_iteration_limiter()(context)
         assert result[ContextKeys.MAX_ITERATIONS_REACHED] is True
         assert result[ContextKeys.EVALUATION_PASSED] is True
 

@@ -7,6 +7,7 @@ continues until the checker approves or maximum revisions are reached.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
@@ -24,6 +25,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_maker_checker_fsm
+from .handlers import make_iteration_limiter
 
 
 class MakerCheckerAgent(BaseAgent):
@@ -128,7 +130,7 @@ class MakerCheckerAgent(BaseAgent):
         )
 
         # Iteration limiter
-        self._register_iteration_limiter(api, self._check_iteration_limit)
+        self._register_iteration_limiter(api, self._make_iteration_limiter())
 
     def _track_revisions(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -200,15 +202,12 @@ class MakerCheckerAgent(BaseAgent):
 
         return result
 
-    def _check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Check if the iteration limit has been reached."""
-        iteration = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-
-        if iteration >= self.config.max_iterations:
-            return {
-                ContextKeys.ITERATION_COUNT: iteration,
+    def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create the iteration limiter handler (shared rule, see handlers)."""
+        return make_iteration_limiter(
+            self.config.max_iterations,
+            {
                 ContextKeys.MAX_ITERATIONS_REACHED: True,
                 ContextKeys.CHECKER_PASSED: True,
-            }
-
-        return {ContextKeys.ITERATION_COUNT: iteration}
+            },
+        )

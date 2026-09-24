@@ -7,6 +7,7 @@ configurable personas and round limits.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
@@ -24,6 +25,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, DebateRound
 from .fsm_definitions import build_debate_fsm
+from .handlers import make_iteration_limiter
 
 _DEFAULT_PROPOSER_PERSONA = (
     "You are a constructive advocate who builds strong, well-reasoned arguments. "
@@ -120,23 +122,12 @@ class DebateAgent(BaseAgent):
             },
         )
 
-        # 4 states per round (propose/critique/counter/judge) + conclude;
-        # multiplied by DEBATE_STATES_PER_ROUND to account for the
-        # number of FSM transitions each debate round requires.
-        max_fsm_iterations = (
-            self.num_rounds
-            * Defaults.FSM_BUDGET_MULTIPLIER
-            * Defaults.DEBATE_STATES_PER_ROUND
-        )
-        # Store so _make_iteration_limiter can use the same cap (A-ISSUE-006).
-        self._max_fsm_iterations = max_fsm_iterations
-
         return self._standard_run(
             task,
             fsm_def,
             context,
             "debate",
-            max_iterations=max_fsm_iterations,
+            max_iterations=self._fsm_budget(),
             extra_answer_keys=[ContextKeys.JUDGE_VERDICT],
         )
 
@@ -194,25 +185,28 @@ class DebateAgent(BaseAgent):
 
         return handle_judge
 
-    def _make_iteration_limiter(self) -> Any:
-        """Create an iteration limiter handler."""
-        # Use the same cap as max_fsm_iterations to avoid premature termination.
-        # Also set CONSENSUS_REACHED so the FSM transitions to CONCLUDE cleanly
-        # (A-ISSUE-006).
-        max_iters = getattr(
-            self,
-            "_max_fsm_iterations",
+    def _fsm_budget(self) -> int:
+        """FSM budget: a pure function of constructor state, never stored on self.
+
+        4 states per round (propose/critique/counter/judge) + conclude;
+        multiplied by DEBATE_STATES_PER_ROUND to account for the number of
+        FSM transitions each debate round requires.
+        """
+        return (
             self.num_rounds
             * Defaults.FSM_BUDGET_MULTIPLIER
-            * Defaults.DEBATE_STATES_PER_ROUND,
+            * Defaults.DEBATE_STATES_PER_ROUND
         )
 
-        def check_limit(context: dict[str, Any]) -> dict[str, Any]:
-            count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-            result: dict[str, Any] = {ContextKeys.ITERATION_COUNT: count}
-            if count >= max_iters:
-                result[ContextKeys.SHOULD_TERMINATE] = True
-                result[ContextKeys.CONSENSUS_REACHED] = True
-            return result
-
-        return check_limit
+    def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create the iteration limiter handler (shared rule, see handlers)."""
+        # Same cap as the run's max_iterations to avoid premature termination.
+        # Also set CONSENSUS_REACHED so the FSM transitions to CONCLUDE cleanly
+        # (A-ISSUE-006).
+        return make_iteration_limiter(
+            self._fsm_budget(),
+            {
+                ContextKeys.SHOULD_TERMINATE: True,
+                ContextKeys.CONSENSUS_REACHED: True,
+            },
+        )

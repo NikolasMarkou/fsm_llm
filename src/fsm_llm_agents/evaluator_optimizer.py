@@ -25,6 +25,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, EvaluationResult
 from .fsm_definitions import build_evalopt_fsm
+from .handlers import make_iteration_limiter
 
 
 class EvaluatorOptimizerAgent(BaseAgent):
@@ -120,7 +121,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         )
 
         # Iteration limiter
-        self._register_iteration_limiter(api, self._check_iteration_limit)
+        self._register_iteration_limiter(api, self._make_iteration_limiter())
 
     def _run_evaluation(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -197,18 +198,15 @@ class EvaluatorOptimizerAgent(BaseAgent):
             ContextKeys.AGENT_TRACE: trace,
         }
 
-    def _check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Check if the iteration limit has been reached."""
-        iteration = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-
-        if iteration >= self.config.max_iterations:
-            return {
-                ContextKeys.ITERATION_COUNT: iteration,
+    def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create the iteration limiter handler (shared rule, see handlers)."""
+        return make_iteration_limiter(
+            self.config.max_iterations,
+            {
                 ContextKeys.MAX_ITERATIONS_REACHED: True,
                 ContextKeys.EVALUATION_PASSED: True,
-            }
-
-        return {ContextKeys.ITERATION_COUNT: iteration}
+            },
+        )
 
     def _extract_answer(
         self,

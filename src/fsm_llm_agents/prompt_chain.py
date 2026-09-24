@@ -7,6 +7,7 @@ gates that can short-circuit the pipeline on failure.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
@@ -24,6 +25,7 @@ from .constants import (
 from .definitions import AgentConfig, AgentResult, ChainStep
 from .exceptions import AgentError
 from .fsm_definitions import build_prompt_chain_fsm
+from .handlers import make_iteration_limiter
 
 
 class PromptChainAgent(BaseAgent):
@@ -178,18 +180,12 @@ class PromptChainAgent(BaseAgent):
 
         return check_gate
 
-    def _make_iteration_limiter(self) -> Any:
-        """Create an iteration limiter handler."""
-        max_iters = len(self.chain) * Defaults.FSM_BUDGET_MULTIPLIER
-
-        def check_limit(context: dict[str, Any]) -> dict[str, Any]:
-            count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-            result: dict[str, Any] = {ContextKeys.ITERATION_COUNT: count}
-            if count >= max_iters:
-                result[ContextKeys.SHOULD_TERMINATE] = True
-            return result
-
-        return check_limit
+    def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create the iteration limiter handler (shared rule, see handlers)."""
+        return make_iteration_limiter(
+            len(self.chain) * Defaults.FSM_BUDGET_MULTIPLIER,
+            {ContextKeys.SHOULD_TERMINATE: True},
+        )
 
     def _extract_answer(
         self,

@@ -26,7 +26,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_plan_execute_fsm
-from .handlers import AgentHandlers
+from .handlers import AgentHandlers, make_iteration_limiter
 from .tools import ToolRegistry
 
 
@@ -180,20 +180,15 @@ class PlanExecuteAgent(BaseAgent):
         )
 
     def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create an iteration limiter handler."""
-
-        def check_iteration_limit(context: dict[str, Any]) -> dict[str, Any]:
-            count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-            max_iters = context.get("_max_iterations", self.config.max_iterations)
-            if count >= max_iters:
-                return {
-                    ContextKeys.ITERATION_COUNT: count,
-                    ContextKeys.MAX_ITERATIONS_REACHED: True,
-                    ContextKeys.SHOULD_TERMINATE: True,
-                }
-            return {ContextKeys.ITERATION_COUNT: count}
-
-        return check_iteration_limit
+        """Create the iteration limiter handler (shared rule, see handlers)."""
+        return make_iteration_limiter(
+            self.config.max_iterations,
+            {
+                ContextKeys.MAX_ITERATIONS_REACHED: True,
+                ContextKeys.SHOULD_TERMINATE: True,
+            },
+            context_max_key="_max_iterations",
+        )
 
     def _make_step_tracker(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create the plan step tracking handler."""

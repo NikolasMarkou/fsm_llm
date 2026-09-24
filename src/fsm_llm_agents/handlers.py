@@ -5,6 +5,7 @@ observation tracking, and HITL gating.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm.logging import logger
@@ -262,3 +263,53 @@ class AgentHandlers:
             }
 
         return {ContextKeys.ITERATION_COUNT: self._current_iteration}
+
+
+# DECISION plan-2026-09-24T045559-3e4eb3e5/D-003: the 8 context-counting
+# patterns build their limiter here; do NOT hand-roll a per-pattern copy (the
+# copies drifted: 7 of 8 triggered at `>= max`, not `>= max - 1`), and do NOT
+# fold this into AgentHandlers.check_iteration_limit (it counts on the
+# instance, these count in context; merging changes ReAct semantics).
+def make_iteration_limiter(
+    max_iterations: int,
+    forced: dict[str, Any],
+    *,
+    context_max_key: str | None = None,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """
+    Build a PRE_TRANSITION iteration limiter that counts in context.
+
+    Args:
+        max_iterations: The limit, or the fallback when ``context_max_key``
+            is given but absent from the context.
+        forced: Context updates returned verbatim (copied once) when the limit
+            is hit, e.g. ``{SHOULD_TERMINATE: True}``.
+        context_max_key: Optional context key whose value overrides
+            ``max_iterations`` at call time.
+
+    Returns:
+        A handler returning ``{ITERATION_COUNT: count}``, plus ``forced`` once
+        ``count >= limit - 1``. It never raises.
+
+    The transition decision is already made before a PRE_TRANSITION handler
+    fires, so the limiter triggers one iteration early (``>= max - 1``) and
+    the forced transition fires on the next iteration rather than
+    overshooting by 1. PRE_TRANSITION handlers do not run on a BLOCKED turn,
+    so this is a near-limit nudge; the loop's hard ceiling
+    (``BaseAgent._check_budgets``) is the real bound.
+    """
+    forced_updates = dict(forced)
+
+    def check_iteration_limit(context: dict[str, Any]) -> dict[str, Any]:
+        count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
+        limit = (
+            context.get(context_max_key, max_iterations)
+            if context_max_key is not None
+            else max_iterations
+        )
+        logger.debug(LogMessages.ITERATION.format(current=count, max=limit))
+        if count >= limit - 1:
+            return {ContextKeys.ITERATION_COUNT: count, **forced_updates}
+        return {ContextKeys.ITERATION_COUNT: count}
+
+    return check_iteration_limit

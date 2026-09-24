@@ -28,6 +28,7 @@ from .constants import (
 from .definitions import AgentConfig, AgentResult
 from .exceptions import AgentError
 from .fsm_definitions import build_adapt_fsm
+from .handlers import make_iteration_limiter
 from .tools import ToolRegistry
 
 
@@ -169,7 +170,7 @@ class ADaPTAgent(BaseAgent):
             .do(self._make_subtask_executor(initial_context, depth, start_time))
         )
 
-        self._register_iteration_limiter(api, self._check_iteration_limit)
+        self._register_iteration_limiter(api, self._make_iteration_limiter())
 
     def _execute_subtasks(
         self,
@@ -294,23 +295,16 @@ class ADaPTAgent(BaseAgent):
 
         return {ContextKeys.AGENT_TRACE: trace}
 
-    def _check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Check if the iteration limit has been reached."""
-        count = context.get(ContextKeys.ITERATION_COUNT, 0) + 1
-        max_iterations = context.get("_max_iterations", Defaults.MAX_ITERATIONS)
-
-        logger.debug(LogMessages.ITERATION.format(current=count, max=max_iterations))
-
-        if count >= max_iterations - 1:
-            # should_terminate alone routes to combine (priority-1 transition);
-            # forcing attempt_succeeded=False here biases toward decompose at the
-            # budget edge, so it is intentionally omitted.
-            return {
-                ContextKeys.ITERATION_COUNT: count,
-                ContextKeys.SHOULD_TERMINATE: True,
-            }
-
-        return {ContextKeys.ITERATION_COUNT: count}
+    def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Create the iteration limiter handler (shared rule, see handlers)."""
+        # should_terminate alone routes to combine (priority-1 transition);
+        # forcing attempt_succeeded=False here biases toward decompose at the
+        # budget edge, so it is intentionally omitted.
+        return make_iteration_limiter(
+            Defaults.MAX_ITERATIONS,
+            {ContextKeys.SHOULD_TERMINATE: True},
+            context_max_key="_max_iterations",
+        )
 
     def _extract_answer(
         self,

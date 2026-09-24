@@ -61,6 +61,24 @@ class TestDebateAgentCreation:
         agent = DebateAgent()
         assert callable(getattr(agent, "run", None))
 
+    def test_run_writes_no_per_run_budget_onto_self(self, monkeypatch):
+        """PT-02: run() computes the FSM budget without storing it on self."""
+        agent = DebateAgent(num_rounds=2)
+        seen: dict = {}
+
+        def _fake_standard_run(*args, **kwargs):
+            seen.update(kwargs)
+            return "done"
+
+        monkeypatch.setattr(agent, "_standard_run", _fake_standard_run)
+        before = set(vars(agent))
+        assert agent.run("topic") == "done"
+        assert "_max_fsm_iterations" not in vars(agent)
+        assert set(vars(agent)) - before == set()
+        assert seen["max_iterations"] == (
+            2 * Defaults.FSM_BUDGET_MULTIPLIER * Defaults.DEBATE_STATES_PER_ROUND
+        )
+
 
 class TestDebateFSM:
     """Tests for build_debate_fsm function."""
