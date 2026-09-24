@@ -310,6 +310,16 @@ def build_adapt_fsm(
                         }
                     ],
                 },
+                # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+                # Unconditional lowest-priority fallback. Do NOT remove it or gate it:
+                # a missing attempt_succeeded would BLOCK `assess`, and no
+                # PRE_TRANSITION limiter runs on a BLOCKED turn, so the run burns the
+                # 3x loop ceiling. An unjudged attempt takes the best-effort path.
+                {
+                    "target_state": "combine",
+                    "description": "Fallback: use best effort if the assessment is unclear",
+                    "priority": 900,
+                },
             ],
         },
         "decompose": {
@@ -343,6 +353,16 @@ def build_adapt_fsm(
                             "logic": {"has_context": ContextKeys.SUBTASKS},
                         }
                     ],
+                },
+                # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+                # Unconditional lowest-priority fallback. Do NOT remove it or gate it:
+                # a missing subtasks list would BLOCK `decompose` (no PRE_TRANSITION
+                # limiter runs on a BLOCKED turn). The subtask executor returns {}
+                # without subtasks, so `combine` synthesizes the attempt alone.
+                {
+                    "target_state": "combine",
+                    "description": "Fallback: combine without subtasks if none were produced",
+                    "priority": 900,
                 },
             ],
         },
@@ -1410,7 +1430,17 @@ def build_evalopt_fsm(
                             "logic": {"has_context": ContextKeys.GENERATED_OUTPUT},
                         }
                     ],
-                }
+                },
+                # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+                # Unconditional lowest-priority fallback. Do NOT remove it or gate it:
+                # a missing generated_output would BLOCK `generate` (no PRE_TRANSITION
+                # limiter runs on a BLOCKED turn). `evaluate` judges the empty output,
+                # then `refine` retries and the refinement cap / limiter end the loop.
+                {
+                    "target_state": "evaluate",
+                    "description": "Fallback: evaluate even if no output was extracted",
+                    "priority": 900,
+                },
             ],
         },
         "evaluate": {
@@ -1580,8 +1610,11 @@ def build_maker_checker_fsm(
                         }
                     ],
                 },
-                # Without this edge a missing checker_passed BLOCKS check, and
-                # no PRE_TRANSITION limiter runs on a BLOCKED turn (FB-01).
+                # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+                # Unconditional lowest-priority fallback. Do NOT remove it or gate it:
+                # a missing checker_passed would BLOCK `check`, and no PRE_TRANSITION
+                # limiter runs on a BLOCKED turn (FB-01), so the run burns the 3x
+                # loop ceiling. An unjudged draft is revised and re-checked.
                 {
                     "target_state": "revise",
                     "description": "Fallback: revise if checker result unclear",

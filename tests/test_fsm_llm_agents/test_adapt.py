@@ -2,9 +2,18 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.adapt module."""
 
+from typing import Any
+
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.llm import LLMInterface
 from fsm_llm_agents.adapt import ADaPTAgent
 from fsm_llm_agents.constants import (
     ADaPTStates,
@@ -333,3 +342,92 @@ class TestADaPTJSONLeakFix:
             AgentTrace(tool_calls=[], total_iterations=2),
             [ContextKeys.ATTEMPT_RESULT],
         )
+
+
+# -------------------------------------------------------------------------
+# D-002 sibling sweep: assess and decompose must not BLOCK when their gating
+# key never extracts (no PRE_TRANSITION limiter runs on a BLOCKED turn).
+# -------------------------------------------------------------------------
+
+
+class _SilentKeysLLM(LLMInterface):
+    """Mock LLM that never extracts ``silent`` keys; ``values`` overrides the
+    plain-string value every other field gets."""
+
+    def __init__(self, silent: set[str], values: dict[str, Any] | None = None):
+        self.model = "mock-model"
+        self.silent = silent
+        self.values = values or {}
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        silent = request.field_name in self.silent
+        value = None if silent else self.values.get(request.field_name, "some text")
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=0.0 if silent else 0.9,
+            reasoning="mock",
+            is_valid=not silent,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="final answer", message_type="response", reasoning="mock"
+        )
+
+
+class TestADaPTLoopStatesNeverBlock:
+    """Plan plan-2026-09-24T045559-3e4eb3e5 step 2.1 (review concern 4)."""
+
+    MAX_ITERATIONS = 4
+
+    @pytest.mark.parametrize("state", ["assess", "decompose"])
+    def test_state_has_unconditional_fallback_edge(self, state):
+        transitions = build_adapt_fsm()["states"][state]["transitions"]
+        fallbacks = [t for t in transitions if not t.get("conditions")]
+        assert len(fallbacks) == 1
+        assert fallbacks[0]["target_state"] == ADaPTStates.COMBINE
+        assert fallbacks[0]["priority"] > max(
+            t["priority"] for t in transitions if t.get("conditions")
+        )
+
+    def _run(self, llm: LLMInterface) -> tuple[Any, list[int]]:
+        agent = ADaPTAgent(
+            config=AgentConfig(max_iterations=self.MAX_ITERATIONS),
+            llm_interface=llm,
+        )
+        loop_counts: list[int] = []
+        real_loop = agent._run_conversation_loop
+
+        def _recording_loop(*args: Any, **kwargs: Any):
+            responses, final_context, iteration = real_loop(*args, **kwargs)
+            loop_counts.append(iteration)
+            return responses, final_context, iteration
+
+        agent._run_conversation_loop = _recording_loop  # type: ignore[method-assign]
+        return agent.run("Solve 2+2"), loop_counts
+
+    def test_missing_attempt_succeeded_reaches_combine(self):
+        # Pre-fix: assess only had should_terminate / attempt_succeeded edges,
+        # so a missing value BLOCKED assess until BudgetExhaustedError.
+        llm = _SilentKeysLLM(
+            {ContextKeys.ATTEMPT_SUCCEEDED, ContextKeys.SHOULD_TERMINATE}
+        )
+        result, loop_counts = self._run(llm)
+        assert loop_counts, "conversation loop never completed"
+        assert loop_counts[0] <= self.MAX_ITERATIONS
+        assert result.answer
+
+    def test_missing_subtasks_reaches_combine(self):
+        # Pre-fix: decompose only had should_terminate / has_context subtasks
+        # edges, so a missing subtasks list BLOCKED decompose.
+        llm = _SilentKeysLLM(
+            {ContextKeys.SUBTASKS, ContextKeys.SHOULD_TERMINATE},
+            {ContextKeys.ATTEMPT_SUCCEEDED: False},
+        )
+        result, loop_counts = self._run(llm)
+        assert loop_counts, "conversation loop never completed"
+        assert loop_counts[0] <= self.MAX_ITERATIONS
+        assert result.answer

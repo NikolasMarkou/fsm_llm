@@ -125,8 +125,9 @@ class TestBuildEvalOptFsm:
     def test_generate_transitions_to_evaluate(self):
         fsm = build_evalopt_fsm()
         transitions = fsm["states"]["generate"]["transitions"]
-        assert len(transitions) == 1
-        assert transitions[0]["target_state"] == "evaluate"
+        # The gated edge plus the D-002 unconditional fallback, both to evaluate.
+        assert len(transitions) == 2
+        assert {t["target_state"] for t in transitions} == {"evaluate"}
 
     def test_evaluate_transitions_to_output_and_refine(self):
         fsm = build_evalopt_fsm()
@@ -406,8 +407,8 @@ class TestGeneratedOutputCountsAsAnAnswer:
         assert "Crimson leaves" in result.answer
 
     def test_an_empty_generated_output_is_still_a_failure(self):
-        # An empty output never leaves ``generate`` (budget error), so the
-        # empty case is pinned at the completion check ``run()`` delegates to.
+        # The empty case is pinned at the completion check ``run()`` delegates
+        # to (TestGenerateStateNeverBlocks covers a never-extracted output).
         from fsm_llm_agents.definitions import AgentTrace
 
         trace = AgentTrace(tool_calls=[], total_iterations=1)
@@ -418,3 +419,47 @@ class TestGeneratedOutputCountsAsAnAnswer:
         assert EvaluatorOptimizerAgent._completion_is_real(
             {ContextKeys.GENERATED_OUTPUT: "a poem"}, trace, keys
         )
+
+
+class TestGenerateStateNeverBlocks:
+    """Plan plan-2026-09-24T045559-3e4eb3e5 step 2.1 (review concern 4, D-002):
+    ``generate`` must not BLOCK when ``generated_output`` never extracts."""
+
+    def test_generate_has_unconditional_fallback_edge(self):
+        transitions = build_evalopt_fsm()["states"]["generate"]["transitions"]
+        fallbacks = [t for t in transitions if not t.get("conditions")]
+        assert len(fallbacks) == 1
+        assert fallbacks[0]["target_state"] == EvalOptStates.EVALUATE
+        assert fallbacks[0]["priority"] > max(
+            t["priority"] for t in transitions if t.get("conditions")
+        )
+
+    def test_missing_generated_output_reaches_output(self):
+        # Pre-fix: generate's only edge was has_context generated_output, so a
+        # silent model BLOCKED generate until BudgetExhaustedError. Now the
+        # evaluator judges the empty output and refine / the limiter act.
+        max_iterations = 4
+        max_refinements = 3
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=_always_fail,
+            config=AgentConfig(max_iterations=max_iterations),
+            max_refinements=max_refinements,
+            llm_interface=_PoemLLM(None),
+        )
+        loop_counts: list[int] = []
+        real_loop = agent._run_conversation_loop
+
+        def _recording_loop(*args, **kwargs):
+            responses, final_context, iteration = real_loop(*args, **kwargs)
+            loop_counts.append(iteration)
+            return responses, final_context, iteration
+
+        agent._run_conversation_loop = _recording_loop  # type: ignore[method-assign]
+        result = agent.run("Write a haiku about autumn")
+        assert loop_counts, "conversation loop never completed"
+        # Measured 8 turns: generate, then evaluate/refine until the refinement
+        # cap forces a pass, then output. The hard ceiling is 3 x 4 = 12.
+        assert loop_counts[0] <= 2 * max_refinements + 2
+        assert loop_counts[0] < 3 * max_iterations
+        # No output was ever produced, so this is not a real completion.
+        assert result.success is False
