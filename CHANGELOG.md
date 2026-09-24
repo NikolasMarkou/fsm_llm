@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-24
+
 ### Agents follow-up 2026-09-24
 
 Follow-up to the agents audit below (`plans/plan-2026-09-24T091842-c1d5bfbc`, one
@@ -17,7 +19,8 @@ test that fails on the pre-fix code. Full suite: 7,158 tests collected (was 6,94
 `DEFAULT_LLM_MODEL` and one comment. Reviews and decisions: the plan's
 `findings/review-iter-1*.md` and `decisions.md` (D-001 to D-030).
 
-Live results (ollama_chat/qwen3.5:9b-q8_0): PENDING
+Live results (ollama_chat/qwen3.5:9b-q8_0): PENDING. They will be recorded under
+[Unreleased] after the 0.9.0 release.
 
 ### Security -- agents follow-up 2026-09-24
 
@@ -257,7 +260,8 @@ Live results (ollama_chat/qwen3.5:9b-q8_0): PENDING
   `fsm_llm_monitor/server.py:1382`) and orphaned decision anchors; `src` grew by about
   +570 net lines in this plan (5 pre-existing bugs found on the way), and
   `fsm_definitions.py` keeps growing.
-- F-LIVE-02 live re-check on `ollama_chat/qwen3.5:9b-q8_0`: PENDING.
+- F-LIVE-02 live re-check on `ollama_chat/qwen3.5:9b-q8_0`: PENDING, recorded after the
+  0.9.0 release.
 
 ### Agents audit 2026-09-24
 
@@ -2350,6 +2354,7 @@ examples, signatures, and the 2-pass core contract are unchanged. New optional
 - 7 examples (basic, intermediate, advanced)
 - Comprehensive documentation
 
+[0.9.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.5.0...v0.6.0

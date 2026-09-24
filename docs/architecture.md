@@ -1,6 +1,6 @@
 # Architecture Deep Dive
 
-> Covers FSM-LLM v0.8.0
+> Covers FSM-LLM v0.9.0
 
 Technical overview of the FSM-LLM architecture and how components work together.
 

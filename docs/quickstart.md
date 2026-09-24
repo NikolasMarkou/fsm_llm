@@ -1,6 +1,6 @@
 # Quick Start Tutorial
 
-> Covers FSM-LLM v0.8.0
+> Covers FSM-LLM v0.9.0
 
 Welcome to FSM-LLM! This tutorial will have you building stateful conversations with LLMs in minutes.
 

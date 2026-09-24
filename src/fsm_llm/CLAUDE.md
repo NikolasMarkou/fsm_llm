@@ -5,7 +5,7 @@ Purpose: Core FSM-LLM framework: JSON-defined finite state machines driven by an
 
 ## Scope
 
-Everything needed to define, validate, visualize, and run FSM conversations: `API`, `FSMManager`, `MessagePipeline`, models, JsonLogic, handlers, classification, litellm interface, prompts, context security, working memory, sessions, CLI. Version 0.8.0 (`__version__.py`, shared by all six packages). Deps: loguru, litellm (>=1.82,<2.0, excluding 1.82.7 and 1.82.8), pydantic v2, python-dotenv. Python 3.10-3.12. Not here: reasoning, workflows, agents, monitor, harness (sibling packages that import this one).
+Everything needed to define, validate, visualize, and run FSM conversations: `API`, `FSMManager`, `MessagePipeline`, models, JsonLogic, handlers, classification, litellm interface, prompts, context security, working memory, sessions, CLI. Version 0.9.0 (`__version__.py`, shared by all six packages). Deps: loguru, litellm (>=1.82,<2.0, excluding 1.82.7 and 1.82.8), pydantic v2, python-dotenv. Python 3.10-3.12. Not here: reasoning, workflows, agents, monitor, harness (sibling packages that import this one).
 
 ## Architecture
 

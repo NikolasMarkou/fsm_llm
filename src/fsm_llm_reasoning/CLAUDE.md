@@ -5,7 +5,7 @@ Purpose: Multi-strategy reasoning engine: an orchestrator FSM classifies a probl
 
 ## Scope
 
-Pure FSM-LLM application code; no third-party deps beyond core `fsm_llm` (extra `reasoning` installs nothing). Version comes from `fsm_llm.__version__` (0.8.0). All FSM definitions are Python dicts in `reasoning_modes.py`, not JSON files. Consumed by `fsm_llm_agents.reasoning_react` (ReasoningReactAgent) and by examples under `examples/reasoning/`.
+Pure FSM-LLM application code; no third-party deps beyond core `fsm_llm` (extra `reasoning` installs nothing). Version comes from `fsm_llm.__version__` (0.9.0). All FSM definitions are Python dicts in `reasoning_modes.py`, not JSON files. Consumed by `fsm_llm_agents.reasoning_react` (ReasoningReactAgent) and by examples under `examples/reasoning/`.
 
 ## Architecture
 

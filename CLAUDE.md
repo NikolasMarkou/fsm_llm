@@ -1,7 +1,7 @@
 # FSM-LLM
 
 Path: repository root
-Purpose: Python framework (v0.8.0, Apache-2.0, Python 3.10-3.12) for stateful conversational AI: JSON-defined finite state machines driven by an LLM through a 2-pass pipeline, plus five extension packages.
+Purpose: Python framework (v0.9.0, Apache-2.0, Python 3.10-3.12) for stateful conversational AI: JSON-defined finite state machines driven by an LLM through a 2-pass pipeline, plus five extension packages.
 
 ## Scope
 
