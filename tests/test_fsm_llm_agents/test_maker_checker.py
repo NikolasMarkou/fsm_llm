@@ -720,3 +720,43 @@ class TestLimiterForcesPassOnlyInCheck:
         assert limiter({ContextKeys.ITERATION_COUNT: 0}) == {
             ContextKeys.ITERATION_COUNT: 1
         }
+
+
+class _PromptRecordingTwoRoundLLM(_TwoRoundLLM):
+    """``_TwoRoundLLM`` that records every checker-verdict extraction prompt."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.checker_prompts: list[str] = []
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        if request.field_name == ContextKeys.CHECKER_PASSED:
+            self.checker_prompts.append(request.system_prompt)
+        return super().extract_field(request)
+
+
+class TestPreviousDraftStaysOutOfFinalContext:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-012 (item 11): the redo stash
+    is dropped from ``AgentResult.final_context`` only; prompts still see it."""
+
+    def test_revise_cycle_result_has_no_previous_draft(self):
+        llm = _PromptRecordingTwoRoundLLM()
+        agent = MakerCheckerAgent(
+            maker_instructions="Write a haiku",
+            checker_instructions="Check the syllables",
+            config=AgentConfig(max_iterations=10),
+            llm_interface=llm,
+        )
+        result = agent.run("Write a haiku about rain")
+
+        # A revise cycle happened (round 1 rejected, round 2 approved).
+        assert llm.verdicts == [False, True]
+        assert result.final_context[ContextKeys.DRAFT_OUTPUT] == "d2"
+        assert ContextKeys.PREVIOUS_DRAFT not in result.final_context
+        assert ContextKeys.PREVIOUS_OUTPUT not in result.final_context
+
+        # During the run the round-2 checker still saw the previous draft.
+        assert len(llm.checker_prompts) == 2
+        assert ContextKeys.PREVIOUS_DRAFT not in llm.checker_prompts[0]
+        assert ContextKeys.PREVIOUS_DRAFT in llm.checker_prompts[1]
+        assert "d1" in llm.checker_prompts[1]

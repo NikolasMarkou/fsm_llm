@@ -232,6 +232,17 @@ class ContextKeys:
 # ---------------------------------------------------------------------------
 
 
+# DECISION plan-2026-09-24T091842-c1d5bfbc/D-012: the redo stash (set by
+# ``make_redraft_handlers`` on entry to a redo state) is run-time prompt input,
+# not a result. BaseAgent drops these keys from ``AgentResult.final_context``
+# only. Do NOT give them an internal prefix instead: internal keys are also
+# filtered out of prompts, which hides the previous draft from the checker and
+# refiner that need it. Add any new ``previous_*`` stash key here.
+RESULT_DROPPED_CONTEXT_KEYS: frozenset[str] = frozenset(
+    {ContextKeys.PREVIOUS_DRAFT, ContextKeys.PREVIOUS_OUTPUT}
+)
+
+
 class HandlerPriorities:
     """Explicit priorities for agent handler execution order.
 

@@ -21,6 +21,7 @@ from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .constants import (
+    RESULT_DROPPED_CONTEXT_KEYS,
     ContextKeys,
     Defaults,
     HandlerNames,
@@ -787,7 +788,14 @@ class BaseAgent(ABC):
                 answer=answer,
                 success=success,
                 trace=trace,
-                final_context=self._filter_context(final_context),
+                # DECISION plan-2026-09-24T091842-c1d5bfbc/D-012: the redo
+                # stash leaves the result here, not in _filter_context (shared
+                # with adapt) and not via an internal prefix (prompts need it).
+                final_context={
+                    k: v
+                    for k, v in self._filter_context(final_context).items()
+                    if k not in RESULT_DROPPED_CONTEXT_KEYS
+                },
                 structured_output=structured,
             )
 

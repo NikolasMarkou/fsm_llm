@@ -542,3 +542,44 @@ class TestLimiterForcedStopShipsAnEvaluatedOutput:
 
         assert result.final_context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True
         assert result.final_context[ContextKeys.GENERATED_OUTPUT] == seen[-1]
+
+
+class _PromptRecordingVersionedLLM(_VersionedLLM):
+    def __init__(self) -> None:
+        super().__init__()
+        self.output_prompts: list[str] = []
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        if request.field_name == ContextKeys.GENERATED_OUTPUT:
+            self.output_prompts.append(request.system_prompt)
+        return super().extract_field(request)
+
+
+class TestPreviousOutputStaysOutOfFinalContext:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-012 (item 11): the redo stash
+    is dropped from ``AgentResult.final_context`` only; prompts still see it."""
+
+    def test_refine_cycle_result_has_no_previous_output(self):
+        verdicts = iter([False, True])
+
+        def _judge(output: str, context: dict) -> EvaluationResult:
+            passed = next(verdicts)
+            return EvaluationResult(passed=passed, score=0.5, feedback="more")
+
+        llm = _PromptRecordingVersionedLLM()
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=_judge,
+            max_refinements=3,
+            config=AgentConfig(max_iterations=20),
+            llm_interface=llm,
+        )
+        result = agent.run("Write a poem")
+
+        assert result.final_context[ContextKeys.GENERATED_OUTPUT] == "v2"
+        assert ContextKeys.PREVIOUS_OUTPUT not in result.final_context
+        assert ContextKeys.PREVIOUS_DRAFT not in result.final_context
+
+        # The refine turn's extraction prompt still carried the previous output.
+        assert len(llm.output_prompts) == 2
+        assert ContextKeys.PREVIOUS_OUTPUT in llm.output_prompts[1]
+        assert "v1" in llm.output_prompts[1]
