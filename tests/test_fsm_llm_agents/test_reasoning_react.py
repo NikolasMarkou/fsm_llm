@@ -3,6 +3,8 @@ from __future__ import annotations
 """Tests for fsm_llm_agents.reasoning_react module."""
 
 
+from unittest.mock import patch
+
 import pytest
 
 from fsm_llm_agents.constants import ContextKeys, ReasoningIntegrationKeys
@@ -160,6 +162,10 @@ class TestReasoningReactAgentPlaceholder:
         assert "reasoning" in result.lower() or "Reasoning" in result
 
 
+class _StubRunError(Exception):
+    """Raised by the stubbed ``_standard_run`` so run() never reaches an LLM."""
+
+
 class TestReasoningReactAgentHandlerReset:
     """Regression: each run() must get independent handler state — no shared
     `AgentHandlers` instance across calls (decisions.md D-012, the D-014
@@ -184,10 +190,12 @@ class TestReasoningReactAgentHandlerReset:
 
         assert not hasattr(agent, "_handlers")
 
-        try:
-            agent.run("test task")
-        except Exception:
-            pass  # Expected — no LLM configured
+        # Stub the FSM loop so run() makes no LLM call: with a reachable
+        # Ollama daemon an unpatched run() executes a real multi-minute
+        # conversation (RB-05). run() builds its handlers before this point.
+        with patch.object(agent, "_standard_run", side_effect=_StubRunError):
+            with pytest.raises(_StubRunError):
+                agent.run("test task")
 
         assert not hasattr(agent, "_handlers")
 
@@ -200,8 +208,6 @@ class TestReasoningReactAgentHandlerReset:
             from fsm_llm_agents import reasoning_react as rr_module
         except ImportError:
             pytest.skip("fsm_llm_reasoning not installed")
-        from unittest.mock import patch
-
         registry = ToolRegistry()
         registry.register_function(_dummy_tool, name="search", description="Search")
 
@@ -218,12 +224,16 @@ class TestReasoningReactAgentHandlerReset:
             created_instances.append(instance)
             return instance
 
-        with patch.object(rr_module, "AgentHandlers", side_effect=tracking_ctor):
+        # Stub the FSM loop so run() makes no LLM call (RB-05): an unpatched
+        # run() against a reachable Ollama advances the second instance's
+        # _current_iteration before the assertion below.
+        with (
+            patch.object(rr_module, "AgentHandlers", side_effect=tracking_ctor),
+            patch.object(agent, "_standard_run", side_effect=_StubRunError),
+        ):
             for _ in range(2):
-                try:
+                with pytest.raises(_StubRunError):
                     agent.run("test task")
-                except Exception:
-                    pass  # Expected — no LLM configured
 
         assert len(created_instances) == 2, (
             "run() must build a new AgentHandlers instance every call"

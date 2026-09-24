@@ -2,7 +2,7 @@
 CLI entry point for fsm_llm_agents.
 
 Usage:
-    python -m fsm_llm_agents --list-tools
+    python -m fsm_llm_agents --info
     python -m fsm_llm_agents --version
 """
 
