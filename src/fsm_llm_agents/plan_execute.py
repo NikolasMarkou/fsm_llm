@@ -147,9 +147,14 @@ class PlanExecuteAgent(BaseAgent):
         self, api: API, handlers: AgentHandlers | None = None
     ) -> None:
         """Register agent handlers with the API."""
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-024
+        # Run the tool on CHECK_RESULT entry, before the checker (priority +1):
+        # the step's tool selection is extracted during the execute_step turn.
+        # Do NOT move it back to EXECUTE_STEP entry (step 1 never ran a tool,
+        # step k ran step k-1's input) and do NOT touch the shared compactor.
         if handlers is not None:
             self._register_tool_executor(
-                api, PlanExecuteStates.EXECUTE_STEP, handlers.execute_tool
+                api, PlanExecuteStates.CHECK_RESULT, handlers.execute_tool
             )
 
         # Iteration limiter
@@ -166,7 +171,7 @@ class PlanExecuteAgent(BaseAgent):
         # Step result checker
         api.register_handler(
             api.create_handler(HandlerNames.PLAN_STEP_CHECKER)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR + 1)
             .on_state_entry(PlanExecuteStates.CHECK_RESULT)
             .do(self._make_result_checker())
         )
@@ -232,10 +237,9 @@ class PlanExecuteAgent(BaseAgent):
                 # weak model that NARRATES a step (zero tool calls) would set
                 # success=True on filler and pass _has_execution_evidence
                 # (base.py:364, "list of dicts all carrying success"). The
-                # execute_tool handler runs on EXECUTE_STEP entry and writes
-                # TOOL_STATUS=="success" ONLY when a tool genuinely ran (else
-                # "skipped"/"rejected"/"failed"); check_result reads it here on
-                # the next state. Do NOT edit _has_execution_evidence instead —
+                # execute_tool handler runs just before this one on CHECK_RESULT
+                # entry (D-024) and writes TOOL_STATUS=="success" ONLY when a
+                # tool genuinely ran (else "skipped"/"rejected"/"failed"). Do NOT edit _has_execution_evidence instead —
                 # the hole is plan_execute-specific (see decisions.md D-001).
                 tool_ran = context.get(ContextKeys.TOOL_STATUS) == "success"
                 step_results.append(
