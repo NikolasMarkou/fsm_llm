@@ -404,7 +404,6 @@ class MetaBuilderConfig(AgentConfig):
     build_max_iterations: int = MetaDefaults.BUILD_MAX_ITERATIONS
     build_timeout_seconds: float = MetaDefaults.BUILD_TIMEOUT_SECONDS
     build_temperature: float = MetaDefaults.BUILD_TEMPERATURE
-    output_path: str | None = None
 
     @field_validator("max_turns")
     @classmethod

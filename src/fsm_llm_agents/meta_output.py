@@ -26,15 +26,17 @@ def format_artifact_json(artifact: dict[str, Any]) -> str:
 def save_artifact(artifact: dict[str, Any], path: str | Path) -> Path:
     """Write an artifact dict to a JSON file.
 
+    The function trusts its caller, like any file-write API: it resolves
+    ``path`` (so ``..`` segments are collapsed) and writes there, creating
+    parent directories as needed. It does not confine writes to any base
+    directory; a caller taking the path from untrusted input must check it.
+
     :param artifact: The artifact dict
     :param path: Output file path
     :return: Resolved path that was written
     :raises OutputError: If writing fails
     """
     path = Path(path).resolve()
-
-    if ".." in Path(path).parts:
-        raise OutputError("Path traversal not allowed", path=str(path))
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

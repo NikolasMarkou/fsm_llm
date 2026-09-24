@@ -67,6 +67,12 @@ class TestMetaAgentInit:
         agent = MetaBuilderAgent(config=config)
         assert agent.meta_config.model == "gpt-4o"
 
+    def test_removed_output_path_is_ignored(self):
+        """output_path was removed; pydantic's extra="ignore" keeps old callers working."""
+        config = MetaBuilderConfig(output_path="x")
+        assert "output_path" not in MetaBuilderConfig.model_fields
+        assert not hasattr(config, "output_path")
+
     def test_initial_state(self):
         agent = MetaBuilderAgent()
         assert not agent.is_complete()
@@ -224,6 +230,19 @@ class TestMetaAgentOutput:
         assert path.exists()
         content = path.read_text()
         assert '"name": "test"' in content
+
+    def test_save_artifact_resolves_dotdot_segments(self, tmp_path):
+        """save_artifact trusts its caller and writes to the resolved path."""
+        from fsm_llm_agents.meta_output import save_artifact
+
+        artifact = {"name": "test", "states": {}}
+        raw = tmp_path / "a" / "b" / ".." / ".." / "out" / "test.json"
+        path = save_artifact(artifact, raw)
+        expected = (tmp_path / "out" / "test.json").resolve()
+        assert path == expected
+        assert ".." not in path.parts
+        assert expected.exists()
+        assert '"name": "test"' in expected.read_text()
 
 
 class TestMetaAgentImports:
