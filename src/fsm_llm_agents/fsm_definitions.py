@@ -442,13 +442,16 @@ def _bool_decision_field_extractions(
     ]
 
 
-def _conclude_on_evidence_logic() -> dict[str, Any]:
+def _conclude_on_evidence_logic(
+    flag: str = ContextKeys.SHOULD_TERMINATE,
+) -> dict[str, Any]:
     """JsonLogic for a tool-loop ``conclude`` edge: terminate on evidence only.
 
-    Contract: returns a fresh ``should_terminate == True AND
-    (observation_count > 0 OR max_iterations_reached == True)`` expression.
-    Used on the ``think`` and ``act`` conclude edges of the ReAct, Reflexion
-    and ParallelReact FSMs. Never raises.
+    Contract: returns a fresh ``<flag> == True AND (observation_count > 0 OR
+    max_iterations_reached == True)`` expression (``flag`` defaults to
+    ``should_terminate``). Used on the ``think`` and ``act`` conclude edges of
+    the ReAct, Reflexion and ParallelReact FSMs, and with ``evaluation_passed``
+    on Reflexion's ``evaluate`` conclude edge. Never raises.
 
     # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
     Do NOT gate a tool loop's conclude edge on ``should_terminate`` alone: a
@@ -461,7 +464,7 @@ def _conclude_on_evidence_logic() -> dict[str, Any]:
     """
     return {
         "and": [
-            {"==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]},
+            {"==": [{"var": flag}, True]},
             {
                 "or": [
                     {">": [{"var": [ContextKeys.OBSERVATION_COUNT, 0]}, 0]},
@@ -684,12 +687,17 @@ def build_reflexion_fsm(
                     "target_state": "conclude",
                     "description": "Evaluation passed, produce final answer",
                     "priority": 10,
+                    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008: a pass
+                    # concludes only with tool evidence or a forced stop. Do
+                    # NOT gate on evaluation_passed alone: a self-evaluated
+                    # memory answer then succeeds with zero tool calls. The
+                    # 900 fallback to reflect keeps evaluate from BLOCKING.
                     "conditions": [
                         {
-                            "description": "Evaluation passed",
-                            "logic": {
-                                "==": [{"var": ContextKeys.EVALUATION_PASSED}, True]
-                            },
+                            "description": "Evaluation passed on evidence",
+                            "logic": _conclude_on_evidence_logic(
+                                ContextKeys.EVALUATION_PASSED
+                            ),
                         }
                     ],
                 },

@@ -503,3 +503,35 @@ class TestReflexionConcludeNeedsEvidence:
         ]
         assert len(fallback) == 1
         assert not fallback[0].get("conditions")
+
+    def test_evaluate_conclude_needs_observation_or_forced_stop(self):
+        """Review W3: a self-evaluated pass with no tool run must not conclude."""
+        fsm = build_reflexion_fsm(_make_registry())
+        passed = {ContextKeys.EVALUATION_PASSED: True}
+
+        assert not _conclude_passes(fsm, "evaluate", passed)
+        assert _conclude_passes(
+            fsm, "evaluate", {**passed, ContextKeys.OBSERVATION_COUNT: 1}
+        )
+        assert _conclude_passes(
+            fsm, "evaluate", {**passed, ContextKeys.MAX_ITERATIONS_REACHED: True}
+        )
+        assert not _conclude_passes(
+            fsm,
+            "evaluate",
+            {ContextKeys.EVALUATION_PASSED: False, ContextKeys.OBSERVATION_COUNT: 3},
+        )
+
+    def test_self_passed_memory_answer_reflects_until_the_forced_stop(self):
+        """Pre-fix: think, act, evaluate, conclude with zero tools (3 turns)."""
+        field_map = {**_ANSWER_FROM_MEMORY, ContextKeys.EVALUATION_PASSED: True}
+        agent = ReflexionAgent(
+            tools=_make_registry(),
+            config=AgentConfig(max_iterations=8),
+            llm_interface=_FieldMapLLM(field_map),
+        )
+        result, states = _run_recording_states(agent)
+
+        assert "reflect" in states, states
+        assert result.final_context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True
+        assert len(states) <= 3 * 8
