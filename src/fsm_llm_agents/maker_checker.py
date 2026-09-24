@@ -172,8 +172,23 @@ class MakerCheckerAgent(BaseAgent):
             .do(on_exit)
         )
 
-        # Iteration limiter
+        # Iteration limiter: counts every turn, sets only max_iterations_reached.
         self._register_iteration_limiter(api, self._make_iteration_limiter())
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-007: the budget's forced
+        # pass lands only on a check turn. Do NOT put checker_passed back in
+        # the global limiter's forced dict: at an odd budget the limit hits on
+        # a revise turn, the next check skips the already-set verdict (core
+        # extracts a key only while it is unset) and ships the unjudged
+        # redraft. Do NOT filter the counter by state either: it must advance
+        # every turn. Runs after the limiter (higher priority number) so it
+        # reads the flag the limiter set on this same turn.
+        api.register_handler(
+            api.create_handler(HandlerNames.MAKER_CHECKER_FORCE_PASS)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .at(HandlerTiming.PRE_TRANSITION)
+            .on_state(MakerCheckerStates.CHECK)
+            .do(self._force_pass_at_limit)
+        )
 
     def _track_revisions(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -253,9 +268,16 @@ class MakerCheckerAgent(BaseAgent):
         # judges at all). Do NOT drop `early=False` without re-measuring.
         return make_iteration_limiter(
             self.config.max_iterations,
-            {
-                ContextKeys.MAX_ITERATIONS_REACHED: True,
-                ContextKeys.CHECKER_PASSED: True,
-            },
+            {ContextKeys.MAX_ITERATIONS_REACHED: True},
             early=False,
         )
+
+    @staticmethod
+    def _force_pass_at_limit(context: dict[str, Any]) -> dict[str, Any]:
+        """Force ``checker_passed`` once the limiter has flagged the budget.
+
+        Registered on the check state only (D-007); returns ``{}`` otherwise.
+        """
+        if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
+            return {ContextKeys.CHECKER_PASSED: True}
+        return {}

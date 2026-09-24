@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from fsm_llm.definitions import (
     BulkExtractionRequest,
     DataExtractionResponse,
@@ -398,7 +400,9 @@ class TestMakerCheckerHandlers:
         context = {ContextKeys.ITERATION_COUNT: 4}
         result = agent._make_iteration_limiter()(context)
         assert result[ContextKeys.MAX_ITERATIONS_REACHED] is True
-        assert result[ContextKeys.CHECKER_PASSED] is True
+        # D-007: the pass is forced by a check-only handler, not the limiter.
+        assert ContextKeys.CHECKER_PASSED not in result
+        assert agent._force_pass_at_limit(result) == {ContextKeys.CHECKER_PASSED: True}
 
     def test_extract_answer_from_final_answer(self):
         agent = MakerCheckerAgent(
@@ -601,10 +605,11 @@ class TestEachRoundIsRejudged:
             config=AgentConfig(max_iterations=5),
         )
         limiter = agent._make_iteration_limiter()
-        assert ContextKeys.CHECKER_PASSED not in limiter(
-            {ContextKeys.ITERATION_COUNT: 3}
-        )
-        assert limiter({ContextKeys.ITERATION_COUNT: 4})[ContextKeys.CHECKER_PASSED]
+        force = agent._force_pass_at_limit
+        assert force(limiter({ContextKeys.ITERATION_COUNT: 3})) == {}
+        assert force(limiter({ContextKeys.ITERATION_COUNT: 4}))[
+            ContextKeys.CHECKER_PASSED
+        ]
 
 
 class _HighScoreRejectLLM(_TwoRoundLLM):
@@ -643,3 +648,75 @@ class TestForcedPassShipsJudgedDraft:
         assert llm.verdicts == [False]
         assert result.final_context[ContextKeys.DRAFT_OUTPUT] == "d1"
         assert result.answer == "d1"
+
+
+# -------------------------------------------------------------------------
+# Plan plan-2026-09-24T091842-c1d5bfbc step 6 (D-007): the limiter's forced
+# pass must land only on a check turn, so a budget-exhausted run ships a
+# draft the checker actually judged
+# -------------------------------------------------------------------------
+
+
+class _AlwaysRejectLLM(_TwoRoundLLM):
+    """Maker drafts ``DRAFT-1``, ``DRAFT-2``, ...; the checker always says
+    ``checker_passed=False`` at a low score. Records, per verdict, the draft
+    under judgment (the newest one, which must appear in the checker prompt)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.judged: list[str] = []
+
+    def extract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
+        response = super().extract_bulk_data(request)
+        if response.extracted_data:
+            response.extracted_data[ContextKeys.DRAFT_OUTPUT] = f"DRAFT-{self.drafts}"
+        return response
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        if request.field_name != ContextKeys.CHECKER_PASSED:
+            return super().extract_field(request)
+        current = f"DRAFT-{self.drafts}"
+        assert current in request.system_prompt
+        self.judged.append(current)
+        self.verdicts.append(False)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=False,
+            confidence=0.9,
+            reasoning="m",
+            is_valid=True,
+        )
+
+
+class TestLimiterForcesPassOnlyInCheck:
+    @pytest.mark.parametrize("max_iterations", [2, 3, 4, 5, 6])
+    def test_budget_exhausted_run_ships_a_judged_draft(self, max_iterations):
+        # Pre-fix: at an odd budget the limiter hit its limit on a revise turn
+        # and forced checker_passed there, so the next check turn skipped the
+        # (already set) verdict and shipped the fresh, unjudged redraft.
+        llm = _AlwaysRejectLLM()
+        agent = MakerCheckerAgent(
+            maker_instructions="Write a haiku",
+            checker_instructions="Check the syllables",
+            config=AgentConfig(max_iterations=max_iterations),
+            max_revisions=100,  # isolate the limiter from _track_revisions
+            llm_interface=llm,
+        )
+        result = agent.run("Write a haiku about rain")
+
+        assert result.final_context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True
+        assert result.answer in llm.judged
+        assert result.answer == llm.judged[-1]
+
+    def test_counter_advances_on_non_check_turns(self):
+        agent = MakerCheckerAgent(
+            maker_instructions="w",
+            checker_instructions="c",
+            config=AgentConfig(max_iterations=5),
+        )
+        limiter = agent._make_iteration_limiter()
+        assert limiter({ContextKeys.ITERATION_COUNT: 0}) == {
+            ContextKeys.ITERATION_COUNT: 1
+        }

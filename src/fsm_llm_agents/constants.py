@@ -267,6 +267,7 @@ class HandlerNames:
     MAKER_CHECKER_CHECKER = "MakerCheckerChecker"
     MAKER_CHECKER_REVISE_ENTRY = "MakerCheckerReviseEntry"
     MAKER_CHECKER_REVISE_EXIT = "MakerCheckerReviseExit"
+    MAKER_CHECKER_FORCE_PASS = "MakerCheckerForcePass"
     CHAIN_GATE_CHECKER = "ChainGateChecker"
     ORCHESTRATOR_DELEGATOR = "OrchestratorDelegator"
     DEBATE_JUDGE = "DebateJudge"
