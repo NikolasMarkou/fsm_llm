@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .constants import ContextKeys, Defaults
+from .constants import Defaults
 from .definitions import ChainStep
 from .tools import ToolRegistry
 
@@ -381,8 +381,6 @@ def build_reflexion_fsm(
         build_think_extraction_instructions,
     )
 
-    tool_names = registry.tool_names
-
     persona = (
         "You are a reflective AI agent that solves tasks by using tools, "
         "then evaluating and critiquing your own work. "
@@ -416,21 +414,15 @@ def build_reflexion_fsm(
                         }
                     ],
                 },
+                # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+                # Unconditional lowest-priority fallback. Do NOT gate this edge on the
+                # tool selection: a gated edge BLOCKS `think` on a null/unknown tool, and
+                # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
+                # run burns the 3x loop ceiling. `act` handles a missing/unknown tool.
                 {
                     "target_state": "act",
                     "description": "Execute the selected tool",
                     "priority": 300,
-                    "conditions": [
-                        {
-                            "description": "A tool has been selected",
-                            "logic": {
-                                "in": [
-                                    {"var": "tool_name"},
-                                    [*tool_names, ContextKeys.NO_TOOL],
-                                ]
-                            },
-                        }
-                    ],
                 },
             ],
         },
@@ -713,8 +705,6 @@ def build_react_fsm(
         build_think_extraction_instructions,
     )
 
-    tool_names = registry.tool_names
-
     # Build persona with tool awareness
     persona = (
         "You are a methodical AI agent that solves tasks by using tools step by step. "
@@ -782,19 +772,16 @@ def build_react_fsm(
             }
         )
 
+    # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+    # Unconditional lowest-priority fallback. Do NOT gate this edge on the
+    # tool selection: a gated edge BLOCKS `think` on a null/unknown tool, and
+    # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
+    # run burns the 3x loop ceiling. `act` handles a missing/unknown tool.
     think_transitions.append(
         {
             "target_state": "act",
             "description": "Execute the selected tool",
             "priority": 300,
-            "conditions": [
-                {
-                    "description": "A tool has been selected",
-                    "logic": {
-                        "in": [{"var": "tool_name"}, [*tool_names, ContextKeys.NO_TOOL]]
-                    },
-                }
-            ],
         }
     )
 

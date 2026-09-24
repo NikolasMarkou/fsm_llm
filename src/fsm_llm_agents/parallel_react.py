@@ -98,16 +98,15 @@ def build_parallel_react_fsm(
                     }
                 ],
             },
+            # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+            # Unconditional lowest-priority fallback. Do NOT gate this edge on the
+            # tool selection: a gated edge BLOCKS `think` on a null/unknown tool, and
+            # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
+            # run burns the 3x loop ceiling. `act` handles an empty batch.
             {
                 "target_state": "act",
                 "description": "Execute the selected tool batch",
                 "priority": 300,
-                "conditions": [
-                    {
-                        "description": "At least one tool was selected",
-                        "logic": {"has_context": TOOL_CALLS_KEY},
-                    }
-                ],
             },
         ],
     }
