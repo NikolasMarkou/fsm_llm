@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -97,6 +101,121 @@ class TestMCPToolProvider:
             MCPToolProvider.create_mock_tool("beta", "Beta tool"),
         ]
         assert provider.get_tool_names() == ["alpha", "beta"]
+
+
+class _FakeMCPSession:
+    """Stand-in for ``mcp.ClientSession``; sleeps are set per test."""
+
+    init_delay = 0.0
+    call_delay = 0.0
+
+    def __init__(self, read, write):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def initialize(self):
+        await asyncio.sleep(self.init_delay)
+
+    async def list_tools(self):
+        tool = SimpleNamespace(
+            name="echo",
+            description="Echo tool",
+            inputSchema={"properties": {"text": {"type": "string"}}},
+        )
+        return SimpleNamespace(tools=[tool])
+
+    async def call_tool(self, name, arguments=None):
+        await asyncio.sleep(self.call_delay)
+        return SimpleNamespace(content=[SimpleNamespace(text=f"{name}:ok")])
+
+
+@asynccontextmanager
+async def _fake_stdio_client(params):
+    yield ("read", "write")
+
+
+class TestMCPTimeouts:
+    """MM-06: MCP discovery and tool calls are bounded by a timeout."""
+
+    HANG = 5.0
+
+    def _provider(self, monkeypatch, init_delay=0.0, call_delay=0.0, **kwargs):
+        import fsm_llm_agents.mcp as mcp_mod
+
+        session_cls = type(
+            "Session",
+            (_FakeMCPSession,),
+            {"init_delay": init_delay, "call_delay": call_delay},
+        )
+        monkeypatch.setattr(mcp_mod, "_HAS_MCP", True)
+        monkeypatch.setattr(mcp_mod, "stdio_client", _fake_stdio_client, raising=False)
+        monkeypatch.setattr(mcp_mod, "ClientSession", session_cls, raising=False)
+        return mcp_mod.MCPToolProvider(server_params=object(), **kwargs)
+
+    async def test_hung_discovery_raises_agent_timeout(self, monkeypatch):
+        from fsm_llm_agents.exceptions import AgentTimeoutError
+
+        provider = self._provider(monkeypatch, init_delay=self.HANG, timeout=0.05)
+        start = time.monotonic()
+        with pytest.raises(AgentTimeoutError) as info:
+            await asyncio.wait_for(provider.discover_tools(), 1.0)
+        assert time.monotonic() - start < 2.0
+        assert isinstance(info.value.__cause__, asyncio.TimeoutError)
+
+    async def test_fast_discovery_and_call_complete(self, monkeypatch):
+        provider = self._provider(monkeypatch, timeout=0.5)
+        tools = await asyncio.wait_for(provider.discover_tools(), 1.0)
+        assert [t.name for t in tools] == ["echo"]
+        out = await asyncio.wait_for(tools[0].execute_fn(text="hi"), 1.0)
+        assert out == "echo:ok"
+
+    async def test_timeout_none_is_unbounded(self, monkeypatch):
+        provider = self._provider(monkeypatch, init_delay=0.1, timeout=None)
+        tools = await asyncio.wait_for(provider.discover_tools(), 1.0)
+        assert [t.name for t in tools] == ["echo"]
+
+    async def test_hung_call_raises_tool_execution_error(self, monkeypatch):
+        from fsm_llm_agents.exceptions import ToolExecutionError
+
+        provider = self._provider(monkeypatch, timeout=0.05)
+        tools = await provider.discover_tools()
+        import fsm_llm_agents.mcp as mcp_mod
+
+        # Discovery was fast; now make the call hang (per-test subclass).
+        mcp_mod.ClientSession.call_delay = self.HANG
+        start = time.monotonic()
+        with pytest.raises(ToolExecutionError) as info:
+            await asyncio.wait_for(tools[0].execute_fn(text="hi"), 1.0)
+        assert time.monotonic() - start < 2.0
+        assert info.value.tool_name == "echo"
+
+    def test_hung_call_via_registry_is_failed_result(self, monkeypatch):
+        import fsm_llm_agents.mcp as mcp_mod
+        from fsm_llm_agents.definitions import ToolCall
+        from fsm_llm_agents.tools import ToolRegistry
+
+        provider = self._provider(monkeypatch, timeout=0.05)
+        asyncio.run(provider.discover_tools())
+        mcp_mod.ClientSession.call_delay = self.HANG
+        registry = ToolRegistry()
+        provider.register_tools(registry)
+        start = time.monotonic()
+        result = registry.execute(ToolCall(tool_name="echo", parameters={"text": "hi"}))
+        assert time.monotonic() - start < 2.0
+        assert result.success is False
+        assert "echo" in (result.error or "")
+
+    def test_new_built_instance_has_default_timeout(self):
+        from fsm_llm_agents.constants import Defaults
+        from fsm_llm_agents.mcp import MCPToolProvider
+
+        provider = MCPToolProvider.__new__(MCPToolProvider)
+        assert provider._timeout == Defaults.MCP_TIMEOUT_SECONDS
 
 
 # ============================================================================

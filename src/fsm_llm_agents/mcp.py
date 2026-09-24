@@ -7,12 +7,15 @@ ToolDefinition objects compatible with ToolRegistry.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
 from fsm_llm.logging import logger
 
+from .constants import Defaults
 from .definitions import ToolDefinition
+from .exceptions import AgentTimeoutError, ToolExecutionError
 
 try:
     from mcp import ClientSession, StdioServerParameters
@@ -70,16 +73,25 @@ class MCPToolProvider:
         provider = MCPToolProvider.from_stdio("npx", ["-y", "@modelcontextprotocol/server-everything"])
         registry = ToolRegistry()
         provider.register_tools(registry)
+
+    Discovery and every tool call are bounded by ``timeout`` seconds
+    (``None`` = unbounded). Expiry raises ``AgentTimeoutError`` from
+    ``discover_tools`` and ``ToolExecutionError`` from a tool call.
     """
+
+    # Class-level default so instances built via ``__new__`` still have one.
+    _timeout: float | None = Defaults.MCP_TIMEOUT_SECONDS
 
     def __init__(
         self,
         server_params: Any | None = None,
         server_url: str | None = None,
+        timeout: float | None = Defaults.MCP_TIMEOUT_SECONDS,
     ) -> None:
         _require_mcp()
         self._server_params = server_params
         self._server_url = server_url
+        self._timeout = timeout
         self._tools: list[ToolDefinition] = []
         self._session: Any | None = None
 
@@ -89,6 +101,7 @@ class MCPToolProvider:
         command: str,
         args: list[str] | None = None,
         env: dict[str, str] | None = None,
+        timeout: float | None = Defaults.MCP_TIMEOUT_SECONDS,
     ) -> MCPToolProvider:
         """Create a provider that connects via stdio transport.
 
@@ -96,6 +109,7 @@ class MCPToolProvider:
             command: The command to run the MCP server.
             args: Arguments to pass to the command.
             env: Environment variables for the server process.
+            timeout: Seconds per discovery and per tool call; None = unbounded.
         """
         _require_mcp()
         params = StdioServerParameters(
@@ -103,31 +117,42 @@ class MCPToolProvider:
             args=args or [],
             env=env,
         )
-        return cls(server_params=params)
+        return cls(server_params=params, timeout=timeout)
 
     @classmethod
-    def from_url(cls, url: str) -> MCPToolProvider:
+    def from_url(
+        cls, url: str, timeout: float | None = Defaults.MCP_TIMEOUT_SECONDS
+    ) -> MCPToolProvider:
         """Create a provider that connects via HTTP/SSE transport.
 
         Args:
             url: The URL of the MCP server.
+            timeout: Seconds per discovery and per tool call; None = unbounded.
         """
         _require_mcp()
-        return cls(server_url=url)
+        return cls(server_url=url, timeout=timeout)
 
     async def discover_tools(self) -> list[ToolDefinition]:
         """Connect to the MCP server and discover available tools.
 
         Returns a list of ToolDefinition objects.
+
+        Raises:
+            AgentTimeoutError: discovery did not finish within the timeout.
         """
         _require_mcp()
 
         if self._server_params is not None:
-            return await self._discover_stdio()
+            discovery = self._discover_stdio()
         elif self._server_url is not None:
-            return await self._discover_http()
+            discovery = self._discover_http()
         else:
             raise ValueError("No server_params or server_url configured")
+        try:
+            return await asyncio.wait_for(discovery, timeout=self._timeout)
+        # asyncio.TimeoutError, not the builtin: they differ on Python 3.10.
+        except asyncio.TimeoutError as e:
+            raise AgentTimeoutError(self._timeout or 0.0) from e
 
     async def _discover_stdio(self) -> list[ToolDefinition]:
         """Discover tools via stdio transport."""
@@ -184,10 +209,11 @@ class MCPToolProvider:
             tool_name: str,
             server_params: Any,
             server_url: str | None,
+            timeout: float | None,
         ):
             """Create an executor that reconnects per call."""
 
-            async def execute(**kwargs: Any) -> str:
+            async def call(**kwargs: Any) -> str:
                 if server_params is not None:
                     async with stdio_client(server_params) as (rd, wr):
                         async with ClientSession(rd, wr) as sess:
@@ -205,6 +231,15 @@ class MCPToolProvider:
                 else:
                     raise ValueError("No server_params or server_url configured")
 
+            async def execute(**kwargs: Any) -> str:
+                try:
+                    return await asyncio.wait_for(call(**kwargs), timeout=timeout)
+                except asyncio.TimeoutError as e:
+                    raise ToolExecutionError(
+                        f"MCP tool '{tool_name}' timed out after {timeout}s",
+                        tool_name=tool_name,
+                    ) from e
+
             return execute
 
         return ToolDefinition(
@@ -213,7 +248,7 @@ class MCPToolProvider:
             or f"MCP tool: {mcp_tool.name}",
             parameter_schema=param_schema,
             execute_fn=make_executor(
-                mcp_tool.name, self._server_params, self._server_url
+                mcp_tool.name, self._server_params, self._server_url, self._timeout
             ),
         )
 
