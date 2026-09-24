@@ -270,7 +270,9 @@ class HandlerNames:
     MAKER_CHECKER_FORCE_PASS = "MakerCheckerForcePass"
     CHAIN_GATE_CHECKER = "ChainGateChecker"
     ORCHESTRATOR_DELEGATOR = "OrchestratorDelegator"
+    ORCHESTRATOR_DECISION_RESET = "OrchestratorDecisionReset"
     DEBATE_JUDGE = "DebateJudge"
+    DEBATE_CONSENSUS_RESET = "DebateConsensusReset"
     ADAPT_ASSESSOR = "ADaPTAssessor"
 
 

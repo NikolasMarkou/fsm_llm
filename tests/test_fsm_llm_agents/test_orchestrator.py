@@ -3,7 +3,18 @@ from __future__ import annotations
 """Tests for fsm_llm_agents.orchestrator module."""
 
 
-from fsm_llm.definitions import FSMDefinition
+import re
+from typing import Any
+
+from fsm_llm.definitions import (
+    DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.llm import LLMInterface
 from fsm_llm_agents.constants import (
     ContextKeys,
     Defaults,
@@ -234,3 +245,97 @@ class TestOrchestratorDelegation:
         result = agent._delegate_to_workers(context)
         worker_results = result[ContextKeys.WORKER_RESULTS]
         assert len(worker_results) == 2
+
+
+class _DecisionLLM(LLMInterface):
+    """Mock LLM that answers ``key`` from ``decisions`` in order.
+
+    Every other field, and every ``- "name"`` a bulk prompt lists, gets a
+    filler value. One turn's field pass and bulk pass see the same decision;
+    the last decision repeats once the list is exhausted.
+    """
+
+    def __init__(self, key: str, decisions: list[bool]) -> None:
+        self.model = "mock-model"
+        self.key = key
+        self.decisions = decisions
+        self.asked = 0
+        self._pending: bool | None = None
+
+    def _next(self) -> bool:
+        value = self.decisions[min(self.asked, len(self.decisions) - 1)]
+        self.asked += 1
+        return value
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        name = request.field_name
+        value: Any = "text"
+        if name == self.key:
+            value = self._pending = self._next()
+        elif name == ContextKeys.SUBTASKS:
+            value = ["subtask"]
+        return FieldExtractionResponse(
+            field_name=name, value=value, confidence=0.9, reasoning="m", is_valid=True
+        )
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        data: dict[str, Any] = {}
+        for name in re.findall(r'- "(\w+)"', request.system_prompt):
+            if name != self.key:
+                data[name] = "text"
+            elif self._pending is not None:
+                data[name], self._pending = self._pending, None
+            else:
+                data[name] = self._next()
+        return DataExtractionResponse(extracted_data=data)
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="ok", message_type="response", reasoning="m"
+        )
+
+
+def _run_recording_states(agent: Any, task: str) -> tuple[Any, list[str]]:
+    """Run the agent; return (result, state before each loop turn)."""
+    states: list[str] = []
+    real_hook = agent._on_loop_iteration
+
+    def _hook(api: Any, conv_id: str, iteration: int) -> None:
+        states.append(api.get_current_state(conv_id))
+        real_hook(api, conv_id, iteration)
+
+    agent._on_loop_iteration = _hook
+    return agent.run(task), states
+
+
+class TestAllCollectedTypedExtraction:
+    """D-009: ``collect`` declares ``all_collected`` as a typed bool extraction."""
+
+    def test_collect_declares_bool_extraction(self):
+        state = build_orchestrator_fsm()["states"][OrchestratorStates.COLLECT]
+        fields = {f["field_name"]: f for f in state.get("field_extractions", [])}
+        assert fields[ContextKeys.ALL_COLLECTED]["field_type"] == "bool"
+        FSMDefinition.model_validate(build_orchestrator_fsm("task"))
+
+    def test_second_round_decision_is_extracted(self):
+        # Round 1 says more work is needed, round 2 says done: the run must
+        # synthesize after the second delegation, not replay round 1's False.
+        workers: list[str] = []
+
+        def worker(subtask: str) -> AgentResult:
+            workers.append(subtask)
+            return AgentResult(answer="w", success=True)
+
+        llm = _DecisionLLM(ContextKeys.ALL_COLLECTED, [False, True])
+        agent = OrchestratorAgent(
+            worker_factory=worker,
+            config=AgentConfig(max_iterations=12),
+            llm_interface=llm,
+        )
+        result, states = _run_recording_states(agent, "task")
+
+        assert len(workers) == 2
+        assert states.count(OrchestratorStates.COLLECT) == 2
+        assert result.success

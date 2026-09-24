@@ -116,6 +116,9 @@ def build_orchestrator_fsm(
             "description": "Review worker results and decide if more work is needed",
             "purpose": "Assess completeness of gathered results",
             "extraction_instructions": build_collect_extraction_instructions(),
+            "field_extractions": _bool_decision_field_extractions(
+                ContextKeys.ALL_COLLECTED, build_collect_extraction_instructions()
+            ),
             "response_instructions": build_collect_response_instructions(),
             "transitions": [
                 {
@@ -415,6 +418,27 @@ def _tool_selection_field_extractions(
             "extraction_instructions": f"Extract the '{name}' field. {think_instructions}",
         }
         for name, field_type in fields
+    ]
+
+
+def _bool_decision_field_extractions(
+    field_name: str, instructions: str
+) -> list[dict[str, Any]]:
+    """Typed ``field_extractions`` for a state's one boolean routing decision.
+
+    Contract: ``instructions`` is the state's ``extraction_instructions``;
+    returns a one-entry list of raw dicts for ``State(field_extractions=...)``
+    declaring ``field_name`` as ``bool``, worded like
+    :func:`_tool_selection_field_extractions`. Never raises.
+    """
+    return [
+        {
+            "field_name": field_name,
+            "field_type": "bool",
+            "extraction_instructions": (
+                f"Extract the '{field_name}' field. {instructions}"
+            ),
+        }
     ]
 
 
@@ -1214,6 +1238,7 @@ def build_debate_fsm(
         "You are a thoughtful AI that explores questions through structured debate. "
         "Multiple perspectives are considered to arrive at the best answer."
     )
+    judge_instructions = build_judge_extraction_instructions(judge_persona, max_rounds)
 
     states: dict[str, Any] = {
         "propose": {
@@ -1268,8 +1293,9 @@ def build_debate_fsm(
             "id": "judge",
             "description": "Evaluate the debate exchange and decide next action",
             "purpose": "Determine whether consensus has been reached",
-            "extraction_instructions": build_judge_extraction_instructions(
-                judge_persona, max_rounds
+            "extraction_instructions": judge_instructions,
+            "field_extractions": _bool_decision_field_extractions(
+                ContextKeys.CONSENSUS_REACHED, judge_instructions
             ),
             "response_instructions": build_judge_response_instructions(),
             "transitions": [
@@ -1279,9 +1305,29 @@ def build_debate_fsm(
                     "priority": 10,
                     "conditions": [
                         {
-                            "description": "Consensus has been reached",
+                            # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
+                            # Do NOT drop the round disjunct: consensus_reached
+                            # is now extracted every round, and transition
+                            # evaluation overlays this turn's extracted False
+                            # on the judge handler's max-round True, so the
+                            # cap must read current_round (bumped by that
+                            # handler, never extracted).
+                            "description": "Consensus reached or max rounds hit",
                             "logic": {
-                                "==": [{"var": ContextKeys.CONSENSUS_REACHED}, True]
+                                "or": [
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.CONSENSUS_REACHED},
+                                            True,
+                                        ]
+                                    },
+                                    {
+                                        ">": [
+                                            {"var": ContextKeys.CURRENT_ROUND},
+                                            max_rounds,
+                                        ]
+                                    },
+                                ]
                             },
                         }
                     ],

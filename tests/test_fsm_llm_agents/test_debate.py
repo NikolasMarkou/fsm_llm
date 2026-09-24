@@ -3,7 +3,20 @@ from __future__ import annotations
 """Tests for fsm_llm_agents.debate module."""
 
 
-from fsm_llm.definitions import FSMDefinition
+import re
+from typing import Any
+
+import pytest
+
+from fsm_llm.definitions import (
+    DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.llm import LLMInterface
 from fsm_llm_agents.constants import ContextKeys, DebateStates, Defaults, HandlerNames
 from fsm_llm_agents.debate import DebateAgent
 from fsm_llm_agents.definitions import AgentConfig, DebateRound
@@ -227,3 +240,108 @@ class TestDebateConstants:
 
     def test_handler_name_debate_judge(self):
         assert HandlerNames.DEBATE_JUDGE == "DebateJudge"
+
+
+class _DecisionLLM(LLMInterface):
+    """Mock LLM that answers ``key`` from ``decisions`` in order.
+
+    Every other field, and every ``- "name"`` a bulk prompt lists, gets a
+    filler value. One turn's field pass and bulk pass see the same decision;
+    the last decision repeats once the list is exhausted.
+    """
+
+    def __init__(self, key: str, decisions: list[bool]) -> None:
+        self.model = "mock-model"
+        self.key = key
+        self.decisions = decisions
+        self.asked = 0
+        self._pending: bool | None = None
+
+    def _next(self) -> bool:
+        value = self.decisions[min(self.asked, len(self.decisions) - 1)]
+        self.asked += 1
+        return value
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        name = request.field_name
+        value: Any = "text"
+        if name == self.key:
+            value = self._pending = self._next()
+        elif name == ContextKeys.SUBTASKS:
+            value = ["subtask"]
+        return FieldExtractionResponse(
+            field_name=name, value=value, confidence=0.9, reasoning="m", is_valid=True
+        )
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        data: dict[str, Any] = {}
+        for name in re.findall(r'- "(\w+)"', request.system_prompt):
+            if name != self.key:
+                data[name] = "text"
+            elif self._pending is not None:
+                data[name], self._pending = self._pending, None
+            else:
+                data[name] = self._next()
+        return DataExtractionResponse(extracted_data=data)
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="ok", message_type="response", reasoning="m"
+        )
+
+
+def _run_recording_states(agent: Any, task: str) -> tuple[Any, list[str]]:
+    """Run the agent; return (result, state before each loop turn)."""
+    states: list[str] = []
+    real_hook = agent._on_loop_iteration
+
+    def _hook(api: Any, conv_id: str, iteration: int) -> None:
+        states.append(api.get_current_state(conv_id))
+        real_hook(api, conv_id, iteration)
+
+    agent._on_loop_iteration = _hook
+    return agent.run(task), states
+
+
+class TestConsensusTypedExtraction:
+    """D-009: ``judge`` declares ``consensus_reached`` as a typed bool extraction."""
+
+    def test_judge_declares_bool_extraction(self):
+        state = build_debate_fsm()["states"][DebateStates.JUDGE]
+        fields = {f["field_name"]: f for f in state.get("field_extractions", [])}
+        assert fields[ContextKeys.CONSENSUS_REACHED]["field_type"] == "bool"
+        FSMDefinition.model_validate(build_debate_fsm("topic", max_rounds=2))
+
+    def test_round_one_consensus_concludes(self):
+        agent = DebateAgent(
+            num_rounds=3,
+            llm_interface=_DecisionLLM(ContextKeys.CONSENSUS_REACHED, [True]),
+        )
+        _, states = _run_recording_states(agent, "topic")
+
+        assert states.count(DebateStates.JUDGE) == 1
+
+    def test_second_round_consensus_concludes(self):
+        agent = DebateAgent(
+            num_rounds=3,
+            llm_interface=_DecisionLLM(ContextKeys.CONSENSUS_REACHED, [False, True]),
+        )
+        _, states = _run_recording_states(agent, "topic")
+
+        assert states.count(DebateStates.JUDGE) == 2
+
+    @pytest.mark.parametrize("rounds", [1, 2, 3])
+    def test_no_consensus_stops_at_round_cap(self, rounds):
+        # The judge extracts False every round; the round cap must still win
+        # (at HEAD, 1 round stopped only because consensus was seeded False
+        # and never extracted).
+        agent = DebateAgent(
+            num_rounds=rounds,
+            llm_interface=_DecisionLLM(ContextKeys.CONSENSUS_REACHED, [False]),
+        )
+        result, states = _run_recording_states(agent, "topic")
+
+        assert states.count(DebateStates.JUDGE) == rounds
+        assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == rounds

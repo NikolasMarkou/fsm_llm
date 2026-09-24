@@ -122,7 +122,6 @@ class DebateAgent(BaseAgent):
             extra={
                 ContextKeys.DEBATE_ROUNDS: [],
                 ContextKeys.CURRENT_ROUND: 1,
-                ContextKeys.CONSENSUS_REACHED: False,
                 "_max_rounds": self.num_rounds,
             },
         )
@@ -148,6 +147,20 @@ class DebateAgent(BaseAgent):
             .at(HandlerTiming.CONTEXT_UPDATE)
             .on_state(DebateStates.JUDGE)
             .do(self._make_judge_handler())
+        )
+
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
+        # Core extracts consensus_reached only while it is unset, so do NOT
+        # seed it in run() and do NOT leave a round's False in place: the
+        # judge could never extract a later True. Clear it on entry to
+        # propose (the redo state), NOT on entry to judge: that would erase
+        # the limiter's forced True (PRE_TRANSITION runs before entry;
+        # plan-2026-09-24T045559-3e4eb3e5/D-013).
+        api.register_handler(
+            api.create_handler(HandlerNames.DEBATE_CONSENSUS_RESET)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_entry(DebateStates.PROPOSE)
+            .do(lambda _context: {ContextKeys.CONSENSUS_REACHED: None})
         )
 
         # Iteration limiter

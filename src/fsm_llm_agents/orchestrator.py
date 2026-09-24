@@ -124,6 +124,19 @@ class OrchestratorAgent(BaseAgent):
             .do(self._delegate_to_workers)
         )
 
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
+        # Core extracts all_collected only while it is unset, so round 1's
+        # False would stick and collect could never extract a later True.
+        # Clear it on entry to orchestrate (the redo state), NOT on entry to
+        # collect: that would erase the limiter's forced True (PRE_TRANSITION
+        # runs before entry; plan-2026-09-24T045559-3e4eb3e5/D-013).
+        api.register_handler(
+            api.create_handler(HandlerNames.ORCHESTRATOR_DECISION_RESET)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_entry(OrchestratorStates.ORCHESTRATE)
+            .do(lambda _context: {ContextKeys.ALL_COLLECTED: None})
+        )
+
         # Iteration limiter: checks budget on every pre-transition
         self._register_iteration_limiter(api, self._make_iteration_limiter())
 
