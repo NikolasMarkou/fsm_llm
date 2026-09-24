@@ -34,7 +34,8 @@ def normalize_tool_input(raw: Any) -> dict[str, Any]:
 
     Handles string, dict, None, and other types by wrapping non-dict values
     in ``{"input": value}``. A string whose stripped text starts with ``{`` and
-    decodes to a JSON object is returned as that dict.
+    decodes to a JSON object is returned as that dict. A list is wrapped as the
+    list itself; other scalars are wrapped as their ``str()``.
     """
     if raw is None:
         return {}
@@ -50,6 +51,9 @@ def normalize_tool_input(raw: Any) -> dict[str, Any]:
         # the decoded text as ``{"input": raw}`` (kwargs tools then fail with
         # ``unexpected keyword argument 'input'``). Non-object JSON and invalid
         # JSON keep the ``{"input": raw}`` fallback. See decisions.md D-017.
+        # (A JSON-array *string* stays a string here; a real list value, which
+        # the ``array`` member of the union yields, is kept below: D-011 of
+        # plan-2026-09-24T091842-c1d5bfbc.)
         if raw.lstrip().startswith("{"):
             try:
                 parsed = json.loads(raw)
@@ -57,6 +61,13 @@ def normalize_tool_input(raw: Any) -> dict[str, Any]:
                 parsed = None
             if isinstance(parsed, dict):
                 return parsed
+        return {"input": raw}
+    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-011: the core ``any`` union
+    # includes ``array``, so a model can emit a list tool_input. Wrap the list
+    # itself. Do NOT let it fall to the ``str(raw)`` catch-all (a list-typed
+    # tool parameter then got the repr "['a', 'b']") and do NOT widen the
+    # union in core to reach this (D-017 above still holds).
+    if isinstance(raw, list):
         return {"input": raw}
     return {"input": str(raw)}
 

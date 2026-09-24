@@ -812,3 +812,73 @@ class TestNormalizeToolInput:
         )
         assert out[ContextKeys.TOOL_STATUS] == "success", out
         assert seen["kwargs"] == {"query": "cats", "limit": 3}
+
+
+class TestListToolInput:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-011: the core ``any`` union
+    allows ``array``, so a model can emit a list ``tool_input``. It must reach
+    the tool as a list, not as its ``str()`` repr."""
+
+    def test_list_is_wrapped_as_is(self):
+        raw = ["a", "b"]
+        out = normalize_tool_input(raw)
+        assert out == {"input": ["a", "b"]}
+        assert out["input"] is raw
+
+    def test_empty_list_is_wrapped_as_is(self):
+        assert normalize_tool_input([]) == {"input": []}
+
+    def test_single_list_param_tool_receives_a_list(self):
+        seen: dict = {}
+
+        @tool
+        def total_length(words: list) -> int:
+            """Sum the lengths of the words."""
+            seen["words"] = words
+            return sum(len(w) for w in words)
+
+        registry = ToolRegistry()
+        registry.register(total_length._tool_definition)
+        result = registry.execute(
+            ToolCall(
+                tool_name="total_length",
+                parameters=normalize_tool_input(["ab", "cde"]),
+            )
+        )
+        assert result.success, result.error
+        assert seen["words"] == ["ab", "cde"]
+        assert result.result == 5
+
+    def test_list_through_agent_handler(self):
+        from fsm_llm_agents.constants import ContextKeys
+        from fsm_llm_agents.handlers import AgentHandlers
+
+        seen: dict = {}
+
+        @tool
+        def count_items(items: list) -> int:
+            """Count the items."""
+            seen["items"] = items
+            return len(items)
+
+        registry = ToolRegistry()
+        registry.register(count_items._tool_definition)
+        out = AgentHandlers(registry).execute_tool(
+            {
+                ContextKeys.TOOL_NAME: "count_items",
+                ContextKeys.TOOL_INPUT: ["x", "y", "z"],
+                ContextKeys.TASK: "count",
+            }
+        )
+        assert out[ContextKeys.TOOL_STATUS] == "success", out
+        assert seen["items"] == ["x", "y", "z"]
+
+    def test_approval_grant_binds_the_list_consistently(self):
+        """The driver writes the grant from an already-normalized input and the
+        refusal recomputes it from the raw context value: both must agree."""
+        from fsm_llm_agents.handlers import approval_grant
+
+        raw = ["a", "b"]
+        driver = approval_grant("t", normalize_tool_input(raw))
+        refusal = approval_grant("t", raw)
+        assert driver == refusal == {"tool_name": "t", "parameters": {"input": raw}}
