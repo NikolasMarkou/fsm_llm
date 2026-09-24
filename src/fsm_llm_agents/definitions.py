@@ -424,6 +424,14 @@ class MetaBuilderResult(AgentResult):
     artifact_type: ArtifactType = ArtifactType.FSM
     artifact: dict[str, Any] = Field(default_factory=dict)
     artifact_json: str = ""
-    is_valid: bool = True
+    is_valid: bool = Field(
+        default=True,
+        description=(
+            "For fsm artifacts: the artifact loads as an FSMDefinition. For "
+            "workflow and agent artifacts: a structurally complete spec that is "
+            "NOT directly loadable (workflow steps and agent tools need Python "
+            "callables the caller must wire)."
+        ),
+    )
     validation_errors: list[str] = Field(default_factory=list)
     conversation_turns: int = 0

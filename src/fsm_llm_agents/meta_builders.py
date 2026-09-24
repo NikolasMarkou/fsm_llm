@@ -654,6 +654,18 @@ class WorkflowBuilder(ArtifactBuilder):
         return warnings
 
     def validate_complete(self) -> list[str]:
+        """Return structural errors; an empty list means a complete *spec*.
+
+        A workflow artifact is not directly loadable by ``fsm_llm_workflows``:
+        its steps need Python callables (``APICallStep.api_function``,
+        ``ConditionStep.condition``, ...) that a JSON spec cannot carry, so a
+        caller still wires them by hand. This checks required metadata, the
+        initial step, transition targets and that every ``step_type`` is in
+        ``VALID_STEP_TYPES``.
+        """
+        # DECISION plan-2026-09-24T045559-3e4eb3e5/D-004: do NOT add a
+        # WorkflowDefinition(**self.to_dict()) load check here without an
+        # adapter that supplies step callables; it can never pass.
         errors: list[str] = []
         if not self.workflow_id:
             errors.append("Workflow ID is required")
@@ -666,8 +678,12 @@ class WorkflowBuilder(ArtifactBuilder):
         elif self.initial_step_id not in self.steps:
             errors.append(f"Initial step '{self.initial_step_id}' not found")
 
-        # Check transition targets exist
+        # Check step types are known and transition targets exist
         for sid, step in self.steps.items():
+            if step["step_type"] not in self.VALID_STEP_TYPES:
+                errors.append(
+                    f"Step '{sid}' has unknown step type '{step['step_type']}'"
+                )
             for t in step["transitions"]:
                 if t["target"] not in self.steps:
                     errors.append(
@@ -967,6 +983,13 @@ class AgentBuilder(ArtifactBuilder):
         return warnings
 
     def validate_complete(self) -> list[str]:
+        """Return structural errors; an empty list means a complete *spec*.
+
+        An agent artifact is not directly loadable: each tool needs an
+        ``execute_fn`` that a JSON spec cannot carry, so a caller still wires
+        the tools by hand. This checks the agent type, the name and that every
+        tool has a name and a description.
+        """
         errors: list[str] = []
         if not self.agent_type:
             errors.append("Agent type is required")

@@ -289,6 +289,14 @@ class TestWorkflowBuilder:
         errors = workflow_builder.validate_complete()
         assert errors == []
 
+    def test_validate_complete_unknown_step_type_is_error(
+        self, workflow_builder: WorkflowBuilder
+    ):
+        workflow_builder.set_overview("wf1", "Flow", "Description")
+        workflow_builder.add_step("s1", "invalid_type", "Step 1")
+        errors = workflow_builder.validate_complete()
+        assert any("s1" in e and "invalid_type" in e for e in errors)
+
     def test_get_summary(self, workflow_builder: WorkflowBuilder):
         workflow_builder.set_overview("wf1", "Flow", "Description")
         workflow_builder.add_step("s1", "auto_transition", "Step 1")
