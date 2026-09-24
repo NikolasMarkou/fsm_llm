@@ -270,3 +270,89 @@ class TestReactAgentConcurrentRuns:
         assert results["b"].success is True
         assert len(results["a"].trace.tool_calls) == 1
         assert len(results["b"].trace.tool_calls) == 1
+
+
+class _GatedToolMockLLM(_DeterministicMockLLM):
+    """Selects the approval-gated ``danger`` tool on every think turn."""
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        value = {
+            "tool_name": "danger",
+            "tool_input": {"x": "1"},
+            "reasoning": "call the gated tool",
+            "should_terminate": False,
+        }.get(request.field_name, "text")
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=0.9,
+            reasoning="mock field extraction",
+            is_valid=True,
+        )
+
+
+class TestReactAgentApprovalIsSingleUse:
+    """D-015: an approval covers the one tool call it was granted for.
+
+    The policy gates every call, so each execution of ``danger`` must be
+    preceded by its own approval request. Before D-015 ``approval_granted``
+    was never reset: after one grant the callback was skipped and
+    ``await_approval`` routed to ``act`` on the stale True.
+    """
+
+    @staticmethod
+    def _run(decide):
+        from fsm_llm_agents.exceptions import AgentError
+        from fsm_llm_agents.hitl import HumanInTheLoop
+
+        executions: list[dict] = []
+        asks: list[bool] = []
+
+        def danger(params):
+            executions.append(params)
+            return "done"
+
+        def callback(request):
+            approved = decide(len(asks))
+            asks.append(approved)
+            return approved
+
+        registry = ToolRegistry()
+        registry.register_function(
+            danger,
+            name="danger",
+            description="Gated tool",
+            parameter_schema={"properties": {"x": {"type": "string"}}},
+        )
+        hitl = HumanInTheLoop(
+            approval_policy=lambda call, ctx: True, approval_callback=callback
+        )
+        agent = ReactAgent(
+            tools=registry,
+            config=AgentConfig(max_iterations=8, model="mock/model"),
+            llm_interface=_GatedToolMockLLM(),
+            hitl=hitl,
+        )
+        try:
+            agent.run("do it")
+        except AgentError:
+            pass
+        return asks, executions
+
+    def test_approval_of_first_call_does_not_cover_later_calls(self):
+        asks, executions = self._run(lambda n: n == 0)
+        assert len(asks) >= 2, "a later gated call skipped the approval callback"
+        assert len(executions) == 1
+
+    def test_each_gated_execution_is_asked_for(self):
+        asks, executions = self._run(lambda n: True)
+        assert len(executions) >= 2
+        # One ask per execution; the last grant may be cut off by the budget
+        # before its act turn runs.
+        assert len(asks) - len(executions) in (0, 1)
+
+    def test_denial_then_new_call_asks_again(self):
+        asks, executions = self._run(lambda n: n >= 1)
+        assert asks[:2] == [False, True]
+        assert len(executions) >= 1
+        assert asks.count(True) - len(executions) in (0, 1)

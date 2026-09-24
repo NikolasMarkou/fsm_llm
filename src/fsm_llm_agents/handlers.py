@@ -29,11 +29,11 @@ class AgentHandlers:
         self._current_iteration = 0
         self._consecutive_no_tool = 0
 
-    def execute_tool(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _run_selected_tool(self, context: dict[str, Any]) -> dict[str, Any]:
         """
         Execute the tool selected during the think state.
 
-        Called as a POST_TRANSITION handler when entering the 'act' state.
+        Body of :meth:`execute_tool`, which adds approval consumption.
         """
         tool_name = context.get(ContextKeys.TOOL_NAME)
         tool_input = context.get(ContextKeys.TOOL_INPUT)
@@ -221,6 +221,23 @@ class AgentHandlers:
             ContextKeys.TOOL_INPUT: None,
             ContextKeys.SHOULD_TERMINATE: None,
         }
+
+    def execute_tool(self, context: dict[str, Any]) -> dict[str, Any]:
+        """
+        Execute the tool selected during the think state.
+
+        Called as a POST_TRANSITION handler when entering the 'act' state.
+        """
+        delta = self._run_selected_tool(context)
+        # DECISION plan-2026-09-24T045559-3e4eb3e5/D-015
+        # Do NOT let an approval outlive the single tool call it was granted
+        # for. The driver asks only while approval_granted is unset, so a stale
+        # True skipped the callback and routed await_approval -> act unasked.
+        # Kept while approval_required is set (the call is still pending).
+        pending = context.get(ContextKeys.APPROVAL_REQUIRED)
+        if ContextKeys.APPROVAL_GRANTED in context and not pending:
+            delta = {**delta, ContextKeys.APPROVAL_GRANTED: None}
+        return delta
 
     def classification_tool_override(self, context: dict[str, Any]) -> dict[str, Any]:
         """
