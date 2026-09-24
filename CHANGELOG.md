@@ -7,6 +7,262 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Agents follow-up 2026-09-24
+
+Follow-up to the agents audit below (`plans/plan-2026-09-24T091842-c1d5bfbc`, one
+commit per step or completion fix, three adversarial review passes). It closes the
+audit's HITL security gaps and most of its Known open list, makes CI green on
+Python 3.10, 3.11 and 3.12, and changes the default model. Every behaviour change has a
+test that fails on the pre-fix code. Core `src/fsm_llm` changed only in
+`DEFAULT_LLM_MODEL` and one comment. Reviews and decisions: the plan's
+`findings/review-iter-1*.md` and `decisions.md` (D-001 to D-030).
+
+Live results (ollama_chat/qwen3.5:9b-q8_0): PENDING
+
+### Security -- agents follow-up 2026-09-24
+
+- **Approval is a driver-only grant bound to one call (D-004, D-023).** In
+  `ReactAgent`, `ReflexionAgent` and `ReasoningReactAgent` with an approval policy, a
+  tool the policy gates runs only when the approval driver wrote a grant for that exact
+  call: the internal key `_approval_granted` (`ContextKeys.DRIVER_APPROVAL`), whose
+  value is `{"tool_name", "parameters"}` of the call the human approved. Core drops
+  internal-prefixed keys from every model extraction, so the model cannot write it.
+  `AgentHandlers(registry, requires_approval=...)` checks it before a registered tool
+  runs (`approval_refusal`): without a matching grant the tool does not run, no
+  observation is recorded (a refused call is never conclude evidence), the selection
+  is kept, `approval_required` is set, a model-written `approval_granted` is deleted,
+  and `tool_status` is `awaiting_approval`, so the driver asks on the next loop
+  iteration. The grant is spent by the call it names, so one approval still covers one
+  call (D-015). A call changed after the approval is refused: pre-fix `ReactAgent` ran
+  `danger(x="EVIL")` after the human approved `danger` with an empty input and the
+  model filled the input on the `await_approval` turn. The public
+  `approval_granted`/`approval_required` keys still route the FSM and stay
+  model-writable; the refusal, not the route, is the boundary.
+- **Reflexion asks before a gated tool (D-005).** `build_reflexion_fsm` takes
+  `include_approval_state` and builds the same `await_approval` state as
+  `build_react_fsm` (shared builders `_await_approval_state` and
+  `_approval_think_transition`). Before, a gated tool ran first and the callback was
+  asked afterwards, so a denial did not stop it.
+- **ReasoningReact has an approval driver (D-005).** `ReasoningReactAgent` now calls
+  `_handle_hitl_approval` before each turn, as `ReactAgent` does. Before, the callback
+  was never asked and the model opened the gate by extracting `approval_granted`.
+- **One approval predicate for all three agents (D-019).** `_hitl_active` and
+  `_approval_predicate` moved to `BaseAgent`. The same predicate builds
+  `await_approval`, registers the gate and feeds the refusal, so they cannot disagree.
+- **The approval is a strict bool (D-023).** The driver asks unless `approval_granted`
+  is exactly `True` and stores the callback's answer as `True` or `False`. A
+  model-written `"yes"` or a callback returning `None` used to park the run in
+  `await_approval` until `BudgetExhaustedError`.
+- **The driver asks only about a real gated tool, and sees the full context (D-005).**
+  A model that writes `approval_required=True` with tool `none`, an unknown tool or an
+  ungated tool is no longer asked about; the driver routes the run back to `think`.
+  The policy is evaluated on the same full context (internal keys included) the
+  refusal sees, so a policy that reads a `_`-prefixed key asks and runs as expected.
+  The approval callback still receives the filtered `get_data` view.
+- **`AgentServer` opt-in API key and input limit (D-006).**
+  `AgentServer(..., api_key=None, max_input_chars=100_000)`. With `api_key` set,
+  `/invoke` and `/stream` need `Authorization: Bearer <key>` or `X-API-Key: <key>`
+  (401 otherwise; `hmac.compare_digest` on UTF-8 `surrogateescape` bytes, a copy of the
+  monitor's compare). `/health` and `/info` stay open. A request whose
+  `len(task) + len(json.dumps(context, ensure_ascii=False))` exceeds `max_input_chars`
+  gets 413 before the agent runs; `None` disables the check. The key is checked before
+  the size and before body validation. `RemoteAgentTool(..., api_key=None)` sends the
+  key as a bearer token on `invoke` and `ainvoke`. An empty or whitespace-only
+  `api_key` raises `ValueError` in both classes: `compare_digest(b"", b"")` is true, so
+  `api_key=os.getenv("KEY", "")` used to give an open server that looked protected.
+  The server is still unauthenticated by default.
+- **Monitor `configure(api_key="")` raises `ValueError` (D-006).** The same empty-key
+  hole existed in the monitor's mutating routes. An empty or whitespace-only `api_key`
+  now raises before any global changes, so a key already configured stays in force.
+  The env var `FSM_LLM_MONITOR_API_KEY=""` keeps its documented meaning (no key).
+
+### Behaviour changes to know about -- agents follow-up 2026-09-24
+
+- **Default model is `ollama_chat/qwen3.5:9b-q8_0` (D-003).** `DEFAULT_LLM_MODEL`, the
+  harness default (which follows it), `react_worker_factory`, `scripts/eval.py`,
+  `scripts/agent_chat_harness.py` and the docs changed from `ollama_chat/qwen3.5:4b`.
+  New users who rely on the default download a larger model (about 10 GB). Bench
+  records and "measured on 4b" notes are unchanged.
+- **Pins: `litellm==1.102.1` and `mcp==2.2.0` in `constraints.txt` (D-002, D-025).**
+  litellm 1.100.1 and 1.100.2 import `typing.NotRequired` (3.11+) and fail to import on
+  Python 3.10; 1.101.0 is the first fixed release. One pin for every Python version,
+  no marker split. mcp is pinned to the version CI ran green, since mcp 2.x already
+  renamed `Tool.inputSchema` once.
+- **Reflexion and ParallelReact conclude only on tool evidence (D-008).** Their
+  `think->conclude` and `act->conclude` edges now carry ReAct's guard
+  (`should_terminate` and (`observation_count > 0` or `max_iterations_reached`)), built
+  by `_conclude_on_evidence_logic()`. Reflexion's `evaluate->conclude` edge needs
+  `evaluation_passed` plus the same evidence, or a forced stop
+  (`max_iterations_reached` alone). A turn-1 answer from memory now goes through `act`;
+  a Reflexion run that never calls a tool ends at the limiter's forced stop instead of
+  concluding on turn 3. Reflexion at `max_iterations=1` no longer raises
+  `BudgetExhaustedError`. ParallelReact's empty-batch branch does not clear
+  `should_terminate`, so a model that insists on stopping with no batch loops until the
+  forced stop (bounded, `max_iterations + 2`).
+- **maker_checker forces a pass only in `check` (D-007, D-021).** The limiter still
+  counts every turn, but the forced `checker_passed=True` is written only on the
+  `check` state (new handler `MakerCheckerForcePass`), and `check->output` also passes
+  on `max_iterations_reached == True`. Every shipped draft is one the checker judged;
+  before, odd budgets could ship the draft written on the forced `revise` turn
+  unjudged. Measured with an always-reject checker: budgets 2 to 10 take the same
+  number of turns as before the plan; budget 1 ships a judged draft in 2 turns
+  (before the plan it shipped an unjudged one).
+- **evaluator_optimizer ends at every budget (D-022).** The limiter's forced
+  `evaluation_passed=True` was overwritten by the next evaluation, so with an
+  always-failing evaluator the run could raise `BudgetExhaustedError` (budgets 1, 2,
+  3 and 10 with the defaults, 2 to 7 with a high `max_refinements`). `_run_evaluation` now
+  treats `max_iterations_reached` like the refinement cap and ships the last evaluated
+  output.
+- **A forced stop reports a verdict the judge did not give.** maker_checker's forced
+  pass and evaluator_optimizer's budget stop return `success=True` with
+  `checker_passed`/`evaluation_passed=True` in `final_context`. Read
+  `max_iterations_reached` to tell a forced stop from a real pass.
+- **Orchestrator and debate decisions are typed bools (D-009).** The orchestrator
+  `collect` state and the debate judge declare `all_collected` and
+  `consensus_reached` as `field_type: "bool"` extractions (one extra extraction call per
+  such turn). `all_collected` is cleared on entry to `orchestrate` and
+  `consensus_reached` on entry to `propose`, so each round is decided again; before,
+  the first round's False stuck and later values were never extracted. The debate no
+  longer seeds `consensus_reached=False`, so the model's verdict is extracted: a
+  round-1 consensus now ends after 1 judge (it ran 3 or 5 before). The judge->conclude
+  edge reads `consensus_reached == True` or `current_round > max_rounds`, so the round
+  cap holds in every round (it only worked in round 1).
+- **meta_builder `step_type` is an enum (D-010).** The extraction schema sets
+  `"enum": sorted(WorkflowBuilder.VALID_STEP_TYPES)`, so a live model cannot invent a
+  step type. The agentic `meta_tools.add_step` parameter is still a free string.
+- **List tool input stays a list (D-011).** `normalize_tool_input` turns a list into
+  `{"input": list}` instead of a string repr. A list reaches a parameter whose schema
+  type is `array` as a list; a string-typed or untyped parameter still gets
+  `str(list)`, the pre-fix value.
+- **`@tool` infers an array schema for list-like annotations (D-011).** Bare `list`,
+  `list[X]`, `typing.List[X]`, `tuple[...]`, `set[...]`, `frozenset[...]`,
+  `Sequence[X]`, and any of these inside `Optional`/`X | None`, give
+  `{"type": "array"}`, with `items: {"type": ...}` for a parametrized generic (OpenAI
+  native function calling rejects an array without `items`). They used to be
+  `"string"`. The prompt now tells the model to send an array for these parameters.
+  Other `Optional` types are unchanged. Side effect (open, see below): an empty
+  `tool_input` no longer gets the task string filled into a single list-typed
+  parameter.
+- **A `**kwargs`-only tool is called with keywords (D-024).** A tool whose one
+  parameter is `**kwargs` used to receive the parameters dict positionally and fail on
+  every call. This covers zero-argument MCP tools and the monitor's launched-agent stub
+  tools.
+- **A single `params` dict tool typed `dict[...]` still gets its dict (D-024).** Only a
+  bare `dict` annotation was recognised; `dict[str, Any]`, `typing.Dict[...]` or a
+  string annotation (`from __future__ import annotations`) made every call fail. Such
+  a parameter is the legacy dict form only when the schema does not name it.
+- **`previous_draft` and `previous_output` are dropped from `final_context` (D-012).**
+  Checker and refiner prompts still see them during the run
+  (`RESULT_DROPPED_CONTEXT_KEYS`).
+- **`max_iterations_reached` is always present and cannot be forged (D-007).**
+  `_init_context` seeds it `False`, so it appears in every prompt context and in
+  `final_context` of the agents that use `_init_context`. Core bulk extraction fills
+  only unset keys, so a model that writes `max_iterations_reached: true` no longer
+  passes every evidence guard (it concluded React and Reflexion on turn 1 and made
+  maker_checker ship its first draft). Only the limiter and stall handlers write True.
+- **ReasoningReact builds `await_approval` for any approval policy (D-019).** It used
+  to need a policy and at least one tool flagged `requires_approval`. A policy can gate
+  any tool, including unflagged ones and the `reason` pseudo-tool.
+- **A gated call with no approval callback raises in Reflexion and ReasoningReact
+  too.** With a policy and no `approval_callback`, the driver's
+  `request_approval` raises `ApprovalDeniedError`, which ends the run as
+  `AgentError`, as `ReactAgent` already did. Before, Reflexion ran the tool and
+  ReasoningReact let the model approve.
+
+### Fixed -- agents follow-up 2026-09-24
+
+- `AgentServer` returned 422 for every valid `/invoke` and `/stream` body: the request
+  models were defined inside `_create_app`, and under `from __future__ import
+  annotations` FastAPI read `request` as a query parameter. They are module-level now
+  (D-020). No test had ever called the server.
+- plan_execute ran each step's tool on `execute_step` entry, before the step's
+  `tool_name`/`tool_input` were extracted, so a 1-step plan never called its tool and
+  step N ran step N-1's input; every step also recorded `success: False` because the
+  compactor had cleared `tool_status`. The executor now runs on `check_result` entry,
+  and the checker runs after it in the same cascade (D-024).
+- mcp 2.x renamed `Tool.inputSchema` to `input_schema`, so every discovered tool had an
+  empty schema and every call failed. `MCPToolProvider` reads either name (D-025).
+- An MCP tool error result (`isError`/`is_error`) is a failed tool call. It used to be
+  reported as `success=True` and counted as evidence (D-026).
+- `SkillLoader` loads a `@tool` reachable under two attribute names once. The first
+  attribute in `dir()` order wins; a different function claiming a loaded name is
+  skipped with a warning (D-012).
+- CI's Python 3.10 leg was red since v0.8.0 (litellm import error, see the pin above).
+  Two latent mypy errors in `mcp.py` and four OTEL tests that ran without the
+  OpenTelemetry SDK surfaced once CI installed the `mcp` extra; both fixed.
+
+### Tests -- agents follow-up 2026-09-24
+
+- `tests/test_fsm_llm_agents/test_hitl_security.py`: forged `approval_granted` and
+  `_approval_granted` with a deny-always callback (tool never runs, callback asked), a
+  swapped or filled-in call after approval, Reflexion asking before the tool,
+  ReasoningReact asking its callback, the driver asking only about a real gated tool,
+  and a policy that reads an internal key.
+- `tests/test_fsm_llm_agents/test_remote.py`: the 401/200/413 matrix on both routes,
+  bearer and `X-API-Key`, non-ASCII and empty keys, at-limit and over-limit input, and
+  `RemoteAgentTool` sending the key.
+- `tests/test_fsm_llm_agents/test_forced_stop_flag.py`: a model-written
+  `max_iterations_reached` changes nothing in React, Reflexion and maker_checker.
+- `tests/test_fsm_llm_agents/test_mcp_stdio.py` with the fixture
+  `mcp_fixture_server.py`: real stdio discovery and call, a slow call timing out with
+  the child process gone within 5 s, a hung server, and an erroring tool. They run in
+  CI, which now installs the `mcp` extra; mcp 1.x was checked only in a local Python
+  3.10 venv.
+- `tests/test_fsm_llm/test_turn_guard_deterministic.py`: a deterministic
+  same-conversation turn-guard test (an Event-blocked mock LLM; exactly one success and
+  one "already being processed"), shown to fail with the guard disabled. The live
+  `TestThreadSafety` counts only guard outcomes and skips on live-model errors.
+- Extended: maker_checker and Reflexion budget sweeps (1 to 10), evaluator_optimizer
+  budget stops, `early=True` limiter boundaries for orchestrator, debate and
+  prompt_chain, the unknown-then-real tool run asserting success, the harness
+  non-native `ReactAgent` path, list and dict parameter dispatch, the SkillLoader alias
+  case, the meta_builder enum, and the monitor's empty-key and stub-tool cases.
+
+### Known open -- agents follow-up 2026-09-24
+
+- An approved call can be dropped: the model selects a gated tool with
+  `should_terminate=True`, the human approves, and `await_approval->conclude` fires
+  before `act`. The tool never runs and the run reports `success=False` (fails closed,
+  but the human was asked about an action that never happened).
+- The per-tool `requires_approval` flag does nothing without an `approval_policy`.
+  Agents with no `hitl` parameter have no approval at all: ParallelReact, REWOO,
+  `NativeFunctionCallingReactAgent` and PlanExecute.
+- The approval policy sees the call before empty-input recovery, so a
+  parameter-sensitive policy can pass `{}` while the tool then runs with the task text
+  filled in. The policy gets a shallow copy of the live context, read outside the
+  conversation lock; write policies as pure predicates. The driver now calls the policy
+  on every turn that selects a registered tool.
+- The react-family success rule ("an answer key or at least one tool call") counts
+  failed tool calls and forced stops as success: a model that never calls a tool
+  reports `success=True` once the budget runs out.
+- plan_execute's recorded step `result` is the model's text from before the tool ran
+  (only `success` reflects the real call), and a failed tool does not set
+  `step_failed`, so it does not trigger a replan.
+- ParallelReact: an empty batch with `should_terminate` loops to the limiter (bounded,
+  no stall detector).
+- Debate: `proposition`, `critique`, `counter_argument` and `judge_verdict` stick
+  across rounds (core fills only unset keys), so rounds 2+ judge round-1 text; a judge
+  turn whose consensus extraction is null is not counted as a round.
+- `@tool` item-type inference: `list[Any]` and nested lists give
+  `items: {"type": "string"}`, and `tuple[int, str]` gives `items: {"type": "integer"}`.
+  Not worse than the old `"string"` schema.
+- A string (or a JSON-array string) sent to a list-typed parameter reaches the tool as
+  a `str`, so a type-correct tool iterates its characters (pre-existing).
+- An empty `tool_input` on a single list-typed parameter now fails with
+  `Tool requires parameters: [...]`; before the array schema it was filled with the
+  task string. A one-line fix is scheduled (D-030).
+- `AgentServer` has no rate limiting (use a reverse proxy), and the HTTP body is parsed
+  before the size check.
+- MCP reconnects on every call, so the 30 s per-call timeout includes starting the
+  server. mcp 1.x was tested only locally. `constraints.txt` does not pin pydantic
+  (fresh installs resolve 2.13.5).
+- Out of scope, recorded: core PRE_TRANSITION handlers do not run on a BLOCKED turn;
+  `validate-plan` reports pre-existing errors (`pyproject.toml:33`,
+  `fsm_llm_monitor/server.py:1382`) and orphaned decision anchors; `src` grew by about
+  +570 net lines in this plan (5 pre-existing bugs found on the way), and
+  `fsm_definitions.py` keeps growing.
+- F-LIVE-02 live re-check on `ollama_chat/qwen3.5:9b-q8_0`: PENDING.
+
 ### Agents audit 2026-09-24
 
 Audit of `src/fsm_llm_agents` dated 2026-09-24 (`plans/plan-2026-09-24T045559-3e4eb3e5`,
@@ -149,20 +405,25 @@ turns are routed, so the already stale eval baseline was not re-measured.
 
 ### Known open -- agents audit 2026-09-24
 
+Closed by the agents follow-up above: `AgentServer` auth and size limit, FB-05 typing
+(the live check is still pending), CR-06, the three HITL gaps, the maker_checker
+unjudged draft, the Reflexion/ParallelReact evidence guard and the `SkillLoader`
+alias. Each closed item below is marked; the text is kept as it was.
+
 - F-LIVE-02 live check, raw outcome, not a fix claim: `TestLiveMemoryAgent` on `ollama_chat/qwen3.5:9b-q8_0` ran twice on the final
   commit. Run 1 failed with `AgentTimeoutError` (120 s) after the first `remember`
   call (a cold model, with test collection running on the same machine); run 2 passed
   in 85 s. Both agents in run 2 reached `Iteration 5/5` before concluding. 1 of 2 is
   not enough to call the issue closed, and the base commit was not re-run.
-- `AgentServer` (A2A) has no authentication and no request size limit (MM-05). Fine for
+- **Closed by the follow-up above (D-006).** `AgentServer` (A2A) has no authentication and no request size limit (MM-05). Fine for
   local use; it needs its own design before it is exposed.
-- FB-05: `all_collected` and `consensus_reached` are read by transitions but not
+- **Closed by the follow-up above (D-009; live check pending).** FB-05: `all_collected` and `consensus_reached` are read by transitions but not
   declared for extraction; confirming whether this bites needs a live extraction check.
-- CR-06: a list `tool_input` value is stringified (the known trade-off of the `any`
+- **Closed by the follow-up above (D-011).** CR-06: a list `tool_input` value is stringified (the known trade-off of the `any`
   union type).
 - Core: PRE_TRANSITION handlers do not run on a BLOCKED turn. This fix works around it
   in the agents package; changing it would change handler timing for every FSM.
-- **HITL approval gaps (security, pre-existing, not fixed).** Do not rely on
+- **Closed by the follow-up above (D-004, D-005; remaining gaps listed there).** **HITL approval gaps (security, pre-existing, not fixed).** Do not rely on
   approval to guard a dangerous tool yet.
   (a) ReflexionAgent has no `await_approval` state: an approval-required tool runs
   first and the callback is asked afterwards, so a denial does not stop it.
@@ -177,7 +438,7 @@ turns are routed, so the already stale eval baseline was not re-measured.
   Fix direction, for a follow-up plan: `execute_tool` refuses to run a real tool while
   `approval_required` is set and the grant did not come from the driver, and the
   grant moves to a driver-only internal key (for example `_approval_granted`).
-- maker_checker can ship an unjudged draft when the iteration limiter ends the run
+- **Closed by the follow-up above (D-007).** maker_checker can ship an unjudged draft when the iteration limiter ends the run
   (D-017/D-018). If the limiter forces `checker_passed=True` on a `revise` turn, the
   draft written on that turn skips `check` and ships without a verdict; the run
   reports `max_iterations_reached=True`. It depends on the budget: with an always-False
@@ -185,12 +446,12 @@ turns are routed, so the already stale eval baseline was not re-measured.
   judged draft. Fix direction, for a follow-up plan: force the pass only while the
   current state is `check`, and add a RED test at `max_iterations=3` asserting the
   answer is the first (judged) draft.
-- Reflexion's and ParallelReact's `think->conclude` have no evidence guard (D-004), so
-  they can conclude without a tool call (pre-existing). ReWOO has no stall guard.
-- `SkillLoader`'s `@tool` scan dedupes only against `SKILLS` names: a `@tool` function
+- **Closed by the follow-up above (D-008), except ReWOO.** Reflexion's and ParallelReact's `think->conclude` have no evidence guard (D-004), so
+  they can conclude without a tool call (pre-existing). ReWOO has no stall guard (still open).
+- **Closed by the follow-up above (D-012).** `SkillLoader`'s `@tool` scan dedupes only against `SKILLS` names: a `@tool` function
   reachable under two attribute names (an alias or a re-import) still loads twice.
 - `scripts/eval.py` was not re-run; the baseline in `CLAUDE.md` is staler after the
-  routing change above.
+  routing change above. The follow-up above re-runs it on the new default model.
 
 ### Core audit 2026-09-22
 

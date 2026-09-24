@@ -264,7 +264,9 @@ agent = ReactAgent(model="gpt-4o-mini", tools=[search],
                    config=AgentConfig(output_schema=MyPydanticModel))
 
 # Human-in-the-loop
-hitl = HumanInTheLoop(approval_callback=fn, require_approval_for=["tool_name"])
+# approval_policy(call, context) -> bool picks the gated calls; each approval covers one call
+hitl = HumanInTheLoop(approval_policy=lambda call, ctx: call.tool_name == "search",
+                      approval_callback=fn)
 agent = ReactAgent(model="gpt-4o-mini", tools=[search], hitl=hitl)
 ```
 
