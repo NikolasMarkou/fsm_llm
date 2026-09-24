@@ -691,7 +691,7 @@ class _AlwaysRejectLLM(_TwoRoundLLM):
 
 
 class TestLimiterForcesPassOnlyInCheck:
-    @pytest.mark.parametrize("max_iterations", [2, 3, 4, 5, 6])
+    @pytest.mark.parametrize("max_iterations", [1, 2, 3, 4, 5, 6])
     def test_budget_exhausted_run_ships_a_judged_draft(self, max_iterations):
         # Pre-fix: at an odd budget the limiter hit its limit on a revise turn
         # and forced checker_passed there, so the next check turn skipped the

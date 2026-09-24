@@ -1645,11 +1645,24 @@ def build_maker_checker_fsm(
                     "target_state": "output",
                     "description": "Draft passed review, produce final output",
                     "priority": 10,
+                    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-007: a check
+                    # turn at the budget ships the draft it just judged. Do NOT
+                    # rely on the forced checker_passed alone: this turn's
+                    # extracted False overlays it, so budget 1 needed 4 turns
+                    # against a 3-turn ceiling and raised BudgetExhaustedError.
                     "conditions": [
                         {
-                            "description": "Checker approved the draft",
+                            "description": "Checker approved, or the budget is spent",
                             "logic": {
-                                "==": [{"var": ContextKeys.CHECKER_PASSED}, True]
+                                "or": [
+                                    {"==": [{"var": ContextKeys.CHECKER_PASSED}, True]},
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.MAX_ITERATIONS_REACHED},
+                                            True,
+                                        ]
+                                    },
+                                ]
                             },
                         }
                     ],
