@@ -44,3 +44,10 @@ pytest-cov==7.1.0
 pytest-mock==3.15.1
 ruff==0.15.22
 mypy==2.3.0
+
+# DECISION plan-2026-09-24T091842-c1d5bfbc/D-025: pin mcp to the version CI was
+# measured green with. CI installs the `mcp` extra since 1d2611e, and the extra's
+# `mcp>=1.0.0` floats: mcp 2.x already renamed Tool.inputSchema and moved FastMCP,
+# so an unpinned CI would silently test a new major. Same rule as the dev tools
+# above: bump deliberately, with the stdio MCP tests on every matrix leg.
+mcp==2.2.0
