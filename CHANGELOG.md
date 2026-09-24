@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Default model is `ollama_chat/qwen3.5:4b` again.** 0.9.0 changed `DEFAULT_LLM_MODEL`
+  (and the `scripts/eval.py`, `scripts/agent_chat_harness.py` and
+  `react_worker_factory` defaults) to `ollama_chat/qwen3.5:9b-q8_0`; this reverts all of
+  them and the docs that state the default. Set `LLM_MODEL` or pass `model=` to use 9b.
+  The 0.9.0 live results below were measured on 9b and stay as recorded.
+
 ### Live results for 0.9.0 (measured after the release)
 
 Measured on `ollama_chat/qwen3.5:9b-q8_0` (the new default) after v0.9.0. Raw records

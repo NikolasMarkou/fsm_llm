@@ -96,7 +96,7 @@ Run it from Python:
 ```python
 from fsm_llm import API
 
-api = API.from_file("greeter.json", model="ollama_chat/qwen3.5:9b-q8_0")
+api = API.from_file("greeter.json", model="ollama_chat/qwen3.5:4b")
 conv_id, reply = api.start_conversation()
 print(reply)
 print(api.converse("Hi, I'm Alice", conv_id))
@@ -108,7 +108,7 @@ api.end_conversation(conv_id)
 Or from the command line:
 
 ```bash
-export LLM_MODEL=ollama_chat/qwen3.5:9b-q8_0
+export LLM_MODEL=ollama_chat/qwen3.5:4b
 fsm-llm --fsm greeter.json               # chat interactively
 fsm-llm-validate --fsm greeter.json      # check for problems
 fsm-llm-visualize --fsm greeter.json     # draw it
@@ -129,7 +129,7 @@ api.register_handler(
 
 ## Things to know
 
-- Any provider litellm supports works. The default model is `ollama_chat/qwen3.5:9b-q8_0`, or whatever `LLM_MODEL` is set to. API keys come from the usual provider environment variables.
+- Any provider litellm supports works. The default model is `ollama_chat/qwen3.5:4b`, or whatever `LLM_MODEL` is set to. API keys come from the usual provider environment variables.
 - A state with no transitions is terminal: once reached, `converse` raises an error.
 - `required_context_keys` only says what to extract. To block a transition until data exists, add a condition with `logic`.
 - Context keys starting with `_`, `system_`, `internal_`, or `__` are internal and hidden from `get_data()`. Keys that look like passwords, tokens, or API keys are filtered out of prompts.

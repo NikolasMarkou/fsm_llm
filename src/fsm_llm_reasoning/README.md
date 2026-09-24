@@ -51,7 +51,7 @@ python -m fsm_llm_reasoning --list-types
 ```python
 from fsm_llm_reasoning import ReasoningEngine
 
-engine = ReasoningEngine(model="ollama_chat/qwen3.5:9b-q8_0")
+engine = ReasoningEngine(model="ollama_chat/qwen3.5:4b")
 solution, trace = engine.solve_problem("If all cats are mammals and Tom is a cat, what is Tom?")
 print(solution)
 print(trace["summary"])

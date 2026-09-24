@@ -461,7 +461,7 @@ Exception
 
 ```python
 from fsm_llm.constants import (
-    DEFAULT_LLM_MODEL,       # "ollama_chat/qwen3.5:9b-q8_0"
+    DEFAULT_LLM_MODEL,       # "ollama_chat/qwen3.5:4b"
     DEFAULT_TEMPERATURE,     # 0.5, the API and LiteLLMInterface default
     DEFAULT_MAX_HISTORY_SIZE, # 5
     DEFAULT_MAX_MESSAGE_LENGTH, # 1000

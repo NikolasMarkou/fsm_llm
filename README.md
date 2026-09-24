@@ -139,7 +139,7 @@ export LLM_MODEL="openai/gpt-4o-mini"   # required by the CLI
 fsm-llm --fsm greeting.json
 ```
 
-Environment variables read by the `fsm-llm` command (the `API` class reads only `LLM_MODEL`, as the fallback for its `model` argument, then the package default `ollama_chat/qwen3.5:9b-q8_0`):
+Environment variables read by the `fsm-llm` command (the `API` class reads only `LLM_MODEL`, as the fallback for its `model` argument, then the package default `ollama_chat/qwen3.5:4b`):
 
 | Variable | Default | Meaning |
 |----------|---------|---------|

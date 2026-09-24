@@ -98,7 +98,7 @@ def _default_complete(model: str, prompt: str) -> str:
 
 
 def default_llm_judge(
-    model: str = "ollama_chat/qwen3.5:9b-q8_0",
+    model: str = "ollama_chat/qwen3.5:4b",
     criteria: str = "",
     threshold: float = 0.7,
     complete_fn: Callable[[str, str], str] | None = None,

@@ -61,7 +61,7 @@ import uvicorn
 from fsm_llm import API
 from fsm_llm_monitor import MonitorBridge, app, configure
 
-api = API.from_file("examples/basic/simple_greeting/fsm.json", model="ollama_chat/qwen3.5:9b-q8_0")
+api = API.from_file("examples/basic/simple_greeting/fsm.json", model="ollama_chat/qwen3.5:4b")
 configure(bridge=MonitorBridge(api=api))
 uvicorn.run(app, host="127.0.0.1", port=8420)
 ```

@@ -19,7 +19,7 @@ Usage::
 
     .venv/bin/python scripts/agent_chat_harness.py \
         --agent auto_memory --scenario mixed \
-        --model ollama_chat/qwen3.5:9b-q8_0 \
+        --model ollama_chat/qwen3.5:4b \
         --persist-path /tmp/agent_mem.json --out /tmp/harness.json
 
     # reproduce the 9B budget-exhaustion bug (slow):
@@ -349,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         ],
     )
     p.add_argument(
-        "--model", default=os.environ.get("LLM_MODEL", "ollama_chat/qwen3.5:9b-q8_0")
+        "--model", default=os.environ.get("LLM_MODEL", "ollama_chat/qwen3.5:4b")
     )
     p.add_argument("--scenario", default="mixed", choices=list(_SCENARIOS))
     p.add_argument(
