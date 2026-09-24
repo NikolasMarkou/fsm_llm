@@ -605,3 +605,41 @@ class TestEachRoundIsRejudged:
             {ContextKeys.ITERATION_COUNT: 3}
         )
         assert limiter({ContextKeys.ITERATION_COUNT: 4})[ContextKeys.CHECKER_PASSED]
+
+
+class _HighScoreRejectLLM(_TwoRoundLLM):
+    """Checker always says ``checker_passed=False`` but scores 0.9, at or
+    above the default threshold, so ``_track_revisions`` forces a pass."""
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        name = request.field_name
+        value: Any
+        if name == ContextKeys.CHECKER_PASSED:
+            value = False
+            self.verdicts.append(value)
+        elif name == "quality_score":
+            value = 0.9
+        else:
+            value = "feedback"
+        return FieldExtractionResponse(
+            field_name=name, value=value, confidence=0.9, reasoning="m", is_valid=True
+        )
+
+
+class TestForcedPassShipsJudgedDraft:
+    def test_quality_auto_pass_ships_the_scored_draft(self):
+        # Step 3.2: a forced pass loses to the extracted False on its own
+        # turn and routes through revise; revise entry used to move d1 aside
+        # anyway, so the maker wrote d2 and check shipped it unjudged.
+        llm = _HighScoreRejectLLM()
+        agent = MakerCheckerAgent(
+            maker_instructions="Write a haiku",
+            checker_instructions="Check the syllables",
+            config=AgentConfig(max_iterations=10),
+            llm_interface=llm,
+        )
+        result = agent.run("Write a haiku about rain")
+
+        assert llm.verdicts == [False]
+        assert result.final_context[ContextKeys.DRAFT_OUTPUT] == "d1"
+        assert result.answer == "d1"

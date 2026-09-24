@@ -143,6 +143,8 @@ class MakerCheckerAgent(BaseAgent):
         # verdict: it is a forced pass (_track_revisions or the limiter) that
         # lost to the extracted False on its own turn, because the evaluator
         # overlays extracted data on context; kept, it routes check -> output.
+        # With a True verdict do NOT move the draft either: the judged draft
+        # must ship, not an unjudged redraft (step 3.2).
         redraft_entry, on_exit = make_redraft_handlers(
             ContextKeys.DRAFT_OUTPUT,
             ContextKeys.PREVIOUS_DRAFT,
@@ -150,11 +152,10 @@ class MakerCheckerAgent(BaseAgent):
         )
 
         def on_entry(context: dict[str, Any]) -> dict[str, Any]:
+            if context.get(ContextKeys.CHECKER_PASSED) is True:
+                return {}
             delta = redraft_entry(context)
-            if context.get(ContextKeys.CHECKER_PASSED) is not True:
-                delta.update(
-                    dict.fromkeys((ContextKeys.CHECKER_PASSED, "quality_score"))
-                )
+            delta.update(dict.fromkeys((ContextKeys.CHECKER_PASSED, "quality_score")))
             return delta
 
         api.register_handler(
