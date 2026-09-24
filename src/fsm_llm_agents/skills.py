@@ -235,6 +235,16 @@ class SkillLoader:
         # Names already provided via SKILLS win; the @tool scan skips them so
         # one function listed in both places is not loaded twice (PT-07).
         explicit_names = {skill.name for skill in skills}
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-012: dedupe the @tool scan
+        # on the tool name against the @tool skills already loaded too, not
+        # only against SKILLS: dir() lists one function once per attribute
+        # name, so an alias loaded it twice. The first attribute in dir()
+        # (alphabetical) order wins; a DIFFERENT function claiming the same
+        # name is skipped with a warning (an alias of the same function is
+        # silent). Do NOT make this last-wins to mirror ToolRegistry.register:
+        # that would make the loaded function depend on attribute spelling in
+        # the other direction and still hide the conflict.
+        tool_attrs: dict[str, tuple[str, Any]] = {}
 
         # Check for @tool decorated functions
         for attr_name in dir(module):
@@ -243,6 +253,16 @@ class SkillLoader:
                 tool_def = obj._tool_definition
                 if tool_def.name in explicit_names:
                     continue
+                if tool_def.name in tool_attrs:
+                    first_attr, first_fn = tool_attrs[tool_def.name]
+                    if tool_def.execute_fn is not first_fn:
+                        logger.warning(
+                            f"Skill file {file_path.name}: '{attr_name}' "
+                            f"declares tool '{tool_def.name}', already loaded "
+                            f"from '{first_attr}'; skipping '{attr_name}'"
+                        )
+                    continue
+                tool_attrs[tool_def.name] = (attr_name, tool_def.execute_fn)
                 skills.append(
                     SkillDefinition(
                         name=tool_def.name,
