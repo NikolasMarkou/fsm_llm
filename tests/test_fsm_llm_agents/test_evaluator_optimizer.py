@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.evaluator_optimizer module."""
 
+import pytest
 
 from fsm_llm.definitions import (
     FieldExtractionRequest,
@@ -515,3 +516,29 @@ class TestRefineProducesANewDraft:
         # Pre-fix: ['v1', 'v1', 'v1', 'v1'].
         assert seen == ["v1", "v2", "v3", "v4"]
         assert result.final_context[ContextKeys.GENERATED_OUTPUT] == "v4"
+
+
+class TestLimiterForcedStopShipsAnEvaluatedOutput:
+    """Plan plan-2026-09-24T091842-c1d5bfbc step 6 (D-007 scan): unlike
+    maker_checker, evaluation runs on entry to ``evaluate`` and rewrites
+    ``evaluation_passed``, so a limiter-forced pass that lands on a refine
+    turn cannot skip judging the refined output. Pinned across budgets."""
+
+    @pytest.mark.parametrize("max_iterations", [2, 3, 4, 5, 6, 7])
+    def test_shipped_output_was_evaluated(self, max_iterations):
+        seen: list[str] = []
+
+        def _record(output: str, context: dict) -> EvaluationResult:
+            seen.append(output)
+            return EvaluationResult(passed=False, score=0.1, feedback="bad")
+
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=_record,
+            max_refinements=100,  # isolate the limiter from max_refinements
+            config=AgentConfig(max_iterations=max_iterations),
+            llm_interface=_VersionedLLM(),
+        )
+        result = agent.run("Write a poem")
+
+        assert result.final_context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True
+        assert result.final_context[ContextKeys.GENERATED_OUTPUT] == seen[-1]

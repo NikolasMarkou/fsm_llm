@@ -198,7 +198,13 @@ class EvaluatorOptimizerAgent(BaseAgent):
         # Check if max refinements reached — force pass with best effort.
         # refinement_count is 0-indexed: allows exactly max_refinements attempts
         # before forcing pass on the (max_refinements + 1)th evaluation.
-        if refinement_count >= max_refinements:
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-022: also honour the
+        # limiter's max_iterations_reached here. Do NOT rely on the limiter's
+        # forced evaluation_passed alone: this entry handler overwrites it with
+        # False every round, so the run never stopped and hit the 3x ceiling.
+        # Forcing here ships the output just evaluated, never an unjudged one.
+        at_budget = context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True
+        if refinement_count >= max_refinements or at_budget:
             logger.info(
                 f"Max refinements ({max_refinements}) reached, "
                 "forcing output with best effort"
