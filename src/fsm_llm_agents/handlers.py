@@ -41,9 +41,15 @@ class AgentHandlers:
             tool_input = {}
         reasoning = context.get(ContextKeys.REASONING, "")
 
-        if not tool_name or tool_name == ContextKeys.NO_TOOL:
+        # DECISION plan-2026-09-24T045559-3e4eb3e5/D-012
+        # An unknown name is a no-tool turn. Do NOT send it down the real-tool
+        # path: its [TOOL FAILED] observation would satisfy the conclude guard.
+        unknown = bool(tool_name) and tool_name != ContextKeys.NO_TOOL
+        unknown = unknown and str(tool_name) not in self.registry
+        miss = f"Unknown tool '{tool_name}'. " if unknown else ""
+        if not tool_name or tool_name == ContextKeys.NO_TOOL or unknown:
             # Skip stall detection for HITL agents awaiting approval
-            if context.get(ContextKeys.APPROVAL_REQUIRED):
+            if context.get(ContextKeys.APPROVAL_REQUIRED) and not unknown:
                 return {
                     ContextKeys.TOOL_RESULT: "Awaiting approval.",
                     ContextKeys.TOOL_STATUS: "skipped",
@@ -56,7 +62,7 @@ class AgentHandlers:
                 tool_names = [t.name for t in self.registry.list_tools()]
                 return {
                     ContextKeys.TOOL_RESULT: (
-                        "You must use at least one tool before concluding. "
+                        f"{miss}You must use at least one tool before concluding. "
                         f"Available: {', '.join(tool_names)}"
                     ),
                     ContextKeys.TOOL_STATUS: "rejected",
@@ -88,12 +94,12 @@ class AgentHandlers:
                     ContextKeys.MAX_ITERATIONS_REACHED: True,
                 }
 
-            if not should_terminate:
+            if not should_terminate or unknown:
                 # Instructive warning to push model toward tool use
                 tool_names = [t.name for t in self.registry.list_tools()]
                 return {
                     ContextKeys.TOOL_RESULT: (
-                        "WARNING: No tool was called but the task is not complete. "
+                        f"{miss}WARNING: No tool was called but the task is not complete. "
                         f"You must select a tool from: {', '.join(tool_names)}. "
                         "Do not answer from memory — use a tool to gather information."
                     ),

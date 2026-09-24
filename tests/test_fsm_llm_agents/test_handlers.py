@@ -89,7 +89,10 @@ class TestAgentHandlers:
             ContextKeys.OBSERVATIONS: [],
         }
         result = handlers.execute_tool(context)
-        assert result[ContextKeys.TOOL_STATUS] == "failed"
+        # An unknown name is a no-tool turn: feedback only, no observation.
+        assert result[ContextKeys.TOOL_STATUS] == "skipped"
+        assert "nonexistent" in result[ContextKeys.TOOL_RESULT]
+        assert ContextKeys.OBSERVATIONS not in result
 
     def test_execute_tool_string_input_normalized(self):
         """String tool_input should be normalized to dict."""

@@ -189,3 +189,49 @@ class TestThinkNeverBlocks:
 
         assert result.answer
         assert loops <= _TWO_STATE_BOUND
+
+
+# D-002 review concern 3: an unknown tool name is not evidence. It must take
+# the no-tool path (corrective feedback, stall counter, no observation), so a
+# hallucinated call cannot satisfy the think->conclude evidence guard.
+_UNKNOWN_TERMINATE = {
+    "tool_name": "made_up",
+    "tool_input": {},
+    "should_terminate": True,
+}
+
+_UNKNOWN_TERMINATE_CASES = [
+    pytest.param(_build(ReactAgent), _TWO_STATE_BOUND, id="react"),
+    pytest.param(_build(ReflexionAgent), _REFLEXION_BOUND, id="reflexion"),
+    pytest.param(_build_reasoning_react, _TWO_STATE_BOUND, id="reasoning_react"),
+]
+
+
+class TestUnknownToolIsNotEvidence:
+    @pytest.mark.parametrize(("factory", "max_loops"), _UNKNOWN_TERMINATE_CASES)
+    def test_unknown_tool_with_terminate_does_not_succeed(self, factory, max_loops):
+        result, loops = _run_and_count(factory, _UNKNOWN_TERMINATE)
+
+        assert result.success is False
+        assert not result.final_context.get("observation_count")
+        assert not any(
+            "made_up" in str(o) for o in result.final_context.get("observations") or []
+        )
+        assert loops <= max_loops
+
+    def test_unknown_tool_feedback_names_it_and_counts_as_stall(self):
+        from fsm_llm_agents.handlers import AgentHandlers
+
+        handlers = AgentHandlers(_make_registry())
+        handlers._current_iteration = 2
+        ctx = {"tool_name": "made_up", "tool_input": {}, "should_terminate": True}
+
+        first = handlers.execute_tool(ctx)
+        assert "made_up" in first["tool_result"]
+        assert "add_numbers" in first["tool_result"]
+        assert "observations" not in first
+        assert "observation_count" not in first
+        handlers.execute_tool(ctx)
+        third = handlers.execute_tool(ctx)
+        assert third["should_terminate"] is True
+        assert third["max_iterations_reached"] is True
