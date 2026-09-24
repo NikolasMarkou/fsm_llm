@@ -126,7 +126,11 @@ class AgentHandlers:
             if len(required) == 1:
                 param_name = required[0]
                 task = context.get(ContextKeys.TASK, "")
-                if task:
+                ptype = props.get(param_name, {}).get("type")
+                # Prose in a non-string param is a TypeError; the miss names the param.
+                string_ok = ptype is None or ptype == "string"
+                string_ok = string_ok or (isinstance(ptype, list) and "string" in ptype)
+                if task and string_ok:
                     tool_input = {param_name: task}
                     logger.info(f"Recovered empty tool_input: {param_name}=<task>")
 

@@ -239,3 +239,58 @@ class TestMakeIterationLimiter:
             ContextKeys.ALL_COLLECTED: True,
             ContextKeys.SHOULD_TERMINATE: True,
         }
+
+
+class TestEmptyToolInputRecovery:
+    """CR-02: the task-string recovery only fills a string-compatible param."""
+
+    _TASK = "What is 17 plus 25?"
+
+    def _run(self, fn, schema):
+        registry = ToolRegistry()
+        registry.register_function(fn, name="spy", parameter_schema=schema)
+        handlers = AgentHandlers(registry)
+        context = {
+            ContextKeys.TOOL_NAME: "spy",
+            ContextKeys.TOOL_INPUT: None,
+            ContextKeys.TASK: self._TASK,
+            ContextKeys.OBSERVATIONS: [],
+        }
+        return handlers.execute_tool(context)
+
+    def test_int_param_never_receives_task_string(self):
+        received: list[object] = []
+
+        def add_numbers(a: int, b: int = 0) -> int:
+            received.append(a)
+            return a + b
+
+        schema = {"properties": {"a": {"type": "integer"}}, "required": ["a"]}
+        result = self._run(add_numbers, schema)
+
+        assert self._TASK not in received
+        assert result[ContextKeys.TOOL_STATUS] == "failed"
+        observation = result[ContextKeys.TOOL_RESULT]
+        assert "can only concatenate" not in observation
+        assert "'a'" in observation
+
+    def _recovered_query(self, param_schema) -> list[object]:
+        received: list[object] = []
+
+        def search(query) -> str:
+            received.append(query)
+            return "ok"
+
+        schema = {"properties": {"query": param_schema}, "required": ["query"]}
+        result = self._run(search, schema)
+        assert result[ContextKeys.TOOL_STATUS] == "success"
+        return received
+
+    def test_string_param_still_recovers(self):
+        assert self._recovered_query({"type": "string"}) == [self._TASK]
+
+    def test_untyped_param_still_recovers(self):
+        assert self._recovered_query({}) == [self._TASK]
+
+    def test_union_with_string_param_still_recovers(self):
+        assert self._recovered_query({"type": ["string", "null"]}) == [self._TASK]
