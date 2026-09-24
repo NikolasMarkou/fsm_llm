@@ -6,7 +6,16 @@
 # all releases from v1.78.0 through v1.82.6 as clean, and recommends v1.83.0+
 # (built on a new, isolated CI/CD v2 pipeline with signed releases) going
 # forward. Pinned here to the latest available release as of this upgrade.
-litellm==1.100.1
+#
+# DECISION plan-2026-09-24T091842-c1d5bfbc/D-002: one pin, no marker split.
+# Python 3.10: litellm 1.100.1 and 1.100.2 import typing.NotRequired (3.11+
+# only) at import time, so `import litellm` fails on 3.10; that kept the CI
+# 3.10 leg red from v0.8.0 on. 1.101.0 is the first fixed release (it imports
+# NotRequired from typing_extensions); 1.101.0-1.102.1 were checked to import
+# on 3.10. Versions 1.83.0-1.100.0 were NOT checked on 3.10. One pin for every
+# Python version on purpose: a per-version marker split would recreate the
+# CI-vs-local drift described below. Do not go back to 1.100.x.
+litellm==1.102.1
 
 # ---------------------------------------------------------------------------
 # Dev toolchain — exact pins so CI and every developer resolve the SAME tools.
