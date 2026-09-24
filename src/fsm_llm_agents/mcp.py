@@ -170,6 +170,9 @@ class MCPToolProvider:
     async def _discover_stdio(self) -> list[ToolDefinition]:
         """Discover tools via stdio transport."""
         tools: list[ToolDefinition] = []
+        # discover_tools only calls this with params set; narrows for mypy,
+        # which sees the real mcp signatures when the mcp extra is installed.
+        assert self._server_params is not None
         async with stdio_client(self._server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -191,6 +194,7 @@ class MCPToolProvider:
             ) from None
 
         tools: list[ToolDefinition] = []
+        assert self._server_url is not None  # as above
         async with sse_client(self._server_url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()

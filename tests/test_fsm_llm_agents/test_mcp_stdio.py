@@ -1,8 +1,8 @@
 """MCPToolProvider against a real stdio MCP server (``mcp_fixture_server.py``).
 
-Skipped when ``mcp`` is not installed, which includes CI and the project
-``.venv`` (D-014, D-025 of plan-2026-09-24T091842-c1d5bfbc: installing mcp
-upgrades shared dependencies, so these run only in dedicated venvs).
+Skipped when ``mcp`` is not installed, which includes the project ``.venv``
+(D-014, D-025 of plan-2026-09-24T091842-c1d5bfbc: installing mcp upgrades
+shared dependencies). CI installs the ``mcp`` extra, so they run there.
 """
 
 from __future__ import annotations

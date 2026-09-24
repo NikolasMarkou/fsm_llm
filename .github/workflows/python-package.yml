@@ -28,7 +28,9 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness]"
+        # `mcp` (beyond the package extras) makes the real stdio MCP tests run
+        # instead of skip (D-025/D-026 of plan-2026-09-24T091842-c1d5bfbc).
+        pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness,mcp]"
     - name: Audit for suspicious .pth files
       run: |
         python scripts/audit_pth.py

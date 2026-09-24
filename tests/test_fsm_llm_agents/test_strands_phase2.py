@@ -527,9 +527,16 @@ class TestAgentGraph:
 
 
 def _has_otel():
-    import importlib.util
+    """True only when the exporter's own import (api AND sdk) succeeded.
 
-    return importlib.util.find_spec("opentelemetry") is not None
+    ``find_spec("opentelemetry")`` is not enough: the mcp extra pulls in
+    opentelemetry-api without the sdk, and the exporter then raises.
+    """
+    try:
+        from fsm_llm_monitor.otel import _HAS_OTEL
+    except ImportError:
+        return False
+    return _HAS_OTEL
 
 
 def _has_httpx():

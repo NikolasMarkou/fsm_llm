@@ -213,13 +213,19 @@ class TestStreamingTryFinally:
 # ============================================================================
 
 
+def _has_otel() -> bool:
+    """Same gate as test_strands_phase2: the exporter's own api+sdk import."""
+    try:
+        from fsm_llm_monitor.otel import _HAS_OTEL
+    except ImportError:
+        return False
+    return _HAS_OTEL
+
+
 class TestOTELThreadSafety:
     """Verify OTEL exporter has thread-safe span management."""
 
-    @pytest.mark.skipif(
-        importlib.util.find_spec("opentelemetry") is None,
-        reason="opentelemetry not installed",
-    )
+    @pytest.mark.skipif(not _has_otel(), reason="opentelemetry sdk not installed")
     def test_has_spans_lock(self):
         """OTELExporter has _spans_lock attribute."""
         from fsm_llm_monitor.otel import OTELExporter
@@ -228,10 +234,7 @@ class TestOTELThreadSafety:
         assert hasattr(exporter, "_spans_lock")
         assert isinstance(exporter._spans_lock, threading.Lock)
 
-    @pytest.mark.skipif(
-        importlib.util.find_spec("opentelemetry") is None,
-        reason="opentelemetry not installed",
-    )
+    @pytest.mark.skipif(not _has_otel(), reason="opentelemetry sdk not installed")
     def test_concurrent_events_no_crash(self):
         """Concurrent event recording doesn't crash."""
         from fsm_llm_monitor.definitions import MonitorEvent
