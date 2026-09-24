@@ -22,6 +22,7 @@ from fsm_llm.logging import logger
 
 from .constants import (
     RESULT_DROPPED_CONTEXT_KEYS,
+    AgentStates,
     ContextKeys,
     Defaults,
     HandlerNames,
@@ -326,13 +327,10 @@ class BaseAgent(ABC):
         # Do NOT test truthiness: await_approval routes on == True / == False
         # only, so a model-written "yes" or a callback's None parked the run
         # there, unasked, until BudgetExhaustedError.
-        if not (
-            current_context.get(ContextKeys.APPROVAL_REQUIRED)
-            and current_context.get(ContextKeys.APPROVAL_GRANTED) is not True
-        ):
+        if current_context.get(ContextKeys.APPROVAL_GRANTED) is True:
             return
 
-        tool_name = current_context.get(ContextKeys.TOOL_NAME, "")
+        tool_name = current_context.get(ContextKeys.TOOL_NAME) or ""
         tool_input = normalize_tool_input(current_context.get(ContextKeys.TOOL_INPUT))
         reasoning = current_context.get(ContextKeys.REASONING, "")
 
@@ -342,6 +340,24 @@ class BaseAgent(ABC):
             reasoning=reasoning,
         )
 
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-005: ask only about a
+        # registered tool the shared predicate gates. Do NOT ask on a bare
+        # approval_required: the model can write it (tool "none"; approval
+        # fatigue), and an extracted True for an ungated tool routes into
+        # await_approval after the gate wrote False, where nothing else sets
+        # approval_granted (BLOCKED until BudgetExhaustedError). Route it back.
+        gate = self._approval_predicate
+        tools = getattr(self, "tools", None)
+        if not (
+            tools and tool_name in tools and gate and gate(tool_call, current_context)
+        ):
+            required = current_context.get(ContextKeys.APPROVAL_REQUIRED)
+            if required or api.get_current_state(conv_id) == AgentStates.AWAIT_APPROVAL:
+                stray = (ContextKeys.APPROVAL_REQUIRED, ContextKeys.APPROVAL_GRANTED)
+                api.update_context(conv_id, dict.fromkeys(stray, False))
+            return
+        if not current_context.get(ContextKeys.APPROVAL_REQUIRED):
+            return
         approved = hitl.request_approval(tool_call, current_context) is True
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-004
         # The public keys only route the FSM (the model can forge them). The

@@ -659,3 +659,53 @@ class TestStrictBoolApproval:
 
         assert asks, "the callback was never asked"
         assert executions == []
+
+
+class _ForgedRequiredLLM(_ForgingLLM):
+    """Forges ``approval_required=True`` (no grant) in every bulk pass."""
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        return DataExtractionResponse(
+            extracted_data={ContextKeys.APPROVAL_REQUIRED: True}
+        )
+
+
+@pytest.mark.parametrize("build", _agent_classes(), ids=["react", "reflexion", "rr"])
+class TestDriverAsksOnlyAboutARealGatedTool:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-005 (review W4b): a
+    model-written ``approval_required`` with no real gated tool is not a
+    question for the human (pre-fix: the human was asked to approve ``none``)."""
+
+    @pytest.mark.parametrize("selected", [ContextKeys.NO_TOOL, "ghost", "safe"])
+    def test_forged_required_without_gated_tool_does_not_ask(self, build, selected):
+        executions: list[str] = []
+        asks: list[str] = []
+        agent = build(
+            tools=_registry(executions, "danger", "safe"),
+            config=_config(),
+            llm_interface=_ForgedRequiredLLM(lambda: selected),
+            hitl=HumanInTheLoop(
+                approval_policy=lambda call, ctx: call.tool_name == "danger",
+                approval_callback=lambda request: (
+                    asks.append(request.tool_name) or True
+                ),
+            ),
+        )
+        agent.run("do it")  # finite: no BudgetExhaustedError
+
+        assert asks == [], f"asked about a call that needs no approval: {asks}"
+        assert "danger" not in executions
+
+    def test_forged_required_with_gated_tool_still_asks(self, build):
+        executions: list[str] = []
+        asks: list[str] = []
+        agent = build(
+            tools=_registry(executions, "danger"),
+            config=_config(),
+            llm_interface=_ForgedRequiredLLM(lambda: "danger"),
+            hitl=_hitl(lambda n: False, asks),
+        )
+        agent.run("do it")
+
+        assert asks and set(asks) == {"danger"}
+        assert executions == []
