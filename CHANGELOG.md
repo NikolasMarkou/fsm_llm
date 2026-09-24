@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Live results for 0.9.0 (measured after the release)
+
+Measured on `ollama_chat/qwen3.5:9b-q8_0` (the new default) after v0.9.0. Raw records
+were kept outside the repository; numbers are reported as measured.
+
+- `scripts/eval.py`, all 101 examples, `--workers 4`, N=1: 80.9% (327/404). Almost every
+  loss is an agent example hitting its eval timeout (the per-example timeouts were tuned
+  on the faster 4b model). This is not comparable to the old 95.3% 4b baseline.
+- Controlled A/B on the 48 agent examples, same model, workers and timeouts, run back to
+  back: pre-plan code (c6e8461) 73.4% (141/192, 17 timeouts); 0.9.0 77.1% (148/192,
+  14 timeouts). Six examples improved (both debate examples, pipeline_review,
+  react_hitl_combined, reasoning_stacking, concurrent_react) and three went from pass to
+  timeout (plan_execute, agent_as_tool, hierarchical_orchestrator). The logs show those
+  three progressing, not looping: plan_execute now runs every step's tool (it did not
+  before), so a 5-step plan needs more than the 180 s example timeout.
+- F-LIVE-02: `TestLiveMemoryAgent` passed 3 of 3 runs (81 s, 68 s, 83 s), up from 1 of 2
+  and then 0 of 2 before the follow-up. Runs were sequential with nothing else on the
+  GPU.
+- FB-05 probe (one orchestrator and one debate run per side): before, the orchestrator
+  never extracted `all_collected` (null) and debate stayed at `current_round=1` after 12
+  iterations; after, the orchestrator extracts `all_collected=True` and debate runs its
+  2 rounds to `current_round=3` in 8 iterations.
+
 ## [0.9.0] - 2026-09-24
 
 ### Agents follow-up 2026-09-24
@@ -19,8 +42,8 @@ test that fails on the pre-fix code. Full suite: 7,158 tests collected (was 6,94
 `DEFAULT_LLM_MODEL` and one comment. Reviews and decisions: the plan's
 `findings/review-iter-1*.md` and `decisions.md` (D-001 to D-030).
 
-Live results (ollama_chat/qwen3.5:9b-q8_0): PENDING. They will be recorded under
-[Unreleased] after the 0.9.0 release.
+Live results (ollama_chat/qwen3.5:9b-q8_0): measured after the release, see
+"Live results for 0.9.0" above.
 
 ### Security -- agents follow-up 2026-09-24
 
@@ -260,8 +283,8 @@ Live results (ollama_chat/qwen3.5:9b-q8_0): PENDING. They will be recorded under
   `fsm_llm_monitor/server.py:1382`) and orphaned decision anchors; `src` grew by about
   +570 net lines in this plan (5 pre-existing bugs found on the way), and
   `fsm_definitions.py` keeps growing.
-- F-LIVE-02 live re-check on `ollama_chat/qwen3.5:9b-q8_0`: PENDING, recorded after the
-  0.9.0 release.
+- F-LIVE-02 live re-check on `ollama_chat/qwen3.5:9b-q8_0`: 3 of 3 passed after the
+  release, see "Live results for 0.9.0" above.
 
 ### Agents audit 2026-09-24
 
