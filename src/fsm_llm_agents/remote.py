@@ -29,7 +29,8 @@ try:
 except ImportError:
     _HAS_FASTAPI = False
 
-#: Default ``AgentServer`` input bound: ``len(task) + len(json.dumps(context))``.
+#: Default ``AgentServer`` input bound, in characters: ``len(task) +
+#: len(json.dumps(context, ensure_ascii=False))``.
 DEFAULT_MAX_INPUT_CHARS = 100_000
 
 
@@ -60,6 +61,17 @@ def _require_httpx() -> None:
         )
 
 
+def _checked_api_key(api_key: str | None) -> str | None:
+    """Return ``api_key`` unchanged; ValueError if it is empty or whitespace-only."""
+    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006: reject an empty key. Do
+    # NOT accept it (compare_digest(b"", b"") is True, so an empty header would
+    # authenticate) and do NOT map it to None (an operator who passed
+    # os.getenv("KEY", "") would silently get an open server).
+    if api_key is not None and not api_key.strip():
+        raise ValueError("api_key must be a non-empty string, or None for no auth")
+    return api_key
+
+
 def _require_fastapi() -> None:
     if not _HAS_FASTAPI:
         raise ImportError(
@@ -78,9 +90,10 @@ class AgentServer:
         ``api_key``: when set, ``/invoke`` and ``/stream`` require
         ``Authorization: Bearer <key>`` or ``X-API-Key: <key>`` and return 401
         otherwise. ``None`` (the default) leaves the server UNAUTHENTICATED;
-        bind it to localhost or put it behind an authenticating proxy.
-        ``max_input_chars``: requests whose ``len(task) +
-        len(json.dumps(context or {}))`` exceeds it get 413 before the agent
+        bind it to localhost or put it behind an authenticating proxy. An
+        empty or whitespace-only key raises ``ValueError``.
+        ``max_input_chars``: requests whose ``len(task) + len(json.dumps(
+        context or {}, ensure_ascii=False))`` exceeds it get 413 before the agent
         runs. Default 100,000; ``None`` disables the check. The HTTP body is
         still parsed first, so a transport-level body cap belongs to a
         reverse proxy. There is no rate limiting.
@@ -109,7 +122,7 @@ class AgentServer:
         self._port = port
         self._name = name or getattr(agent, "__class__", type(agent)).__name__
         self._timeout = timeout
-        self._api_key = api_key
+        self._api_key = _checked_api_key(api_key)
         self._max_input_chars = max_input_chars
         self._app = self._create_app()
 
@@ -148,7 +161,8 @@ class AgentServer:
         """
         if self._max_input_chars is None:
             return
-        size = len(request.task) + len(json.dumps(request.context or {}))
+        context = json.dumps(request.context or {}, ensure_ascii=False)
+        size = len(request.task) + len(context)
         if size > self._max_input_chars:
             raise HTTPException(
                 status_code=413,
@@ -302,7 +316,8 @@ class RemoteAgentTool:
 
     The tool sends tasks to a remote AgentServer's /invoke endpoint
     and returns the result as a string. ``api_key``, when set, is sent as
-    ``Authorization: Bearer <key>`` on every invoke.
+    ``Authorization: Bearer <key>`` on every invoke; an empty or
+    whitespace-only key raises ``ValueError``.
 
     Example::
 
@@ -329,7 +344,7 @@ class RemoteAgentTool:
         self._name = name
         self._description = description
         self._timeout = timeout
-        self._api_key = api_key
+        self._api_key = _checked_api_key(api_key)
 
     def _headers(self) -> dict[str, str]:
         """Auth headers shared by ``invoke`` and ``ainvoke``."""

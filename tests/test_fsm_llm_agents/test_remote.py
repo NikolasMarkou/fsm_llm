@@ -93,6 +93,12 @@ class TestApiKey:
         assert resp.status_code == 200
         assert len(agent.calls) == 1
 
+    @pytest.mark.parametrize("empty", ["", "   ", "\t\n"])
+    def test_empty_api_key_rejected_at_construction(self, empty):
+        """W6: an empty key would authenticate an empty header (compare b"" to b"")."""
+        with pytest.raises(ValueError, match="api_key"):
+            AgentServer(agent=_StubAgent(), api_key=empty)
+
     def test_health_and_info_open(self):
         client, _ = _client(api_key=KEY)
         assert client.get("/health").status_code == 200
@@ -144,6 +150,18 @@ class TestInputLimit:
         task = "x" * (self.LIMIT - len(json.dumps(context)))
         resp = _post(client, route, {"task": task, "context": context})
         assert resp.status_code == 200
+        assert len(agent.calls) == 1
+
+    @pytest.mark.parametrize("route", ROUTES)
+    def test_non_ascii_context_counted_as_characters(self, route):
+        """A non-ASCII character counts once in context, as it does in task."""
+        client, agent = _client(max_input_chars=self.LIMIT)
+        context = {"k": "\u6f22" * 30}  # 39 chars; 189 with \uXXXX escapes
+        task = "x" * (self.LIMIT - len(json.dumps(context, ensure_ascii=False)))
+        resp = _post(client, route, {"task": task, "context": context})
+        assert resp.status_code == 200
+        over = _post(client, route, {"task": task + "x", "context": context})
+        assert over.status_code == 413
         assert len(agent.calls) == 1
 
     @pytest.mark.parametrize("route", ROUTES)
@@ -216,6 +234,14 @@ class TestRemoteAgentToolAuth:
         tool.invoke("hi")
         asyncio.run(tool.ainvoke("hi"))
         assert all("authorization" not in r.headers for r in seen)
+
+    @pytest.mark.parametrize("empty", ["", "  "])
+    def test_empty_api_key_rejected_at_construction(self, empty):
+        """An empty key would send a bare ``Bearer `` header; fail loud instead."""
+        with pytest.raises(ValueError, match="api_key"):
+            RemoteAgentTool(
+                url="http://a.test", name="r", description="d", api_key=empty
+            )
 
     def test_round_trip_against_server(self, monkeypatch):
         """The client's header is accepted by a keyed AgentServer."""
