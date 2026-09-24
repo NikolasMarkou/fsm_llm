@@ -39,8 +39,16 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
-from fsm_llm.definitions import StateNotFoundError
-from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface
+from fsm_llm.definitions import (
+    DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+    StateNotFoundError,
+)
+from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface, LLMInterface
+from fsm_llm_agents.constants import ContextKeys as AgentKeys
 from fsm_llm_agents.definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from fsm_llm_agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm_agents.react import ReactAgent
@@ -3851,6 +3859,51 @@ class TestWriteEvidenceLabelNormalization:
         assert _verified_execute_workspace_write([record], ["uploader.py"]) is True
 
 
+class _UnknownThenReadLLM(LLMInterface):
+    """Mock LLM for the ReAct arm: ``made_up`` once, ``read_file`` once, then done.
+
+    Each ``think`` turn pops the next selection; once the list is empty the
+    model selects no tool and terminates, so the run ends in ``conclude``.
+    ``should_terminate`` is extracted before ``tool_name`` in a turn, so it
+    reads the list, not ``done``.
+    """
+
+    def __init__(self) -> None:
+        self.names = ["made_up", WorkspaceTools.READ_FILE]
+        self.done = False
+
+    def _field(self, name: str) -> Any:
+        if name == AgentKeys.TOOL_NAME:
+            if self.names:
+                return self.names.pop(0)
+            self.done = True
+            return AgentKeys.NO_TOOL
+        if name == AgentKeys.TOOL_INPUT:
+            return {"path": "notes.txt"}
+        if name == AgentKeys.SHOULD_TERMINATE:
+            return not self.names
+        return "text"
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=self._field(request.field_name),
+            confidence=0.9,
+            reasoning="mock",
+            is_valid=True,
+        )
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        return DataExtractionResponse(extracted_data={})
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="notes say hello", message_type="response", reasoning="mock"
+        )
+
+
 class TestDefaultAgentBuilder:
     """The one construction choice the factory makes when nobody overrides it."""
 
@@ -3876,6 +3929,44 @@ class TestDefaultAgentBuilder:
 
         assert isinstance(agent, ReactAgent)
         assert agent.config.output_schema is spec.output_schema
+
+    def test_the_react_arm_survives_an_unknown_tool_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-013 (item 17): the ReAct arm runs, not only constructs.
+
+        The wiring test above never calls ``run``.  Here the builder's own
+        agent (default API construction, the LLM swapped where ``API`` builds
+        it) meets an unknown tool name first, then a real workspace tool, and
+        must finish with ``success`` and the file's bytes as its observation.
+        """
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "notes.txt").write_text("hello from the workspace\n")
+        spec = get_role_spec(HarnessStates.EXPLORE)
+        registry = build_workspace_tools(Workspace(workspace), allowed=spec.tool_scope)
+        config = AgentConfig(
+            model="ollama_chat/x", max_iterations=8, output_schema=spec.output_schema
+        )
+        llm = _UnknownThenReadLLM()
+        monkeypatch.setattr("fsm_llm.api.LiteLLMInterface", lambda **_: llm)
+
+        agent = _default_agent_builder(native_function_calling=False)(
+            spec, registry, config
+        )
+        result = agent.run("What do the notes say?")
+
+        assert isinstance(agent, ReactAgent)
+        assert result.success is True
+        assert llm.done, "the run ended before the model finished"
+        observations = result.final_context[AgentKeys.OBSERVATIONS]
+        assert len(observations) == 1
+        assert "hello from the workspace" in observations[0]
+        assert "made_up" not in observations[0]
+        assert [c.tool_name for c in result.trace.tool_calls] == [
+            WorkspaceTools.READ_FILE
+        ]
+        assert not result.final_context.get(AgentKeys.MAX_ITERATIONS_REACHED)
 
     def test_native_function_calling_swaps_the_agent_not_the_schema(
         self, tmp_path: Path
