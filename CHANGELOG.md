@@ -140,9 +140,8 @@ Live results (ollama_chat/qwen3.5:9b-q8_0): PENDING
   `{"type": "array"}`, with `items: {"type": ...}` for a parametrized generic (OpenAI
   native function calling rejects an array without `items`). They used to be
   `"string"`. The prompt now tells the model to send an array for these parameters.
-  Other `Optional` types are unchanged. Side effect (open, see below): an empty
-  `tool_input` no longer gets the task string filled into a single list-typed
-  parameter.
+  Other `Optional` types are unchanged. An empty `tool_input` on a single list-typed
+  parameter is filled with `[task]` (D-030); it used to get the bare task string.
 - **A `**kwargs`-only tool is called with keywords (D-024).** A tool whose one
   parameter is `**kwargs` used to receive the parameters dict positionally and fail on
   every call. This covers zero-argument MCP tools and the monitor's launched-agent stub
@@ -248,9 +247,6 @@ Live results (ollama_chat/qwen3.5:9b-q8_0): PENDING
   Not worse than the old `"string"` schema.
 - A string (or a JSON-array string) sent to a list-typed parameter reaches the tool as
   a `str`, so a type-correct tool iterates its characters (pre-existing).
-- An empty `tool_input` on a single list-typed parameter now fails with
-  `Tool requires parameters: [...]`; before the array schema it was filled with the
-  task string. A one-line fix is scheduled (D-030).
 - `AgentServer` has no rate limiting (use a reverse proxy), and the HTTP body is parsed
   before the size check.
 - MCP reconnects on every call, so the 30 s per-call timeout includes starting the

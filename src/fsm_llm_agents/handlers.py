@@ -178,9 +178,16 @@ class AgentHandlers:
                 # Prose in a non-string param is a TypeError; the miss names the param.
                 string_ok = ptype is None or ptype == "string"
                 string_ok = string_ok or (isinstance(ptype, list) and "string" in ptype)
+                # DECISION plan-2026-09-24T091842-c1d5bfbc/D-030: an array param
+                # gets [task]; do NOT drop it (list tools ran here pre-D-011).
+                array_ok = ptype == "array"
+                array_ok = array_ok or (isinstance(ptype, list) and "array" in ptype)
                 if task and string_ok:
                     tool_input = {param_name: task}
                     logger.info(f"Recovered empty tool_input: {param_name}=<task>")
+                elif task and array_ok:
+                    tool_input = {param_name: [task]}
+                    logger.info(f"Recovered empty tool_input: {param_name}=[<task>]")
 
         logger.info(LogMessages.TOOL_SELECTED.format(name=tool_name, input=tool_input))
 

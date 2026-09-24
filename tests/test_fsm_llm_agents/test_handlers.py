@@ -6,7 +6,7 @@ from typing import ClassVar
 
 from fsm_llm_agents.constants import ContextKeys, Defaults
 from fsm_llm_agents.handlers import AgentHandlers, make_iteration_limiter
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm_agents.tools import ToolRegistry, tool
 
 
 def _echo(params):
@@ -305,3 +305,71 @@ class TestEmptyToolInputRecovery:
     def test_string_property_schema_recovers_without_error(self):
         # Flat description shape nested under "properties"; base recovered here.
         assert self._recovered_query("search text") == [self._TASK]
+
+
+class TestEmptyInputListParamRecovery:
+    """D-030: an empty input fills a single list-typed param with ``[task]``."""
+
+    _TASK = "weather in paris"
+
+    def _run(self, tool_def):
+        registry = ToolRegistry()
+        registry.register(tool_def)
+        context = {
+            ContextKeys.TOOL_NAME: tool_def.name,
+            ContextKeys.TOOL_INPUT: None,
+            ContextKeys.TASK: self._TASK,
+            ContextKeys.OBSERVATIONS: [],
+        }
+        return AgentHandlers(registry).execute_tool(context)
+
+    def test_list_str_param_runs_with_task_list(self):
+        received: list[object] = []
+
+        @tool
+        def search(queries: list[str]) -> str:
+            """Search several queries."""
+            received.append(queries)
+            return "R:" + "|".join(queries)
+
+        result = self._run(search._tool_definition)
+        assert result[ContextKeys.TOOL_STATUS] == "success"
+        assert received == [[self._TASK]]
+        assert result[ContextKeys.TOOL_RESULT] == f"R:{self._TASK}"
+
+    def test_nullable_array_param_runs_with_task_list(self):
+        received: list[object] = []
+
+        def search(queries) -> str:
+            received.append(queries)
+            return "ok"
+
+        registry = ToolRegistry()
+        schema = {
+            "properties": {"queries": {"type": ["array", "null"]}},
+            "required": ["queries"],
+        }
+        registry.register_function(search, name="spy", parameter_schema=schema)
+        context = {
+            ContextKeys.TOOL_NAME: "spy",
+            ContextKeys.TOOL_INPUT: {},
+            ContextKeys.TASK: self._TASK,
+            ContextKeys.OBSERVATIONS: [],
+        }
+        result = AgentHandlers(registry).execute_tool(context)
+        assert result[ContextKeys.TOOL_STATUS] == "success"
+        assert received == [[self._TASK]]
+
+    def test_int_param_still_fails_naming_param(self):
+        received: list[object] = []
+
+        @tool
+        def lookup(count: int) -> str:
+            """Look up a count."""
+            received.append(count)
+            return str(count)
+
+        result = self._run(lookup._tool_definition)
+        assert received == []
+        assert result[ContextKeys.TOOL_STATUS] == "failed"
+        assert "'count'" in result[ContextKeys.TOOL_RESULT]
