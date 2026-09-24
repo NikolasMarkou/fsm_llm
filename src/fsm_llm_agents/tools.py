@@ -9,8 +9,9 @@ import json
 import re
 import threading
 import time
+import types
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, get_type_hints
 
 from fsm_llm.logging import logger
@@ -31,6 +32,7 @@ _PYTHON_TO_JSON_SCHEMA: dict[type, str] = {
     list: "array",
     dict: "object",
 }
+_LIST_ORIGINS = (list, tuple, set, frozenset, Sequence)  # array-like generics
 
 
 # DECISION plan-2026-09-24T091842-c1d5bfbc/D-011: a list reaches a positional
@@ -582,11 +584,23 @@ def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
                     break
             hint = real_type
 
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-011 (P2-W4): a list-like
+        # generic, bare or in Optional, is an ``array`` with ``items`` (OpenAI
+        # rejects an array without them). Do NOT map it to "string": the
+        # positional fallback then passes str(list). Other Optionals unchanged.
+        inner, elem = hint, ()
+        if typing.get_origin(hint) in (typing.Union, types.UnionType):
+            opts = [a for a in typing.get_args(hint) if a is not type(None)]
+            inner = opts[0] if len(opts) == 1 else hint
+        if inner is list or typing.get_origin(inner) in _LIST_ORIGINS:
+            hint, elem = list, typing.get_args(inner)[:1]
         # Default to "string" for missing or unknown types
         if hint is None:
             hint = str
         json_type = _PYTHON_TO_JSON_SCHEMA.get(hint, "string")
         prop: dict[str, Any] = {"type": json_type}
+        if elem:
+            prop["items"] = {"type": _PYTHON_TO_JSON_SCHEMA.get(elem[0], "string")}
         if param_desc:
             prop["description"] = param_desc
 

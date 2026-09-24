@@ -914,6 +914,64 @@ class TestListToolInput:
         assert result.success, result.error
         assert seen["query"] == "['a', 'b']"
 
+    @staticmethod
+    def _list_tool(annotation: Any) -> tuple[Any, list]:
+        seen: list = []
+
+        def tag(tags):
+            seen.append(tags)
+            return f"{type(tags).__name__}:{tags}"
+
+        tag.__annotations__ = {"tags": annotation, "return": str}
+        return tool(tag), seen
+
+    _LIST_LIKE = pytest.mark.parametrize(
+        "annotation",
+        [
+            list[str],
+            typing.List[str],  # noqa: UP006
+            typing.Optional[list[str]],  # noqa: UP045
+            list[int] | None,
+            typing.Sequence[str],
+            tuple[str, ...],
+        ],
+        ids=["list-str", "List-str", "Optional", "pipe-None", "Sequence", "tuple"],
+    )
+
+    @_LIST_LIKE
+    def test_list_like_param_receives_a_list(self, annotation):
+        """Review P2-W4: ``@tool`` inferred ``string`` for any generic, so a
+        ``list[str]`` parameter got ``str(list)`` from the positional fallback
+        (c6e8461 passed the list)."""
+        fn, seen = self._list_tool(annotation)
+        registry = ToolRegistry()
+        registry.register(fn._tool_definition)
+        for raw in (["a", "b"], {"input": ["a", "b"]}):
+            result = registry.execute(
+                ToolCall(tool_name="tag", parameters=normalize_tool_input(raw))
+            )
+            assert result.success, result.error
+        assert seen == [["a", "b"], ["a", "b"]]
+
+    @_LIST_LIKE
+    def test_list_like_param_schema_is_an_array_with_items(self, annotation):
+        fn, _ = self._list_tool(annotation)
+        prop = fn._tool_definition.parameter_schema["properties"]["tags"]
+        assert prop["type"] == "array"
+        # OpenAI native function calling rejects an array without ``items``.
+        assert prop["items"]["type"] in ("string", "integer")
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [list, typing.Optional[int], dict[str, int], str],  # noqa: UP045
+        ids=["bare-list", "Optional-int", "dict-generic", "str"],
+    )
+    def test_other_annotations_keep_their_schema(self, annotation):
+        fn, _ = self._list_tool(annotation)
+        prop = fn._tool_definition.parameter_schema["properties"]["tags"]
+        expected = {"type": "array"} if annotation is list else {"type": "string"}
+        assert prop == expected
+
     def test_approval_grant_binds_the_list_consistently(self):
         """The driver writes the grant from an already-normalized input and the
         refusal recomputes it from the raw context value: both must agree."""
