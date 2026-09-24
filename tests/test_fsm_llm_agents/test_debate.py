@@ -345,3 +345,20 @@ class TestConsensusTypedExtraction:
 
         assert states.count(DebateStates.JUDGE) == rounds
         assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == rounds
+
+
+class TestIterationLimiterBoundary:
+    """D-013 (item 15): the early limiter fires at count ``max - 1``, not before."""
+
+    def test_limiter_triggers_at_max_minus_one_not_max_minus_two(self):
+        agent = DebateAgent(num_rounds=2)
+        limiter = agent._make_iteration_limiter()
+        limit = agent._fsm_budget()
+
+        before = limiter({ContextKeys.ITERATION_COUNT: limit - 3})
+        assert before == {ContextKeys.ITERATION_COUNT: limit - 2}
+
+        at = limiter({ContextKeys.ITERATION_COUNT: limit - 2})
+        assert at[ContextKeys.ITERATION_COUNT] == limit - 1
+        assert at[ContextKeys.CONSENSUS_REACHED] is True
+        assert at[ContextKeys.SHOULD_TERMINATE] is True

@@ -339,3 +339,29 @@ class TestAllCollectedTypedExtraction:
         assert len(workers) == 2
         assert states.count(OrchestratorStates.COLLECT) == 2
         assert result.success
+
+
+class TestIterationLimiterBoundary:
+    """D-013 (item 15): the early limiter fires at count ``max - 1``, not before."""
+
+    def test_limiter_triggers_at_max_minus_one_not_max_minus_two(self):
+        agent = OrchestratorAgent(worker_factory=_dummy_worker)
+        limiter = agent._make_iteration_limiter()
+        limit = 7  # run() seeds `_max_iterations`; it overrides the default
+
+        before = limiter({"_max_iterations": limit, ContextKeys.ITERATION_COUNT: 4})
+        assert before == {ContextKeys.ITERATION_COUNT: limit - 2}
+
+        at = limiter({"_max_iterations": limit, ContextKeys.ITERATION_COUNT: 5})
+        assert at[ContextKeys.ITERATION_COUNT] == limit - 1
+        assert at[ContextKeys.ALL_COLLECTED] is True
+        assert at[ContextKeys.SHOULD_TERMINATE] is True
+
+    def test_limiter_default_limit_without_context_key(self):
+        limiter = OrchestratorAgent()._make_iteration_limiter()
+        limit = Defaults.MAX_ITERATIONS
+
+        before = limiter({ContextKeys.ITERATION_COUNT: limit - 3})
+        assert ContextKeys.ALL_COLLECTED not in before
+        at = limiter({ContextKeys.ITERATION_COUNT: limit - 2})
+        assert at[ContextKeys.ALL_COLLECTED] is True

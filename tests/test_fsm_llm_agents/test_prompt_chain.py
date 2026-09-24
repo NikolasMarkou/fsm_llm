@@ -7,6 +7,7 @@ import pytest
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm_agents.constants import (
     ContextKeys,
+    Defaults,
     ErrorMessages,
     HandlerNames,
     PromptChainStates,
@@ -397,6 +398,19 @@ class TestPromptChainHandlers:
         context = {ContextKeys.ITERATION_COUNT: 3}
         result = limiter(context)
         assert result[ContextKeys.ITERATION_COUNT] == 4
+
+    def test_limiter_triggers_at_max_minus_one_not_max_minus_two(self):
+        # D-013 (item 15): the early limiter fires at count max - 1, not before.
+        agent = PromptChainAgent(chain=_make_chain(2))
+        limiter = agent._make_iteration_limiter()
+        limit = 2 * Defaults.FSM_BUDGET_MULTIPLIER
+
+        before = limiter({ContextKeys.ITERATION_COUNT: limit - 3})
+        assert before == {ContextKeys.ITERATION_COUNT: limit - 2}
+
+        at = limiter({ContextKeys.ITERATION_COUNT: limit - 2})
+        assert at[ContextKeys.ITERATION_COUNT] == limit - 1
+        assert at[ContextKeys.SHOULD_TERMINATE] is True
 
     def test_extract_answer_from_final_answer(self):
         chain = _make_chain(2)
