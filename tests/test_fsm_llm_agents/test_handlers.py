@@ -294,3 +294,11 @@ class TestEmptyToolInputRecovery:
 
     def test_union_with_string_param_still_recovers(self):
         assert self._recovered_query({"type": ["string", "null"]}) == [self._TASK]
+
+    def test_bool_property_schema_recovers_without_error(self):
+        # JSON Schema allows `true` as a property schema; base recovered here.
+        assert self._recovered_query(True) == [self._TASK]
+
+    def test_string_property_schema_recovers_without_error(self):
+        # Flat description shape nested under "properties"; base recovered here.
+        assert self._recovered_query("search text") == [self._TASK]

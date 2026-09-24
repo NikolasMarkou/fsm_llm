@@ -115,6 +115,8 @@ class AgentHandlers:
             tool_def = self.registry.get(tool_name)
             schema = tool_def.parameter_schema or {}
             props = schema.get("properties", {})
+            if not isinstance(props, dict):
+                props = {}
             # Handle flat {param: description} schemas (no "properties" wrapper)
             if not props and schema and "type" not in schema:
                 if all(isinstance(v, str) for v in schema.values()):
@@ -126,7 +128,9 @@ class AgentHandlers:
             if len(required) == 1:
                 param_name = required[0]
                 task = context.get(ContextKeys.TASK, "")
-                ptype = props.get(param_name, {}).get("type")
+                spec = props.get(param_name)
+                # A bool/str property schema carries no type: recover as base did.
+                ptype = spec.get("type") if isinstance(spec, dict) else None
                 # Prose in a non-string param is a TypeError; the miss names the param.
                 string_ok = ptype is None or ptype == "string"
                 string_ok = string_ok or (isinstance(ptype, list) and "string" in ptype)
