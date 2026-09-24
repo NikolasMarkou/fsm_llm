@@ -323,6 +323,15 @@ class TestDriverGrant:
             def get_data(self, conv_id: str) -> dict[str, Any]:
                 return dict(self.data)
 
+            # The driver's policy view (D-005, P2-W1): the full context.
+            fsm_manager = property(lambda self: self)
+
+            def get_sub_conversation_id(self, conv_id: str) -> str:
+                return conv_id
+
+            def get_complete_conversation(self, conv_id: str) -> dict[str, Any]:
+                return {"collected_data": dict(self.data)}
+
             def update_context(self, conv_id: str, update: dict[str, Any]) -> None:
                 self.writes.append(update)
 
@@ -709,3 +718,54 @@ class TestDriverAsksOnlyAboutARealGatedTool:
 
         assert asks and set(asks) == {"danger"}
         assert executions == []
+
+
+@pytest.mark.parametrize("build", _agent_classes(), ids=["react", "reflexion", "rr"])
+class TestDriverSeesRefusalContext:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-005 (review P2-W1): the
+    driver evaluates the approval policy on the same full context the refusal
+    uses, internal keys included. Pre-fix the driver read ``get_data`` (internal
+    keys stripped), judged a ``_``-key-gated call ungated and never asked, while
+    the refusal kept blocking it: asks 0, runs 0 until the budget."""
+
+    @staticmethod
+    def _policy(call: Any, ctx: dict[str, Any]) -> bool:
+        return ctx.get("_sensitive") is True
+
+    def test_internal_key_policy_asks_and_runs_once(self, build):
+        executions: list[str] = []
+        asks: list[str] = []
+
+        def approve_once(request: Any) -> bool:
+            asks.append(request.tool_name)
+            return len(asks) == 1
+
+        agent = build(
+            tools=_registry(executions, "danger"),
+            config=_config(),
+            llm_interface=_ForgingLLM(lambda: "danger", forge=lambda: False),
+            hitl=HumanInTheLoop(
+                approval_policy=self._policy, approval_callback=approve_once
+            ),
+        )
+        agent.run("do it", initial_context={"_sensitive": True})
+
+        assert asks[:1] == ["danger"], f"the gated call was never asked: {asks}"
+        assert executions == ["danger"], f"approve-once ran {executions}"
+
+    def test_internal_key_policy_false_runs_without_asking(self, build):
+        executions: list[str] = []
+        asks: list[str] = []
+        agent = build(
+            tools=_registry(executions, "danger"),
+            config=_config(),
+            llm_interface=_ForgingLLM(lambda: "danger", forge=lambda: False),
+            hitl=HumanInTheLoop(
+                approval_policy=self._policy,
+                approval_callback=lambda request: asks.append(request.tool_name),
+            ),
+        )
+        agent.run("do it", initial_context={"_sensitive": False})
+
+        assert asks == []
+        assert "danger" in executions

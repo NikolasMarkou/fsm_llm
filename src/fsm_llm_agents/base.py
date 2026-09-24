@@ -346,11 +346,14 @@ class BaseAgent(ABC):
         # fatigue), and an extracted True for an ungated tool routes into
         # await_approval after the gate wrote False, where nothing else sets
         # approval_granted (BLOCKED until BudgetExhaustedError). Route it back.
+        # The gate reads the FULL context (internal keys included), exactly as
+        # AgentHandlers.approval_refusal does. Do NOT pass get_data's stripped
+        # view: a policy on a `_` key then never asks while the refusal blocks.
         gate = self._approval_predicate
         tools = getattr(self, "tools", None)
-        if not (
-            tools and tool_name in tools and gate and gate(tool_call, current_context)
-        ):
+        sub_id = api.get_sub_conversation_id(conv_id)
+        full = api.fsm_manager.get_complete_conversation(sub_id)["collected_data"]
+        if not (tools and tool_name in tools and gate and gate(tool_call, full)):
             required = current_context.get(ContextKeys.APPROVAL_REQUIRED)
             if required or api.get_current_state(conv_id) == AgentStates.AWAIT_APPROVAL:
                 stray = (ContextKeys.APPROVAL_REQUIRED, ContextKeys.APPROVAL_GRANTED)
