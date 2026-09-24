@@ -195,7 +195,8 @@ class BaseAgent(ABC):
     ) -> dict[str, Any]:
         """Build the standard initial context for an agent run.
 
-        Sets ``TASK``, ``AGENT_TRACE``, and ``ITERATION_COUNT``.
+        Sets ``TASK``, ``AGENT_TRACE``, ``ITERATION_COUNT`` and
+        ``MAX_ITERATIONS_REACHED`` (False; so a run's ``final_context`` carries it).
         Warns if *initial_context* already contains reserved keys.
         """
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
@@ -203,6 +204,7 @@ class BaseAgent(ABC):
             ContextKeys.TASK,
             ContextKeys.AGENT_TRACE,
             ContextKeys.ITERATION_COUNT,
+            ContextKeys.MAX_ITERATIONS_REACHED,
         }
         conflicts = reserved & context.keys()
         if conflicts:
@@ -213,6 +215,11 @@ class BaseAgent(ABC):
         context[ContextKeys.TASK] = task
         context[ContextKeys.AGENT_TRACE] = []
         context[ContextKeys.ITERATION_COUNT] = 0
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-007: seed the forced-stop
+        # flag False. Bulk extraction fills only UNSET keys, so the model cannot
+        # write True and pass every evidence guard (P2-W2). Only the limiter
+        # and stall handlers write True. Do NOT drop the seed or set it None.
+        context[ContextKeys.MAX_ITERATIONS_REACHED] = False
 
         # Schema-enforced output: when output_schema is set, store the
         # JSON schema as response_format so the pipeline can pass it to
