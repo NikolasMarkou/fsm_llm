@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from fsm_llm.definitions import (
+    DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     FSMDefinition,
@@ -535,3 +536,99 @@ class TestReflexionConcludeNeedsEvidence:
         assert "reflect" in states, states
         assert result.final_context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True
         assert len(states) <= 3 * 8
+
+
+_BUDGET_MODES: dict[str, dict[str, Any]] = {
+    "memory": {
+        "tool_name": "none",
+        "should_terminate": True,
+        "evaluation_passed": True,
+    },
+    "tool_fail_eval": {
+        "tool_name": "search",
+        "tool_input": {"q": "a"},
+        "should_terminate": False,
+        "evaluation_passed": False,
+    },
+    "tool_pass": {
+        "tool_name": "search",
+        "tool_input": {"q": "a"},
+        "should_terminate": True,
+        "evaluation_passed": True,
+    },
+    "none_noterm": {
+        "tool_name": "none",
+        "should_terminate": False,
+        "evaluation_passed": False,
+    },
+    "missing_eval": {
+        "tool_name": "search",
+        "tool_input": {"q": "a"},
+        "should_terminate": True,
+    },
+}
+
+
+class _ScriptedBehaviourLLM(LLMInterface):
+    """One fixed model behaviour; a field outside the script is not extracted."""
+
+    def __init__(self, script: dict[str, Any]) -> None:
+        self.model = "mock"
+        self.values = {
+            "evaluation_score": 0.5,
+            "final_answer": "ANS",
+            "reasoning": "r",
+            "reflection": "x",
+            **script,
+        }
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        name = request.field_name
+        known = name in self.values
+        return FieldExtractionResponse(
+            field_name=name,
+            value=self.values.get(name),
+            confidence=0.9 if known else 0.0,
+            reasoning="m",
+            is_valid=known,
+        )
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        return DataExtractionResponse(extracted_data={})
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="R", message_type="response", reasoning="m"
+        )
+
+
+class TestForcedStopFromEvaluate:
+    """DECISION plan-2026-09-24T091842-c1d5bfbc/D-008 (review P2-W3): every
+    budget ends cleanly. Pre-fix, ``max_iterations=1`` raised
+    BudgetExhaustedError in 3 of these 5 behaviours: ``evaluate`` had no exit
+    on the forced stop alone, so the run cycled evaluate -> reflect -> think
+    to the 3-turn ceiling."""
+
+    @pytest.mark.parametrize("budget", [1, 2, 3, 4, 5])
+    @pytest.mark.parametrize("mode", sorted(_BUDGET_MODES))
+    def test_every_budget_terminates(self, mode, budget):
+        ran: list[str] = []
+        registry = ToolRegistry()
+        registry.register_function(
+            lambda q="": ran.append(q) or "res",
+            name="search",
+            description="d",
+            parameter_schema={"properties": {"q": {"type": "string"}}},
+        )
+        agent = ReflexionAgent(
+            tools=registry,
+            config=AgentConfig(max_iterations=budget, model="mock/m"),
+            llm_interface=_ScriptedBehaviourLLM(_BUDGET_MODES[mode]),
+        )
+        result = agent.run("t")  # pre-fix: BudgetExhaustedError at budget 1
+
+        assert result.trace.total_iterations <= 3 * budget
+        if mode in ("memory", "none_noterm"):
+            assert ran == [] and result.success is False

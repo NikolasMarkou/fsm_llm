@@ -692,12 +692,25 @@ def build_reflexion_fsm(
                     # NOT gate on evaluation_passed alone: a self-evaluated
                     # memory answer then succeeds with zero tool calls. The
                     # 900 fallback to reflect keeps evaluate from BLOCKING.
+                    # A forced stop alone also concludes here (P2-W3): do NOT
+                    # route it through reflect -> think, or max_iterations=1
+                    # cycles to the 3-turn ceiling (BudgetExhaustedError).
                     "conditions": [
                         {
-                            "description": "Evaluation passed on evidence",
-                            "logic": _conclude_on_evidence_logic(
-                                ContextKeys.EVALUATION_PASSED
-                            ),
+                            "description": "Passed on evidence, or forced stop",
+                            "logic": {
+                                "or": [
+                                    _conclude_on_evidence_logic(
+                                        ContextKeys.EVALUATION_PASSED
+                                    ),
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.MAX_ITERATIONS_REACHED},
+                                            True,
+                                        ]
+                                    },
+                                ]
+                            },
                         }
                     ],
                 },
