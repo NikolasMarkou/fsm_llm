@@ -29,6 +29,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
+from .hitl import ApprovalPolicy, HumanInTheLoop
 
 
 def _output_response_format(schema: Any) -> dict[str, Any] | None:
@@ -271,15 +272,47 @@ class BaseAgent(ABC):
     # HITL loop-iteration helper
     # ------------------------------------------------------------------
 
+    @property
+    def _hitl_active(self) -> bool:
+        # DECISION plan_2026-05-29_1d66f861/D-001 [STALE]
+        # Single source of truth for "this run needs HITL approval gating".
+        # INVARIANT: the await_approval FSM state (include_approval_state)
+        # MUST be built under exactly this predicate, because it is also the
+        # predicate that registers the runtime approval gate. If the two
+        # diverge, the gate can set approval_required=True with no
+        # await_approval state to intercept it, and the tool executes
+        # un-gated (THINK -> act runs execute_tool before the loop's
+        # _handle_hitl_approval hook). Approval is policy-driven
+        # (hitl.approval_policy); the per-tool requires_approval attribute
+        # does NOT drive runtime approval, so it must NOT gate this predicate.
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-005
+        # Moved here from ReactAgent so React, Reflexion and ReasoningReact
+        # share ONE predicate for the FSM state, the gate and the
+        # AgentHandlers refusal. Do NOT re-add a per-agent copy, and do NOT
+        # AND it with "some tool is flagged": a policy may gate any tool.
+        hitl = getattr(self, "hitl", None)
+        return hitl is not None and hitl.has_approval_policy
+
+    @property
+    def _approval_predicate(self) -> ApprovalPolicy | None:
+        """The ``AgentHandlers(requires_approval=...)`` value, or None.
+
+        Set only under :attr:`_hitl_active` (plan-2026-09-24T091842-c1d5bfbc
+        D-004/D-005), so the refusal never gates a run without the state.
+        """
+        hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
+        if hitl is None or not self._hitl_active:
+            return None
+        return hitl.requires_approval
+
     def _handle_hitl_approval(self, api: API, conv_id: str) -> None:
         """Check and process HITL approval for the current context.
 
         Shared logic for agents that use synchronous HITL approval gates
-        (ReactAgent, ReflexionAgent).  Subclasses must set ``self.hitl``
-        to a :class:`HumanInTheLoop` instance (or ``None``).
+        (ReactAgent, ReflexionAgent, ReasoningReactAgent).  Subclasses must
+        set ``self.hitl`` to a :class:`HumanInTheLoop` instance (or ``None``).
         """
         from .handlers import approval_grant
-        from .hitl import HumanInTheLoop
         from .tools import normalize_tool_input
 
         hitl: HumanInTheLoop | None = getattr(self, "hitl", None)

@@ -111,18 +111,16 @@ class ReflexionAgent(BaseAgent):
         # see the fuller note in react.py's ReactAgent.run() (D-014). A fresh
         # instance needs no `.reset()`. Do NOT reintroduce
         # `self._handlers = AgentHandlers(...)` — see decisions.md D-012.
-        # plan-2026-09-24T091842-c1d5bfbc/D-004: the refusal is fed under the
-        # predicate that registers the gate below; Reflexion has no
-        # await_approval state, so the refusal is what stops a gated tool
-        # from running on `act` entry before the driver asks.
-        hitl = self.hitl
-        gated = hitl is not None and hitl.has_approval_policy
-        predicate = hitl.requires_approval if hitl is not None and gated else None
-        handlers = AgentHandlers(self.tools, requires_approval=predicate)
+        # plan-2026-09-24T091842-c1d5bfbc/D-005: the await_approval state, the
+        # gate in _register_handlers and the D-004 refusal share ONE predicate
+        # (BaseAgent._hitl_active), so a gated call is asked in await_approval
+        # before `act` runs it; the refusal stays as the backstop.
+        handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
 
         fsm_def = build_reflexion_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
+            include_approval_state=self._hitl_active,
         )
 
         context = self._init_context(
@@ -180,8 +178,9 @@ class ReflexionAgent(BaseAgent):
                 .do(self._make_evaluation_handler())
             )
 
-        # HITL: flag tools needing approval
-        if self.hitl is not None and self.hitl.has_approval_policy:
+        # HITL: flag tools needing approval (same predicate as the FSM state)
+        if self._hitl_active:
+            assert self.hitl is not None  # narrowed by _hitl_active
             self._register_hitl_gate(api, make_hitl_checker(self.hitl))
 
     def _make_evaluation_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:

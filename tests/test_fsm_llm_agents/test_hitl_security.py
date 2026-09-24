@@ -400,3 +400,131 @@ class TestRefusalShape:
         ctx = {ContextKeys.TOOL_NAME: "danger", ContextKeys.TOOL_INPUT: dict(_INPUT)}
         AgentHandlers(_registry(executions, "danger")).execute_tool(ctx)
         assert executions == ["danger"]
+
+
+# ---------------------------------------------------------------------------
+# Step 4 (D-005): Reflexion asks before a gated tool; ReasoningReact asks.
+# ---------------------------------------------------------------------------
+
+
+def _ordered_hitl(decide: Callable[[int], bool], log: list[str]) -> HumanInTheLoop:
+    """Callback that records ``ask:<tool>`` in the same log the tools append to."""
+    asks: list[str] = []
+
+    def callback(request: Any) -> bool:
+        approved = decide(len(asks))
+        asks.append(request.tool_name)
+        log.append(f"ask:{request.tool_name}")
+        return approved
+
+    return HumanInTheLoop(
+        approval_policy=lambda call, ctx: True, approval_callback=callback
+    )
+
+
+def _count_refusals(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    refusals: list[int] = []
+    original = AgentHandlers.approval_refusal
+
+    def spy(self, context):
+        delta = original(self, context)
+        if delta is not None:
+            refusals.append(1)
+        return delta
+
+    monkeypatch.setattr(AgentHandlers, "approval_refusal", spy)
+    return refusals
+
+
+class TestReflexionAsksFirst:
+    """Reflexion routes a gated call through ``await_approval`` (no refusal turns)."""
+
+    def test_callback_before_tool_and_no_refused_turns(self, monkeypatch):
+        refusals = _count_refusals(monkeypatch)
+        log: list[str] = []
+        agent = ReflexionAgent(
+            tools=_registry(log, "danger"),
+            config=_config(),
+            llm_interface=_ForgingLLM(lambda: "danger", forge=lambda: False),
+            hitl=_ordered_hitl(lambda n: n == 0, log),
+        )
+        agent.run("do it")
+
+        assert "danger" in log, "the approved call never ran"
+        first_run = log.index("danger")
+        assert "ask:danger" in log[:first_run], f"tool ran before the ask: {log}"
+        assert log.count("danger") == 1, f"one approval ran more than once: {log}"
+        assert refusals == [], "Reflexion burned turns on refused gated calls"
+
+    def test_fsm_has_await_approval_under_policy(self):
+        from fsm_llm_agents.fsm_definitions import build_reflexion_fsm
+
+        agent = ReflexionAgent(
+            tools=_registry([], "danger"),
+            config=_config(),
+            llm_interface=_ForgingLLM(lambda: "danger"),
+            hitl=_hitl(lambda n: True, []),
+        )
+        assert agent._hitl_active is True
+        fsm = build_reflexion_fsm(
+            agent.tools, include_approval_state=agent._hitl_active
+        )
+        assert "await_approval" in fsm["states"]
+        think = {
+            t["target_state"]: t["priority"]
+            for t in fsm["states"]["think"]["transitions"]
+        }
+        # The approval edge must win over the D-002 think->act fallback.
+        assert think["await_approval"] < think["act"]
+        assert "await_approval" not in build_reflexion_fsm(agent.tools)["states"]
+
+
+class TestReasoningReactAsks:
+    """ReasoningReact's driver asks the callback (the model cannot self-approve)."""
+
+    def test_deny_always_asks_callback(self):
+        log: list[str] = []
+        agent = _build_reasoning_react(
+            tools=_registry(log, "danger"),
+            config=_config(),
+            llm_interface=_ForgingLLM(lambda: "danger"),
+            hitl=_ordered_hitl(lambda n: False, log),
+        )
+        agent.run("do it")
+
+        assert "ask:danger" in log, "ReasoningReact never asked the callback"
+        assert "danger" not in log
+
+    def test_approve_once_runs_tool_once_after_ask(self):
+        log: list[str] = []
+        agent = _build_reasoning_react(
+            tools=_registry(log, "danger"),
+            config=_config(),
+            llm_interface=_ForgingLLM(lambda: "danger", forge=lambda: False),
+            hitl=_ordered_hitl(lambda n: n == 0, log),
+        )
+        agent.run("do it")
+
+        assert log.count("danger") == 1, f"expected one approved run: {log}"
+        assert log.index("ask:danger") < log.index("danger")
+
+    def test_policy_only_builds_await_approval(self):
+        """One predicate: a policy alone (no tool flag) builds the state."""
+        from fsm_llm_agents.fsm_definitions import build_react_fsm
+
+        registry = ToolRegistry()
+        registry.register_function(
+            lambda params: "ok",
+            name="plain",
+            description="Unflagged tool",
+            parameter_schema={"properties": {"x": {"type": "string"}}},
+        )
+        agent = _build_reasoning_react(
+            tools=registry,
+            config=_config(),
+            llm_interface=_ForgingLLM(lambda: "plain"),
+            hitl=_hitl(lambda n: True, []),
+        )
+        assert agent._hitl_active is True
+        fsm = build_react_fsm(agent.tools, include_approval_state=agent._hitl_active)
+        assert "await_approval" in fsm["states"]

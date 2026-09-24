@@ -25,7 +25,7 @@ from .definitions import AgentConfig, AgentResult
 from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers
-from .hitl import ApprovalPolicy, HumanInTheLoop, make_hitl_checker
+from .hitl import HumanInTheLoop, make_hitl_checker
 from .tools import ToolRegistry
 
 
@@ -98,7 +98,7 @@ class ReactAgent(BaseAgent):
         handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
 
         # The await_approval state must be built under the SAME predicate that
-        # registers the runtime approval gate (see _hitl_active / _register_handlers).
+        # registers the runtime approval gate (BaseAgent._hitl_active, D-001).
         fsm_def = build_react_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
@@ -157,30 +157,6 @@ class ReactAgent(BaseAgent):
         yield from self._standard_run_stream(
             task, fsm_def, context, "react", handlers=handlers
         )
-
-    @property
-    def _hitl_active(self) -> bool:
-        # DECISION plan_2026-05-29_1d66f861/D-001 [STALE]
-        # Single source of truth for "this run needs HITL approval gating".
-        # INVARIANT: the await_approval FSM state (build_react_fsm
-        # include_approval_state) MUST be built under exactly this predicate,
-        # because it is also the predicate that registers the runtime approval
-        # gate in _register_handlers. If the two diverge, the gate can set
-        # approval_required=True with no await_approval state to intercept it,
-        # and the tool executes un-gated (THINK -> act runs execute_tool before
-        # the loop's _handle_hitl_approval hook). Approval is policy-driven
-        # (hitl.approval_policy); the per-tool requires_approval attribute does
-        # NOT drive runtime approval, so it must NOT gate this predicate.
-        return self.hitl is not None and self.hitl.has_approval_policy
-
-    @property
-    def _approval_predicate(self) -> ApprovalPolicy | None:
-        # D-001 extended by plan-2026-09-24T091842-c1d5bfbc/D-004: the refusal
-        # in AgentHandlers is fed under the same _hitl_active predicate.
-        if not self._hitl_active:
-            return None
-        assert self.hitl is not None  # narrowed by _hitl_active
-        return self.hitl.requires_approval
 
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
         """Handle HITL approval gates before each converse()."""

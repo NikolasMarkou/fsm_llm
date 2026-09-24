@@ -162,26 +162,18 @@ class ReasoningReactAgent(BaseAgent):
         # `_register_handlers` via `_standard_run`'s `handlers=` parameter.
         # A fresh instance needs no `.reset()`. Do NOT reintroduce
         # `self._handlers = AgentHandlers(...)` — see decisions.md D-012.
-        # plan-2026-09-24T091842-c1d5bfbc/D-004: the refusal is fed under the
-        # predicate that registers the gate in _register_handlers (fail
-        # closed: a gated call without a driver grant never runs).
-        hitl = self.hitl
-        gated = hitl is not None and hitl.has_approval_policy
-        predicate = hitl.requires_approval if hitl is not None and gated else None
-        handlers = AgentHandlers(self.tools, requires_approval=predicate)
-
-        # Build FSM from tool registry
-        has_approval_tools = any(t.requires_approval for t in self.tools.list_tools())
-        include_approval = (
-            self.hitl is not None
-            and self.hitl.has_approval_policy
-            and has_approval_tools
-        )
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-005
+        # One predicate (BaseAgent._hitl_active) for the await_approval state,
+        # the gate in _register_handlers and the D-004 refusal. Do NOT AND the
+        # state with "some tool has requires_approval": the policy may gate an
+        # unflagged tool (or `reason`), and a gate without the state makes every
+        # gated call a refused act turn instead of an ask.
+        handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
 
         fsm_def = build_react_fsm(
             self.tools,
             task_description=task,
-            include_approval_state=include_approval,
+            include_approval_state=self._hitl_active,
         )
 
         # Build initial context
@@ -328,5 +320,10 @@ class ReasoningReactAgent(BaseAgent):
 
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
 
-        if self.hitl is not None and self.hitl.has_approval_policy:
+        if self._hitl_active:
+            assert self.hitl is not None  # narrowed by _hitl_active
             self._register_hitl_gate(api, make_hitl_checker(self.hitl))
+
+    def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
+        """Ask the HITL callback before each converse() (same driver as React)."""
+        self._handle_hitl_approval(api, conv_id)

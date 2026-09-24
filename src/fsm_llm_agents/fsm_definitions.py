@@ -418,6 +418,84 @@ def _tool_selection_field_extractions(
     ]
 
 
+def _approval_think_transition() -> dict[str, Any]:
+    """The ``think -> await_approval`` edge shared by every approval-gated FSM.
+
+    Contract: returns a fresh transition dict at priority 150, which beats the
+    D-002 ``think -> act`` fallback (300) and loses to ``think -> conclude``
+    (10). Never raises.
+    """
+    return {
+        "target_state": "await_approval",
+        "description": "Action requires human approval before execution",
+        "priority": 150,
+        "conditions": [
+            {
+                "description": "Approval is required for this action",
+                "logic": {"==": [{"var": ContextKeys.APPROVAL_REQUIRED}, True]},
+            }
+        ],
+    }
+
+
+def _await_approval_state() -> dict[str, Any]:
+    """The ``await_approval`` state shared by every approval-gated FSM.
+
+    Contract: returns a fresh state dict with edges to ``conclude`` (forced
+    termination), ``act`` (``approval_granted`` True) and ``think``
+    (``approval_granted`` False); the builder must define those three states.
+    The agent's loop driver (``BaseAgent._handle_hitl_approval``) writes the
+    decision between turns. Never raises.
+    """
+    from .prompts import build_approval_extraction_instructions
+
+    return {
+        "id": "await_approval",
+        "description": "Waiting for human approval before executing action",
+        "purpose": "Present the planned action and wait for user approval",
+        "extraction_instructions": build_approval_extraction_instructions(),
+        "response_instructions": (
+            "Explain what action you want to take and why, "
+            "then ask the user for approval."
+        ),
+        "transitions": [
+            {
+                "target_state": "conclude",
+                "description": "Terminate when framework signals completion",
+                "priority": 1,
+                "conditions": [
+                    {
+                        "description": "Framework or agent decided to terminate",
+                        "logic": {"==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]},
+                    }
+                ],
+            },
+            {
+                "target_state": "act",
+                "description": "Approval granted, proceed with action",
+                "priority": 10,
+                "conditions": [
+                    {
+                        "description": "User approved the action",
+                        "logic": {"==": [{"var": ContextKeys.APPROVAL_GRANTED}, True]},
+                    }
+                ],
+            },
+            {
+                "target_state": "think",
+                "description": "Approval denied, reconsider approach",
+                "priority": 300,
+                "conditions": [
+                    {
+                        "description": "User denied the action",
+                        "logic": {"==": [{"var": ContextKeys.APPROVAL_GRANTED}, False]},
+                    }
+                ],
+            },
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Reflexion FSM
 # ---------------------------------------------------------------------------
@@ -426,6 +504,7 @@ def _tool_selection_field_extractions(
 def build_reflexion_fsm(
     registry: ToolRegistry,
     task_description: str = "",
+    include_approval_state: bool = False,
 ) -> dict[str, Any]:
     """
     Build a Reflexion FSM definition from a tool registry.
@@ -433,6 +512,10 @@ def build_reflexion_fsm(
     Extends the ReAct loop with evaluation and self-reflection:
     think -> act -> evaluate -> reflect (if failed) -> think (loop)
                               -> conclude (if passed)
+
+    With *include_approval_state*, a gated call goes
+    think -> await_approval -> act, the same state and priorities as
+    :func:`build_react_fsm`.
     """
     from .prompts import (
         build_conclude_extraction_instructions,
@@ -483,6 +566,13 @@ def build_reflexion_fsm(
                         }
                     ],
                 },
+                # DECISION plan-2026-09-24T091842-c1d5bfbc/D-005
+                # The approval edge (150) must beat the fallback below (300).
+                # Do NOT drop it while the agent registers the HITL gate: without
+                # it think -> act runs execute_tool before the driver asks, and
+                # every gated call burns an act/evaluate/reflect cycle on the
+                # D-004 refusal.
+                *([_approval_think_transition()] if include_approval_state else []),
                 # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
                 # Unconditional lowest-priority fallback. Do NOT gate this edge on the
                 # tool selection: a gated edge BLOCKS `think` on a null/unknown tool, and
@@ -591,6 +681,8 @@ def build_reflexion_fsm(
             "transitions": [],
         },
     }
+    if include_approval_state:
+        states["await_approval"] = _await_approval_state()
 
     return _finalize_fsm(
         "reflexion_agent",
@@ -780,7 +872,6 @@ def build_react_fsm(
     This can improve tool selection accuracy for large tool registries.
     """
     from .prompts import (
-        build_approval_extraction_instructions,
         build_conclude_extraction_instructions,
         build_conclude_response_instructions,
         build_think_extraction_instructions,
@@ -844,19 +935,7 @@ def build_react_fsm(
     ]
 
     if include_approval_state:
-        think_transitions.append(
-            {
-                "target_state": "await_approval",
-                "description": "Action requires human approval before execution",
-                "priority": 150,
-                "conditions": [
-                    {
-                        "description": "Approval is required for this action",
-                        "logic": {"==": [{"var": ContextKeys.APPROVAL_REQUIRED}, True]},
-                    }
-                ],
-            }
-        )
+        think_transitions.append(_approval_think_transition())
 
     # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
     # Unconditional lowest-priority fallback. Do NOT gate this edge on the
@@ -991,57 +1070,7 @@ def build_react_fsm(
     }
 
     if include_approval_state:
-        states["await_approval"] = {
-            "id": "await_approval",
-            "description": "Waiting for human approval before executing action",
-            "purpose": "Present the planned action and wait for user approval",
-            "extraction_instructions": build_approval_extraction_instructions(),
-            "response_instructions": (
-                "Explain what action you want to take and why, "
-                "then ask the user for approval."
-            ),
-            "transitions": [
-                {
-                    "target_state": "conclude",
-                    "description": "Terminate when framework signals completion",
-                    "priority": 1,
-                    "conditions": [
-                        {
-                            "description": "Framework or agent decided to terminate",
-                            "logic": {
-                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": "act",
-                    "description": "Approval granted, proceed with action",
-                    "priority": 10,
-                    "conditions": [
-                        {
-                            "description": "User approved the action",
-                            "logic": {
-                                "==": [{"var": ContextKeys.APPROVAL_GRANTED}, True]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": "think",
-                    "description": "Approval denied, reconsider approach",
-                    "priority": 300,
-                    "conditions": [
-                        {
-                            "description": "User denied the action",
-                            "logic": {
-                                "==": [{"var": ContextKeys.APPROVAL_GRANTED}, False]
-                            },
-                        }
-                    ],
-                },
-            ],
-        }
+        states["await_approval"] = _await_approval_state()
 
     return _finalize_fsm(
         "react_agent",
