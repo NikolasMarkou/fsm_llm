@@ -811,26 +811,6 @@ class API:
                 self.fsm_manager.end_conversation(current_frame.conversation_id)
             finally:
                 # Re-acquire lock only to mutate the stack
-                # DECISION plan-2026-07-18T051819-80b0bd4d/D-013 [STALE]
-                # Remove the frame we just ended BY OBJECT IDENTITY, at whatever
-                # index it now holds. Do NOT restore the old
-                # `inner_stack[-1].conversation_id == current_frame.conversation_id`
-                # top-of-stack test: end_conversation runs with _stack_lock RELEASED
-                # (D-001 above, deliberately), so a concurrent push_fsm on the same
-                # root id can append a new top frame in that window. The positional
-                # test then fails and the already-ended frame is stranded in the
-                # stack forever — permanently bricking the conversation, because
-                # _get_current_fsm_conversation_id keeps returning a conversation
-                # FSMManager has already torn down (converse and pop_fsm then fail
-                # on every subsequent call).
-                # Use `is`, NOT `==` / list.remove(): FSMStackFrame is a pydantic
-                # model with VALUE equality, so two structurally-identical frames
-                # are indistinguishable by `==` and the wrong one could be deleted.
-                # Absent frame (double pop / concurrent end_conversation) is a no-op,
-                # never an IndexError.
-                # Do NOT "simplify" this by widening _stack_lock over
-                # end_conversation — that stalls unrelated conversations for the
-                # duration of FSM teardown I/O, which is exactly what D-001 rejected.
                 with self._stack_lock:
                     inner_stack = self.conversation_stacks.get(conversation_id) or []
                     for idx in range(len(inner_stack) - 1, -1, -1):
@@ -1006,24 +986,6 @@ class API:
                     f"Conversation stack is empty for {conversation_id}. "
                     f"The conversation may have been corrupted."
                 )
-            # DECISION plan-2026-07-18T051819-80b0bd4d/D-014 [STALE]
-            # THIS is the single idleness-refresh point. Every public method that
-            # resolves "which FSM is current" funnels through here (converse,
-            # converse_stream, get_data, update_context, get_current_state,
-            # get_conversation_history, get_sub_conversation_id,
-            # has_conversation_ended, push_fsm, save_session, end_conversation), so
-            # one write under the ALREADY-HELD lock covers all of them.
-            # Do NOT re-add explicit `self._last_accessed[...] = ...` lines in
-            # converse/converse_stream: they were deleted precisely because they
-            # duplicated this write one line later, and two writers of the same
-            # eviction bookkeeping is how cleanup_stale_conversations came to
-            # force-end conversations that were driven purely through
-            # push_fsm/get_data/update_context (which never called converse).
-            # Do NOT extract this into a _touch() helper that acquires the lock:
-            # _stack_lock is a plain non-reentrant threading.Lock, so a helper
-            # called from here would self-deadlock.
-            # Must use time.monotonic() — cleanup_stale_conversations reads the
-            # same clock; mixing in time.time() silently corrupts the arithmetic.
             self._last_accessed[conversation_id] = time.monotonic()
             return stack[-1].conversation_id
 
