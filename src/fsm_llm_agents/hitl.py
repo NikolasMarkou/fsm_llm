@@ -83,8 +83,8 @@ class HumanInTheLoop:
         """
         Request approval from a human.
 
-        Returns True if approved, False if denied.
-        If no callback is set, defaults to auto-approve.
+        Returns True if approved, False if denied (a timeout counts as denied).
+        Raises ``ApprovalDeniedError`` if no callback is set.
         """
         logger.info(
             LogMessages.APPROVAL_REQUESTED.format(

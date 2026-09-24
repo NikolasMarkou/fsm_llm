@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Agents audit 2026-09-24
 
 Audit of `src/fsm_llm_agents` dated 2026-09-24 (`plans/plan-2026-09-24T045559-3e4eb3e5`,
-13 steps, one commit per step). Finding ids below are the audit's own. Every behaviour
-change has a test that fails on the pre-fix code, except the logging and docstring
-items. Full suite: 6,915 tests collected (was 6,873). `ruff` and `mypy` clean across
+13 steps and 6 completion fixes after review, one commit each). Finding ids below are
+the audit's own. Every behaviour change has a test that fails on the pre-fix code,
+except the logging and docstring items. Full suite: 6,934 tests collected (was 6,873). `ruff` and `mypy` clean across
 all 6 packages. The ReAct-family routing change (first item) changes how a live model's
 turns are routed, so the already stale eval baseline was not re-measured.
 
@@ -27,29 +27,71 @@ turns are routed, so the already stale eval baseline was not re-measured.
   unconditional lowest-priority (300) fallback, so the existing no-tool feedback,
   stall detector and iteration limiter run and the agent concludes. The `conclude` and
   `await_approval` edges are unchanged. Every non-concluding `think` turn now goes
-  through `act`, which records a corrective observation where the turn used to sit in
-  `think` silently.
-- **`maker_checker` has a fallback out of `check` (FB-01).** A turn where
-  `checker_passed` was never extracted used to BLOCK `check` until the budget ran out;
-  an unconditional priority-900 `check->revise` edge now continues the loop.
-- **Iteration limiters signal one iteration earlier (PT-05/PT-06/FB-06).** The 8
-  hand-rolled PRE_TRANSITION limiters (plan_execute, rewoo, evaluator_optimizer,
-  maker_checker, prompt_chain, debate, orchestrator, adapt) now share
-  `fsm_llm_agents.handlers.make_iteration_limiter`, which forces termination at
-  `count >= max_iterations - 1` on all 8 patterns. Only adapt did this before; the other
-  7 now stop one iteration earlier. `DebateAgent.run()` no longer stores
-  `_max_fsm_iterations` on the instance (PT-02).
+  through `act`, which gives corrective feedback where the turn used to sit in `think`
+  silently.
+- **An unknown tool name is a no-tool turn, not evidence (D-012).** In
+  `AgentHandlers.execute_tool`, a tool name that is not `none` and not registered now
+  takes the no-tool path: the model gets `Unknown tool '<name>'.` plus the list of
+  available tools, the turn counts toward the 3-turn stall detector, and no observation
+  is recorded. Before, it recorded a `[TOOL FAILED]` observation that satisfied the
+  `think->conclude` evidence guard, so a hallucinated tool plus `should_terminate=True`
+  ended with `success=True`. The turn's `tool_status` is now `skipped`, not
+  `failed`. `ParallelReactAgent` is unchanged.
+- **Fallback edges out of more loop states (FB-01, D-002).** A turn where the routing
+  key was never extracted used to BLOCK the state until `BudgetExhaustedError`, because
+  no PRE_TRANSITION limiter runs on a BLOCKED turn. Unconditional priority-900 edges now
+  continue the loop: maker_checker `check->revise`, ADaPT `assess->combine` and
+  `decompose->combine`, evaluator_optimizer `generate->evaluate`. Every agent loop state
+  now has an unconditional fallback except plan_execute `plan` (its key is seeded) and
+  the react `await_approval` state (the ReactAgent driver always sets a bool).
+- **maker_checker and evaluator_optimizer re-judge every round (D-013).** Core extracts
+  a key only while it is unset, so maker_checker judged `checker_passed` and
+  `quality_score` once per run and `revise` never replaced `draft_output`; the
+  evaluator_optimizer `refine` state never replaced `generated_output`, so the
+  evaluation function scored the first draft on every round. Entering `revise`/`refine`
+  now moves the draft to `previous_draft`/`previous_output` and clears the draft (and,
+  in maker_checker, a False verdict), so the revised draft really replaces the previous
+  one and is judged again. Leaving `revise` clears the consumed `checker_feedback`, so
+  the next check writes fresh feedback; if no new draft was produced, the previous one
+  is restored. `max_revisions` now ends the maker_checker loop (always-False checker at
+  `max_iterations=10`: 12 turns with 1 verdict before, 8 turns with 3 verdicts now).
+  Two prompt lines changed to point at the new keys (`Your previous output is in
+  'previous_output'.`, `Your previous draft is in 'previous_draft'.`); this was not
+  measured on a live model. New handler factory `make_redraft_handlers`.
+- **Iteration limiters share one factory (PT-05/PT-06/FB-06).** The 8 hand-rolled
+  PRE_TRANSITION limiters (plan_execute, rewoo, evaluator_optimizer, maker_checker,
+  prompt_chain, debate, orchestrator, adapt) now use
+  `fsm_llm_agents.handlers.make_iteration_limiter(max, forced, *, context_max_key=None,
+  early=True)`. With `early=True` it forces its keys at `count >= max_iterations - 1`
+  (only adapt did this before); maker_checker passes `early=False` and triggers at
+  `max_iterations` as before, so the checker judges at every budget (D-014). The early
+  trigger changes routing only where a transition reads the forced keys: orchestrator,
+  debate and prompt_chain now stop one iteration earlier (adapt already did). For plan_execute, rewoo
+  and evaluator_optimizer the forced keys do not change routing (no transition reads
+  them, the loop is linear, or `_run_evaluation` overwrites them). `DebateAgent.run()`
+  no longer stores `_max_fsm_iterations` on the instance (PT-02).
+- **HITL approvals are single-use (D-015).** `approval_granted` was never reset, so
+  after one granted approval every later approval-required call skipped the callback
+  and ran. This approval bypass predates the audit. `execute_tool` now deletes
+  `approval_granted` at `act` entry once no approval is pending, so each gated call is
+  asked for exactly once. Applies to ReactAgent, ReflexionAgent and ReasoningReactAgent's
+  non-`reason` tools.
 - **Empty `tool_input` recovery checks the parameter type (CR-02).** When a tool with a
   single required parameter is called with no input, the task string is used as that
   parameter only when its schema type is absent, `"string"`, or a list containing
-  `"string"`. An integer parameter used to receive prose and fail with a `TypeError`;
-  the call now fails with `Tool requires parameters: [...]`, naming what the model must
-  supply.
+  `"string"`. A property schema that is not a dict (a JSON-Schema `true`, a description
+  string) counts as untyped. An integer parameter used to receive prose and fail with a
+  `TypeError`; the call now fails with `Tool requires parameters: [...]`, naming what
+  the model must supply.
 - **MCP calls time out (MM-06).** `MCPToolProvider`, `from_stdio` and `from_url` take
   `timeout` (default `Defaults.MCP_TIMEOUT_SECONDS = 30.0`; `None` means no limit). A
   discovery that runs past it raises `AgentTimeoutError`; a hung tool call raises
   `ToolExecutionError`, which `ToolRegistry.execute` turns into a failed `ToolResult`.
-  Before, both could hang forever.
+  Before, both could hang forever. The executor reconnects on every call, so the limit
+  is per call and includes starting the server and `initialize`: a long-running tool
+  that worked before can now fail by default (pass a larger `timeout` or `None`).
+  Teardown of a real stdio server under cancellation is untested; on Python 3.10/3.11
+  a slow teardown can run past the timeout.
 - **Unknown workflow `step_type` is a validation error (MM-01/MM-02).**
   `WorkflowBuilder.validate_complete` reports a step whose `step_type` is not in
   `VALID_STEP_TYPES` as an error (`add_step` still only warns). The meta-builder's
@@ -64,7 +106,10 @@ turns are routed, so the already stale eval baseline was not re-measured.
   module's `SKILLS` list is no longer registered a second time by the `@tool` scan.
 - **HITL logs a late callback error (CR-05).** An approval callback that raises after
   the approval timeout (the request was already denied) is now logged instead of
-  dropped.
+  dropped. Two small timing changes come with it: a callback that returns between the
+  join timeout and the internal lock is now honoured (it used to be denied), and a
+  callback that raises a `BaseException` (not an `Exception`) is logged as a timeout
+  and denied.
 
 ### Removed -- agents audit 2026-09-24
 
@@ -103,7 +148,13 @@ turns are routed, so the already stale eval baseline was not re-measured.
   union type).
 - Core: PRE_TRANSITION handlers do not run on a BLOCKED turn. This fix works around it
   in the agents package; changing it would change handler timing for every FSM.
-- Reflexion's `think->conclude` has no evidence guard, and ReWOO has no stall guard.
+- `ReasoningReactAgent` builds an `await_approval` state when a policy and a
+  `requires_approval` tool are present, but it has no approval driver, so the callback
+  is never asked and the gate can never be granted (D-015, pre-existing).
+- Reflexion's and ParallelReact's `think->conclude` have no evidence guard (D-004), so
+  they can conclude without a tool call (pre-existing). ReWOO has no stall guard.
+- `SkillLoader`'s `@tool` scan dedupes only against `SKILLS` names: a `@tool` function
+  reachable under two attribute names (an alias or a re-import) still loads twice.
 - `scripts/eval.py` was not re-run; the baseline in `CLAUDE.md` is staler after the
   routing change above.
 

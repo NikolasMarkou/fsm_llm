@@ -327,11 +327,12 @@ def make_iteration_limiter(
         never raises.
 
     The transition decision is already made before a PRE_TRANSITION handler
-    fires, so the limiter triggers one iteration early (``>= max - 1``) and
-    the forced transition fires on the next iteration rather than
-    overshooting by 1. PRE_TRANSITION handlers do not run on a BLOCKED turn,
-    so this is a near-limit nudge; the loop's hard ceiling
-    (``BaseAgent._check_budgets``) is the real bound.
+    fires, so with ``early`` the limiter triggers one iteration early
+    (``>= max - 1``) and the forced transition fires on the next iteration
+    rather than overshooting by 1. The forced keys only change routing where
+    a transition reads them. PRE_TRANSITION handlers do not run on a BLOCKED
+    turn, so the loop's hard ceiling (``BaseAgent._check_budgets``) is the
+    backstop bound.
     """
     forced_updates = dict(forced)
 

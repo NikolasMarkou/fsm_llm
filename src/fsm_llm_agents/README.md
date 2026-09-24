@@ -100,9 +100,11 @@ fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
 - `pip install "fsm-llm[agents]"` has no extra dependencies. `mcp.py` needs `fsm-llm[mcp]`; `RemoteAgentTool` needs `fsm-llm[a2a]` (httpx); `AgentServer` needs fastapi.
 - `ReactAgent` and most tool patterns refuse an empty tool registry.
 - Each `run()` makes many LLM calls. Small models can hit the iteration limit and fail with `BudgetExhaustedError`.
-- Human approval: if a tool needs approval and no approval callback is set, the agent raises `ApprovalDeniedError` instead of approving silently.
+- Human approval: if a tool needs approval and no approval callback is set, the agent raises `ApprovalDeniedError` instead of approving silently. Each approval covers one tool call; the next call that needs approval asks again. `ReasoningReactAgent` cannot ask for approval yet, so its approval-gated tools never run.
 - Keys in the returned `final_context` that look internal (starting with `_`, `system_`, `internal_`, `__`) are removed.
 - `EvaluatorOptimizerAgent` and `MakerCheckerAgent` need arguments `create_agent` cannot guess (an evaluation function, maker and checker instructions); pass them yourself.
 - Maker and checker instructions and the three `DebateAgent` personas go into the prompts as written, with no sanitizing. Write them yourself; put user input in the task, not in these arguments.
-- MCP servers get a 30-second timeout per tool discovery and per tool call by default (`timeout=None` turns it off).
+- MCP servers get a 30-second timeout per tool discovery and per tool call by default (`timeout=None` turns it off). Each call starts the server again, and that start counts toward the timeout.
+- If the model names a tool that does not exist, it is told which tools exist and the turn counts as a turn without a tool call; it is not treated as evidence the agent did work.
+- `MakerCheckerAgent` and `EvaluatorOptimizerAgent` judge every new draft; the old one is kept under `previous_draft` / `previous_output` while the model rewrites it.
 - The meta-builder makes one LLM call to extract the whole design, then assembles it in Python. For workflows and agents, `is_valid` means the spec is complete, not that it loads as a runnable object; you still wire in the Python functions.
