@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import Any
 
 import pytest
 
+from fsm_llm.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.expressions import evaluate_logic
+from fsm_llm.llm import LLMInterface
 from fsm_llm_agents import (
     AgentConfig,
     ParallelReactAgent,
@@ -171,3 +180,112 @@ class TestDispatch:
         }
         agent._dispatch_parallel(ctx)
         assert active["max"] >= 2
+
+
+# ---------------------------------------------------------------------------
+# D-008: conclude needs tool evidence (plan-2026-09-24T091842-c1d5bfbc)
+# ---------------------------------------------------------------------------
+
+
+class _BatchLLM(LLMInterface):
+    """Mock LLM: ``batches[i]`` is the i-th think's (tool_calls, should_terminate).
+
+    A think turn starts at its ``tool_calls`` request (extracted before
+    ``should_terminate``); the last entry repeats once the list is exhausted.
+    """
+
+    def __init__(self, batches: list[tuple[list[dict[str, Any]], bool]]) -> None:
+        self.model = "mock-model"
+        self.batches = batches
+        self.thinks = 0
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        name = request.field_name
+        if name == TOOL_CALLS_KEY:
+            self.thinks += 1
+        calls, terminate = self.batches[
+            min(max(self.thinks - 1, 0), len(self.batches) - 1)
+        ]
+        value: Any = {
+            TOOL_CALLS_KEY: calls,
+            ContextKeys.SHOULD_TERMINATE: terminate,
+            ContextKeys.FINAL_ANSWER: "sunny",
+        }.get(name)
+        return FieldExtractionResponse(
+            field_name=name,
+            value=value,
+            confidence=0.9 if value is not None else 0.0,
+            reasoning="mock",
+            is_valid=value is not None,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="final answer", message_type="response", reasoning="mock"
+        )
+
+
+def _run_recording_states(agent: Any) -> tuple[Any, list[str]]:
+    """Run the agent; return (result, state before each loop turn)."""
+    states: list[str] = []
+    real_hook = agent._on_loop_iteration
+
+    def _hook(api: Any, conv_id: str, iteration: int) -> None:
+        states.append(api.get_current_state(conv_id))
+        real_hook(api, conv_id, iteration)
+
+    agent._on_loop_iteration = _hook
+    return agent.run("Weather in Paris?"), states
+
+
+def _conclude_passes(state: str, ctx: dict[str, Any]) -> bool:
+    fsm = build_parallel_react_fsm(_registry())
+    edge = next(
+        t
+        for t in fsm["states"][state]["transitions"]
+        if t["target_state"] == "conclude"
+    )
+    return all(bool(evaluate_logic(c["logic"], ctx)) for c in edge["conditions"])
+
+
+_PARIS = [{"tool_name": "weather", "tool_input": {"city": "Paris"}}]
+
+
+class TestParallelConcludeNeedsEvidence:
+    """Turn-1 ``should_terminate=True`` with no tool must not conclude (D-008)."""
+
+    def _agent(self, batches) -> ParallelReactAgent:
+        return ParallelReactAgent(
+            tools=_registry(),
+            config=AgentConfig(model="mock/model", max_iterations=6),
+            llm_interface=_BatchLLM(batches),
+        )
+
+    def test_turn_one_terminate_without_tool_goes_to_act(self):
+        result, states = _run_recording_states(self._agent([([], True)]))
+
+        assert len(states) >= 2, "ParallelReact concluded on turn 1 with no tool"
+        assert states[1] == "act"
+        assert result.answer
+        assert len(states) <= 6 + 2
+
+    def test_tool_then_terminate_still_concludes(self):
+        result, states = _run_recording_states(
+            self._agent([(_PARIS, False), ([], True)])
+        )
+
+        assert states[:3] == ["think", "act", "think"]
+        assert len(states) == 3
+        assert "weather" in result.tools_used
+
+    @pytest.mark.parametrize("state", ["think", "act"])
+    def test_conclude_edge_needs_observation_or_forced_stop(self, state):
+        terminate = {ContextKeys.SHOULD_TERMINATE: True}
+
+        assert not _conclude_passes(state, terminate)
+        assert _conclude_passes(state, {**terminate, ContextKeys.OBSERVATION_COUNT: 1})
+        assert _conclude_passes(
+            state, {**terminate, ContextKeys.MAX_ITERATIONS_REACHED: True}
+        )

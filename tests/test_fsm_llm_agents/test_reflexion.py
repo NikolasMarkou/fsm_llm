@@ -2,9 +2,19 @@ from __future__ import annotations
 
 """Tests for fsm_llm_agents.reflexion module and Reflexion FSM definition."""
 
+from typing import Any
+
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.expressions import evaluate_logic
+from fsm_llm.llm import LLMInterface
 from fsm_llm_agents.constants import (
     ContextKeys,
     Defaults,
@@ -380,3 +390,116 @@ class TestReflexionAgentIntegration:
     def test_run_requires_llm(self):
         """ReflexionAgent.run() needs a real or mock LLM -- skip in unit tests."""
         pytest.skip("Requires LLM interface -- run with real_llm marker")
+
+
+# ---------------------------------------------------------------------------
+# D-008: conclude needs tool evidence (plan-2026-09-24T091842-c1d5bfbc)
+# ---------------------------------------------------------------------------
+
+
+class _FieldMapLLM(LLMInterface):
+    """Mock LLM returning ``field_map[name]`` for every extracted field."""
+
+    def __init__(self, field_map: dict[str, Any]) -> None:
+        self.model = "mock-model"
+        self.field_map = field_map
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        value = self.field_map.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=0.9 if value is not None else 0.0,
+            reasoning="mock",
+            is_valid=value is not None,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="final answer", message_type="response", reasoning="mock"
+        )
+
+
+def _run_recording_states(agent: Any) -> tuple[Any, list[str]]:
+    """Run the agent; return (result, state before each loop turn)."""
+    states: list[str] = []
+    real_hook = agent._on_loop_iteration
+
+    def _hook(api: Any, conv_id: str, iteration: int) -> None:
+        states.append(api.get_current_state(conv_id))
+        real_hook(api, conv_id, iteration)
+
+    agent._on_loop_iteration = _hook
+    return agent.run("What is 2 + 2?"), states
+
+
+def _conclude_conditions(fsm: dict[str, Any], state: str) -> list[dict[str, Any]]:
+    for transition in fsm["states"][state]["transitions"]:
+        if transition["target_state"] == "conclude":
+            return transition["conditions"]
+    raise AssertionError(f"{state} has no conclude edge")
+
+
+def _conclude_passes(fsm: dict[str, Any], state: str, ctx: dict[str, Any]) -> bool:
+    return all(
+        bool(evaluate_logic(c["logic"], ctx)) for c in _conclude_conditions(fsm, state)
+    )
+
+
+_ANSWER_FROM_MEMORY: dict[str, Any] = {
+    ContextKeys.TOOL_NAME: ContextKeys.NO_TOOL,
+    ContextKeys.TOOL_INPUT: {},
+    ContextKeys.SHOULD_TERMINATE: True,
+    ContextKeys.EVALUATION_PASSED: False,
+    ContextKeys.EVALUATION_SCORE: 0.1,
+    ContextKeys.REFLECTION: "use a tool",
+    ContextKeys.FINAL_ANSWER: "4",
+}
+
+
+class TestReflexionConcludeNeedsEvidence:
+    """Turn-1 ``should_terminate=True`` with no tool must not conclude (D-008)."""
+
+    def test_turn_one_terminate_without_tool_goes_to_act(self):
+        agent = ReflexionAgent(
+            tools=_make_registry(),
+            config=AgentConfig(max_iterations=6),
+            llm_interface=_FieldMapLLM(_ANSWER_FROM_MEMORY),
+        )
+        result, states = _run_recording_states(agent)
+
+        assert len(states) >= 2, "Reflexion concluded on turn 1 with no tool"
+        assert states[1] == "act"
+        assert result.answer
+        assert len(states) <= 3 * 6
+
+    @pytest.mark.parametrize("state", ["think", "act"])
+    def test_conclude_edge_needs_observation_or_forced_stop(self, state):
+        fsm = build_reflexion_fsm(_make_registry())
+        terminate = {ContextKeys.SHOULD_TERMINATE: True}
+
+        assert not _conclude_passes(fsm, state, terminate)
+        assert _conclude_passes(
+            fsm, state, {**terminate, ContextKeys.OBSERVATION_COUNT: 1}
+        )
+        assert _conclude_passes(
+            fsm, state, {**terminate, ContextKeys.MAX_ITERATIONS_REACHED: True}
+        )
+        assert not _conclude_passes(
+            fsm,
+            state,
+            {ContextKeys.SHOULD_TERMINATE: False, ContextKeys.OBSERVATION_COUNT: 3},
+        )
+
+    @pytest.mark.parametrize("approval", [False, True])
+    def test_think_keeps_unconditional_act_fallback(self, approval):
+        fsm = build_reflexion_fsm(_make_registry(), include_approval_state=approval)
+        fallback = [
+            t
+            for t in fsm["states"]["think"]["transitions"]
+            if t["target_state"] == "act"
+        ]
+        assert len(fallback) == 1
+        assert not fallback[0].get("conditions")

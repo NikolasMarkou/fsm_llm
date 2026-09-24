@@ -34,6 +34,7 @@ from .base import BaseAgent
 from .constants import ContextKeys, Defaults
 from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall
 from .exceptions import AgentError
+from .fsm_definitions import _conclude_on_evidence_logic
 from .handlers import AgentHandlers
 from .tools import ToolRegistry, normalize_tool_input
 from .truncation import smart_truncate
@@ -93,8 +94,15 @@ def build_parallel_react_fsm(
                 "priority": 10,
                 "conditions": [
                     {
-                        "description": "Agent decided to terminate",
-                        "logic": {"==": [{"var": "should_terminate"}, True]},
+                        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
+                        # Do NOT revert to should_terminate alone: a turn-1
+                        # terminate with no batch would answer from memory.
+                        # See _conclude_on_evidence_logic.
+                        "description": (
+                            "Agent decided to terminate AND a tool has run "
+                            "or termination is forced"
+                        ),
+                        "logic": _conclude_on_evidence_logic(),
                     }
                 ],
             },
@@ -125,8 +133,11 @@ def build_parallel_react_fsm(
                     "priority": 1,
                     "conditions": [
                         {
-                            "description": "Framework or agent decided to terminate",
-                            "logic": {"==": [{"var": "should_terminate"}, True]},
+                            "description": (
+                                "Framework/agent decided to terminate AND a tool "
+                                "has run or termination is forced"
+                            ),
+                            "logic": _conclude_on_evidence_logic(),
                         }
                     ],
                 },

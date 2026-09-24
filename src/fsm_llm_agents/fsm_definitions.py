@@ -418,6 +418,36 @@ def _tool_selection_field_extractions(
     ]
 
 
+def _conclude_on_evidence_logic() -> dict[str, Any]:
+    """JsonLogic for a tool-loop ``conclude`` edge: terminate on evidence only.
+
+    Contract: returns a fresh ``should_terminate == True AND
+    (observation_count > 0 OR max_iterations_reached == True)`` expression.
+    Used on the ``think`` and ``act`` conclude edges of the ReAct, Reflexion
+    and ParallelReact FSMs. Never raises.
+
+    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
+    Do NOT gate a tool loop's conclude edge on ``should_terminate`` alone: a
+    model that sets it on turn 1 answers from memory with no tool run (the B4
+    under-call, plan_2026-05-30_5598b755 D-004). Both evidence keys are
+    framework-written (tool executors, iteration limiter, stall detector), so
+    a forced stop with zero observations still concludes. Keep the D-002
+    unconditional ``think -> act`` fallback beside it, or a rejected conclude
+    BLOCKS ``think``.
+    """
+    return {
+        "and": [
+            {"==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]},
+            {
+                "or": [
+                    {">": [{"var": [ContextKeys.OBSERVATION_COUNT, 0]}, 0]},
+                    {"==": [{"var": ContextKeys.MAX_ITERATIONS_REACHED}, True]},
+                ]
+            },
+        ]
+    }
+
+
 def _approval_think_transition() -> dict[str, Any]:
     """The ``think -> await_approval`` edge shared by every approval-gated FSM.
 
@@ -559,10 +589,13 @@ def build_reflexion_fsm(
                     "priority": 10,
                     "conditions": [
                         {
-                            "description": "Agent decided to terminate",
-                            "logic": {
-                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
-                            },
+                            # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
+                            # Evidence guard, see _conclude_on_evidence_logic.
+                            "description": (
+                                "Agent decided to terminate AND a tool has run "
+                                "or termination is forced"
+                            ),
+                            "logic": _conclude_on_evidence_logic(),
                         }
                     ],
                 },
@@ -597,10 +630,11 @@ def build_reflexion_fsm(
                     "priority": 1,
                     "conditions": [
                         {
-                            "description": "Framework or agent decided to terminate",
-                            "logic": {
-                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
-                            },
+                            "description": (
+                                "Framework/agent decided to terminate AND a tool "
+                                "has run or termination is forced"
+                            ),
+                            "logic": _conclude_on_evidence_logic(),
                         }
                     ],
                 },
@@ -908,27 +942,7 @@ def build_react_fsm(
                         "Agent decided to terminate AND a tool has run or "
                         "termination is forced"
                     ),
-                    "logic": {
-                        "and": [
-                            {"==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]},
-                            {
-                                "or": [
-                                    {
-                                        ">": [
-                                            {"var": [ContextKeys.OBSERVATION_COUNT, 0]},
-                                            0,
-                                        ]
-                                    },
-                                    {
-                                        "==": [
-                                            {"var": ContextKeys.MAX_ITERATIONS_REACHED},
-                                            True,
-                                        ]
-                                    },
-                                ]
-                            },
-                        ]
-                    },
+                    "logic": _conclude_on_evidence_logic(),
                 }
             ],
         },
@@ -1006,39 +1020,7 @@ def build_react_fsm(
                                 "Framework/agent decided to terminate AND a tool "
                                 "has run or termination is forced"
                             ),
-                            "logic": {
-                                "and": [
-                                    {
-                                        "==": [
-                                            {"var": ContextKeys.SHOULD_TERMINATE},
-                                            True,
-                                        ]
-                                    },
-                                    {
-                                        "or": [
-                                            {
-                                                ">": [
-                                                    {
-                                                        "var": [
-                                                            ContextKeys.OBSERVATION_COUNT,
-                                                            0,
-                                                        ]
-                                                    },
-                                                    0,
-                                                ]
-                                            },
-                                            {
-                                                "==": [
-                                                    {
-                                                        "var": ContextKeys.MAX_ITERATIONS_REACHED
-                                                    },
-                                                    True,
-                                                ]
-                                            },
-                                        ]
-                                    },
-                                ]
-                            },
+                            "logic": _conclude_on_evidence_logic(),
                         }
                     ],
                 },
