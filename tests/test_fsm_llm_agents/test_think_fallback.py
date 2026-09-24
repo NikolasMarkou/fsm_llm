@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from fsm_llm.definitions import (
+    DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,
@@ -235,3 +236,100 @@ class TestUnknownToolIsNotEvidence:
         third = handlers.execute_tool(ctx)
         assert third["should_terminate"] is True
         assert third["max_iterations_reached"] is True
+
+
+# D-012 pass-2 regression: core extracts a key only while it is unset, so the
+# unknown-name path must clear tool_name/tool_input like the real-tool path or
+# the model can never select a real tool again.
+class _UnknownThenRealLLM(LLMInterface):
+    """Selects ``made_up`` once, then ``add_numbers`` on every later turn."""
+
+    def __init__(self) -> None:
+        self.names = ["made_up"]
+
+    def _next_name(self) -> str:
+        return self.names.pop(0) if self.names else "add_numbers"
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        values: dict[str, Any] = {
+            "tool_input": {"a": 1, "b": 2},
+            "plan_steps": ["step a", "step b"],
+        }
+        name = request.field_name
+        if name == "tool_name":
+            value: Any = self._next_name()
+        elif name in values:
+            value = values[name]
+        elif name in ("should_terminate", "step_failed", "all_steps_complete"):
+            value = False
+        else:
+            value = "text"
+        return FieldExtractionResponse(
+            field_name=name, value=value, confidence=0.9, reasoning="m", is_valid=True
+        )
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        return DataExtractionResponse(
+            extracted_data={
+                "tool_name": self._next_name(),
+                "tool_input": {"a": 1, "b": 2},
+                "step_result": "r",
+            }
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="final answer", message_type="response", reasoning="mock"
+        )
+
+
+def _build_plan_execute(registry: ToolRegistry, config: AgentConfig, llm):
+    from fsm_llm_agents.plan_execute import PlanExecuteAgent
+
+    return PlanExecuteAgent(tools=registry, config=config, llm_interface=llm)
+
+
+_UNKNOWN_THEN_REAL_CASES = [
+    pytest.param(_build(ReactAgent), id="react"),
+    pytest.param(_build(ReflexionAgent), id="reflexion"),
+    pytest.param(_build_reasoning_react, id="reasoning_react"),
+    pytest.param(_build_plan_execute, id="plan_execute"),
+]
+
+
+class TestUnknownToolThenRealTool:
+    @pytest.mark.parametrize("factory", _UNKNOWN_THEN_REAL_CASES)
+    def test_real_tool_runs_after_unknown_name(self, factory):
+        calls: list[dict[str, Any]] = []
+
+        def _add(params: dict[str, Any]) -> str:
+            calls.append(params)
+            return _add_numbers(params)
+
+        registry = ToolRegistry()
+        registry.register_function(
+            _add,
+            name="add_numbers",
+            description="Add two numbers",
+            parameter_schema={
+                "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}
+            },
+        )
+        agent = factory(registry, AgentConfig(max_iterations=8), _UnknownThenRealLLM())
+        agent.run("What is 1 + 2?")
+
+        assert calls, "add_numbers never ran after one unknown tool name"
+
+    def test_unknown_name_clears_selection(self):
+        from fsm_llm_agents.handlers import AgentHandlers
+
+        handlers = AgentHandlers(_make_registry())
+        handlers._current_iteration = 2
+        ctx = {"tool_name": "made_up", "tool_input": {"a": 1}, "should_terminate": True}
+
+        delta = handlers.execute_tool(ctx)
+        assert "tool_name" in delta and delta["tool_name"] is None
+        assert "tool_input" in delta and delta["tool_input"] is None
+        assert "should_terminate" in delta and delta["should_terminate"] is None

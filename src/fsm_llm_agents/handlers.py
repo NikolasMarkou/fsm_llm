@@ -47,6 +47,9 @@ class AgentHandlers:
         unknown = bool(tool_name) and tool_name != ContextKeys.NO_TOOL
         unknown = unknown and str(tool_name) not in self.registry
         miss = f"Unknown tool '{tool_name}'. " if unknown else ""
+        # Clear the selection as the real-tool path does: core re-extracts a
+        # key only while it is unset, so a kept name blocks every later tool.
+        clear = {ContextKeys.TOOL_NAME: None, ContextKeys.TOOL_INPUT: None}
         if not tool_name or tool_name == ContextKeys.NO_TOOL or unknown:
             # Skip stall detection for HITL agents awaiting approval
             if context.get(ContextKeys.APPROVAL_REQUIRED) and not unknown:
@@ -66,6 +69,7 @@ class AgentHandlers:
                         f"Available: {', '.join(tool_names)}"
                     ),
                     ContextKeys.TOOL_STATUS: "rejected",
+                    **clear,
                     ContextKeys.SHOULD_TERMINATE: False,
                 }
 
@@ -104,11 +108,14 @@ class AgentHandlers:
                         "Do not answer from memory — use a tool to gather information."
                     ),
                     ContextKeys.TOOL_STATUS: "skipped",
+                    **clear,
+                    ContextKeys.SHOULD_TERMINATE: None,
                 }
 
             return {
                 ContextKeys.TOOL_RESULT: "No tool was selected.",
                 ContextKeys.TOOL_STATUS: "skipped",
+                **clear,
             }
 
         # Reset stall counter — a tool was actually selected
