@@ -33,6 +33,16 @@ _PYTHON_TO_JSON_SCHEMA: dict[type, str] = {
 }
 
 
+# DECISION plan-2026-09-24T091842-c1d5bfbc/D-011: a list reaches a positional
+# fallback parameter as a list only when its schema type is ``array``; any other
+# (string, untyped) parameter gets ``str(list)``, the exact pre-D-011 value. Do
+# NOT pass the raw list to a string parameter (``query.lower()`` then fails).
+def _as_param_value(value: Any, prop: dict[str, Any] | None) -> Any:
+    if isinstance(value, list) and (prop or {}).get("type") != "array":
+        return str(value)
+    return value
+
+
 def normalize_tool_input(raw: Any) -> dict[str, Any]:
     """Normalize tool input to a dict.
 
@@ -285,8 +295,10 @@ class ToolRegistry:
             # Fallback: model sent wrong/empty keys. Try to recover.
             if param_count == 1 and parameters:
                 # Single-param function — pass the first available value
-                first_value = next(iter(parameters.values()))
                 param_name = next(iter(sig.parameters))
+                first_value = _as_param_value(
+                    next(iter(parameters.values())), schema_props.get(param_name)
+                )
                 logger.debug(
                     f"Tool kwarg mismatch, retrying: {param_name}={first_value!r}"
                 )
@@ -303,7 +315,11 @@ class ToolRegistry:
                 # Only positional-map a single required param; for >=2 params the
                 # LLM's value order is untrusted and would silently swap args.
                 if len(required) == 1 and len(vals) == len(required):
-                    mapped = dict(zip(required, vals, strict=True))
+                    mapped = {
+                        required[0]: _as_param_value(
+                            vals[0], schema_props.get(required[0])
+                        )
+                    }
                     logger.debug(
                         f"Tool kwarg mismatch, retrying with positional mapping: {mapped}"
                     )

@@ -874,6 +874,46 @@ class TestListToolInput:
         assert out[ContextKeys.TOOL_STATUS] == "success", out
         assert seen["items"] == ["x", "y", "z"]
 
+    def test_single_str_param_tool_keeps_the_old_string_form(self):
+        """A list reaching a string parameter gets ``str(list)``, exactly as
+        before D-011 (review W2: ``.lower()`` on the raw list failed)."""
+        from fsm_llm_agents.constants import ContextKeys
+        from fsm_llm_agents.handlers import AgentHandlers
+
+        @tool
+        def search(query: str) -> str:
+            """Search."""
+            return "results for " + query.lower()
+
+        registry = ToolRegistry()
+        registry.register(search._tool_definition)
+        out = AgentHandlers(registry).execute_tool(
+            {
+                ContextKeys.TOOL_NAME: "search",
+                ContextKeys.TOOL_INPUT: ["Weather in Paris"],
+                ContextKeys.TASK: "t",
+            }
+        )
+        assert out[ContextKeys.TOOL_STATUS] == "success", out
+        assert out[ContextKeys.TOOL_RESULT] == "results for ['weather in paris']"
+
+    def test_str_param_with_optional_param_keeps_the_old_string_form(self):
+        seen: dict = {}
+
+        @tool
+        def search(query: str, limit: int = 3) -> str:
+            """Search."""
+            seen["query"] = query
+            return query.upper()
+
+        registry = ToolRegistry()
+        registry.register(search._tool_definition)
+        result = registry.execute(
+            ToolCall(tool_name="search", parameters=normalize_tool_input(["a", "b"]))
+        )
+        assert result.success, result.error
+        assert seen["query"] == "['a', 'b']"
+
     def test_approval_grant_binds_the_list_consistently(self):
         """The driver writes the grant from an already-normalized input and the
         refusal recomputes it from the raw context value: both must agree."""
