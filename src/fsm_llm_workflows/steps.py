@@ -747,7 +747,9 @@ class ParallelStep(WorkflowStep):
                 "if memory usage is a concern"
             )
         contexts = [self._copy_context(context) for _ in self.steps]
-        tasks = [step.execute(ctx) for step, ctx in zip(self.steps, contexts, strict=True)]
+        tasks = [
+            step.execute(ctx) for step, ctx in zip(self.steps, contexts, strict=True)
+        ]
         results = await self._with_timeout(
             asyncio.gather(*tasks, return_exceptions=True)
         )
