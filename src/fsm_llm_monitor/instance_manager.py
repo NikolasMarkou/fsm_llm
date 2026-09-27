@@ -18,8 +18,14 @@ from typing import Any, TypeVar
 _T = TypeVar("_T")
 
 from fsm_llm import API, HandlerTiming, create_handler
-from fsm_llm.constants import DEFAULT_LLM_MODEL, has_internal_prefix
+from fsm_llm.constants import (
+    DEFAULT_LLM_MODEL,
+    MAX_CONTEXT_FILTER_DEPTH,
+    has_internal_prefix,
+    is_forbidden_context_entry,
+)
 from fsm_llm.logging import logger
+from fsm_llm.utilities import filter_context_tree
 
 from .collector import EventCollector
 from .constants import (
@@ -52,6 +58,32 @@ from .definitions import (
 )
 from .exceptions import MonitorInitializationError
 
+
+def _drop_forbidden_entry(key: Any, value: Any, _full_key: str) -> str | None:
+    """``filter_context_tree`` predicate: drop a secret-shaped entry."""
+    if isinstance(key, str) and is_forbidden_context_entry(key, value):
+        return "forbidden"
+    return None
+
+
+def _redact_workflow_mapping(data: Any) -> Any:
+    """Secret-shaped entries removed at every depth (workflow context and
+    history data are shown on the dashboard). Falls back to a top-level
+    filter if the walker refuses a pathological cyclic value."""
+    if not isinstance(data, dict):
+        return data
+    try:
+        return filter_context_tree(
+            data, MAX_CONTEXT_FILTER_DEPTH, _drop_forbidden_entry
+        )
+    except Exception:
+        return {
+            k: v
+            for k, v in data.items()
+            if not (isinstance(k, str) and is_forbidden_context_entry(k, v))
+        }
+
+
 # Optional imports for workflows and agents
 _HAS_WORKFLOWS = False
 _HAS_AGENTS = False
@@ -60,6 +92,7 @@ try:
     from fsm_llm_workflows import (
         WorkflowDefinition,
         WorkflowEngine,
+        WorkflowEvent,
         WorkflowStep,
         WorkflowStepResult,
         auto_step,
@@ -1108,6 +1141,56 @@ class InstanceManager:
 
         return bool(result)
 
+    async def send_workflow_event(
+        self,
+        instance_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        wf_instance_id: str | None = None,
+    ) -> list[str]:
+        """Deliver an event to a managed workflow engine.
+
+        With ``wf_instance_id`` the event targets that workflow instance only
+        (and is buffered for it if it is not waiting yet); otherwise it is
+        broadcast to every instance waiting for ``event_type``. Returns the
+        workflow instance ids the event woke.
+        """
+        inst = self._get_workflow(instance_id)
+        if wf_instance_id:
+            self._validate_workflow_instance_id(inst, instance_id, wf_instance_id)
+        event = WorkflowEvent(
+            event_type=event_type,
+            payload=payload or {},
+            instance_id=wf_instance_id or None,
+        )
+        affected = await inst.engine.process_event(event)
+
+        self._emit_global_event(
+            EVENT_WORKFLOW_ADVANCED,
+            message=f"Workflow event delivered: {event_type}",
+            data={
+                "instance_id": instance_id,
+                "event_type": event_type,
+                "affected": list(affected),
+            },
+        )
+        for wf_id in affected:
+            status_str = _status_str(inst.engine.get_workflow_status(wf_id)).lower()
+            if status_str in ("completed", "failed", "cancelled"):
+                with self._lock:
+                    if wf_id in inst.active_instance_ids:
+                        inst.active_instance_ids.remove(wf_id)
+                if status_str == "completed":
+                    self._emit_global_event(
+                        EVENT_WORKFLOW_COMPLETED,
+                        message=f"Workflow completed: {wf_id}",
+                        data={
+                            "instance_id": instance_id,
+                            "workflow_instance_id": wf_id,
+                        },
+                    )
+        return list(affected)
+
     async def cancel_workflow(
         self,
         instance_id: str,
@@ -1160,7 +1243,7 @@ class InstanceManager:
                         "step_id": getattr(entry, "step_id", ""),
                         "message": getattr(entry, "message", ""),
                         "timestamp": str(getattr(entry, "timestamp", "")),
-                        "data": getattr(entry, "data", None),
+                        "data": _redact_workflow_mapping(getattr(entry, "data", None)),
                         "error": getattr(entry, "error", None),
                     }
                 )
@@ -1169,7 +1252,7 @@ class InstanceManager:
                 "workflow_instance_id": wf_instance_id,
                 "status": status_str,
                 "current_step": getattr(wf_instance, "current_step_id", ""),
-                "context": context,
+                "context": _redact_workflow_mapping(context),
                 "history": history,
                 "created_at": str(getattr(wf_instance, "created_at", "")),
                 "updated_at": str(getattr(wf_instance, "updated_at", "")),

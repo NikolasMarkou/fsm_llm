@@ -41,6 +41,7 @@ from .definitions import (
     StartConversationRequest,
     WorkflowAdvanceRequest,
     WorkflowCancelRequest,
+    WorkflowEventRequest,
 )
 from .exceptions import MonitorError
 from .instance_manager import InstanceManager, _find_examples_dir, validate_preset_id
@@ -725,6 +726,33 @@ async def api_workflow_cancel(
         ) from None
     except Exception as e:
         logger.error(f"Failed to cancel workflow on instance {instance_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@app.post("/api/workflow/{instance_id}/event", dependencies=[Depends(_require_api_key)])
+async def api_workflow_event(
+    instance_id: str, req: WorkflowEventRequest
+) -> dict[str, Any]:
+    """Deliver an event to a workflow engine (wakes waiting instances)."""
+    mgr = get_manager()
+    try:
+        affected = await asyncio.wait_for(
+            mgr.send_workflow_event(
+                instance_id,
+                req.event_type,
+                req.payload,
+                req.workflow_instance_id or None,
+            ),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+        return {"affected": affected}
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Workflow event delivery timed out",
+        ) from None
+    except Exception as e:
+        logger.error(f"Failed to deliver workflow event on instance {instance_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 

@@ -1077,6 +1077,7 @@ class TestApiKeyGate:
             ("post", "/api/fsm/does-not-exist/end"),
             ("post", "/api/workflow/does-not-exist/advance"),
             ("post", "/api/workflow/does-not-exist/cancel"),
+            ("post", "/api/workflow/does-not-exist/event"),
             ("post", "/api/agent/does-not-exist/cancel"),
         ],
     )
@@ -1100,6 +1101,7 @@ class TestApiKeyGate:
             ("post", "/api/fsm/does-not-exist/end"),
             ("post", "/api/workflow/does-not-exist/advance"),
             ("post", "/api/workflow/does-not-exist/cancel"),
+            ("post", "/api/workflow/does-not-exist/event"),
             ("post", "/api/agent/does-not-exist/cancel"),
         ],
     )

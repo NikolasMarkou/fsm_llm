@@ -163,3 +163,8 @@ plan-2026-09-24T091842-c1d5bfbc/D-024 | 2026-09-24 | Fixed two pre-existing bugs
 plan-2026-09-24T091842-c1d5bfbc/D-025 | 2026-09-24 | MCP tests run only in scratch venvs (never CI/`.venv`) with a compat fix reading `inputSchema`, falling back to `input_schema` for mcp 2.x.
 plan-2026-09-24T091842-c1d5bfbc/D-026 | 2026-09-24 | `_format_mcp_result` now raises `ToolExecutionError` on an MCP error flag instead of returning a successful `ToolResult`.
 plan-2026-09-24T091842-c1d5bfbc/D-030 | 2026-09-24 | An array-typed single tool parameter with empty input now recovers as `[task]` instead of failing, restoring pre-plan behaviour for list tools.
+plan-2026-09-27T120000-5d1e7a3b/D-001 | 2026-09-27 | `process_event` consumes listeners under the listener lock, then delivers per instance under its lock (re-check WAITING, cancel the wait timeout before transitioning, isolate exceptions); every wait timeout is scheduled and fails the instance without a timeout_state.
+plan-2026-09-27T120000-5d1e7a3b/D-002 | 2026-09-27 | The workflow driver is a loop with a per-call step budget, and validate() rejects only synchronous cycles (cycles through wait/timer steps are allowed).
+plan-2026-09-27T120000-5d1e7a3b/D-003 | 2026-09-27 | Step failures without an error route carry no next_state (the instance FAILS); ParallelStep counts every failed child, with or without error text.
+plan-2026-09-27T120000-5d1e7a3b/D-004 | 2026-09-27 | User callables go through `_call_user_callable`, which awaits any awaitable a callable returns and runs sync callables in the engine executor.
+plan-2026-09-27T120000-5d1e7a3b/D-005 | 2026-09-27 | A custom instance_id still held by the engine is rejected, and instance resources are released by `Timer.instance_id`, never by key prefix.

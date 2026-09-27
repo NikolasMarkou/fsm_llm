@@ -293,6 +293,8 @@ await engine.shutdown()
 
 11 step types: `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`, `conversation_step`, `agent_step`, `retry_step`, `switch_step`.
 
+Events and loops: `await engine.process_event(WorkflowEvent(event_type="paid", payload={...}))` wakes waiting instances (set `instance_id=` to target one; `wait_event_step(..., correlation_key=...)` matches a payload key against the instance context). Loops must pass through a `timer_step` or `wait_event_step`; purely synchronous cycles are rejected by `register_workflow`. A step failure with no error route FAILS the instance. `engine.add_hook(fn)` observes step and status changes.
+
 ## Harness (`fsm_llm_harness`)
 
 The iterative-planner protocol as a 6-state FSM over a plan directory. Requires

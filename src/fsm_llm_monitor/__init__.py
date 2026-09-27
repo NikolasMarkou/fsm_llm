@@ -86,6 +86,7 @@ from .definitions import (
     TransitionInfo,
     WorkflowAdvanceRequest,
     WorkflowCancelRequest,
+    WorkflowEventRequest,
     model_to_dict,
 )
 
@@ -130,6 +131,7 @@ __all__ = [
     "LaunchWorkflowRequest",
     "WorkflowAdvanceRequest",
     "WorkflowCancelRequest",
+    "WorkflowEventRequest",
     "DashboardConfig",
     "DashboardPanel",
     "DashboardAlert",

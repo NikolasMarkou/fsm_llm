@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (workflows audit, 2026-09-27)
+
+Breaking behavior changes are marked **(behavior)**.
+
+- `process_event`: one instance's failure (deadline passed, cancelled meanwhile, bad
+  state) no longer aborts delivery to the other waiting instances, whose listeners had
+  already been consumed. Delivery re-checks WAITING under the instance lock and no longer
+  mutates the context of a non-waiting instance.
+- A follow-up wait on the same event type kept its timeout: the old code cancelled the new
+  wait's timeout after the transition.
+- A wait with `timeout_seconds` and no `timeout_state` now FAILS the instance on timeout
+  instead of staying WAITING forever; `success_state=""` completes the instance when the
+  event arrives. `timeout_state` without `timeout_seconds` is rejected.
+- `LLMProcessingStep` works with a core `LLMInterface` (`generate_response`) and with a
+  sync or async `generate(prompt)`; before, every core interface failed with
+  `AttributeError`.
+- **(behavior)** Failures never fall back to the success route: LLM, conversation,
+  parallel and agent steps without `error_state` now FAIL the instance, and an agent
+  reporting `success=False` fails its step.
+- `ParallelStep` counts every failed child (an exception with an empty message was
+  aggregated as success), drops internal keys before the `step_<i>_` prefix, rejects
+  wait/timer children, keeps the successful children's data on failure, and falls back to
+  a shallow copy for contexts that cannot be deep-copied.
+- User callables that return a coroutine (a lambda wrapping an async function, an object
+  with `async __call__`) are awaited: a `ConditionStep` no longer always takes
+  `true_state` and an `APICallStep` no longer maps nothing.
+- Cancelling instance `order` no longer cancels the timers of `order_2`; a custom
+  `instance_id` still held by the engine is rejected instead of overwriting it.
+- The workflow deadline is enforced while WAITING; `WorkflowTimeoutError.instance_id`
+  names the instance when `start_workflow` raises.
+- **(behavior)** Only synchronous cycles are rejected at registration: loops through a
+  timer or event wait are allowed. The recursive driver with a 20-step depth cap is
+  replaced by a loop with `max_steps_per_run` (default 1000).
+- Events can be targeted (`WorkflowEvent.instance_id`, buffered until the instance
+  waits) and correlated (`WaitEventConfig.correlation_key`).
+- **(behavior)** `switch_step` defaults to `default_state=None` like `SwitchStep` (an
+  unmatched value FAILS instead of completing); its outputs are now
+  `switch_<id>_matched`/`_target` (the old `_switch_*` keys never reached the context).
+- `AgentStep` maps `"answer"` even with an empty `final_context`, passes `input_mapping`
+  as `initial_context`, accepts a plain string result, and adds per-step
+  `agent_<id>_answer`/`_success`.
+- `ConversationStep` honours the base `timeout`, reports `conversation_<id>_ended`, can
+  `require_completion` and `use_user_input`, accepts an `FSMDefinition` object, and
+  rejects a missing or doubled FSM source at construction.
+- Resources: fired event timeouts leave no timer entry; timers, listeners and buffered
+  events are released on every terminal status; failed instances are purged too;
+  **(behavior)** `max_completed_instances` defaults to 1000 and history to 1000 entries
+  per instance.
+- Running instances keep the definition they started with; the engine stores a copy on
+  registration.
+- `fsm_llm_workflows` logging is off until `setup_logging()`/`enable_debug_logging()`,
+  like the core package (new `fsm_llm.logging.enable_library_logging`).
+- Smaller: `error_state` on `AutoTransitionStep`/`ConditionStep`; float timer and wait
+  durations; every DSL factory exposes `timeout`; history records step errors without
+  redundant "running" entries; `DependencyResolver.has_cycles` no longer reports an
+  unknown dependency as a cycle; exception constructors copy `details`;
+  `register_event_listener` raises `WorkflowEventError` for an empty event type;
+  duplicate step ids raise `WorkflowDefinitionError`; `APICallStep` output paths
+  (`"a.b"`, `""`); `serialize()` strips custom callables; `shutdown()` awaits its tasks
+  and refuses new starts; `start_workflow(wait=False)`; `get_workflow_context` returns a
+  copy; lifecycle hooks (`add_hook`); injectable `executor`; `WorkflowHistoryEntry`
+  exported; new `constants.py`.
+- Monitor: workflow status redacts secret-shaped context and history entries; new
+  `send_workflow_event` / `POST /api/workflow/{id}/event` (API-key gated).
+
+
 ### Changed
 
 - **Default model is `ollama_chat/qwen3.5:4b` again.** 0.9.0 changed `DEFAULT_LLM_MODEL`

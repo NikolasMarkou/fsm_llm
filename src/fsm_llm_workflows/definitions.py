@@ -13,8 +13,10 @@ from fsm_llm.logging import logger
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from .exceptions import WorkflowValidationError
+from .constants import PAUSING_STEP_TYPES
+from .exceptions import WorkflowDefinitionError, WorkflowValidationError
 from .steps import (
+    AgentStep,
     APICallStep,
     AutoTransitionStep,
     ConditionStep,
@@ -68,6 +70,8 @@ def _serialize_step(step: WorkflowStep) -> dict[str, Any]:
     steps (returned as-is) or is one of the two known nesting shapes above.
     """
     step_dict = step.model_dump(exclude=set(_STEP_CALLABLE_EXCLUDE_FIELDS))
+    # Custom steps may carry other callable fields; never emit a function.
+    step_dict = {k: v for k, v in step_dict.items() if not callable(v)}
     step_dict["type"] = step.__class__.__name__
 
     if isinstance(step, RetryStep) and isinstance(step.step, WorkflowStep):
@@ -96,7 +100,17 @@ class WorkflowDefinition(BaseModel):
     def with_step(
         self, step: WorkflowStep, is_initial: bool = False
     ) -> WorkflowDefinition:
-        """Add a step to the workflow."""
+        """Add a step to the workflow.
+
+        Raises ``WorkflowDefinitionError`` if a DIFFERENT step with the same
+        ``step_id`` is already present (re-adding the same object is a no-op).
+        """
+        existing = self.steps.get(step.step_id)
+        if existing is not None and existing is not step:
+            raise WorkflowDefinitionError(
+                workflow_id=self.workflow_id,
+                message=f"Duplicate step_id '{step.step_id}'",
+            )
         self.steps[step.step_id] = step
         if is_initial:
             self.initial_step_id = step.step_id
@@ -142,11 +156,14 @@ class WorkflowDefinition(BaseModel):
         # Reachability validation
         errors.extend(self._validate_reachability())
 
-        # Cycle detection
-        if self.has_cycles():
+        # Cycle detection: only a cycle made entirely of steps that run back
+        # to back without pausing is an error. A cycle through an event or
+        # timer step is a legitimate loop (polling, retry-until, re-approval).
+        if self.has_synchronous_cycles():
             errors.append(
-                "Workflow contains cycles. Ensure auto-transition chains "
-                "have a terminal state or use event/timer steps to break loops."
+                "Workflow contains a synchronous cycle (a loop with no event or "
+                "timer step in it would run forever). Put a WaitForEventStep or "
+                "TimerStep on the loop, or give the chain a terminal state."
             )
 
         # Warn about states that cannot reach any terminal state
@@ -178,6 +195,16 @@ class WorkflowDefinition(BaseModel):
             if not step.name:
                 errors.append(f"Step '{step_id}' must have a name")
 
+            if isinstance(step, ParallelStep):
+                seen: set[str] = set()
+                for child in step.steps:
+                    if child.step_id in seen:
+                        errors.append(
+                            f"ParallelStep '{step_id}' has duplicate child "
+                            f"step_id '{child.step_id}'"
+                        )
+                    seen.add(child.step_id)
+
         return errors
 
     def _validate_state_transitions(self) -> list[str]:
@@ -203,12 +230,21 @@ class WorkflowDefinition(BaseModel):
 
         if isinstance(step, AutoTransitionStep):
             referenced_states.add(step.next_state)
+            if step.error_state:
+                referenced_states.add(step.error_state)
         elif isinstance(step, APICallStep):
             referenced_states.add(step.success_state)
             referenced_states.add(step.failure_state)
         elif isinstance(step, ConditionStep):
             referenced_states.add(step.true_state)
             referenced_states.add(step.false_state)
+            if step.error_state:
+                referenced_states.add(step.error_state)
+        elif isinstance(step, AgentStep):
+            if step.success_state:
+                referenced_states.add(step.success_state)
+            if step.error_state:
+                referenced_states.add(step.error_state)
         elif isinstance(step, LLMProcessingStep):
             referenced_states.add(step.next_state)
             if step.error_state:
@@ -300,12 +336,41 @@ class WorkflowDefinition(BaseModel):
         return terminal_states
 
     def has_cycles(self) -> bool:
-        """Check if the workflow has cycles.
+        """Check if the workflow graph has any cycle (including loops that
+        pass through event or timer steps; see ``has_synchronous_cycles``).
 
         Uses an iterative DFS with WHITE/GRAY/BLACK coloring to avoid
         RecursionError on large workflow graphs (W-ISSUE-003). Consistent
         with the iterative pattern used in _find_reachable_states.
         """
+        return self._has_cycle(pausing_breaks_cycle=False)
+
+    def has_synchronous_cycles(self) -> bool:
+        """Check for a cycle whose steps all run back to back without pausing.
+
+        Edges leaving a pausing step (``WaitForEventStep``/``TimerStep``, or a
+        ``RetryStep`` wrapping one) are ignored: the engine returns control at
+        such a step, so a loop through it cannot spin inside one engine call.
+
+        # DECISION plan-2026-09-27T120000-5d1e7a3b/D-002
+        # validate() rejects ONLY synchronous cycles. Do NOT go back to
+        # rejecting every cycle: polling / retry-until loops through a timer
+        # or event step are the classic workflow shape and were impossible to
+        # register. The per-call step budget (engine `max_steps_per_run`)
+        # still bounds custom steps that route dynamically.
+        """
+        return self._has_cycle(pausing_breaks_cycle=True)
+
+    @staticmethod
+    def _is_pausing_step(step: WorkflowStep) -> bool:
+        inner: object = step
+        while isinstance(inner, RetryStep):
+            inner = inner.step
+        return type(inner).__name__ in PAUSING_STEP_TYPES or isinstance(
+            inner, (WaitForEventStep, TimerStep)
+        )
+
+    def _has_cycle(self, pausing_breaks_cycle: bool) -> bool:
         if not self.initial_step_id:
             return False
 
@@ -315,6 +380,14 @@ class WorkflowDefinition(BaseModel):
         # linear workflows with >1000 steps. See decisions.md D-005.
         WHITE, GRAY, BLACK = 0, 1, 2
         color: dict[str, int] = {sid: WHITE for sid in self.steps}
+
+        def successors(node: str) -> set[str]:
+            step = self.steps.get(node)
+            if step is None:
+                return set()
+            if pausing_breaks_cycle and self._is_pausing_step(step):
+                return set()
+            return self._get_referenced_states(step)
 
         for start in list(self.steps):
             if color.get(start, WHITE) != WHITE:
@@ -332,13 +405,12 @@ class WorkflowDefinition(BaseModel):
                     continue
                 color[node] = GRAY
                 stack.append((node, True))  # mark for post-visit (back-edge close)
-                if node in self.steps:
-                    for succ in self._get_referenced_states(self.steps[node]):
-                        succ_color = color.get(succ, WHITE)
-                        if succ_color == GRAY:
-                            return True
-                        if succ_color == WHITE:
-                            stack.append((succ, False))
+                for succ in successors(node):
+                    succ_color = color.get(succ, WHITE)
+                    if succ_color == GRAY:
+                        return True
+                    if succ_color == WHITE:
+                        stack.append((succ, False))
         return False
 
     def serialize(self) -> dict[str, Any]:

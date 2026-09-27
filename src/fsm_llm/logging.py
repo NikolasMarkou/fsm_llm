@@ -53,6 +53,34 @@ _library_handler_ids: list[int] = []
 # so that unconfigured usage does not spam stderr.
 logger.disable("fsm_llm")
 
+#: Top-level packages of this distribution whose log output is library output.
+#: loguru's `disable("fsm_llm")` matches `fsm_llm` and its SUBmodules only, so
+#: an extension that is its own top-level package (``fsm_llm_workflows``)
+#: disables itself at import, and `setup_logging()` /
+#: `enable_debug_logging()` re-enable every name listed here.
+LIBRARY_LOGGER_NAMES: tuple[str, ...] = ("fsm_llm", "fsm_llm_workflows")
+
+
+_library_logging_enabled = False
+
+
+def enable_library_logging() -> None:
+    """Re-enable log output of every package in ``LIBRARY_LOGGER_NAMES``."""
+    global _library_logging_enabled
+    _library_logging_enabled = True
+    for name in LIBRARY_LOGGER_NAMES:
+        logger.enable(name)
+
+
+def is_library_logging_enabled() -> bool:
+    """True once ``setup_logging()`` / ``enable_debug_logging()`` has run.
+
+    An extension package imported AFTER that call checks this so its
+    import-time ``logger.disable(...)`` does not undo the user's choice.
+    """
+    return _library_logging_enabled
+
+
 # --------------------------------------------------------------
 
 _file_handler_initialized = False
@@ -187,7 +215,7 @@ def setup_logging(
     resolved_format = format or os.environ.get(ENV_LOG_FORMAT, LOG_FORMAT_HUMAN)
 
     # Enable library logging
-    logger.enable("fsm_llm")
+    enable_library_logging()
 
     # Determine sink and format
     if sink == LOG_SINK_FILE:

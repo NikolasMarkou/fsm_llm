@@ -53,7 +53,7 @@ Harness status in brief: gates are JsonLogic terms over values counted from disk
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (7,158 tests)
+make test           # pytest -v (7,231 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -148,17 +148,17 @@ Rules: `required_context_keys` only tells Pass 1 what to extract, it never block
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (7,158 collected)
+pytest                                 # Run all tests (7,231 collected)
 pytest tests/test_fsm_llm/            # Core package tests (2,707 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (119 tests)
-pytest tests/test_fsm_llm_workflows/  # Workflows tests (156 tests)
+pytest tests/test_fsm_llm_workflows/  # Workflows tests (225 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (1,278 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (306 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (310 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (218 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,982 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (277 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 7,086. The remaining 72 are three root-level files:
+# The 9 suites above sum to 7,159. The remaining 72 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (26)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests

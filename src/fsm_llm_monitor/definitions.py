@@ -253,6 +253,18 @@ class WorkflowCancelRequest(BaseModel):
     reason: str = ""
 
 
+class WorkflowEventRequest(BaseModel):
+    """Request to deliver an event to a managed workflow engine.
+
+    ``workflow_instance_id`` targets one workflow instance; empty broadcasts
+    to every instance waiting for ``event_type``.
+    """
+
+    event_type: str = Field(..., min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    workflow_instance_id: str = ""
+
+
 # --- Custom Dashboard Configuration ---
 
 

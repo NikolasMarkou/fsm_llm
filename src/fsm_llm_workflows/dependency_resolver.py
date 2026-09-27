@@ -45,6 +45,9 @@ class DependencyResolver:
     ) -> DependencyResolver:
         """Register a step with optional dependencies.
 
+        Unlike ``add_dependency``, the steps named in ``depends_on`` are NOT
+        registered by this call; ``resolve()`` raises if any stays unknown.
+
         Args:
             step_id: Unique identifier for the step.
             depends_on: List of step IDs this step depends on.
@@ -60,7 +63,7 @@ class DependencyResolver:
         return self
 
     def add_dependency(self, step_id: str, depends_on: str) -> DependencyResolver:
-        """Add a single dependency for a step.
+        """Add a single dependency for a step, registering both steps.
 
         Args:
             step_id: The dependent step.
@@ -128,12 +131,25 @@ class DependencyResolver:
         return waves
 
     def has_cycles(self) -> bool:
-        """Check if the dependency graph contains cycles."""
-        try:
-            self.resolve()
-            return False
-        except WorkflowValidationError:
-            return True
+        """Check if the dependency graph contains a cycle.
+
+        Dependencies on unregistered steps are ignored here (they are not a
+        cycle); ``resolve()`` still reports them as an error.
+        """
+        in_degree: dict[str, int] = {
+            s: len(self._dependencies.get(s, set()) & self._steps) for s in self._steps
+        }
+        queue: deque[str] = deque(s for s, d in in_degree.items() if d == 0)
+        processed = 0
+        while queue:
+            step_id = queue.popleft()
+            processed += 1
+            for dependent in self._dependents.get(step_id, set()):
+                if dependent in in_degree:
+                    in_degree[dependent] -= 1
+                    if in_degree[dependent] == 0:
+                        queue.append(dependent)
+        return processed < len(self._steps)
 
     def get_dependencies(self, step_id: str) -> set[str]:
         """Get direct dependencies for a step."""
