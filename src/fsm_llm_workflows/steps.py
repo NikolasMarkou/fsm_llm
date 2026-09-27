@@ -38,6 +38,10 @@ _STEP_EXECUTOR: contextvars.ContextVar[Executor | None] = contextvars.ContextVar
 )
 
 
+#: ``fsm_llm.definitions.ResponseGenerationRequest.user_message`` max_length.
+_MAX_CORE_USER_MESSAGE = 10000
+
+
 def _is_async_callable(fn: Any) -> bool:
     """True for ``async def`` functions (incl. partials) and objects whose
     ``__call__`` is ``async def``."""
@@ -365,9 +369,18 @@ class LLMProcessingStep(WorkflowStep):
         elif callable(getattr(llm, "generate_response", None)):
             from fsm_llm.definitions import ResponseGenerationRequest
 
-            request = ResponseGenerationRequest(
-                system_prompt=self.system_prompt, user_message=prompt
-            )
+            system_prompt = self.system_prompt or "Follow the user's instructions."
+            if len(prompt) > _MAX_CORE_USER_MESSAGE:
+                # ResponseGenerationRequest caps user_message; the system
+                # prompt allows much more, so carry a long prompt there.
+                request = ResponseGenerationRequest(
+                    system_prompt=f"{system_prompt}\n\n{prompt}",
+                    user_message="Follow the instructions above.",
+                )
+            else:
+                request = ResponseGenerationRequest(
+                    system_prompt=system_prompt, user_message=prompt
+                )
             raw = await self._with_timeout(
                 _call_user_callable(llm.generate_response, request)
             )

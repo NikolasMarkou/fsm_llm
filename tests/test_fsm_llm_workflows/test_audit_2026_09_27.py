@@ -1193,3 +1193,134 @@ class TestStepExecutor:
             engine.register_workflow(wf)
             iid = await engine.start_workflow("ex")
         assert engine.get_workflow_context(iid)["thread"].startswith("wf-exec")
+
+
+# ---------------------------------------------------------------
+# Follow-up review: delivery to the right wait, cancellation safety,
+# background start guard, long prompts
+# ---------------------------------------------------------------
+
+
+class _SlowStep(WorkflowStep):
+    next_state: str = ""
+    delay: float = 0.3
+
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+        await asyncio.sleep(self.delay)
+        return WorkflowStepResult.success_result(next_state=self.next_state)
+
+
+def _two_waits_workflow() -> WorkflowDefinition:
+    """wa (A, times out to wb) -> slow -> "" ; wb waits for B."""
+    wf = create_workflow("tw", "tw")
+    wf.with_initial_step(
+        wait_event_step(
+            "wa",
+            "WA",
+            "A",
+            success_state="slow",
+            timeout_seconds=0.1,
+            timeout_state="wb",
+        )
+    )
+    wf.with_step(_SlowStep(step_id="slow", name="Slow"))
+    wf.with_step(wait_event_step("wb", "WB", "B", success_state="got_b"))
+    wf.with_step(auto_step("got_b", "Got B", next_state=""))
+    return wf
+
+
+class TestReviewFollowUp:
+    async def test_event_not_delivered_to_a_different_wait(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_two_waits_workflow())
+        first = await engine.start_workflow("tw")
+        second = await engine.start_workflow("tw")
+
+        # Delivery to `first` runs the slow step (0.3 s) while `second`
+        # times out into `wb`; the A event must not then move `second`.
+        affected = await engine.process_event(WorkflowEvent(event_type="A"))
+
+        assert first in affected
+        assert second not in affected
+        inst = engine.workflow_instances[second]
+        assert inst.current_step_id == "wb"
+        assert inst.status == WorkflowStatus.WAITING
+
+    async def test_cancelled_delivery_restores_undelivered_listeners(self):
+        wf = create_workflow("cd", "cd")
+        wf.with_initial_step(wait_event_step("wa", "WA", "A", success_state="slow"))
+        wf.with_step(_SlowStep(step_id="slow", name="Slow", delay=0.5))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        await engine.start_workflow("cd")
+        second = await engine.start_workflow("cd")
+
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                engine.process_event(WorkflowEvent(event_type="A")), 0.1
+            )
+
+        assert second in engine.event_listeners["A"]
+        assert second in await engine.process_event(
+            WorkflowEvent(event_type="A", instance_id=second)
+        )
+
+    async def test_leaving_a_wait_drops_its_listener(self):
+        wf = create_workflow("lw", "lw")
+        wf.with_initial_step(wait_event_step("wa", "WA", "A", success_state="wb"))
+        wf.with_step(wait_event_step("wb", "WB", "B", success_state="done"))
+        wf.with_step(auto_step("done", "Done", next_state=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start_workflow("lw", workflow_timeout=60)
+
+        # advance_workflow re-registers the A listener while the event is
+        # being delivered; leaving `wa` must drop it.
+        await asyncio.gather(
+            engine.advance_workflow(iid),
+            engine.process_event(WorkflowEvent(event_type="A")),
+        )
+
+        assert engine.workflow_instances[iid].current_step_id == "wb"
+        assert iid not in engine.event_listeners.get("A", {})
+        assert await engine.process_event(WorkflowEvent(event_type="A")) == []
+        await engine.shutdown()
+
+    async def test_background_start_skips_cancelled_instance(self):
+        ran: list[str] = []
+        wf = create_workflow("bgc", "bgc")
+        wf.with_initial_step(
+            auto_step("charge", "Charge", next_state="", action=lambda c: ran.append(1))
+        )
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start_workflow("bgc", wait=False)
+        assert await engine.cancel_workflow(iid) is True
+        await _settle()
+
+        assert ran == []
+        assert engine.get_workflow_status(iid) == WorkflowStatus.CANCELLED
+
+    async def test_long_prompt_fits_core_request_limits(self):
+        llm = _CoreLikeLLM("ok")
+        step = LLMProcessingStep(
+            step_id="llm",
+            name="LLM",
+            llm_interface=llm,
+            prompt_template="x" * 12000,
+            output_mapping={"out": ""},
+            next_state="done",
+        )
+        result = await step.execute({})
+        assert result.success is True
+        assert len(llm.requests[0].user_message) <= 10000
+        assert "x" * 12000 in llm.requests[0].system_prompt
+
+    async def test_event_completion_clears_waiting_info(self):
+        wf = create_workflow("wc", "wc")
+        wf.with_initial_step(wait_event_step("wait", "Wait", "go", success_state=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start_workflow("wc")
+        await engine.process_event(WorkflowEvent(event_type="go"))
+        assert "_waiting_info" not in engine.workflow_instances[iid].context

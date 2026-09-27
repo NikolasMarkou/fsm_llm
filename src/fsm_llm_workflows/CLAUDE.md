@@ -77,7 +77,8 @@ Status changes made by the engine go through `_set_status`, which fires the `sta
 ## Invariants and constraints
 
 - Locks: acquire the per-instance lock ONLY at outermost entry points (`start_workflow`, `advance_workflow`, `cancel_workflow`, the per-instance delivery loop in `process_event`, timer expiry, event timeout, deadline watchdog, background start). Never inside `_execute_workflow_step`/`_transition_to_state` (`asyncio.Lock` is not reentrant). Order is instance lock then `_listener_lock`, never reversed.
-- `process_event` collects and consumes listeners under `_listener_lock` without touching instances, then delivers per instance under its lock after re-checking WAITING, cancels the wait's timeout BEFORE transitioning, and isolates each instance's exceptions (D-001).
+- `process_event` collects and consumes listeners under `_listener_lock` without touching instances, then delivers per instance under its lock only if the instance is still WAITING at the listener's `step_id`, cancels the wait's timeout BEFORE transitioning, isolates each instance's exceptions, and on cancellation restores the listeners it had not delivered yet (D-001). `_prepare_transition` drops the instance's listeners and wait timers (not the deadline watchdog).
+- `start_workflow(wait=False)`: the background run does nothing if another entry point already drove or cancelled the instance.
 - Only synchronous cycles are rejected; loops through a wait/timer step are allowed and bounded per call by `max_steps_per_run` (D-002).
 - Result data keys with an internal prefix (`has_internal_prefix`) are dropped except `_STEP_INTERNAL_WHITELIST = {_waiting_info, _timer_info}`; do not drop the whitelist.
 - `next_state == ""` on ANY successful result means terminal for that route (no isinstance narrowing).

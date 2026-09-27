@@ -393,7 +393,9 @@ class WorkflowEngine:
             self._schedule_deadline(instance)
 
         if not wait:
-            task = asyncio.ensure_future(self._run_in_background(instance))
+            task = asyncio.ensure_future(
+                self._run_in_background(instance, len(instance.history))
+            )
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
             return instance_id
@@ -402,9 +404,19 @@ class WorkflowEngine:
             await self._execute_workflow_step(instance)
         return instance_id
 
-    async def _run_in_background(self, instance: WorkflowInstance) -> None:
+    async def _run_in_background(
+        self, instance: WorkflowInstance, history_len: int
+    ) -> None:
         try:
             async with self._get_instance_lock(instance.instance_id):
+                # Skip if another entry point already drove or cancelled the
+                # instance before this task got the lock (its initial step
+                # must run once, and never after a cancel).
+                if (
+                    instance.status != WorkflowStatus.RUNNING
+                    or len(instance.history) != history_len
+                ):
+                    return
                 await self._execute_workflow_step(instance)
         except asyncio.CancelledError:
             raise
@@ -728,6 +740,10 @@ class WorkflowEngine:
             )
 
         logger.info(f"Transitioning from {instance.current_step_id} to {next_state}")
+        # Leaving a step ends its wait: drop the instance's listeners and wait
+        # timers (not its deadline watchdog) so a stale listener cannot wake
+        # it later at a different step.
+        self._drop_wait_resources(instance.instance_id)
         instance.context.pop(KEY_WAITING_INFO, None)
         instance.context.pop(KEY_TIMER_INFO, None)
         instance.current_step_id = next_state
@@ -783,6 +799,7 @@ class WorkflowEngine:
                 self._apply_event(instance, waiting_info.get("event_mapping"), buffered)
                 if success_state:
                     return success_state
+                instance.context.pop(KEY_WAITING_INFO, None)
                 self._set_status(instance, WorkflowStatus.COMPLETED)
                 return None
             logger.info(
@@ -872,6 +889,7 @@ class WorkflowEngine:
                 instance.context.get(correlation_key) if correlation_key else None
             ),
             timeout_state=timeout_state,
+            step_id=instance.current_step_id,
         )
 
         if timeout_seconds is not None:
@@ -1056,48 +1074,89 @@ class WorkflowEngine:
             return []
 
         affected_instances: list[str] = []
-        for instance_id, listener in candidates:
-            instance = self.workflow_instances.get(instance_id)
-            if instance is None:
-                continue
-            # DECISION plan-2026-09-27T120000-5d1e7a3b/D-001
-            # Per-instance isolation: an exception while delivering to one
-            # instance (deadline passed, instance cancelled meanwhile, bad
-            # state) must NOT abort delivery to the rest -- their listeners
-            # were already consumed above and they would stay WAITING forever.
-            try:
-                async with self._get_instance_lock(instance_id):
-                    if instance.status != WorkflowStatus.WAITING:
-                        logger.debug(
-                            f"Event '{event_type}' not delivered to {instance_id}: "
-                            f"status is {instance.status.value}"
-                        )
-                        continue
-                    # Cancel the wait's timeout BEFORE transitioning: the chain
-                    # may re-wait on the same event type and arm a new timeout
-                    # under the same key, which a later cancel would kill.
-                    self._cancel_event_timeout(instance_id, event_type)
-                    self._apply_event(instance, listener.event_mapping, event)
-                    affected_instances.append(instance_id)
-                    # NOTE (W-ISSUE-004): the step budget restarts here
-                    # (event-mediated transition); loops through a wait are
-                    # allowed by design.
-                    if listener.success_state:
-                        await self._transition_to_state(
-                            instance, listener.success_state
-                        )
-                    else:
-                        self._set_status(instance, WorkflowStatus.COMPLETED)
-            except Exception as e:
-                logger.error(
-                    f"Delivering event '{event_type}' to {instance_id} failed: {e!s}"
+        delivered = 0
+        try:
+            for instance_id, listener in candidates:
+                delivered += 1
+                await self._deliver_event(
+                    event, instance_id, listener, affected_instances
                 )
-                self._fail(instance, e)
+        except asyncio.CancelledError:
+            # Listeners were consumed up front: put back those not yet
+            # delivered so the instances can still be woken by a later event.
+            self._restore_listeners(event_type, candidates[delivered:])
+            raise
 
         logger.info(
             f"Processed event {event_type}, affected instances: {len(affected_instances)}"
         )
         return affected_instances
+
+    def _restore_listeners(
+        self, event_type: str, pending: list[tuple[str, EventListener]]
+    ) -> None:
+        listeners = self.event_listeners.setdefault(event_type, {})
+        for instance_id, listener in pending:
+            instance = self.workflow_instances.get(instance_id)
+            if (
+                instance is not None
+                and instance.status == WorkflowStatus.WAITING
+                and instance.current_step_id == listener.step_id
+            ):
+                listeners.setdefault(instance_id, listener)
+
+    async def _deliver_event(
+        self,
+        event: WorkflowEvent,
+        instance_id: str,
+        listener: EventListener,
+        affected_instances: list[str],
+    ) -> None:
+        """Deliver ``event`` to one instance under its lock."""
+        event_type = event.event_type
+        instance = self.workflow_instances.get(instance_id)
+        if instance is None:
+            return
+        # DECISION plan-2026-09-27T120000-5d1e7a3b/D-001
+        # Per-instance isolation: an exception while delivering to one
+        # instance (deadline passed, instance cancelled meanwhile, bad
+        # state) must NOT abort delivery to the rest -- their listeners
+        # were already consumed above and they would stay WAITING forever.
+        try:
+            async with self._get_instance_lock(instance_id):
+                # Deliver only to the wait this listener belongs to: the
+                # instance may have moved on to a different wait (also
+                # WAITING) while the lock was held elsewhere.
+                if (
+                    instance.status != WorkflowStatus.WAITING
+                    or listener.step_id not in (None, instance.current_step_id)
+                ):
+                    logger.debug(
+                        f"Event '{event_type}' not delivered to {instance_id}: "
+                        f"status is {instance.status.value}, step "
+                        f"{instance.current_step_id}"
+                    )
+                    return
+                # Cancel the wait's timeout BEFORE transitioning: the chain
+                # may re-wait on the same event type and arm a new timeout
+                # under the same key, which a later cancel would kill.
+                self._cancel_event_timeout(instance_id, event_type)
+                self._apply_event(instance, listener.event_mapping, event)
+                affected_instances.append(instance_id)
+                # NOTE (W-ISSUE-004): the step budget restarts here
+                # (event-mediated transition); loops through a wait are
+                # allowed by design.
+                if listener.success_state:
+                    await self._transition_to_state(instance, listener.success_state)
+                else:
+                    self._drop_wait_resources(instance_id)
+                    instance.context.pop(KEY_WAITING_INFO, None)
+                    self._set_status(instance, WorkflowStatus.COMPLETED)
+        except Exception as e:
+            logger.error(
+                f"Delivering event '{event_type}' to {instance_id} failed: {e!s}"
+            )
+            self._fail(instance, e)
 
     @staticmethod
     def _correlates(
@@ -1366,6 +1425,17 @@ class WorkflowEngine:
 
         logger.info(f"Workflow instance {instance_id} cancelled: {reason}")
         return True
+
+    def _drop_wait_resources(self, instance_id: str) -> None:
+        """Drop the listeners, event timeouts and timer of ``instance_id``
+        (everything tied to its current wait; the deadline watchdog stays)."""
+        deadline_key = f"{instance_id}_deadline"
+        for timer_key, timer in list(self.timers.items()):
+            if timer.instance_id == instance_id and timer_key != deadline_key:
+                timer.cancel()
+                self.timers.pop(timer_key, None)
+        for listeners in self.event_listeners.values():
+            listeners.pop(instance_id, None)
 
     def _release_instance_resources(self, instance_id: str) -> None:
         """Drop every timer, listener and buffered event of ``instance_id``.

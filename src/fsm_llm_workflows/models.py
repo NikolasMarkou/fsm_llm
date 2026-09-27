@@ -249,6 +249,9 @@ class EventListener(BaseModel):
     registered."""
     timeout_state: str | None = None
     """Where a timed-out wait goes; ``None`` fails the instance."""
+    step_id: str | None = None
+    """The step whose wait registered this listener; an event is delivered
+    only while the instance is still at that step."""
 
     def is_expired(self) -> bool:
         """Check if the event listener has expired."""

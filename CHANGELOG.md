@@ -69,6 +69,11 @@ Breaking behavior changes are marked **(behavior)**.
   and refuses new starts; `start_workflow(wait=False)`; `get_workflow_context` returns a
   copy; lifecycle hooks (`add_hook`); injectable `executor`; `WorkflowHistoryEntry`
   exported; new `constants.py`.
+- Event delivery only wakes an instance still at the wait the listener was registered
+  for; leaving a step drops its listeners and wait timers; a cancelled `process_event`
+  restores the listeners it had not delivered; a background start never runs a step of
+  an instance that was cancelled or driven first; long prompts fit the core
+  `ResponseGenerationRequest` limits.
 - Monitor: workflow status redacts secret-shaped context and history entries; new
   `send_workflow_event` / `POST /api/workflow/{id}/event` (API-key gated).
 
