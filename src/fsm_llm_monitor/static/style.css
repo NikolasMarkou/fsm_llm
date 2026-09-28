@@ -2705,3 +2705,20 @@ button.btn.btn-warning:hover {
 
     .modal { width: 100vw; max-width: 100vw; border-radius: 0; max-height: 100vh; }
 }
+
+/* === API KEY MODAL, FORM HINTS, KEYBOARD FOCUS === */
+
+.modal.modal-sm { width: 440px; }
+.form-hint { font-size: var(--text-xs); color: var(--text-dim); margin-left: var(--space-2); }
+.wf-event-form { margin-top: var(--space-2); }
+.wf-event-form .btn-row { margin-top: var(--space-2); }
+
+[role="button"][tabindex]:focus-visible,
+tr.clickable-row:focus-visible,
+.instance-card:focus-visible,
+.conv-card:focus-visible,
+.preset-card:focus-visible,
+.trace-step:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}

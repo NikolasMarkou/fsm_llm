@@ -174,7 +174,8 @@ class TestMonitorBridgeWithMockAPI:
         bridge = MonitorBridge(api=api)
         assert bridge.connected is True
         # Should have registered 8 handlers (one per timing)
-        assert api.register_handler.call_count == 8
+        # 7: the no-op POST_TRANSITION observer is not registered.
+        assert api.register_handler.call_count == 7
 
     def test_get_active_conversations(self):
         api = self._make_mock_api()
@@ -225,7 +226,11 @@ class TestMonitorBridgeWithMockAPI:
                 "description": "Greet user",
                 "is_terminal": False,
             },
-            "collected_data": {"name": "Alice", "_internal_secret": "shh"},
+            "collected_data": {
+                "name": "Alice",
+                "_internal_secret": "shh",
+                "_internal_note": "n",
+            },
             "conversation_history": [],
             "last_extraction_response": None,
             "last_transition_decision": None,
@@ -251,7 +256,9 @@ class TestMonitorBridgeWithMockAPI:
         bridge = MonitorBridge(api=api, config=MonitorConfig(show_internal_keys=True))
         snap = bridge.get_conversation_snapshot("c1")
         assert snap is not None
-        assert "_internal_secret" in snap.context_data
+        assert "_internal_note" in snap.context_data
+        # Secret-looking entries stay hidden even when internal keys are shown.
+        assert "_internal_secret" not in snap.context_data
 
 
 class TestMonitorBridgeConnectNone:

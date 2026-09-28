@@ -27,3 +27,10 @@ class MonitorConnectionError(MonitorError):
     """Raised when monitor cannot connect to the API instance."""
 
     pass
+
+
+class MonitorCapacityError(MonitorError):
+    """Raised when a launch would exceed a configured capacity limit
+    (``max_instances``, ``max_running_agents``, builder sessions)."""
+
+    pass

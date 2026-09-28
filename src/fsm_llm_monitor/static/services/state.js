@@ -20,6 +20,7 @@ const _target = {
     workflowUpdates: {},
     refreshTimers: {},
     stubToolCount: 0,
+    autoScrollLogs: true,
     _lastContextData: null,
 };
 
@@ -52,4 +53,14 @@ export function scheduleRefresh(key, fn, delayMs) {
         state.refreshTimers[key] = null;
         fn();
     }, delayMs);
+}
+
+/** Cancel pending scheduleRefresh timers for the given keys. */
+export function cancelRefresh(...keys) {
+    for (const key of keys) {
+        if (state.refreshTimers[key]) {
+            clearTimeout(state.refreshTimers[key]);
+            state.refreshTimers[key] = null;
+        }
+    }
 }

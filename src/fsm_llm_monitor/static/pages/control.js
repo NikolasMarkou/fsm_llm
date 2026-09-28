@@ -1,8 +1,11 @@
 // FSM-LLM Monitor — Control Center Page (Unified View)
 
-import { state, scheduleRefresh } from '../services/state.js';
+import { state, scheduleRefresh, cancelRefresh } from '../services/state.js';
 import { fetchJson, postJson } from '../services/api.js';
-import { $, esc, statusBadge, hashInstances, showToast, renderResultBanner } from '../utils/dom.js';
+import {
+    $, esc, statusBadge, hashInstances, showToast, renderResultBanner,
+    levelClass, openDialog, closeDialog,
+} from '../utils/dom.js';
 import { formatTime } from '../utils/format.js';
 import { showConversationInDrawer } from './conversations.js';
 import { refreshInstances } from './dashboard.js';
@@ -18,6 +21,18 @@ const _ctrlPerPage = 25;
 let _ctrlSearch = '';
 let _lastCtrlHash = '';
 let _lastDrawerEventsHash = '';
+
+// Drawer refresh bookkeeping. Every refresh gets a token; only the latest
+// token for the currently selected instance may paint (drops out-of-order
+// responses and late timers for a previous selection). A refresh requested
+// while one is in flight for the same instance is queued, not raced.
+let _detailToken = 0;
+let _inflightKey = null;
+let _queuedKey = null;
+let _lastDetailHtml = '';
+let _lastAgentUpdateSig = '';
+
+const _TRACE_STATES = ['think', 'act', 'conclude', 'error'];
 
 // --- Filter & Search ---
 
@@ -100,14 +115,20 @@ export function renderUnifiedTable() {
             if (inst.source) detail += ` &middot; ${esc(inst.source)}`;
         } else if (inst.instance_type === 'agent') {
             detail = esc(inst.agent_type || '');
-            if (inst.task) detail += ` &middot; ${esc((inst.task || '').substring(0, 40))}`;
+            // `task` is optional on InstanceInfo (already truncated server side).
+            const task = typeof inst.task === 'string' ? inst.task.trim() : '';
+            if (task) detail += `${detail ? ' &middot; ' : ''}${esc(task.substring(0, 40))}`;
         } else if (inst.instance_type === 'workflow') {
             detail = `${inst.active_workflows || 0} active`;
         }
 
-        rows += `<tr class="clickable-row${sel}" data-instance-id="${esc(inst.instance_id)}" data-action="open-drawer" data-instance-type="${esc(inst.instance_type)}">`;
+        // Rows hold nested buttons, so they get tabindex (Enter/Space open the
+        // drawer via app.js) but not role="button", which would hide the
+        // nested controls from assistive technology.
+        const label = inst.label || inst.instance_id;
+        rows += `<tr class="clickable-row${sel}" tabindex="0" aria-label="Open details for ${esc(label)}" data-instance-id="${esc(inst.instance_id)}" data-action="open-drawer" data-instance-type="${esc(inst.instance_type)}">`;
         rows += `<td>${typeDot}${esc(inst.instance_type)}</td>`;
-        rows += `<td>${esc(inst.label || inst.instance_id)}</td>`;
+        rows += `<td>${esc(label)}</td>`;
         rows += `<td class="cell-truncate text-dim">${detail}</td>`;
         rows += `<td>${statusBadge(inst.status)}</td>`;
         rows += '<td>';
@@ -117,7 +138,7 @@ export function renderUnifiedTable() {
         if (inst.instance_type === 'agent' && inst.status === 'running') {
             rows += `<button class="btn btn-sm btn-warning" data-action="cancel-agent" data-instance-id="${esc(inst.instance_id)}">Cancel</button> `;
         }
-        rows += `<button class="btn btn-sm btn-danger" data-action="destroy-instance" data-instance-id="${esc(inst.instance_id)}">&times;</button>`;
+        rows += `<button class="btn btn-sm btn-danger" data-action="destroy-instance" data-instance-id="${esc(inst.instance_id)}" aria-label="Destroy ${esc(label)}">&times;</button>`;
         rows += '</td></tr>';
     }
     body.innerHTML = rows;
@@ -162,38 +183,22 @@ function _updateFilterChipCounts() {
 
 // --- Drawer ---
 
-export function openDrawer(instanceId, type) {
-    document.querySelectorAll('tr.clickable-row.selected').forEach(r => r.classList.remove('selected'));
-    const row = document.querySelector(`tr[data-instance-id="${instanceId}"]`);
-    if (row) row.classList.add('selected');
-
-    state.selectedDetailId = instanceId;
-    state.selectedDetailType = type;
-
-    $('ctrl-drawer-backdrop').style.display = 'block';
-    $('ctrl-drawer').style.display = 'block';
-
-    _lastDrawerEventsHash = '';
-    refreshDetailPanel(instanceId, type);
-
-    if (state.detailPollTimer) clearInterval(state.detailPollTimer);
-    state.detailPollTimer = setInterval(() => {
-        if (state.selectedDetailId && state.currentPage === 'control') {
-            refreshDetailPanel(state.selectedDetailId, state.selectedDetailType);
-        }
-    }, 2000);
+function _isSelected(instanceId, type) {
+    return !!instanceId && state.selectedDetailId === instanceId && state.selectedDetailType === type;
 }
 
-export function closeDrawer() {
-    $('ctrl-drawer-backdrop').style.display = 'none';
-    $('ctrl-drawer').style.display = 'none';
-    state.selectedDetailId = null;
-    state.selectedDetailType = null;
-    state.selectedConvId = null;
-    state._lastContextData = null;
-    if (state.detailPollTimer) { clearInterval(state.detailPollTimer); state.detailPollTimer = null; }
-    document.querySelectorAll('tr.clickable-row.selected').forEach(r => r.classList.remove('selected'));
+/** Invalidate in-flight/queued refreshes and pending WS refresh timers. */
+function _resetDetailRequests() {
+    _detailToken++;
+    _inflightKey = null;
+    _queuedKey = null;
+    _lastDetailHtml = '';
+    _lastDrawerEventsHash = '';
+    _lastAgentUpdateSig = '';
+    cancelRefresh('ctrl-detail', 'ctrl-detail-wf', 'conv-detail');
+}
 
+function _showDetailView() {
     const backBtn = $('ctrl-drawer-back');
     const drawerContent = $('ctrl-drawer-content');
     const convWrapper = $('conv-detail-wrapper');
@@ -202,7 +207,61 @@ export function closeDrawer() {
     if (drawerContent) drawerContent.style.display = 'block';
     if (convWrapper) convWrapper.style.display = 'none';
     if (eventsWrapper) eventsWrapper.style.display = 'block';
-    _lastDrawerEventsHash = '';
+}
+
+export function openDrawer(instanceId, type) {
+    if (!instanceId) return;
+    const switching = state.selectedDetailId !== instanceId || state.selectedDetailType !== type;
+
+    document.querySelectorAll('tr.clickable-row.selected').forEach(r => r.classList.remove('selected'));
+    const row = document.querySelector(`tr[data-instance-id="${CSS.escape(instanceId)}"]`);
+    if (row) row.classList.add('selected');
+
+    state.selectedDetailId = instanceId;
+    state.selectedDetailType = type;
+    state.selectedConvId = null;
+    state._lastContextData = null;
+    _resetDetailRequests();
+    _showDetailView();
+
+    if (switching) {
+        // Do not show the previous instance's content under the new title.
+        const contentEl = $('ctrl-drawer-content');
+        const eventsEl = $('ctrl-drawer-events');
+        if (contentEl) contentEl.innerHTML = '<div class="loading-spinner">Loading...</div>';
+        if (eventsEl) eventsEl.innerHTML = '';
+        const inst = state.instances.find(i => i.instance_id === instanceId);
+        const titleEl = $('ctrl-drawer-title');
+        if (titleEl) titleEl.textContent = inst?.label || instanceId;
+    }
+
+    const backdrop = $('ctrl-drawer-backdrop');
+    if (backdrop) backdrop.style.display = 'block';
+    openDialog($('ctrl-drawer'), 'block');
+
+    refreshDetailPanel(instanceId, type);
+
+    if (state.detailPollTimer) clearInterval(state.detailPollTimer);
+    state.detailPollTimer = setInterval(() => {
+        // Skip while the conversation sub-view is shown; Back re-renders.
+        if (state.selectedDetailId && state.currentPage === 'control' && !state.selectedConvId) {
+            refreshDetailPanel(state.selectedDetailId, state.selectedDetailType);
+        }
+    }, 2000);
+}
+
+export function closeDrawer() {
+    const backdrop = $('ctrl-drawer-backdrop');
+    if (backdrop) backdrop.style.display = 'none';
+    closeDialog($('ctrl-drawer'));
+    state.selectedDetailId = null;
+    state.selectedDetailType = null;
+    state.selectedConvId = null;
+    state._lastContextData = null;
+    if (state.detailPollTimer) { clearInterval(state.detailPollTimer); state.detailPollTimer = null; }
+    _resetDetailRequests();
+    document.querySelectorAll('tr.clickable-row.selected').forEach(r => r.classList.remove('selected'));
+    _showDetailView();
 }
 
 export function navigateToInstance(instanceId, instanceType) {
@@ -211,19 +270,120 @@ export function navigateToInstance(instanceId, instanceType) {
 }
 
 export async function refreshDetailPanel(instanceId, type) {
+    if (!_isSelected(instanceId, type)) return;
+    const key = `${type}:${instanceId}`;
+    if (_inflightKey === key) { _queuedKey = key; return; }
+    _inflightKey = key;
+    const token = ++_detailToken;
+    try {
+        await _refreshDetail(instanceId, type, token);
+    } catch (e) {
+        console.error('refreshDetailPanel:', e);
+    }
+    if (_inflightKey === key) _inflightKey = null;
+    if (_queuedKey === key) {
+        _queuedKey = null;
+        if (_isSelected(instanceId, type)) refreshDetailPanel(instanceId, type);
+    }
+}
+
+async function _refreshDetail(instanceId, type, token) {
+    const isCurrent = () => token === _detailToken && _isSelected(instanceId, type);
+
+    let inst = state.instances.find(i => i.instance_id === instanceId);
+    if (!inst) {
+        // A just-launched instance may not be in the cached list yet.
+        await refreshInstances();
+        if (!isCurrent()) return;
+        inst = state.instances.find(i => i.instance_id === instanceId);
+        if (!inst) { closeDrawer(); return; }
+    }
+
+    let html = '';
+    if (type === 'fsm') html = await _buildFSMDetail(instanceId, inst);
+    else if (type === 'workflow') html = await _buildWorkflowDetail(instanceId, inst);
+    else if (type === 'agent') html = await _buildAgentDetail(instanceId);
+    if (!isCurrent()) return;
+
+    // In the conversation sub-view the title belongs to conversations.js.
     const titleEl = $('ctrl-drawer-title');
-    const contentEl = $('ctrl-drawer-content');
-    const eventsEl = $('ctrl-drawer-events');
-    const inst = state.instances.find(i => i.instance_id === instanceId);
+    if (titleEl && !state.selectedConvId) titleEl.textContent = inst.label || instanceId;
+    _paintDetail($('ctrl-drawer-content'), html);
 
-    if (!inst) { closeDrawer(); return; }
-    if (titleEl) titleEl.textContent = inst.label || instanceId;
+    let events;
+    try {
+        events = await fetchJson(`/api/instances/${encodeURIComponent(instanceId)}/events?limit=100`);
+    } catch (e) {
+        console.error('refreshDetailEvents:', e);
+        return;
+    }
+    if (!isCurrent()) return;
+    _paintEvents($('ctrl-drawer-events'), events, type);
+}
 
-    if (type === 'fsm') await renderFSMDetail(instanceId, contentEl);
-    else if (type === 'workflow') await renderWorkflowDetail(instanceId, contentEl);
-    else if (type === 'agent') await renderAgentDetail(instanceId, contentEl);
+// --- Paint helpers (change detection + scroll/expansion/form preservation) ---
 
-    await refreshDetailEvents(instanceId, eventsEl);
+function _atBottom(el) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+}
+
+function _captureFormState(root) {
+    const values = {};
+    root.querySelectorAll('input[id], textarea[id], select[id]').forEach(el => { values[el.id] = el.value; });
+    const active = document.activeElement;
+    let focus = null;
+    if (active && active.id && root.contains(active)) {
+        focus = { id: active.id, start: active.selectionStart ?? null, end: active.selectionEnd ?? null };
+    }
+    return { values, focus };
+}
+
+function _restoreFormState(root, st) {
+    for (const [id, v] of Object.entries(st.values)) {
+        const el = root.querySelector(`#${CSS.escape(id)}`);
+        if (!el) continue;
+        if (el.tagName === 'SELECT') {
+            if ([...el.options].some(o => o.value === v)) el.value = v;
+        } else {
+            el.value = v;
+        }
+    }
+    if (st.focus) {
+        const el = root.querySelector(`#${CSS.escape(st.focus.id)}`);
+        if (el) {
+            el.focus();
+            try {
+                if (st.focus.start != null) el.setSelectionRange(st.focus.start, st.focus.end);
+            } catch { /* not a text control */ }
+        }
+    }
+}
+
+function _paintDetail(contentEl, html) {
+    if (!contentEl || html === _lastDetailHtml) return;
+    _lastDetailHtml = html;
+
+    const drawer = $('ctrl-drawer');
+    const drawerScroll = drawer ? { top: drawer.scrollTop, atBottom: _atBottom(drawer) } : null;
+    const inner = [...contentEl.querySelectorAll('.chat-container')]
+        .map(el => ({ top: el.scrollTop, atBottom: _atBottom(el) }));
+    const expanded = _captureTraceState(contentEl);
+    const form = _captureFormState(contentEl);
+
+    contentEl.innerHTML = html;
+
+    // Live logs stick to the bottom only when the user was already there.
+    contentEl.querySelectorAll('.chat-container').forEach((el, i) => {
+        const prev = inner[i];
+        el.scrollTop = (!prev || prev.atBottom) ? el.scrollHeight : prev.top;
+    });
+    _restoreTraceState(contentEl, expanded);
+    _restoreFormState(contentEl, form);
+    if (drawer && drawerScroll) {
+        drawer.scrollTop = (drawerScroll.atBottom && drawerScroll.top > 0)
+            ? drawer.scrollHeight
+            : drawerScroll.top;
+    }
 }
 
 function _enrichAgentEvents(events) {
@@ -279,52 +439,41 @@ function _enrichAgentEvents(events) {
     return enriched;
 }
 
-async function refreshDetailEvents(instanceId, logEl) {
-    if (!logEl) return;
-    try {
-        const events = await fetchJson(`/api/instances/${encodeURIComponent(instanceId)}/events?limit=100`);
-        const evHash = `${events.length}:${events.length > 0 ? events[0].timestamp + events[events.length - 1].timestamp : ''}`;
-        if (evHash === _lastDrawerEventsHash) return;
-        _lastDrawerEventsHash = evHash;
+function _paintEvents(logEl, events, instType) {
+    if (!logEl || !Array.isArray(events)) return;
+    const evHash = `${events.length}:${events.length > 0 ? events[0].timestamp + events[events.length - 1].timestamp : ''}`;
+    if (evHash === _lastDrawerEventsHash) return;
+    _lastDrawerEventsHash = evHash;
 
-        if (events.length === 0) {
-            logEl.innerHTML = '<div class="empty-state"><div class="empty-hint">No events yet...</div></div>';
-            return;
-        }
-
-        // For agents, enrich events to show meaningful info
-        const instType = state.selectedDetailType;
-        const displayEvents = (instType === 'agent')
-            ? _enrichAgentEvents(events)
-            : events;
-
-        if (displayEvents.length === 0) {
-            logEl.innerHTML = '<div class="empty-state"><div class="empty-hint">Agent initializing...</div></div>';
-            return;
-        }
-
-        let html = '';
-        for (const e of displayEvents) {
-            const level = (e.level || 'INFO').toLowerCase();
-            const typeClass = e.event_type === 'iteration' ? ' transition' : e.event_type === 'tool_call' ? ' conversation' : e.event_type === 'error' ? ' error' : '';
-            html += `<div class="entry ${level}${typeClass}">`;
-            html += `<span class="ts">${formatTime(e.timestamp)}</span>`;
-            html += `<span class="type">${esc(e.event_type)}</span>`;
-            html += `<span class="msg">${esc(e.message)}</span>`;
-            html += '</div>';
-        }
-        logEl.innerHTML = html;
-    } catch (e) {
-        console.error('refreshDetailEvents:', e);
-        showToast('Failed to load events', 'error');
+    if (events.length === 0) {
+        logEl.innerHTML = '<div class="empty-state"><div class="empty-hint">No events yet...</div></div>';
+        return;
     }
+
+    // For agents, enrich events to show meaningful info
+    const displayEvents = (instType === 'agent') ? _enrichAgentEvents(events) : events;
+
+    if (displayEvents.length === 0) {
+        logEl.innerHTML = '<div class="empty-state"><div class="empty-hint">Agent initializing...</div></div>';
+        return;
+    }
+
+    let html = '';
+    for (const e of displayEvents) {
+        const level = levelClass(e.level || 'INFO');
+        const typeClass = e.event_type === 'iteration' ? ' transition' : e.event_type === 'tool_call' ? ' conversation' : e.event_type === 'error' ? ' error' : '';
+        html += `<div class="entry ${level}${typeClass}">`;
+        html += `<span class="ts">${esc(formatTime(e.timestamp))}</span>`;
+        html += `<span class="type">${esc(e.event_type)}</span>`;
+        html += `<span class="msg">${esc(e.message)}</span>`;
+        html += '</div>';
+    }
+    logEl.innerHTML = html;
 }
 
 // --- FSM Detail ---
 
-async function renderFSMDetail(instanceId, contentEl) {
-    const inst = state.instances.find(i => i.instance_id === instanceId);
-    if (!inst) return;
+async function _buildFSMDetail(instanceId, inst) {
     try {
         const convs = await fetchJson(`/api/fsm/${encodeURIComponent(instanceId)}/conversations`);
         let html = '<div class="kv detail-kv">';
@@ -341,45 +490,73 @@ async function renderFSMDetail(instanceId, contentEl) {
         } else {
             for (const c of convs) {
                 if (c.error) continue;
-                html += `<div class="conv-card" data-action="go-to-conv" data-instance-id="${esc(instanceId)}" data-conv-id="${esc(c.conversation_id)}">`;
+                const convId = String(c.conversation_id || '');
+                // Card holds a nested End button: tabindex but no role="button".
+                html += `<div class="conv-card" tabindex="0" aria-label="Open conversation ${esc(convId.substring(0, 12))}" data-action="go-to-conv" data-instance-id="${esc(instanceId)}" data-conv-id="${esc(convId)}">`;
                 html += '<div class="conv-info">';
-                html += `<span class="mono-id">${esc(c.conversation_id.substring(0, 12))}</span>`;
+                html += `<span class="mono-id">${esc(convId.substring(0, 12))}</span>`;
                 html += `<span class="conv-state">${esc(c.current_state)}</span>`;
                 html += `<span class="text-dim">${c.message_history ? c.message_history.length : 0} msgs</span>`;
                 html += '</div>';
-                html += `<div>${c.is_terminal ? statusBadge('ended') : statusBadge('active')}</div>`;
+                html += '<div class="flex-row-gap-4">';
+                html += c.is_terminal ? statusBadge('ended') : statusBadge('active');
+                if (!c.is_terminal) {
+                    html += `<button class="btn btn-sm btn-warning" data-action="end-conversation" data-instance-id="${esc(instanceId)}" data-conv-id="${esc(convId)}" aria-label="End conversation ${esc(convId.substring(0, 12))}">End</button>`;
+                }
+                html += '</div>';
                 html += '</div>';
             }
             if (inst.status === 'running') {
                 html += `<button class="btn btn-sm mt-4" data-action="start-conv" data-instance-id="${esc(instanceId)}">+ New Conversation</button>`;
             }
         }
-        contentEl.innerHTML = html;
-    } catch {
-        contentEl.innerHTML = '<span class="error-message">Failed to load FSM detail</span>';
+        return html;
+    } catch (e) {
+        return `<span class="error-message">Failed to load FSM detail: ${esc(e.message)}</span>`;
     }
 }
 
 // --- Workflow Detail ---
 
-async function renderWorkflowDetail(instanceId, contentEl) {
-    const inst = state.instances.find(i => i.instance_id === instanceId);
-    if (!inst) return;
+const _ACTIVE_WF_STATUSES = ['running', 'pending', 'active', 'waiting'];
+
+function _workflowEventForm(instanceId, wfInstances) {
+    const targets = wfInstances.filter(w => !w.error && w.workflow_instance_id);
+    const active = targets.find(w => _ACTIVE_WF_STATUSES.includes(String(w.status || '').toLowerCase()));
+    const defaultTarget = active ? String(active.workflow_instance_id) : '';
+    let opts = `<option value=""${defaultTarget === '' ? ' selected' : ''}>Broadcast (all instances)</option>`;
+    for (const w of targets) {
+        const id = String(w.workflow_instance_id);
+        opts += `<option value="${esc(id)}"${id === defaultTarget ? ' selected' : ''}>${esc(id.substring(0, 12))} (${esc(w.status || 'unknown')})</option>`;
+    }
+    let html = '<div class="panel-title panel-title-spaced">Send Event</div>';
+    html += '<div class="wf-event-form">';
+    html += '<div class="form-row"><label for="wf-event-type">Event type:</label><input type="text" id="wf-event-type" class="flex-1" placeholder="e.g. approval_received" autocomplete="off" spellcheck="false"></div>';
+    html += `<div class="form-row"><label for="wf-event-target">Target:</label><select id="wf-event-target" class="flex-1">${opts}</select></div>`;
+    html += '<div class="form-row"><label for="wf-event-payload">Payload (JSON object):</label><textarea id="wf-event-payload" class="form-textarea" rows="3" spellcheck="false">{}</textarea></div>';
+    html += `<div class="btn-row"><button class="btn btn-sm btn-primary" data-action="send-workflow-event" data-instance-id="${esc(instanceId)}">Send Event</button></div>`;
+    html += '</div>';
+    return html;
+}
+
+async function _buildWorkflowDetail(instanceId, inst) {
     let html = '<div class="kv detail-kv">';
     html += `<span class="key">Instance ID:</span><span class="val mono-id">${esc(instanceId)}</span>`;
     html += `<span class="key">Status:</span><span class="val">${statusBadge(inst.status)}</span>`;
-    html += `<span class="key">Active Workflows:</span><span class="val">${inst.active_workflows || 0}</span>`;
+    html += `<span class="key">Active Workflows:</span><span class="val">${esc(inst.active_workflows || 0)}</span>`;
     html += '</div>';
+    let wfInstances = [];
     try {
-        const wfInstances = await fetchJson(`/api/workflow/${encodeURIComponent(instanceId)}/instances`);
+        wfInstances = await fetchJson(`/api/workflow/${encodeURIComponent(instanceId)}/instances`);
+        if (!Array.isArray(wfInstances)) wfInstances = [];
         html += `<div class="panel-title">Workflow Instances (${wfInstances.length})</div>`;
         if (wfInstances.length === 0) {
             html += '<div class="empty-state"><div class="empty-hint">No workflow instances.</div></div>';
         } else {
             for (const wf of wfInstances) {
                 if (wf.error) continue;
-                const wfId = wf.workflow_instance_id || '';
-                const wfStatus = (wf.status || 'unknown').toLowerCase();
+                const wfId = String(wf.workflow_instance_id || '');
+                const wfStatus = String(wf.status || 'unknown').toLowerCase();
                 const isActive = wfStatus === 'running' || wfStatus === 'pending' || wfStatus === 'active';
 
                 html += '<div class="conv-card">';
@@ -414,42 +591,42 @@ async function renderWorkflowDetail(instanceId, contentEl) {
                             }
                         }
                         if (hasError) html += `<div class="error-message" style="margin-top:0.25rem;">${esc(step.error)}</div>`;
-                        if (step.timestamp) html += `<div class="text-dim" style="font-size:0.7rem;margin-top:0.25rem;">${formatTime(step.timestamp)}</div>`;
+                        if (step.timestamp) html += `<div class="text-dim" style="font-size:0.7rem;margin-top:0.25rem;">${esc(formatTime(step.timestamp))}</div>`;
                         html += '</div>';
                     }
                     html += '</div>';
                 }
 
-                // Context data display (collapsible)
-                if (wf.context && Object.keys(wf.context).length > 0) {
-                    const ctxKeys = Object.keys(wf.context).filter(k => !k.startsWith('_'));
-                    if (ctxKeys.length > 0) {
-                        html += `<details style="margin-top:0.5rem;"><summary class="panel-title" style="font-size:0.8rem;cursor:pointer;">Context Data (${ctxKeys.length} keys)</summary>`;
-                        html += '<div class="kv">';
-                        for (const k of ctxKeys) {
-                            const v = wf.context[k];
-                            html += `<span class="key">${esc(k)}:</span><span class="val">${esc(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>`;
-                        }
-                        html += '</div></details>';
+                // Context data display (collapsible). The server already drops
+                // internal-prefix and secret-looking keys; show keys as sent.
+                if (wf.context && typeof wf.context === 'object' && Object.keys(wf.context).length > 0) {
+                    const ctxKeys = Object.keys(wf.context);
+                    html += `<details style="margin-top:0.5rem;"><summary class="panel-title" style="font-size:0.8rem;cursor:pointer;">Context Data (${ctxKeys.length} keys)</summary>`;
+                    html += '<div class="kv">';
+                    for (const k of ctxKeys) {
+                        const v = wf.context[k];
+                        html += `<span class="key">${esc(k)}:</span><span class="val">${esc(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>`;
                     }
+                    html += '</div></details>';
                 }
 
                 // Timestamps
                 if (wf.created_at || wf.updated_at) {
                     html += '<div class="text-dim" style="font-size:0.75rem;margin-top:0.5rem;">';
-                    if (wf.created_at) html += `Created: ${formatTime(wf.created_at)}`;
-                    if (wf.updated_at) html += ` &middot; Updated: ${formatTime(wf.updated_at)}`;
+                    if (wf.created_at) html += `Created: ${esc(formatTime(wf.created_at))}`;
+                    if (wf.updated_at) html += ` &middot; Updated: ${esc(formatTime(wf.updated_at))}`;
                     html += '</div>';
                 }
 
                 html += '</div>';
             }
         }
-    } catch {
+    } catch (e) {
         html += '<div class="panel-title">Workflow Instances</div>';
-        html += '<div class="empty-state"><div class="empty-hint">Could not load workflow instances.</div></div>';
+        html += `<div class="empty-state"><div class="empty-hint">Could not load workflow instances: ${esc(e.message)}</div></div>`;
     }
-    contentEl.innerHTML = html;
+    html += _workflowEventForm(instanceId, wfInstances);
+    return html;
 }
 
 export async function advanceWorkflow(instanceId, wfInstanceId) {
@@ -459,10 +636,7 @@ export async function advanceWorkflow(instanceId, wfInstanceId) {
             user_input: ''
         });
         showToast('Workflow advanced', 'success');
-        if (state.selectedDetailId === instanceId) {
-            const contentEl = $('ctrl-drawer-content');
-            if (contentEl) renderWorkflowDetail(instanceId, contentEl);
-        }
+        refreshDetailPanel(instanceId, 'workflow');
     } catch (e) {
         console.error('advanceWorkflow:', e);
         showToast(`Failed to advance workflow: ${e.message}`, 'error');
@@ -477,13 +651,60 @@ export async function cancelWorkflow(instanceId, wfInstanceId) {
             reason: 'Cancelled from monitor'
         });
         showToast('Workflow cancelled', 'success');
-        if (state.selectedDetailId === instanceId) {
-            const contentEl = $('ctrl-drawer-content');
-            if (contentEl) renderWorkflowDetail(instanceId, contentEl);
-        }
+        refreshDetailPanel(instanceId, 'workflow');
     } catch (e) {
         console.error('cancelWorkflow:', e);
         showToast(`Failed to cancel workflow: ${e.message}`, 'error');
+    }
+}
+
+/** POST /api/workflow/{id}/event from the drawer's Send Event form. */
+export async function sendWorkflowEvent(instanceId) {
+    const typeEl = $('wf-event-type');
+    const payloadEl = $('wf-event-payload');
+    const targetEl = $('wf-event-target');
+    const eventType = typeEl?.value.trim() || '';
+    if (!eventType) {
+        showToast('Enter an event type', 'error');
+        typeEl?.focus();
+        return;
+    }
+    const raw = payloadEl?.value.trim() || '';
+    let payload = {};
+    if (raw) {
+        try {
+            payload = JSON.parse(raw);
+        } catch (e) {
+            showToast(`Payload is not valid JSON: ${e.message}`, 'error');
+            payloadEl?.focus();
+            return;
+        }
+        if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+            showToast('Payload must be a JSON object, for example {"key": "value"}', 'error');
+            payloadEl?.focus();
+            return;
+        }
+    }
+    const target = targetEl?.value || '';
+    const btn = document.querySelector('#ctrl-drawer-content [data-action="send-workflow-event"]');
+    if (btn) btn.disabled = true;
+    try {
+        const data = await postJson(`/api/workflow/${encodeURIComponent(instanceId)}/event`, {
+            event_type: eventType,
+            payload,
+            workflow_instance_id: target,
+        });
+        const affected = Array.isArray(data?.affected) ? data.affected : [];
+        const scope = target ? 'targeted' : 'broadcast';
+        showToast(affected.length
+            ? `Event "${eventType}" (${scope}) affected ${affected.length} instance${affected.length === 1 ? '' : 's'}: ${affected.map(a => String(a).substring(0, 12)).join(', ')}`
+            : `Event "${eventType}" (${scope}) sent; no workflow instance was affected`, 'success');
+        refreshDetailPanel(instanceId, 'workflow');
+    } catch (e) {
+        console.error('sendWorkflowEvent:', e);
+        showToast(`Failed to send event: ${e.message}`, 'error');
+    } finally {
+        if (btn && document.contains(btn)) btn.disabled = false;
     }
 }
 
@@ -501,12 +722,16 @@ function _restoreTraceState(contentEl, expanded) {
     if (!contentEl || !expanded.length) return;
     const bodies = contentEl.querySelectorAll('.trace-step .step-body');
     for (const i of expanded) {
-        if (bodies[i]) bodies[i].style.display = 'block';
+        if (bodies[i]) {
+            bodies[i].style.display = 'block';
+            bodies[i].closest('.trace-step')?.querySelector('.step-header')?.setAttribute('aria-expanded', 'true');
+        }
     }
 }
 
 function _extractTaskText(raw) {
     if (!raw) return '';
+    if (typeof raw !== 'string') return String(_fmtVal(raw));
     // If it looks like JSON config, try to extract a meaningful description
     const trimmed = raw.trim();
     if (trimmed.startsWith('{')) {
@@ -590,7 +815,7 @@ function _renderAgentConversation(log) {
     let iteration = 0;
 
     for (const entry of log) {
-        const ts = entry.timestamp ? '<span class="text-dim" style="float:right;font-size:0.65rem;">' + formatTime(entry.timestamp) + '</span>' : '';
+        const ts = entry.timestamp ? '<span class="text-dim" style="float:right;font-size:0.65rem;">' + esc(formatTime(entry.timestamp)) + '</span>' : '';
 
         if (entry.type === 'start') {
             html += '<div style="text-align:center;padding:0.5rem 0;font-size:0.75rem;">';
@@ -652,16 +877,11 @@ function _renderAgentConversation(log) {
     return html;
 }
 
-async function renderAgentDetail(instanceId, contentEl) {
-    const inst = state.instances.find(i => i.instance_id === instanceId);
-    if (!inst) return;
-    const expandedSteps = _captureTraceState(contentEl);
-
+async function _buildAgentDetail(instanceId) {
     try {
         const data = await fetchJson(`/api/agent/${encodeURIComponent(instanceId)}/status`);
         if (data.error && !data.status) {
-            contentEl.innerHTML = `<span class="error-message">${esc(data.error)}</span>`;
-            return;
+            return `<span class="error-message">${esc(data.error)}</span>`;
         }
 
         const taskText = _extractTaskText(data.task);
@@ -672,15 +892,16 @@ async function renderAgentDetail(instanceId, contentEl) {
         html += `<span class="key">Status:</span><span class="val">${statusBadge(data.status)}</span>`;
         html += `<span class="key">Task:</span><span class="val word-break">${esc(taskText)}</span>`;
         if (data.total_iterations !== undefined) {
-            html += `<span class="key">Iterations:</span><span class="val">${data.total_iterations}</span>`;
+            html += `<span class="key">Iterations:</span><span class="val">${esc(data.total_iterations)}</span>`;
         }
         html += '</div>';
 
         if (data.status === 'running') {
-            const iterCount = data.iteration_count || 0;
-            const maxIter = data.max_iterations || 10;
-            const pct = Math.min(Math.round((iterCount / maxIter) * 100), 95);
-            const stateLabel = data.current_state || 'initializing';
+            const iterCount = Number(data.iteration_count) || 0;
+            const maxIter = Number(data.max_iterations) || 10;
+            const rawPct = Math.min(Math.round((iterCount / maxIter) * 100), 95);
+            const pct = Number.isFinite(rawPct) ? Math.max(0, rawPct) : 0;
+            const stateLabel = String(data.current_state || 'initializing');
             const stateClass = stateLabel === 'think' ? 'state-think' : stateLabel === 'act' ? 'state-act' : stateLabel === 'conclude' ? 'state-conclude' : 'state-default';
             html += '<div class="agent-progress"><div class="agent-progress-header">';
             html += `<span>Iteration <b>${iterCount}</b></span>`;
@@ -704,17 +925,14 @@ async function renderAgentDetail(instanceId, contentEl) {
         }
 
         if (data.status !== 'running') {
-            await _renderAgentTrace(instanceId, html, contentEl, data, expandedSteps);
-            return;
+            html += await _buildAgentTrace(instanceId, data);
+            return html;
         }
 
         if (data.tools_used?.length) html += _renderToolCalls(data.tools_used);
-        if (data.success !== undefined && data.status !== 'running') html += renderResultBanner(data.success);
-
-        contentEl.innerHTML = html;
-        _restoreTraceState(contentEl, expandedSteps);
-    } catch {
-        contentEl.innerHTML = '<span class="error-message">Failed to load agent detail</span>';
+        return html;
+    } catch (e) {
+        return `<span class="error-message">Failed to load agent detail: ${esc(e.message)}</span>`;
     }
 }
 
@@ -730,12 +948,24 @@ function _renderToolCalls(toolsUsed) {
 }
 
 export function toggleAllTraceSteps(expand) {
-    document.querySelectorAll('.trace-step .step-body').forEach(el => {
+    document.querySelectorAll('#ctrl-drawer-content .trace-step .step-body').forEach(el => {
         el.style.display = expand ? 'block' : 'none';
+        el.closest('.trace-step')?.querySelector('.step-header[aria-expanded]')
+            ?.setAttribute('aria-expanded', expand ? 'true' : 'false');
     });
 }
 
-async function _renderAgentTrace(instanceId, html, contentEl, statusData, expandedSteps) {
+/** Toggle one trace step (data-action="toggle-trace-step" on its header). */
+export function toggleTraceStep(headerEl) {
+    const body = headerEl?.closest('.trace-step')?.querySelector('.step-body');
+    if (!body) return;
+    const open = body.style.display !== 'block';
+    body.style.display = open ? 'block' : 'none';
+    headerEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+async function _buildAgentTrace(instanceId, statusData) {
+    let html = '';
     try {
         const result = await fetchJson(`/api/agent/${encodeURIComponent(instanceId)}/result`);
         if (result.trace_steps?.length) {
@@ -746,19 +976,20 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData, expand
             html += '</div></div>';
             let iteration = 0;
             for (const step of result.trace_steps) {
-                const st = step.state || '';
+                const st = String(step.state || '');
                 if (st === 'think') iteration++;
+                const stepCls = _TRACE_STATES.includes(st) ? st : 'other';
                 const stateColorClass = st === 'think' ? 'state-think' : st === 'act' ? 'state-act' : st === 'conclude' ? 'state-conclude' : 'state-default';
                 const stepIcon = st === 'think' ? '&#9679;' : st === 'act' ? '&#9654;' : st === 'conclude' ? '&#10003;' : '&#8226;';
-                html += `<div class="trace-step step-${st}" data-action="toggle-trace-step">`;
-                html += `<div class="step-header"><span class="${stateColorClass}">${stepIcon} ${esc(st.toUpperCase())}`;
+                html += `<div class="trace-step step-${stepCls}">`;
+                html += `<div class="step-header" data-action="toggle-trace-step" role="button" tabindex="0" aria-expanded="false"><span class="${stateColorClass}">${stepIcon} ${esc(st.toUpperCase())}`;
                 if (st === 'think') html += ` #${iteration}`;
                 if (step.tool_name) html += ` &mdash; ${esc(step.tool_name)}`;
                 html += '</span></div>';
                 html += '<div class="step-body">';
                 if (step.reasoning) html += `<div><b>Reasoning:</b> ${esc(step.reasoning)}</div>`;
-                if (step.tool_input) html += `<div><b>Input:</b> ${esc(step.tool_input)}</div>`;
-                if (step.tool_result) html += `<div><b>Result:</b> ${esc(step.tool_result)}</div>`;
+                if (step.tool_input) html += `<div><b>Input:</b> ${esc(_fmtVal(step.tool_input))}</div>`;
+                if (step.tool_result) html += `<div><b>Result:</b> ${esc(_fmtVal(step.tool_result))}</div>`;
                 html += '</div></div>';
             }
         } else if (statusData.tools_used?.length) {
@@ -767,15 +998,18 @@ async function _renderAgentTrace(instanceId, html, contentEl, statusData, expand
     } catch { /* trace fetch failed, skip */ }
 
     if (statusData.success !== undefined) html += renderResultBanner(statusData.success);
-    contentEl.innerHTML = html;
-    _restoreTraceState(contentEl, expandedSteps || []);
+    return html;
 }
 
 export function updateRunningAgents(updates) {
-    if (state.selectedDetailType === 'agent' && state.selectedDetailId && updates[state.selectedDetailId]) {
-        const contentEl = $('ctrl-drawer-content');
-        if (contentEl) renderAgentDetail(state.selectedDetailId, contentEl);
-    }
+    const id = state.selectedDetailId;
+    if (state.selectedDetailType !== 'agent' || !id || !updates?.[id]) return;
+    // The WS pushes every tick; only refetch when this agent's update changed.
+    let sig;
+    try { sig = JSON.stringify(updates[id]); } catch { sig = String(Date.now()); }
+    if (sig === _lastAgentUpdateSig) return;
+    _lastAgentUpdateSig = sig;
+    refreshDetailPanel(id, 'agent');
 }
 
 // --- Actions ---
@@ -787,7 +1021,7 @@ export async function startConversationOn(instanceId) {
         if (data.conversation_id) showConversationInDrawer(instanceId, data.conversation_id);
     } catch (e) {
         console.error('startConversationOn:', e);
-        showToast(`Failed to start conversation: ${e.message}`);
+        showToast(`Failed to start conversation: ${e.message}`, 'error');
     }
 }
 
@@ -801,7 +1035,7 @@ export async function destroyInstance(instanceId) {
         if (state.currentPage === 'control') refreshControlCenter();
     } catch (e) {
         console.error('destroyInstance:', e);
-        showToast(`Failed to destroy instance: ${e.message}`);
+        showToast(`Failed to destroy instance: ${e.message}`, 'error');
     }
 }
 
@@ -809,13 +1043,10 @@ export async function cancelAgent(instanceId) {
     if (!confirm('Cancel this agent? It will stop execution.')) return;
     try {
         await postJson(`/api/agent/${encodeURIComponent(instanceId)}/cancel`, {});
-        if (state.selectedDetailId === instanceId) {
-            const contentEl = $('ctrl-drawer-content');
-            if (contentEl) renderAgentDetail(instanceId, contentEl);
-        }
+        refreshDetailPanel(instanceId, 'agent');
         refreshControlCenter();
     } catch (e) {
         console.error('cancelAgent:', e);
-        showToast(`Failed to cancel agent: ${e.message}`);
+        showToast(`Failed to cancel agent: ${e.message}`, 'error');
     }
 }

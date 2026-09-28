@@ -7,6 +7,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (monitor audit, 2026-09-28)
+
+Breaking behavior changes are marked **(behavior)**.
+
+- **(behavior)** Security: state-changing requests from a foreign `Origin` get 403, a
+  foreign `Host` gets 400 (DNS rebinding), bodies over 1 MB get 413, and every response
+  carries CSP / nosniff / frame-ancestors headers. Trusted hosts and CORS origins come
+  from `FSM_LLM_MONITOR_TRUSTED_HOSTS` / `FSM_LLM_MONITOR_CORS_ORIGINS`; the permissive
+  CORS origin regex is gone.
+- **(behavior)** With an API key set, sensitive reads (conversations, activity, events,
+  logs, agent status/result, builder result) and `/ws` require it. `/ws` authenticates
+  with a first message `{type: "auth", api_key}` and closes 4401 (bad key) or 4403
+  (foreign origin). `FSM_LLM_MONITOR_API_KEY` applies without calling `configure()`;
+  new `GET /api/auth` and `--api-key` CLI flag.
+- **(behavior)** Error mapping: unknown ids 404 (were 500), busy conversation 409,
+  capacity 429 (`MonitorCapacityError`), missing extension 501, bad input 400; 500
+  details are generic.
+- Secret-looking context entries were shown by the snapshot, workflow status, agent
+  result and tool parameters; one redaction path (`collector.redact_context`) now covers
+  all of them, and non-JSON values are no longer `str()`-ed.
+- Monitor handlers recorded the wrong states (the core never passes `_target_state`);
+  they now capture current/target state in `should_execute`. Registration is idempotent,
+  handlers are unregistered on destroy, and the POST_TRANSITION duplicate is dropped (7
+  handlers per FSM, was 8).
+- WebSocket streaming used timestamps and list lengths and dropped or repeated events
+  after bursts or ring-buffer eviction; it now uses sequence cursors.
+- Workflow runs: status, completion, failure and cancellation come from engine hooks;
+  every run of an instance is tracked; unknown runs are 404; launch has a timeout and
+  cleans up orphans; engines are shut down on destroy.
+- Agents: `max_running_agents` cap, finished instances evicted at `max_instances`, a
+  late cancel keeps the result, no double cancelled event, `last_tool` read from the
+  conversation log.
+- Conversations: terminal conversations are ended after caching their final state;
+  `end_conversation` on an unknown id raises; a completed FSM instance reopens on start.
+- Config: bounds on refresh interval and buffer sizes, `log_level` validated and applied
+  to the log sink, buffers resized live. Request bounds on message, task, iterations,
+  timeout and tools.
+- Builder: sessions capped at 50 (429), TTL counts from last use, a timed-out send keeps
+  the session busy until its thread finishes, delete while busy is 409.
+- Dashboard config accepts the builder's unwrapped output; malformed input is 400.
+- `get_logs` level filter is ordered and case-insensitive; blocking snapshot routes run
+  off the event loop.
+- OTEL: bounded open conversation spans, fixed span names, lifecycle spans carry ids only,
+  `disable()` restores only its own wrapper.
+- Frontend: API key prompt and retry, WebSocket auth, server-side internal-key filtering
+  (client `startsWith('_')` removed), workflow "Send event" and "End conversation"
+  controls, readable 422 errors, and many UI fixes (stale timers, log dedup/pause,
+  drawer re-render, escaping, accessibility).
+
+### Fixed (workflows audit, 2026-09-27)
+
+Breaking behavior changes are marked **(behavior)**.
+
+- `process_event`: one instance's failure (deadline passed, cancelled meanwhile, bad
+  state) no longer aborts delivery to the other waiting instances, whose listeners had
+  already been consumed. Delivery re-checks WAITING under the instance lock and no longer
+  mutates the context of a non-waiting instance.
+- A follow-up wait on the same event type kept its timeout: the old code cancelled the new
+  wait's timeout after the transition.
+- A wait with `timeout_seconds` and no `timeout_state` now FAILS the instance on timeout
+  instead of staying WAITING forever; `success_state=""` completes the instance when the
+  event arrives. `timeout_state` without `timeout_seconds` is rejected.
+- `LLMProcessingStep` works with a core `LLMInterface` (`generate_response`) and with a
+  sync or async `generate(prompt)`; before, every core interface failed with
+  `AttributeError`.
+- **(behavior)** Failures never fall back to the success route: LLM, conversation,
+  parallel and agent steps without `error_state` now FAIL the instance, and an agent
+  reporting `success=False` fails its step.
+- `ParallelStep` counts every failed child (an exception with an empty message was
+  aggregated as success), drops internal keys before the `step_<i>_` prefix, rejects
+  wait/timer children, keeps the successful children's data on failure, and falls back to
+  a shallow copy for contexts that cannot be deep-copied.
+- User callables that return a coroutine (a lambda wrapping an async function, an object
+  with `async __call__`) are awaited: a `ConditionStep` no longer always takes
+  `true_state` and an `APICallStep` no longer maps nothing.
+- Cancelling instance `order` no longer cancels the timers of `order_2`; a custom
+  `instance_id` still held by the engine is rejected instead of overwriting it.
+- The workflow deadline is enforced while WAITING; `WorkflowTimeoutError.instance_id`
+  names the instance when `start_workflow` raises.
+- **(behavior)** Only synchronous cycles are rejected at registration: loops through a
+  timer or event wait are allowed. The recursive driver with a 20-step depth cap is
+  replaced by a loop with `max_steps_per_run` (default 1000).
+- Events can be targeted (`WorkflowEvent.instance_id`, buffered until the instance
+  waits) and correlated (`WaitEventConfig.correlation_key`).
+- **(behavior)** `switch_step` defaults to `default_state=None` like `SwitchStep` (an
+  unmatched value FAILS instead of completing); its outputs are now
+  `switch_<id>_matched`/`_target` (the old `_switch_*` keys never reached the context).
+- `AgentStep` maps `"answer"` even with an empty `final_context`, passes `input_mapping`
+  as `initial_context`, accepts a plain string result, and adds per-step
+  `agent_<id>_answer`/`_success`.
+- `ConversationStep` honours the base `timeout`, reports `conversation_<id>_ended`, can
+  `require_completion` and `use_user_input`, accepts an `FSMDefinition` object, and
+  rejects a missing or doubled FSM source at construction.
+- Resources: fired event timeouts leave no timer entry; timers, listeners and buffered
+  events are released on every terminal status; failed instances are purged too;
+  **(behavior)** `max_completed_instances` defaults to 1000 and history to 1000 entries
+  per instance.
+- Running instances keep the definition they started with; the engine stores a copy on
+  registration.
+- `fsm_llm_workflows` logging is off until `setup_logging()`/`enable_debug_logging()`,
+  like the core package (new `fsm_llm.logging.enable_library_logging`).
+- Smaller: `error_state` on `AutoTransitionStep`/`ConditionStep`; float timer and wait
+  durations; every DSL factory exposes `timeout`; history records step errors without
+  redundant "running" entries; `DependencyResolver.has_cycles` no longer reports an
+  unknown dependency as a cycle; exception constructors copy `details`;
+  `register_event_listener` raises `WorkflowEventError` for an empty event type;
+  duplicate step ids raise `WorkflowDefinitionError`; `APICallStep` output paths
+  (`"a.b"`, `""`); `serialize()` strips custom callables; `shutdown()` awaits its tasks
+  and refuses new starts; `start_workflow(wait=False)`; `get_workflow_context` returns a
+  copy; lifecycle hooks (`add_hook`); injectable `executor`; `WorkflowHistoryEntry`
+  exported; new `constants.py`.
+- Event delivery only wakes an instance still at the wait the listener was registered
+  for; leaving a step drops its listeners and wait timers; a cancelled `process_event`
+  restores the listeners it had not delivered; a background start never runs a step of
+  an instance that was cancelled or driven first; long prompts fit the core
+  `ResponseGenerationRequest` limits.
+- Monitor: workflow status redacts secret-shaped context and history entries; new
+  `send_workflow_event` / `POST /api/workflow/{id}/event` (API-key gated).
+
+
 ### Changed
 
 - **Default model is `ollama_chat/qwen3.5:4b` again.** 0.9.0 changed `DEFAULT_LLM_MODEL`

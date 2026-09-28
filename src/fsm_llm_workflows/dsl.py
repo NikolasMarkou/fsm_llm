@@ -58,6 +58,8 @@ def auto_step(
     next_state: str,
     action: Callable | None = None,
     description: str = "",
+    error_state: str | None = None,
+    timeout: float | None = None,
 ) -> AutoTransitionStep:
     """
     Create an auto transition step.
@@ -66,8 +68,12 @@ def auto_step(
         step_id: Unique identifier for the step
         name: Human-readable name
         next_state: State to transition to
-        action: Optional function to execute before transition
+        action: Optional function (sync or async) to execute before transition;
+            returns a dict merged into the context, or None
         description: Optional description
+        error_state: State to transition to if the action fails (otherwise the
+            instance FAILS)
+        timeout: Optional per-step time limit in seconds
 
     Returns:
         A new auto transition step
@@ -78,6 +84,8 @@ def auto_step(
         next_state=next_state,
         action=action,
         description=description,
+        error_state=error_state,
+        timeout=timeout,
     )
 
 
@@ -93,6 +101,7 @@ def api_step(
     input_mapping: dict[str, str] | None = None,
     output_mapping: dict[str, str] | None = None,
     description: str = "",
+    timeout: float | None = None,
 ) -> APICallStep:
     """
     Create an API call step.
@@ -103,9 +112,11 @@ def api_step(
         api_function: Function to call the API
         success_state: State to transition to on success
         failure_state: State to transition to on failure
-        input_mapping: Map context keys to API parameters
-        output_mapping: Map API response to context keys
+        input_mapping: ``{api_param: context_key}``
+        output_mapping: ``{context_key: result_key}``; ``result_key`` may be a
+            dotted path, or ``""`` for the whole result
         description: Optional description
+        timeout: Optional per-step time limit in seconds
 
     Returns:
         A new API call step
@@ -119,6 +130,7 @@ def api_step(
         input_mapping=input_mapping or {},
         output_mapping=output_mapping or {},
         description=description,
+        timeout=timeout,
     )
 
 
@@ -132,6 +144,8 @@ def condition_step(
     true_state: str,
     false_state: str,
     description: str = "",
+    error_state: str | None = None,
+    timeout: float | None = None,
 ) -> ConditionStep:
     """
     Create a condition step.
@@ -143,6 +157,9 @@ def condition_step(
         true_state: State to transition to if condition is True
         false_state: State to transition to if condition is False
         description: Optional description
+        error_state: State to transition to if the condition raises
+            (otherwise the instance FAILS)
+        timeout: Optional per-step time limit in seconds
 
     Returns:
         A new condition step
@@ -154,6 +171,8 @@ def condition_step(
         true_state=true_state,
         false_state=false_state,
         description=description,
+        error_state=error_state,
+        timeout=timeout,
     )
 
 
@@ -165,11 +184,13 @@ def llm_step(
     name: str,
     llm_interface: Any,
     prompt_template: str,
-    context_mapping: dict[str, str],
-    output_mapping: dict[str, str],
-    next_state: str,
+    context_mapping: dict[str, str] | None = None,
+    output_mapping: dict[str, str] | None = None,
+    next_state: str = "",
     error_state: str | None = None,
     description: str = "",
+    timeout: float | None = None,
+    system_prompt: str | None = None,
 ) -> LLMProcessingStep:
     """
     Create an LLM processing step.
@@ -177,27 +198,37 @@ def llm_step(
     Args:
         step_id: Unique identifier for the step
         name: Human-readable name
-        llm_interface: LLM interface to use
-        prompt_template: Template string for the prompt
-        context_mapping: Map context keys to prompt variables
-        output_mapping: Map LLM response to context keys
-        next_state: State to transition to on success
-        error_state: State to transition to on error
+        llm_interface: A core ``LLMInterface`` or any object with
+            ``generate(prompt)`` (sync or async)
+        prompt_template: ``str.format`` template for the prompt
+        context_mapping: INPUT mapping ``{prompt_var: context_key}``
+        output_mapping: ``{context_key: regex}`` applied to the response
+            (``""`` stores the whole response)
+        next_state: State to transition to on success (``""`` = terminal)
+        error_state: State to transition to on error (otherwise the
+            instance FAILS)
         description: Optional description
+        timeout: Optional per-step time limit in seconds
+        system_prompt: System prompt used with a core ``LLMInterface``
 
     Returns:
         A new LLM processing step
     """
+    extra: dict[str, Any] = {}
+    if system_prompt is not None:
+        extra["system_prompt"] = system_prompt
     return LLMProcessingStep(
         step_id=step_id,
         name=name,
         llm_interface=llm_interface,
         prompt_template=prompt_template,
-        context_mapping=context_mapping,
-        output_mapping=output_mapping,
+        context_mapping=context_mapping or {},
+        output_mapping=output_mapping or {},
         next_state=next_state,
         error_state=error_state,
         description=description,
+        timeout=timeout,
+        **extra,
     )
 
 
@@ -209,10 +240,11 @@ def wait_event_step(
     name: str,
     event_type: str,
     success_state: str,
-    timeout_seconds: int | None = None,
+    timeout_seconds: float | None = None,
     timeout_state: str | None = None,
     event_mapping: dict[str, str] | None = None,
     description: str = "",
+    correlation_key: str | None = None,
 ) -> WaitForEventStep:
     """
     Create a wait for event step.
@@ -222,10 +254,14 @@ def wait_event_step(
         name: Human-readable name
         event_type: Type of event to wait for
         success_state: State to transition to when event received
+            (``""`` completes the workflow)
         timeout_seconds: Optional timeout in seconds
-        timeout_state: State to transition to on timeout
-        event_mapping: Map event payload to context keys
+        timeout_state: State to transition to on timeout (requires
+            ``timeout_seconds``; without it a timeout FAILS the instance)
+        event_mapping: ``{context_key: payload_key}``
         description: Optional description
+        correlation_key: Only accept events whose ``payload[key]`` equals
+            ``context[key]``
 
     Returns:
         A new wait for event step
@@ -240,6 +276,7 @@ def wait_event_step(
             timeout_seconds=timeout_seconds,
             timeout_state=timeout_state,
             event_mapping=event_mapping or {},
+            correlation_key=correlation_key,
         ),
     )
 
@@ -248,7 +285,11 @@ def wait_event_step(
 
 
 def timer_step(
-    step_id: str, name: str, delay_seconds: int, next_state: str, description: str = ""
+    step_id: str,
+    name: str,
+    delay_seconds: float,
+    next_state: str,
+    description: str = "",
 ) -> TimerStep:
     """
     Create a timer step.
@@ -283,6 +324,7 @@ def parallel_step(
     error_state: str | None = None,
     aggregation_function: Callable | None = None,
     description: str = "",
+    timeout: float | None = None,
 ) -> ParallelStep:
     """
     Create a parallel step.
@@ -292,9 +334,11 @@ def parallel_step(
         name: Human-readable name
         steps: List of steps to execute in parallel
         next_state: State to transition to on success
-        error_state: State to transition to on any error
+        error_state: State to transition to on any error (otherwise the
+            instance FAILS)
         aggregation_function: Function to aggregate results
         description: Optional description
+        timeout: Optional time limit in seconds for all children together
 
     Returns:
         A new parallel step
@@ -307,6 +351,7 @@ def parallel_step(
         error_state=error_state,
         aggregation_function=aggregation_function,
         description=description,
+        timeout=timeout,
     )
 
 
@@ -323,6 +368,10 @@ def conversation_step(
     max_turns: int = 20,
     error_state: str | None = None,
     description: str = "",
+    conversation_timeout: float | None = None,
+    timeout: float | None = None,
+    require_completion: bool = False,
+    use_user_input: bool = False,
 ) -> ConversationStep:
     """
     Create a conversation step that runs an FSM conversation within a workflow.
@@ -335,14 +384,20 @@ def conversation_step(
         name: Human-readable name
         success_state: State to transition to on success
         fsm_file: Path to FSM definition JSON file
-        fsm_definition: FSMDefinition object (alternative to fsm_file)
+        fsm_definition: FSM definition as a dict or ``FSMDefinition``
+            (exactly one of ``fsm_file`` / ``fsm_definition``)
         model: LLM model to use
-        initial_context: Map of {conversation_key: workflow_context_key} for initial context
-        context_mapping: Map of {workflow_key: conversation_key} for result extraction
+        initial_context: INPUT map ``{conversation_key: workflow_key}``
+        context_mapping: OUTPUT map ``{workflow_key: conversation_key}``
         auto_messages: Messages to send to drive the conversation
         max_turns: Maximum conversation turns
-        error_state: State to transition to on error
+        error_state: State to transition to on error (otherwise the
+            instance FAILS)
         description: Optional description
+        conversation_timeout: Time limit for the conversation in seconds
+        timeout: Per-step time limit (the smaller limit wins)
+        require_completion: Fail when the conversation has not ended
+        use_user_input: Also send ``advance_workflow``'s user input
 
     Returns:
         A new conversation step
@@ -360,6 +415,10 @@ def conversation_step(
         max_turns=max_turns,
         error_state=error_state,
         description=description,
+        conversation_timeout=conversation_timeout,
+        timeout=timeout,
+        require_completion=require_completion,
+        use_user_input=use_user_input,
     )
 
 
@@ -391,8 +450,15 @@ class WorkflowBuilder:
         self.workflow.metadata[key] = value
         return self
 
-    def build(self) -> WorkflowDefinition:
-        """Build and return the workflow definition."""
+    def build(self, validate: bool = False) -> WorkflowDefinition:
+        """Return the workflow definition (the builder's own object).
+
+        Args:
+            validate: Run ``WorkflowDefinition.validate()`` first (raises
+                ``WorkflowValidationError``).
+        """
+        if validate:
+            self.workflow.validate()
         return self.workflow
 
 
@@ -424,7 +490,11 @@ def linear_workflow(
     workflow_id: str, name: str, steps: list[WorkflowStep], description: str = ""
 ) -> WorkflowDefinition:
     """
-    Create a linear workflow where steps execute in sequence.
+    Register ``steps`` in a workflow and make the first one initial.
+
+    This does NOT wire the steps together: each step must already name its
+    successor (for example ``auto_step(..., next_state="<next id>")``), and
+    the last one should end the workflow (``next_state=""``).
 
     Args:
         workflow_id: Unique identifier for the workflow
@@ -433,7 +503,7 @@ def linear_workflow(
         description: Optional description
 
     Returns:
-        A workflow definition with linear step execution
+        A workflow definition (not yet validated)
     """
     if not steps:
         raise ValueError("Linear workflow must have at least one step")
@@ -463,7 +533,11 @@ def conditional_workflow(
     description: str = "",
 ) -> WorkflowDefinition:
     """
-    Create a conditional workflow with two branches.
+    Register an initial step, a condition step and two branches.
+
+    This does NOT wire the steps together: ``initial_step`` must route to
+    ``condition_step``, whose ``true_state``/``false_state`` must name the
+    first step of each branch.
 
     Args:
         workflow_id: Unique identifier for the workflow
@@ -504,7 +578,11 @@ def event_driven_workflow(
     description: str = "",
 ) -> WorkflowDefinition:
     """
-    Create an event-driven workflow that waits for external events.
+    Register setup steps, an event wait and processing steps.
+
+    This does NOT wire the steps together: the last setup step must route
+    to ``event_step``, whose ``success_state`` must name the first
+    processing step.
 
     Args:
         workflow_id: Unique identifier for the workflow
@@ -547,6 +625,8 @@ def agent_step(
     context_mapping: dict[str, str] | None = None,
     error_state: str | None = None,
     description: str = "",
+    input_mapping: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> AgentStep:
     """Create an ``AgentStep`` that runs an FSM-LLM agent.
 
@@ -556,9 +636,13 @@ def agent_step(
         agent: A ``BaseAgent`` instance (or anything with ``run(task)``).
         task_template: Format string for agent task (filled from context).
         success_state: State to transition to on success.
-        context_mapping: ``{workflow_key: agent_result_key}`` mapping.
-        error_state: State to transition to on failure.
+        context_mapping: OUTPUT ``{workflow_key: agent_result_key}`` mapping.
+        error_state: State to transition to on failure (otherwise the
+            instance FAILS).
         description: Step description.
+        input_mapping: INPUT ``{agent_context_key: workflow_key}`` passed as
+            ``agent.run(task, initial_context=...)``.
+        timeout: Optional per-step time limit in seconds.
 
     Returns:
         Configured AgentStep instance.
@@ -572,6 +656,8 @@ def agent_step(
         context_mapping=context_mapping or {},
         error_state=error_state,
         description=description,
+        input_mapping=input_mapping or {},
+        timeout=timeout,
     )
 
 
@@ -582,6 +668,7 @@ def retry_step(
     max_retries: int = 3,
     backoff_factor: float = 1.0,
     description: str = "",
+    timeout: float | None = None,
 ) -> RetryStep:
     """Create a ``RetryStep`` that wraps another step with retry logic.
 
@@ -590,8 +677,10 @@ def retry_step(
         name: Human-readable step name.
         step: The inner step to retry on failure.
         max_retries: Maximum number of retry attempts.
-        backoff_factor: Delay multiplier (seconds) between retries.
+        backoff_factor: Linear delay multiplier: retry ``n`` waits
+            ``backoff_factor * n`` seconds.
         description: Step description.
+        timeout: Optional time limit per attempt in seconds.
 
     Returns:
         Configured RetryStep instance.
@@ -603,6 +692,7 @@ def retry_step(
         max_retries=max_retries,
         backoff_factor=backoff_factor,
         description=description,
+        timeout=timeout,
     )
 
 
@@ -611,7 +701,7 @@ def switch_step(
     name: str,
     key: str,
     cases: dict[str, str],
-    default_state: str = "",
+    default_state: str | None = None,
     description: str = "",
 ) -> SwitchStep:
     """Create a ``SwitchStep`` for n-way branching on a context key.
@@ -621,7 +711,9 @@ def switch_step(
         name: Human-readable step name.
         key: Context key whose value determines routing.
         cases: ``{value: target_state}`` mapping.
-        default_state: State when value matches no case.
+        default_state: State when value matches no case. ``None`` (the
+            default, same as ``SwitchStep``) FAILS the instance on an
+            unmatched value; ``""`` completes it.
         description: Step description.
 
     Returns:

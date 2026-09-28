@@ -23,6 +23,24 @@ DEFAULT_REFRESH_INTERVAL = 1.0  # seconds
 DEFAULT_MAX_EVENTS = 1000
 DEFAULT_MAX_LOG_LINES = 5000
 DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_MAX_INSTANCES = 200
+DEFAULT_MAX_RUNNING_AGENTS = 8
+
+# --- Config bounds (enforced by MonitorConfig) ---
+MIN_REFRESH_INTERVAL = 0.5  # seconds
+MAX_REFRESH_INTERVAL = 60.0
+MIN_BUFFER_SIZE = 10
+MAX_BUFFER_SIZE = 100_000
+LOG_LEVELS = ("TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL")
+
+# --- Request bounds ---
+MAX_MESSAGE_LENGTH = 10_000  # matches core ResponseGenerationRequest.user_message
+MAX_TASK_LENGTH = 20_000
+MAX_AGENT_ITERATIONS = 100
+MAX_AGENT_TIMEOUT_SECONDS = 3600.0
+MAX_STUB_TOOLS = 50
+MAX_REQUEST_BODY_BYTES = 1_048_576  # 1 MiB
+MAX_BUILDER_SESSIONS = 50
 
 # --- Event Types ---
 EVENT_CONVERSATION_START = "conversation_start"
@@ -46,6 +64,8 @@ EVENT_WORKFLOW_STARTED = "workflow_started"
 EVENT_WORKFLOW_ADVANCED = "workflow_advanced"
 EVENT_WORKFLOW_COMPLETED = "workflow_completed"
 EVENT_WORKFLOW_CANCELLED = "workflow_cancelled"
+EVENT_WORKFLOW_FAILED = "workflow_failed"
+EVENT_WORKFLOW_EVENT_DELIVERED = "workflow_event_delivered"
 
 # --- Agent Event Types ---
 EVENT_AGENT_STARTED = "agent_started"

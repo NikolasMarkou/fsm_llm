@@ -1,20 +1,29 @@
 """
-FSM-LLM Workflow System - Clean Architecture
-===========================================
+FSM-LLM Workflow System
+=======================
 
-A workflow system built on top of FSM-LLM that enables:
-- Automated state transitions
-- Event-driven workflows
-- External system integration
-- Parallel workflow execution
-- Monitoring and error recovery
+An async, in-memory workflow engine built on top of FSM-LLM:
+
+- Step graphs with automatic transitions, branching and loops through
+  event/timer waits
+- Event-driven waits (broadcast or targeted, with correlation keys) and timers
+- Steps that call APIs, LLMs, FSM conversations and agents
+- Parallel steps, retries, per-step and whole-workflow timeouts
+- Lifecycle hooks (``WorkflowEngine.add_hook``)
+
+Log output is off until ``fsm_llm.setup_logging()`` (or
+``fsm_llm.enable_debug_logging()``) is called, like the core package.
 """
 
 from __future__ import annotations
 
 # Core models and exceptions
 # Version info — imported via __version__.py to stay in sync (matches classification/reasoning pattern)
+from fsm_llm.logging import is_library_logging_enabled as _logging_enabled
+from fsm_llm.logging import logger as _logger
+
 from .__version__ import __version__
+from .constants import MAX_STEP_DEPTH, MAX_STEPS_PER_RUN
 
 # Workflow definition and validation
 from .definitions import (
@@ -64,6 +73,7 @@ from .models import (
     EventListener,
     WaitEventConfig,
     WorkflowEvent,
+    WorkflowHistoryEntry,
     WorkflowInstance,
     WorkflowStatus,
     WorkflowStepResult,
@@ -85,6 +95,12 @@ from .steps import (
     WorkflowStep,
 )
 
+# Library logging is off by default, like the core package (whose
+# `logger.disable("fsm_llm")` does not cover this top-level package).
+# `fsm_llm.setup_logging()` / `enable_debug_logging()` re-enable it.
+if not _logging_enabled():
+    _logger.disable("fsm_llm_workflows")
+
 __author__ = "Nikolas Markou"
 
 # Public API
@@ -104,6 +120,7 @@ __all__ = [
     "WorkflowEvent",
     "WorkflowStepResult",
     "WorkflowInstance",
+    "WorkflowHistoryEntry",
     "EventListener",
     "WaitEventConfig",
     # Steps
@@ -125,6 +142,8 @@ __all__ = [
     # Engine
     "WorkflowEngine",
     "Timer",
+    "MAX_STEPS_PER_RUN",
+    "MAX_STEP_DEPTH",
     # Dependency Resolution
     "DependencyResolver",
     # Version

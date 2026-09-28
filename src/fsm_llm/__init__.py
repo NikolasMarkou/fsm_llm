@@ -433,6 +433,7 @@ def enable_debug_logging():
     """
     from .constants import LOG_FORMAT_HUMAN, LOG_SINK_STDERR
     from .logging import (
+        enable_library_logging,
         logger,
         prepare_log_record,
         register_stream_handler,
@@ -440,7 +441,7 @@ def enable_debug_logging():
     )
 
     # Re-enable the library loggers
-    logger.enable("fsm_llm")
+    enable_library_logging()
 
     # Only remove library-registered handlers (not user's handlers), and let
     # setup_file_logging be called again.

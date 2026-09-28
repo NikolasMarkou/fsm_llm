@@ -10,15 +10,27 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 
 from .constants import (
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_EVENTS,
+    DEFAULT_MAX_INSTANCES,
     DEFAULT_MAX_LOG_LINES,
+    DEFAULT_MAX_RUNNING_AGENTS,
     DEFAULT_REFRESH_INTERVAL,
+    LOG_LEVELS,
+    MAX_AGENT_ITERATIONS,
+    MAX_AGENT_TIMEOUT_SECONDS,
+    MAX_BUFFER_SIZE,
+    MAX_MESSAGE_LENGTH,
+    MAX_REFRESH_INTERVAL,
+    MAX_STUB_TOOLS,
+    MAX_TASK_LENGTH,
+    MIN_BUFFER_SIZE,
+    MIN_REFRESH_INTERVAL,
 )
 
 
@@ -136,7 +148,7 @@ class TransitionInfo(BaseModel):
 
     target_state: str
     description: str = ""
-    priority: int = 0
+    priority: int = 100  # the core's default transition priority
     condition_count: int = 0
     has_logic: bool = False
 
@@ -154,14 +166,41 @@ class FSMSnapshot(BaseModel):
 
 
 class MonitorConfig(BaseModel):
-    """Configuration for the monitor."""
+    """Configuration for the monitor.
 
-    refresh_interval: float = DEFAULT_REFRESH_INTERVAL
-    max_events: int = DEFAULT_MAX_EVENTS
-    max_log_lines: int = DEFAULT_MAX_LOG_LINES
+    ``log_level`` is the minimum level the log sink records.
+    ``max_events``/``max_log_lines`` size the global buffers (applied on
+    change) and the buffers of instances launched afterwards.
+    ``max_instances`` caps managed instances (the oldest finished ones are
+    evicted first) and ``max_running_agents`` caps concurrent agent threads.
+    ``auto_scroll_logs`` is a dashboard display preference.
+    """
+
+    refresh_interval: float = Field(
+        default=DEFAULT_REFRESH_INTERVAL,
+        ge=MIN_REFRESH_INTERVAL,
+        le=MAX_REFRESH_INTERVAL,
+        allow_inf_nan=False,
+    )
+    max_events: int = Field(
+        default=DEFAULT_MAX_EVENTS, ge=MIN_BUFFER_SIZE, le=MAX_BUFFER_SIZE
+    )
+    max_log_lines: int = Field(
+        default=DEFAULT_MAX_LOG_LINES, ge=MIN_BUFFER_SIZE, le=MAX_BUFFER_SIZE
+    )
     log_level: str = DEFAULT_LOG_LEVEL
     show_internal_keys: bool = False
     auto_scroll_logs: bool = True
+    max_instances: int = Field(default=DEFAULT_MAX_INSTANCES, ge=1, le=10_000)
+    max_running_agents: int = Field(default=DEFAULT_MAX_RUNNING_AGENTS, ge=1, le=256)
+
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, v: str) -> str:
+        level = str(v).upper()
+        if level not in LOG_LEVELS:
+            raise ValueError(f"log_level must be one of {', '.join(LOG_LEVELS)}")
+        return level
 
 
 # --- Instance Management Models ---
@@ -179,6 +218,7 @@ class InstanceInfo(BaseModel):
     conversation_count: int = 0
     active_workflows: int = 0
     agent_type: str = ""
+    task: str = ""  # agent task (truncated)
 
 
 class LaunchFSMRequest(BaseModel):
@@ -200,7 +240,7 @@ class StartConversationRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request to send a message to an FSM conversation."""
 
-    message: str
+    message: str = Field(..., max_length=MAX_MESSAGE_LENGTH)
     conversation_id: str
 
 
@@ -222,11 +262,13 @@ class LaunchAgentRequest(BaseModel):
     """Request to launch an agent."""
 
     agent_type: str = "ReactAgent"
-    task: str
+    task: str = Field(..., min_length=1, max_length=MAX_TASK_LENGTH)
     model: str = DEFAULT_LLM_MODEL
-    max_iterations: int = 10
-    timeout_seconds: float = 120.0
-    tools: list[StubToolConfig] = Field(default_factory=list)
+    max_iterations: int = Field(default=10, ge=1, le=MAX_AGENT_ITERATIONS)
+    timeout_seconds: float = Field(
+        default=120.0, gt=0, le=MAX_AGENT_TIMEOUT_SECONDS, allow_inf_nan=False
+    )
+    tools: list[StubToolConfig] = Field(default_factory=list, max_length=MAX_STUB_TOOLS)
     label: str = ""
 
 
@@ -251,6 +293,18 @@ class WorkflowCancelRequest(BaseModel):
 
     workflow_instance_id: str
     reason: str = ""
+
+
+class WorkflowEventRequest(BaseModel):
+    """Request to deliver an event to a managed workflow engine.
+
+    ``workflow_instance_id`` targets one workflow instance; empty broadcasts
+    to every instance waiting for ``event_type``.
+    """
+
+    event_type: str = Field(..., min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    workflow_instance_id: str = ""
 
 
 # --- Custom Dashboard Configuration ---
@@ -304,7 +358,7 @@ class BuilderSendRequest(BaseModel):
     """Request to send a message to a builder session."""
 
     session_id: str
-    message: str
+    message: str = Field(..., max_length=MAX_MESSAGE_LENGTH)
 
 
 def model_to_dict(obj: Any) -> dict[str, Any] | None:

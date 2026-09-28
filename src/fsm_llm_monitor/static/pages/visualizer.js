@@ -7,6 +7,10 @@ import { renderGraph } from '../utils/graph.js';
 
 let _vizStatusTimer = null;
 
+/**
+ * Render a graph. Returns true on success, false on failure (a toast is
+ * shown), and null when there was nothing to render.
+ */
 export async function visualizeGraph(type, typeValue) {
     const endpoints = {
         fsm: { post: '/api/fsm/visualize', presetGet: '/api/fsm/visualize/preset/' },
@@ -34,10 +38,10 @@ export async function visualizeGraph(type, typeValue) {
                     body: JSON.stringify(typeValue),
                 });
             } else {
-                return;
+                return null;
             }
         } else {
-            if (!typeValue) return;
+            if (!typeValue) return null;
             data = await fetchJson(`${endpoints[type].get}${encodeURIComponent(typeValue)}`);
         }
 
@@ -67,7 +71,7 @@ export async function visualizeGraph(type, typeValue) {
             let rows = '';
             for (const e of data.edges) {
                 rows += `<tr><td>${esc(e.from)}</td><td>${esc(e.to)}</td>`;
-                if (type === 'fsm') rows += `<td>${e.priority || ''}</td>`;
+                if (type === 'fsm') rows += `<td>${esc(e.priority || '')}</td>`;
                 rows += `<td title="${esc(e.label)}">${esc(e.label)}</td></tr>`;
             }
             tbody.innerHTML = rows;
@@ -79,22 +83,28 @@ export async function visualizeGraph(type, typeValue) {
             const details = $('viz-details');
             if (details) details.style.display = '';
         }
+        return true;
     } catch (e) {
         console.error(`visualizeGraph ${type}:`, e);
-        showToast('Visualization failed', 'error');
+        showToast(`Visualization failed: ${e.message || e}`, 'error');
+        return false;
     }
 }
 
 export async function visualizeFSM() {
     const jsonText = $('viz-fsm-json')?.value.trim();
     if (!jsonText) return;
+    let fsmDef;
     try {
-        const fsmDef = JSON.parse(jsonText);
-        await visualizeGraph('fsm', fsmDef);
-        _showVizStatus('OK', 'success');
+        fsmDef = JSON.parse(jsonText);
     } catch {
         _showVizStatus('Invalid JSON', 'error');
+        return;
     }
+    const ok = await visualizeGraph('fsm', fsmDef);
+    if (ok === true) _showVizStatus('OK', 'success');
+    else if (ok === false) _showVizStatus('Visualization failed', 'error');
+    else _showVizStatus('Expected an FSM JSON object', 'error');
 }
 
 function _showVizStatus(text, type) {

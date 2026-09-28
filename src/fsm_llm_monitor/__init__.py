@@ -56,6 +56,8 @@ from .constants import (
     EVENT_WORKFLOW_ADVANCED,
     EVENT_WORKFLOW_CANCELLED,
     EVENT_WORKFLOW_COMPLETED,
+    EVENT_WORKFLOW_EVENT_DELIVERED,
+    EVENT_WORKFLOW_FAILED,
     EVENT_WORKFLOW_STARTED,
     MONITOR_HANDLER_NAME,
     MONITOR_HANDLER_PRIORITY,
@@ -86,12 +88,14 @@ from .definitions import (
     TransitionInfo,
     WorkflowAdvanceRequest,
     WorkflowCancelRequest,
+    WorkflowEventRequest,
     model_to_dict,
 )
 
 # Exceptions
 from .exceptions import (
     MetricCollectionError,
+    MonitorCapacityError,
     MonitorConnectionError,
     MonitorError,
     MonitorInitializationError,
@@ -130,6 +134,7 @@ __all__ = [
     "LaunchWorkflowRequest",
     "WorkflowAdvanceRequest",
     "WorkflowCancelRequest",
+    "WorkflowEventRequest",
     "DashboardConfig",
     "DashboardPanel",
     "DashboardAlert",
@@ -155,6 +160,8 @@ __all__ = [
     "EVENT_WORKFLOW_ADVANCED",
     "EVENT_WORKFLOW_COMPLETED",
     "EVENT_WORKFLOW_CANCELLED",
+    "EVENT_WORKFLOW_FAILED",
+    "EVENT_WORKFLOW_EVENT_DELIVERED",
     "EVENT_AGENT_STARTED",
     "EVENT_AGENT_COMPLETED",
     "EVENT_AGENT_FAILED",
@@ -170,4 +177,5 @@ __all__ = [
     "MonitorInitializationError",
     "MetricCollectionError",
     "MonitorConnectionError",
+    "MonitorCapacityError",
 ]

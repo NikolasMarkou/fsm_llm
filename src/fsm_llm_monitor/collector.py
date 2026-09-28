@@ -7,13 +7,23 @@ Stores events in bounded deques and computes basic metrics.
 
 from __future__ import annotations
 
+import json
 import threading
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
-from fsm_llm.constants import has_internal_prefix
+from fsm_llm.constants import (
+    MAX_CONTEXT_FILTER_DEPTH,
+    has_internal_prefix,
+    is_forbidden_context_entry,
+)
 from fsm_llm.logging import logger
+from fsm_llm.utilities import (
+    filter_context_tree,
+    redact_non_json_leaf,
+    redacting_json_default,
+)
 
 from .constants import (
     DEFAULT_MAX_EVENTS,
@@ -80,6 +90,8 @@ class EventCollector:
         """Get events added after a given total count, newest first.
 
         Use with ``total_events`` to stream only new events to clients.
+        Streaming clients should prefer :meth:`events_after`, which returns a
+        consistent cursor.
         """
         with self._lock:
             new_count = self._total_events - after_total
@@ -92,6 +104,57 @@ class EventCollector:
             events = self._events
             result = [events[-1 - i] for i in range(take)]
         return result
+
+    @staticmethod
+    def _slice_after(
+        buffer: deque[Any], total: int, cursor: int, limit: int
+    ) -> tuple[list[Any], int]:
+        """Oldest-first records recorded after ``cursor`` (a total count),
+        at most ``limit``, plus the cursor to use next time.
+
+        Records that fell out of the bounded buffer are skipped (the cursor
+        jumps over them). A cursor ahead of ``total`` (the collector was
+        cleared) restarts from the beginning of the buffer.
+        """
+        if cursor > total:
+            cursor = total - len(buffer)
+        available = min(total - cursor, len(buffer))
+        if available <= 0:
+            return [], total
+        first = len(buffer) - available  # index of the oldest unseen record
+        take = min(available, max(limit, 0))
+        items = [buffer[first + i] for i in range(take)]
+        return items, total - available + take
+
+    def events_after(
+        self, cursor: int, limit: int = 50
+    ) -> tuple[list[MonitorEvent], int]:
+        """Events recorded after ``cursor``, OLDEST first, and the next cursor.
+
+        # DECISION plan-2026-09-28T090000-3c9e41d2/D-004
+        # Stream from a cursor taken under the SAME lock as the slice. Do NOT
+        # go back to reading the total first and slicing "newest N" later:
+        # that re-sent the newest records every cycle and never delivered the
+        # middle of a burst.
+        """
+        with self._lock:
+            return self._slice_after(self._events, self._total_events, cursor, limit)
+
+    def logs_after(self, cursor: int, limit: int = 50) -> tuple[list[LogRecord], int]:
+        """Log records received after ``cursor``, OLDEST first, and the next
+        cursor (see :meth:`events_after`)."""
+        with self._lock:
+            return self._slice_after(self._logs, self._total_logs, cursor, limit)
+
+    def resize(self, max_events: int, max_log_lines: int) -> None:
+        """Change the buffer bounds, keeping the newest records."""
+        with self._lock:
+            if max_events != self._max_events:
+                self._events = deque(self._events, maxlen=max_events)
+                self._max_events = max_events
+            if max_log_lines != self._max_log_lines:
+                self._logs = deque(self._logs, maxlen=max_log_lines)
+                self._max_log_lines = max_log_lines
 
     def record_event(self, event: MonitorEvent) -> None:
         """Record a monitor event. Thread-safe."""
@@ -145,20 +208,16 @@ class EventCollector:
         return events
 
     def get_logs(self, limit: int = 0, level: str | None = None) -> list[LogRecord]:
-        """Get recent logs, newest first. Optionally filter by level."""
-        level_order = {
-            "DEBUG": 0,
-            "INFO": 1,
-            "WARNING": 2,
-            "ERROR": 3,
-            "CRITICAL": 4,
-        }
+        """Get recent logs, newest first. Optionally filter by minimum level
+        (case-insensitive; loguru's TRACE and SUCCESS levels are ranked)."""
         with self._lock:
             logs = list(self._logs)
         logs.reverse()
-        if level and level in level_order:
-            min_level = level_order[level]
-            logs = [r for r in logs if level_order.get(r.level, 0) >= min_level]
+        min_level = _LEVEL_ORDER.get(level.upper()) if level else None
+        if min_level is not None:
+            logs = [
+                r for r in logs if _LEVEL_ORDER.get(r.level.upper(), 0) >= min_level
+            ]
         if limit > 0:
             return logs[:limit]
         return logs
@@ -212,7 +271,11 @@ class EventCollector:
         return events
 
     def clear(self) -> None:
-        """Clear all collected data."""
+        """Clear all collected data.
+
+        Totals restart at zero; streaming cursors ahead of the new totals are
+        handled by :meth:`events_after` / :meth:`logs_after`.
+        """
         with self._lock:
             self._events.clear()
             self._logs.clear()
@@ -265,30 +328,51 @@ class EventCollector:
 
         Returns a dict mapping timing names to callback functions
         that can be used with the handler system.
+
+        Every callback takes ``(context, current_state=None,
+        target_state=None)``: the monitor's handler wrapper passes the states
+        the core hands to ``should_execute`` (the core never puts
+        ``_target_state`` into the handler context). Without them the
+        callbacks fall back to the context keys.
         """
         return {
             "START_CONVERSATION": self._on_start_conversation,
             "PRE_PROCESSING": self._on_pre_processing,
             "POST_PROCESSING": self._on_post_processing,
             "PRE_TRANSITION": self._on_pre_transition,
-            "POST_TRANSITION": self._on_post_transition,  # no-op; pre-transition captures data
+            "POST_TRANSITION": self._on_post_transition,  # no-op; not registered
             "CONTEXT_UPDATE": self._on_context_update,
             "END_CONVERSATION": self._on_end_conversation,
             "ERROR": self._on_error,
         }
 
-    def _on_start_conversation(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _on_start_conversation(
+        self,
+        context: dict[str, Any],
+        current_state: str | None = None,
+        target_state: str | None = None,
+    ) -> dict[str, Any]:
         conv_id = context.get("_conversation_id", "")
+        state = _state_of(context, current_state)
         self.record_event(
             MonitorEvent(
                 event_type=EVENT_CONVERSATION_START,
                 conversation_id=conv_id,
+                target_state=state or None,
                 message=f"Conversation started: {conv_id}",
             )
         )
+        if state:
+            with self._lock:
+                self._states_visited[state] = self._states_visited.get(state, 0) + 1
         return {}
 
-    def _on_pre_processing(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _on_pre_processing(
+        self,
+        context: dict[str, Any],
+        current_state: str | None = None,
+        target_state: str | None = None,
+    ) -> dict[str, Any]:
         conv_id = context.get("_conversation_id", "")
         self.record_event(
             MonitorEvent(
@@ -299,7 +383,12 @@ class EventCollector:
         )
         return {}
 
-    def _on_post_processing(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _on_post_processing(
+        self,
+        context: dict[str, Any],
+        current_state: str | None = None,
+        target_state: str | None = None,
+    ) -> dict[str, Any]:
         conv_id = context.get("_conversation_id", "")
         self.record_event(
             MonitorEvent(
@@ -310,10 +399,15 @@ class EventCollector:
         )
         return {}
 
-    def _on_pre_transition(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _on_pre_transition(
+        self,
+        context: dict[str, Any],
+        current_state: str | None = None,
+        target_state: str | None = None,
+    ) -> dict[str, Any]:
         conv_id = context.get("_conversation_id", "")
-        source = context.get("_current_state", "")
-        target = context.get("_target_state", "")
+        source = _state_of(context, current_state)
+        target = target_state or context.get("_target_state", "") or ""
         self.record_event(
             MonitorEvent(
                 event_type=EVENT_STATE_TRANSITION,
@@ -326,11 +420,21 @@ class EventCollector:
         )
         return {}
 
-    def _on_post_transition(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _on_post_transition(
+        self,
+        context: dict[str, Any],
+        current_state: str | None = None,
+        target_state: str | None = None,
+    ) -> dict[str, Any]:
         # Post-transition is informational; pre-transition already captured
         return {}
 
-    def _on_context_update(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _on_context_update(
+        self,
+        context: dict[str, Any],
+        current_state: str | None = None,
+        target_state: str | None = None,
+    ) -> dict[str, Any]:
         conv_id = context.get("_conversation_id", "")
         self.record_event(
             MonitorEvent(
@@ -341,18 +445,30 @@ class EventCollector:
         )
         return {}
 
-    def _on_end_conversation(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _on_end_conversation(
+        self,
+        context: dict[str, Any],
+        current_state: str | None = None,
+        target_state: str | None = None,
+    ) -> dict[str, Any]:
         conv_id = context.get("_conversation_id", "")
+        state = _state_of(context, current_state)
         self.record_event(
             MonitorEvent(
                 event_type=EVENT_CONVERSATION_END,
                 conversation_id=conv_id,
                 message=f"Conversation ended: {conv_id}",
+                data={"state": state},
             )
         )
         return {}
 
-    def _on_error(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _on_error(
+        self,
+        context: dict[str, Any],
+        current_state: str | None = None,
+        target_state: str | None = None,
+    ) -> dict[str, Any]:
         conv_id = context.get("_conversation_id", "")
         error = context.get("_error", "Unknown error")
         self.record_event(
@@ -381,8 +497,12 @@ class EventCollector:
     ) -> dict[str, str]:
         """Extract display-worthy key-value pairs from an FSM context dict.
 
-        Filters out internal-prefixed keys, noise keys, and empty values.
+        Filters out internal-prefixed keys, secret-looking entries (at every
+        depth), noise keys, and empty values. Values are rendered as text
+        WITHOUT calling an object's ``__str__`` (non-JSON leaves become
+        ``<redacted:Type>``).
         """
+        ctx = redact_context(ctx)
         out: dict[str, str] = {}
         for k, v in ctx.items():
             # DECISION plan-2026-07-20T040150-876e7164/D-003 [STALE]
@@ -393,7 +513,7 @@ class EventCollector:
             # alongside it, not folded into it. See decisions.md D-003.
             if has_internal_prefix(k) or k in EventCollector._CONTEXT_NOISE_KEYS:
                 continue
-            s = str(v) if v is not None else ""
+            s = _display_text(v)
             if s in EventCollector._CONTEXT_EMPTY_VALUES:
                 continue
             out[k] = s[:max_value_len]
@@ -419,34 +539,46 @@ class EventCollector:
         def _ts() -> str:
             return datetime.now(timezone.utc).isoformat()
 
-        def _on_start(ctx: dict[str, Any]) -> dict[str, Any]:
+        def _on_start(
+            ctx: dict[str, Any],
+            current_state: str | None = None,
+            target_state: str | None = None,
+        ) -> dict[str, Any]:
             _emit(
                 {
                     "type": "start",
-                    "state": ctx.get("_current_state", ""),
+                    "state": _state_of(ctx, current_state),
                     "conversation_id": ctx.get("_conversation_id", ""),
                     "timestamp": _ts(),
                 }
             )
             return {}
 
-        def _on_post_processing(ctx: dict[str, Any]) -> dict[str, Any]:
+        def _on_post_processing(
+            ctx: dict[str, Any],
+            current_state: str | None = None,
+            target_state: str | None = None,
+        ) -> dict[str, Any]:
             data = self.snapshot_context(ctx)
             if not data:
                 return {}
             _emit(
                 {
                     "type": "context",
-                    "state": ctx.get("_current_state", ""),
+                    "state": _state_of(ctx, current_state),
                     "data": data,
                     "timestamp": _ts(),
                 }
             )
             return {}
 
-        def _on_pre_transition(ctx: dict[str, Any]) -> dict[str, Any]:
-            source = ctx.get("_current_state", "")
-            target = ctx.get("_target_state", "")
+        def _on_pre_transition(
+            ctx: dict[str, Any],
+            current_state: str | None = None,
+            target_state: str | None = None,
+        ) -> dict[str, Any]:
+            source = _state_of(ctx, current_state)
+            target = target_state or ctx.get("_target_state", "") or ""
             if not target or target == source:
                 return {}
             _emit(
@@ -459,36 +591,48 @@ class EventCollector:
             )
             return {}
 
-        def _on_context_update(ctx: dict[str, Any]) -> dict[str, Any]:
+        def _on_context_update(
+            ctx: dict[str, Any],
+            current_state: str | None = None,
+            target_state: str | None = None,
+        ) -> dict[str, Any]:
             data = self.snapshot_context(ctx)
             if not data:
                 return {}
             _emit(
                 {
                     "type": "context",
-                    "state": ctx.get("_current_state", ""),
+                    "state": _state_of(ctx, current_state),
                     "data": data,
                     "timestamp": _ts(),
                 }
             )
             return {}
 
-        def _on_end(ctx: dict[str, Any]) -> dict[str, Any]:
+        def _on_end(
+            ctx: dict[str, Any],
+            current_state: str | None = None,
+            target_state: str | None = None,
+        ) -> dict[str, Any]:
             _emit(
                 {
                     "type": "end",
-                    "state": ctx.get("_current_state", ""),
+                    "state": _state_of(ctx, current_state),
                     "data": self.snapshot_context(ctx),
                     "timestamp": _ts(),
                 }
             )
             return {}
 
-        def _on_error(ctx: dict[str, Any]) -> dict[str, Any]:
+        def _on_error(
+            ctx: dict[str, Any],
+            current_state: str | None = None,
+            target_state: str | None = None,
+        ) -> dict[str, Any]:
             _emit(
                 {
                     "type": "error",
-                    "state": ctx.get("_current_state", ""),
+                    "state": _state_of(ctx, current_state),
                     "error": str(ctx.get("_error", "Unknown error")),
                     "timestamp": _ts(),
                 }
@@ -503,3 +647,92 @@ class EventCollector:
             "END_CONVERSATION": _on_end,
             "ERROR": _on_error,
         }
+
+
+# ------------------------------------------------------------------
+# Module helpers
+# ------------------------------------------------------------------
+
+# Minimum-level ranking for log filters (loguru's numeric levels).
+_LEVEL_ORDER: dict[str, int] = {
+    "TRACE": 5,
+    "DEBUG": 10,
+    "INFO": 20,
+    "SUCCESS": 25,
+    "WARNING": 30,
+    "ERROR": 40,
+    "CRITICAL": 50,
+}
+
+
+def _state_of(context: dict[str, Any], state: str | None) -> str:
+    """The state the core passed to the handler, else the context's copy."""
+    if state:
+        return state
+    value = context.get("_current_state", "")
+    return value if isinstance(value, str) else ""
+
+
+def _drop_for_display(
+    drop_internal: bool,
+) -> Any:
+    def _should_drop(key: Any, value: Any, _full_key: str) -> str | None:
+        if isinstance(key, str):
+            if drop_internal and has_internal_prefix(key):
+                return "internal"
+            if is_forbidden_context_entry(key, value):
+                return "forbidden"
+        return None
+
+    return _should_drop
+
+
+def redact_context(data: Any, drop_internal: bool = True) -> Any:
+    """A copy of ``data`` safe to show on the dashboard.
+
+    Secret-looking entries (``is_forbidden_context_entry``) are dropped at
+    every depth, internal-prefix keys too unless ``drop_internal`` is False,
+    and non-JSON leaves become ``<redacted:Type>`` (their ``__str__`` is never
+    called). Non-dict input is returned leaf-redacted.
+
+    # DECISION plan-2026-09-28T090000-3c9e41d2/D-002
+    # ONE redaction path for everything the monitor shows (conversation
+    # snapshots, agent logs and results, workflow context). Do NOT re-inline
+    # a top-level key filter or call ``str(value)`` before this runs: a
+    # nested secret and an object's ``__str__`` both reached the dashboard.
+    """
+    if not isinstance(data, dict):
+        if isinstance(data, list | tuple):
+            return [redact_context(v, drop_internal) for v in data]
+        return redact_non_json_leaf(data)
+    try:
+        return filter_context_tree(
+            data,
+            MAX_CONTEXT_FILTER_DEPTH,
+            _drop_for_display(drop_internal),
+            leaf=redact_non_json_leaf,
+        )
+    except Exception:
+        # A pathological cyclic value: fall back to a top-level filter.
+        should_drop = _drop_for_display(drop_internal)
+        return {
+            k: redact_non_json_leaf(v)
+            for k, v in data.items()
+            if should_drop(k, v, str(k)) is None
+        }
+
+
+def _display_text(value: Any) -> str:
+    """Text for an already-redacted value (containers as JSON)."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict | list | tuple):
+        try:
+            return json.dumps(value, default=redacting_json_default)
+        except (TypeError, ValueError):
+            return f"<redacted:{type(value).__name__}>"
+    if isinstance(value, bool | int | float):
+        return str(value)
+    return redacting_json_default(value)

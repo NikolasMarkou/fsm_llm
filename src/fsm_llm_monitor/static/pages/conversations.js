@@ -2,29 +2,42 @@
 
 import { state } from '../services/state.js';
 import { fetchJson, postJson } from '../services/api.js';
-import { $, esc, renderLLMData, copyToClipboard, showToast } from '../utils/dom.js';
+import { $, esc, renderLLMData, copyToClipboard, showToast, openDialog } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
 
 // Forward references (set by app.js)
-let _showPage, _refreshActivityTable, _refreshDetailPanel;
+let _showPage, _refreshActivityTable, _refreshDetailPanel, _openDrawer, _refreshInstances;
 let _detailRequestId = 0;
+// Conversation id with a chat send in flight. While set, a re-render of that
+// conversation (WS-triggered refresh) is deferred so the optimistic user
+// bubble and the reply are not wiped by a detached chat log.
+let _sendingConvId = null;
+let _rerenderAfterSend = false;
 
 export function setDeps(deps) {
     _showPage = deps.showPage;
     _refreshActivityTable = deps.refreshActivityTable;
     _refreshDetailPanel = deps.refreshDetailPanel;
+    _openDrawer = deps.openDrawer;
+    _refreshInstances = deps.refreshInstances;
 }
 
 export function showConversationInDrawer(instanceId, convId) {
+    if (state.currentPage !== 'control') _showPage?.('control');
+
+    // Make the owning FSM the drawer's selected instance (for example right
+    // after a launch, which opens the conversation without openDrawer) so
+    // Back shows that instance instead of an empty panel.
+    if (state.selectedDetailId !== instanceId || state.selectedDetailType !== 'fsm') {
+        _openDrawer?.(instanceId, 'fsm');
+    }
     state.selectedConvInstanceId = instanceId;
     state.selectedConvId = convId;
 
-    if (state.currentPage !== 'control') _showPage?.('control');
-
     const drawer = $('ctrl-drawer');
     const backdrop = $('ctrl-drawer-backdrop');
-    if (drawer) drawer.style.display = 'block';
     if (backdrop) backdrop.style.display = 'block';
+    openDialog(drawer, 'block');
 
     const backBtn = $('ctrl-drawer-back');
     const drawerContent = $('ctrl-drawer-content');
@@ -61,6 +74,7 @@ export function drawerBack() {
 }
 
 export async function showConversationDetail(convId) {
+    if (_sendingConvId && _sendingConvId === convId) { _rerenderAfterSend = true; return; }
     const thisRequest = ++_detailRequestId;
     state.selectedConvId = convId;
     const detail = $('conv-detail');
@@ -69,7 +83,9 @@ export async function showConversationDetail(convId) {
 
     try {
         const data = await fetchJson(`/api/conversations/${encodeURIComponent(convId)}`);
-        if (thisRequest !== _detailRequestId) return;
+        if (thisRequest !== _detailRequestId || state.selectedConvId !== convId) return;
+        // A send may have started while this request was in flight.
+        if (_sendingConvId === convId) { _rerenderAfterSend = true; return; }
 
         if (data.instance_id) {
             state.selectedConvInstanceId = data.instance_id;
@@ -83,8 +99,13 @@ export async function showConversationDetail(convId) {
         html += `<span class="key">State:</span><span class="val text-primary-bold">${esc(data.current_state)}</span>`;
         html += `<span class="key">Description:</span><span class="val">${esc(data.state_description)}</span>`;
         html += `<span class="key">Terminal:</span><span class="val">${data.is_terminal ? '<span class="text-error">Yes</span>' : '<span class="text-success">No</span>'}</span>`;
-        html += `<span class="key">Stack Depth:</span><span class="val">${data.stack_depth || 1}</span>`;
+        html += `<span class="key">Stack Depth:</span><span class="val">${esc(data.stack_depth || 1)}</span>`;
         html += '</div>';
+
+        const ownerId = data.instance_id || state.selectedConvInstanceId;
+        if (!data.is_terminal && ownerId) {
+            html += `<div class="btn-row"><button class="btn btn-sm btn-warning" data-action="end-conversation" data-instance-id="${esc(ownerId)}" data-conv-id="${esc(data.conversation_id || convId)}">End conversation</button></div>`;
+        }
 
         if (data.context_data && Object.keys(data.context_data).length > 0) {
             html += '<div class="panel-title panel-title-spaced panel-title-flex"><span>Context Data</span><button class="btn btn-sm" data-action="copy-context">Copy JSON</button></div>';
@@ -112,20 +133,21 @@ export async function showConversationDetail(convId) {
             html += `<div class="llm-data-panel response">${renderLLMData(data.last_response)}</div>`;
         }
 
-        if (data.message_history?.length > 0) {
-            html += `<div class="panel-title panel-title-spaced">Message History (${data.message_history.length})</div>`;
-            html += '<div class="chat-container" id="conv-chat-log">';
-            for (const msg of data.message_history) {
-                const role = msg.role || 'system';
-                const content = msg.content || '';
-                const bubbleClass = role === 'user' ? 'user' : 'assistant';
-                html += `<div class="chat-bubble ${bubbleClass}">`;
-                html += `<div class="chat-role-tag">${esc(role)}</div>`;
-                html += role === 'user' ? esc(content) : `<div class="md-body">${renderMarkdown(content)}</div>`;
-                html += '</div>';
-            }
+        // Always render the chat log so a send has somewhere to append to,
+        // even before the first message.
+        const history = Array.isArray(data.message_history) ? data.message_history : [];
+        html += `<div class="panel-title panel-title-spaced">Message History (${history.length})</div>`;
+        html += '<div class="chat-container" id="conv-chat-log">';
+        for (const msg of history) {
+            const role = msg.role || 'system';
+            const content = msg.content || '';
+            const bubbleClass = role === 'user' ? 'user' : 'assistant';
+            html += `<div class="chat-bubble ${bubbleClass}">`;
+            html += `<div class="chat-role-tag">${esc(role)}</div>`;
+            html += role === 'user' ? esc(content) : `<div class="md-body">${renderMarkdown(content)}</div>`;
             html += '</div>';
         }
+        html += '</div>';
 
         if (data.is_terminal) html += '<div class="ended-indicator">Conversation ended</div>';
 
@@ -141,7 +163,7 @@ export async function showConversationDetail(convId) {
         const titleEl = $('ctrl-drawer-title');
         if (titleEl) {
             const inst = state.instances.find(i => i.instance_id === state.selectedConvInstanceId);
-            const instLabel = inst ? (inst.label || state.selectedConvInstanceId.substring(0, 12)) : '';
+            const instLabel = inst ? (inst.label || String(state.selectedConvInstanceId || '').substring(0, 12)) : '';
             titleEl.textContent = `${instLabel ? `${instLabel} \u2192 ` : ''}${data.current_state}`;
         }
     } catch (e) {
@@ -186,11 +208,18 @@ export { _addTypingIndicator as addTypingIndicator, _removeTypingIndicator as re
 
 export async function sendChatMessage() {
     if (!state.selectedConvId || !state.selectedConvInstanceId) return;
+    if (_sendingConvId) return;
     const input = $('conv-message-input');
     const message = input.value.trim();
     if (!message) return;
+    const convId = state.selectedConvId;
+    const instanceId = state.selectedConvInstanceId;
     input.value = '';
     input.disabled = true;
+    _sendingConvId = convId;
+    _rerenderAfterSend = false;
+    // Drop any render that was already in flight for the old history.
+    _detailRequestId++;
 
     const chatLog = $('conv-chat-log');
     if (chatLog) {
@@ -203,8 +232,8 @@ export async function sendChatMessage() {
     _addTypingIndicator(chatLog);
 
     try {
-        const data = await postJson(`/api/fsm/${encodeURIComponent(state.selectedConvInstanceId)}/converse`, {
-            conversation_id: state.selectedConvId, message
+        const data = await postJson(`/api/fsm/${encodeURIComponent(instanceId)}/converse`, {
+            conversation_id: convId, message
         });
         _removeTypingIndicator();
 
@@ -234,6 +263,33 @@ export async function sendChatMessage() {
         }
         console.error('sendChatMessage:', e);
     }
+    _sendingConvId = null;
     input.disabled = false;
     input.focus();
+    // Catch up on any refresh deferred during the send.
+    if (_rerenderAfterSend && state.selectedConvId === convId) {
+        _rerenderAfterSend = false;
+        showConversationDetail(convId);
+    }
+    _rerenderAfterSend = false;
+}
+
+/** POST /api/fsm/{id}/end for a conversation of a managed FSM, then refresh. */
+export async function endConversation(instanceId, convId) {
+    if (!instanceId || !convId) return;
+    if (!confirm('End this conversation?')) return;
+    try {
+        await postJson(`/api/fsm/${encodeURIComponent(instanceId)}/end`, { conversation_id: convId });
+        showToast('Conversation ended', 'success');
+    } catch (e) {
+        console.error('endConversation:', e);
+        showToast(`Failed to end conversation: ${e.message}`, 'error');
+        return;
+    }
+    if (state.selectedConvId === convId) showConversationDetail(convId);
+    if (state.selectedDetailId === instanceId && state.selectedDetailType === 'fsm') {
+        _refreshDetailPanel?.(instanceId, 'fsm');
+    }
+    _refreshInstances?.();
+    if (state.currentPage === 'dashboard') _refreshActivityTable?.();
 }

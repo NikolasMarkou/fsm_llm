@@ -26,7 +26,11 @@ from .definitions import (
     TransitionInfo,
 )
 from .exceptions import MonitorConnectionError
-from .instance_manager import register_monitor_handlers, snapshot_from_api
+from .instance_manager import (
+    register_monitor_handlers,
+    snapshot_from_api,
+    unregister_monitor_handlers,
+)
 
 
 class MonitorBridge:
@@ -83,20 +87,30 @@ class MonitorBridge:
     def connect(self, api: API) -> None:
         """Connect to an API instance and register monitor handlers.
 
-        Raises ``MonitorConnectionError`` if handler registration fails.
+        Connecting again to the same API is a no-op (handlers are not
+        stacked); connecting to a different API detaches the previous one.
+        Raises ``MonitorConnectionError`` if handler registration fails (the
+        bridge then stays disconnected).
         """
+        if api is None:
+            return
+        if self._connected and self._api is api:
+            return
+        if self._connected and self._api is not None:
+            self.disconnect()
+        try:
+            register_monitor_handlers(api, self._collector)
+        except Exception as e:
+            raise MonitorConnectionError(
+                f"Failed to register monitor handlers: {e}"
+            ) from e
         self._api = api
-        if self._api is not None:
-            try:
-                register_monitor_handlers(self._api, self._collector)
-            except Exception as e:
-                raise MonitorConnectionError(
-                    f"Failed to register monitor handlers: {e}"
-                ) from e
-            self._connected = True
+        self._connected = True
 
     def disconnect(self) -> None:
-        """Disconnect from the API."""
+        """Disconnect from the API: its monitor handlers stop recording."""
+        if self._api is not None:
+            unregister_monitor_handlers(self._api, self._collector)
         self._api = None
         self._connected = False
 
@@ -185,7 +199,7 @@ def _fsm_dict_to_snapshot(data: dict[str, Any]) -> FSMSnapshot:
                 TransitionInfo(
                     target_state=t.get("target_state", ""),
                     description=t.get("description", ""),
-                    priority=t.get("priority", 0),
+                    priority=t.get("priority", 100),
                     condition_count=len(conditions),
                     has_logic=any(c.get("logic") for c in conditions),
                 )

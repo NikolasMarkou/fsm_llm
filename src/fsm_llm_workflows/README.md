@@ -30,11 +30,12 @@ Step types: automatic (run a function, move on), API call, condition (yes/no bra
 
 - `engine.py` - `WorkflowEngine`: runs instances, handles events and timers, cancels, cleans up.
 - `steps.py` - the 11 step classes.
-- `dsl.py` - short builder functions (`create_workflow`, `auto_step`, `condition_step`, ...) and three ready-made patterns.
+- `dsl.py` - short builder functions (`create_workflow`, `auto_step`, `condition_step`, ...) and three helpers that register a set of steps (they do not wire the steps together).
 - `definitions.py` - `WorkflowDefinition` with validation (targets exist, all steps reachable), and `WorkflowValidator`.
 - `models.py` - statuses, events, step results, instances, event listeners, wait settings.
 - `dependency_resolver.py` - `DependencyResolver`: orders steps into "waves" that can run in parallel. It is a standalone helper; the engine does not use it.
 - `exceptions.py` - error classes.
+- `constants.py` - engine context keys, limits and defaults.
 - `__init__.py`, `__version__.py`, `py.typed` - public exports, version, type marker.
 
 ## How to use it
@@ -64,10 +65,13 @@ asyncio.run(main())
 
 ## Things to know
 
-- Everything is `async`. Plain functions (actions, conditions, agents) are run in a thread pool.
+- Everything is `async`. Plain functions (actions, conditions, agents) run in a thread pool (pass `WorkflowEngine(executor=...)` to choose it). A function that returns a coroutine is awaited. A timeout cannot stop a plain function that is still running in its thread.
 - A step returning `next_state=""` ends the workflow there.
-- One chain of steps may be at most 20 steps deep in a single call. Longer runs, or loops, fail with an error; loops through timers or events are not caught by this limit.
+- A failed step goes to its `error_state` (or `failure_state` for API steps). With no error route the workflow FAILS; it never continues down the success route.
+- Loops are allowed when they pass through a timer or event wait (polling, retry-until). A loop made only of steps that run back to back is rejected when the workflow is registered. One engine call runs at most `max_steps_per_run` steps (default 1000).
+- Events: `process_event` wakes every instance waiting for that event type, or only one instance when `WorkflowEvent.instance_id` is set (such a targeted event is kept until that instance waits for it). `wait_event_step(..., correlation_key="order_id")` only accepts events whose payload `order_id` equals the instance's own. A wait with `timeout_seconds` and no `timeout_state` fails the instance when it times out.
 - Keys a step returns that look internal (starting with `_`, `system_`, `internal_`, `__`) are dropped from the context, except the engine's own wait and timer markers.
-- Nothing is saved to disk. Instances live in memory; set `max_completed_instances` to cap how many finished ones are kept.
-- `workflow_timeout` on `start_workflow` limits the whole run, including a single long step.
-- Unlike the core package, this package's log lines are not switched off by default: running a workflow prints INFO lines to stderr.
+- Nothing is saved to disk. Instances live in memory; by default the 1000 most recent finished ones are kept (`max_completed_instances`), each with at most 1000 history entries.
+- `workflow_timeout` on `start_workflow` limits the whole run, waits included.
+- `engine.add_hook(fn)` calls `fn(event_name, instance, data)` on step start, step end and status change.
+- Log output is off until `fsm_llm.setup_logging()` or `fsm_llm.enable_debug_logging()` is called, like the core package.

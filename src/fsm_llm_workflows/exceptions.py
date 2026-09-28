@@ -39,7 +39,7 @@ class WorkflowStepError(WorkflowError):
         self.step_id = step_id
         self.cause = cause
 
-        error_details = details or {}
+        error_details = dict(details or {})
         if cause:
             error_details["cause"] = str(cause)
             error_details["cause_type"] = type(cause).__name__
@@ -65,12 +65,19 @@ class WorkflowTimeoutError(WorkflowError):
         operation: str,
         timeout_seconds: float,
         details: dict[str, Any] | None = None,
+        instance_id: str | None = None,
     ):
         self.operation = operation
         self.timeout_seconds = timeout_seconds
+        #: The workflow instance that timed out, when known. Lets a caller of
+        #: ``start_workflow`` find the (now FAILED) instance even though the
+        #: call raised before returning its id.
+        self.instance_id = instance_id
 
-        error_details = details or {}
+        error_details = dict(details or {})
         error_details["timeout_seconds"] = timeout_seconds
+        if instance_id is not None:
+            error_details["instance_id"] = instance_id
 
         super().__init__(
             f"Operation '{operation}' timed out after {timeout_seconds} seconds",
@@ -87,7 +94,7 @@ class WorkflowValidationError(WorkflowError):
         error_summary = f"Validation failed with {len(validation_errors)} error(s):\n"
         error_summary += "\n".join(f"  - {error}" for error in validation_errors)
 
-        error_details = details or {}
+        error_details = dict(details or {})
         error_details["validation_errors"] = validation_errors
 
         super().__init__(error_summary, error_details)
@@ -106,7 +113,7 @@ class WorkflowStateError(WorkflowError):
         self.current_state = current_state
         self.operation = operation
 
-        error_details = details or {}
+        error_details = dict(details or {})
         error_details["current_state"] = current_state
         error_details["operation"] = operation
 
@@ -123,7 +130,7 @@ class WorkflowEventError(WorkflowError):
     ):
         self.event_type = event_type
 
-        error_details = details or {}
+        error_details = dict(details or {})
         error_details["event_type"] = event_type
 
         super().__init__(f"Event '{event_type}': {message}", error_details)
@@ -142,7 +149,7 @@ class WorkflowResourceError(WorkflowError):
         self.resource_type = resource_type
         self.resource_id = resource_id
 
-        error_details = details or {}
+        error_details = dict(details or {})
         error_details["resource_type"] = resource_type
         error_details["resource_id"] = resource_id
 

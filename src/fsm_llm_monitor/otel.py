@@ -26,6 +26,7 @@ from .constants import (
     EVENT_STATE_TRANSITION,
     EVENT_WORKFLOW_CANCELLED,
     EVENT_WORKFLOW_COMPLETED,
+    EVENT_WORKFLOW_FAILED,
     EVENT_WORKFLOW_STARTED,
 )
 from .definitions import MonitorEvent
@@ -42,6 +43,29 @@ try:
     _HAS_OTEL = True
 except ImportError:
     _HAS_OTEL = False
+
+try:
+    from opentelemetry.context import Context as _OtelContext
+except ImportError:  # pragma: no cover - optional / mocked in tests
+    _OtelContext = None
+
+#: Cap on simultaneously open conversation spans; the oldest is ended first.
+MAX_OPEN_CONVERSATION_SPANS = 10_000
+#: Error text exported as a span attribute is cut to this length.
+MAX_ERROR_TEXT = 200
+
+
+def _root_context() -> Any:
+    """An empty OTEL context, so a span without a conversation parent does not
+    attach to whatever span happens to be current in this thread."""
+    return _OtelContext() if _OtelContext is not None else None
+
+
+def _error_text(message: str) -> str:
+    """First line of an error message, truncated (provider errors can echo
+    request details)."""
+    first = (message or "").splitlines()[0] if message else ""
+    return first[:MAX_ERROR_TEXT]
 
 
 def _require_otel() -> None:
@@ -102,6 +126,7 @@ class OTELExporter:
 
         # Original record_event method (stored on enable, restored on disable)
         self._original_record_event: Any = None
+        self._wrapper: Any = None
 
         logger.info(f"OTELExporter initialized for service '{service_name}'")
 
@@ -136,6 +161,7 @@ class OTELExporter:
                 original_record(event)
                 self._export_event(event)
 
+            self._wrapper = wrapped_record
             collector.record_event = wrapped_record
         logger.info("OTEL export enabled")
 
@@ -148,10 +174,18 @@ class OTELExporter:
     def _disable_locked(self) -> None:
         """Disable export. Caller must hold ``self._state_lock``."""
         self._enabled = False
-        # Restore the original record_event on the collector
-        if self._collector is not None and self._original_record_event is not None:
+        # Restore the original record_event on the collector, but only if our
+        # wrapper is still the outermost one: if another exporter wrapped us
+        # since, restoring would silently drop its wrapper. Ours stays in the
+        # chain as a pass-through (``_enabled`` is False).
+        if (
+            self._collector is not None
+            and self._original_record_event is not None
+            and getattr(self._collector, "record_event", None) is self._wrapper
+        ):
             self._collector.record_event = self._original_record_event
-            self._original_record_event = None
+        self._original_record_event = None
+        self._wrapper = None
         self._collector = None
         # End any active conversation spans
         with self._spans_lock:
@@ -197,23 +231,42 @@ class OTELExporter:
             EVENT_AGENT_FAILED,
             EVENT_WORKFLOW_STARTED,
             EVENT_WORKFLOW_COMPLETED,
+            EVENT_WORKFLOW_FAILED,
             EVENT_WORKFLOW_CANCELLED,
         ):
             self._on_lifecycle_event(event)
 
     def _on_conversation_start(self, event: MonitorEvent) -> None:
-        """Start a conversation-level span."""
+        """Start a conversation-level span.
+
+        Span names are fixed ("conversation", "transition", ...); ids go in
+        attributes, so backends do not see one span name per conversation.
+        """
         conv_id = event.conversation_id or "unknown"
         span = self._tracer.start_span(
-            f"conversation.{conv_id}",
+            "conversation",
+            context=_root_context(),
             attributes={
                 "fsm_llm.conversation_id": conv_id,
                 "fsm_llm.event_type": event.event_type,
                 "fsm_llm.service": self._service_name,
             },
         )
+        evicted = []
         with self._spans_lock:
-            self._conversation_spans[conv_id] = span
+            if not self._enabled:
+                # disable() ran meanwhile: do not leak an unowned span.
+                evicted.append(span)
+            else:
+                previous = self._conversation_spans.pop(conv_id, None)
+                if previous is not None:
+                    evicted.append(previous)
+                self._conversation_spans[conv_id] = span
+                while len(self._conversation_spans) > MAX_OPEN_CONVERSATION_SPANS:
+                    oldest = next(iter(self._conversation_spans))
+                    evicted.append(self._conversation_spans.pop(oldest))
+        for stale in evicted:
+            stale.end()
 
     def _on_conversation_end(self, event: MonitorEvent) -> None:
         """End the conversation-level span."""
@@ -231,9 +284,9 @@ class OTELExporter:
         # _on_conversation_end cannot end() the parent between read and use.
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
-            ctx = trace.set_span_in_context(parent) if parent else None
+            ctx = trace.set_span_in_context(parent) if parent else _root_context()
             with self._tracer.start_as_current_span(
-                f"transition.{event.source_state}->{event.target_state}",
+                "transition",
                 context=ctx,
                 attributes={
                     "fsm_llm.conversation_id": conv_id,
@@ -251,20 +304,25 @@ class OTELExporter:
             "fsm_llm.conversation_id": conv_id,
             "fsm_llm.event_type": phase,
         }
-        # Add LLM-specific attributes if present
+        # Optional LLM attributes (set when an event carries them); a bad
+        # value skips that attribute instead of dropping the span.
         data = event.data
-        if "model" in data:
-            attrs["fsm_llm.model"] = str(data["model"])
-        if "tokens" in data:
-            attrs["fsm_llm.tokens"] = int(data["tokens"])
-        if "latency_ms" in data:
-            attrs["fsm_llm.latency_ms"] = float(data["latency_ms"])
+        for key, attr, cast in (
+            ("model", "fsm_llm.model", str),
+            ("tokens", "fsm_llm.tokens", int),
+            ("latency_ms", "fsm_llm.latency_ms", float),
+        ):
+            if key in data:
+                try:
+                    attrs[attr] = cast(data[key])
+                except (TypeError, ValueError):
+                    pass
 
         # Hold the lock across child-span creation so a concurrent
         # _on_conversation_end cannot end() the parent between read and use.
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
-            ctx = trace.set_span_in_context(parent) if parent else None
+            ctx = trace.set_span_in_context(parent) if parent else _root_context()
             with self._tracer.start_as_current_span(
                 f"processing.{phase}",
                 context=ctx,
@@ -280,18 +338,26 @@ class OTELExporter:
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
             if parent:
-                parent.set_status(StatusCode.ERROR, event.message)
-                parent.set_attribute("fsm_llm.error", event.message)
+                text = _error_text(event.message)
+                parent.set_status(StatusCode.ERROR, text)
+                parent.set_attribute("fsm_llm.error", text)
 
     def _on_lifecycle_event(self, event: MonitorEvent) -> None:
         """Record agent/workflow lifecycle events."""
+        # Only ids and the event type: messages can carry agent task text or
+        # provider error text.
+        attrs: dict[str, Any] = {
+            "fsm_llm.event_type": event.event_type,
+            "fsm_llm.conversation_id": event.conversation_id or "",
+        }
+        for key in ("instance_id", "workflow_instance_id"):
+            value = event.data.get(key)
+            if isinstance(value, str) and value:
+                attrs[f"fsm_llm.{key}"] = value
         with self._tracer.start_as_current_span(
             f"lifecycle.{event.event_type}",
-            attributes={
-                "fsm_llm.event_type": event.event_type,
-                "fsm_llm.conversation_id": event.conversation_id or "",
-                "fsm_llm.message": event.message,
-            },
+            context=_root_context(),
+            attributes=attrs,
         ):
             pass
 

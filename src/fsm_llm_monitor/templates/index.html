@@ -250,12 +250,12 @@
             </div>
             <!-- Drawer backdrop + drawer for detail -->
             <div id="ctrl-drawer-backdrop" class="drawer-backdrop" style="display:none;" data-action="close-drawer"></div>
-            <div id="ctrl-drawer" class="drawer-overlay" style="display:none;" role="dialog" aria-label="Instance detail">
+            <div id="ctrl-drawer" class="drawer-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="ctrl-drawer-title">
                 <div class="drawer-header">
                     <h3 id="ctrl-drawer-title">Detail</h3>
                     <div class="flex-row-gap-4">
                         <button id="ctrl-drawer-back" class="btn btn-sm" style="display:none;" data-action="drawer-back">&larr; Back</button>
-                        <button class="btn btn-sm" data-action="close-drawer">&times;</button>
+                        <button class="btn btn-sm" data-action="close-drawer" aria-label="Close detail">&times;</button>
                     </div>
                 </div>
                 <div id="ctrl-drawer-content"></div>
@@ -359,8 +359,10 @@
                 </div>
                 <div id="builder-result-status" class="builder-result-status"></div>
                 <div id="builder-result-summary" class="builder-result-summary"></div>
+                <div id="builder-launch-note" class="unavailable-notice" style="display:none;"></div>
                 <div id="builder-result-graph" class="builder-result-graph" style="display:none;">
                     <svg id="builder-result-svg" class="graph-svg"></svg>
+                    <div id="builder-result-graph-error" class="empty-state" style="display:none;" role="status"></div>
                 </div>
                 <details class="builder-json-details">
                     <summary>JSON Definition</summary>
@@ -385,16 +387,25 @@
             <div class="grid-2">
                 <div class="panel" id="settings-panel">
                     <div class="panel-title">Monitor Settings</div>
-                    <div class="form-row"><label for="set-refresh">Refresh Interval (s):</label><input type="number" id="set-refresh" value="1.0" step="0.5" min="0.5" class="input-narrow"></div>
-                    <div class="form-row"><label for="set-max-events">Max Events:</label><input type="number" id="set-max-events" value="1000" min="100" class="input-narrow"></div>
-                    <div class="form-row"><label for="set-max-logs">Max Log Lines:</label><input type="number" id="set-max-logs" value="5000" min="100" class="input-narrow"></div>
-                    <div class="form-row"><label for="set-level">Log Level:</label><select id="set-level" class="input-narrow"><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option></select></div>
+                    <div class="form-row"><label for="set-refresh">Refresh Interval (s):</label><input type="number" id="set-refresh" value="1.0" step="0.5" min="0.5" max="60" class="input-narrow" aria-describedby="set-refresh-hint"><span id="set-refresh-hint" class="form-hint">0.5 to 60</span></div>
+                    <div class="form-row"><label for="set-max-events">Max Events:</label><input type="number" id="set-max-events" value="1000" min="10" max="100000" step="1" class="input-narrow" aria-describedby="set-max-events-hint"><span id="set-max-events-hint" class="form-hint">10 to 100000; resizes the global buffer now, per-instance buffers on new instances</span></div>
+                    <div class="form-row"><label for="set-max-logs">Max Log Lines:</label><input type="number" id="set-max-logs" value="5000" min="10" max="100000" step="1" class="input-narrow" aria-describedby="set-max-logs-hint"><span id="set-max-logs-hint" class="form-hint">10 to 100000; resizes the global buffer now, per-instance buffers on new instances</span></div>
+                    <div class="form-row"><label for="set-level">Log Level:</label><select id="set-level" class="input-narrow"><option>TRACE</option><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select></div>
                     <div class="form-row"><label for="set-internal-keys">Show Internal Keys:</label><input type="checkbox" id="set-internal-keys"></div>
                     <div class="form-row"><label for="set-auto-scroll">Auto-Scroll Logs:</label><input type="checkbox" id="set-auto-scroll" checked></div>
                     <div class="btn-row">
                         <button class="btn btn-primary" data-action="save-settings">Save</button>
                         <button class="btn" data-action="reset-settings">Reset</button>
                     </div>
+                    <span id="settings-status" class="form-status" role="status"></span>
+                    <div class="panel-title panel-title-spaced">API Key</div>
+                    <div class="form-row"><label for="set-api-key">API Key:</label><input type="password" id="set-api-key" class="flex-1" autocomplete="off" spellcheck="false" placeholder="Enter key to store for this session" aria-describedby="api-key-state"></div>
+                    <div id="api-key-state" class="form-hint"></div>
+                    <div class="btn-row">
+                        <button class="btn btn-primary" data-action="save-api-key">Save Key</button>
+                        <button class="btn" data-action="clear-api-key">Clear Key</button>
+                    </div>
+                    <span id="api-key-status" class="form-status" role="status"></span>
                     <div class="panel-title panel-title-spaced">Keyboard Shortcuts</div>
                     <div class="shortcuts-list">
                         <div><kbd>1</kbd> Dashboard</div>
@@ -419,11 +430,11 @@
     </div>
 
     <!-- SHORTCUTS OVERLAY -->
-    <div id="shortcuts-overlay" class="modal-overlay" style="display:none;" data-action="close-shortcuts-backdrop" role="dialog" aria-label="Keyboard shortcuts">
+    <div id="shortcuts-overlay" class="modal-overlay" style="display:none;" data-action="close-shortcuts-backdrop" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
         <div class="shortcuts-modal">
             <div class="modal-header">
                 <span>Keyboard Shortcuts</span>
-                <button class="btn btn-sm" data-action="close-shortcuts">&times;</button>
+                <button class="btn btn-sm" data-action="close-shortcuts" aria-label="Close shortcuts">&times;</button>
             </div>
             <div class="shortcuts-grid">
                 <div class="shortcut-group">
@@ -445,11 +456,11 @@
     </div>
 
     <!-- LAUNCH MODAL -->
-    <div id="launch-modal" class="modal-overlay" style="display:none;" data-action="close-modal-backdrop" role="dialog" aria-label="Launch instance">
+    <div id="launch-modal" class="modal-overlay" style="display:none;" data-action="close-modal-backdrop" role="dialog" aria-modal="true" aria-label="Launch instance">
         <div class="modal">
             <div class="modal-header">
                 <span>Launch Instance</span>
-                <button class="btn btn-sm" data-action="close-launch-modal">&times;</button>
+                <button class="btn btn-sm" data-action="close-launch-modal" aria-label="Close launch dialog">&times;</button>
             </div>
             <div class="tab-bar">
                 <button class="tab active" data-tab="launch-tab-fsm" data-action="switch-tab">FSM</button>
@@ -549,6 +560,26 @@
             </div>
         </div>
     </div>
+
+    <!-- API KEY MODAL (driven by static/services/auth.js) -->
+    <div id="apikey-modal" class="modal-overlay" style="display:none;" data-action="close-apikey-backdrop" role="dialog" aria-modal="true" aria-labelledby="apikey-modal-title" aria-describedby="apikey-modal-msg">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <span id="apikey-modal-title">API Key Required</span>
+                <button class="btn btn-sm" data-action="apikey-cancel" aria-label="Cancel">&times;</button>
+            </div>
+            <p id="apikey-modal-msg" class="text-dim"></p>
+            <div class="form-row"><label for="apikey-input">API Key:</label><input type="password" id="apikey-input" class="flex-1" autocomplete="off" spellcheck="false"></div>
+            <div class="btn-row">
+                <button class="btn btn-primary" data-action="apikey-save">Save</button>
+                <button class="btn" data-action="apikey-cancel">Cancel</button>
+                <span id="apikey-status" class="form-status" role="status"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen-reader announcements for toasts (utils/dom.js showToast) -->
+    <div id="toast-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <!-- MOBILE BOTTOM NAV (hidden on desktop) -->
     <nav class="mobile-nav" id="mobile-nav">

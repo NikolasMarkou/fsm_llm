@@ -171,7 +171,7 @@ Priority ordering (lower first). Error modes: `"continue"` (log + skip) or `"rai
 ```
 fsm_llm (core, includes classification)
 ├── fsm_llm_reasoning  — Uses API (push/pop FSM stacking) + classification
-├── fsm_llm_workflows  — Uses HandlerSystem + API (via ConversationStep)
+├── fsm_llm_workflows  — Uses API (via ConversationStep); lifecycle hooks via add_hook
 ├── fsm_llm_agents     — Uses API (auto-generates FSMs) + handlers for tool execution
 ├── fsm_llm_monitor    — Uses API + handlers (observer callbacks at priority 9999)
 └── fsm_llm_harness    — Uses API (hand-written FSM) + handlers at state entry; dispatches

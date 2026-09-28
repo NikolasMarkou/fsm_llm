@@ -398,10 +398,19 @@ class TestConversationStep:
 
     @pytest.mark.asyncio
     async def test_requires_fsm_file_or_definition(self):
-        """ConversationStep must fail if neither fsm_file nor fsm_definition is given."""
-        step = ConversationStep(step_id="conv1", name="Conv", success_state="done")
-        with pytest.raises(WorkflowStepError, match="requires either"):
-            await step.execute({})
+        """ConversationStep must be rejected at construction if neither
+        fsm_file nor fsm_definition is given (not only when it runs)."""
+        with pytest.raises(ValueError, match="requires either"):
+            ConversationStep(step_id="conv1", name="Conv", success_state="done")
+
+    def test_rejects_both_fsm_file_and_definition(self):
+        with pytest.raises(ValueError, match="exactly one"):
+            ConversationStep(
+                step_id="conv1",
+                name="Conv",
+                fsm_file="x.json",
+                fsm_definition={"name": "t"},
+            )
 
     @pytest.mark.asyncio
     async def test_success_with_fsm_definition(self):

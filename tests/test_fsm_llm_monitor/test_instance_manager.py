@@ -208,13 +208,14 @@ class TestInstanceManager:
 
 
 class TestRegisterMonitorHandlers:
-    def test_registers_8_handlers(self):
+    def test_registers_7_handlers(self):
         from fsm_llm_monitor.collector import EventCollector
 
         api = MagicMock()
         collector = EventCollector()
         register_monitor_handlers(api, collector)
-        assert api.register_handler.call_count == 8
+        # 7: the no-op POST_TRANSITION observer is not registered.
+        assert api.register_handler.call_count == 7
 
 
 class TestSnapshotInternalKeyHiding:
@@ -282,7 +283,16 @@ class TestSnapshotInternalKeyHiding:
         )
 
         assert snap is not None
-        assert snap.context_data == self._MIXED_CONTEXT
+        # Internal keys are shown, but secret-looking entries never are.
+        assert snap.context_data == {
+            "order_id": "A-1",
+            "_private": "no",
+            "internal_token": "tok",
+            "__dunder": "no",
+            "Internal_token": "tok",
+        }
+        for secret in ("system_password", "System_Password", "SYSTEM_secret"):
+            assert secret not in snap.context_data
 
 
 class TestConversationCaching:
@@ -657,6 +667,38 @@ class TestWorkflowPresets:
         mgr = self._make_manager()
         with pytest.raises(ValueError, match="preset_id is required"):
             mgr.launch_workflow()
+
+    async def test_status_redacts_secret_shaped_context(self):
+        mgr = self._make_manager()
+        managed = mgr.launch_workflow(preset_id="demo_branching")
+        wf_id = await mgr.start_workflow_instance(
+            managed.instance_id,
+            managed.workflow_id,
+            {
+                "amount": 5000,
+                "password": "hunter2",
+                "nested": {"password": "x", "ok": 1},
+            },
+        )
+        context = mgr.get_workflow_status(managed.instance_id, wf_id)["context"]
+        assert context.get("tier") == "high"
+        assert "password" not in context
+        assert context["nested"] == {"ok": 1}
+
+    async def test_send_workflow_event(self):
+        import pytest
+
+        mgr = self._make_manager()
+        managed = mgr.launch_workflow(preset_id="demo_linear")
+        # Nothing waits in the demo presets: a broadcast wakes nobody.
+        assert (
+            await mgr.send_workflow_event(managed.instance_id, "ping", {"a": 1}) == []
+        )
+        # A target that is not a known workflow instance is rejected.
+        with pytest.raises(KeyError):
+            await mgr.send_workflow_event(
+                managed.instance_id, "ping", {}, wf_instance_id="nope"
+            )
 
 
 class TestDisabledAgentTypes:

@@ -1,11 +1,15 @@
 """
-Workflow engine for executing workflow definitions using FSM-LLM.
+Workflow engine for executing workflow definitions.
 """
 
 from __future__ import annotations
 
 import asyncio
+import collections
+import inspect
 import uuid
+from collections.abc import Callable
+from concurrent.futures import Executor
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -16,31 +20,55 @@ from fsm_llm.logging import logger
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
+from .constants import (
+    DEFAULT_MAX_COMPLETED_INSTANCES,
+    KEY_CANCELLATION_REASON,
+    KEY_LAST_EVENT,
+    KEY_TIMEOUT,
+    KEY_TIMER_EXPIRED,
+    KEY_TIMER_INFO,
+    KEY_USER_INPUT,
+    KEY_WAITING_INFO,
+    KEY_WORKFLOW_INFO,
+    MAX_BUFFERED_EVENTS_PER_INSTANCE,
+    MAX_STEP_DEPTH,
+    MAX_STEPS_PER_RUN,
+    STEP_INTERNAL_WHITELIST,
+)
 from .definitions import WorkflowDefinition
 from .exceptions import (
     WorkflowDefinitionError,
+    WorkflowEventError,
     WorkflowInstanceError,
     WorkflowResourceError,
     WorkflowStateError,
     WorkflowStepError,
+    WorkflowTimeoutError,
 )
-from .models import EventListener, WorkflowEvent, WorkflowInstance, WorkflowStatus
+from .models import (
+    EventListener,
+    WorkflowEvent,
+    WorkflowInstance,
+    WorkflowStatus,
+    WorkflowStepResult,
+)
+from .steps import _STEP_EXECUTOR
 
-# Maximum recursion depth for workflow step execution to prevent infinite loops
-MAX_STEP_DEPTH = 20
+# Backwards-compatible module-level names (the constants live in constants.py).
+_KEY_WAITING_INFO = KEY_WAITING_INFO
+_KEY_TIMER_INFO = KEY_TIMER_INFO
+_KEY_WORKFLOW_INFO = KEY_WORKFLOW_INFO
+_KEY_TIMEOUT = KEY_TIMEOUT
+_KEY_TIMER_EXPIRED = KEY_TIMER_EXPIRED
+_KEY_LAST_EVENT = KEY_LAST_EVENT
+_KEY_USER_INPUT = KEY_USER_INPUT
+_KEY_CANCELLATION_REASON = KEY_CANCELLATION_REASON
+_STEP_INTERNAL_WHITELIST = STEP_INTERNAL_WHITELIST
 
-# Internal context keys used by engine and steps for workflow state management
-_KEY_WAITING_INFO = "_waiting_info"
-_KEY_TIMER_INFO = "_timer_info"
-_KEY_WORKFLOW_INFO = "_workflow_info"
-_KEY_TIMEOUT = "_timeout"
-_KEY_TIMER_EXPIRED = "_timer_expired"
-_KEY_LAST_EVENT = "_last_event"
-_KEY_USER_INPUT = "_user_input"
-_KEY_CANCELLATION_REASON = "_cancellation_reason"
+__all__ = ["MAX_STEP_DEPTH", "MAX_STEPS_PER_RUN", "Timer", "WorkflowEngine"]
 
-# Internal context keys that steps are allowed to set (bypass underscore filter)
-_STEP_INTERNAL_WHITELIST = {_KEY_WAITING_INFO, _KEY_TIMER_INFO}
+#: Signature of a lifecycle hook: ``hook(event_name, instance, data)``.
+LifecycleHook = Callable[[str, WorkflowInstance, dict[str, Any]], Any]
 
 # --------------------------------------------------------------
 
@@ -51,7 +79,7 @@ class Timer:
     def __init__(
         self,
         instance_id: str,
-        next_state: str,
+        next_state: str | None,
         expires_at: datetime,
         task: asyncio.Task | None = None,
     ):
@@ -65,43 +93,57 @@ class Timer:
         return datetime.now(timezone.utc) > self.expires_at
 
     def cancel(self) -> None:
-        """Cancel the timer task."""
+        """Cancel the timer task (never the task that is currently running,
+        which would abort the very transition that task is performing)."""
         if self.task and not self.task.done():
-            self.task.cancel()
+            try:
+                current = asyncio.current_task()
+            except RuntimeError:
+                current = None
+            if self.task is not current:
+                self.task.cancel()
 
 
 class WorkflowEngine:
-    """Engine for executing workflow definitions using FSM-LLM.
+    """Engine for executing workflow definitions.
 
-    The workflow engine manages its own state machine independently (async, event-driven)
-    and integrates with FSM-LLM through the handler system for handler registration.
+    The engine runs its own async state machine: it executes an instance's
+    steps back to back until one pauses (event or timer wait), ends, or
+    fails. Everything is in memory.
 
     Args:
-        handler_system: Handler system for registering workflow handlers.
-            If not provided, a new one is created.
-        max_concurrent_workflows: Maximum number of concurrent workflow instances.
+        handler_system: Accepted for backwards compatibility and stored as
+            ``self.handler_system``; the engine does not call it. Use
+            ``add_hook`` to observe instances.
+        max_concurrent_workflows: Maximum number of active (RUNNING/WAITING)
+            instances.
+        max_completed_instances: Maximum number of terminal instances kept in
+            memory (oldest purged first). ``None`` keeps all of them.
+        max_steps_per_run: Maximum steps one engine call may execute before
+            the instance is FAILED (guards custom steps with dynamic routing;
+            static synchronous cycles are rejected at registration).
+        executor: Executor for synchronous step callables. ``None`` uses the
+            event loop's default executor.
     """
 
     def __init__(
         self,
         handler_system: HandlerSystem | None = None,
         max_concurrent_workflows: int = 100,
-        max_completed_instances: int | None = None,
+        max_completed_instances: int | None = DEFAULT_MAX_COMPLETED_INSTANCES,
+        max_steps_per_run: int = MAX_STEPS_PER_RUN,
+        executor: Executor | None = None,
     ):
-        """Initialize the workflow engine.
-
-        Args:
-            handler_system: Optional handler system for workflow hooks.
-            max_concurrent_workflows: Maximum number of concurrent active workflows.
-            max_completed_instances: Maximum number of completed/failed/cancelled
-                instances to keep in memory. When exceeded, oldest terminal
-                instances are removed. None means no limit (default).
-        """
+        """Initialize the workflow engine."""
+        if max_steps_per_run < 1:
+            raise ValueError("max_steps_per_run must be >= 1")
         self.handler_system = handler_system or HandlerSystem()
 
         # Configuration
         self.max_concurrent_workflows = max_concurrent_workflows
         self.max_completed_instances = max_completed_instances
+        self.max_steps_per_run = max_steps_per_run
+        self.executor = executor
 
         # Storage
         self.workflow_definitions: dict[str, WorkflowDefinition] = {}
@@ -110,8 +152,54 @@ class WorkflowEngine:
         self.timers: dict[str, Timer] = {}
         self._listener_lock = asyncio.Lock()
         self._instance_locks: dict[str, asyncio.Lock] = {}
+        # Definition each instance was started with (re-registering a
+        # workflow id does not change instances already running).
+        self._instance_definitions: dict[str, WorkflowDefinition] = {}
+        # Targeted events that arrived before their instance waited for them.
+        self._event_buffers: dict[str, collections.deque[WorkflowEvent]] = {}
+        self._hooks: list[LifecycleHook] = []
+        self._background_tasks: set[asyncio.Task] = set()
+        self._closed = False
 
         logger.info("Workflow engine initialized")
+
+    # ------------------------------------------------------------------
+    # Hooks
+    # ------------------------------------------------------------------
+
+    def add_hook(self, hook: LifecycleHook) -> None:
+        """Register ``hook(event_name, instance, data)``.
+
+        Events: ``"step_started"`` (``{"step_id"}``), ``"step_completed"``
+        (``{"step_id", "success", "next_state", "error"}``) and
+        ``"status_changed"`` (``{"status", "error"}``). A hook's exception is
+        logged and never affects the workflow. A hook returning an awaitable
+        is scheduled as a task.
+        """
+        self._hooks.append(hook)
+
+    def remove_hook(self, hook: LifecycleHook) -> bool:
+        """Unregister a hook. Returns False if it was not registered."""
+        try:
+            self._hooks.remove(hook)
+            return True
+        except ValueError:
+            return False
+
+    def _emit(self, event: str, instance: WorkflowInstance, **data: Any) -> None:
+        for hook in list(self._hooks):
+            try:
+                result = hook(event, instance, data)
+                if inspect.isawaitable(result):
+                    task = asyncio.ensure_future(result)
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
+            except Exception as e:
+                logger.warning(f"Workflow hook failed on {event}: {e!s}")
+
+    # ------------------------------------------------------------------
+    # Locks and status
+    # ------------------------------------------------------------------
 
     def _get_instance_lock(self, instance_id: str) -> asyncio.Lock:
         """Get (creating if absent) the per-instance lock for ``instance_id``.
@@ -119,23 +207,18 @@ class WorkflowEngine:
         # DECISION plan-2026-09-12T065608-089d0ec7/D-003
         # F4 fix: the lock is acquired ONLY at the outermost public entry
         # points (`start_workflow`, `advance_workflow`, `cancel_workflow`,
-        # `process_event`'s per-instance transition loop,
-        # `_handle_timer_expiration`, `_handle_event_timeout`) -- never
-        # inside `_execute_workflow_step`/`_transition_to_state` themselves.
-        # `_transition_to_state` recurses into `_execute_workflow_step`
-        # (see the call at the end of `_transition_to_state`), so acquiring
+        # `process_event`'s per-instance delivery loop,
+        # `_handle_timer_expiration`, `_handle_event_timeout`,
+        # `_handle_deadline`) -- never inside
+        # `_execute_workflow_step`/`_transition_to_state` themselves.
+        # `_transition_to_state` runs `_execute_workflow_step`, so acquiring
         # this same `asyncio.Lock` at those inner levels would deadlock on
         # the very first reentrant call -- `asyncio.Lock` is NOT reentrant.
-        # A depth-aware alternative (only lock when `_depth == 0`) was
-        # considered and rejected: it is more code for the same guarantee
-        # and ties correctness to `_depth`, a counter whose primary job is
-        # unrelated recursion-guarding (MAX_STEP_DEPTH), not lock scoping.
         # See decisions.md D-003.
         #
         # Lock-ordering note: several outermost entry points call into a
         # method that acquires `self._listener_lock` internally
-        # (`register_event_listener`, `_cleanup_workflow_resources`, and the
-        # `_listener_lock` block inside `_handle_event_timeout`) while the
+        # (`register_event_listener`, `_cleanup_workflow_resources`) while the
         # instance lock is already held. The ordering is consistently
         # instance-lock-then-listener-lock everywhere in this file; never
         # the reverse. Do not add a call path that acquires
@@ -144,10 +227,7 @@ class WorkflowEngine:
         Interface contract: keyed by `instance_id`; returns the same
         `asyncio.Lock` object for repeated calls with the same id until that
         id's entry is removed (see `remove_instance`,
-        `_purge_oldest_terminal_instances`). Never raises. Not safe to call
-        with an empty/None `instance_id` in a context where two distinct
-        logical instances must not share a lock -- callers always pass the
-        real `WorkflowInstance.instance_id`.
+        `_purge_oldest_terminal_instances`). Never raises.
         """
         lock = self._instance_locks.get(instance_id)
         if lock is None:
@@ -155,19 +235,78 @@ class WorkflowEngine:
             self._instance_locks[instance_id] = lock
         return lock
 
+    def _set_status(
+        self,
+        instance: WorkflowInstance,
+        status: WorkflowStatus,
+        error: Exception | None = None,
+    ) -> None:
+        """Change an instance's status, notify hooks, and release every
+        timer, listener and buffered event of an instance that became
+        terminal (completed, failed and cancelled alike)."""
+        previous = instance.status
+        instance.update_status(status, error)
+        if previous != status:
+            self._emit(
+                "status_changed",
+                instance,
+                status=status.value,
+                error=str(error) if error else None,
+            )
+        if instance.is_terminal():
+            self._release_instance_resources(instance.instance_id)
+            self._purge_oldest_terminal_instances()
+
+    def _fail(self, instance: WorkflowInstance, error: Exception) -> None:
+        """FAIL an instance unless it is already terminal."""
+        if instance.is_terminal():
+            return
+        self._set_status(instance, WorkflowStatus.FAILED, error)
+
+    # ------------------------------------------------------------------
+    # Registration and start
+    # ------------------------------------------------------------------
+
     async def shutdown(self) -> None:
-        """Cancel all pending timers and clean up resources."""
+        """Stop the engine: cancel and await every timer and background
+        task, drop listeners and buffered events, and refuse new starts.
+
+        Instances keep their current status; WAITING instances can no longer
+        be woken by timers.
+        """
+        self._closed = True
+        tasks = [t.task for t in self.timers.values() if t.task is not None]
+        tasks.extend(self._background_tasks)
         for timer in self.timers.values():
             timer.cancel()
+        for task in self._background_tasks:
+            task.cancel()
         self.timers.clear()
+        current = asyncio.current_task()
+        pending = [t for t in tasks if t is not current and not t.done()]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        self._background_tasks.clear()
+        async with self._listener_lock:
+            self.event_listeners.clear()
+        self._event_buffers.clear()
 
     def register_workflow(self, workflow: WorkflowDefinition) -> None:
-        """Register a workflow definition."""
-        # Validate the workflow
-        workflow.validate()
+        """Validate and register a workflow definition.
 
-        # Store the workflow
-        self.workflow_definitions[workflow.workflow_id] = workflow
+        The engine stores a copy (with its own ``steps`` dict), so later
+        ``with_step`` calls on ``workflow`` do not change the registered
+        definition. Re-registering an id replaces the definition for NEW
+        instances only; running instances keep the one they started with.
+        """
+        workflow.validate()
+        registered = workflow.model_copy(update={"steps": dict(workflow.steps)})
+        if workflow.workflow_id in self.workflow_definitions:
+            logger.info(
+                f"Re-registering workflow {workflow.workflow_id}: running "
+                "instances keep their original definition"
+            )
+        self.workflow_definitions[workflow.workflow_id] = registered
         logger.info(f"Registered workflow: {workflow.workflow_id}")
 
     async def start_workflow(
@@ -176,16 +315,35 @@ class WorkflowEngine:
         initial_context: dict[str, Any] | None = None,
         instance_id: str | None = None,
         workflow_timeout: float | None = None,
+        wait: bool = True,
     ) -> str:
         """Start a new workflow instance.
 
         Args:
             workflow_id: ID of the registered workflow definition.
-            initial_context: Initial context data for the workflow.
+            initial_context: Initial context data for the workflow (copied).
             instance_id: Optional custom instance ID (generated if omitted).
+                Must not belong to an instance the engine still holds.
             workflow_timeout: Optional total time limit in seconds for the
-                entire workflow execution. ``None`` means no limit.
+                entire workflow execution, waits included. ``None`` means no
+                limit.
+            wait: ``True`` (default) runs the steps before returning.
+                ``False`` returns the id immediately and runs them in a
+                background task.
+
+        Raises:
+            WorkflowResourceError: the engine is shut down or the concurrent
+                limit is reached.
+            WorkflowInstanceError: ``instance_id`` is already in use.
+            WorkflowTimeoutError: the run exceeded ``workflow_timeout``; its
+                ``instance_id`` attribute names the (FAILED) instance.
         """
+        if self._closed:
+            raise WorkflowResourceError(
+                resource_type="workflow_engine",
+                resource_id="shutdown",
+                message="Engine has been shut down",
+            )
         # Check concurrent workflow limit
         active_workflows = len(
             [i for i in self.workflow_instances.values() if i.is_active()]
@@ -200,8 +358,16 @@ class WorkflowEngine:
         # Get and validate workflow definition
         workflow_def = self._get_workflow_definition(workflow_id)
 
-        # Create instance
+        # DECISION plan-2026-09-27T120000-5d1e7a3b/D-005
+        # Do NOT silently overwrite an existing instance: its timers and
+        # listeners are keyed by this id and would then drive the NEW
+        # instance (wrong transitions, possibly into a different workflow).
         instance_id = instance_id or str(uuid.uuid4())
+        if instance_id in self.workflow_instances:
+            raise WorkflowInstanceError(
+                instance_id=instance_id,
+                message="Instance id already in use (remove_instance it first)",
+            )
         instance = self._create_workflow_instance(
             workflow_def, instance_id, initial_context
         )
@@ -215,6 +381,7 @@ class WorkflowEngine:
 
         # Store and execute
         self.workflow_instances[instance_id] = instance
+        self._instance_definitions[instance_id] = workflow_def
         log = logger.bind(
             workflow_id=workflow_id,
             instance_id=instance_id,
@@ -222,9 +389,41 @@ class WorkflowEngine:
         )
         log.info(f"Started workflow instance: {instance_id} (workflow: {workflow_id})")
 
+        if instance.deadline is not None:
+            self._schedule_deadline(instance)
+
+        if not wait:
+            task = asyncio.ensure_future(
+                self._run_in_background(instance, len(instance.history))
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            return instance_id
+
         async with self._get_instance_lock(instance_id):
             await self._execute_workflow_step(instance)
         return instance_id
+
+    async def _run_in_background(
+        self, instance: WorkflowInstance, history_len: int
+    ) -> None:
+        try:
+            async with self._get_instance_lock(instance.instance_id):
+                # Skip if another entry point already drove or cancelled the
+                # instance before this task got the lock (its initial step
+                # must run once, and never after a cancel).
+                if (
+                    instance.status != WorkflowStatus.RUNNING
+                    or len(instance.history) != history_len
+                ):
+                    return
+                await self._execute_workflow_step(instance)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Background run of instance {instance.instance_id} ended with: {e!s}"
+            )
 
     def _get_workflow_definition(self, workflow_id: str) -> WorkflowDefinition:
         """Get a workflow definition, raising an error if not found."""
@@ -233,6 +432,13 @@ class WorkflowEngine:
                 workflow_id=workflow_id, message="Workflow definition not found"
             )
         return self.workflow_definitions[workflow_id]
+
+    def _definition_for(self, instance: WorkflowInstance) -> WorkflowDefinition:
+        """The definition ``instance`` runs on (pinned at start)."""
+        pinned = self._instance_definitions.get(instance.instance_id)
+        if pinned is not None:
+            return pinned
+        return self._get_workflow_definition(instance.workflow_id)
 
     def _create_workflow_instance(
         self,
@@ -247,39 +453,76 @@ class WorkflowEngine:
                 message="Workflow does not have an initial step defined",
             )
 
-        # Create instance
+        # Create instance (the caller's dict is copied, never shared)
         instance = WorkflowInstance(
             instance_id=instance_id,
             workflow_id=workflow_def.workflow_id,
             current_step_id=workflow_def.initial_step_id,
-            context=initial_context or {},
+            context=dict(initial_context or {}),
         )
 
         # Add workflow metadata to context
-        instance.context[_KEY_WORKFLOW_INFO] = {
+        instance.context[KEY_WORKFLOW_INFO] = {
             "workflow_id": workflow_def.workflow_id,
             "instance_id": instance_id,
-            "auto_transition_states": {
-                step_id: step.__class__.__name__ == "AutoTransitionStep"
-                for step_id, step in workflow_def.steps.items()
-            },
         }
 
         instance.update_status(WorkflowStatus.RUNNING)
         return instance
 
+    # ------------------------------------------------------------------
+    # Step driver
+    # ------------------------------------------------------------------
+
     async def _execute_workflow_step(
         self, instance: WorkflowInstance, _depth: int = 0
     ) -> None:
-        """Execute the current step in a workflow."""
-        if _depth >= MAX_STEP_DEPTH:
-            from .exceptions import WorkflowError
+        """Run ``instance`` from its current step until it pauses, ends or fails.
 
-            raise WorkflowError(
-                f"Maximum workflow step depth ({MAX_STEP_DEPTH}) exceeded for instance "
-                f"{instance.instance_id}. This likely indicates an infinite loop in the "
-                f"workflow definition."
-            )
+        # DECISION plan-2026-09-27T120000-5d1e7a3b/D-002
+        # This is a LOOP with a per-call step budget, not recursion: do NOT
+        # go back to `_transition_to_state` -> `_execute_workflow_step`
+        # recursion with a depth cap. The old cap (20) failed legitimate
+        # acyclic chains longer than 20 steps with an "infinite loop" error,
+        # and every exception unwound (and was logged) once per level.
+
+        Step exceptions FAIL the instance and are not raised, except
+        ``WorkflowTimeoutError`` (workflow deadline), which is re-raised after
+        the instance is FAILED. ``_depth`` is accepted for backwards
+        compatibility and counts toward the step budget.
+        """
+        steps_run = max(0, int(_depth))
+        while True:
+            if steps_run >= self.max_steps_per_run:
+                error = WorkflowStateError(
+                    current_state=instance.current_step_id,
+                    operation="execute",
+                    message=(
+                        f"Step budget exceeded: {self.max_steps_per_run} steps in "
+                        f"one engine call for instance {instance.instance_id} "
+                        "(a custom step may be routing in a loop)"
+                    ),
+                )
+                logger.error(str(error))
+                self._fail(instance, error)
+                return
+
+            next_state = await self._run_current_step(instance)
+            steps_run += 1
+            if next_state is None:
+                return
+            try:
+                self._prepare_transition(instance, next_state)
+            except Exception as e:
+                await self._handle_step_exception(instance, e)
+                return
+
+    async def _run_current_step(self, instance: WorkflowInstance) -> str | None:
+        """Execute the instance's current step once.
+
+        Returns the state to transition to next, or ``None`` when the run
+        stops here (paused, completed, failed).
+        """
 
         # Report the configured workflow_timeout (not deadline-minus-created_at,
         # which is inflated by the construction-to-start gap). Fall back to the
@@ -290,64 +533,62 @@ class WorkflowEngine:
         # `WorkflowTimeoutError`'s message, which is actively misleading (the
         # `asyncio.wait_for` call below already receives the correct float
         # timeout — only this reporting helper was truncating). See D-011.
-        def _timeout_seconds() -> float:
-            if instance.workflow_timeout is not None:
-                return float(instance.workflow_timeout)
-            if instance.deadline is not None:
-                return (instance.deadline - instance.created_at).total_seconds()
-            return 0.0
+        def _timeout_error() -> WorkflowTimeoutError:
+            return WorkflowTimeoutError(
+                timeout_seconds=self._timeout_seconds(instance),
+                operation=f"step {instance.current_step_id}",
+                instance_id=instance.instance_id,
+            )
 
         # Check workflow-level timeout (cheap fast-path at the step boundary)
         if (
             instance.deadline is not None
             and datetime.now(timezone.utc) > instance.deadline
         ):
-            from .exceptions import WorkflowTimeoutError
-
-            instance.update_status(WorkflowStatus.FAILED)
-            raise WorkflowTimeoutError(
-                timeout_seconds=_timeout_seconds(),
-                operation=f"step {instance.current_step_id}",
-            )
+            error = _timeout_error()
+            self._fail(instance, error)
+            raise error
         try:
             # Get workflow definition and current step
-            workflow_def = self._get_workflow_definition(instance.workflow_id)
+            workflow_def = self._definition_for(instance)
             current_step = self._get_current_step(
                 workflow_def, instance.current_step_id
             )
+            step_id = instance.current_step_id
 
-            logger.info(
-                f"Executing step: {instance.current_step_id} (instance: {instance.instance_id})"
-            )
+            logger.info(f"Executing step: {step_id} (instance: {instance.instance_id})")
+            self._emit("step_started", instance, step_id=step_id)
 
             # Execute the step. When a workflow-level deadline is set, bound the
             # step itself by the remaining budget so a single long step cannot
-            # run unbounded past the deadline (it is only re-checked between
-            # steps otherwise).
-            if instance.deadline is not None:
-                remaining = (
-                    instance.deadline - datetime.now(timezone.utc)
-                ).total_seconds()
-                if remaining <= 0:
-                    from .exceptions import WorkflowTimeoutError
+            # run unbounded past the deadline.
+            token = _STEP_EXECUTOR.set(self.executor)
+            try:
+                if instance.deadline is not None:
+                    remaining = (
+                        instance.deadline - datetime.now(timezone.utc)
+                    ).total_seconds()
+                    if remaining <= 0:
+                        raise _timeout_error()
+                    try:
+                        result = await asyncio.wait_for(
+                            current_step.execute(instance.context), timeout=remaining
+                        )
+                    except asyncio.TimeoutError as e:
+                        raise _timeout_error() from e
+                else:
+                    result = await current_step.execute(instance.context)
+            finally:
+                _STEP_EXECUTOR.reset(token)
 
-                    raise WorkflowTimeoutError(
-                        timeout_seconds=_timeout_seconds(),
-                        operation=f"step {instance.current_step_id}",
-                    )
-                try:
-                    result = await asyncio.wait_for(
-                        current_step.execute(instance.context), timeout=remaining
-                    )
-                except asyncio.TimeoutError as e:
-                    from .exceptions import WorkflowTimeoutError
-
-                    raise WorkflowTimeoutError(
-                        timeout_seconds=_timeout_seconds(),
-                        operation=f"step {instance.current_step_id}",
-                    ) from e
-            else:
-                result = await current_step.execute(instance.context)
+            if not isinstance(result, WorkflowStepResult):
+                raise WorkflowStepError(
+                    step_id=step_id,
+                    message=(
+                        f"execute() returned {type(result).__name__}, "
+                        "expected a WorkflowStepResult"
+                    ),
+                )
 
             # Update context and history (filter internal keys to prevent overwrites).
             # DECISION plan-2026-07-20T040150-876e7164/D-003 [STALE]
@@ -369,25 +610,40 @@ class WorkflowEngine:
                 instance.context.update(filtered_data)
 
             instance.add_history_entry(
-                step_id=instance.current_step_id,
+                step_id=step_id,
                 message=result.message or "",
                 data=result.data,
+                error=result.error,
+            )
+            self._emit(
+                "step_completed",
+                instance,
+                step_id=step_id,
+                success=result.success,
+                next_state=result.next_state,
+                error=result.error,
             )
 
             # Handle the result
             if result.success:
-                await self._handle_successful_step(instance, result, _depth=_depth)
-            else:
-                await self._handle_failed_step(instance, result, _depth=_depth)
+                return await self._handle_successful_step(instance, result)
+            return self._handle_failed_step(instance, result)
 
         except Exception as e:
-            from .exceptions import WorkflowTimeoutError
-
             await self._handle_step_exception(instance, e)
             # Propagate workflow-level timeouts to the caller, matching the
             # behavior of the step-boundary deadline check above.
             if isinstance(e, WorkflowTimeoutError):
                 raise
+            return None
+
+    @staticmethod
+    def _timeout_seconds(instance: WorkflowInstance) -> float:
+        if instance.workflow_timeout is not None:
+            return float(instance.workflow_timeout)
+        if instance.deadline is not None:
+            return (instance.deadline - instance.created_at).total_seconds()
+        return 0.0
 
     def _get_current_step(self, workflow_def: WorkflowDefinition, step_id: str):
         """Get the current step, raising an error if not found."""
@@ -400,66 +656,55 @@ class WorkflowEngine:
         return workflow_def.steps[step_id]
 
     async def _handle_successful_step(
-        self, instance: WorkflowInstance, result: Any, _depth: int = 0
-    ) -> None:
-        """Handle a successful step execution."""
+        self, instance: WorkflowInstance, result: WorkflowStepResult, _depth: int = 0
+    ) -> str | None:
+        """Handle a successful step execution; return the next state or None."""
         if result.next_state:
-            await self._transition_to_state(instance, result.next_state, _depth=_depth)
-        else:
-            # DECISION plan-2026-09-12T135914-45a654de/D-013
-            # A step (e.g. SwitchStep) can signal "this specific route is
-            # terminal" by returning next_state="" -- distinct from a step
-            # that has no next_state field at all (also falsy, e.g. a step
-            # awaiting an event/timer, whose model default is None). Do NOT
-            # re-derive terminality from WorkflowDefinition.get_terminal_states()
-            # here: that is a static, WHOLE-STEP analysis (used for
-            # reachability warnings) and cannot see that only ONE of a
-            # SwitchStep's cases routes to "terminal". This applies to ANY
-            # step type whose result carries next_state == "" -- not just
-            # SwitchStep -- since ConditionStep, APICallStep,
-            # LLMProcessingStep, ParallelStep and RetryStep-wrapped steps all
-            # share the same per-route "" == terminal semantics, and
-            # definitions.py's own get_terminal_states() already treats ""
-            # as a plan-wide terminal-step marker (see
-            # `referenced_states.discard("")` in definitions.py).
-            #
-            # DECISION plan-2026-09-12T135914-45a654de/D-020
-            # A prior completion-fix (D-018) narrowed this check to
-            # `isinstance(step, SwitchStep)`, reasoning that ConversationStep/
-            # AgentStep's `success_state=""` default was an unset field, not
-            # an authored "terminal" signal. A second adversarial review
-            # pass found that narrowing REOPENED this exact bug for a
-            # RetryStep-wrapped SwitchStep (the engine sees the outer
-            # RetryStep, not the inner SwitchStep, so the isinstance check is
-            # False) plus 4 other step types (ConditionStep, APICallStep,
-            # LLMProcessingStep, ParallelStep) with the identical per-route
-            # "" == terminal semantics -- and that D-018's own justification
-            # was a no-op in practice: ConversationStep/AgentStep are ALREADY
-            # marked terminal by get_terminal_states()'s static analysis
-            # before this runtime check is ever consulted, so narrowing here
-            # bought zero real protection. Do NOT reintroduce an
-            # isinstance-based narrowing of this predicate -- restore (and
-            # keep) the wide `result.next_state == ""` check for ANY
-            # successful step result. See decisions.md D-020.
-            explicitly_terminal = result.next_state == ""
-            await self._handle_step_without_transition(
-                instance, explicitly_terminal=explicitly_terminal
-            )
+            return result.next_state
+        # DECISION plan-2026-09-12T135914-45a654de/D-013
+        # A step (e.g. SwitchStep) can signal "this specific route is
+        # terminal" by returning next_state="" -- distinct from a step
+        # that has no next_state field at all (also falsy, e.g. a step
+        # awaiting an event/timer, whose model default is None). Do NOT
+        # re-derive terminality from WorkflowDefinition.get_terminal_states()
+        # here: that is a static, WHOLE-STEP analysis (used for
+        # reachability warnings) and cannot see that only ONE of a
+        # SwitchStep's cases routes to "terminal". This applies to ANY
+        # step type whose result carries next_state == "" -- not just
+        # SwitchStep -- since ConditionStep, APICallStep,
+        # LLMProcessingStep, ParallelStep and RetryStep-wrapped steps all
+        # share the same per-route "" == terminal semantics, and
+        # definitions.py's own get_terminal_states() already treats ""
+        # as a plan-wide terminal-step marker (see
+        # `referenced_states.discard("")` in definitions.py).
+        #
+        # DECISION plan-2026-09-12T135914-45a654de/D-020
+        # A prior completion-fix (D-018) narrowed this check to
+        # `isinstance(step, SwitchStep)`. A second adversarial review
+        # pass found that narrowing REOPENED this exact bug for a
+        # RetryStep-wrapped SwitchStep plus 4 other step types. Do NOT
+        # reintroduce an isinstance-based narrowing of this predicate --
+        # keep the wide `result.next_state == ""` check for ANY
+        # successful step result. See decisions.md D-020.
+        explicitly_terminal = result.next_state == ""
+        return await self._handle_step_without_transition(
+            instance, explicitly_terminal=explicitly_terminal
+        )
 
-    async def _handle_failed_step(
-        self, instance: WorkflowInstance, result: Any, _depth: int = 0
-    ) -> None:
-        """Handle a failed step execution."""
+    def _handle_failed_step(
+        self, instance: WorkflowInstance, result: WorkflowStepResult, _depth: int = 0
+    ) -> str | None:
+        """Handle a failed step result: follow its route or FAIL the instance."""
         logger.warning(f"Step failed: {instance.current_step_id} - {result.message}")
 
         if result.next_state:
-            await self._transition_to_state(instance, result.next_state, _depth=_depth)
-        else:
-            error = WorkflowStepError(
-                step_id=instance.current_step_id,
-                message=result.message or "Step failed without error message",
-            )
-            instance.update_status(WorkflowStatus.FAILED, error)
+            return result.next_state
+        message = result.message or "Step failed without error message"
+        if result.error and result.error not in message:
+            message = f"{message} ({result.error})"
+        error = WorkflowStepError(step_id=instance.current_step_id, message=message)
+        self._fail(instance, error)
+        return None
 
     async def _handle_step_exception(
         self, instance: WorkflowInstance, exception: Exception
@@ -481,13 +726,11 @@ class WorkflowEngine:
                 f"({instance.status.value}); not overwriting with FAILED"
             )
             return
-        instance.update_status(WorkflowStatus.FAILED, exception)
+        self._set_status(instance, WorkflowStatus.FAILED, exception)
 
-    async def _transition_to_state(
-        self, instance: WorkflowInstance, next_state: str, _depth: int = 0
-    ) -> None:
-        """Transition to a new state."""
-        workflow_def = self._get_workflow_definition(instance.workflow_id)
+    def _prepare_transition(self, instance: WorkflowInstance, next_state: str) -> None:
+        """Validate ``next_state`` and move the instance onto it (RUNNING)."""
+        workflow_def = self._definition_for(instance)
 
         if next_state not in workflow_def.steps:
             raise WorkflowStateError(
@@ -497,17 +740,33 @@ class WorkflowEngine:
             )
 
         logger.info(f"Transitioning from {instance.current_step_id} to {next_state}")
-        instance.context.pop(_KEY_WAITING_INFO, None)
-        instance.context.pop(_KEY_TIMER_INFO, None)
+        # Leaving a step ends its wait: drop the instance's listeners and wait
+        # timers (not its deadline watchdog) so a stale listener cannot wake
+        # it later at a different step.
+        self._drop_wait_resources(instance.instance_id)
+        instance.context.pop(KEY_WAITING_INFO, None)
+        instance.context.pop(KEY_TIMER_INFO, None)
         instance.current_step_id = next_state
-        instance.update_status(WorkflowStatus.RUNNING)
+        self._set_status(instance, WorkflowStatus.RUNNING)
 
-        await self._execute_workflow_step(instance, _depth=_depth + 1)
+    async def _transition_to_state(
+        self, instance: WorkflowInstance, next_state: str, _depth: int = 0
+    ) -> None:
+        """Transition to ``next_state`` and run from there.
+
+        Raises ``WorkflowStateError`` for an unknown state (the instance is
+        unchanged) and ``WorkflowTimeoutError`` for a deadline breach.
+        """
+        self._prepare_transition(instance, next_state)
+        await self._execute_workflow_step(instance)
 
     async def _handle_step_without_transition(
         self, instance: WorkflowInstance, explicitly_terminal: bool = False
-    ) -> None:
+    ) -> str | None:
         """Handle a step that doesn't specify a next state.
+
+        Returns a state to continue with (a buffered event satisfied a wait)
+        or ``None``.
 
         Args:
             instance: The workflow instance whose current step just ran.
@@ -518,35 +777,50 @@ class WorkflowEngine:
                 ``WorkflowDefinition.get_terminal_states()``'s static
                 whole-step analysis (see D-013 in decisions.md).
         """
-        waiting_info = instance.context.get(_KEY_WAITING_INFO, {})
-        timer_info = instance.context.get(_KEY_TIMER_INFO, {})
+        waiting_info = instance.context.get(KEY_WAITING_INFO) or {}
+        timer_info = instance.context.get(KEY_TIMER_INFO) or {}
 
         if explicitly_terminal:
             logger.info(
                 f"Workflow instance {instance.instance_id} completed successfully "
                 "(step signalled explicit terminal route)"
             )
-            instance.update_status(WorkflowStatus.COMPLETED)
-            self._purge_oldest_terminal_instances()
-        elif waiting_info.get("waiting_for_event"):
+            self._set_status(instance, WorkflowStatus.COMPLETED)
+        elif isinstance(waiting_info, dict) and waiting_info.get("waiting_for_event"):
+            event_type = waiting_info.get("event_type") or ""
+            success_state = waiting_info.get("success_state") or ""
+            correlation_key = waiting_info.get("correlation_key")
+            buffered = self._take_buffered_event(instance, event_type, correlation_key)
+            if buffered is not None:
+                logger.info(
+                    f"Workflow instance {instance.instance_id} consumed a buffered "
+                    f"'{event_type}' event"
+                )
+                self._apply_event(instance, waiting_info.get("event_mapping"), buffered)
+                if success_state:
+                    return success_state
+                instance.context.pop(KEY_WAITING_INFO, None)
+                self._set_status(instance, WorkflowStatus.COMPLETED)
+                return None
             logger.info(
                 f"Workflow instance {instance.instance_id} is waiting for event"
             )
-            instance.update_status(WorkflowStatus.WAITING)
+            self._set_status(instance, WorkflowStatus.WAITING)
             # Auto-register the event listener from step metadata
             await self.register_event_listener(
                 instance_id=instance.instance_id,
-                event_type=waiting_info.get("event_type", ""),
-                success_state=waiting_info.get("success_state"),
+                event_type=event_type,
+                success_state=success_state,
                 timeout_seconds=waiting_info.get("timeout_seconds"),
                 timeout_state=waiting_info.get("timeout_state"),
                 event_mapping=waiting_info.get("event_mapping"),
+                correlation_key=correlation_key,
             )
-        elif timer_info.get("waiting_for_timer"):
+        elif isinstance(timer_info, dict) and timer_info.get("waiting_for_timer"):
             logger.info(
                 f"Workflow instance {instance.instance_id} is waiting for timer"
             )
-            instance.update_status(WorkflowStatus.WAITING)
+            self._set_status(instance, WorkflowStatus.WAITING)
             # Auto-schedule the timer from step metadata
             await self.schedule_timer(
                 instance_id=instance.instance_id,
@@ -555,33 +829,54 @@ class WorkflowEngine:
             )
         else:
             # Check if this is a terminal step
-            workflow_def = self._get_workflow_definition(instance.workflow_id)
+            workflow_def = self._definition_for(instance)
             terminal_states = workflow_def.get_terminal_states()
 
             if instance.current_step_id in terminal_states:
                 logger.info(
                     f"Workflow instance {instance.instance_id} completed successfully"
                 )
-                instance.update_status(WorkflowStatus.COMPLETED)
-                self._purge_oldest_terminal_instances()
+                self._set_status(instance, WorkflowStatus.COMPLETED)
             else:
                 logger.warning(
-                    f"Step {instance.current_step_id} has no transition and is not terminal"
+                    f"Step {instance.current_step_id} has no transition and is not "
+                    "terminal; the instance stays RUNNING until advance_workflow"
                 )
+        return None
+
+    # ------------------------------------------------------------------
+    # Events
+    # ------------------------------------------------------------------
 
     async def register_event_listener(
         self,
         instance_id: str,
         event_type: str,
         success_state: str | None = None,
-        timeout_seconds: int | None = None,
+        timeout_seconds: float | None = None,
         timeout_state: str | None = None,
         event_mapping: dict[str, str] | None = None,
+        correlation_key: str | None = None,
     ) -> None:
-        """Register a workflow instance to listen for an event."""
-        if instance_id not in self.workflow_instances:
+        """Register a workflow instance to listen for an event.
+
+        ``success_state`` of ``""``/``None`` completes the instance when the
+        event arrives. With ``timeout_seconds``, the wait times out to
+        ``timeout_state``, or FAILS the instance when none is given.
+        ``correlation_key`` restricts delivery to events whose payload value
+        for that key equals the instance's context value for it now.
+        """
+        if not event_type:
+            raise WorkflowEventError(event_type="", message="event_type is required")
+        instance = self.workflow_instances.get(instance_id)
+        if instance is None:
             raise WorkflowInstanceError(
                 instance_id=instance_id, message="Workflow instance not found"
+            )
+        if instance.is_terminal():
+            raise WorkflowInstanceError(
+                instance_id=instance_id,
+                message=f"Instance is {instance.status.value}; cannot listen for events",
             )
 
         # Create listener
@@ -589,6 +884,12 @@ class WorkflowEngine:
             instance_id=instance_id,
             success_state=success_state or "",
             event_mapping=event_mapping or {},
+            correlation_key=correlation_key,
+            correlation_value=(
+                instance.context.get(correlation_key) if correlation_key else None
+            ),
+            timeout_state=timeout_state,
+            step_id=instance.current_step_id,
         )
 
         if timeout_seconds is not None:
@@ -605,8 +906,12 @@ class WorkflowEngine:
             f"Registered event listener: instance {instance_id} for event {event_type}"
         )
 
-        # Set up timeout if needed
-        if timeout_seconds is not None and timeout_state:
+        # DECISION plan-2026-09-27T120000-5d1e7a3b/D-001
+        # Schedule the timeout whenever timeout_seconds is set, with or
+        # without timeout_state. Do NOT go back to "only with timeout_state":
+        # the listener then expired silently, later events were skipped, and
+        # the instance stayed WAITING forever. No timeout_state -> FAILED.
+        if timeout_seconds is not None:
             await self._schedule_event_timeout(
                 instance_id, event_type, timeout_state, timeout_seconds
             )
@@ -615,8 +920,8 @@ class WorkflowEngine:
         self,
         instance_id: str,
         event_type: str,
-        timeout_state: str,
-        timeout_seconds: int,
+        timeout_state: str | None,
+        timeout_seconds: float,
     ) -> None:
         """Schedule a timeout for an event listener."""
         timeout_task = asyncio.create_task(
@@ -643,8 +948,8 @@ class WorkflowEngine:
         self,
         instance_id: str,
         event_type: str,
-        timeout_state: str,
-        timeout_seconds: int,
+        timeout_state: str | None,
+        timeout_seconds: float,
     ) -> None:
         """Task to handle event timeouts."""
         try:
@@ -656,42 +961,28 @@ class WorkflowEngine:
             logger.error(f"Error in event timeout task: {e!s}")
 
     async def _handle_event_timeout(
-        self, instance_id: str, event_type: str, timeout_state: str
+        self, instance_id: str, event_type: str, timeout_state: str | None
     ) -> None:
-        """Handle an event timeout."""
+        """Handle an event timeout: go to ``timeout_state`` or FAIL."""
         logger.info(
             f"Event timeout for instance {instance_id} waiting for {event_type}"
         )
 
-        if instance_id not in self.workflow_instances:
+        instance = self.workflow_instances.get(instance_id)
+        if instance is None:
             return
-
-        # Remove listener under lock to prevent race with process_event
-        async with self._listener_lock:
-            if (
-                event_type in self.event_listeners
-                and instance_id in self.event_listeners[event_type]
-            ):
-                del self.event_listeners[event_type][instance_id]
-
-        # Update instance
-        instance = self.workflow_instances[instance_id]
 
         # F4: hold the per-instance lock across the status re-check and the
         # transition, so this timeout cannot interleave with a concurrent
         # advance_workflow/cancel_workflow/process_event transition on the
-        # same instance. Acquired AFTER the _listener_lock block above has
-        # already released it (instance-lock, then listener-lock, never the
-        # reverse -- see _get_instance_lock's docstring).
+        # same instance (instance-lock, then listener-lock, never the reverse).
         async with self._get_instance_lock(instance_id):
             # DECISION plan_2026-05-29_5b2fbb09/D-001 [STALE]
             # If the event already fired, process_event has consumed the listener
-            # and called _transition_to_state, which synchronously flips status to
-            # RUNNING before its first await. A timeout firing during that (slow)
-            # success transition must NOT drive a second, concurrent transition to
-            # the timeout state. Only a still-WAITING instance should time out
-            # (RW3-001). _cancel_event_timeout runs only AFTER the success
-            # transition completes, so this status guard is the real defense.
+            # and transitioned the instance out of WAITING. A timeout firing
+            # during that (slow) success transition must NOT drive a second,
+            # concurrent transition to the timeout state. Only a still-WAITING
+            # instance should time out (RW3-001).
             if instance.status != WorkflowStatus.WAITING:
                 logger.debug(
                     f"Event timeout for {instance_id} ignored: instance no longer "
@@ -699,20 +990,257 @@ class WorkflowEngine:
                 )
                 return
 
-            instance.context[_KEY_TIMEOUT] = {
+            # This timer has fired: drop its entry (it is not "active" any more).
+            timer_key = f"{instance_id}_{event_type}_timeout"
+            timer = self.timers.get(timer_key)
+            if timer is not None and timer.task is asyncio.current_task():
+                self.timers.pop(timer_key, None)
+
+            async with self._listener_lock:
+                self.event_listeners.get(event_type, {}).pop(instance_id, None)
+
+            instance.context[KEY_TIMEOUT] = {
                 "event_type": event_type,
                 "timeout_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            # NOTE (W-ISSUE-004): _depth resets to 0 here (timer-mediated transition).
-            # The step-depth guard (MAX_STEP_DEPTH) does not prevent timer-mediated cycles.
-            # Prevent A --timer--> B --auto--> A patterns at workflow design time.
-            await self._transition_to_state(instance, timeout_state)
+            if not timeout_state:
+                wait_seconds = None
+                waiting_info = instance.context.get(KEY_WAITING_INFO) or {}
+                if isinstance(waiting_info, dict):
+                    wait_seconds = waiting_info.get("timeout_seconds")
+                self._fail(
+                    instance,
+                    WorkflowTimeoutError(
+                        operation=f"wait for event '{event_type}'",
+                        timeout_seconds=float(wait_seconds or 0.0),
+                        instance_id=instance_id,
+                    ),
+                )
+                return
+
+            # NOTE (W-ISSUE-004): the step budget restarts here (event-mediated
+            # transition); loops through a wait are allowed by design.
+            try:
+                await self._transition_to_state(instance, timeout_state)
+            except Exception as e:
+                self._fail(instance, e)
+
+    async def process_event(self, event: WorkflowEvent) -> list[str]:
+        """Deliver an external event; return the ids of the instances it woke.
+
+        A broadcast event (``event.instance_id is None``) goes to every
+        instance waiting for ``event.event_type`` whose correlation matches;
+        a targeted event only to that instance, and is buffered for it when
+        it is not waiting for the event yet. One instance's failure never
+        prevents delivery to the others.
+        """
+        event_type = event.event_type
+        target = event.instance_id
+
+        # Collect matching listeners under the listener lock (no awaits
+        # inside), consuming them so a second event cannot claim them.
+        # DECISION plan-2026-09-27T120000-5d1e7a3b/D-001
+        # Do NOT mutate instance context here: delivery happens below under
+        # each instance's own lock, after its status is re-checked.
+        candidates: list[tuple[str, EventListener]] = []
+        async with self._listener_lock:
+            listeners = self.event_listeners.get(event_type, {})
+            for instance_id, listener in list(listeners.items()):
+                if target is not None and instance_id != target:
+                    continue
+                if instance_id not in self.workflow_instances:
+                    listeners.pop(instance_id, None)
+                    continue
+                # Skip expired listeners (their timeout task handles them)
+                if listener.is_expired():
+                    logger.warning(
+                        f"Skipping expired listener for event '{event_type}' "
+                        f"on instance {instance_id}"
+                    )
+                    continue
+                if not self._correlates(
+                    listener.correlation_key, listener.correlation_value, event
+                ):
+                    continue
+                listeners.pop(instance_id, None)
+                candidates.append((instance_id, listener))
+
+        if not candidates:
+            if target is not None:
+                self._buffer_event(target, event)
+            else:
+                logger.debug(f"No listeners for event type: {event_type}")
+            return []
+
+        affected_instances: list[str] = []
+        delivered = 0
+        try:
+            for instance_id, listener in candidates:
+                delivered += 1
+                await self._deliver_event(
+                    event, instance_id, listener, affected_instances
+                )
+        except asyncio.CancelledError:
+            # Listeners were consumed up front: put back those not yet
+            # delivered so the instances can still be woken by a later event.
+            self._restore_listeners(event_type, candidates[delivered:])
+            raise
+
+        logger.info(
+            f"Processed event {event_type}, affected instances: {len(affected_instances)}"
+        )
+        return affected_instances
+
+    def _restore_listeners(
+        self, event_type: str, pending: list[tuple[str, EventListener]]
+    ) -> None:
+        listeners = self.event_listeners.setdefault(event_type, {})
+        for instance_id, listener in pending:
+            instance = self.workflow_instances.get(instance_id)
+            if (
+                instance is not None
+                and instance.status == WorkflowStatus.WAITING
+                and instance.current_step_id == listener.step_id
+            ):
+                listeners.setdefault(instance_id, listener)
+
+    async def _deliver_event(
+        self,
+        event: WorkflowEvent,
+        instance_id: str,
+        listener: EventListener,
+        affected_instances: list[str],
+    ) -> None:
+        """Deliver ``event`` to one instance under its lock."""
+        event_type = event.event_type
+        instance = self.workflow_instances.get(instance_id)
+        if instance is None:
+            return
+        # DECISION plan-2026-09-27T120000-5d1e7a3b/D-001
+        # Per-instance isolation: an exception while delivering to one
+        # instance (deadline passed, instance cancelled meanwhile, bad
+        # state) must NOT abort delivery to the rest -- their listeners
+        # were already consumed above and they would stay WAITING forever.
+        try:
+            async with self._get_instance_lock(instance_id):
+                # Deliver only to the wait this listener belongs to: the
+                # instance may have moved on to a different wait (also
+                # WAITING) while the lock was held elsewhere.
+                if (
+                    instance.status != WorkflowStatus.WAITING
+                    or listener.step_id not in (None, instance.current_step_id)
+                ):
+                    logger.debug(
+                        f"Event '{event_type}' not delivered to {instance_id}: "
+                        f"status is {instance.status.value}, step "
+                        f"{instance.current_step_id}"
+                    )
+                    return
+                # Cancel the wait's timeout BEFORE transitioning: the chain
+                # may re-wait on the same event type and arm a new timeout
+                # under the same key, which a later cancel would kill.
+                self._cancel_event_timeout(instance_id, event_type)
+                self._apply_event(instance, listener.event_mapping, event)
+                affected_instances.append(instance_id)
+                # NOTE (W-ISSUE-004): the step budget restarts here
+                # (event-mediated transition); loops through a wait are
+                # allowed by design.
+                if listener.success_state:
+                    await self._transition_to_state(instance, listener.success_state)
+                else:
+                    self._drop_wait_resources(instance_id)
+                    instance.context.pop(KEY_WAITING_INFO, None)
+                    self._set_status(instance, WorkflowStatus.COMPLETED)
+        except Exception as e:
+            logger.error(
+                f"Delivering event '{event_type}' to {instance_id} failed: {e!s}"
+            )
+            self._fail(instance, e)
+
+    @staticmethod
+    def _correlates(
+        correlation_key: str | None, expected: Any, event: WorkflowEvent
+    ) -> bool:
+        if not correlation_key:
+            return True
+        return (
+            correlation_key in event.payload
+            and event.payload[correlation_key] == expected
+        )
+
+    def _apply_event(
+        self,
+        instance: WorkflowInstance,
+        event_mapping: dict[str, str] | None,
+        event: WorkflowEvent,
+    ) -> None:
+        """Map an event's payload into the instance context."""
+        for context_key, payload_key in (event_mapping or {}).items():
+            if payload_key in event.payload:
+                instance.context[context_key] = event.payload[payload_key]
+            else:
+                logger.warning(
+                    f"Event mapping key '{payload_key}' not found in "
+                    f"event payload for instance {instance.instance_id}; "
+                    f"context key '{context_key}' will not be set"
+                )
+        instance.context[KEY_LAST_EVENT] = event.model_dump()
+
+    def _buffer_event(self, instance_id: str, event: WorkflowEvent) -> None:
+        instance = self.workflow_instances.get(instance_id)
+        if instance is None or instance.is_terminal():
+            logger.warning(
+                f"Targeted event '{event.event_type}' dropped: instance "
+                f"{instance_id} is unknown or finished"
+            )
+            return
+        buffer = self._event_buffers.setdefault(
+            instance_id, collections.deque(maxlen=MAX_BUFFERED_EVENTS_PER_INSTANCE)
+        )
+        buffer.append(event)
+        logger.info(
+            f"Buffered event '{event.event_type}' for instance {instance_id} "
+            f"({len(buffer)} buffered)"
+        )
+
+    def _take_buffered_event(
+        self,
+        instance: WorkflowInstance,
+        event_type: str,
+        correlation_key: str | None,
+    ) -> WorkflowEvent | None:
+        buffer = self._event_buffers.get(instance.instance_id)
+        if not buffer:
+            return None
+        expected = instance.context.get(correlation_key) if correlation_key else None
+        for event in list(buffer):
+            if event.event_type == event_type and self._correlates(
+                correlation_key, expected, event
+            ):
+                buffer.remove(event)
+                return event
+        return None
+
+    def _cancel_event_timeout(self, instance_id: str, event_type: str) -> None:
+        """Cancel an event timeout."""
+        timer_key = f"{instance_id}_{event_type}_timeout"
+        timer = self.timers.pop(timer_key, None)
+        if timer is not None:
+            timer.cancel()
+
+    # ------------------------------------------------------------------
+    # Timers and deadlines
+    # ------------------------------------------------------------------
 
     async def schedule_timer(
-        self, instance_id: str, delay_seconds: int, next_state: str
+        self, instance_id: str, delay_seconds: float, next_state: str
     ) -> None:
-        """Schedule a timer for a workflow instance."""
+        """Schedule a timer that moves a WAITING instance to ``next_state``."""
+        if instance_id not in self.workflow_instances:
+            raise WorkflowInstanceError(
+                instance_id=instance_id, message="Workflow instance not found"
+            )
         timer_task = asyncio.create_task(
             self._timer_task(instance_id, delay_seconds, next_state)
         )
@@ -732,7 +1260,7 @@ class WorkflowEngine:
         )
 
     async def _timer_task(
-        self, instance_id: str, delay_seconds: int, next_state: str
+        self, instance_id: str, delay_seconds: float, next_state: str
     ) -> None:
         """Task to handle timer expirations."""
         try:
@@ -747,11 +1275,9 @@ class WorkflowEngine:
         """Handle a timer expiration."""
         logger.info(f"Timer expired for instance {instance_id}")
 
-        if instance_id not in self.workflow_instances:
+        instance = self.workflow_instances.get(instance_id)
+        if instance is None:
             return
-
-        # Update instance
-        instance = self.workflow_instances[instance_id]
 
         # F4: per-instance lock, same reasoning as _handle_event_timeout above.
         async with self._get_instance_lock(instance_id):
@@ -765,7 +1291,7 @@ class WorkflowEngine:
                 )
                 return
 
-            instance.context[_KEY_TIMER_EXPIRED] = {
+            instance.context[KEY_TIMER_EXPIRED] = {
                 "expired_at": datetime.now(timezone.utc).isoformat()
             }
 
@@ -774,97 +1300,67 @@ class WorkflowEngine:
             if timer_key in self.timers:
                 del self.timers[timer_key]
 
-            # NOTE (W-ISSUE-004): _depth resets to 0 here (timer-mediated transition).
-            # The step-depth guard (MAX_STEP_DEPTH) does not prevent timer-mediated cycles.
-            # Prevent A --timer--> B --auto--> A patterns at workflow design time.
-            await self._transition_to_state(instance, next_state)
+            # NOTE (W-ISSUE-004): the step budget restarts here (timer-mediated
+            # transition); loops through a timer are allowed by design.
+            try:
+                await self._transition_to_state(instance, next_state)
+            except Exception as e:
+                self._fail(instance, e)
 
-    async def process_event(self, event: WorkflowEvent) -> list[str]:
-        """Process an external event."""
-        event_type = event.event_type
-
-        if event_type not in self.event_listeners:
-            logger.debug(f"No listeners for event type: {event_type}")
-            return []
-
-        affected_instances = []
-
-        # Collect matching listeners under lock, then transition outside lock
-        # to prevent deadlock if _transition_to_state registers new listeners
-        pending_transitions: list[tuple[WorkflowInstance, str]] = []
-        async with self._listener_lock:
-            for instance_id, listener in list(self.event_listeners[event_type].items()):
-                if instance_id not in self.workflow_instances:
-                    continue
-
-                # Skip expired listeners
-                if (
-                    listener.timeout_at is not None
-                    and datetime.now(timezone.utc) > listener.timeout_at
-                ):
-                    logger.warning(
-                        f"Skipping expired listener for event '{event_type}' "
-                        f"on instance {instance_id}"
-                    )
-                    self.event_listeners[event_type].pop(instance_id, None)
-                    continue
-
-                # Update instance context
-                instance = self.workflow_instances[instance_id]
-
-                # Map event payload to context
-                for context_key, payload_key in listener.event_mapping.items():
-                    if payload_key in event.payload:
-                        instance.context[context_key] = event.payload[payload_key]
-                    else:
-                        logger.warning(
-                            f"Event mapping key '{payload_key}' not found in "
-                            f"event payload for instance {instance_id}; "
-                            f"context key '{context_key}' will not be set"
-                        )
-
-                instance.context[_KEY_LAST_EVENT] = event.model_dump()
-
-                # Queue transition and clean up listener
-                if listener.success_state:
-                    pending_transitions.append((instance, listener.success_state))
-
-                    # Clean up listener (use pop to avoid KeyError if timeout already removed it)
-                    self.event_listeners.get(event_type, {}).pop(instance_id, None)
-
-                    affected_instances.append(instance_id)
-
-        # Execute transitions outside the _listener_lock to prevent deadlock
-        # (unchanged, pre-existing design -- see the comment above
-        # `pending_transitions`). F4 adds a per-instance lock around each
-        # transition so it cannot interleave with a concurrent
-        # advance_workflow/cancel_workflow/timer transition on the same
-        # instance; instance-lock is acquired only after _listener_lock has
-        # already been released above, preserving instance-lock-then-
-        # listener-lock ordering throughout this file.
-        for instance, success_state in pending_transitions:
-            async with self._get_instance_lock(instance.instance_id):
-                # NOTE (W-ISSUE-004): _depth resets to 0 here (event-mediated transition).
-                # The step-depth guard (MAX_STEP_DEPTH) does not prevent event-mediated cycles.
-                # Prevent A --event--> B --auto--> A patterns at workflow design time.
-                await self._transition_to_state(instance, success_state)
-                # Cancel timeout after transition
-                self._cancel_event_timeout(instance.instance_id, event_type)
-
-        logger.info(
-            f"Processed event {event_type}, affected instances: {len(affected_instances)}"
+    def _schedule_deadline(self, instance: WorkflowInstance) -> None:
+        """Arm a watchdog that FAILS the instance if it is still WAITING at
+        its deadline (a step boundary never comes while it waits)."""
+        assert instance.deadline is not None
+        delay = max(
+            0.0, (instance.deadline - datetime.now(timezone.utc)).total_seconds()
         )
-        return affected_instances
+        task = asyncio.ensure_future(self._deadline_task(instance.instance_id, delay))
+        self.timers[f"{instance.instance_id}_deadline"] = Timer(
+            instance.instance_id, None, instance.deadline, task
+        )
 
-    def _cancel_event_timeout(self, instance_id: str, event_type: str) -> None:
-        """Cancel an event timeout."""
-        timer_key = f"{instance_id}_{event_type}_timeout"
-        timer = self.timers.pop(timer_key, None)
-        if timer is not None:
-            timer.cancel()
+    async def _deadline_task(self, instance_id: str, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+            await self._handle_deadline(instance_id)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in deadline task: {e!s}")
+
+    async def _handle_deadline(self, instance_id: str) -> None:
+        instance = self.workflow_instances.get(instance_id)
+        if instance is None:
+            return
+        async with self._get_instance_lock(instance_id):
+            self.timers.pop(f"{instance_id}_deadline", None)
+            if instance.status != WorkflowStatus.WAITING:
+                return
+            logger.warning(
+                f"Workflow instance {instance_id} reached its deadline while WAITING"
+            )
+            self._fail(
+                instance,
+                WorkflowTimeoutError(
+                    operation=f"step {instance.current_step_id}",
+                    timeout_seconds=self._timeout_seconds(instance),
+                    instance_id=instance_id,
+                ),
+            )
+
+    # ------------------------------------------------------------------
+    # Advance / cancel / cleanup
+    # ------------------------------------------------------------------
 
     async def advance_workflow(self, instance_id: str, user_input: str = "") -> bool:
-        """Advance a workflow instance."""
+        """Re-run an active instance's current step.
+
+        ``user_input`` is placed in the context under ``_user_input`` for the
+        duration of this run (``ConversationStep(use_user_input=True)`` sends
+        it as a message) and removed afterwards. Re-running a waiting step
+        re-arms its wait (and its timeout). Returns False if the instance is
+        unknown or not active.
+        """
         if instance_id not in self.workflow_instances:
             return False
 
@@ -873,17 +1369,17 @@ class WorkflowEngine:
         # F4: hold the per-instance lock across the is_active() check AND the
         # step execution, so a concurrent cancel_workflow/advance_workflow on
         # the same instance cannot interleave with this call's mutation of
-        # instance.context/status (re-check is_active() under the lock, not
-        # just before it, to avoid a TOCTOU race against a lock-holder that
-        # just moved the instance to a terminal status).
+        # instance.context/status (re-check is_active() under the lock).
         async with self._get_instance_lock(instance_id):
             if not instance.is_active():
                 return False
 
             if user_input:
-                instance.context[_KEY_USER_INPUT] = user_input
-
-            await self._execute_workflow_step(instance)
+                instance.context[KEY_USER_INPUT] = user_input
+            try:
+                await self._execute_workflow_step(instance)
+            finally:
+                instance.context.pop(KEY_USER_INPUT, None)
         return True
 
     async def cancel_workflow(
@@ -892,13 +1388,10 @@ class WorkflowEngine:
         """Cancel a workflow instance.
 
         :returns: ``True`` if this call transitioned the instance to
-            ``CANCELLED``. ``False`` covers three distinct cases the caller
-            cannot distinguish from the return value alone: the instance id
-            is unknown, or the instance had already reached a terminal
-            status (``COMPLETED``/``FAILED``/``CANCELLED``) by the time this
+            ``CANCELLED``. ``False`` if the instance id is unknown, or the
+            instance had already reached a terminal status by the time this
             call acquired the per-instance lock (see D-015 -- a benign no-op,
-            not an error). Callers that need to tell these apart should
-            check ``get_workflow_status(instance_id)`` before/after.
+            not an error).
         """
         if instance_id not in self.workflow_instances:
             return False
@@ -912,56 +1405,63 @@ class WorkflowEngine:
             # Do NOT call update_status(CANCELLED, ...) unconditionally here.
             # Since F4/D-003, this lock can be won only AFTER a concurrent
             # in-flight step already finished and committed a terminal status
-            # (e.g. COMPLETED) for this same instance -- the step's own
-            # coroutine held the lock first and released it on completion,
-            # and this cancel_workflow call was simply waiting its turn.
-            # update_status(CANCELLED) on an already-terminal instance raises
-            # WorkflowStateError (terminal states map to an empty transition
-            # set in _VALID_STATUS_TRANSITIONS), which would propagate out of
-            # this `-> bool` API instead of the plain False it returns for
-            # every other "nothing to cancel" case (see the missing-instance
-            # early return above). Treat "cancel a workflow that already
-            # finished/failed/was cancelled by the time this call got the
-            # lock" as a benign no-op, mirroring D-005's terminal guard on
-            # _handle_step_exception. See decisions.md D-015.
+            # (e.g. COMPLETED) for this same instance. update_status(CANCELLED)
+            # on an already-terminal instance raises WorkflowStateError, which
+            # would propagate out of this `-> bool` API instead of the plain
+            # False it returns for every other "nothing to cancel" case. See
+            # decisions.md D-015.
             if instance.is_terminal():
                 logger.debug(
                     f"Instance {instance_id} already terminal "
                     f"({instance.status.value}); cancel_workflow is a no-op"
                 )
                 return False
-            instance.update_status(WorkflowStatus.CANCELLED)
-            instance.context[_KEY_CANCELLATION_REASON] = reason
+            instance.context[KEY_CANCELLATION_REASON] = reason
+            self._set_status(instance, WorkflowStatus.CANCELLED)
 
-            # Clean up resources
+            # Clean up resources (already released by _set_status; kept so the
+            # listener lock is observed on this path too)
             await self._cleanup_workflow_resources(instance_id)
 
         logger.info(f"Workflow instance {instance_id} cancelled: {reason}")
-        self._purge_oldest_terminal_instances()
         return True
 
-    async def _cleanup_workflow_resources(self, instance_id: str) -> None:
-        """Clean up resources for a workflow instance."""
-        # Cancel timers (exception-safe per resource)
-        for timer_key in list(self.timers.keys()):
-            if timer_key.startswith(f"{instance_id}_"):
-                try:
-                    self.timers[timer_key].cancel()
-                except Exception as e:
-                    logger.warning(f"Failed to cancel timer {timer_key}: {e}")
-                finally:
-                    self.timers.pop(timer_key, None)
+    def _drop_wait_resources(self, instance_id: str) -> None:
+        """Drop the listeners, event timeouts and timer of ``instance_id``
+        (everything tied to its current wait; the deadline watchdog stays)."""
+        deadline_key = f"{instance_id}_deadline"
+        for timer_key, timer in list(self.timers.items()):
+            if timer.instance_id == instance_id and timer_key != deadline_key:
+                timer.cancel()
+                self.timers.pop(timer_key, None)
+        for listeners in self.event_listeners.values():
+            listeners.pop(instance_id, None)
 
-        # Remove event listeners under lock to prevent race with process_event
+    def _release_instance_resources(self, instance_id: str) -> None:
+        """Drop every timer, listener and buffered event of ``instance_id``.
+
+        # DECISION plan-2026-09-27T120000-5d1e7a3b/D-005
+        # Match timers by `Timer.instance_id`, NOT by the key prefix
+        # f"{instance_id}_": with custom ids, cancelling "order" also matched
+        # "order_2_timer" and killed another instance's timer.
+        """
+        for timer_key, timer in list(self.timers.items()):
+            if timer.instance_id != instance_id:
+                continue
+            try:
+                timer.cancel()
+            except Exception as e:
+                logger.warning(f"Failed to cancel timer {timer_key}: {e}")
+            finally:
+                self.timers.pop(timer_key, None)
+        for listeners in self.event_listeners.values():
+            listeners.pop(instance_id, None)
+        self._event_buffers.pop(instance_id, None)
+
+    async def _cleanup_workflow_resources(self, instance_id: str) -> None:
+        """Clean up resources for a workflow instance (under the listener lock)."""
         async with self._listener_lock:
-            for event_type in list(self.event_listeners.keys()):
-                try:
-                    if instance_id in self.event_listeners[event_type]:
-                        del self.event_listeners[event_type][instance_id]
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to remove event listener {event_type}/{instance_id}: {e}"
-                    )
+            self._release_instance_resources(instance_id)
 
     def remove_instance(self, instance_id: str) -> bool:
         """Remove a terminal workflow instance from memory.
@@ -978,12 +1478,17 @@ class WorkflowEngine:
                 f"(status={instance.status.value})"
             )
             return False
-        del self.workflow_instances[instance_id]
+        self._forget_instance(instance_id)
+        logger.debug(f"Removed terminal instance {instance_id}")
+        return True
+
+    def _forget_instance(self, instance_id: str) -> None:
+        self.workflow_instances.pop(instance_id, None)
         # F4: drop the per-instance lock too, otherwise _instance_locks grows
         # unbounded across the engine's lifetime.
         self._instance_locks.pop(instance_id, None)
-        logger.debug(f"Removed terminal instance {instance_id}")
-        return True
+        self._instance_definitions.pop(instance_id, None)
+        self._release_instance_resources(instance_id)
 
     def _purge_oldest_terminal_instances(self) -> None:
         """Remove oldest terminal instances if max_completed_instances is exceeded."""
@@ -1000,18 +1505,19 @@ class WorkflowEngine:
         terminal.sort(key=lambda x: x[1].completed_at or x[1].updated_at)
         to_remove = len(terminal) - self.max_completed_instances
         for iid, _ in terminal[:to_remove]:
-            del self.workflow_instances[iid]
-            # F4: same lock-leak cleanup as remove_instance.
-            self._instance_locks.pop(iid, None)
+            self._forget_instance(iid)
         logger.debug(f"Purged {to_remove} oldest terminal workflow instances")
 
-    # Getter methods
+    # ------------------------------------------------------------------
+    # Queries
+    # ------------------------------------------------------------------
+
     def get_workflow_instance(self, instance_id: str) -> WorkflowInstance | None:
-        """Get a workflow instance by ID."""
+        """Get a workflow instance by ID (the live object)."""
         return self.workflow_instances.get(instance_id)
 
     def get_workflow_definition(self, workflow_id: str) -> WorkflowDefinition | None:
-        """Get a workflow definition by ID."""
+        """Get a registered workflow definition by ID."""
         return self.workflow_definitions.get(workflow_id)
 
     def get_workflow_status(self, instance_id: str) -> WorkflowStatus | None:
@@ -1020,9 +1526,9 @@ class WorkflowEngine:
         return instance.status if instance else None
 
     def get_workflow_context(self, instance_id: str) -> dict[str, Any] | None:
-        """Get the context of a workflow instance."""
+        """Get a shallow copy of a workflow instance's context."""
         instance = self.get_workflow_instance(instance_id)
-        return instance.context if instance else None
+        return dict(instance.context) if instance else None
 
     def get_active_workflows(self) -> list[str]:
         """Get a list of active workflow instance IDs."""
@@ -1046,7 +1552,10 @@ class WorkflowEngine:
             "event_listeners": sum(
                 len(listeners) for listeners in self.event_listeners.values()
             ),
-            "active_timers": len(self.timers),
+            "active_timers": sum(
+                1 for t in self.timers.values() if t.task is None or not t.task.done()
+            ),
+            "buffered_events": sum(len(b) for b in self._event_buffers.values()),
             "status_breakdown": statuses,
         }
 
