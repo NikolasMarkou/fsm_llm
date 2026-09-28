@@ -3,7 +3,11 @@
 
 import { state } from './services/state.js';
 import { connectWS, registerHandlers } from './services/ws.js';
-import { $ } from './utils/dom.js';
+import {
+    getApiKey, checkAuthRequired, requestApiKey, onApiKeyChange,
+    submitApiKeyModal, cancelApiKeyModal, isApiKeyModalOpen,
+} from './services/auth.js';
+import { $, openDialog, closeDialog } from './utils/dom.js';
 
 // Page modules
 import * as dashboard from './pages/dashboard.js';
@@ -18,6 +22,14 @@ import * as builder from './pages/builder.js';
 // === NAVIGATION ===
 
 const VALID_PAGES = ['dashboard', 'control', 'visualizer', 'logs', 'builder', 'settings'];
+
+// Data (re)load hooks run when a page is shown or a new API key is saved.
+const PAGE_REFRESH = {
+    dashboard: () => { dashboard.loadDashboardConfig(); dashboard.refreshActivityTable(); },
+    logs: () => logs.onShowLogs(),
+    settings: () => settings.loadSettings(),
+    control: () => control.refreshControlCenter(),
+};
 
 function showPage(page) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -35,13 +47,7 @@ function showPage(page) {
     if (location.hash !== `#${page}`) history.replaceState(null, '', `#${page}`);
     if (page !== 'control') control.closeDrawer();
 
-    const refreshMap = {
-        dashboard: dashboard.loadDashboardConfig,
-        logs: logs.refreshLogs,
-        settings: settings.loadSettings,
-        control: control.refreshControlCenter,
-    };
-    refreshMap[page]?.();
+    PAGE_REFRESH[page]?.();
 
     if (page === 'visualizer') {
         const activeTab = document.querySelector('.tab-content.active');
@@ -56,7 +62,16 @@ function showPage(page) {
 }
 
 function toggleSidebar() {
-    $('sidebar')?.classList.toggle('collapsed');
+    const collapsed = $('sidebar')?.classList.toggle('collapsed');
+    $('sidebar-toggle')?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+function toggleShortcuts(show) {
+    const overlay = $('shortcuts-overlay');
+    if (!overlay) return;
+    const visible = overlay.style.display !== 'none';
+    if (show ?? !visible) openDialog(overlay, 'flex');
+    else closeDialog(overlay);
 }
 
 function switchTab(tabId, btn) {
@@ -90,6 +105,8 @@ conversations.setDeps({
     showPage,
     refreshActivityTable: dashboard.refreshActivityTable,
     refreshDetailPanel: control.refreshDetailPanel,
+    openDrawer: control.openDrawer,
+    refreshInstances: dashboard.refreshInstances,
 });
 launch.setDeps({
     showPage,
@@ -108,7 +125,6 @@ registerHandlers({
     renderUnifiedTable: control.renderUnifiedTable,
     updateRunningAgents: control.updateRunningAgents,
     appendLogs: logs.appendLogs,
-    updateLogErrorBadge: logs.updateLogErrorBadge,
     refreshActivityTable: dashboard.refreshActivityTable,
     showConversationDetail: conversations.showConversationDetail,
     refreshDetailPanel: control.refreshDetailPanel,
@@ -159,11 +175,13 @@ const ACTIONS = {
     'cancel-agent':      (el) => control.cancelAgent(el.dataset.instanceId),
     'advance-workflow':  (el) => control.advanceWorkflow(el.dataset.instanceId, el.dataset.wfInstanceId),
     'cancel-workflow':   (el) => control.cancelWorkflow(el.dataset.instanceId, el.dataset.wfInstanceId),
+    'send-workflow-event': (el) => control.sendWorkflowEvent(el.dataset.instanceId),
+    'end-conversation':  (el) => conversations.endConversation(el.dataset.instanceId, el.dataset.convId),
     'destroy-instance':  (el) => control.destroyInstance(el.dataset.instanceId),
     'go-to-conv':        (el) => conversations.showConversationInDrawer(el.dataset.instanceId, el.dataset.convId),
     'ctrl-page-prev':    () => control.ctrlPagePrev(),
     'ctrl-page-next':    () => control.ctrlPageNext(),
-    'toggle-trace-step': (el) => { const body = el.querySelector('.step-body'); if (body) body.style.display = body.style.display === 'none' ? 'block' : 'none'; },
+    'toggle-trace-step': (el) => control.toggleTraceStep(el),
     'expand-all-trace':  () => control.toggleAllTraceSteps(true),
     'collapse-all-trace':() => control.toggleAllTraceSteps(false),
 
@@ -194,12 +212,19 @@ const ACTIONS = {
     // Settings
     'save-settings':     () => settings.saveSettings(),
     'reset-settings':    () => settings.resetSettings(),
+    'save-api-key':      () => settings.saveApiKeySetting(),
+    'clear-api-key':     () => settings.clearApiKeySetting(),
 
-    // Modals
+    // Modals. Backdrop handlers compare the click target with the element that
+    // carries the data-action (the overlay itself): the delegated listener sits
+    // on document, so e.currentTarget is document and never matches.
     'close-launch-modal': () => launch.closeLaunchModal(),
-    'close-shortcuts':    () => { $('shortcuts-overlay').style.display = 'none'; },
-    'close-modal-backdrop': (_el, e) => { if (e.target === e.currentTarget) launch.closeLaunchModal(); },
-    'close-shortcuts-backdrop': (_el, e) => { if (e.target === e.currentTarget) { $('shortcuts-overlay').style.display = 'none'; } },
+    'close-shortcuts':    () => toggleShortcuts(false),
+    'close-modal-backdrop': (el, e) => { if (e.target === el) launch.closeLaunchModal(); },
+    'close-shortcuts-backdrop': (el, e) => { if (e.target === el) toggleShortcuts(false); },
+    'apikey-save':        () => submitApiKeyModal(),
+    'apikey-cancel':      () => cancelApiKeyModal(),
+    'close-apikey-backdrop': (el, e) => { if (e.target === el) cancelApiKeyModal(); },
 
     // Launch modal
     'filter-presets':    (el) => launch.filterPresets(el.dataset.cat),
@@ -247,27 +272,41 @@ document.addEventListener('change', (e) => {
 
 // === KEYBOARD SHORTCUTS ===
 
+const _NATIVE_ACTIVATABLE = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'];
+
 document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        // The API key modal sits on top: close only it.
+        if (isApiKeyModalOpen()) { cancelApiKeyModal(); return; }
+        toggleShortcuts(false);
+        launch.closeLaunchModal();
+        control.closeDrawer();
+        return;
+    }
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
         if (e.key === 'Enter' && !e.shiftKey) {
             if (e.target.id === 'conv-message-input') { e.preventDefault(); conversations.sendChatMessage(); }
             else if (e.target.id === 'builder-message-input') { e.preventDefault(); builder.sendBuilderMessage(); }
             else if (e.target.id === 'log-filter') { logs.refreshLogs(); }
+            else if (e.target.id === 'apikey-input') { e.preventDefault(); submitApiKeyModal(); }
+            else if (e.target.id === 'set-api-key') { e.preventDefault(); settings.saveApiKeySetting(); }
         }
         return;
     }
+    // Keyboard activation for non-native clickable elements (cards and rows
+    // rendered with role="button" tabindex="0"): route through the same
+    // click delegation as a mouse click.
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.action
+        && !_NATIVE_ACTIVATABLE.includes(tag)) {
+        e.preventDefault();
+        e.target.click();
+        return;
+    }
+    if (isApiKeyModalOpen()) return;
     const pageKeys = { '1': 'dashboard', '2': 'control', '3': 'visualizer', '4': 'logs', '5': 'builder', '6': 'settings' };
     if (pageKeys[e.key]) { showPage(pageKeys[e.key]); return; }
-    if (e.key === '?') {
-        const overlay = $('shortcuts-overlay');
-        overlay.style.display = overlay.style.display === 'none' ? 'flex' : 'none';
-    }
-    if (e.key === 'Escape') {
-        $('shortcuts-overlay').style.display = 'none';
-        launch.closeLaunchModal();
-        control.closeDrawer();
-    }
+    if (e.key === '?') toggleShortcuts();
 });
 
 // === SCROLL HANDLERS ===
@@ -281,10 +320,24 @@ window.addEventListener('hashchange', navigateFromHash);
 
 // === BOOT SEQUENCE ===
 
+// Ask the server whether a key is required before anything else, so the key
+// modal opens once up front instead of on the first 401. Requests issued
+// meanwhile share the same prompt and retry after the key is saved.
+checkAuthRequired().then(required => {
+    if (required && !getApiKey()) requestApiKey({ force: true });
+});
+// Reload what the user is looking at once a (new) key is saved, since
+// requests made before it may have failed with 401.
+onApiKeyChange(() => {
+    if (!getApiKey()) return;
+    dashboard.refreshInstances();
+    PAGE_REFRESH[state.currentPage]?.();
+});
 connectWS();
 settings.loadSettings();
 dashboard.loadDashboardConfig();
 dashboard.refreshInstances();
+dashboard.refreshActivityTable();
 visualizer.initVizDivider();
 setInterval(updateClock, 1000);
 updateClock();
@@ -293,8 +346,10 @@ setInterval(() => {
     if (state.currentPage === 'control' || state.currentPage === 'dashboard') {
         dashboard.refreshInstances();
         if (state.currentPage === 'control') control.refreshControlCenter();
+        if (state.currentPage === 'dashboard') dashboard.refreshActivityTable();
     }
-    if (state.currentPage === 'logs') logs.refreshLogs();
+    // Incremental catch-up: appends only unseen records and respects pause.
+    if (state.currentPage === 'logs') logs.syncLogs();
 }, 10000);
 
 navigateFromHash();

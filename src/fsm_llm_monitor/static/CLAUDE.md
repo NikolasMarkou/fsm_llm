@@ -31,17 +31,19 @@ Layering rule: `utils/` imports nothing outside `utils/`; `services/` imports `u
 | `style.css` | Theme and components | Design tokens on `:root` (`--bg`, `--surface`, `--primary`, `--primary-dim`, `--success`, `--warning`, `--danger`, `--info`, `--cyan`, `--yellow`, `--text*`, `--space-*`, `--radius-*`, `--shadow-*`, `--font-body`, `--font-mono`) |
 | `flows.json` | Pattern graphs | `{agents: {<AgentClass>: {description, nodes[], edges[]}}, workflows: {<id>: {...}}}` |
 | `pages/` | Screen modules | dashboard, control, conversations, launch, visualizer, builder, logs, settings |
-| `services/` | `api.js`, `state.js`, `ws.js` | REST, Proxy state, WebSocket with 3 s to 30 s backoff |
+| `services/` | `api.js`, `auth.js`, `state.js`, `ws.js` | REST (API key header, 401 prompt + one retry), key storage/modal, Proxy state, WebSocket with first-message auth and 3 s to 30 s backoff |
 | `utils/` | `dom.js`, `format.js`, `markdown.js`, `graph.js` | `esc()`, formatting, safe Markdown subset, BFS SVG layout |
 
 ## app.js behavior
 
-- `showPage(page)`: toggles `.page.active`, sidebar and mobile nav `active`, sets `state.currentPage`, `history.replaceState` to `#page`, closes the drawer when leaving `control`, then runs the page refresher: dashboard -> `loadDashboardConfig`, logs -> `refreshLogs`, settings -> `loadSettings`, control -> `refreshControlCenter`; visualizer re-renders the active agent or workflow tab.
+- `showPage(page)`: toggles `.page.active`, sidebar and mobile nav `active`, sets `state.currentPage`, `history.replaceState` to `#page`, closes the drawer when leaving `control`, then runs `PAGE_REFRESH[page]`: dashboard -> `loadDashboardConfig` + `refreshActivityTable`, logs -> `onShowLogs` (no rebuild while paused), settings -> `loadSettings`, control -> `refreshControlCenter`; visualizer re-renders the active agent or workflow tab. `PAGE_REFRESH[currentPage]` and `refreshInstances` also run whenever a new API key is saved.
 - Click delegation: one `document` `click` listener; finds `closest('[data-action]')`, stops propagation when nested inside another `[data-action]` (buttons inside clickable rows), and calls `ACTIONS[action](el, event)`. No inline `onclick` anywhere.
 - `input` delegation by element id: `inst-search`, `activity-search`, `ctrl-search`, `log-filter`. `change` delegation: `viz-preset-select`, `viz-agent-type`, `viz-wf-type`, `launch-agent-type`, `launch-fsm-source`.
-- Keys: Enter (no Shift) sends in `conv-message-input` and `builder-message-input`, refreshes logs in `log-filter`. Outside inputs: `1`..`6` pages, `?` toggles `#shortcuts-overlay`, `Escape` closes overlay, launch modal, and drawer.
-- Boot: `connectWS()`, `settings.loadSettings()`, `dashboard.loadDashboardConfig()`, `dashboard.refreshInstances()`, `visualizer.initVizDivider()`, 1 s clock (`#clock`, `#footer-clock`), `navigateFromHash()`.
-- Poll every 10 s: on dashboard or control, `refreshInstances()` (plus `refreshControlCenter()` on control); on logs, `refreshLogs()`.
+- Keys: Enter (no Shift) sends in `conv-message-input` and `builder-message-input`, refreshes logs in `log-filter`, saves in `apikey-input` and `set-api-key`. `Escape` (anywhere, inputs included) closes only the API key modal when it is open, otherwise the shortcuts overlay, launch modal, and drawer. Enter/Space on a focused non-native `[data-action]` element (cards, rows with `tabindex="0"`) dispatches a click. Outside inputs and with no key modal: `1`..`6` pages, `?` toggles `#shortcuts-overlay`.
+- Backdrop clicks (`close-modal-backdrop`, `close-shortcuts-backdrop`, `close-apikey-backdrop`) close only when `e.target` is the overlay element itself; clicks inside the dialog do not.
+- `toggle-sidebar` keeps `aria-expanded` on `#sidebar-toggle` in sync.
+- Boot: `checkAuthRequired()` (forced key modal when the server needs a key and none is stored), `connectWS()`, `settings.loadSettings()`, `dashboard.loadDashboardConfig()`, `dashboard.refreshInstances()`, `dashboard.refreshActivityTable()`, `visualizer.initVizDivider()`, 1 s clock (`#clock`, `#footer-clock`), `navigateFromHash()`.
+- Poll every 10 s: on dashboard or control, `refreshInstances()` (plus `refreshControlCenter()` on control, `refreshActivityTable()` on dashboard); on logs, `syncLogs()` (append-only, de-duplicated, respects pause).
 
 ## flows.json
 

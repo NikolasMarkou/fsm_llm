@@ -2,7 +2,7 @@
 
 import { state, TOOL_BASED_AGENTS } from '../services/state.js';
 import { fetchJson, postJson } from '../services/api.js';
-import { $, esc, numVal, intVal, showError, showStatus } from '../utils/dom.js';
+import { $, esc, numVal, intVal, showError, showStatus, openDialog, closeDialog } from '../utils/dom.js';
 
 // Forward references (set by app.js)
 let _showPage, _refreshInstances, _showConversationInDrawer;
@@ -14,18 +14,17 @@ export function setDeps(deps) {
 }
 
 export function showLaunchModal() {
-    $('launch-modal').style.display = 'flex';
+    openDialog($('launch-modal'), 'flex', $('launch-fsm-label'));
     loadLaunchPresets();
     loadWorkflowPresets();
     checkCapabilities();
     onAgentTypeChange();
     populateToolTemplates();
     _clearLaunchStatuses();
-    $('launch-fsm-label')?.focus();
 }
 
 export function closeLaunchModal() {
-    $('launch-modal').style.display = 'none';
+    closeDialog($('launch-modal'));
 }
 
 function _clearLaunchStatuses() {
@@ -116,6 +115,9 @@ export function renderLaunchPresets(presets) {
         card.className = 'preset-card';
         card.setAttribute('data-category', p.category || 'other');
         card.setAttribute('data-action', 'select-preset');
+        card.setAttribute('role', 'button');
+        card.setAttribute('tabindex', '0');
+        card.setAttribute('aria-pressed', 'false');
         card.setAttribute('data-preset-id', p.id);
         card.setAttribute('data-preset-name', p.name);
         card.innerHTML = `<div class="preset-name">${esc(p.name)}</div><div class="preset-category">${esc(p.category || '')}</div><div class="preset-desc">${esc(p.description || '')}</div>`;
@@ -151,8 +153,12 @@ export function selectPreset(card) {
     const id = card.getAttribute('data-preset-id');
     const name = card.getAttribute('data-preset-name');
     $('launch-fsm-preset-id').value = id;
-    $('launch-preset-list')?.querySelectorAll('.preset-card').forEach(c => c.classList.remove('selected'));
+    $('launch-preset-list')?.querySelectorAll('.preset-card').forEach(c => {
+        c.classList.remove('selected');
+        c.setAttribute('aria-pressed', 'false');
+    });
     card.classList.add('selected');
+    card.setAttribute('aria-pressed', 'true');
     if (!$('launch-fsm-label').value) {
         $('launch-fsm-label').value = name.replace(/\s*\(.*\)/, '');
     }

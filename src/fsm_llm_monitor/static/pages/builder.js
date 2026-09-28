@@ -37,6 +37,25 @@ let _artifact = null;
 let _artifactType = null;
 let _sending = false;
 let _following = true;
+// Bumped on every start/reset: replies carrying an older token belong to a
+// session the user abandoned and are dropped.
+let _sessionToken = 0;
+
+const WORKFLOW_LAUNCH_NOTE = 'Workflows built here cannot be launched from the monitor: the server only launches '
+    + 'its built-in workflow presets, not a JSON definition. Copy or download the definition and build it with '
+    + 'the fsm_llm_workflows Python DSL.';
+
+function _deleteServerSession(sessionId) {
+    if (!sessionId) return;
+    fetchJson(`/api/builder/${encodeURIComponent(sessionId)}`, { method: 'DELETE' }).catch(() => {});
+}
+
+function _resetInputControls() {
+    const input = $('builder-message-input');
+    if (input) input.disabled = false;
+    const sendBtn = input?.nextElementSibling;
+    if (sendBtn) sendBtn.disabled = false;
+}
 
 function _isNearBottom(el) {
     return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
@@ -76,6 +95,11 @@ export function startBuilderSession() {
     const model = $('builder-model').value.trim();
     const temp = numVal('builder-temp', 0.7);
 
+    // Abandon the previous session: free it on the server and ignore any of
+    // its replies still in flight.
+    if (_sessionId && !_complete) _deleteServerSession(_sessionId);
+    const token = ++_sessionToken;
+
     _sessionId = null;
     _complete = false;
     _messages = [];
@@ -83,6 +107,8 @@ export function startBuilderSession() {
     _artifactType = null;
     _sending = false;
 
+    removeTypingIndicator();
+    _resetInputControls();
     $('builder-chat').innerHTML = '';
     $('builder-result-panel').style.display = 'none';
     $('builder-input-area').style.display = 'flex';
@@ -90,6 +116,11 @@ export function startBuilderSession() {
 
     postJson('/api/builder/start', { model: model || undefined, temperature: temp })
         .then(data => {
+            if (token !== _sessionToken) {
+                // A newer start or a reset superseded this one.
+                _deleteServerSession(data?.session_id);
+                return;
+            }
             _sessionId = data.session_id;
             _appendBubble('assistant', data.response);
             _renderInternalState(data.internal_state);
@@ -97,7 +128,10 @@ export function startBuilderSession() {
             $('builder-message-input').focus();
             if (data.is_complete) _onComplete(data);
         })
-        .catch(e => showError('builder-status', `Failed to start: ${e.message}`));
+        .catch(e => {
+            if (token !== _sessionToken) return;
+            showError('builder-status', `Failed to start: ${e.message}`);
+        });
 }
 
 export function sendBuilderMessage() {
@@ -108,6 +142,7 @@ export function sendBuilderMessage() {
     const msg = input.value.trim();
     if (!msg) return;
 
+    const token = _sessionToken;
     _sending = true;
     input.value = '';
     input.disabled = true;
@@ -125,6 +160,7 @@ export function sendBuilderMessage() {
     postJson('/api/builder/send', { session_id: _sessionId, message: msg })
         .then(data => {
             clearTimeout(buildTimer);
+            if (token !== _sessionToken) return;
             _sending = false;
             removeTypingIndicator();
             _appendBubble('assistant', data.response);
@@ -141,6 +177,7 @@ export function sendBuilderMessage() {
         })
         .catch(e => {
             clearTimeout(buildTimer);
+            if (token !== _sessionToken) return;
             _sending = false;
             removeTypingIndicator();
             _appendBubble('error', e.message || 'Request failed');
@@ -159,6 +196,10 @@ function _onComplete(data) {
         $('builder-result-json').textContent = '{}';
         $('builder-result-summary').innerHTML = '';
         $('builder-result-graph').style.display = 'none';
+        const errLaunchBtn = $('builder-launch-btn');
+        if (errLaunchBtn) errLaunchBtn.style.display = 'none';
+        const errNote = $('builder-launch-note');
+        if (errNote) errNote.style.display = 'none';
         $('builder-result-status').innerHTML =
             `<span class="badge badge-failed">ERROR</span> ${esc(data.error || 'Result extraction failed')}`;
         showStatus('builder-status', 'Build completed with errors', 'error');
@@ -181,10 +222,21 @@ function _onComplete(data) {
     $('builder-result-summary').innerHTML = _buildResultSummary(artifact, artifactType);
 
     const launchBtn = $('builder-launch-btn');
+    const launchNote = $('builder-launch-note');
     if (launchBtn) {
         const known = ['fsm', 'workflow', 'agent'].includes(artifactType);
+        const isWorkflow = artifactType === 'workflow';
         launchBtn.textContent = known ? `Launch ${artifactType.toUpperCase()}` : 'Launch';
         launchBtn.style.display = known ? '' : 'none';
+        // The server rejects definition_json launches, so do not offer one.
+        launchBtn.disabled = isWorkflow;
+        if (isWorkflow) launchBtn.setAttribute('aria-describedby', 'builder-launch-note');
+        else launchBtn.removeAttribute('aria-describedby');
+        launchBtn.title = isWorkflow ? 'Workflows cannot be launched from a JSON definition' : '';
+    }
+    if (launchNote) {
+        launchNote.textContent = artifactType === 'workflow' ? WORKFLOW_LAUNCH_NOTE : '';
+        launchNote.style.display = artifactType === 'workflow' ? 'block' : 'none';
     }
 
     // Hide agent launch form from any previous result
@@ -236,12 +288,26 @@ function _buildResultSummary(artifact, artifactType) {
 }
 
 function _renderBuilderGraph(fsmDef) {
+    const token = _sessionToken;
+    const svg = $('builder-result-svg');
+    const errEl = $('builder-result-graph-error');
+    if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+    if (svg) svg.style.display = '';
     postJson('/api/fsm/visualize', fsmDef)
-        .then(vizData => renderGraph('builder-result-svg', vizData, { colorVar: 'var(--primary-dim)', rx: 4, nodeClass: 'fsm' }))
+        .then(vizData => {
+            if (token !== _sessionToken) return;
+            renderGraph('builder-result-svg', vizData, { colorVar: 'var(--primary-dim)', rx: 4, nodeClass: 'fsm' });
+        })
         .catch(e => {
+            if (token !== _sessionToken) return;
             console.error('Builder graph render failed:', e);
-            const g = $('builder-result-graph');
-            g.innerHTML = `<div class="empty-state">Graph render failed: ${esc(e.message || String(e))}</div>`;
+            // Keep #builder-result-svg in the DOM for the next result; show the
+            // error in its sibling instead of replacing the container.
+            if (svg) { svg.innerHTML = ''; svg.style.display = 'none'; }
+            if (errEl) {
+                errEl.textContent = `Graph render failed: ${e.message || String(e)}`;
+                errEl.style.display = '';
+            }
         });
 }
 
@@ -281,7 +347,7 @@ function _renderInternalState(state) {
     html += '<h4>Session</h4>';
     html += '<div class="builder-state-kv">';
     html += `<span class="key">Phase</span><span class="val"><span class="builder-state-badge">${esc(state.phase || state.current_state || 'n/a')}</span></span>`;
-    html += `<span class="key">Turn</span><span class="val">${state.turn_count ?? 0}</span>`;
+    html += `<span class="key">Turn</span><span class="val">${esc(state.turn_count ?? 0)}</span>`;
     if (state.artifact_type) {
         html += `<span class="key">Type</span><span class="val">${esc(state.artifact_type)}</span>`;
     }
@@ -289,13 +355,14 @@ function _renderInternalState(state) {
 
     // Progress
     if (state.builder_progress) {
-        const pct = state.builder_progress.percentage ?? 0;
+        const rawPct = Number(state.builder_progress.percentage ?? 0);
+        const pct = Number.isFinite(rawPct) ? Math.max(0, Math.min(100, rawPct)) : 0;
         html += '<div class="builder-state-section">';
         html += '<h4>Progress</h4>';
         html += `<div class="builder-state-progress"><div class="builder-state-progress-bar" style="width:${pct}%"></div></div>`;
         html += '<div class="builder-state-kv">';
         html += `<span class="key">Complete</span><span class="val">${pct.toFixed(0)}%</span>`;
-        const missing = state.builder_progress.missing || [];
+        const missing = Array.isArray(state.builder_progress.missing) ? state.builder_progress.missing : [];
         if (missing.length > 0) {
             html += `<span class="key">Missing</span><span class="val">${esc(missing.join(', '))}</span>`;
         }
@@ -381,7 +448,7 @@ function _launchBuilderFSM() {
         .then(data => {
             showStatus('builder-status', 'Launched! Switching to Control Center...', 'success');
             _refreshInstances?.();
-            return postJson(`/api/fsm/${data.instance_id}/start`, {}).then(() => {
+            return postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, {}).then(() => {
                 setTimeout(() => _showPage?.('control'), 500);
             });
         })
@@ -389,19 +456,9 @@ function _launchBuilderFSM() {
 }
 
 function _launchBuilderWorkflow() {
-    let parsed;
-    try { parsed = JSON.parse(_artifact); } catch { showError('builder-status', 'Invalid JSON'); return; }
-
-    postJson('/api/workflow/launch', {
-        definition_json: parsed,
-        label: parsed.name || 'Built Workflow',
-    })
-        .then(() => {
-            showStatus('builder-status', 'Launched! Switching to Control Center...', 'success');
-            _refreshInstances?.();
-            setTimeout(() => _showPage?.('control'), 500);
-        })
-        .catch(e => showError('builder-status', `Launch failed: ${e.message}`));
+    // The server cannot launch a workflow from definition_json (only presets),
+    // so explain instead of sending a request that always fails.
+    showError('builder-status', WORKFLOW_LAUNCH_NOTE);
 }
 
 function _launchBuilderAgent() {
@@ -501,9 +558,8 @@ function _collectAgentToolStubs(parsed) {
 }
 
 export function resetBuilder() {
-    if (_sessionId && !_complete) {
-        fetchJson(`/api/builder/${_sessionId}`, { method: 'DELETE' }).catch(() => {});
-    }
+    if (_sessionId && !_complete) _deleteServerSession(_sessionId);
+    _sessionToken++;
     _sessionId = null;
     _complete = false;
     _messages = [];
@@ -511,6 +567,8 @@ export function resetBuilder() {
     _artifactType = null;
     _sending = false;
 
+    removeTypingIndicator();
+    _resetInputControls();
     $('builder-chat').innerHTML = '';
     $('builder-result-panel').style.display = 'none';
     $('builder-input-area').style.display = 'none';

@@ -2,7 +2,7 @@
 
 import { state, scheduleRefresh } from '../services/state.js';
 import { fetchJson } from '../services/api.js';
-import { $, esc, highlightText, showToast } from '../utils/dom.js';
+import { $, esc, highlightText, showToast, levelClass } from '../utils/dom.js';
 import { formatTime } from '../utils/format.js';
 
 // --- State ---
@@ -11,6 +11,42 @@ let _logBuffer = [];
 let _logFollowing = true;
 let _logErrorCount = 0;
 let _logPillCounts = {};
+
+// De-duplication of records across WS pushes, periodic syncs and full
+// refreshes. Key = timestamp + level + source line + message; bounded FIFO.
+const _SEEN_CAP = 10000;
+let _seenKeys = new Set();
+let _seenOrder = [];
+
+function _logKey(r) {
+    return `${r.timestamp}|${r.level}|${r.module}:${r.line}|${r.message}`;
+}
+
+function _markSeen(key) {
+    _seenKeys.add(key);
+    _seenOrder.push(key);
+    if (_seenOrder.length > _SEEN_CAP) {
+        const drop = _seenOrder.splice(0, _seenOrder.length - _SEEN_CAP);
+        for (const k of drop) _seenKeys.delete(k);
+    }
+}
+
+/** Keep only records not seen before, marking them seen. */
+function _takeUnseen(logs) {
+    const fresh = [];
+    for (const r of logs) {
+        const k = _logKey(r);
+        if (_seenKeys.has(k)) continue;
+        _markSeen(k);
+        fresh.push(r);
+    }
+    return fresh;
+}
+
+
+export function isLogPaused() {
+    return _logPaused;
+}
 
 // --- Pill Toggles ---
 
@@ -60,13 +96,13 @@ export function onLogSearchInput() {
 
 function _logEntryHtml(r, filter) {
     const ts = formatTime(r.timestamp);
-    const levelLower = r.level.toLowerCase();
+    const levelLower = levelClass(r.level);
     const dotHtml = `<span class="log-level-dot ${levelLower}"></span>`;
     const conv = r.conversation_id ? ` [${r.conversation_id}]` : '';
     const msgText = `${r.module}:${r.line}${conv} ${r.message}`;
     const msgHtml = filter ? highlightText(msgText, filter) : esc(msgText);
     const entryClass = (levelLower === 'error' || levelLower === 'critical') ? ' error' : '';
-    return `<div class="entry${entryClass}"><span class="ts log-${levelLower}">${ts}</span><span class="type log-type-col log-${levelLower}">${dotHtml}${r.level}</span><span class="msg text-dim">${msgHtml}</span></div>`;
+    return `<div class="entry${entryClass}"><span class="ts log-${levelLower}">${esc(ts)}</span><span class="type log-type-col log-${levelLower}">${dotHtml}${esc(r.level)}</span><span class="msg text-dim">${msgHtml}</span></div>`;
 }
 
 // --- Auto-scroll ---
@@ -107,6 +143,7 @@ export function onLogScroll() {
 function _updatePauseButton() {
     const btn = $('log-pause-btn');
     if (!btn) return;
+    btn.setAttribute('aria-pressed', _logPaused ? 'true' : 'false');
     if (_logPaused) {
         const count = _logBuffer.length;
         btn.textContent = count > 0 ? `Resume (${count} pending)` : 'Resume';
@@ -119,10 +156,11 @@ function _updatePauseButton() {
 
 export function toggleLogPause() {
     _logPaused = !_logPaused;
+    const pending = _logBuffer;
+    _logBuffer = [];
     _updatePauseButton();
-    if (!_logPaused && _logBuffer.length > 0) {
-        appendLogs(_logBuffer);
-        _logBuffer = [];
+    if (!_logPaused && pending.length > 0 && state.currentPage === 'logs') {
+        _renderLogs(pending);
     }
 }
 
@@ -131,45 +169,31 @@ export function toggleLogPause() {
 export function clearLogs() {
     const stream = $('log-stream');
     if (stream) stream.innerHTML = '';
-    $('log-stats').textContent = '0 entries';
+    const statsEl = $('log-stats');
+    if (statsEl) statsEl.textContent = '0 entries';
+    _logBuffer = [];
+    _updatePauseButton();
     _logPillCounts = {};
     _updateLogPillCounts([], true);
+    // Cleared records stay marked as seen so the periodic sync does not
+    // bring them back; the error badge restarts from zero.
+    _logErrorCount = 0;
+    _updateLogSidebarBadge();
 }
 
-// --- Incremental Append (from WebSocket) ---
+// --- Incremental Append (from WebSocket / periodic sync) ---
 
 // Cap on the paused-mode buffer to prevent unbounded growth during a long
 // paused high-volume run (frontend finding F-06).
 const _LOG_BUFFER_CAP = 5000;
 
-export function appendLogs(logs) {
-    if (!logs?.length) return;
-
-    if (_logPaused) {
-        for (const log of logs) _logBuffer.push(log);
-        if (_logBuffer.length > _LOG_BUFFER_CAP) {
-            _logBuffer.splice(0, _logBuffer.length - _LOG_BUFFER_CAP);
-        }
-        _updatePauseButton();
-        return;
-    }
-
-    if (state.currentPage !== 'logs') {
-        // Not visible: keep the sidebar error badge and pill counts live instead
-        // of dropping the entries entirely; the Logs page re-polls the server's
-        // bounded log deque on navigation for the full stream (finding F-02).
-        _updateLogPillCounts(logs);
-        for (const log of logs) {
-            if (log.level === 'ERROR' || log.level === 'CRITICAL') _logErrorCount++;
-        }
-        _updateLogSidebarBadge();
-        return;
-    }
+/** Render already de-duplicated records (newest first) into the stream. */
+function _renderLogs(logs) {
+    const stream = $('log-stream');
+    if (!stream || !logs.length) return;
 
     const activeLevels = getActiveLogLevels();
     const filter = $('log-filter')?.value.trim().toLowerCase();
-    const stream = $('log-stream');
-    if (!stream) return;
 
     stream.querySelector('.empty-state')?.remove();
 
@@ -179,7 +203,7 @@ export function appendLogs(logs) {
     for (let i = logs.length - 1; i >= 0; i--) {
         const r = logs[i];
         if (!activeLevels.includes(r.level)) continue;
-        if (filter && !r.message.toLowerCase().includes(filter)) continue;
+        if (filter && !String(r.message ?? '').toLowerCase().includes(filter)) continue;
         html += _logEntryHtml(r, filter);
     }
 
@@ -190,44 +214,85 @@ export function appendLogs(logs) {
         }
     }
 
-    if (wasFollowing) {
+    if (wasFollowing && state.autoScrollLogs !== false) {
         _scrollToBottom(stream);
         _logFollowing = true;
+    } else {
+        _logFollowing = _isNearBottom(stream);
     }
     updateJumpButton();
 
     const statsEl = $('log-stats');
     if (statsEl) statsEl.textContent = `${stream.children.length} entries`;
+}
 
-    _updateLogPillCounts(logs);
+export function appendLogs(logs) {
+    if (!logs?.length) return;
+    const fresh = _takeUnseen(logs);
+    if (!fresh.length) return;
 
-    for (const log of logs) {
+    // Counters track records as received, once each, whatever the view state.
+    _updateLogPillCounts(fresh);
+    for (const log of fresh) {
         if (log.level === 'ERROR' || log.level === 'CRITICAL') _logErrorCount++;
     }
     _updateLogSidebarBadge();
+
+    if (_logPaused) {
+        for (const log of fresh) _logBuffer.push(log);
+        if (_logBuffer.length > _LOG_BUFFER_CAP) {
+            _logBuffer.splice(0, _logBuffer.length - _LOG_BUFFER_CAP);
+        }
+        _updatePauseButton();
+        return;
+    }
+
+    // Not visible: the Logs page rebuilds from the server's bounded log deque
+    // on navigation (finding F-02).
+    if (state.currentPage !== 'logs') return;
+
+    _renderLogs(fresh);
 }
 
 // --- Sidebar Error Badge ---
+// One meaning only: the number of ERROR/CRITICAL log lines this page has
+// received (not the server's error-event metric).
 
 function _updateLogSidebarBadge() {
     const badge = $('log-error-badge');
     if (!badge) return;
     if (_logErrorCount > 0) {
-        badge.textContent = _logErrorCount > 99 ? '99+' : _logErrorCount;
+        badge.textContent = _logErrorCount > 99 ? '99+' : String(_logErrorCount);
+        const label = `${_logErrorCount} error or critical log line${_logErrorCount === 1 ? '' : 's'} received`;
+        badge.title = label;
+        badge.setAttribute('aria-label', label);
         badge.style.display = 'inline-flex';
     } else {
         badge.style.display = 'none';
     }
 }
 
-export function updateLogErrorBadge(metrics) {
-    if (metrics?.total_errors !== undefined) {
-        _logErrorCount = metrics.total_errors;
-        _updateLogSidebarBadge();
-    }
+// --- Full Refresh ---
+
+/** Page-show hook: rebuild the stream unless the user paused it. */
+export function onShowLogs() {
+    const stream = $('log-stream');
+    if (_logPaused && stream && stream.children.length > 0) return;
+    refreshLogs();
 }
 
-// --- Full Refresh ---
+/**
+ * Periodic catch-up: fetch the latest records and append only unseen ones.
+ * Never wipes the stream; while paused, new records go to the pause buffer.
+ */
+export async function syncLogs() {
+    try {
+        const logs = await fetchJson(`/api/logs?limit=500&level=${encodeURIComponent(getMinLogLevel())}`);
+        appendLogs(logs);
+    } catch (e) {
+        console.error('syncLogs:', e);
+    }
+}
 
 export async function refreshLogs() {
     const activeLevels = getActiveLogLevels();
@@ -237,11 +302,22 @@ export async function refreshLogs() {
     try {
         let logs = await fetchJson(`/api/logs?limit=500&level=${encodeURIComponent(minLevel)}`);
 
+        // The rebuilt view reflects the server's latest state, so anything held
+        // in the pause buffer is either shown now or already evicted server side.
+        // Records not seen before still count toward the error badge once.
+        for (const r of _takeUnseen(logs)) {
+            if (r.level === 'ERROR' || r.level === 'CRITICAL') _logErrorCount++;
+        }
+        _updateLogSidebarBadge();
+        _logBuffer = [];
+        _updatePauseButton();
+
         _updateLogPillCounts(logs, true);
         logs = logs.filter(r => activeLevels.includes(r.level));
-        if (filter) logs = logs.filter(r => r.message.toLowerCase().includes(filter));
+        if (filter) logs = logs.filter(r => String(r.message ?? '').toLowerCase().includes(filter));
 
         const stream = $('log-stream');
+        if (!stream) return;
         $('log-empty')?.remove();
         logs.reverse();
 
@@ -255,14 +331,21 @@ export async function refreshLogs() {
                 + `</div>`;
         }
         for (const log of logs) html += _logEntryHtml(log, filter);
+        const prevTop = stream.scrollTop;
         stream.innerHTML = html;
-        $('log-stats').textContent = `${logs.length} entries`;
+        const statsEl = $('log-stats');
+        if (statsEl) statsEl.textContent = `${logs.length} entries`;
 
-        stream.scrollTop = stream.scrollHeight;
-        _logFollowing = true;
+        if (state.autoScrollLogs !== false) {
+            stream.scrollTop = stream.scrollHeight;
+            _logFollowing = true;
+        } else {
+            stream.scrollTop = prevTop;
+            _logFollowing = _isNearBottom(stream);
+        }
         updateJumpButton();
     } catch (e) {
         console.error('refreshLogs:', e);
-        showToast('Failed to load logs', 'error');
+        showToast(`Failed to load logs: ${e.message}`, 'error');
     }
 }

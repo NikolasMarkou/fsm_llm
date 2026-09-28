@@ -2,7 +2,7 @@
 
 import { state, scheduleRefresh } from '../services/state.js';
 import { fetchJson } from '../services/api.js';
-import { $, esc, statusBadge, hashInstances, showToast } from '../utils/dom.js';
+import { $, esc, statusBadge, hashInstances, showToast, levelClass } from '../utils/dom.js';
 import { formatTime, relativeTime, formatNumber } from '../utils/format.js';
 
 // --- Instance Grid State ---
@@ -191,10 +191,11 @@ export function updateEvents(events) {
     let html = '';
     for (const e of events) {
         const ts = formatTime(e.timestamp);
-        const level = (e.level || 'INFO').toLowerCase();
-        const cat = e.event_type.includes('transition') ? ' transition' : e.event_type.includes('conversation') ? ' conversation' : '';
-        const cid = e.conversation_id ? `<span class="conv-id">${esc(e.conversation_id.substring(0, 8))}</span>` : '';
-        html += `<div class="entry ${level}${cat}"><span class="ts">${ts}</span>${cid}<span class="type">${esc(e.event_type)}</span><span class="msg">${esc(e.message)}</span></div>`;
+        const level = levelClass(e.level || 'INFO');
+        const evType = String(e.event_type || '');
+        const cat = evType.includes('transition') ? ' transition' : evType.includes('conversation') ? ' conversation' : '';
+        const cid = e.conversation_id ? `<span class="conv-id">${esc(String(e.conversation_id).substring(0, 8))}</span>` : '';
+        html += `<div class="entry ${level}${cat}"><span class="ts">${esc(ts)}</span>${cid}<span class="type">${esc(e.event_type)}</span><span class="msg">${esc(e.message)}</span></div>`;
     }
     log.insertAdjacentHTML('afterbegin', html);
     while (log.children.length > 50) log.removeChild(log.lastChild);
@@ -240,8 +241,8 @@ export function renderInstanceGrid() {
 
     let html = '';
     for (const inst of pageItems) {
-        const typeClass = `type-${inst.instance_type || 'fsm'}`;
-        html += `<div class="instance-card ${typeClass}" data-action="navigate-instance" data-instance-id="${esc(inst.instance_id)}" data-instance-type="${esc(inst.instance_type)}">`;
+        const typeClass = `type-${_INSTANCE_TYPES.includes(inst.instance_type) ? inst.instance_type : 'fsm'}`;
+        html += `<div class="instance-card ${typeClass}" role="button" tabindex="0" aria-label="Open ${esc(inst.label || inst.instance_id)} in Control Center" data-action="navigate-instance" data-instance-id="${esc(inst.instance_id)}" data-instance-type="${esc(inst.instance_type)}">`;
         html += `<div class="inst-label">${esc(inst.label || inst.instance_id)}</div>`;
         html += `<div class="flex-between">`;
         html += `<div class="inst-type">${esc(inst.instance_type)}</div>`;
@@ -258,7 +259,7 @@ export function renderInstanceGrid() {
         if (extra || inst.created_at) {
             html += `<div class="text-small-dim">`;
             html += `<span>${esc(extra)}</span>`;
-            if (inst.created_at) html += `<span>${relativeTime(inst.created_at)}</span>`;
+            if (inst.created_at) html += `<span>${esc(relativeTime(inst.created_at))}</span>`;
             html += `</div>`;
         }
         html += `</div>`;
@@ -311,6 +312,7 @@ export async function refreshInstances() {
 // --- Activity Table ---
 
 const _TYPE_LABELS = { fsm_conversation: 'FSM', agent_task: 'Agent', workflow_instance: 'Workflow' };
+const _INSTANCE_TYPES = ['fsm', 'agent', 'workflow'];
 
 export function toggleActivityEnded() {
     _actShowEnded = !_actShowEnded;
@@ -377,21 +379,22 @@ function _renderActivityTable() {
     for (const a of display) {
         const typeKey = a.item_type === 'fsm_conversation' ? 'fsm' : a.item_type === 'agent_task' ? 'agent' : 'workflow';
         const typeDot = `<span class="type-dot type-${typeKey}"></span>`;
-        const typeLabel = _TYPE_LABELS[a.item_type] || a.item_type;
+        const typeLabel = _TYPE_LABELS[a.item_type] || a.item_type || '';
         const badge = a.is_terminal ? 'badge-ended' : 'badge-active';
-        const statusLabel = a.is_terminal ? (a.status === 'failed' ? 'FAILED' : 'ENDED') : a.status.toUpperCase();
+        const statusLabel = a.is_terminal ? (a.status === 'failed' ? 'FAILED' : 'ENDED') : String(a.status || 'unknown').toUpperCase();
+        const itemId = String(a.item_id || '');
 
         let action = '';
         if (a.instance_id) {
-            action = ` data-action="activity-row-click" data-item-type="${esc(a.item_type)}" data-instance-id="${esc(a.instance_id)}" data-item-id="${esc(a.item_id)}"`;
+            action = ` role="button" tabindex="0" aria-label="Open ${esc(a.label || itemId)}" data-action="activity-row-click" data-item-type="${esc(a.item_type)}" data-instance-id="${esc(a.instance_id)}" data-item-id="${esc(itemId)}"`;
         }
 
         rows += `<tr class="clickable-row"${action}>`;
-        rows += `<td>${typeDot}${typeLabel}</td>`;
-        rows += `<td class="cell-truncate" title="${esc(a.item_id)}">${esc(a.label || a.item_id.substring(0, 12))}</td>`;
+        rows += `<td>${typeDot}${esc(typeLabel)}</td>`;
+        rows += `<td class="cell-truncate" title="${esc(itemId)}">${esc(a.label || itemId.substring(0, 12))}</td>`;
         rows += `<td>${esc(a.current_step || '')}</td>`;
         rows += `<td class="cell-truncate text-dim">${esc(a.detail || '')}</td>`;
-        rows += `<td><span class="badge ${badge}${a.status === 'failed' ? ' badge-failed' : ''}">${statusLabel}</span></td>`;
+        rows += `<td><span class="badge ${badge}${a.status === 'failed' ? ' badge-failed' : ''}">${esc(statusLabel)}</span></td>`;
         rows += `</tr>`;
     }
     body.innerHTML = rows;
@@ -419,6 +422,7 @@ export async function refreshActivityTable() {
         _renderActivityTable();
     } catch (e) {
         console.error('refreshActivityTable:', e);
-        showToast('Failed to refresh activity', 'error');
+        if (body && _actData.length === 0 && body.querySelector('.loading-spinner')) body.innerHTML = '';
+        showToast(`Failed to refresh activity: ${e.message}`, 'error');
     }
 }
