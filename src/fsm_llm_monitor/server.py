@@ -12,23 +12,28 @@ import asyncio
 import hmac
 import json
 import os
+import re
 import time
+import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from fsm_llm.definitions import ConversationBusyError
 from fsm_llm.logging import logger
 from fsm_llm.utilities import redacting_json_default
 
-from .bridge import MonitorBridge
+from .bridge import MonitorBridge, _fsm_dict_to_snapshot
+from .constants import MAX_BUILDER_SESSIONS, MAX_REQUEST_BODY_BYTES
 from .definitions import (
     BuilderSendRequest,
     BuilderStartRequest,
@@ -43,7 +48,7 @@ from .definitions import (
     WorkflowCancelRequest,
     WorkflowEventRequest,
 )
-from .exceptions import MonitorError
+from .exceptions import MonitorCapacityError, MonitorError
 from .instance_manager import InstanceManager, _find_examples_dir, validate_preset_id
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -72,13 +77,32 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         _manager.global_collector.cleanup()
 
 
-# CORS origins — defaults to localhost only for security. Override via
-# configure(cors_origins=["*"]) or the MONITOR_CORS_ORIGINS env var.
-_CORS_ORIGINS: list[str] = [
+def _env_list(name: str) -> list[str]:
+    raw = os.environ.get(name, "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+# CORS origins -- the dashboard is served by this same server, so it needs no
+# CORS; these only allow OTHER origins to read the API. Defaults to the
+# default port on localhost. Override via configure(cors_origins=[...]) or the
+# FSM_LLM_MONITOR_CORS_ORIGINS env var (comma-separated).
+_CORS_ORIGINS: list[str] = _env_list("FSM_LLM_MONITOR_CORS_ORIGINS") or [
     "http://localhost:8420",
     "http://127.0.0.1:8420",
 ]
-_CORS_ORIGIN_REGEX: str | None = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+# DECISION plan-2026-09-28T090000-3c9e41d2/D-001
+# No default origin regex: `https?://(localhost|127.0.0.1)(:\d+)?` trusted
+# every local dev server on any port. Same-origin requests need no entry.
+_CORS_ORIGIN_REGEX: str | None = None
+
+# Host header allow-list (DNS-rebinding defence). "*" disables the check.
+# "testserver" is the Host Starlette's TestClient sends.
+_TRUSTED_HOSTS: list[str] = _env_list("FSM_LLM_MONITOR_TRUSTED_HOSTS") or [
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "testserver",
+]
 
 app = FastAPI(title="FSM-LLM Monitor", docs_url="/api/docs", lifespan=_lifespan)
 app.add_middleware(
@@ -90,6 +114,85 @@ app.add_middleware(
 )
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+_SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; "
+        "base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    ),
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+def _host_only(host_header: str) -> str:
+    """The host part of a Host header value (port removed, IPv6 unbracketed)."""
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        return host[1 : host.find("]")] if "]" in host else host[1:]
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def _host_allowed(host_header: str | None) -> bool:
+    if "*" in _TRUSTED_HOSTS:
+        return True
+    if not host_header:
+        return False
+    host = _host_only(host_header)
+    return any(host == _host_only(h) for h in _TRUSTED_HOSTS)
+
+
+def _origin_allowed(origin: str | None, host_header: str | None) -> bool:
+    """A browser request may act on the monitor only from the monitor's own
+    origin or a configured CORS origin. No Origin header (curl, scripts,
+    same-origin GETs in some browsers) is allowed; auth still applies."""
+    if not origin:
+        return True
+    if origin == "null":
+        return False
+    if "*" in _CORS_ORIGINS or origin in _CORS_ORIGINS:
+        return True
+    if _CORS_ORIGIN_REGEX and re.fullmatch(_CORS_ORIGIN_REGEX, origin):
+        return True
+    if not host_header:
+        return False
+    return urlsplit(origin).netloc.lower() == host_header.strip().lower()
+
+
+@app.middleware("http")
+async def _security_guard(request: Request, call_next):
+    """Host allow-list, same-origin check for state-changing requests, body
+    size cap, and security headers on every response.
+
+    # DECISION plan-2026-09-28T090000-3c9e41d2/D-001
+    # A cross-site page could POST to the monitor (a no-cors fetch with no
+    # Content-Type is parsed as JSON) and a rebinding DNS name could read it.
+    # Do NOT drop the Origin check on unsafe methods or the Host check: CORS
+    # only governs READING responses, not sending requests.
+    """
+    host = request.headers.get("host")
+    if not _host_allowed(host):
+        return JSONResponse({"detail": "invalid host header"}, status_code=400)
+    if request.method in _UNSAFE_METHODS and not _origin_allowed(
+        request.headers.get("origin"), host
+    ):
+        return JSONResponse({"detail": "cross-origin request refused"}, status_code=403)
+    length = request.headers.get("content-length")
+    if length is not None:
+        try:
+            too_big = int(length) > MAX_REQUEST_BODY_BYTES
+        except ValueError:
+            too_big = True
+        if too_big:
+            return JSONResponse({"detail": "request body too large"}, status_code=413)
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
 
 
 @app.middleware("http")
@@ -122,7 +225,9 @@ _manager: InstanceManager | None = None
 # would let a previously-set `_api_key` leak across independent configure()
 # calls (e.g. between tests), which is exactly the isolation `_api_key` needs.
 # See `_require_api_key` below for the per-request timing note (D-008).
-_api_key: str | None = None
+# Initialised from the env var at import so `uvicorn fsm_llm_monitor.server:app`
+# (which never calls configure()) still honours FSM_LLM_MONITOR_API_KEY.
+_api_key: str | None = os.environ.get("FSM_LLM_MONITOR_API_KEY") or None
 
 # Flow data loaded from static/flows.json
 _flows: dict[str, Any] = {}
@@ -142,6 +247,7 @@ def configure(
     manager: InstanceManager | None = None,
     cors_origins: list[str] | None = None,
     api_key: str | None = None,
+    trusted_hosts: list[str] | None = None,
 ) -> None:
     """Configure the global instance manager for the web server.
 
@@ -166,6 +272,10 @@ def configure(
         key being cleared by a call that did not itself supply ``api_key`` —
         is detected. An empty or whitespace-only ``api_key`` raises
         ``ValueError``; an empty env var still means no key.
+    :param trusted_hosts: Host header values the server answers to (DNS
+        rebinding defence). Defaults to localhost; ``["*"]`` disables the
+        check (needed when serving on a LAN address). Like ``cors_origins``,
+        only changed when given.
     """
     global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX, _api_key
     # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006: raise on an empty or
@@ -199,6 +309,8 @@ def configure(
             "request(s); CORS changes will not take effect until the next server "
             "restart."
         )
+    if trusted_hosts is not None:
+        _TRUSTED_HOSTS[:] = trusted_hosts
     if cors_origins is not None:
         _CORS_ORIGINS[:] = cors_origins
         _CORS_ORIGIN_REGEX = None  # Disable regex when explicit origins are provided
@@ -215,15 +327,20 @@ def configure(
     _flows = _load_flows()
     _bridge_cache = None  # Reset cached bridge
 
-    # Clean up old manager's loguru sink to prevent accumulation
-    if _manager is not None:
-        _manager.global_collector.cleanup()
+    # Detach the old manager (log sink, handlers on its APIs) -- but never the
+    # manager being re-installed: configure(manager=current, api_key=...) is
+    # how a caller rotates the key, and cleaning it up killed its log feed.
+    if _manager is not None and _manager is not manager:
+        _manager.shutdown()
 
     if manager is not None:
         _manager = manager
     elif bridge is not None:
         _manager = InstanceManager(config=bridge.config)
         if bridge.connected and bridge.api is not None:
+            # The bridge's own collector handlers are switched off so the API
+            # does not feed two collectors (connect_bridge is idempotent).
+            bridge.disconnect()
             _manager.connect_bridge(bridge.api)
     else:
         _manager = InstanceManager()
@@ -307,6 +424,46 @@ def _require_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="missing or invalid API key")
 
 
+def _api_key_matches(token: str | None) -> bool:
+    if _api_key is None:
+        return True
+    return token is not None and hmac.compare_digest(
+        token.encode("utf-8", "surrogateescape"),
+        _api_key.encode("utf-8", "surrogateescape"),
+    )
+
+
+def _raise_http(e: Exception, action: str) -> NoReturn:
+    """Map a manager exception to an HTTP error (one mapping for all routes).
+
+    KeyError -> 404, TypeError (wrong instance type) / ValueError -> 400,
+    ConversationBusyError -> 409, MonitorCapacityError -> 429,
+    NotImplementedError (extension missing) -> 501, anything else -> 500
+    with a generic detail (the exception text is logged, never returned).
+    """
+    if isinstance(e, HTTPException):
+        raise e
+    if isinstance(e, KeyError):
+        raise HTTPException(status_code=404, detail="not found") from e
+    if isinstance(e, FileNotFoundError):
+        raise HTTPException(status_code=404, detail="not found") from e
+    if isinstance(e, ConversationBusyError):
+        raise HTTPException(
+            status_code=409, detail="conversation is busy with another turn"
+        ) from e
+    if isinstance(e, MonitorCapacityError):
+        raise HTTPException(status_code=429, detail=str(e)) from e
+    if isinstance(e, NotImplementedError):
+        raise HTTPException(status_code=501, detail=str(e) or "not available") from e
+    if isinstance(e, TypeError | ValueError):
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    logger.error(f"Failed to {action}: {e}")
+    raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+_GATED = [Depends(_require_api_key)]
+
+
 # --- HTML Pages ---
 
 
@@ -318,6 +475,12 @@ async def index(request: Request) -> HTMLResponse:
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/auth")
+async def api_auth() -> dict[str, bool]:
+    """Whether an API key is required (never gated, never reveals the key)."""
+    return {"auth_required": _api_key is not None}
 
 
 # --- REST API: Monitoring ---
@@ -333,41 +496,51 @@ async def api_metrics() -> dict[str, Any]:
     return metrics.model_dump()
 
 
-@app.get("/api/conversations")
+# DECISION plan-2026-09-28T090000-3c9e41d2/D-005
+# Conversation snapshots wait on the conversation's turn lock (a whole LLM
+# call). Do NOT call them on the event loop: every route and /ws froze for the
+# length of a turn. They run in a worker thread.
+
+
+@app.get("/api/conversations", dependencies=_GATED)
 async def api_conversations(
     include_ended: bool = True,
 ) -> list[dict[str, Any]]:
     mgr = get_manager()
     try:
-        snapshots = mgr.get_all_conversation_snapshots(include_ended=include_ended)
+        snapshots = await asyncio.to_thread(
+            mgr.get_all_conversation_snapshots, include_ended=include_ended
+        )
     except MonitorError as e:
         raise HTTPException(status_code=500, detail="Internal server error") from e
     return [s.model_dump() for s in snapshots]
 
 
-@app.get("/api/conversations/{conversation_id}")
-async def api_conversation(conversation_id: str) -> dict[str, Any] | None:
+@app.get("/api/conversations/{conversation_id}", dependencies=_GATED)
+async def api_conversation(conversation_id: str) -> dict[str, Any]:
     mgr = get_manager()
-    snap = mgr.get_conversation_snapshot(conversation_id)
+    snap = await asyncio.to_thread(mgr.get_conversation_snapshot, conversation_id)
     if snap is None:
         raise HTTPException(status_code=404, detail="not found")
     return snap.model_dump()
 
 
-@app.get("/api/activity")
+@app.get("/api/activity", dependencies=_GATED)
 async def api_activity(
     include_ended: bool = True,
 ) -> list[dict[str, Any]]:
     """Get unified activity list: FSM conversations, agent tasks, workflow instances."""
     mgr = get_manager()
     try:
-        items = mgr.get_all_activity_snapshots(include_ended=include_ended)
+        items = await asyncio.to_thread(
+            mgr.get_all_activity_snapshots, include_ended=include_ended
+        )
     except MonitorError as e:
         raise HTTPException(status_code=500, detail="Internal server error") from e
     return [item.model_dump() for item in items]
 
 
-@app.get("/api/events")
+@app.get("/api/events", dependencies=_GATED)
 async def api_events(limit: int = 50) -> list[dict[str, Any]]:
     mgr = get_manager()
     try:
@@ -377,7 +550,7 @@ async def api_events(limit: int = 50) -> list[dict[str, Any]]:
     return [e.model_dump() for e in events]
 
 
-@app.get("/api/logs")
+@app.get("/api/logs", dependencies=_GATED)
 async def api_logs(limit: int = 100, level: str = "INFO") -> list[dict[str, Any]]:
     mgr = get_manager()
     try:
@@ -393,7 +566,7 @@ async def api_config_get() -> dict[str, Any]:
     return mgr.config.model_dump()
 
 
-@app.post("/api/config", dependencies=[Depends(_require_api_key)])
+@app.post("/api/config", dependencies=_GATED)
 async def api_config_set(config: MonitorConfig) -> dict[str, str]:
     mgr = get_manager()
     mgr.config = config
@@ -413,62 +586,88 @@ async def api_dashboard_config_get() -> dict[str, Any]:
     return {"active": True, "config": cfg.model_dump()}
 
 
-@app.post("/api/dashboard/config", dependencies=[Depends(_require_api_key)])
-async def api_dashboard_config_set(req: dict[str, Any]) -> dict[str, str]:
-    """Apply a custom dashboard config from MonitorBuilder output.
+def _parse_dashboard_config(req: dict[str, Any]) -> Any:
+    """Build a DashboardConfig from MonitorBuilder ``to_dict()`` output.
 
-    Accepts the raw MonitorBuilder ``to_dict()`` output and converts it
-    to a ``DashboardConfig`` stored on the InstanceManager.
+    Accepts the output itself (``{"name", "panels", "alerts", "config":
+    {refresh_interval_seconds, retention_hours}}``) or that output wrapped as
+    ``{"config": <output>}``. Raises ``ValueError`` on a malformed body.
     """
+    from pydantic import ValidationError
+
     from .definitions import DashboardAlert, DashboardConfig, DashboardPanel
 
-    mgr = get_manager()
-
-    raw = req.get("config", req)
-    panels: list[DashboardPanel] = []
-    for pid, pdata in (raw.get("panels") or {}).items():
-        if isinstance(pdata, dict):
-            panels.append(
-                DashboardPanel(
-                    panel_id=pid,
-                    title=pdata.get("title", pid),
-                    panel_type=pdata.get("panel_type", "metric"),
-                    metric=pdata.get("metric", ""),
-                    description=pdata.get("description", ""),
-                )
-            )
-
-    alerts: list[DashboardAlert] = []
-    for aid, adata in (raw.get("alerts") or {}).items():
-        if isinstance(adata, dict):
-            alerts.append(
-                DashboardAlert(
-                    alert_id=aid,
-                    metric=adata.get("metric", ""),
-                    condition=adata.get("condition", ">"),
-                    threshold=float(adata.get("threshold", 0)),
-                    description=adata.get("description", ""),
-                )
-            )
-
-    config_section = raw.get("config") or {}
-    cfg = DashboardConfig(
-        name=raw.get("name", ""),
-        description=raw.get("description", ""),
-        panels=panels,
-        alerts=alerts,
-        refresh_interval_seconds=config_section.get("refresh_interval_seconds", 30),
-        retention_hours=config_section.get("retention_hours", 24),
+    wrapped = req.get("config")
+    is_wrapped = (
+        isinstance(wrapped, dict)
+        and set(req) <= {"config"}
+        and any(k in wrapped for k in ("name", "panels", "alerts", "description"))
     )
+    raw = wrapped if is_wrapped else req
+    if not isinstance(raw, dict):
+        raise ValueError("dashboard config must be an object")
+
+    panels_raw = raw.get("panels") or {}
+    alerts_raw = raw.get("alerts") or {}
+    settings = raw.get("config") or {}
+    if not isinstance(panels_raw, dict) or not isinstance(alerts_raw, dict):
+        raise ValueError("'panels' and 'alerts' must be objects keyed by id")
+    if not isinstance(settings, dict):
+        raise ValueError("'config' must be an object")
+
+    try:
+        panels = [
+            DashboardPanel(
+                panel_id=str(pid),
+                title=pdata.get("title", pid),
+                panel_type=pdata.get("panel_type", "metric"),
+                metric=pdata.get("metric", ""),
+                description=pdata.get("description", ""),
+            )
+            for pid, pdata in panels_raw.items()
+            if isinstance(pdata, dict)
+        ]
+        alerts = [
+            DashboardAlert(
+                alert_id=str(aid),
+                metric=adata.get("metric", ""),
+                condition=adata.get("condition", ">"),
+                threshold=float(adata.get("threshold", 0)),
+                description=adata.get("description", ""),
+            )
+            for aid, adata in alerts_raw.items()
+            if isinstance(adata, dict)
+        ]
+        return DashboardConfig(
+            name=raw.get("name", ""),
+            description=raw.get("description", ""),
+            panels=panels,
+            alerts=alerts,
+            refresh_interval_seconds=settings.get("refresh_interval_seconds", 30),
+            retention_hours=settings.get("retention_hours", 24),
+        )
+    except (ValidationError, TypeError) as e:
+        raise ValueError(f"invalid dashboard config: {e}") from e
+
+
+@app.post("/api/dashboard/config", dependencies=_GATED)
+async def api_dashboard_config_set(req: dict[str, Any]) -> dict[str, str]:
+    """Apply a custom dashboard config from MonitorBuilder output (either the
+    ``to_dict()`` output itself or wrapped as ``{"config": ...}``)."""
+    mgr = get_manager()
+    try:
+        cfg = _parse_dashboard_config(req)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     mgr.dashboard_config = cfg
     logger.info(
         f"Dashboard config applied: {cfg.name} "
-        f"({len(panels)} panels, {len(alerts)} alerts)"
+        f"({len(cfg.panels)} panels, {len(cfg.alerts)} alerts)"
     )
     return {"status": "ok"}
 
 
-@app.delete("/api/dashboard/config", dependencies=[Depends(_require_api_key)])
+@app.delete("/api/dashboard/config", dependencies=_GATED)
 async def api_dashboard_config_delete() -> dict[str, str]:
     """Remove the custom dashboard configuration."""
     mgr = get_manager()
@@ -521,7 +720,7 @@ async def api_instance_detail(instance_id: str) -> dict[str, Any]:
     return inst.to_info().model_dump()
 
 
-@app.get("/api/instances/{instance_id}/events")
+@app.get("/api/instances/{instance_id}/events", dependencies=_GATED)
 async def api_instance_events(
     instance_id: str, limit: int = 50
 ) -> list[dict[str, Any]]:
@@ -529,12 +728,12 @@ async def api_instance_events(
     mgr = get_manager()
     collector = mgr.get_instance_collector(instance_id)
     if collector is None:
-        return []
+        raise HTTPException(status_code=404, detail="instance not found")
     events = collector.get_events(limit=limit)
     return [e.model_dump() for e in events]
 
 
-@app.delete("/api/instances/{instance_id}", dependencies=[Depends(_require_api_key)])
+@app.delete("/api/instances/{instance_id}", dependencies=_GATED)
 async def api_instance_destroy(instance_id: str) -> dict[str, str]:
     """Destroy a managed instance."""
     mgr = get_manager()
@@ -554,7 +753,7 @@ async def api_instance_destroy(instance_id: str) -> dict[str, str]:
 # --- REST API: FSM Launch/Control ---
 
 
-@app.post("/api/fsm/launch", dependencies=[Depends(_require_api_key)])
+@app.post("/api/fsm/launch", dependencies=_GATED)
 async def api_fsm_launch(req: LaunchFSMRequest) -> dict[str, Any]:
     """Launch a new FSM instance."""
     mgr = get_manager()
@@ -569,14 +768,11 @@ async def api_fsm_launch(req: LaunchFSMRequest) -> dict[str, Any]:
             label=req.label,
         )
         return managed.to_info().model_dump()
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Failed to launch FSM: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, "launch FSM")
 
 
-@app.post("/api/fsm/{instance_id}/start", dependencies=[Depends(_require_api_key)])
+@app.post("/api/fsm/{instance_id}/start", dependencies=_GATED)
 async def api_fsm_start_conversation(
     instance_id: str, req: StartConversationRequest
 ) -> dict[str, Any]:
@@ -589,13 +785,14 @@ async def api_fsm_start_conversation(
         )
         return {"conversation_id": conv_id, "response": response}
     except asyncio.TimeoutError:
+        # The worker thread cannot be stopped: the conversation may still be
+        # created and will then appear in the instance's conversation list.
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
-        logger.error(f"Failed to start conversation on instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"start conversation on instance {instance_id}")
 
 
-@app.post("/api/fsm/{instance_id}/converse", dependencies=[Depends(_require_api_key)])
+@app.post("/api/fsm/{instance_id}/converse", dependencies=_GATED)
 async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[str, Any]:
     """Send a message to an FSM conversation."""
     mgr = get_manager()
@@ -610,11 +807,10 @@ async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[st
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
-        logger.error(f"Failed to send message to instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"send message to instance {instance_id}")
 
 
-@app.post("/api/fsm/{instance_id}/end", dependencies=[Depends(_require_api_key)])
+@app.post("/api/fsm/{instance_id}/end", dependencies=_GATED)
 async def api_fsm_end_conversation(
     instance_id: str, req: EndConversationRequest
 ) -> dict[str, str]:
@@ -629,20 +825,18 @@ async def api_fsm_end_conversation(
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
-        logger.error(f"Failed to end conversation on instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"end conversation on instance {instance_id}")
 
 
-@app.get("/api/fsm/{instance_id}/conversations")
+@app.get("/api/fsm/{instance_id}/conversations", dependencies=_GATED)
 async def api_fsm_conversations(instance_id: str) -> list[dict[str, Any]]:
     """List conversations on a managed FSM instance."""
     mgr = get_manager()
     try:
-        snapshots = mgr.get_fsm_conversations(instance_id)
+        snapshots = await asyncio.to_thread(mgr.get_fsm_conversations, instance_id)
         return [s.model_dump() for s in snapshots]
     except Exception as e:
-        logger.error(f"Failed to get conversations for instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"get conversations for instance {instance_id}")
 
 
 # --- REST API: Workflow Launch/Control ---
@@ -655,7 +849,7 @@ async def api_workflow_presets() -> dict[str, list[dict[str, str]]]:
     return {"workflows": mgr.get_workflow_presets()}
 
 
-@app.post("/api/workflow/launch", dependencies=[Depends(_require_api_key)])
+@app.post("/api/workflow/launch", dependencies=_GATED)
 async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
     """Launch a workflow preset and start an instance."""
     mgr = get_manager()
@@ -665,25 +859,36 @@ async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
             definition_json=req.definition_json,
             label=req.label,
         )
-        wf_instance_id = await mgr.start_workflow_instance(
-            managed.instance_id,
-            managed.workflow_id,
-            req.initial_context,
-        )
-        info = managed.to_info().model_dump()
-        info["workflow_instance_id"] = wf_instance_id
-        return info
-    except ValueError as e:
-        # Bad preset / unsupported definition_json — caller error, message is safe.
-        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Failed to launch workflow: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, "launch workflow")
+    try:
+        wf_instance_id = await asyncio.wait_for(
+            mgr.start_workflow_instance(
+                managed.instance_id,
+                managed.workflow_id,
+                req.initial_context,
+            ),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+    except BaseException as e:
+        # Do not leave a half-launched engine behind.
+        try:
+            await asyncio.to_thread(mgr.destroy_instance, managed.instance_id)
+        except Exception as cleanup_err:
+            logger.debug(f"Failed to clean up workflow launch: {cleanup_err}")
+        if isinstance(e, asyncio.TimeoutError):
+            raise HTTPException(
+                status_code=504, detail="Workflow start timed out"
+            ) from None
+        if not isinstance(e, Exception):
+            raise
+        _raise_http(e, "start workflow")
+    info = managed.to_info().model_dump()
+    info["workflow_instance_id"] = wf_instance_id
+    return info
 
 
-@app.post(
-    "/api/workflow/{instance_id}/advance", dependencies=[Depends(_require_api_key)]
-)
+@app.post("/api/workflow/{instance_id}/advance", dependencies=_GATED)
 async def api_workflow_advance(
     instance_id: str, req: WorkflowAdvanceRequest
 ) -> dict[str, Any]:
@@ -701,13 +906,10 @@ async def api_workflow_advance(
             detail="Workflow advance timed out",
         ) from None
     except Exception as e:
-        logger.error(f"Failed to advance workflow on instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"advance workflow on instance {instance_id}")
 
 
-@app.post(
-    "/api/workflow/{instance_id}/cancel", dependencies=[Depends(_require_api_key)]
-)
+@app.post("/api/workflow/{instance_id}/cancel", dependencies=_GATED)
 async def api_workflow_cancel(
     instance_id: str, req: WorkflowCancelRequest
 ) -> dict[str, Any]:
@@ -725,11 +927,10 @@ async def api_workflow_cancel(
             detail="Workflow cancel timed out",
         ) from None
     except Exception as e:
-        logger.error(f"Failed to cancel workflow on instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"cancel workflow on instance {instance_id}")
 
 
-@app.post("/api/workflow/{instance_id}/event", dependencies=[Depends(_require_api_key)])
+@app.post("/api/workflow/{instance_id}/event", dependencies=_GATED)
 async def api_workflow_event(
     instance_id: str, req: WorkflowEventRequest
 ) -> dict[str, Any]:
@@ -752,11 +953,10 @@ async def api_workflow_event(
             detail="Workflow event delivery timed out",
         ) from None
     except Exception as e:
-        logger.error(f"Failed to deliver workflow event on instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"deliver workflow event on instance {instance_id}")
 
 
-@app.get("/api/workflow/{instance_id}/status")
+@app.get("/api/workflow/{instance_id}/status", dependencies=_GATED)
 async def api_workflow_status(
     instance_id: str, workflow_instance_id: str = ""
 ) -> dict[str, Any]:
@@ -770,25 +970,23 @@ async def api_workflow_status(
     try:
         return mgr.get_workflow_status(instance_id, workflow_instance_id)
     except Exception as e:
-        logger.error(f"Failed to get workflow status for instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"get workflow status for instance {instance_id}")
 
 
-@app.get("/api/workflow/{instance_id}/instances")
+@app.get("/api/workflow/{instance_id}/instances", dependencies=_GATED)
 async def api_workflow_instances(instance_id: str) -> list[dict[str, Any]]:
     """List all workflow instances on a managed workflow engine."""
     mgr = get_manager()
     try:
         return mgr.get_workflow_instances(instance_id)
     except Exception as e:
-        logger.error(f"Failed to list workflow instances for {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"list workflow instances for {instance_id}")
 
 
 # --- REST API: Agent Launch/Control ---
 
 
-@app.post("/api/agent/launch", dependencies=[Depends(_require_api_key)])
+@app.post("/api/agent/launch", dependencies=_GATED)
 async def api_agent_launch(req: LaunchAgentRequest) -> dict[str, Any]:
     """Launch an agent in a background thread."""
     mgr = get_manager()
@@ -804,46 +1002,41 @@ async def api_agent_launch(req: LaunchAgentRequest) -> dict[str, Any]:
             label=req.label,
         )
         return managed.to_info().model_dump()
-    except (ValueError, RuntimeError) as e:
-        # Unknown/disabled agent type, missing tools, or extension unavailable.
-        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Failed to launch agent: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        # Unknown/disabled agent type or missing tools -> 400; capacity -> 429;
+        # extension unavailable -> 501.
+        _raise_http(e, "launch agent")
 
 
-@app.get("/api/agent/{instance_id}/status")
+@app.get("/api/agent/{instance_id}/status", dependencies=_GATED)
 async def api_agent_status(instance_id: str) -> dict[str, Any]:
     """Get agent execution status."""
     mgr = get_manager()
     try:
         return mgr.get_agent_status(instance_id)
     except Exception as e:
-        logger.error(f"Failed to get agent status for instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"get agent status for instance {instance_id}")
 
 
-@app.get("/api/agent/{instance_id}/result")
+@app.get("/api/agent/{instance_id}/result", dependencies=_GATED)
 async def api_agent_result(instance_id: str) -> dict[str, Any]:
     """Get final agent result."""
     mgr = get_manager()
     try:
         return mgr.get_agent_result(instance_id)
     except Exception as e:
-        logger.error(f"Failed to get agent result for instance {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"get agent result for instance {instance_id}")
 
 
-@app.post("/api/agent/{instance_id}/cancel", dependencies=[Depends(_require_api_key)])
-async def api_agent_cancel(instance_id: str) -> dict[str, str]:
-    """Cancel a running agent."""
+@app.post("/api/agent/{instance_id}/cancel", dependencies=_GATED)
+async def api_agent_cancel(instance_id: str) -> dict[str, Any]:
+    """Cancel a running agent (``cancelled`` is False when it had finished)."""
     mgr = get_manager()
     try:
-        mgr.cancel_agent(instance_id)
-        return {"status": "ok"}
+        cancelled = mgr.cancel_agent(instance_id)
+        return {"status": "ok", "cancelled": cancelled}
     except Exception as e:
-        logger.error(f"Failed to cancel agent {instance_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, f"cancel agent {instance_id}")
 
 
 # --- REST API: FSM Visualization ---
@@ -856,11 +1049,20 @@ async def api_fsm_load(request: Request) -> dict[str, Any]:
         data = await request.json()
     except Exception as e:
         raise HTTPException(status_code=400, detail="invalid JSON") from e
-    bridge = get_bridge()
-    snap = bridge.load_fsm_from_dict(data)
-    if snap is None:
+    return _snapshot_or_400(data).model_dump()
+
+
+def _snapshot_or_400(data: Any) -> Any:
+    """Parse an FSM definition dict into a snapshot, or raise 400."""
+    if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="failed to parse FSM definition")
-    return snap.model_dump()
+    try:
+        return _fsm_dict_to_snapshot(data)
+    except Exception as e:
+        logger.debug(f"Failed to convert FSM dict to snapshot: {e}")
+        raise HTTPException(
+            status_code=400, detail="failed to parse FSM definition"
+        ) from e
 
 
 def _fsm_snapshot_to_viz(snap: Any) -> dict[str, Any]:
@@ -899,11 +1101,7 @@ async def api_fsm_visualize(request: Request) -> dict[str, Any]:
         data = await request.json()
     except Exception as e:
         raise HTTPException(status_code=400, detail="invalid JSON") from e
-    bridge = get_bridge()
-    snap = bridge.load_fsm_from_dict(data)
-    if snap is None:
-        raise HTTPException(status_code=400, detail="failed to parse FSM definition")
-    return _fsm_snapshot_to_viz(snap)
+    return _fsm_snapshot_to_viz(_snapshot_or_400(data))
 
 
 def _resolve_preset_path(preset_id: str) -> Path:
@@ -936,11 +1134,7 @@ def _read_preset_json(preset_id: str) -> dict[str, Any]:
 async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
     """Load an FSM preset by ID and return visualization data."""
     data = _read_preset_json(preset_id)
-    bridge = get_bridge()
-    snap = bridge.load_fsm_from_dict(data)
-    if snap is None:
-        raise HTTPException(status_code=400, detail="failed to parse FSM definition")
-    return _fsm_snapshot_to_viz(snap)
+    return _fsm_snapshot_to_viz(_snapshot_or_400(data))
 
 
 # --- REST API: Presets ---
@@ -1085,13 +1279,15 @@ async def api_workflow_visualize(
 
 # --- Builder (Meta-Agent) ---
 
-# Session store: session_id -> (agent, created_at_timestamp)
+# Session store: session_id -> (agent, last_used_timestamp)
 _builder_sessions: dict[str, tuple[Any, float]] = {}
-_BUILDER_SESSION_TTL = 3600.0  # 1 hour
+_BUILDER_SESSION_TTL = 3600.0  # 1 hour since last use
 # Session IDs with an in-flight `send` — guards against concurrent sends to the
 # same MetaBuilderAgent corrupting its internal state (the agent is not
 # re-entrant). Mutated only under _get_builder_lock().
 _builder_busy: set[str] = set()
+# Strong references to fire-and-forget tasks (the loop keeps only weak ones).
+_background_tasks: set[asyncio.Future[Any]] = set()
 # Lock protecting _builder_sessions. Initialized lazily (not at module import
 # time) to avoid creating an asyncio.Lock before an event loop exists (Python
 # 3.10+ deprecates that pattern).
@@ -1116,25 +1312,30 @@ def _get_builder_internal_state(agent: Any) -> dict[str, Any]:
 
 
 async def _cleanup_stale_builder_sessions() -> None:
-    """Remove builder sessions older than TTL."""
-    import time
-
+    """Remove builder sessions unused for longer than the TTL (never one with
+    a send in flight)."""
     now = time.time()
     async with _get_builder_lock():
         stale = [
             sid
             for sid, (_, ts) in _builder_sessions.items()
-            if now - ts > _BUILDER_SESSION_TTL
+            if now - ts > _BUILDER_SESSION_TTL and sid not in _builder_busy
         ]
         for sid in stale:
             _builder_sessions.pop(sid, None)
             logger.debug(f"Cleaned up stale builder session: {sid}")
 
 
-@app.post("/api/builder/start", dependencies=[Depends(_require_api_key)])
+@app.post("/api/builder/start", dependencies=_GATED)
 async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     """Start a new builder session using the meta-agent."""
     await _cleanup_stale_builder_sessions()
+    async with _get_builder_lock():
+        if len(_builder_sessions) >= MAX_BUILDER_SESSIONS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"too many builder sessions (max {MAX_BUILDER_SESSIONS})",
+            )
     try:
         from fsm_llm_agents.meta_builder import (
             MetaBuilderAgent as MetaAgent,
@@ -1148,13 +1349,11 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
             detail="fsm_llm_agents meta-builder not available",
         ) from None
 
-    config_kwargs: dict[str, Any] = {}
-    if req.model:
-        config_kwargs["model"] = req.model
-    if req.temperature is not None:
-        config_kwargs["temperature"] = req.temperature
-    if req.max_tokens:
-        config_kwargs["max_tokens"] = req.max_tokens
+    config_kwargs: dict[str, Any] = {
+        "model": req.model,
+        "temperature": req.temperature,
+        "max_tokens": req.max_tokens,
+    }
 
     config = MetaAgentConfig(**config_kwargs)
     agent = MetaAgent(config=config)
@@ -1171,9 +1370,6 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
         logger.error(f"Builder start failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
-    import time
-    import uuid
-
     session_id = f"builder-{uuid.uuid4().hex[:8]}"
     async with _get_builder_lock():
         _builder_sessions[session_id] = (agent, time.time())
@@ -1189,7 +1385,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     return result
 
 
-@app.post("/api/builder/send", dependencies=[Depends(_require_api_key)])
+@app.post("/api/builder/send", dependencies=_GATED)
 async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
     """Send a message to an existing builder session.
 
@@ -1210,12 +1406,37 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
         )
     agent = entry[0]
 
+    # The worker thread cannot be stopped on timeout; the session stays busy
+    # until it really finishes, so a second send can never run concurrently
+    # on the non-re-entrant agent.
+    work = asyncio.ensure_future(asyncio.to_thread(agent.send, req.message))
+
+    async def _release() -> None:
+        async with _get_builder_lock():
+            _builder_busy.discard(req.session_id)
+            if req.session_id in _builder_sessions:
+                _builder_sessions[req.session_id] = (agent, time.time())
+
+    def _release_when_done(_fut: asyncio.Future[Any]) -> None:
+        task = asyncio.ensure_future(_release())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
     try:
         response = await asyncio.wait_for(
-            asyncio.to_thread(agent.send, req.message),
-            timeout=_BUILDER_OPERATION_TIMEOUT,
+            asyncio.shield(work), timeout=_BUILDER_OPERATION_TIMEOUT
         )
+    except asyncio.TimeoutError:
+        work.add_done_callback(_release_when_done)
+        raise HTTPException(
+            status_code=504, detail="Builder operation timed out"
+        ) from None
+    except Exception as e:
+        await _release()
+        logger.error(f"Builder send failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
+    try:
         result: dict[str, Any] = {
             "response": response,
             "is_complete": agent.is_complete(),
@@ -1224,50 +1445,61 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
         result["internal_state"] = _get_builder_internal_state(agent)
 
         if agent.is_complete():
-            try:
-                build_result = agent.get_result()
-                result["artifact"] = build_result.artifact
-                result["artifact_json"] = build_result.artifact_json
-                result["artifact_type"] = build_result.artifact_type.value
-                result["is_valid"] = build_result.is_valid
-                result["validation_errors"] = build_result.validation_errors
-            except Exception as e:
-                logger.error(f"Builder result extraction failed: {e}")
-                result["artifact"] = {}
-                result["artifact_json"] = "{}"
-                result["artifact_type"] = "unknown"
-                result["is_valid"] = False
-                result["validation_errors"] = [f"Result extraction failed: {e}"]
-                result["error"] = str(e)
-
+            result.update(_builder_result_fields(agent))
             # Clean up completed session
             async with _get_builder_lock():
                 _builder_sessions.pop(req.session_id, None)
 
         return result
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code=504, detail="Builder operation timed out"
-        ) from None
     except Exception as e:
         logger.error(f"Builder send failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
     finally:
-        async with _get_builder_lock():
-            _builder_busy.discard(req.session_id)
+        await _release()
 
 
-@app.get("/api/builder/result/{session_id}")
+def _builder_result_fields(agent: Any) -> dict[str, Any]:
+    """The built artifact of a completed builder agent (no exception text)."""
+    try:
+        build_result = agent.get_result()
+        return {
+            "artifact": build_result.artifact,
+            "artifact_json": build_result.artifact_json,
+            "artifact_type": build_result.artifact_type.value,
+            "is_valid": build_result.is_valid,
+            "validation_errors": build_result.validation_errors,
+        }
+    except Exception as e:
+        logger.error(f"Builder result extraction failed: {e}")
+        return {
+            "artifact": {},
+            "artifact_json": "{}",
+            "artifact_type": "unknown",
+            "is_valid": False,
+            "validation_errors": ["Result extraction failed"],
+            "error": "Result extraction failed",
+        }
+
+
+@app.get("/api/builder/result/{session_id}", dependencies=_GATED)
 async def api_builder_result(session_id: str) -> dict[str, Any]:
-    """Get the current state of a builder session."""
+    """Get the current state of a builder session.
+
+    While a send is in flight the agent is being mutated by a worker thread,
+    so only ``{"busy": true}`` is reported.
+    """
     async with _get_builder_lock():
         entry = _builder_sessions.get(session_id)
+        busy = session_id in _builder_busy
     if entry is None:
         raise HTTPException(status_code=404, detail="Builder session not found")
+    if busy:
+        return {"session_id": session_id, "busy": True}
     agent = entry[0]
 
     result: dict[str, Any] = {
         "session_id": session_id,
+        "busy": False,
         "is_complete": agent.is_complete(),
     }
 
@@ -1275,23 +1507,19 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
     result["internal_state"] = _get_builder_internal_state(agent)
 
     if agent.is_complete():
-        try:
-            build_result = agent.get_result()
-            result["artifact"] = build_result.artifact
-            result["artifact_json"] = build_result.artifact_json
-            result["artifact_type"] = build_result.artifact_type.value
-            result["is_valid"] = build_result.is_valid
-            result["validation_errors"] = build_result.validation_errors
-        except Exception as e:
-            result["error"] = str(e)
+        result.update(_builder_result_fields(agent))
 
     return result
 
 
-@app.delete("/api/builder/{session_id}", dependencies=[Depends(_require_api_key)])
+@app.delete("/api/builder/{session_id}", dependencies=_GATED)
 async def api_builder_delete(session_id: str) -> dict[str, Any]:
-    """Delete a builder session."""
+    """Delete a builder session (refused with 409 while a send is in flight)."""
     async with _get_builder_lock():
+        if session_id in _builder_busy:
+            raise HTTPException(
+                status_code=409, detail="Builder session is processing a message"
+            )
         removed = _builder_sessions.pop(session_id, None)
     return {"deleted": removed is not None}
 
@@ -1299,58 +1527,88 @@ async def api_builder_delete(session_id: str) -> dict[str, Any]:
 # --- WebSocket for real-time updates ---
 
 
-# NOTE (F2 follow-up, D-008): the `/ws` endpoint is NOT gated by `_api_key`.
-# FastAPI's `Depends`/`dependencies=[...]` mechanism does not attach to
-# `@app.websocket` routes the same way it does to REST routes, so applying
-# the F2 API-key gate here would need a different mechanism (e.g. a
-# query-param or first-message auth handshake). This is an explicit,
-# named-but-deferred follow-up, not a silent gap: `/ws` is read-only (it only
-# streams metrics/events/logs/instance status), so it was judged lower
-# priority than the mutating REST routes this step gates, but it remains
-# unauthenticated when `_api_key` is configured.
+_WS_AUTH_TIMEOUT = 5.0
+_WS_CLOSE_UNAUTHORIZED = 4401
+_WS_CLOSE_FORBIDDEN = 4403
+
+
+async def _ws_authorized(websocket: WebSocket) -> bool:
+    """Origin and API-key checks for ``/ws`` (browsers apply no CORS to
+    WebSockets, so the Origin must be checked here).
+
+    # DECISION plan-2026-09-28T090000-3c9e41d2/D-001
+    # With a key configured the client must send ``{"type": "auth",
+    # "api_key": "..."}`` as its first message within 5 s. Do NOT move the
+    # key into the URL (it would land in access logs and browser history).
+    """
+    host = websocket.headers.get("host")
+    if not _host_allowed(host) or not _origin_allowed(
+        websocket.headers.get("origin"), host
+    ):
+        await websocket.close(code=_WS_CLOSE_FORBIDDEN)
+        return False
+    if _api_key is None:
+        return True
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), _WS_AUTH_TIMEOUT)
+        message = json.loads(raw)
+        token = message.get("api_key") if isinstance(message, dict) else None
+    except Exception:
+        token = None
+    if not isinstance(token, str) or not _api_key_matches(token):
+        await websocket.close(code=_WS_CLOSE_UNAUTHORIZED)
+        return False
+    return True
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
+    if not await _ws_authorized(websocket):
+        return
     mgr = get_manager()
-    last_event_count = 0
-    last_log_count = 0
+    event_cursor = mgr.global_collector.get_metrics().total_events
+    log_cursor = mgr.global_collector.total_logs
+    # Replay a little history to a new client.
+    event_cursor = max(0, event_cursor - 50)
+    log_cursor = max(0, log_cursor - 50)
     last_dashboard_config_version = mgr.dashboard_config_version
 
     try:
         _cleanup_counter = 0
         while True:
-            await asyncio.sleep(mgr.config.refresh_interval)
+            await asyncio.sleep(get_manager().config.refresh_interval)
+            # Re-read the manager each cycle so a re-configure() takes effect.
+            current = get_manager()
+            if current is not mgr:
+                mgr = current
+                event_cursor = mgr.global_collector.get_metrics().total_events
+                log_cursor = mgr.global_collector.total_logs
             # Periodic cleanup of stale builder sessions (every ~60 cycles)
             _cleanup_counter += 1
             if _cleanup_counter >= 60:
                 _cleanup_counter = 0
                 await _cleanup_stale_builder_sessions()
             metrics = mgr.get_metrics()
-            current_count = metrics.total_events
 
             data: dict[str, Any] = {
                 "type": "metrics",
                 "data": metrics.model_dump(),
             }
 
-            if current_count > last_event_count:
-                events = mgr.global_collector.get_events_since(
-                    last_event_count, limit=50
-                )
-                if events:
-                    data["events"] = [e.model_dump() for e in events]
-                last_event_count = current_count
+            # DECISION plan-2026-09-28T090000-3c9e41d2/D-004
+            # Oldest-first slices from a cursor taken with the slice; sent
+            # newest-first as before. Bursts beyond 50 continue next cycle.
+            events, event_cursor = mgr.global_collector.events_after(
+                event_cursor, limit=50
+            )
+            if events:
+                data["events"] = [e.model_dump() for e in reversed(events)]
 
-            # Push new log records
-            current_log_count = mgr.global_collector.total_logs
-            if current_log_count > last_log_count:
-                logs = mgr.global_collector.get_logs_since(last_log_count, limit=50)
-                if logs:
-                    data["logs"] = [r.model_dump() for r in logs]
-                # Advance by the number actually sent so logs beyond the cap are
-                # delivered on subsequent cycles instead of being dropped.
-                last_log_count += len(logs)
-                data["log_count"] = current_log_count
+            logs, log_cursor = mgr.global_collector.logs_after(log_cursor, limit=50)
+            if logs:
+                data["logs"] = [r.model_dump() for r in reversed(logs)]
+            data["log_count"] = mgr.global_collector.total_logs
 
             # Always include instance list so status changes propagate
             instances = mgr.list_instances()

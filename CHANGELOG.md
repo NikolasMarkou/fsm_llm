@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (monitor audit, 2026-09-28)
+
+Breaking behavior changes are marked **(behavior)**.
+
+- **(behavior)** Security: state-changing requests from a foreign `Origin` get 403, a
+  foreign `Host` gets 400 (DNS rebinding), bodies over 1 MB get 413, and every response
+  carries CSP / nosniff / frame-ancestors headers. Trusted hosts and CORS origins come
+  from `FSM_LLM_MONITOR_TRUSTED_HOSTS` / `FSM_LLM_MONITOR_CORS_ORIGINS`; the permissive
+  CORS origin regex is gone.
+- **(behavior)** With an API key set, sensitive reads (conversations, activity, events,
+  logs, agent status/result, builder result) and `/ws` require it. `/ws` authenticates
+  with a first message `{type: "auth", api_key}` and closes 4401 (bad key) or 4403
+  (foreign origin). `FSM_LLM_MONITOR_API_KEY` applies without calling `configure()`;
+  new `GET /api/auth` and `--api-key` CLI flag.
+- **(behavior)** Error mapping: unknown ids 404 (were 500), busy conversation 409,
+  capacity 429 (`MonitorCapacityError`), missing extension 501, bad input 400; 500
+  details are generic.
+- Secret-looking context entries were shown by the snapshot, workflow status, agent
+  result and tool parameters; one redaction path (`collector.redact_context`) now covers
+  all of them, and non-JSON values are no longer `str()`-ed.
+- Monitor handlers recorded the wrong states (the core never passes `_target_state`);
+  they now capture current/target state in `should_execute`. Registration is idempotent,
+  handlers are unregistered on destroy, and the POST_TRANSITION duplicate is dropped (7
+  handlers per FSM, was 8).
+- WebSocket streaming used timestamps and list lengths and dropped or repeated events
+  after bursts or ring-buffer eviction; it now uses sequence cursors.
+- Workflow runs: status, completion, failure and cancellation come from engine hooks;
+  every run of an instance is tracked; unknown runs are 404; launch has a timeout and
+  cleans up orphans; engines are shut down on destroy.
+- Agents: `max_running_agents` cap, finished instances evicted at `max_instances`, a
+  late cancel keeps the result, no double cancelled event, `last_tool` read from the
+  conversation log.
+- Conversations: terminal conversations are ended after caching their final state;
+  `end_conversation` on an unknown id raises; a completed FSM instance reopens on start.
+- Config: bounds on refresh interval and buffer sizes, `log_level` validated and applied
+  to the log sink, buffers resized live. Request bounds on message, task, iterations,
+  timeout and tools.
+- Builder: sessions capped at 50 (429), TTL counts from last use, a timed-out send keeps
+  the session busy until its thread finishes, delete while busy is 409.
+- Dashboard config accepts the builder's unwrapped output; malformed input is 400.
+- `get_logs` level filter is ordered and case-insensitive; blocking snapshot routes run
+  off the event loop.
+- OTEL: bounded open conversation spans, fixed span names, lifecycle spans carry ids only,
+  `disable()` restores only its own wrapper.
+- Frontend: API key prompt and retry, WebSocket auth, server-side internal-key filtering
+  (client `startsWith('_')` removed), workflow "Send event" and "End conversation"
+  controls, readable 422 errors, and many UI fixes (stale timers, log dedup/pause,
+  drawer re-render, escaping, accessibility).
+
 ### Fixed (workflows audit, 2026-09-27)
 
 Breaking behavior changes are marked **(behavior)**.

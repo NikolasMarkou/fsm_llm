@@ -53,7 +53,7 @@ Harness status in brief: gates are JsonLogic terms over values counted from disk
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (7,237 tests)
+make test           # pytest -v (7,310 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy across all 6 packages
@@ -143,22 +143,22 @@ Rules: `required_context_keys` only tells Pass 1 what to extract, it never block
 - Pydantic v2 `BaseModel` with `model_validator` for complex validation. Logging via `from fsm_llm.logging import logger`.
 - Exports: one static `__all__` list per package `__init__.py`; no dynamic extend/append (conditional `ReasoningReactAgent` in agents is the one guarded exception).
 - Constants in each package's `constants.py`; reasoning and agents use `ContextKeys` classes of string constants.
-- Exceptions: core `FSMError` -> `ConversationBusyError`, `FSMDefinitionNotFoundError` (also a `ValueError`), `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` -> (`SchemaValidationError`, `ClassificationResponseError`); `HandlerSystemError(FSMError)` -> `HandlerExecutionError`. Reasoning `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError`. Workflows `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`. Agents `AgentError` -> `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`, `MetaBuilderError` -> (`BuilderError`, `MetaValidationError`, `OutputError`). Harness `HarnessError(FSMError)` -> `HarnessArtifactError`, `HarnessOwnershipError`, `HarnessReentrancyError`, `HarnessConfinementError`. Monitor `MonitorError(Exception)` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError` (not an `FSMError`).
+- Exceptions: core `FSMError` -> `ConversationBusyError`, `FSMDefinitionNotFoundError` (also a `ValueError`), `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` -> (`SchemaValidationError`, `ClassificationResponseError`); `HandlerSystemError(FSMError)` -> `HandlerExecutionError`. Reasoning `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError`. Workflows `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`. Agents `AgentError` -> `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`, `MetaBuilderError` -> (`BuilderError`, `MetaValidationError`, `OutputError`). Harness `HarnessError(FSMError)` -> `HarnessArtifactError`, `HarnessOwnershipError`, `HarnessReentrancyError`, `HarnessConfinementError`. Monitor `MonitorError(Exception)` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError`, `MonitorCapacityError` (not an `FSMError`).
 
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (7,237 collected)
+pytest                                 # Run all tests (7,310 collected)
 pytest tests/test_fsm_llm/            # Core package tests (2,707 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (119 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (231 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (1,278 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (310 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (383 tests)
 pytest tests/test_fsm_llm_meta/       # Meta tests (218 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,982 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (277 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 7,165. The remaining 72 are three root-level files:
+# The 9 suites above sum to 7,238. The remaining 72 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (26)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests

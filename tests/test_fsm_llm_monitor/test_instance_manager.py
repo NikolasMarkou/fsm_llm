@@ -208,13 +208,14 @@ class TestInstanceManager:
 
 
 class TestRegisterMonitorHandlers:
-    def test_registers_8_handlers(self):
+    def test_registers_7_handlers(self):
         from fsm_llm_monitor.collector import EventCollector
 
         api = MagicMock()
         collector = EventCollector()
         register_monitor_handlers(api, collector)
-        assert api.register_handler.call_count == 8
+        # 7: the no-op POST_TRANSITION observer is not registered.
+        assert api.register_handler.call_count == 7
 
 
 class TestSnapshotInternalKeyHiding:
@@ -282,7 +283,16 @@ class TestSnapshotInternalKeyHiding:
         )
 
         assert snap is not None
-        assert snap.context_data == self._MIXED_CONTEXT
+        # Internal keys are shown, but secret-looking entries never are.
+        assert snap.context_data == {
+            "order_id": "A-1",
+            "_private": "no",
+            "internal_token": "tok",
+            "__dunder": "no",
+            "Internal_token": "tok",
+        }
+        for secret in ("system_password", "System_Password", "SYSTEM_secret"):
+            assert secret not in snap.context_data
 
 
 class TestConversationCaching:

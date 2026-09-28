@@ -168,3 +168,9 @@ plan-2026-09-27T120000-5d1e7a3b/D-002 | 2026-09-27 | The workflow driver is a lo
 plan-2026-09-27T120000-5d1e7a3b/D-003 | 2026-09-27 | Step failures without an error route carry no next_state (the instance FAILS); ParallelStep counts every failed child, with or without error text.
 plan-2026-09-27T120000-5d1e7a3b/D-004 | 2026-09-27 | User callables go through `_call_user_callable`, which awaits any awaitable a callable returns and runs sync callables in the engine executor.
 plan-2026-09-27T120000-5d1e7a3b/D-005 | 2026-09-27 | A custom instance_id still held by the engine is rejected, and instance resources are released by `Timer.instance_id`, never by key prefix.
+plan-2026-09-28T090000-3c9e41d2/D-001 | 2026-09-28 | Monitor server refuses cross-origin state-changing requests and foreign Host headers, gates sensitive reads and `/ws` (first-message auth, 4401/4403) behind the API key; no CORS origin regex.
+plan-2026-09-28T090000-3c9e41d2/D-002 | 2026-09-28 | Every context the monitor exposes goes through `collector.redact_context` (internal prefix + `is_forbidden_context_entry`, non-JSON leaves redacted); never `str()` a context object.
+plan-2026-09-28T090000-3c9e41d2/D-003 | 2026-09-28 | `_MonitorHandler` captures current/target state in `should_execute` (thread-local) for `execute`; the core never puts `_target_state` in the handler context. No POST_TRANSITION handler.
+plan-2026-09-28T090000-3c9e41d2/D-004 | 2026-09-28 | WebSocket streams use `events_after`/`logs_after` sequence cursors, not timestamps or list lengths, so bursts and ring-buffer eviction never drop or repeat items.
+plan-2026-09-28T090000-3c9e41d2/D-005 | 2026-09-28 | FSM snapshot routes that read files run via `asyncio.to_thread`, off the event loop.
+plan-2026-09-28T090000-3c9e41d2/D-006 | 2026-09-28 | Workflow run status and events come from the engine's `add_hook` callbacks keyed by a pre-generated run id, not from polling or return values of advance/cancel.

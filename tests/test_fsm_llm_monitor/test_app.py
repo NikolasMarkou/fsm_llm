@@ -164,7 +164,7 @@ class TestWebServer:
 
     def test_api_workflow_instances_not_found(self):
         resp = self.client.get("/api/workflow/nonexistent/instances")
-        assert resp.status_code == 500
+        assert resp.status_code == 404
 
     def test_api_capabilities(self):
         resp = self.client.get("/api/capabilities")
@@ -192,10 +192,9 @@ class TestWebServer:
         resp = self.client.delete("/api/instances/nonexistent")
         assert resp.status_code == 404
 
-    def test_api_instance_events_empty(self):
+    def test_api_instance_events_unknown_instance(self):
         resp = self.client.get("/api/instances/nonexistent/events")
-        assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.status_code == 404
 
     def test_api_fsm_visualize_invalid_json(self):
         resp = self.client.post(
@@ -665,15 +664,15 @@ class TestServerErrorHandling:
 
     def test_agent_status_not_found(self):
         resp = self.client.get("/api/agent/nonexistent/status")
-        assert resp.status_code == 500
+        assert resp.status_code == 404
 
     def test_agent_result_not_found(self):
         resp = self.client.get("/api/agent/nonexistent/result")
-        assert resp.status_code == 500
+        assert resp.status_code == 404
 
     def test_agent_cancel_not_found(self):
         resp = self.client.post("/api/agent/nonexistent/cancel")
-        assert resp.status_code == 500
+        assert resp.status_code == 404
 
     def test_workflow_status_missing_param(self):
         resp = self.client.get("/api/workflow/nonexistent/status")
@@ -746,11 +745,22 @@ class TestServerHygieneAndWorkflow:
         self.client = TestClient(app)
 
     def test_500_detail_is_generic(self):
-        # Unknown agent id -> internal KeyError -> 500 with a generic detail
-        # (no exception text leaked).
-        resp = self.client.get("/api/agent/does-not-exist/status")
+        # An unexpected internal error -> 500 with a generic detail (no
+        # exception text leaked).
+        from unittest import mock
+
+        with mock.patch.object(
+            InstanceManager,
+            "get_agent_status",
+            side_effect=RuntimeError("secret internal detail"),
+        ):
+            resp = self.client.get("/api/agent/does-not-exist/status")
         assert resp.status_code == 500
         assert resp.json()["detail"] == "Internal server error"
+
+    def test_unknown_instance_is_404(self):
+        resp = self.client.get("/api/agent/does-not-exist/status")
+        assert resp.status_code == 404
 
     def test_disabled_agent_returns_400(self):
         resp = self.client.post(
