@@ -9,7 +9,7 @@ from typing import Any, Literal, get_args
 
 from fsm_llm.constants import has_internal_prefix
 
-from .constants import ContextKeys, Defaults
+from .constants import ContextKeys, Defaults, StopReason
 from .definitions import ChainStep
 from .tools import ToolRegistry
 
@@ -1357,11 +1357,16 @@ def build_prompt_chain_fsm(
     Build a Prompt Chain FSM definition from a list of ChainStep objects.
 
     Creates a linear pipeline of states: step_0 -> step_1 -> ... -> output.
-    Each step uses the ChainStep's extraction and response instructions.
+    Each step extracts one typed ``chain_step_result`` (str) whose prompt
+    shows the task and ``chain_results``; the ChainStep's instructions word
+    that field, and its ``response_instructions`` stay the step's reply
+    (user-owned). A step after a gated step (one with ``validation_fn``) also
+    has an edge to ``output`` taken when that gate failed.
     """
     from .prompts import (
         build_chain_output_extraction_instructions,
         build_chain_output_response_instructions,
+        build_chain_step_field_instructions,
     )
 
     persona = (
@@ -1377,19 +1382,55 @@ def build_prompt_chain_fsm(
         is_last = i == len(chain) - 1
         next_state = "output" if is_last else f"step_{i + 1}"
 
+        transitions: list[dict[str, Any]] = []
+        if i > 0 and chain[i - 1].validation_fn is not None:
+            # The gate of step i-1 runs on entry here (PromptChainAgent).
+            transitions.append(
+                {
+                    "target_state": "output",
+                    "description": f"Stop: the gate of {chain[i - 1].name} failed",
+                    "priority": 50,
+                    "conditions": [
+                        {
+                            "description": "The previous step's gate failed",
+                            "logic": {
+                                "==": [
+                                    {"var": ContextKeys.FORCED_STOP_REASON},
+                                    StopReason.GATE_FAILED,
+                                ]
+                            },
+                        }
+                    ],
+                }
+            )
+        transitions.append(
+            {
+                "target_state": next_state,
+                "description": f"Proceed to {'output' if is_last else step.name}",
+                "priority": 100,
+            }
+        )
+
         states[state_id] = {
             "id": state_id,
             "description": f"Step {i + 1}: {step.name}",
             "purpose": step.name,
-            "extraction_instructions": step.extraction_instructions,
-            "response_instructions": step.response_instructions,
-            "transitions": [
-                {
-                    "target_state": next_state,
-                    "description": f"Proceed to {'output' if is_last else step.name}",
-                    "priority": 100,
-                }
+            "extraction_instructions": "",
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.CHAIN_STEP_RESULT,
+                    "str",
+                    build_chain_step_field_instructions(
+                        i,
+                        step.name,
+                        step.response_instructions,
+                        step.extraction_instructions,
+                    ),
+                    extra_context_keys=(ContextKeys.CHAIN_RESULTS,),
+                )
             ],
+            "response_instructions": step.response_instructions,
+            "transitions": transitions,
         }
 
     # Output (terminal) state
@@ -1732,15 +1773,18 @@ def build_evalopt_fsm(
     - evaluate: handler runs external evaluation function
     - refine: LLM refines based on feedback
     - output: terminal state with final answer
+
+    generate and refine each extract one typed ``generated_output`` (str) and
+    are silent (empty response instructions); ``evaluation_passed`` is written
+    only by the evaluation handler, never extracted.
     """
     from .prompts import (
-        build_evalopt_generate_extraction_instructions,
-        build_evalopt_generate_response_instructions,
+        build_evalopt_field_instructions,
         build_evalopt_output_extraction_instructions,
         build_evalopt_output_response_instructions,
-        build_evalopt_refine_extraction_instructions,
-        build_evalopt_refine_response_instructions,
     )
+
+    fields = build_evalopt_field_instructions()
 
     persona = (
         "You are an AI agent that produces high-quality outputs through iterative "
@@ -1753,9 +1797,13 @@ def build_evalopt_fsm(
             "id": "generate",
             "description": "Generate an initial output for the task",
             "purpose": "Produce the best possible first attempt at the task",
-            "extraction_instructions": build_evalopt_generate_extraction_instructions(),
-            "response_instructions": build_evalopt_generate_response_instructions(),
-            "required_context_keys": [ContextKeys.GENERATED_OUTPUT],
+            "extraction_instructions": "",
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.GENERATED_OUTPUT, "str", fields["generate"]
+                )
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "evaluate",
@@ -1824,9 +1872,19 @@ def build_evalopt_fsm(
             "id": "refine",
             "description": "Refine the output based on evaluation feedback",
             "purpose": "Improve the output by addressing specific feedback points",
-            "extraction_instructions": build_evalopt_refine_extraction_instructions(),
-            "response_instructions": build_evalopt_refine_response_instructions(),
-            "required_context_keys": [ContextKeys.GENERATED_OUTPUT],
+            "extraction_instructions": "",
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.GENERATED_OUTPUT,
+                    "str",
+                    fields["refine"],
+                    extra_context_keys=(
+                        ContextKeys.PREVIOUS_OUTPUT,
+                        ContextKeys.REFINEMENT_FEEDBACK,
+                    ),
+                )
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "evaluate",
@@ -1875,14 +1933,17 @@ def build_maker_checker_fsm(
     - output: terminal state with final answer
     """
     from .prompts import (
-        build_checker_extraction_instructions,
+        build_maker_checker_field_instructions,
         build_maker_checker_output_extraction_instructions,
         build_maker_checker_output_response_instructions,
-        build_maker_extraction_instructions,
-        build_maker_response_instructions,
-        build_revise_extraction_instructions,
-        build_revise_response_instructions,
     )
+
+    fields = build_maker_checker_field_instructions(
+        maker_instructions, checker_instructions
+    )
+    draft = ContextKeys.DRAFT_OUTPUT
+    # The checker sees the draft under judgment and the one it replaced.
+    judged = (draft, ContextKeys.PREVIOUS_DRAFT)
 
     persona = (
         "You are an AI agent that produces high-quality outputs through a "
@@ -1895,10 +1956,11 @@ def build_maker_checker_fsm(
             "id": "make",
             "description": "Maker generates a draft output",
             "purpose": "Produce a high-quality draft following the maker instructions",
-            "extraction_instructions": build_maker_extraction_instructions(
-                maker_instructions
-            ),
-            "response_instructions": build_maker_response_instructions(),
+            "extraction_instructions": "",
+            "field_extractions": [
+                _typed_field_extraction(draft, "str", fields["make"])
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "check",
@@ -1911,14 +1973,35 @@ def build_maker_checker_fsm(
             "id": "check",
             "description": "Checker evaluates the draft",
             "purpose": "Critically evaluate the draft against quality criteria",
-            "required_context_keys": [
-                ContextKeys.CHECKER_PASSED,
-                ContextKeys.CHECKER_FEEDBACK,
-                "quality_score",
+            "extraction_instructions": "",
+            # DECISION plan-2026-09-29T103145-06a5ec0a/D-039
+            # One call per field and turn: feedback first (the score and the
+            # verdict prompts then show it), checker_passed optional (a null
+            # costs no retry and falls to the D-002 revise edge, and
+            # _track_revisions passes on the score). Do NOT put these keys
+            # back in required_context_keys: core mints an untyped `any`
+            # config per key with the whole context, agent_trace included.
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.CHECKER_FEEDBACK,
+                    "str",
+                    fields[ContextKeys.CHECKER_FEEDBACK],
+                    extra_context_keys=judged,
+                ),
+                _typed_field_extraction(
+                    "quality_score",
+                    "float",
+                    fields["quality_score"],
+                    extra_context_keys=judged,
+                ),
+                _typed_field_extraction(
+                    ContextKeys.CHECKER_PASSED,
+                    "bool",
+                    fields[ContextKeys.CHECKER_PASSED],
+                    extra_context_keys=judged,
+                    required=False,
+                ),
             ],
-            "extraction_instructions": build_checker_extraction_instructions(
-                checker_instructions
-            ),
             "response_instructions": "",
             "transitions": [
                 {
@@ -1977,10 +2060,19 @@ def build_maker_checker_fsm(
             "id": "revise",
             "description": "Maker revises the draft based on checker feedback",
             "purpose": "Address all checker feedback and produce an improved draft",
-            "extraction_instructions": build_revise_extraction_instructions(
-                maker_instructions
-            ),
-            "response_instructions": build_revise_response_instructions(),
+            "extraction_instructions": "",
+            "field_extractions": [
+                _typed_field_extraction(
+                    draft,
+                    "str",
+                    fields["revise"],
+                    extra_context_keys=(
+                        ContextKeys.PREVIOUS_DRAFT,
+                        ContextKeys.CHECKER_FEEDBACK,
+                    ),
+                )
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "check",

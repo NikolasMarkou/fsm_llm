@@ -272,7 +272,13 @@ class TestBuildPromptChainFsm:
         )
         fsm = build_prompt_chain_fsm([step])
         state = fsm["states"]["step_0"]
-        assert state["extraction_instructions"] == "Custom extraction here"
+        # The step's instructions word its typed chain_step_result; the reply
+        # stays user-owned; no context-free bulk extraction runs.
+        assert state["extraction_instructions"] == ""
+        (field,) = state["field_extractions"]
+        assert field["field_name"] == ContextKeys.CHAIN_STEP_RESULT
+        assert "Custom extraction here" in field["extraction_instructions"]
+        assert "Custom response here" in field["extraction_instructions"]
         assert state["response_instructions"] == "Custom response here"
 
     def test_step_description_includes_name(self):
@@ -381,7 +387,8 @@ class TestPromptChainHandlers:
         context = {}
         result = gate_fn(context)
         assert result.get(ContextKeys.GATE_PASSED) is False
-        assert result.get(ContextKeys.SHOULD_TERMINATE) is True
+        # Routed on by the gate edge; caller context cannot seed it.
+        assert result.get(ContextKeys.FORCED_STOP_REASON) == "gate_failed"
 
     def test_gate_checker_no_validation_on_first_step(self):
         chain = _make_chain(3)

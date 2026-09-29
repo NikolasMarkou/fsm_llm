@@ -271,8 +271,13 @@ class TestBuildMakerCheckerFsm:
             maker_instructions="Write a haiku",
             checker_instructions="Check syllable count",
         )
-        extraction = fsm["states"]["make"]["extraction_instructions"]
-        assert "haiku" in extraction.lower() or "Write a haiku" in extraction
+        # The draft is a typed field; the state-level (context-free bulk)
+        # instructions are empty.
+        make = fsm["states"]["make"]
+        assert make["extraction_instructions"] == ""
+        (field,) = make["field_extractions"]
+        assert field["field_name"] == "draft_output"
+        assert "Write a haiku" in field["extraction_instructions"]
 
 
 # -------------------------------------------------------------------------
@@ -535,6 +540,8 @@ class _TwoRoundLLM(LLMInterface):
     """Maker drafts ``d1``, ``d2``, ...; the checker rejects round 1 and
     approves round 2. Records every ``checker_passed`` extraction."""
 
+    DRAFT_PREFIX = "d"
+
     def __init__(self) -> None:
         self.drafts = 0
         self.verdicts: list[bool] = []
@@ -542,17 +549,15 @@ class _TwoRoundLLM(LLMInterface):
     def extract_bulk_data(
         self, request: BulkExtractionRequest
     ) -> DataExtractionResponse:
-        if "You are the MAKER" not in request.system_prompt:
-            return DataExtractionResponse(extracted_data={})
-        self.drafts += 1
-        return DataExtractionResponse(
-            extracted_data={ContextKeys.DRAFT_OUTPUT: f"d{self.drafts}"}
-        )
+        return DataExtractionResponse(extracted_data={})
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         name = request.field_name
         value: Any
-        if name == ContextKeys.CHECKER_PASSED:
+        if name == ContextKeys.DRAFT_OUTPUT:
+            self.drafts += 1
+            value = f"{self.DRAFT_PREFIX}{self.drafts}"
+        elif name == ContextKeys.CHECKER_PASSED:
             value = len(self.verdicts) >= 1
             self.verdicts.append(value)
         elif name == "quality_score":
@@ -622,6 +627,8 @@ class _HighScoreRejectLLM(_TwoRoundLLM):
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         name = request.field_name
+        if name == ContextKeys.DRAFT_OUTPUT:
+            return super().extract_field(request)
         value: Any
         if name == ContextKeys.CHECKER_PASSED:
             value = False
@@ -666,17 +673,11 @@ class _AlwaysRejectLLM(_TwoRoundLLM):
     ``checker_passed=False`` at a low score. Records, per verdict, the draft
     under judgment (the newest one, which must appear in the checker prompt)."""
 
+    DRAFT_PREFIX = "DRAFT-"
+
     def __init__(self) -> None:
         super().__init__()
         self.judged: list[str] = []
-
-    def extract_bulk_data(
-        self, request: BulkExtractionRequest
-    ) -> DataExtractionResponse:
-        response = super().extract_bulk_data(request)
-        if response.extracted_data:
-            response.extracted_data[ContextKeys.DRAFT_OUTPUT] = f"DRAFT-{self.drafts}"
-        return response
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         if request.field_name != ContextKeys.CHECKER_PASSED:
@@ -732,10 +733,12 @@ class _PromptRecordingTwoRoundLLM(_TwoRoundLLM):
     def __init__(self) -> None:
         super().__init__()
         self.checker_prompts: list[str] = []
+        self.checker_contexts: list[dict[str, Any]] = []
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         if request.field_name == ContextKeys.CHECKER_PASSED:
             self.checker_prompts.append(request.system_prompt)
+            self.checker_contexts.append(dict(request.context or {}))
         return super().extract_field(request)
 
 
@@ -760,7 +763,7 @@ class TestPreviousDraftStaysOutOfFinalContext:
         assert ContextKeys.PREVIOUS_OUTPUT not in result.final_context
 
         # During the run the round-2 checker still saw the previous draft.
-        assert len(llm.checker_prompts) == 2
-        assert ContextKeys.PREVIOUS_DRAFT not in llm.checker_prompts[0]
-        assert ContextKeys.PREVIOUS_DRAFT in llm.checker_prompts[1]
+        assert len(llm.checker_contexts) == 2
+        assert ContextKeys.PREVIOUS_DRAFT not in llm.checker_contexts[0]
+        assert llm.checker_contexts[1][ContextKeys.PREVIOUS_DRAFT] == "d1"
         assert "d1" in llm.checker_prompts[1]

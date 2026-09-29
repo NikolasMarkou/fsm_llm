@@ -18,6 +18,16 @@ if TYPE_CHECKING:
     from .semantic_tools import SemanticToolRegistry
 
 
+# Generated loop values (debate rounds, drafts, chain step outputs) are
+# written, not found: the field prompt frames every value as an extraction,
+# and live qwen3.5:4b returned null ("not in the user message") for text no
+# message holds. Every generated text field opens with this sentence.
+_COMPOSE = (
+    "This value does not exist yet: do not look for it in the messages or the "
+    "context, compose it yourself now and never return null. "
+)
+
+
 def _build_tool_example(tool_name: str, params: dict) -> str:
     """Build a compact JSON example for a specific tool call."""
     import json
@@ -444,55 +454,25 @@ def build_rewoo_solve_response_instructions() -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_evalopt_generate_extraction_instructions(
-    task_instructions: str = "",
-) -> str:
-    """Build extraction instructions for the EvalOpt generate state."""
-    context_line = ""
-    if task_instructions:
-        context_line = f"\nTask-specific instructions: {task_instructions}\n"
+def build_evalopt_field_instructions() -> dict[str, str]:
+    """Per-field instructions for EvalOpt's typed ``generated_output``.
 
-    return "\n".join(
-        [
-            "Generate your best output for the given task.",
-            context_line,
-            "Extract the following as JSON:",
-            '- "generated_output": your complete generated output',
-            '- "reasoning": your reasoning and approach',
-        ]
-    )
-
-
-def build_evalopt_generate_response_instructions() -> str:
-    """Build response instructions for the EvalOpt generate state."""
-    return "Present the output you have generated for the task."
-
-
-def build_evalopt_refine_extraction_instructions() -> str:
-    """Build extraction instructions for the EvalOpt refine state."""
-    return "\n".join(
-        [
-            "Your previous output did not pass evaluation. Refine it based "
-            "on the feedback provided.",
-            "",
-            "The feedback from the evaluator is available in the context as "
-            "'refinement_feedback'. Your previous output is in 'previous_output'.",
-            "",
-            "IMPORTANT: Address ALL feedback points. Do not just repeat the same output.",
-            "",
-            "Extract the following as JSON:",
-            '- "generated_output": your refined output (complete, not just the changes)',
-            '- "reasoning": what you changed and why',
-        ]
-    )
-
-
-def build_evalopt_refine_response_instructions() -> str:
-    """Build response instructions for the EvalOpt refine state."""
-    return (
-        "Explain what changes you made to address the evaluation feedback "
-        "and present your revised output."
-    )
+    Returns ``{state: instructions}`` for ``generate`` and ``refine``. The
+    refine prompt shows ``previous_output`` and ``refinement_feedback``.
+    """
+    return {
+        "generate": (
+            f"{_COMPOSE}Your complete output for the task: the full "
+            "deliverable itself, exactly as it should be delivered, with no "
+            "commentary before or after it."
+        ),
+        "refine": (
+            f"{_COMPOSE}Your complete refined output for the task: rewrite "
+            "previous_output so that it fixes every point of "
+            "refinement_feedback. Give the full deliverable, not only the "
+            "changes, with no commentary before or after it."
+        ),
+    }
 
 
 def build_evalopt_output_extraction_instructions() -> str:
@@ -519,80 +499,43 @@ def build_evalopt_output_response_instructions() -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_maker_extraction_instructions(
+def build_maker_checker_field_instructions(
     maker_instructions: str,
-) -> str:
-    """Build extraction instructions for the Maker-Checker make state."""
-    return "\n".join(
-        [
-            "You are the MAKER. Your job is to produce a high-quality draft.",
-            "",
-            f"Instructions: {maker_instructions}",
-            "",
-            "If previous checker feedback is available in the context, "
-            "use it to improve your draft.",
-            "",
-            "Extract the following as JSON:",
-            '- "draft_output": your complete draft',
-            '- "reasoning": your approach and rationale',
-        ]
-    )
-
-
-def build_maker_response_instructions() -> str:
-    """Build response instructions for the Maker-Checker make state."""
-    return "Present the draft you have created."
-
-
-def build_checker_extraction_instructions(
     checker_instructions: str,
-) -> str:
-    """Build extraction instructions for the Maker-Checker check state."""
-    return "\n".join(
-        [
-            "You are the CHECKER. Critically evaluate the draft produced by the maker.",
-            "",
-            f"Evaluation criteria: {checker_instructions}",
-            "",
-            "Be thorough and constructive. Point out specific issues.",
-            "",
-            "Extract the following as JSON:",
-            '- "checker_passed": true if the draft meets quality standards, false otherwise',
-            '- "checker_feedback": detailed feedback on what is good and what needs improvement',
-            '- "quality_score": a float between 0.0 and 1.0 rating overall quality',
-        ]
+) -> dict[str, str]:
+    """Per-field instructions for the Maker-Checker typed fields.
+
+    Returns ``{name: instructions}`` for ``make`` and ``revise`` (both the
+    ``draft_output`` str field of that state), ``checker_feedback`` (str),
+    ``quality_score`` (float) and ``checker_passed`` (bool). The revise
+    prompt shows ``previous_draft`` and ``checker_feedback``; the check
+    prompts show ``draft_output``.
+    """
+    draft = (
+        "Give the full deliverable itself, with no commentary before or after it. "
+        f"Maker instructions: {maker_instructions}"
     )
-
-
-def build_revise_extraction_instructions(
-    maker_instructions: str,
-) -> str:
-    """Build extraction instructions for the Maker-Checker revise state."""
-    return "\n".join(
-        [
-            "You are the MAKER. The checker has provided feedback on your draft. "
-            "Revise your output to address all feedback points.",
-            "",
-            f"Original instructions: {maker_instructions}",
-            "",
-            "The checker's feedback is in 'checker_feedback'. "
-            "Your previous draft is in 'previous_draft'.",
-            "",
-            "IMPORTANT: Address ALL feedback points. Produce a complete revised draft.",
-            "",
-            "Extract the following as JSON:",
-            '- "draft_output": your complete revised draft (not just the changes)',
-            '- "reasoning": what you changed and why',
-        ]
-    )
-
-
-def build_revise_response_instructions() -> str:
-    """Build response instructions for the Maker-Checker revise state."""
-    return (
-        "Explain what changes you made to address the checker's feedback "
-        "and present your revised draft."
-    )
+    criteria = f"Evaluation criteria: {checker_instructions}"
+    return {
+        "make": f"{_COMPOSE}Your complete draft for the task. {draft}",
+        "revise": (
+            f"{_COMPOSE}Your complete revised draft for the task: rewrite "
+            "previous_draft so that it fixes every point of checker_feedback "
+            f"(the whole draft, not only the changes). {draft}"
+        ),
+        ContextKeys.CHECKER_FEEDBACK: (
+            f"{_COMPOSE}Your review of the draft_output value as the checker: "
+            "what is good and each specific issue to fix. " + criteria
+        ),
+        "quality_score": (
+            "Your rating of the draft_output value against the criteria, a "
+            "number from 0.0 (unusable) to 1.0 (meets every criterion). " + criteria
+        ),
+        ContextKeys.CHECKER_PASSED: (
+            "true if the draft_output value meets the criteria, false if it "
+            "needs revision. " + criteria
+        ),
+    }
 
 
 def build_maker_checker_output_extraction_instructions() -> str:
@@ -819,6 +762,27 @@ def build_combine_response_instructions() -> str:
 # ---------------------------------------------------------------------------
 
 
+def build_chain_step_field_instructions(
+    index: int,
+    name: str,
+    response_instructions: str,
+    extraction_instructions: str,
+) -> str:
+    """Per-field instructions for step ``index`` (0-based) of a prompt chain.
+
+    ``chain_step_result`` (str) is the step's output. The ChainStep's
+    ``response_instructions`` say what the step does and its
+    ``extraction_instructions`` what the output must hold; the prompt shows
+    ``chain_results`` (the earlier steps' outputs).
+    """
+    return (
+        f"{_COMPOSE}The complete output of pipeline step {index + 1} "
+        f"('{name}') as plain text (not a JSON object), building on the "
+        f"earlier steps' outputs in chain_results. Step: {response_instructions} "
+        f"The output must cover: {extraction_instructions}"
+    )
+
+
 def build_chain_output_extraction_instructions() -> str:
     """Build extraction instructions for the chain output (terminal) state."""
     return "\n".join(
@@ -867,14 +831,6 @@ def build_generate_response_instructions() -> str:
 def _persona_line(persona: str) -> str:
     """Return the ``Role:`` sentence for a debate persona, or ``""`` when unset."""
     return f" Role: {persona}" if persona else ""
-
-
-# Debate values are written, not found: the field prompt frames every value
-# as an extraction, and a model then returns null for text no message holds.
-_COMPOSE = (
-    "This value does not exist yet: do not look for it in the messages or the "
-    "context, compose it yourself now and never return null. "
-)
 
 
 def build_debate_field_instructions(

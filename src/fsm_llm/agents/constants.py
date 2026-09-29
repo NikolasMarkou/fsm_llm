@@ -276,8 +276,11 @@ class StopReason:
     # A prompt-chain validation gate failed.
     GATE_FAILED = "gate_failed"
 
-    # Reasons a forcing handler may record in ``ContextKeys.FORCED_STOP_REASON``.
-    FORCED: frozenset[str] = frozenset({MAX_ITERATIONS, FORCED_PASS, STALLED})
+    # Reasons a forcing handler may record in ``ContextKeys.FORCED_STOP_REASON``
+    # (the prompt-chain gate handler records ``GATE_FAILED``).
+    FORCED: frozenset[str] = frozenset(
+        {MAX_ITERATIONS, FORCED_PASS, STALLED, GATE_FAILED}
+    )
 
 
 # ---------------------------------------------------------------------------

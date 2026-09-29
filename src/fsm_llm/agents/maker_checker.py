@@ -204,20 +204,9 @@ class MakerCheckerAgent(BaseAgent):
         """
         revision_count = context.get(ContextKeys.REVISION_COUNT, 0) + 1
         max_revisions = context.get("_max_revisions", self.max_revisions)
+        # Typed float field (a dict-shaped checker_feedback, which an earlier
+        # recovery read the score from, is now rejected by the str field).
         quality_score = context.get("quality_score", 0.0)
-
-        # Recovery: small models sometimes embed quality_score inside
-        # checker_feedback as a dict/JSON instead of as a separate field.
-        if not quality_score and isinstance(
-            context.get(ContextKeys.CHECKER_FEEDBACK), dict
-        ):
-            feedback_dict = context[ContextKeys.CHECKER_FEEDBACK]
-            extracted = feedback_dict.get("quality_score")
-            if isinstance(extracted, int | float):
-                quality_score = float(extracted)
-                logger.debug(
-                    f"Recovered quality_score={quality_score} from checker_feedback"
-                )
 
         # Record in trace
         trace = list(context.get(ContextKeys.AGENT_TRACE, []))

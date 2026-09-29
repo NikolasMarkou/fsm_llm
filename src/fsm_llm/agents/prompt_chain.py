@@ -21,11 +21,12 @@ from .constants import (
     HandlerNames,
     HandlerPriorities,
     PromptChainStates,
+    StopReason,
 )
 from .definitions import AgentConfig, AgentResult, ChainStep
 from .exceptions import AgentError
 from .fsm_definitions import build_prompt_chain_fsm
-from .handlers import make_iteration_limiter
+from .handlers import make_fresh_keys_handler, make_iteration_limiter
 
 
 class PromptChainAgent(BaseAgent):
@@ -120,62 +121,79 @@ class PromptChainAgent(BaseAgent):
             context,
             "prompt_chain",
             max_iterations=max_fsm_iterations,
+            # Success key only: the last step's output is kept (not cleared on
+            # output entry), so a chain whose last step produced nothing
+            # reports no_result. The answer comes from _extract_answer.
+            extra_answer_keys=[ContextKeys.CHAIN_STEP_RESULT],
         )
 
     def _register_handlers(self, api: API) -> None:
         """Register chain-specific handlers with the API."""
-        # Gate checker: runs post-transition on every step state
-        for i, _step in enumerate(self.chain):
-            state_id = f"{PromptChainStates.STEP_PREFIX}{i}"
-
+        # On entry to step i (i >= 1) and to output, the gate checker records
+        # the previous step's result and runs its gate. step_0 is the initial
+        # state: nothing precedes it.
+        targets = [
+            f"{PromptChainStates.STEP_PREFIX}{i}" for i in range(1, len(self.chain))
+        ]
+        targets.append(PromptChainStates.OUTPUT)
+        for index, state_id in enumerate(targets, start=1):
+            suffix = "final" if state_id == PromptChainStates.OUTPUT else index
             api.register_handler(
-                api.create_handler(f"{HandlerNames.CHAIN_GATE_CHECKER}_{i}")
+                api.create_handler(f"{HandlerNames.CHAIN_GATE_CHECKER}_{suffix}")
                 .with_priority(HandlerPriorities.TOOL_EXECUTOR)
                 .on_state_entry(state_id)
-                .do(self._make_gate_checker(i))
+                .do(self._make_gate_checker(index))
             )
-
-        # Final gate: validate the last step's result on entry to output state
-        api.register_handler(
-            api.create_handler(f"{HandlerNames.CHAIN_GATE_CHECKER}_final")
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(PromptChainStates.OUTPUT)
-            .do(self._make_gate_checker(len(self.chain)))
-        )
 
         # Iteration limiter
         self._register_iteration_limiter(api, self._make_iteration_limiter())
 
     def _make_gate_checker(self, step_index: int) -> Any:
-        """Create a gate checker handler for a specific step."""
+        """Create the entry handler of the state after step ``step_index - 1``.
+
+        ``step_index`` is 1..len(chain); ``len(chain)`` is the output state.
+        """
         chain = self.chain
+        prev_step = chain[step_index - 1] if step_index > 0 else None
+        # The next step extracts its own result (skip-if-set); on output the
+        # last step's result stays as the success key.
+        refresh = (
+            None
+            if step_index == len(chain)
+            else make_fresh_keys_handler([ContextKeys.CHAIN_STEP_RESULT])
+        )
 
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-038
+        # The gate runs on ENTRY to the next state, after core recorded the
+        # step's chain_step_result; a failure writes forced_stop_reason
+        # gate_failed and KEEPS chain_step_result, so the next state's turn
+        # skips its extraction (skip-if-set) and its gate edge routes to
+        # output. Do NOT move the gate to PRE_TRANSITION of the step (core
+        # has already chosen the edge, D-031) or to CONTEXT_UPDATE (never
+        # fires on a null extraction), and do NOT route on gate_passed:
+        # caller context can seed it, forced_stop_reason it cannot.
         def check_gate(context: dict[str, Any]) -> dict[str, Any]:
-            # Record current step index
-            updates: dict[str, Any] = {
-                ContextKeys.CHAIN_STEP_INDEX: step_index,
-            }
-
-            # If the previous step had a result and validation_fn, check it
-            prev_index = step_index - 1
-            if prev_index >= 0 and prev_index < len(chain):
-                prev_step = chain[prev_index]
-                if prev_step.validation_fn is not None:
-                    passed = prev_step.validation_fn(context)
-                    updates[ContextKeys.GATE_PASSED] = passed
-                    if not passed:
-                        logger.warning(
-                            f"Gate failed at step '{prev_step.name}', terminating chain"
-                        )
-                        updates[ContextKeys.SHOULD_TERMINATE] = True
-
-            # Accumulate step result from previous step
+            if context.get(ContextKeys.FORCED_STOP_REASON) == StopReason.GATE_FAILED:
+                return {}  # an earlier gate stopped the chain
+            updates: dict[str, Any] = {ContextKeys.CHAIN_STEP_INDEX: step_index}
             step_result = context.get(ContextKeys.CHAIN_STEP_RESULT)
             if step_result is not None:
                 chain_results = list(context.get(ContextKeys.CHAIN_RESULTS, []))
                 chain_results.append(step_result)
                 updates[ContextKeys.CHAIN_RESULTS] = chain_results
 
+            if prev_step is not None and prev_step.validation_fn is not None:
+                passed = prev_step.validation_fn(context)
+                updates[ContextKeys.GATE_PASSED] = passed
+                if not passed:
+                    logger.warning(
+                        f"Gate failed at step '{prev_step.name}', terminating chain"
+                    )
+                    updates[ContextKeys.FORCED_STOP_REASON] = StopReason.GATE_FAILED
+                    return updates
+
+            if refresh is not None:
+                updates.update(refresh(context))
             return updates
 
         return check_gate

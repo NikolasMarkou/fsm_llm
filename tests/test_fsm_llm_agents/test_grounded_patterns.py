@@ -1530,3 +1530,248 @@ class TestSelfConsistencyVote:
         (request,) = llm.calls("generate_response")
         assert "Answer:" in request.system_prompt
         assert not llm.calls("extract_bulk_data")
+
+
+# ---------------------------------------------------------------------------
+# Step 20: PromptChain, MakerChecker, EvaluatorOptimizer (PAT-06/PAT-11)
+# ---------------------------------------------------------------------------
+
+_CHAIN_TASK = "Write a note about tides"
+
+
+def _spoken_states(llm: PromptGroundedLLM) -> set[str]:
+    return {
+        m.group(1)
+        for r in llm.calls("generate_response")
+        if (m := _CURRENT_STATE_TAG.search(r.system_prompt))
+    }
+
+
+def _stage(k: int) -> str:
+    return f"Stage {k} output text"
+
+
+def _chain_derived() -> dict[str, object]:
+    """Step ``k`` outputs ``_stage(k)``, grounded on the task and on the ``k``
+    earlier outputs its prompt shows in ``chain_results``."""
+
+    def step_result(text: str, ctx: dict) -> object:
+        results = ctx.get(ContextKeys.CHAIN_RESULTS)
+        if _CHAIN_TASK not in text or not isinstance(results, list):
+            return None
+        return _stage(len(results))
+
+    return {ContextKeys.CHAIN_STEP_RESULT: step_result}
+
+
+class TestPromptChainLoop:
+    """Step 20 (PAT-06): each step extracts a fresh grounded result that is
+    appended to ``chain_results``, and a failed gate stops the chain."""
+
+    def _run(self, gates: dict[int, object] | None = None):
+        from fsm_llm.agents import ChainStep, PromptChainAgent
+
+        gates = gates or {}
+        chain = [
+            ChainStep(
+                step_id=f"s{i}",
+                name=f"Stage {i}",
+                extraction_instructions=f"Extract stage {i} text.",
+                response_instructions=f"Present stage {i}.",
+                validation_fn=gates.get(i),
+            )
+            for i in range(3)
+        ]
+        llm = _TurnAwareLLM(_chain_derived(), responses={"output": "Final note."})
+        result = PromptChainAgent(chain=chain, llm_interface=llm).run(_CHAIN_TASK)
+        return llm, result
+
+    def test_chain_results_hold_each_steps_grounded_output(self):
+        # PAT-06: the step result came only from the user's context-free
+        # bulk instructions and froze after step 0, so chain_results was [].
+        _, result = self._run()
+
+        assert result.final_context[ContextKeys.CHAIN_RESULTS] == [
+            _stage(0),
+            _stage(1),
+            _stage(2),
+        ]
+        assert result.answer == _stage(2)
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_step_prompts_show_task_and_earlier_results_not_trace(self):
+        llm, _ = self._run()
+
+        requests = _field_requests(llm, ContextKeys.CHAIN_STEP_RESULT)
+        assert [len(r.context[ContextKeys.CHAIN_RESULTS]) for r in requests] == [
+            0,
+            1,
+            2,
+        ]
+        for request in requests:
+            assert ContextKeys.AGENT_TRACE not in request.context
+        assert not llm.calls("extract_bulk_data")
+
+    def test_failed_gate_stops_the_chain(self):
+        # PAT-06: gate_passed/should_terminate were written but every step
+        # edge was unconditional, so the chain ran every step anyway.
+        llm, result = self._run(gates={0: lambda ctx: False})
+
+        assert result.final_context[ContextKeys.CHAIN_RESULTS] == [_stage(0)]
+        assert len(_field_requests(llm, ContextKeys.CHAIN_STEP_RESULT)) == 1
+        assert result.success is False
+        assert result.stop_reason == "gate_failed"
+        assert result.final_context[ContextKeys.GATE_PASSED] is False
+
+    def test_passing_gate_sees_the_step_result(self):
+        seen: list[object] = []
+
+        def gate(ctx: dict) -> bool:
+            seen.append(ctx.get(ContextKeys.CHAIN_STEP_RESULT))
+            return True
+
+        _, result = self._run(gates={1: gate})
+
+        assert seen == [_stage(1)]
+        assert result.final_context[ContextKeys.CHAIN_RESULTS] == [
+            _stage(0),
+            _stage(1),
+            _stage(2),
+        ]
+        assert result.stop_reason == "answered"
+
+
+_MC_TASK = "Write a haiku about rain"
+
+
+def _maker_checker_derived() -> dict[str, object]:
+    """The maker writes ``DRAFT-1`` from the task and ``DRAFT-2`` only when its
+    prompt shows the checker's feedback on ``DRAFT-1``; the checker judges the
+    draft its prompt shows."""
+
+    def draft(text: str, ctx: dict) -> object:
+        if "FIX-SYLLABLES" in text:
+            return "DRAFT-2"
+        return "DRAFT-1" if _MC_TASK in text else None
+
+    def feedback(_text: str, ctx: dict) -> object:
+        return {"DRAFT-1": "FIX-SYLLABLES", "DRAFT-2": "fine"}.get(
+            ctx.get(ContextKeys.DRAFT_OUTPUT)
+        )
+
+    def score(_text: str, ctx: dict) -> object:
+        return {"DRAFT-1": 0.2, "DRAFT-2": 0.9}.get(ctx.get(ContextKeys.DRAFT_OUTPUT))
+
+    def passed(_text: str, ctx: dict) -> object:
+        return {"DRAFT-1": False, "DRAFT-2": True}.get(
+            ctx.get(ContextKeys.DRAFT_OUTPUT)
+        )
+
+    return {
+        ContextKeys.DRAFT_OUTPUT: draft,
+        ContextKeys.CHECKER_FEEDBACK: feedback,
+        "quality_score": score,
+        ContextKeys.CHECKER_PASSED: passed,
+    }
+
+
+class TestMakerCheckerLoop:
+    """Step 20 (PAT-11): the maker and reviser write grounded typed drafts, the
+    reviser sees the checker's feedback, and only ``output`` speaks."""
+
+    def _run(self):
+        from fsm_llm.agents import AgentConfig, MakerCheckerAgent
+
+        llm = _TurnAwareLLM(_maker_checker_derived())
+        agent = MakerCheckerAgent(
+            maker_instructions="Write a haiku.",
+            checker_instructions="Check the syllables.",
+            max_revisions=3,
+            config=AgentConfig(max_iterations=10),
+            llm_interface=llm,
+        )
+        return llm, agent.run(_MC_TASK)
+
+    def test_reviser_prompt_contains_the_checker_feedback(self):
+        # PAT-11: make/revise drafts came from the context-free bulk call.
+        llm, result = self._run()
+
+        drafts = _field_requests(llm, ContextKeys.DRAFT_OUTPUT)
+        assert len(drafts) == 2
+        revise = drafts[1].context
+        assert revise[ContextKeys.CHECKER_FEEDBACK] == "FIX-SYLLABLES"
+        assert revise[ContextKeys.PREVIOUS_DRAFT] == "DRAFT-1"
+        assert result.answer == "DRAFT-2"
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_checker_fields_are_typed_and_judge_each_draft(self):
+        llm, result = self._run()
+
+        judged = [
+            r.context.get(ContextKeys.DRAFT_OUTPUT)
+            for r in _field_requests(llm, "quality_score")
+        ]
+        assert judged == ["DRAFT-1", "DRAFT-2"]
+        assert result.final_context["quality_score"] == 0.9
+        assert result.final_context[ContextKeys.REVISION_COUNT] == 2
+
+    def test_only_output_speaks_and_no_bulk_call_runs(self):
+        llm, _ = self._run()
+
+        assert _spoken_states(llm) == {"output"}
+        assert not llm.calls("extract_bulk_data")
+        for request in llm.calls("extract_field"):
+            assert ContextKeys.AGENT_TRACE not in (request.context or {})
+
+
+class TestEvaluatorOptimizerLoop:
+    """Step 20 (PAT-11): generate/refine extract a typed ``generated_output``
+    whose refine prompt shows the evaluator's feedback, and only ``output``
+    speaks."""
+
+    def _run(self):
+        from fsm_llm.agents import AgentConfig, EvaluatorOptimizerAgent
+        from fsm_llm.agents.definitions import EvaluationResult
+
+        def output(text: str, _ctx: dict) -> object:
+            if "ADD-IMAGERY" in text:
+                return "HAIKU-2"
+            return "HAIKU-1" if "haiku" in text else None
+
+        def evaluate(out: str, _ctx: dict) -> EvaluationResult:
+            ok = out == "HAIKU-2"
+            return EvaluationResult(
+                passed=ok,
+                score=1.0 if ok else 0.2,
+                feedback="ok" if ok else "ADD-IMAGERY",
+            )
+
+        llm = _TurnAwareLLM({ContextKeys.GENERATED_OUTPUT: output})
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=evaluate,
+            max_refinements=3,
+            config=AgentConfig(max_iterations=10),
+            llm_interface=llm,
+        )
+        return llm, agent.run("Write a haiku about rain")
+
+    def test_refine_sees_feedback_and_ships_the_passing_output(self):
+        llm, result = self._run()
+
+        outputs = _field_requests(llm, ContextKeys.GENERATED_OUTPUT)
+        assert len(outputs) == 2
+        refine = outputs[1].context
+        assert refine[ContextKeys.REFINEMENT_FEEDBACK] == "ADD-IMAGERY"
+        assert refine[ContextKeys.PREVIOUS_OUTPUT] == "HAIKU-1"
+        assert result.answer == "HAIKU-2"
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_only_output_speaks_and_prompts_exclude_trace(self):
+        # generate/refine spoke every turn (an unread Pass-2 call each) and
+        # their auto-minted `any` configs dumped agent_trace into the prompt.
+        llm, _ = self._run()
+
+        assert _spoken_states(llm) == {"output"}
+        assert not llm.calls("extract_bulk_data")
+        for request in _field_requests(llm, ContextKeys.GENERATED_OUTPUT):
+            assert ContextKeys.AGENT_TRACE not in request.context
