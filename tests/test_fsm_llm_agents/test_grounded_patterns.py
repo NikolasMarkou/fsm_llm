@@ -2259,3 +2259,75 @@ class TestSwarmHandoff:
         assert "final_answer" not in b_context
         assert "next_agent" not in b_context
         assert result.final_context["_swarm_handoff_chain"] == ["a", "b"]
+
+
+# Step 24 (API-01): the only evidence for the tool call is in the instructions.
+_POLICY = "Follow POLICY-7: look every fact up before answering."
+_POLICY_FACTS: dict[str, tuple[object, str]] = {
+    "tool_name": ("lookup", "POLICY-7"),
+    "tool_input": ({"query": "capital of France"}, "POLICY-7"),
+    "should_terminate": (True, "is Paris"),
+}
+
+
+def _spoken_replies(llm: PromptGroundedLLM) -> list:
+    """Pass-2 requests that reach the model (core skips silent states)."""
+    return [r for r in llm.calls("generate_response") if not r.skip_generation]
+
+
+class TestAgentInstructions:
+    """Step 24 (API-01): ``system_prompt`` / ``AgentConfig.instructions``
+    reach the prompts the model decides on, and silent states stay silent."""
+
+    def _react(self, *args: object, **kwargs: object):
+        from fsm_llm.agents import AgentConfig, create_agent
+
+        runs: list[str] = []
+        llm = PromptGroundedLLM(facts=_POLICY_FACTS, default_response="Paris")
+        agent = create_agent(
+            *args,  # type: ignore[arg-type]
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=6),
+            llm_interface=llm,
+            **kwargs,
+        )
+        return runs, llm, agent.run("What is the capital of France?")
+
+    def test_react_system_prompt_steers_the_tool_choice(self):
+        runs, llm, result = self._react("react", system_prompt=_POLICY)
+
+        assert runs == ["capital of France"]
+        assert result.success
+        assert all(_POLICY in r.system_prompt for r in llm.calls("extract_field"))
+        replies = _spoken_replies(llm)
+        assert replies and all(_POLICY in r.system_prompt for r in replies)
+
+    def test_react_without_instructions_never_sees_the_policy(self):
+        runs, llm, _ = self._react("react")
+
+        assert runs == []
+        assert not any("POLICY-7" in r.system_prompt for _, r in llm.requests)
+
+    def test_legacy_positional_prompt_reaches_the_prompt(self):
+        with pytest.warns(DeprecationWarning, match="first argument"):
+            runs, llm, _ = self._react(_POLICY)
+
+        assert runs == ["capital of France"]
+        assert any(_POLICY in r.system_prompt for r in llm.calls("extract_field"))
+
+    def test_debate_instructions_reach_every_prompt_and_keep_silence(self):
+        from fsm_llm.agents import create_agent
+
+        rule = "House rule DR-9: cite one number per claim."
+        llm = _TurnAwareLLM(_debate_derived(), responses={"conclude": _CONCLUDE_TEXT})
+        agent = create_agent(
+            "debate", system_prompt=rule, num_rounds=1, llm_interface=llm
+        )
+        result = agent.run(_DEBATE_TASK)
+
+        assert result.answer == _CONCLUDE_TEXT
+        fields = llm.calls("extract_field")
+        assert fields and all(rule in r.system_prompt for r in fields)
+        replies = _spoken_replies(llm)
+        assert replies and all(rule in r.system_prompt for r in replies)
+        assert _spoken_states(llm) == {"conclude"}

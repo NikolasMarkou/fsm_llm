@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Agents: `create_agent(pattern="react", tools=None, *, config=None, system_prompt=None,
+  **kwargs)` takes the pattern first, so `create_agent("debate")` builds a
+  `DebateAgent`. The old `create_agent(system_prompt, tools)` call still works with a
+  `DeprecationWarning` when the first argument names no pattern and contains whitespace
+  or is longer than 32 characters; a short unknown name raises `ValueError`. A third
+  positional argument, or a positional prompt together with `pattern=`, is now a
+  `TypeError`.
+- Agents: `system_prompt` (new `AgentConfig.instructions`, at most 2,000 characters)
+  now reaches the model. FSM patterns prefix it to every non-empty prompt instruction
+  (replies and per-field extractions); `NativeFunctionCallingReactAgent` uses it as its
+  default `system_policy`. Swarm and meta_builder reject it in `create_agent`.
+- Agents: `AgentConfig` and `MetaBuilderConfig` reject unknown fields
+  (`extra="forbid"`). A misspelt key, the removed `MetaBuilderConfig.output_path`, or a
+  typo in an SOP's `config_overrides` now raises instead of being ignored.
+- Agents: `AgentConfig.model` defaults to env `LLM_MODEL` (read when the config is
+  built), then `DEFAULT_LLM_MODEL`; `default_llm_judge(model=None)` resolves the same
+  way. An explicit model always wins.
+
 ### Fixed
 
 - Reasoning: `ReasoningTrace` now dumps `reasoning_types_used` as a sorted list, so

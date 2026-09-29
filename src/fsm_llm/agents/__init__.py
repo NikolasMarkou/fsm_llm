@@ -27,6 +27,8 @@ With HITL:
 
 from __future__ import annotations
 
+import warnings
+
 from .__version__ import __version__
 from .adapt import ADaPTAgent
 from .agent_graph import AgentGraph, AgentGraphBuilder
@@ -135,33 +137,81 @@ try:
 except ImportError:
     pass
 
+# Pattern name -> agent class for create_agent. AgentGraph is intentionally
+# absent: it is built only via AgentGraphBuilder (a node/edge graph, not the
+# flat tools/config/**kwargs shape create_agent forwards).
+_PATTERNS: dict[str, type] = {
+    "react": ReactAgent,
+    "rewoo": REWOOAgent,
+    "debate": DebateAgent,
+    "plan_execute": PlanExecuteAgent,
+    "prompt_chain": PromptChainAgent,
+    "self_consistency": SelfConsistencyAgent,
+    "orchestrator": OrchestratorAgent,
+    "adapt": ADaPTAgent,
+    "evaluator_optimizer": EvaluatorOptimizerAgent,
+    "maker_checker": MakerCheckerAgent,
+    "reflexion": ReflexionAgent,
+    "meta_builder": MetaBuilderAgent,
+    "swarm": SwarmAgent,
+    "parallel_react": ParallelReactAgent,
+    "native_fc": NativeFunctionCallingReactAgent,
+    "verified_react": VerifiedReactAgent,
+    "auto_memory": AutoMemoryReactAgent,
+}
+if _has_reasoning_react:
+    _PATTERNS["reasoning_react"] = ReasoningReactAgent
+
+# Patterns whose own prompts never see AgentConfig.instructions: Swarm hands
+# the task to member agents, and MetaBuilderAgent is not an FSM agent.
+_NO_INSTRUCTIONS_PATTERNS = frozenset({"swarm", "meta_builder"})
+
+# A legacy first positional (the old system_prompt) is told apart from a
+# mistyped pattern name by shape: pattern names are short single words.
+_LEGACY_PROMPT_MIN_LENGTH = 33
+
+
+def _is_legacy_system_prompt(value: object) -> bool:
+    """Whether a first positional that names no pattern is a legacy prompt."""
+    return isinstance(value, str) and (
+        any(ch.isspace() for ch in value) or len(value) >= _LEGACY_PROMPT_MIN_LENGTH
+    )
+
 
 def create_agent(
-    system_prompt: str = "You are a helpful assistant.",
-    tools: list | ToolRegistry | None = None,
     pattern: str = "react",
+    tools: list | ToolRegistry | None = None,
+    *,
+    config: AgentConfig | None = None,
+    system_prompt: str | None = None,
     **kwargs,
 ):
     """Create an agent in one line.
 
     Args:
-        system_prompt: System prompt (used in tool descriptions, not FSM persona).
+        pattern: Agent pattern: "react" (default), "debate", "rewoo", ...
+            (see ``_PATTERNS``).
         tools: List of @tool-decorated functions or a ToolRegistry.
-        pattern: Agent pattern — "react" (default), "debate", "rewoo", etc.
-        **kwargs: Passed to the agent constructor (config, hitl, etc.). A
-            kwarg the pattern cannot use (``hitl``, ``tools``, ``model``, ...)
-            raises ``TypeError``; set the model on ``AgentConfig``.
+        config: ``AgentConfig`` for the agent; omitted, the pattern's default.
+        system_prompt: Standing instructions for the agent, stored as
+            ``AgentConfig.instructions`` (FSM patterns put them in their
+            prompts; ``native_fc`` uses them as its ``system_policy``).
+        **kwargs: Passed to the agent constructor (hitl, llm_interface, ...).
+            A kwarg the pattern cannot use (``hitl``, ``tools``, ``model``,
+            ...) raises ``TypeError``; set the model on ``AgentConfig``.
 
     Raises:
-        ValueError: Unknown pattern.
+        ValueError: Unknown pattern (the message lists the valid ones);
+            ``system_prompt`` for ``swarm``/``meta_builder``; or a
+            ``system_prompt`` that conflicts with ``config.instructions``.
         TypeError: ``tools`` given to a pattern whose constructor takes none.
 
-    Note:
-        ``AgentGraph`` is intentionally excluded from ``pattern`` — it is
-        constructed only via ``AgentGraphBuilder().add_node(...).add_edge(...)
-        .set_entry(...).build()``, taking a pre-built ``nodes``/``adjacency``/
-        ``entry`` graph rather than a flat ``tools``/``config``/``**kwargs``
-        shape this factory's ``cls(**kwargs)`` call convention assumes.
+    Deprecated:
+        The legacy call ``create_agent("You are ...", tools)`` still works:
+        a first argument that names no pattern and contains whitespace or is
+        longer than 32 characters is taken as ``system_prompt`` with a
+        ``DeprecationWarning``, and the pattern is "react". A short unknown
+        name raises ``ValueError``.
 
     Returns:
         A configured agent instance with ``__call__`` support.
@@ -175,9 +225,49 @@ def create_agent(
             \"\"\"Search the web.\"\"\"
             return "results"
 
-        agent = create_agent(tools=[search])
+        agent = create_agent("react", [search], system_prompt="Cite sources.")
         result = agent("What is the capital of France?")
     """
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-012: the pattern comes first.
+    # Do NOT treat every unknown first argument as a legacy prompt (a typo like
+    # "debat" must raise), and do NOT drop the shim: before this a positional
+    # prompt was silently ignored, so old callers must keep running, warned.
+    if pattern not in _PATTERNS and _is_legacy_system_prompt(pattern):
+        warnings.warn(
+            "create_agent(system_prompt, tools) is deprecated: the first "
+            "argument is now the pattern. Use create_agent(pattern, tools, "
+            "system_prompt=...).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if system_prompt is not None:
+            raise ValueError(
+                "create_agent got a legacy positional system prompt and "
+                "system_prompt=; pass it once"
+            )
+        system_prompt, pattern = pattern, "react"
+
+    cls = _PATTERNS.get(pattern)
+    if cls is None:
+        raise ValueError(f"Unknown pattern {pattern!r}. Available: {sorted(_PATTERNS)}")
+
+    if system_prompt is not None:
+        if pattern in _NO_INSTRUCTIONS_PATTERNS:
+            raise ValueError(
+                f"Pattern {pattern!r} does not use system_prompt; set "
+                "AgentConfig.instructions on the agents it runs"
+            )
+        if config is not None and config.instructions not in (None, system_prompt):
+            raise ValueError(
+                "create_agent got both system_prompt= and config.instructions; "
+                "pass the instructions once"
+            )
+        base = config if config is not None else AgentConfig()
+        fields = {name: getattr(base, name) for name in type(base).model_fields}
+        config = type(base)(**{**fields, "instructions": system_prompt})
+    if config is not None:
+        kwargs["config"] = config
+
     # Build ToolRegistry from list of @tool-decorated functions
     registry = None
     if isinstance(tools, ToolRegistry):
@@ -189,32 +279,6 @@ def create_agent(
                 registry.register(fn._tool_definition)
             else:
                 registry.register_function(fn)
-
-    _PATTERNS = {
-        "react": ReactAgent,
-        "rewoo": REWOOAgent,
-        "debate": DebateAgent,
-        "plan_execute": PlanExecuteAgent,
-        "prompt_chain": PromptChainAgent,
-        "self_consistency": SelfConsistencyAgent,
-        "orchestrator": OrchestratorAgent,
-        "adapt": ADaPTAgent,
-        "evaluator_optimizer": EvaluatorOptimizerAgent,
-        "maker_checker": MakerCheckerAgent,
-        "reflexion": ReflexionAgent,
-        "meta_builder": MetaBuilderAgent,
-        "swarm": SwarmAgent,
-        "parallel_react": ParallelReactAgent,
-        "native_fc": NativeFunctionCallingReactAgent,
-        "verified_react": VerifiedReactAgent,
-        "auto_memory": AutoMemoryReactAgent,
-    }
-    if _has_reasoning_react:
-        _PATTERNS["reasoning_react"] = ReasoningReactAgent
-
-    cls = _PATTERNS.get(pattern)
-    if cls is None:
-        raise ValueError(f"Unknown pattern '{pattern}'. Available: {sorted(_PATTERNS)}")
 
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-003: route tools by constructor
     # signature. Do NOT inject `tools` into every pattern: a tool-less pattern

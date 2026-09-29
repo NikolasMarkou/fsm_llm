@@ -15,7 +15,7 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
-from .base import BaseAgent, strip_caller_context
+from .base import BaseAgent, strip_caller_context, with_instructions
 from .constants import (
     ContextKeys,
     Defaults,
@@ -310,7 +310,7 @@ class SelfConsistencyAgent(BaseAgent):
             sample; its ``Answer:`` line is what the vote compares.
         """
         api = API.from_definition(
-            fsm_def,
+            with_instructions(fsm_def, self.config.instructions),
             model=self.config.model,
             temperature=temperature,
             max_tokens=self.config.max_tokens,

@@ -4,14 +4,16 @@ Pydantic models for the agents package.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.logging import logger
 
 from .constants import Defaults, MetaDefaults
@@ -122,10 +124,39 @@ class AgentTrace(BaseModel):
         return sorted({tc.tool_name for tc in self.tool_calls})
 
 
-class AgentConfig(BaseModel):
-    """Configuration for an agent."""
+def resolve_agent_model(model: str | None = None) -> str:
+    """The model an agent uses: *model*, else env ``LLM_MODEL``, else the default.
 
-    model: str = Defaults.MODEL
+    Interface contract (2 call sites: the ``AgentConfig.model`` default factory
+    and ``composition.default_llm_judge``):
+        - A non-empty *model* wins. Otherwise a non-blank ``LLM_MODEL`` (read
+          now, stripped), otherwise ``Defaults.MODEL`` (core
+          ``DEFAULT_LLM_MODEL``). Always returns a non-empty string.
+        - Never raises.
+
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-013
+    Do NOT make ``AgentConfig.model`` default to ``None`` and resolve later:
+    ``config.model`` is read directly at more than 20 sites (native_fc,
+    SelfConsistency, ReasoningReact, meta builder, log lines, the harness),
+    and every one of them needs a concrete string.
+    """
+    if model:
+        return model
+    env = (os.environ.get(ENV_LLM_MODEL) or "").strip()
+    return env or Defaults.MODEL
+
+
+class AgentConfig(BaseModel):
+    """Configuration for an agent.
+
+    Unknown fields raise (``extra="forbid"``): a typo such as ``max_iteration``
+    is an error, not a silently ignored key.
+    """
+
+    model: str = Field(default_factory=resolve_agent_model)
+    """litellm model id. Default: env ``LLM_MODEL`` at construction, else
+    ``DEFAULT_LLM_MODEL``."""
+
     max_iterations: int = Defaults.MAX_ITERATIONS
     timeout_seconds: float = Defaults.TIMEOUT_SECONDS
     temperature: float = Defaults.TEMPERATURE
@@ -202,7 +233,22 @@ class AgentConfig(BaseModel):
     finalization). Consumed only by ``NativeFunctionCallingReactAgent``.
     """
 
-    model_config = {"arbitrary_types_allowed": True}
+    instructions: str | None = Field(
+        default=None, max_length=Defaults.MAX_INSTRUCTIONS_LENGTH
+    )
+    """Caller-owned standing instructions (a system prompt).
+
+    FSM patterns prefix them to every non-empty prompt instruction of their
+    FSM (Pass 2 replies and the per-field extractions where tools and answers
+    are chosen); ``NativeFunctionCallingReactAgent`` uses them as its default
+    ``system_policy``. ``SwarmAgent`` and ``AgentGraph`` hand work to member
+    agents, so set it on the members; ``MetaBuilderAgent`` ignores it.
+    ``None`` (default) changes no prompt.
+    The text shares each slot's 5000-char core budget: long instructions with
+    a large tool registry fail the FSM load with a length error.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     @field_validator("max_history_size", "reflect_every_n", "auto_summarize_after")
     @classmethod

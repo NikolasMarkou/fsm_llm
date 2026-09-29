@@ -39,6 +39,52 @@ from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
 from .hitl import ApprovalPolicy, HumanInTheLoop, make_hitl_checker
 
 
+def with_instructions(
+    fsm_def: dict[str, Any], instructions: str | None
+) -> dict[str, Any]:
+    """Return *fsm_def* with ``AgentConfig.instructions`` in every LLM prompt.
+
+    Interface contract (2 call sites: :meth:`BaseAgent._create_api` and
+    ``SelfConsistencyAgent``, the one pattern that builds its ``API``
+    directly):
+        - ``None`` or blank *instructions* return *fsm_def* itself, unchanged.
+        - Otherwise returns a copy (the caller's dict and its states are not
+          mutated) where each state's non-empty ``response_instructions``
+          (Pass 2), non-empty ``extraction_instructions`` (bulk Pass 1) and
+          every ``field_extractions`` entry's ``extraction_instructions`` start
+          with an ``Agent instructions:`` block. Empty instructions stay
+          empty, so a silent state stays silent and no bulk call is added.
+        - Never raises.
+
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-047
+    Do NOT put the instructions in the FSM ``persona`` (the plan's first
+    choice): core caps ``persona`` at 500 chars, so an ordinary system prompt
+    would fail the FSM load, and core shows ``persona`` only to Pass 2, never
+    to the per-field calls where agents choose tools and answers. Do NOT fill
+    an EMPTY instruction slot either: an empty ``response_instructions`` skips
+    Pass 2 and an empty state ``extraction_instructions`` skips the bulk call.
+    """
+    text = (instructions or "").strip()
+    if not text:
+        return fsm_def
+    block = f"Agent instructions: {text}\n\n"
+    states: dict[str, Any] = {}
+    for name, state in fsm_def.get("states", {}).items():
+        state = dict(state)
+        for key in ("response_instructions", "extraction_instructions"):
+            if state.get(key):
+                state[key] = block + state[key]
+        if state.get("field_extractions"):
+            state["field_extractions"] = [
+                {**fe, "extraction_instructions": block + fe["extraction_instructions"]}
+                if fe.get("extraction_instructions")
+                else fe
+                for fe in state["field_extractions"]
+            ]
+        states[name] = state
+    return {**fsm_def, "states": states}
+
+
 def _output_response_format(schema: Any) -> dict[str, Any] | None:
     """Build the ``response_format`` envelope for a Pydantic *schema*.
 
@@ -1016,7 +1062,7 @@ class BaseAgent(ABC):
             # litellm response-cache flag; no-op where the provider/cache is unset.
             kwargs["caching"] = True
         return API.from_definition(
-            fsm_def,
+            with_instructions(fsm_def, self.config.instructions),
             model=self.config.model,
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,

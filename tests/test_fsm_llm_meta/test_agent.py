@@ -84,11 +84,14 @@ class TestMetaAgentInit:
         agent = MetaBuilderAgent(config=config)
         assert agent.meta_config.model == "gpt-4o"
 
-    def test_removed_output_path_is_ignored(self):
-        """output_path was removed; pydantic's extra="ignore" keeps old callers working."""
-        config = MetaBuilderConfig(output_path="x")
+    def test_removed_output_path_is_rejected(self):
+        """output_path was removed; since D-012 of plan 06a5ec0a the configs are
+        extra="forbid", so an old caller gets an error naming the key."""
+        from pydantic import ValidationError
+
         assert "output_path" not in MetaBuilderConfig.model_fields
-        assert not hasattr(config, "output_path")
+        with pytest.raises(ValidationError, match="output_path"):
+            MetaBuilderConfig(output_path="x")
 
     def test_initial_state(self):
         agent = MetaBuilderAgent()

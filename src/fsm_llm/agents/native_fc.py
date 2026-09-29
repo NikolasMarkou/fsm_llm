@@ -176,7 +176,8 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         complete_fn: Optional override ``(model, messages, tool_schemas) -> dict``
             for tests / custom backends. Defaults to a litellm completion.
         system_policy: Standing instructions appended to the system message.
-            ``None`` (the default) leaves the system message exactly as it was.
+            ``None`` (the default) falls back to ``config.instructions``; when
+            both are unset the system message is exactly as it was.
         seed: Optional sampling seed forwarded to every ``litellm.completion``.
             ``None`` (the default) sends no ``seed`` key at all.
     """
@@ -199,7 +200,9 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         self._complete_fn = complete_fn
         self.seed = seed
         #: Public and mutable on purpose -- see :meth:`_system_message`.
-        self.system_policy = system_policy
+        self.system_policy = (
+            system_policy if system_policy is not None else self.config.instructions
+        )
 
     def _system_message(self) -> str:
         """Return this run's system message: the base prompt plus any policy.

@@ -24,7 +24,12 @@ from typing import Any
 from fsm_llm.logging import logger
 from fsm_llm.utilities import extract_json_from_text
 
-from .definitions import AgentConfig, AgentResult, EvaluationResult
+from .definitions import (
+    AgentConfig,
+    AgentResult,
+    EvaluationResult,
+    resolve_agent_model,
+)
 from .exceptions import EvaluationError
 from .react import ReactAgent
 from .tools import ToolRegistry
@@ -98,7 +103,7 @@ def _default_complete(model: str, prompt: str) -> str:
 
 
 def default_llm_judge(
-    model: str = "ollama_chat/qwen3.5:4b",
+    model: str | None = None,
     criteria: str = "",
     threshold: float = 0.7,
     complete_fn: Callable[[str, str], str] | None = None,
@@ -107,6 +112,7 @@ def default_llm_judge(
 
     Args:
         model: litellm model id used to grade (when ``complete_fn`` is None).
+            ``None`` resolves now: env ``LLM_MODEL``, else ``DEFAULT_LLM_MODEL``.
         criteria: Optional extra grading criteria appended to the prompt.
         threshold: Score at/above which ``passed`` is True.
         complete_fn: Optional ``(model, prompt) -> str`` override (for tests or
@@ -117,6 +123,7 @@ def default_llm_judge(
     """
     criteria_clause = f", judged on: {criteria}" if criteria else ""
     complete = complete_fn or _default_complete
+    model = resolve_agent_model(model)
 
     def judge(output: str, context: dict[str, Any] | None = None) -> EvaluationResult:
         task = ""

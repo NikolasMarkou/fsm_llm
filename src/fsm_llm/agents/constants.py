@@ -426,6 +426,10 @@ class Defaults:
     CONFIDENCE_THRESHOLD = 0.3
     MIN_ANSWER_LENGTH = 5
     MAX_TASK_PREVIEW_LENGTH = 200
+    # Cap on AgentConfig.instructions. They are prefixed to prompt slots that
+    # core caps at 5000 chars; a ReAct think slot grows with the tool list, so
+    # long instructions plus a large registry can still fail the FSM load.
+    MAX_INSTRUCTIONS_LENGTH = 2000
 
     # Message sent to advance the FSM conversation loop
     CONTINUE_MESSAGE = "Continue."
