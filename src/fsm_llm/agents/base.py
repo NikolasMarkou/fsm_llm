@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any, cast
 
 from pydantic import BaseModel
@@ -252,6 +252,67 @@ def _reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> Non
             f"set them on AgentConfig instead, e.g. "
             f"{pattern}(config=AgentConfig({config_owned[0]}=...))"
         )
+
+
+def _skip_marker_states(fsm_def: Mapping[str, Any]) -> dict[str, str]:
+    """Map each core skip marker of *fsm_def* to the state that emits it.
+
+    Core's Pass 2 answers a state whose ``response_instructions`` is the empty
+    string with the synthetic chunk ``f"[{state.id}]"`` instead of calling the
+    model (``pipeline.py`` fast path). Returns ``{"[think]": "think", ...}``
+    for exactly those states; states that speak are absent. Never raises on a
+    malformed definition (non-mapping entries are skipped).
+    """
+    markers: dict[str, str] = {}
+    states = fsm_def.get("states")
+    if not isinstance(states, Mapping):
+        return markers
+    for key, state in states.items():
+        if isinstance(state, Mapping) and state.get("response_instructions") == "":
+            state_id = str(state.get("id", key))
+            markers[f"[{state_id}]"] = state_id
+    return markers
+
+
+def _drop_skip_marker(
+    chunks: Iterable[str],
+    markers: Mapping[str, str],
+    api: API,
+    conv_id: str,
+) -> Iterator[str]:
+    """Yield one turn's *chunks* minus core's skip marker.
+
+    A chunk is dropped only when it is the turn's sole chunk, equals a marker
+    in *markers* (from ``_skip_marker_states``), and the conversation sits in
+    that marker's state once the turn is over: core yields the marker alone
+    and only for a state that never calls the model, so model text that
+    happens to read ``[think]`` in a speaking state is kept. A marker-shaped
+    first chunk is held back until the next chunk or the end of the turn.
+    """
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-030
+    # Do NOT drop every chunk that merely equals a known marker, and do NOT
+    # query the state mid-turn (the turn holds the conversation lock). The
+    # marker is dropped only as the turn's sole chunk with the post-turn state
+    # matching it, so a speaking state's "[think]" text still ships.
+    held: str | None = None
+    count = 0
+    for chunk in chunks:
+        count += 1
+        if held is not None:
+            yield held
+            held = None
+        if count == 1 and chunk in markers:
+            held = chunk
+        else:
+            yield chunk
+    if held is None:
+        return
+    try:
+        state = api.get_current_state(conv_id)
+    except Exception:
+        state = None
+    if state != markers[held]:
+        yield held
 
 
 class BaseAgent(ABC):
@@ -1041,9 +1102,13 @@ class BaseAgent(ABC):
 
         Drives the same FSM loop but streams each turn's Pass-2 output token by
         token via ``API.converse_stream``. Intermediate states with empty
-        ``response_instructions`` (think/act) yield nothing; the final answer
-        state (conclude) streams its output. Yields raw text only — callers
-        needing the structured ``AgentResult``/trace should use ``run()``.
+        ``response_instructions`` (think/act) yield nothing: core's
+        ``[<state_id>]`` skip marker for them is dropped (see
+        ``_skip_marker_states``); the final answer state (conclude) streams its
+        output. Yields raw text only — callers needing the structured
+        ``AgentResult``/trace should use ``run()``. Errors are wrapped exactly
+        like ``_standard_run``: budget and timeout errors propagate, anything
+        else is raised as ``AgentError``.
 
         ``handlers``: see ``_standard_run``'s docstring — an optional,
         call-local handler-state object threaded straight through to
@@ -1069,19 +1134,35 @@ class BaseAgent(ABC):
         self._register_lifecycle_handlers(api, agent_type)
 
         max_iters = max_iterations or self.config.max_iterations
-        conv_id, initial_response = api.start_conversation(context)
-        if initial_response:
-            yield initial_response
-
-        iteration = 0
+        silent = _skip_marker_states(fsm_def)
         try:
-            while not api.has_conversation_ended(conv_id):
-                iteration += 1
-                self._check_budgets(start_time, iteration, max_iters)
-                self._on_loop_iteration(api, conv_id, iteration)
-                yield from api.converse_stream(Defaults.CONTINUE_MESSAGE, conv_id)
-        finally:
-            api.end_conversation(conv_id)
+            conv_id, initial_response = api.start_conversation(context)
+            try:
+                if initial_response:
+                    yield from _drop_skip_marker(
+                        [initial_response], silent, api, conv_id
+                    )
+
+                iteration = 0
+                while not api.has_conversation_ended(conv_id):
+                    iteration += 1
+                    self._check_budgets(start_time, iteration, max_iters)
+                    self._on_loop_iteration(api, conv_id, iteration)
+                    yield from _drop_skip_marker(
+                        api.converse_stream(Defaults.CONTINUE_MESSAGE, conv_id),
+                        silent,
+                        api,
+                        conv_id,
+                    )
+            finally:
+                api.end_conversation(conv_id)
+        except (AgentTimeoutError, BudgetExhaustedError):
+            raise
+        except Exception as e:
+            raise AgentError(
+                f"{agent_type.title()} execution failed: {e}",
+                details={"task": task},
+            ) from e
 
     # ------------------------------------------------------------------
     # Standard run() implementation

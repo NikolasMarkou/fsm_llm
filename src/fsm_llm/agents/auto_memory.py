@@ -31,6 +31,7 @@ Example::
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any, Protocol
 
 from fsm_llm.logging import logger
@@ -201,6 +202,15 @@ class AutoMemoryReactAgent(ReactAgent):
                     self._remember_raw(task)
                 elif result.success or not self.remember_only_on_success:
                     remember_interaction(self.memory, task, result.answer)
+
+    def run_stream(
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None = None,
+    ) -> Iterator[str]:
+        """Run :meth:`run` (memory recall and persistence included) and yield
+        its final answer once; streaming the bare loop would skip both."""
+        return self._stream_via_run(task, initial_context)
 
     def _remember_raw(self, text: str) -> None:
         """Persist the raw input when no result is available (run raised)."""

@@ -162,6 +162,21 @@ class ReactAgent(BaseAgent):
             task, fsm_def, context, "react", handlers=handlers
         )
 
+    def _stream_via_run(
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None = None,
+    ) -> Iterator[str]:
+        """Stream by running :meth:`run` and yielding its final answer once.
+
+        For subclasses whose ``run()`` wraps the loop (verification retries,
+        memory recall/persist): streaming the inner loop would skip that
+        wrapping, so their ``run_stream`` delegates here. Lazy like
+        ``run_stream``: nothing runs until the first ``next()``. Yields exactly
+        one chunk (the answer, possibly empty); errors propagate from ``run()``.
+        """
+        yield self.run(task, initial_context).answer
+
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
         """Handle HITL approval gates before each converse()."""
         self._handle_hitl_approval(api, conv_id)

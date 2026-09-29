@@ -33,6 +33,7 @@ Example::
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from fsm_llm import API
@@ -109,6 +110,22 @@ class VerifiedReactAgent(ReactAgent):
             )
         assert result is not None
         return result
+
+    def run_stream(
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None = None,
+    ) -> Iterator[str]:
+        """Stream the verified answer.
+
+        With ``config.verification_fn`` set, the answer is only known once a
+        verified (or last) attempt is done, so this runs :meth:`run` and
+        yields its final answer once. Without a verifier it streams like
+        :class:`ReactAgent` (periodic reflection still applies).
+        """
+        if self.config.verification_fn is None:
+            return super().run_stream(task, initial_context)
+        return self._stream_via_run(task, initial_context)
 
     # --- periodic reflection -------------------------------------------
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
