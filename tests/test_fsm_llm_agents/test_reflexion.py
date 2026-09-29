@@ -203,17 +203,33 @@ class TestReflexionFSM:
         """States that extract data should have extraction_instructions."""
         registry = _make_registry()
         fsm = build_reflexion_fsm(registry)
-        for state_name in ("evaluate", "reflect", "conclude"):
+        assert len(fsm["states"]["conclude"]["extraction_instructions"]) > 0
+        # think, evaluate and reflect extract only typed per-field values
+        # (D-009 of plan 06a5ec0a) and write no Pass-2 prose.
+        expected = {
+            "think": {"tool_name", "tool_input", "reasoning", "should_terminate"},
+            "evaluate": {
+                "evaluation_passed",
+                "evaluation_score",
+                "evaluation_feedback",
+            },
+            "reflect": {"reflection", "lessons"},
+        }
+        for state_name, fields in expected.items():
             state = fsm["states"][state_name]
-            assert "extraction_instructions" in state, (
-                f"State '{state_name}' is missing extraction_instructions"
-            )
-            assert len(state["extraction_instructions"]) > 0
-        # think extracts only typed per-field values (D-009 of plan 06a5ec0a).
-        think = fsm["states"]["think"]
-        assert think["extraction_instructions"] == ""
-        names = {fc["field_name"] for fc in think["field_extractions"]}
-        assert names == {"tool_name", "tool_input", "reasoning", "should_terminate"}
+            assert state["extraction_instructions"] == ""
+            assert state["response_instructions"] == ""
+            assert {fc["field_name"] for fc in state["field_extractions"]} == fields
+            for fc in state["field_extractions"]:
+                assert "agent_trace" not in fc["context_keys"]
+        # Every key a state requires has an explicit typed config (no
+        # auto-minted "any" config reading all context).
+        for state_name in ("evaluate", "reflect"):
+            state = fsm["states"][state_name]
+            typed = {fc["field_name"] for fc in state["field_extractions"]}
+            assert set(state["required_context_keys"]) <= typed
+        reflect_cfgs = fsm["states"]["reflect"]["field_extractions"]
+        assert all("episodic_memory" in fc["context_keys"] for fc in reflect_cfgs)
 
     def test_states_have_response_instructions(self):
         """Terminal states should have non-empty response_instructions.

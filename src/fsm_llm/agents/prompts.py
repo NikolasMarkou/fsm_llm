@@ -235,58 +235,49 @@ def build_approval_extraction_instructions() -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_evaluate_extraction_instructions() -> str:
-    """Build extraction instructions for the Reflexion evaluate state."""
-    return "\n".join(
-        [
-            "Evaluate whether the information gathered so far is sufficient "
-            "to answer the original task correctly and completely.",
-            "",
-            "Consider:",
-            "- Are all parts of the question addressed?",
-            "- Is the evidence reliable and consistent?",
-            "- Could the answer be wrong or incomplete?",
-            "",
-            "Extract the following as JSON:",
-            '- "evaluation_passed": true if the gathered info is sufficient, false otherwise',
-            '- "evaluation_score": a float between 0.0 and 1.0 rating answer quality',
-            '- "evaluation_feedback": a brief explanation of what is good or missing',
-        ]
+def build_evaluate_field_instructions() -> dict[str, str]:
+    """Per-field instructions for the Reflexion ``evaluate`` state.
+
+    Returns ``{field_name: instructions}`` for ``evaluation_passed`` (bool),
+    ``evaluation_score`` (float) and ``evaluation_feedback`` (str).
+    """
+    criteria = (
+        "Judge whether the observations so far answer the task correctly and "
+        "completely: every part of the question addressed, the evidence "
+        "reliable and consistent."
     )
+    return {
+        "evaluation_passed": (
+            f"{criteria} true if they are sufficient, false otherwise."
+        ),
+        "evaluation_score": (
+            f"{criteria} A number from 0.0 to 1.0 rating the answer quality."
+        ),
+        "evaluation_feedback": (
+            f"{criteria} One or two sentences on what is good or missing."
+        ),
+    }
 
 
-def build_evaluate_response_instructions() -> str:
-    """Build response instructions for the Reflexion evaluate state."""
-    return (
-        "Explain your evaluation of the current answer quality. "
-        "Mention specific strengths and weaknesses."
-    )
+def build_reflect_field_instructions() -> dict[str, str]:
+    """Per-field instructions for the Reflexion ``reflect`` state.
 
-
-def build_reflect_extraction_instructions() -> str:
-    """Build extraction instructions for the Reflexion reflect state."""
-    return "\n".join(
-        [
-            "The previous evaluation found the answer insufficient. "
-            "Reflect on what went wrong and what to try differently.",
-            "",
-            "Review your episodic memory (previous reflections) if available "
-            "to avoid repeating the same mistakes.",
-            "",
-            "Extract the following as JSON:",
-            '- "reflection": a detailed self-critique of what went wrong',
-            '- "lessons": a JSON list of short lesson strings to remember '
-            "for next attempts",
-        ]
-    )
-
-
-def build_reflect_response_instructions() -> str:
-    """Build response instructions for the Reflexion reflect state."""
-    return (
-        "Explain what went wrong in the previous attempt and describe "
-        "your revised strategy for the next attempt."
-    )
+    Returns ``{field_name: instructions}`` for ``reflection`` and ``lessons``
+    (both str). The prompt shows the evaluation feedback and the episodic
+    memory, so a new episode's reflection differs from earlier ones.
+    """
+    return {
+        "reflection": (
+            "The last evaluation found the answer insufficient (see "
+            "evaluation_feedback). Critique what went wrong in this attempt "
+            "and what to try differently. Do not repeat a reflection already "
+            "in episodic_memory."
+        ),
+        "lessons": (
+            "One short lesson to remember for the next attempt, based on "
+            "evaluation_feedback and not already listed in episodic_memory."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------

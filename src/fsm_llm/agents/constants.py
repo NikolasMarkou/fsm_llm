@@ -372,6 +372,7 @@ class HandlerNames:
     # Pattern-specific handlers
     REFLEXION_EVALUATOR = "ReflexionEvaluator"
     REFLEXION_REFLECTOR = "ReflexionReflector"
+    REFLEXION_FRESH_KEYS = "ReflexionFreshKeys"
     PLAN_STEP_EXECUTOR = "PlanStepExecutor"
     PLAN_STEP_CHECKER = "PlanStepChecker"
     REWOO_EXECUTOR = "REWOOExecutor"

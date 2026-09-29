@@ -709,10 +709,8 @@ def build_reflexion_fsm(
     from .prompts import (
         build_conclude_extraction_instructions,
         build_conclude_response_instructions,
-        build_evaluate_extraction_instructions,
-        build_evaluate_response_instructions,
-        build_reflect_extraction_instructions,
-        build_reflect_response_instructions,
+        build_evaluate_field_instructions,
+        build_reflect_field_instructions,
         build_think_extraction_instructions,
     )
 
@@ -726,6 +724,15 @@ def build_reflexion_fsm(
 
     think_instructions = build_think_extraction_instructions(
         registry, task_description=task_description
+    )
+    evaluate_fields = build_evaluate_field_instructions()
+    reflect_fields = build_reflect_field_instructions()
+    # REACT-01: reflect reads the verdict it critiques and the earlier
+    # episodes, so each episode's reflection is its own.
+    reflect_context = (
+        ContextKeys.EVALUATION_FEEDBACK,
+        ContextKeys.EVALUATION_SCORE,
+        ContextKeys.EPISODIC_MEMORY,
     )
 
     states: dict[str, Any] = {
@@ -817,8 +824,31 @@ def build_reflexion_fsm(
                 ContextKeys.EVALUATION_SCORE,
                 ContextKeys.EVALUATION_PASSED,
             ],
-            "extraction_instructions": build_evaluate_extraction_instructions(),
-            "response_instructions": build_evaluate_response_instructions(),
+            # Typed per-field values only (D-009 of plan 06a5ec0a); an
+            # intermediate state, so no Pass-2 prose (LOOP-09). With an
+            # evaluation_fn the verdict is set on evaluate entry and these
+            # extractions are skipped (skip-if-set).
+            "extraction_instructions": "",
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.EVALUATION_PASSED,
+                    "bool",
+                    evaluate_fields[ContextKeys.EVALUATION_PASSED],
+                ),
+                _typed_field_extraction(
+                    ContextKeys.EVALUATION_SCORE,
+                    "float",
+                    evaluate_fields[ContextKeys.EVALUATION_SCORE],
+                    required=False,
+                ),
+                _typed_field_extraction(
+                    ContextKeys.EVALUATION_FEEDBACK,
+                    "str",
+                    evaluate_fields[ContextKeys.EVALUATION_FEEDBACK],
+                    required=False,
+                ),
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "conclude",
@@ -877,8 +907,23 @@ def build_reflexion_fsm(
             "description": "Self-critique and plan a revised approach",
             "purpose": "Analyze what went wrong and generate lessons for next attempt",
             "required_context_keys": [ContextKeys.REFLECTION],
-            "extraction_instructions": build_reflect_extraction_instructions(),
-            "response_instructions": build_reflect_response_instructions(),
+            "extraction_instructions": "",
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.REFLECTION,
+                    "str",
+                    reflect_fields[ContextKeys.REFLECTION],
+                    extra_context_keys=reflect_context,
+                ),
+                _typed_field_extraction(
+                    ContextKeys.LESSONS,
+                    "str",
+                    reflect_fields[ContextKeys.LESSONS],
+                    extra_context_keys=reflect_context,
+                    required=False,
+                ),
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "think",

@@ -12,7 +12,6 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
@@ -32,9 +31,16 @@ from .definitions import (
 )
 from .exceptions import AgentError
 from .fsm_definitions import build_reflexion_fsm
-from .handlers import AgentHandlers
+from .handlers import AgentHandlers, make_fresh_keys_handler
 from .hitl import HumanInTheLoop
 from .tools import ToolRegistry
+
+# The verdict keys evaluate produces (cleared on evaluate entry).
+_EVALUATION_KEYS = (
+    ContextKeys.EVALUATION_PASSED,
+    ContextKeys.EVALUATION_SCORE,
+    ContextKeys.EVALUATION_FEEDBACK,
+)
 
 
 class ReflexionAgent(BaseAgent):
@@ -162,33 +168,57 @@ class ReflexionAgent(BaseAgent):
             )
         self._register_tool_executor(api, ReflexionStates.ACT, handlers.execute_tool)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
-        # Only `reasoning` is refreshed here: the reflect handler sets
-        # should_terminate at max_reflections and think must still see it
-        # (Reflexion's own loop keys are step 17's).
+        # Only `reasoning` is refreshed on think entry: the reflect bookkeeping
+        # sets should_terminate at max_reflections and think must still see it.
         self._register_think_loop_handlers(api, [ContextKeys.REASONING])
 
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-031
+        # The verdict is produced on evaluate ENTRY: evaluation_fn writes it
+        # there, otherwise the stale one is cleared so evaluate extracts a new
+        # one. Do NOT run evaluation_fn at CONTEXT_UPDATE (core skips it when
+        # extraction returns nothing, REACT-02) or at PRE_TRANSITION on
+        # evaluate (the edge is already chosen by then, so a null extraction
+        # takes the 900 fallback to reflect whatever the function said).
+        # See decisions.md D-031.
+        if self.evaluation_fn is not None:
+            api.register_handler(
+                api.create_handler(HandlerNames.REFLEXION_EVALUATOR)
+                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+                .on_state_entry(ReflexionStates.EVALUATE)
+                .do(self._make_evaluation_handler())
+            )
+        else:
+            api.register_handler(
+                api.create_handler(HandlerNames.REFLEXION_EVALUATOR)
+                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+                .on_state_entry(ReflexionStates.EVALUATE)
+                .do(make_fresh_keys_handler(_EVALUATION_KEYS))
+            )
+
+        # REACT-01: reflect produces reflection/lessons, so they are cleared
+        # on reflect entry and recorded on reflect EXIT, after the reflect
+        # extraction (entry runs before it and stored the previous episode's).
+        api.register_handler(
+            api.create_handler(HandlerNames.REFLEXION_FRESH_KEYS)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_entry(ReflexionStates.REFLECT)
+            .do(make_fresh_keys_handler([ContextKeys.REFLECTION, ContextKeys.LESSONS]))
+        )
         api.register_handler(
             api.create_handler(HandlerNames.REFLEXION_REFLECTOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(ReflexionStates.REFLECT)
+            .on_state_exit(ReflexionStates.REFLECT)
             .do(self._make_reflection_handler())
         )
-
-        # External evaluation: override LLM self-evaluation with user-provided fn
-        if self.evaluation_fn is not None:
-            api.register_handler(
-                api.create_handler("external_evaluator")
-                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-                .at(HandlerTiming.CONTEXT_UPDATE)
-                .on_state(ReflexionStates.EVALUATE)
-                .do(self._make_evaluation_handler())
-            )
 
         # HITL: flag tools needing approval (same predicate as the FSM state)
         self._register_approval_gate(api)
 
     def _make_evaluation_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create handler that runs external evaluation_fn after LLM extraction."""
+        """Create the evaluate-entry handler that runs the external evaluation_fn.
+
+        Its verdict replaces the self-evaluation: the keys it writes are set,
+        so evaluate extracts nothing (skip-if-set)."""
         if self.evaluation_fn is None:
             raise AgentError(
                 "evaluation_fn must be set before creating evaluation handler"
@@ -206,7 +236,10 @@ class ReflexionAgent(BaseAgent):
         return handle_evaluation
 
     def _make_reflection_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the reflection and episodic memory handler."""
+        """Create the reflect-exit handler that records the episode.
+
+        It runs after the reflect extraction, so the memory entry holds this
+        episode's reflection and lessons and the verdict evaluate produced."""
         max_reflections = self.max_reflections
 
         def handle_reflection(context: dict[str, Any]) -> dict[str, Any]:
@@ -238,9 +271,6 @@ class ReflexionAgent(BaseAgent):
             updates: dict[str, Any] = {
                 ContextKeys.REFLECTION_COUNT: reflection_count,
                 ContextKeys.EPISODIC_MEMORY: episodic_memory,
-                ContextKeys.EVALUATION_PASSED: None,
-                ContextKeys.EVALUATION_SCORE: None,
-                ContextKeys.EVALUATION_FEEDBACK: None,
             }
             if reflection_count >= max_reflections:
                 updates[ContextKeys.SHOULD_TERMINATE] = True

@@ -25,7 +25,7 @@ from fsm_llm.definitions import (
     FieldExtractionRequest,
     ResponseGenerationRequest,
 )
-from tests.conftest import PromptGroundedLLM, network_exempt
+from tests.conftest import _CURRENT_STATE_TAG, PromptGroundedLLM, network_exempt
 
 
 def _field_request(**overrides: object) -> FieldExtractionRequest:
@@ -1047,3 +1047,134 @@ class TestReactLoop:
         for request in think:
             assert ContextKeys.EPISODIC_MEMORY in (request.context or {})
             assert ContextKeys.AGENT_TRACE not in (request.context or {})
+
+
+def _episodes(context: dict) -> list | None:
+    memory = context.get(ContextKeys.EPISODIC_MEMORY)
+    return memory if isinstance(memory, list) else None
+
+
+def _reflect_derived() -> dict[str, object]:
+    """``reflection``/``lessons`` grounded on the episodic memory the reflect
+    prompt shows, so each episode's value is its own."""
+
+    def reflection(text: str, context: dict) -> object:
+        memory = _episodes(context)
+        return None if memory is None else f"reflection after {len(memory)} episodes"
+
+    def lessons(text: str, context: dict) -> object:
+        memory = _episodes(context)
+        return None if memory is None else f"lesson {len(memory) + 1}"
+
+    return {"reflection": reflection, "lessons": lessons}
+
+
+# The lookup observation carries "is Paris": the self-evaluation fails on it,
+# so the run reflects until max_reflections forces the stop.
+_REFLEXION_FACTS: dict[str, tuple[object, str]] = {
+    "tool_name": ("lookup", "capital"),
+    "tool_input": ({"query": "capital of France"}, "capital"),
+    "evaluation_passed": (False, "is Paris"),
+    "evaluation_score": (0.2, "is Paris"),
+    "evaluation_feedback": ("name a second source", "is Paris"),
+}
+
+
+class TestReflexionLoop:
+    """Step 17 (REACT-01/02): each episode records its own grounded
+    reflection, ``evaluation_fn`` runs even when extraction returns nothing,
+    and evaluate/reflect are silent intermediate states."""
+
+    def _agent(self, llm, runs, **kwargs):
+        from fsm_llm.agents import AgentConfig, ReflexionAgent
+
+        return ReflexionAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=10),
+            max_reflections=2,
+            llm_interface=llm,
+            **kwargs,
+        )
+
+    def _run(self, **kwargs):
+        runs: list[str] = []
+        llm = _TurnAwareLLM(_reflect_derived(), facts=_REFLEXION_FACTS)
+        result = self._agent(llm, runs, **kwargs).run("What is the capital of France?")
+        return llm, runs, result
+
+    def test_each_episode_records_its_own_grounded_reflection(self):
+        # REACT-01: the bookkeeping ran on reflect ENTRY, before the reflect
+        # extraction: episode 1 stored "" and later episodes lagged one behind
+        # (the never-cleared reflection was extracted once).
+        _, runs, result = self._run()
+
+        memory = result.final_context[ContextKeys.EPISODIC_MEMORY]
+        assert len(runs) == 2
+        assert [m["reflection"] for m in memory] == [
+            "reflection after 0 episodes",
+            "reflection after 1 episodes",
+        ]
+        assert [m["lessons"] for m in memory] == [["lesson 1"], ["lesson 2"]]
+        assert [m["outcome"] for m in memory] == ["name a second source"] * 2
+
+    def test_think_prompt_sees_the_recorded_reflection(self):
+        llm, _, _ = self._run()
+
+        seen = [
+            r
+            for r in _field_requests(llm, "tool_name")
+            if "reflection after 0 episodes"
+            in json.dumps((r.context or {}).get(ContextKeys.EPISODIC_MEMORY))
+        ]
+        assert seen, "no think prompt carried episode 1's reflection"
+
+    def test_evaluation_fn_runs_when_extraction_returns_nothing(self):
+        # REACT-02: evaluation_fn was a CONTEXT_UPDATE handler, which core runs
+        # only when extraction returned data; a null self-evaluation skipped it.
+        from fsm_llm.agents.definitions import EvaluationResult
+
+        calls: list[int] = []
+
+        def evaluation_fn(context: dict) -> EvaluationResult:
+            calls.append(len(context.get(ContextKeys.OBSERVATIONS) or []))
+            passed = len(calls) >= 2
+            return EvaluationResult(
+                passed=passed,
+                score=0.9 if passed else 0.1,
+                feedback=f"check {len(calls)}",
+            )
+
+        runs: list[str] = []
+        facts = {
+            k: v for k, v in _REFLEXION_FACTS.items() if not k.startswith("evaluation")
+        }
+        llm = _TurnAwareLLM(_reflect_derived(), facts=facts)
+        result = self._agent(llm, runs, evaluation_fn=evaluation_fn).run(
+            "What is the capital of France?"
+        )
+
+        assert calls == [1, 2]
+        assert len(runs) == 2
+        memory = result.final_context[ContextKeys.EPISODIC_MEMORY]
+        assert [m["outcome"] for m in memory] == ["check 1"]
+        assert result.final_context[ContextKeys.EVALUATION_PASSED] is True
+        assert (result.success, result.stop_reason) == (True, "answered")
+        # The external verdict replaces the self-evaluation: no model call.
+        assert not _field_requests(llm, "evaluation_passed")
+
+    def test_evaluate_and_reflect_are_silent_typed_states(self):
+        llm, _, _ = self._run()
+
+        states = [
+            m.group(1)
+            for r in llm.calls("generate_response")
+            if (m := _CURRENT_STATE_TAG.search(r.system_prompt))
+        ]
+        assert "evaluate" not in states and "reflect" not in states
+        assert not llm.calls("extract_bulk_data")
+        for request in llm.calls("extract_field"):
+            assert ContextKeys.AGENT_TRACE not in (request.context or {})
+        evaluate = _field_requests(llm, "evaluation_passed")
+        assert evaluate and all(
+            ContextKeys.OBSERVATIONS in (r.context or {}) for r in evaluate
+        )
