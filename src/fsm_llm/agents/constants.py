@@ -160,6 +160,13 @@ class ContextKeys:
     # and it can only lower `success`; caller context never supplies it
     # (`RUN_OUTPUT_KEYS`).
     FORCED_STOP_REASON = "forced_stop_reason"
+    # Why the last loop turn did nothing (an executor warning, a HITL denial),
+    # for the next think turn's prompt. Not a transient key: the compactor
+    # would delete it before think reads it (LOOP-06, D-021 of plan 06a5ec0a).
+    AGENT_FEEDBACK = "agent_feedback"
+    # The state a transition leaves, written by core on every transition
+    # (absent before the first one). Read by the ReAct-family limiter.
+    CURRENT_STATE = "_current_state"
 
     # HITL
     APPROVAL_REQUIRED = "approval_required"
@@ -285,6 +292,15 @@ RESULT_DROPPED_CONTEXT_KEYS: frozenset[str] = frozenset(
 )
 
 
+# Loop values a ReAct think turn produces (react, reasoning_react,
+# parallel_react): cleared on think entry so each turn extracts them afresh.
+# The executors clear the tool selection themselves.
+REACT_THINK_FRESH_KEYS: tuple[str, ...] = (
+    ContextKeys.REASONING,
+    ContextKeys.SHOULD_TERMINATE,
+)
+
+
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-002: keys a run writes for itself
 # (tool selection and results, evidence counters, termination, approval state and
 # the driver-only grant). Caller context never supplies them; they are removed
@@ -308,6 +324,7 @@ RUN_OUTPUT_KEYS: frozenset[str] = frozenset(
         ContextKeys.DRIVER_APPROVAL,
         ContextKeys.APPROVALS_SPENT,
         ContextKeys.FORCED_STOP_REASON,
+        ContextKeys.AGENT_FEEDBACK,
     }
 )
 
@@ -345,6 +362,9 @@ class HandlerNames:
 
     TOOL_EXECUTOR = "AgentToolExecutor"
     ITERATION_LIMITER = "AgentIterationLimiter"
+    THINK_FRESH_KEYS = "AgentThinkFreshKeys"
+    FEEDBACK_CONSUMED = "AgentFeedbackConsumed"
+    APPROVAL_FRESH_KEYS = "AgentApprovalFreshKeys"
     HITL_GATE = "AgentHITLGate"
     END_CONVERSATION = "AgentEndConversation"
     ERROR = "AgentError"
@@ -398,6 +418,11 @@ class Defaults:
     # headroom so the FSM can finish its current cycle before the budget
     # check fires.
     FSM_BUDGET_MULTIPLIER = 3
+    # Loop turns a ReAct-family run may still need after a forced stop to
+    # reach its conclude state (Reflexion: think -> act -> evaluate ->
+    # conclude). ``AgentHandlers.check_iteration_limit`` forces the stop this
+    # many transitions before the hard ceiling (capped at ``max_iterations``).
+    FORCED_STOP_MARGIN = 3
 
     # Reflexion
     MAX_REFLECTIONS = 3

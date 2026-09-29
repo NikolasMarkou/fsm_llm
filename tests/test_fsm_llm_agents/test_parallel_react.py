@@ -269,7 +269,8 @@ class TestParallelConcludeNeedsEvidence:
         assert len(states) >= 2, "ParallelReact concluded on turn 1 with no tool"
         assert states[1] == "act"
         assert result.answer
-        assert len(states) <= 6 + 2
+        # max_iterations=6 think turns and 5 act turns at most (D-028).
+        assert len(states) <= 2 * 6 - 1
 
     def test_tool_then_terminate_still_concludes(self):
         result, states = _run_recording_states(

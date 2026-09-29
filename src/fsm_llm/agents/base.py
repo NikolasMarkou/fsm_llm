@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, cast
 
 from pydantic import BaseModel
@@ -137,6 +137,27 @@ def strip_caller_context(
         else:
             logger.debug(message)
     return kept
+
+
+def caller_prompt_keys(context: Mapping[str, Any] | None) -> tuple[str, ...]:
+    """Caller context keys a think turn's narrowed field prompts must list.
+
+    Interface contract (callers: ``ReactAgent``, ``ReflexionAgent``,
+    ``ReasoningReactAgent``, ``ParallelReactAgent`` ``run``): the think field
+    configs name their prompt keys (``context_keys``, D-017 of plan 06a5ec0a),
+    so a caller's hint such as ``suggested_tool`` would otherwise vanish from
+    the prompt. Returns the caller's string keys in order, without
+    internal-prefixed keys, ``RUN_OUTPUT_KEYS`` and ``agent_trace``. Core's
+    prompt filter still drops secret-looking entries. Never raises.
+    """
+    return tuple(
+        key
+        for key in (context or {})
+        if isinstance(key, str)
+        and not has_internal_prefix(key)
+        and key not in RUN_OUTPUT_KEYS
+        and key != ContextKeys.AGENT_TRACE
+    )
 
 
 def accepts_tools(agent_cls: type) -> bool:
@@ -427,6 +448,49 @@ class BaseAgent(ABC):
             .do(handler_fn)
         )
 
+    def _register_think_loop_handlers(
+        self, api: API, fresh_keys: Sequence[str]
+    ) -> None:
+        """Register the ReAct-family think bookkeeping (react, reflexion,
+        reasoning_react, parallel_react).
+
+        ``fresh_keys`` are the loop values ``think`` produces; they are cleared
+        on think entry so think extracts them again (skip-if-set, D-008 of plan
+        06a5ec0a). ``agent_feedback`` is cleared on think exit, once the think
+        turn has read it. Under :attr:`_hitl_active`, ``should_terminate`` is
+        also cleared on ``await_approval`` entry (a forced True is kept).
+        """
+        from .handlers import make_fresh_keys_handler
+
+        api.register_handler(
+            api.create_handler(HandlerNames.THINK_FRESH_KEYS)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_entry(AgentStates.THINK)
+            .do(make_fresh_keys_handler(fresh_keys))
+        )
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-029
+        # agent_feedback is consumed by think, so it is cleared on think EXIT.
+        # Do NOT clear it on think entry with the fresh keys: act writes it and
+        # the act -> think transition enters think before think extracts, so an
+        # entry clear erases every warning and denial unread (LOOP-06). Do NOT
+        # make it a compactor transient key either. See decisions.md D-029.
+        api.register_handler(
+            api.create_handler(HandlerNames.FEEDBACK_CONSUMED)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_exit(AgentStates.THINK)
+            .do(make_fresh_keys_handler([ContextKeys.AGENT_FEEDBACK]))
+        )
+        if self._hitl_active:
+            # D-029: an early should_terminate from the gated call's think turn
+            # must not beat await_approval -> act; a forced True still routes
+            # await_approval -> conclude.
+            api.register_handler(
+                api.create_handler(HandlerNames.APPROVAL_FRESH_KEYS)
+                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+                .on_state_entry(AgentStates.AWAIT_APPROVAL)
+                .do(make_fresh_keys_handler([ContextKeys.SHOULD_TERMINATE]))
+            )
+
     def _register_hitl_gate(
         self,
         api: API,
@@ -543,7 +607,7 @@ class BaseAgent(ABC):
         set ``self.hitl`` to a :class:`HumanInTheLoop` instance (or ``None``).
         """
         from .handlers import approval_grant
-        from .tools import normalize_tool_input
+        from .tools import normalize_tool_input, redact_secret_entries
 
         hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
         if hitl is None:
@@ -605,11 +669,20 @@ class BaseAgent(ABC):
             },
         )
         if not approved:
+            # LOOP-06 (D-021 of plan 06a5ec0a): the denial reaches the next think
+            # turn as feedback, never as an observation: an observation would
+            # bump observation_count and satisfy the D-008 conclude guard with
+            # no tool result. The input shown is the redacted copy (D-016).
+            shown = redact_secret_entries(tool_input)
             api.update_context(
                 conv_id,
                 {
                     ContextKeys.TOOL_NAME: None,
                     ContextKeys.TOOL_INPUT: None,
+                    ContextKeys.AGENT_FEEDBACK: (
+                        f"The human reviewer denied the call {tool_name}({shown}). "
+                        "Do not repeat it; choose another tool or approach."
+                    ),
                 },
             )
 
@@ -628,8 +701,17 @@ class BaseAgent(ABC):
             raise AgentTimeoutError(self.config.timeout_seconds)
 
         max_iters = max_iterations or self.config.max_iterations
-        if iteration > max_iters * Defaults.FSM_BUDGET_MULTIPLIER:
-            raise BudgetExhaustedError("iterations", max_iters)
+        ceiling = max_iters * Defaults.FSM_BUDGET_MULTIPLIER
+        if iteration > ceiling:
+            # LOOP-17: cite the loop-turn ceiling that was hit, not max_iterations.
+            raise BudgetExhaustedError(
+                "iterations",
+                ceiling,
+                detail=(
+                    f"{ceiling} loop turns = max_iterations {max_iters} x "
+                    f"FSM_BUDGET_MULTIPLIER {Defaults.FSM_BUDGET_MULTIPLIER}"
+                ),
+            )
 
     # ------------------------------------------------------------------
     # Answer extraction

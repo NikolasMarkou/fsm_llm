@@ -202,6 +202,24 @@ def build_conclude_response_instructions() -> str:
     )
 
 
+def build_think_reasoning_instructions() -> str:
+    """Per-field instructions for a think turn's ``reasoning`` (str)."""
+    return (
+        "Give your step-by-step reasoning for the next action: what the "
+        "observations so far establish, what is still missing for the task, "
+        "and what any agent_feedback says about the last turn."
+    )
+
+
+def build_think_terminate_instructions() -> str:
+    """Per-field instructions for a think turn's ``should_terminate`` (bool)."""
+    return (
+        "true ONLY when the observations already contain what the task asks "
+        "for; false when a tool still has to run. Never true before any tool "
+        "has run."
+    )
+
+
 def build_approval_extraction_instructions() -> str:
     """Build extraction instructions for the approval-waiting state."""
     return (

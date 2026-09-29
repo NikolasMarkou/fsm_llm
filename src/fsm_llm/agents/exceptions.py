@@ -43,9 +43,10 @@ class ToolValidationError(AgentError):
 class BudgetExhaustedError(AgentError):
     """Agent exceeded its iteration/token/time budget."""
 
-    def __init__(self, budget_type: str, limit: int | float):
+    def __init__(self, budget_type: str, limit: int | float, detail: str = ""):
+        suffix = f" ({detail})" if detail else ""
         super().__init__(
-            f"Agent budget exhausted: {budget_type} limit ({limit}) reached"
+            f"Agent budget exhausted: {budget_type} limit ({limit}) reached{suffix}"
         )
         self.budget_type = budget_type
         self.limit = limit

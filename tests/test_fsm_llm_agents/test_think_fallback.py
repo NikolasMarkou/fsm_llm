@@ -108,11 +108,13 @@ def _build(agent_cls):
 
 
 # Loop-turn bounds. The hard ceiling is FSM_BUDGET_MULTIPLIER x max_iterations
-# (18 here). A think/act cycle is 2 turns, so the 2-state patterns must conclude
-# within max_iterations + 2. Reflexion's cycle is 4 turns (think, act, evaluate,
-# reflect), so after the iteration limiter fires it can need one more turn.
-_TWO_STATE_BOUND = MAX_ITERATIONS + 2
-_REFLEXION_BOUND = MAX_ITERATIONS + 3
+# (18 here). max_iterations counts think turns (LOOP-04, D-028 of plan
+# 06a5ec0a): a 2-state pattern the limiter stops runs max_iterations think turns
+# and max_iterations - 1 act turns. Reflexion's cycle is 4 turns (think, act,
+# evaluate, reflect); a tool-free run ends at the stall detector, at most 4
+# cycles in (one premature-terminate rejection, then 3 tool-free acts).
+_TWO_STATE_BOUND = 2 * MAX_ITERATIONS - 1
+_REFLEXION_BOUND = 4 * 4
 _HARD_CEILING = 3 * MAX_ITERATIONS
 
 _CASES = [

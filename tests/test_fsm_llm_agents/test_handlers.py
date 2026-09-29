@@ -181,16 +181,129 @@ class TestAgentHandlers:
         assert ContextKeys.MAX_ITERATIONS_REACHED not in result
 
     def test_check_iteration_limit_reached(self):
+        # LOOP-04 (D-028 of plan 06a5ec0a): think exits are counted; the flag
+        # lands when the cycle closes (act exit) with count >= max - 1.
         registry = _make_registry()
         handlers = AgentHandlers(registry)
 
-        # Simulate reaching the limit
-        context = {"_max_iterations": 2}
-        handlers.check_iteration_limit(context)  # iteration 1
-        result = handlers.check_iteration_limit(context)  # iteration 2
+        think = {"_max_iterations": 2, ContextKeys.CURRENT_STATE: "think"}
+        act = {"_max_iterations": 2, ContextKeys.CURRENT_STATE: "act"}
+        first = handlers.check_iteration_limit(think)  # think turn 1
+        assert first == {ContextKeys.ITERATION_COUNT: 1}
+        result = handlers.check_iteration_limit(act)  # cycle 1 closes
 
+        assert result[ContextKeys.ITERATION_COUNT] == 1
         assert result[ContextKeys.MAX_ITERATIONS_REACHED] is True
         assert result[ContextKeys.SHOULD_TERMINATE] is True
+
+    def test_check_iteration_limit_counts_only_think_exits(self):
+        handlers = AgentHandlers(_make_registry())
+        ctx = {"_max_iterations": 6}
+        counts = []
+        for state in ("think", "act") * 4:
+            out = handlers.check_iteration_limit(
+                {**ctx, ContextKeys.CURRENT_STATE: state}
+            )
+            counts.append(out[ContextKeys.ITERATION_COUNT])
+            assert ContextKeys.MAX_ITERATIONS_REACHED not in out
+        assert counts == [1, 1, 2, 2, 3, 3, 4, 4]
+        # The first transition has no _current_state yet: it leaves think.
+        assert AgentHandlers(_make_registry()).check_iteration_limit(ctx) == {
+            ContextKeys.ITERATION_COUNT: 1
+        }
+
+    def test_check_iteration_limit_never_flags_on_a_think_exit(self):
+        # The think -> act decision is already made; a flag there would skip
+        # the cycle's tool, so max_iterations=1 still runs one tool.
+        handlers = AgentHandlers(_make_registry())
+        out = handlers.check_iteration_limit(
+            {"_max_iterations": 1, ContextKeys.CURRENT_STATE: "think"}
+        )
+        assert ContextKeys.MAX_ITERATIONS_REACHED not in out
+        out = handlers.check_iteration_limit(
+            {"_max_iterations": 1, ContextKeys.CURRENT_STATE: "act"}
+        )
+        assert out[ContextKeys.MAX_ITERATIONS_REACHED] is True
+
+    def test_check_iteration_limit_approved_exit_keeps_the_call(self):
+        handlers = AgentHandlers(_make_registry())
+        base = {"_max_iterations": 2}
+        handlers.check_iteration_limit({**base, ContextKeys.CURRENT_STATE: "think"})
+        approved = handlers.check_iteration_limit(
+            {
+                **base,
+                ContextKeys.CURRENT_STATE: "await_approval",
+                ContextKeys.APPROVAL_GRANTED: True,
+            }
+        )
+        assert ContextKeys.MAX_ITERATIONS_REACHED not in approved
+        closed = handlers.check_iteration_limit(
+            {**base, ContextKeys.CURRENT_STATE: "act"}
+        )
+        assert closed[ContextKeys.MAX_ITERATIONS_REACHED] is True
+
+    def test_check_iteration_limit_forces_the_stop_before_the_ceiling(self):
+        # 4-turn cycles (Reflexion) would reach the 3x ceiling first; the stop
+        # is forced FORCED_STOP_MARGIN transitions before it.
+        handlers = AgentHandlers(_make_registry())
+        ctx = {"_max_iterations": 10}
+        ceiling = 10 * Defaults.FSM_BUDGET_MULTIPLIER
+        flagged_at = None
+        states = ("think", "act", "evaluate", "reflect") * 10
+        for n, state in enumerate(states, start=1):
+            out = handlers.check_iteration_limit(
+                {**ctx, ContextKeys.CURRENT_STATE: state}
+            )
+            if out.get(ContextKeys.MAX_ITERATIONS_REACHED):
+                flagged_at = n
+                break
+        assert flagged_at == ceiling - Defaults.FORCED_STOP_MARGIN
+
+    def test_forced_stop_runs_no_tool(self):
+        # LOOP-05: after the flag the executor skips the tool and keeps
+        # should_terminate True so act -> conclude routes.
+        runs: list[str] = []
+        registry = ToolRegistry()
+        registry.register_function(
+            lambda params: runs.append("ran") or "ok", name="echo", description="E"
+        )
+        handlers = AgentHandlers(registry)
+        delta = handlers.execute_tool(
+            {
+                ContextKeys.TOOL_NAME: "echo",
+                ContextKeys.TOOL_INPUT: {"input": "x"},
+                ContextKeys.MAX_ITERATIONS_REACHED: True,
+                ContextKeys.SHOULD_TERMINATE: True,
+            }
+        )
+        assert runs == []
+        assert delta[ContextKeys.SHOULD_TERMINATE] is True
+        assert delta[ContextKeys.TOOL_STATUS] == "skipped"
+        assert ContextKeys.OBSERVATION_COUNT not in delta
+
+    def test_no_tool_warning_is_carried_as_feedback(self):
+        # LOOP-06: tool_result is compacted away before think reads it.
+        handlers = AgentHandlers(_make_registry())
+        handlers._current_iteration = 2
+        delta = handlers.execute_tool({ContextKeys.TOOL_NAME: None})
+        assert "WARNING" in delta[ContextKeys.AGENT_FEEDBACK]
+        assert delta[ContextKeys.AGENT_FEEDBACK] == delta[ContextKeys.TOOL_RESULT]
+
+    def test_step_numbers_keep_rising_after_observations_are_pruned(self):
+        # LOOP-16: numbers come from the unpruned trace, not observations.
+        handlers = AgentHandlers(_make_registry())
+        trace = [{"iteration": i} for i in range(1, 26)]
+        observations = [f"[Step {i}]" for i in range(6, 26)]
+        delta = handlers.execute_tool(
+            {
+                ContextKeys.TOOL_NAME: "echo",
+                ContextKeys.TOOL_INPUT: {"input": "x"},
+                ContextKeys.OBSERVATIONS: observations,
+                ContextKeys.AGENT_TRACE: trace,
+            }
+        )
+        assert delta[ContextKeys.OBSERVATIONS][-1].startswith("[Step 26]")
+        assert delta[ContextKeys.AGENT_TRACE][-1]["iteration"] == 26
 
 
 class TestMakeIterationLimiter:

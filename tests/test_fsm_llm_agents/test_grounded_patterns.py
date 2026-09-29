@@ -7,7 +7,9 @@ the task or the prior turns in front of it (the RC1 loop class).
 
 from __future__ import annotations
 
+import json
 import socket
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -753,3 +755,295 @@ class TestSuccessContract:
 
         assert body["success"] is False
         assert body["stop_reason"] == "forced_pass"
+
+
+def _act_entry_probe(flags: list[object]) -> object:
+    """A handler recording ``max_iterations_reached`` as each ``act`` is entered.
+
+    Priority 1 runs it before the tool executor (100), so ``flags`` holds the
+    flag each executor call saw.
+    """
+    from fsm_llm.handlers import create_handler
+
+    return (
+        create_handler("ActEntryProbe")
+        .on_state_entry("act")
+        .with_priority(1)
+        .do(lambda ctx: flags.append(ctx.get(ContextKeys.MAX_ITERATIONS_REACHED)) or {})
+    )
+
+
+class _TurnAwareLLM(PromptGroundedLLM):
+    """``PromptGroundedLLM`` plus fields computed from the request.
+
+    ``derived`` maps a field name to ``fn(text, context) -> value | None``;
+    those fields ignore ``facts``. The request is recorded either way.
+    """
+
+    def __init__(self, derived: dict[str, object], **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.derived = derived
+
+    def extract_field(self, request: FieldExtractionRequest):
+        fn = self.derived.get(request.field_name)
+        if fn is None:
+            return super().extract_field(request)
+        from fsm_llm.definitions import FieldExtractionResponse
+
+        self.requests.append(("extract_field", request))
+        context = request.context or {}
+        text = f"{request.system_prompt}\n{json.dumps(context, default=str)}"
+        value = fn(text, context)  # type: ignore[operator]
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="turn-aware fake",
+            is_valid=value is not None,
+        )
+
+
+def _field_requests(llm: PromptGroundedLLM, name: str) -> list:
+    return [r for r in llm.calls("extract_field") if r.field_name == name]
+
+
+class TestReactLoop:
+    """Step 15: the ReAct loop extracts grounded typed fields each think turn,
+    ``max_iterations`` counts think turns, no tool runs after the forced stop,
+    and executor/HITL feedback reaches the next think turn."""
+
+    def _agent(self, llm, runs, max_iterations=6, **kwargs):
+        from fsm_llm.agents import AgentConfig, ReactAgent
+
+        return ReactAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=max_iterations),
+            llm_interface=llm,
+            **kwargs,
+        )
+
+    def test_max_iterations_counts_think_turns(self):
+        # LOOP-04: 6 think turns = 5 tool turns (was 3: every transition counted).
+        runs: list[str] = []
+        facts = {k: v for k, v in _REACT_FACTS.items() if k != "should_terminate"}
+        agent = self._agent(PromptGroundedLLM(facts=facts), runs)
+        result = agent.run("What is the capital of France?")
+
+        assert len(runs) == 5
+        assert result.final_context[ContextKeys.ITERATION_COUNT] == 6
+        assert result.stop_reason == "max_iterations"
+
+    def test_no_tool_runs_after_the_forced_stop(self):
+        # LOOP-05: the flag used to land on think -> act and the tool still ran.
+        runs: list[str] = []
+        flags: list[object] = []
+        facts = {k: v for k, v in _REACT_FACTS.items() if k != "should_terminate"}
+        agent = self._agent(
+            PromptGroundedLLM(facts=facts),
+            runs,
+            handlers=[_act_entry_probe(flags)],
+        )
+        agent.run("What is the capital of France?")
+
+        assert flags, "act was never entered"
+        assert len(runs) == sum(1 for flag in flags if flag is not True)
+        assert True not in flags
+
+    def test_think_prompt_contains_the_previous_executor_warning(self):
+        # LOOP-06: the no-tool WARNING lived in tool_result, which the
+        # compactor deleted before think read it; here the tool selection is
+        # grounded ONLY on that warning.
+        runs: list[str] = []
+        facts: dict[str, tuple[object, str]] = {
+            "tool_name": ("lookup", "No tool was called"),
+            "tool_input": ({"query": "capital of France"}, "No tool was called"),
+            "should_terminate": (True, "is Paris"),
+        }
+        llm = PromptGroundedLLM(facts=facts)
+        result = self._agent(llm, runs).run("What is the capital of France?")
+
+        assert runs == ["capital of France"]
+        seen = [
+            r
+            for r in _field_requests(llm, "tool_name")
+            if "WARNING: No tool was called"
+            in str((r.context or {}).get(ContextKeys.AGENT_FEEDBACK))
+        ]
+        assert seen, "no think prompt carried the executor warning"
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_no_field_prompt_contains_agent_trace(self):
+        # LOOP-08: agent_trace is unbounded; it must stay out of every prompt.
+        runs: list[str] = []
+        llm = PromptGroundedLLM(facts=_REACT_FACTS)
+        self._agent(llm, runs).run("What is the capital of France?")
+
+        requests = llm.calls("extract_field")
+        assert runs and requests
+        for request in requests:
+            assert ContextKeys.AGENT_TRACE not in (request.context or {})
+            assert '"action": "lookup(' not in request.system_prompt
+        assert not llm.calls("extract_bulk_data")  # no context-free bulk call
+
+    def test_reasoning_changes_across_turns(self):
+        # LOOP-02/16: reasoning was a context-free bulk value, set once.
+        def reasoning(text: str, context: dict) -> object:
+            observations = context.get(ContextKeys.OBSERVATIONS)
+            if not isinstance(observations, list):
+                return None
+            return f"after {len(observations)} observations"
+
+        runs: list[str] = []
+        facts = {k: v for k, v in _REACT_FACTS.items() if k != "should_terminate"}
+        llm = _TurnAwareLLM({"reasoning": reasoning}, facts=facts)
+        result = self._agent(llm, runs, max_iterations=4).run(
+            "What is the capital of France?"
+        )
+
+        thoughts = [call.reasoning for call in result.trace.tool_calls]
+        assert thoughts == [
+            "after 0 observations",
+            "after 1 observations",
+            "after 2 observations",
+        ]
+
+    def test_caller_hint_stays_in_the_think_prompt(self):
+        # Narrowed prompts must still list the caller's own context keys.
+        runs: list[str] = []
+        facts = dict(_REACT_FACTS)
+        facts["tool_name"] = ("lookup", "prefer-lookup-7")
+        llm = PromptGroundedLLM(facts=facts)
+        self._agent(llm, runs).run(
+            "What is the capital of France?",
+            initial_context={"suggested_tool": "prefer-lookup-7"},
+        )
+
+        assert runs == ["capital of France"]
+
+    def _hitl(self, decision: bool, asked: list[str]):
+        from fsm_llm.agents import HumanInTheLoop
+
+        def callback(request) -> bool:
+            asked.append(request.tool_name)
+            return decision
+
+        return HumanInTheLoop(
+            approval_policy=lambda call, ctx: call.tool_name == "danger",
+            approval_callback=callback,
+        )
+
+    def _danger_registry(self, runs: list[str]):
+        registry = _lookup_registry(runs)
+
+        def danger(query: str) -> str:
+            runs.append(f"danger:{query}")
+            return "The capital of France is Paris."
+
+        registry.register_function(danger, name="danger", description="Risky lookup")
+        return registry
+
+    def test_hitl_denial_reaches_the_next_think_turn_without_evidence(self):
+        # LOOP-06: a denial wrote nothing the model could see, so it asked for
+        # the same gated call again. It must not count as evidence either.
+        from fsm_llm.agents import AgentConfig, ReactAgent
+
+        def tool_name(text: str, context: dict) -> object:
+            return "lookup" if "denied the call" in text else "danger"
+
+        runs: list[str] = []
+        asked: list[str] = []
+        facts = {
+            "tool_input": ({"query": "capital of France"}, "capital"),
+            "should_terminate": (True, "is Paris"),
+        }
+        llm = _TurnAwareLLM({"tool_name": tool_name}, facts=facts)
+        agent = ReactAgent(
+            tools=self._danger_registry(runs),
+            config=AgentConfig(max_iterations=6),
+            hitl=self._hitl(False, asked),
+            llm_interface=llm,
+        )
+        result = agent.run("What is the capital of France?")
+
+        assert asked == ["danger"]
+        assert runs == ["capital of France"]
+        assert result.final_context[ContextKeys.OBSERVATION_COUNT] == 1
+        assert not any("danger" in o for o in result.final_context["observations"])
+
+    def test_approved_call_runs_before_an_early_terminate_concludes(self):
+        # Step 5 gap: think set should_terminate with the gated call, and
+        # await_approval -> conclude (p1) beat the approved -> act edge.
+        from fsm_llm.agents import AgentConfig, ReactAgent
+
+        runs: list[str] = []
+        asked: list[str] = []
+        facts: dict[str, tuple[object, str]] = {
+            "tool_name": ("danger", "capital"),
+            "tool_input": ({"query": "capital of France"}, "capital"),
+            "should_terminate": (True, "capital"),
+        }
+        agent = ReactAgent(
+            tools=self._danger_registry(runs),
+            config=AgentConfig(max_iterations=6),
+            hitl=self._hitl(True, asked),
+            llm_interface=PromptGroundedLLM(facts=facts),
+        )
+        result = agent.run("What is the capital of France?")
+
+        assert asked == ["danger"]
+        assert runs == ["danger:capital of France"]
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_budget_error_cites_the_loop_ceiling(self):
+        # LOOP-17: the message named max_iterations, not the ceiling hit.
+        from fsm_llm.agents import AgentConfig, ReactAgent
+        from fsm_llm.agents.exceptions import BudgetExhaustedError
+
+        agent = ReactAgent(
+            tools=_lookup_registry([]),
+            config=AgentConfig(max_iterations=2),
+            llm_interface=PromptGroundedLLM(),
+        )
+        with pytest.raises(BudgetExhaustedError) as info:
+            agent._check_budgets(time.monotonic(), 7)
+        assert info.value.limit == 6
+        assert "max_iterations 2 x FSM_BUDGET_MULTIPLIER 3" in str(info.value)
+
+    def test_parallel_react_counts_think_turns_and_narrows_prompts(self):
+        # Sibling: ParallelReact shares the limiter and the typed think fields.
+        from fsm_llm.agents import AgentConfig
+        from fsm_llm.agents.parallel_react import ParallelReactAgent
+
+        runs: list[str] = []
+        calls = [{"tool_name": "lookup", "tool_input": {"query": "capital"}}]
+        llm = PromptGroundedLLM(facts={"tool_calls": (calls, "capital")})
+        agent = ParallelReactAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=4),
+            llm_interface=llm,
+        )
+        result = agent.run("What is the capital of France?")
+
+        assert len(runs) == 3
+        assert result.stop_reason == "max_iterations"
+        assert not llm.calls("extract_bulk_data")
+        for request in llm.calls("extract_field"):
+            assert ContextKeys.AGENT_TRACE not in (request.context or {})
+
+    def test_reflexion_think_prompt_keeps_episodic_memory_without_trace(self):
+        from fsm_llm.agents import AgentConfig, ReflexionAgent
+
+        runs: list[str] = []
+        llm = PromptGroundedLLM(facts=_REACT_FACTS)
+        agent = ReflexionAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=6),
+            llm_interface=llm,
+        )
+        agent.run("What is the capital of France?")
+
+        think = _field_requests(llm, "tool_name")
+        assert runs and think
+        for request in think:
+            assert ContextKeys.EPISODIC_MEMORY in (request.context or {})
+            assert ContextKeys.AGENT_TRACE not in (request.context or {})

@@ -203,12 +203,17 @@ class TestReflexionFSM:
         """States that extract data should have extraction_instructions."""
         registry = _make_registry()
         fsm = build_reflexion_fsm(registry)
-        for state_name in ("think", "evaluate", "reflect", "conclude"):
+        for state_name in ("evaluate", "reflect", "conclude"):
             state = fsm["states"][state_name]
             assert "extraction_instructions" in state, (
                 f"State '{state_name}' is missing extraction_instructions"
             )
             assert len(state["extraction_instructions"]) > 0
+        # think extracts only typed per-field values (D-009 of plan 06a5ec0a).
+        think = fsm["states"]["think"]
+        assert think["extraction_instructions"] == ""
+        names = {fc["field_name"] for fc in think["field_extractions"]}
+        assert names == {"tool_name", "tool_input", "reasoning", "should_terminate"}
 
     def test_states_have_response_instructions(self):
         """Terminal states should have non-empty response_instructions.
@@ -227,8 +232,14 @@ class TestReflexionFSM:
         registry = _make_registry()
         fsm = build_reflexion_fsm(registry)
         think = fsm["states"]["think"]
-        assert "search" in think["extraction_instructions"]
-        assert "calculate" in think["extraction_instructions"]
+        tool_name_cfg = think["field_extractions"][0]
+        assert tool_name_cfg["field_name"] == "tool_name"
+        assert "search" in tool_name_cfg["extraction_instructions"]
+        assert "calculate" in tool_name_cfg["extraction_instructions"]
+        # The episodic memory stays visible to every think field prompt.
+        assert all(
+            "episodic_memory" in fc["context_keys"] for fc in think["field_extractions"]
+        )
 
     def test_custom_task_description(self):
         registry = _make_registry()

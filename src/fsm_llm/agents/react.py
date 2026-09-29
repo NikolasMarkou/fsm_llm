@@ -13,8 +13,9 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, caller_prompt_keys
 from .constants import (
+    REACT_THINK_FRESH_KEYS,
     AgentStates,
     ContextKeys,
     Defaults,
@@ -106,6 +107,7 @@ class ReactAgent(BaseAgent):
             include_approval_state=self._hitl_active,
             use_classification=self.use_classification,
             output_schema=self.config.output_schema,
+            context_keys=caller_prompt_keys(initial_context),
         )
 
         context = self._init_context(
@@ -146,6 +148,7 @@ class ReactAgent(BaseAgent):
             include_approval_state=self._hitl_active,
             use_classification=self.use_classification,
             output_schema=self.config.output_schema,
+            context_keys=caller_prompt_keys(initial_context),
         )
         context = self._init_context(
             task,
@@ -186,6 +189,7 @@ class ReactAgent(BaseAgent):
             )
         self._register_tool_executor(api, AgentStates.ACT, handlers.execute_tool)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
+        self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)
 
         if self.use_classification:
             from fsm_llm.handlers import HandlerTiming

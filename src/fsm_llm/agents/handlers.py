@@ -12,6 +12,7 @@ from fsm_llm.logging import logger
 
 from .constants import (
     RESULT_DROPPED_CONTEXT_KEYS,
+    AgentStates,
     ContextKeys,
     Defaults,
     LogMessages,
@@ -85,6 +86,55 @@ def approval_grant(tool_name: Any, tool_input: Any) -> dict[str, Any]:
     }
 
 
+def forced_stop_skip(context: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The executor delta for a turn after a forced stop, else None.
+
+    Shared by every ReAct-family tool executor (``AgentHandlers``,
+    ReasoningReact's ``reason`` path, ParallelReact's batch): once
+    ``max_iterations_reached is True`` (limiter, stall detector; seeded False,
+    framework-only) no tool runs. The delta clears the selection and keeps
+    ``should_terminate`` True, so the act -> conclude evidence guard routes
+    the run to its answer. Never raises.
+    """
+    if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is not True:
+        return None
+    logger.info("Iteration budget reached: the selected tool is not run")
+    return {
+        ContextKeys.TOOL_RESULT: "Iteration budget reached; no tool was run.",
+        ContextKeys.TOOL_STATUS: "skipped",
+        ContextKeys.TOOL_NAME: None,
+        ContextKeys.TOOL_INPUT: None,
+        ContextKeys.SHOULD_TERMINATE: True,
+    }
+
+
+def next_step_number(trace: list[Any]) -> int:
+    """Step number for the next tool observation: one past the trace length.
+
+    Shared by the ReAct-family executors (``AgentHandlers``, ParallelReact,
+    ReasoningReact's ``reason`` path). ``agent_trace`` is never pruned, so the
+    number keeps rising after ``observations`` is capped at
+    ``MAX_OBSERVATIONS`` (LOOP-16: counting observations repeated numbers).
+    Never raises.
+    """
+    return len(trace) + 1
+
+
+def with_feedback(message: str, delta: dict[str, Any]) -> dict[str, Any]:
+    """An executor delta whose message also reaches the next think turn.
+
+    ``tool_result`` is transient (the compactor deletes it at the next turn's
+    PRE_PROCESSING, before think extracts), so the message is copied to
+    ``agent_feedback``, which think's prompts list and whose think-exit
+    handler clears it once read (D-029).
+    """
+    return {
+        ContextKeys.TOOL_RESULT: message,
+        ContextKeys.AGENT_FEEDBACK: message,
+        **delta,
+    }
+
+
 class AgentHandlers:
     """Collection of handler functions for agent FSM operations."""
 
@@ -103,6 +153,7 @@ class AgentHandlers:
         self.registry = registry
         self.requires_approval = requires_approval
         self._current_iteration = 0
+        self._transitions = 0
         self._consecutive_no_tool = 0
         # Last driver grant this instance spent and how many it has spent;
         # see approval_refusal (plan-2026-09-29T103145-06a5ec0a/D-015).
@@ -112,6 +163,7 @@ class AgentHandlers:
     def reset(self) -> None:
         """Reset handler state for a new run."""
         self._current_iteration = 0
+        self._transitions = 0
         self._consecutive_no_tool = 0
         self._spent_grant = None
         self._grants_spent = 0
@@ -122,6 +174,9 @@ class AgentHandlers:
 
         Body of :meth:`execute_tool`, which adds approval consumption.
         """
+        forced = forced_stop_skip(context)
+        if forced is not None:
+            return forced
         tool_name = context.get(ContextKeys.TOOL_NAME)
         tool_input = context.get(ContextKeys.TOOL_INPUT)
         if tool_input is None:
@@ -150,15 +205,15 @@ class AgentHandlers:
                 ContextKeys.SHOULD_TERMINATE
             ):
                 tool_names = [t.name for t in self.registry.list_tools()]
-                return {
-                    ContextKeys.TOOL_RESULT: (
-                        f"{miss}You must use at least one tool before concluding. "
-                        f"Available: {', '.join(tool_names)}"
-                    ),
-                    ContextKeys.TOOL_STATUS: "rejected",
-                    **clear,
-                    ContextKeys.SHOULD_TERMINATE: False,
-                }
+                return with_feedback(
+                    f"{miss}You must use at least one tool before concluding. "
+                    f"Available: {', '.join(tool_names)}",
+                    {
+                        ContextKeys.TOOL_STATUS: "rejected",
+                        **clear,
+                        ContextKeys.SHOULD_TERMINATE: False,
+                    },
+                )
 
             self._consecutive_no_tool += 1
             should_terminate = context.get(ContextKeys.SHOULD_TERMINATE)
@@ -189,22 +244,20 @@ class AgentHandlers:
             if not should_terminate or unknown:
                 # Instructive warning to push model toward tool use
                 tool_names = [t.name for t in self.registry.list_tools()]
-                return {
-                    ContextKeys.TOOL_RESULT: (
-                        f"{miss}WARNING: No tool was called but the task is not complete. "
-                        f"You must select a tool from: {', '.join(tool_names)}. "
-                        "Do not answer from memory — use a tool to gather information."
-                    ),
-                    ContextKeys.TOOL_STATUS: "skipped",
-                    **clear,
-                    ContextKeys.SHOULD_TERMINATE: None,
-                }
+                return with_feedback(
+                    f"{miss}WARNING: No tool was called but the task is not complete. "
+                    f"You must select a tool from: {', '.join(tool_names)}. "
+                    "Do not answer from memory — use a tool to gather information.",
+                    {
+                        ContextKeys.TOOL_STATUS: "skipped",
+                        **clear,
+                        ContextKeys.SHOULD_TERMINATE: None,
+                    },
+                )
 
-            return {
-                ContextKeys.TOOL_RESULT: "No tool was selected.",
-                ContextKeys.TOOL_STATUS: "skipped",
-                **clear,
-            }
+            return with_feedback(
+                "No tool was selected.", {ContextKeys.TOOL_STATUS: "skipped", **clear}
+            )
 
         refusal = self.approval_refusal(context)
         if refusal is not None:
@@ -283,8 +336,11 @@ class AgentHandlers:
         observations = context.get(ContextKeys.OBSERVATIONS, [])
         if not isinstance(observations, list):
             observations = []
+        trace = context.get(ContextKeys.AGENT_TRACE, [])
+        if not isinstance(trace, list):
+            trace = []
 
-        step_num = len(observations) + 1
+        step_num = next_step_number(trace)
         observation_entry = (
             f"[Step {step_num}] Tool: {tool_name} | "
             f"Input: {shown_input} | "
@@ -308,9 +364,6 @@ class AgentHandlers:
             observations = observations[-Defaults.MAX_OBSERVATIONS :]
 
         # Track in agent trace
-        trace = context.get(ContextKeys.AGENT_TRACE, [])
-        if not isinstance(trace, list):
-            trace = []
         trace_step = AgentStep(
             iteration=step_num,
             thought=reasoning,
@@ -471,15 +524,33 @@ class AgentHandlers:
         return {}
 
     def check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
-        """
-        Check if the iteration limit has been reached.
+        """Count think turns and force the stop once the budget is spent.
 
-        Called as a PRE_TRANSITION handler. Since the transition decision
-        is already made before this handler fires, we trigger one iteration
-        early (>= max - 1) so the conclude transition fires on the next
-        iteration rather than overshooting by 1.
+        Called as a PRE_TRANSITION handler on every transition. ``max_iterations``
+        (``_max_iterations`` in context) counts think turns: the count rises on
+        each transition out of ``think``. The stop is forced (``max_iterations_
+        reached`` and ``should_terminate`` True) when a later transition closes
+        a cycle with ``count >= max - 1``, so the next think turn concludes: a
+        limit of N gives N think turns and N - 1 tool turns, and no tool runs
+        after the flag. An approved ``await_approval -> act`` exit does not close
+        the cycle (its call still runs). Independently, the stop is forced
+        ``FORCED_STOP_MARGIN`` transitions (at most ``max``) before the
+        ``max * FSM_BUDGET_MULTIPLIER`` loop ceiling, so a run with long cycles
+        concludes instead of raising ``BudgetExhaustedError``. Never raises.
         """
-        self._current_iteration += 1
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-028
+        # LOOP-04: count think exits here, on the instance. Do NOT move this
+        # into make_iteration_limiter or give that factory a state filter
+        # (3e4eb3e5 D-003, c1d5bfbc D-007: the other patterns count every turn).
+        # Do NOT force the stop on the think exit itself: the think -> act
+        # decision is already made, so the cycle's tool would be skipped and
+        # max_iterations=1 would run no tool at all. Keep the `- 1` early rule:
+        # the flag lands at the end of cycle max - 1, and think turn max
+        # concludes on it. See decisions.md D-028.
+        self._transitions += 1
+        leaving = context.get(ContextKeys.CURRENT_STATE) or AgentStates.THINK
+        if leaving == AgentStates.THINK:
+            self._current_iteration += 1
         max_iterations = context.get("_max_iterations", Defaults.MAX_ITERATIONS)
 
         logger.debug(
@@ -488,7 +559,15 @@ class AgentHandlers:
             )
         )
 
-        if self._current_iteration >= max_iterations - 1:
+        approved = (
+            leaving == AgentStates.AWAIT_APPROVAL
+            and context.get(ContextKeys.APPROVAL_GRANTED) is True
+        )
+        cycle_closed = leaving != AgentStates.THINK and not approved
+        spent = cycle_closed and self._current_iteration >= max_iterations - 1
+        margin = min(Defaults.FORCED_STOP_MARGIN, max_iterations)
+        ceiling = max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
+        if spent or self._transitions >= ceiling - margin:
             return {
                 ContextKeys.ITERATION_COUNT: self._current_iteration,
                 ContextKeys.MAX_ITERATIONS_REACHED: True,
@@ -638,7 +717,9 @@ def make_fresh_keys_handler(
     that state's extraction run again.
 
     Interface contract (ReAct think, Reflexion, PlanExecute, Debate,
-    PromptChain; register with ``on_state_entry(<producing state>)``):
+    PromptChain; register with ``on_state_entry(<producing state>)``; a key
+    another state writes for this one to read, such as ``agent_feedback``, is
+    cleared with ``on_state_exit(<consuming state>)`` instead, D-029):
         - ``keys``: non-empty; the context keys the producing state writes.
         - ``stash``: optional ``{key: stash_key}`` for keys whose previous
           value the producing prompt must still see. Every ``key`` must be in

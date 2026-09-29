@@ -15,8 +15,9 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, caller_prompt_keys
 from .constants import (
+    REACT_THINK_FRESH_KEYS,
     AgentStates,
     ContextKeys,
     LogMessages,
@@ -25,7 +26,7 @@ from .constants import (
 from .definitions import AgentConfig, AgentResult, AgentStep
 from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
-from .handlers import AgentHandlers
+from .handlers import AgentHandlers, forced_stop_skip, next_step_number
 from .hitl import HumanInTheLoop
 from .tools import ToolRegistry, redact_secret_entries
 
@@ -184,6 +185,7 @@ class ReasoningReactAgent(BaseAgent):
             self.tools,
             task_description=task,
             include_approval_state=self._hitl_active,
+            context_keys=caller_prompt_keys(initial_context),
         )
 
         # Build initial context
@@ -225,6 +227,9 @@ class ReasoningReactAgent(BaseAgent):
             # one-call grant consumption as execute_tool; `reason` is a tool
             # the HITL policy may gate too. The grant is spent before the
             # engine runs (plan-2026-09-29T103145-06a5ec0a/D-015).
+            forced = forced_stop_skip(context)
+            if forced is not None:  # LOOP-05: no tool after the forced stop
+                return base_handler.consume_approval(context, forced)
             refusal = base_handler.approval_refusal(context)
             if refusal is not None:
                 return refusal
@@ -261,7 +266,10 @@ class ReasoningReactAgent(BaseAgent):
                 observations = context.get(ContextKeys.OBSERVATIONS, [])
                 if not isinstance(observations, list):
                     observations = []
-                step_num = len(observations) + 1
+                trace = context.get(ContextKeys.AGENT_TRACE, [])
+                if not isinstance(trace, list):
+                    trace = []
+                step_num = next_step_number(trace)
                 observation_entry = (
                     f"[Step {step_num}] Tool: reason | "
                     f"Input: {shown} | "
@@ -270,9 +278,6 @@ class ReasoningReactAgent(BaseAgent):
                 observations.append(observation_entry)
 
                 # Track in agent trace
-                trace = context.get(ContextKeys.AGENT_TRACE, [])
-                if not isinstance(trace, list):
-                    trace = []
                 trace.append(
                     AgentStep(
                         iteration=step_num,
@@ -331,6 +336,7 @@ class ReasoningReactAgent(BaseAgent):
         )
 
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
+        self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)
 
         self._register_approval_gate(api)
 

@@ -252,11 +252,14 @@ class TestReactAgentConcurrentRuns:
         t2.join(timeout=30)
 
         assert not t1.is_alive() and not t2.is_alive()
-        assert len(seen_ids) == 2
-        assert seen_ids[0] != seen_ids[1], (
+        # max_iterations=3 is 3 think turns and 2 tool turns per run (D-028 of
+        # plan 06a5ec0a), each run on its own handler instance.
+        assert len(seen_ids) == 4
+        assert len(set(seen_ids)) == 2, (
             "both concurrent run() calls dispatched into the SAME "
             "AgentHandlers instance — the F9/D-014 fix regressed"
         )
+        assert sorted(seen_ids.count(i) for i in set(seen_ids)) == [2, 2]
         # The mock never sets should_terminate, so each run ends on its own
         # iteration budget: a forced stop ships its answer with success=False
         # (D-011 of plan 06a5ec0a), identically for both isolated runs.
@@ -264,8 +267,8 @@ class TestReactAgentConcurrentRuns:
             assert results[key].answer == "ok"
             assert results[key].success is False
             assert results[key].stop_reason == "max_iterations"
-        assert len(results["a"].trace.tool_calls) == 1
-        assert len(results["b"].trace.tool_calls) == 1
+        assert len(results["a"].trace.tool_calls) == 2
+        assert len(results["b"].trace.tool_calls) == 2
 
 
 class _GatedToolMockLLM(_DeterministicMockLLM):

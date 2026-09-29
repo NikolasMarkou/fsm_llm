@@ -394,14 +394,19 @@ def build_adapt_fsm(
 
 
 def _tool_selection_field_extractions(
-    think_instructions: str, *, include_tool_name: bool = True
+    think_instructions: str,
+    *,
+    include_tool_name: bool = True,
+    context_keys: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Typed ``field_extractions`` for a think state's tool selection.
 
-    Contract: ``think_instructions`` is the state's ``extraction_instructions``;
-    returns raw dicts for ``State(field_extractions=...)``: ``tool_name`` as
-    ``str`` (omitted when ``include_tool_name`` is False, i.e. the classifier
-    owns it) and ``tool_input`` as ``dict``. Never raises.
+    Contract: ``think_instructions`` is the think prompt (tools, examples,
+    rules); returns raw dicts for ``State(field_extractions=...)``:
+    ``tool_name`` as ``str`` (omitted when ``include_tool_name`` is False, i.e.
+    the classifier owns it) and ``tool_input`` as ``dict``. ``context_keys``,
+    when given, narrows each prompt's context to those keys (see
+    :func:`_loop_field_context_keys`). Never raises.
 
     # DECISION plan-2026-09-19T175721-21cd7f8e/D-024
     Do NOT drop these and rely on the auto-minted config from
@@ -414,11 +419,13 @@ def _tool_selection_field_extractions(
     fields = [("tool_input", "dict")]
     if include_tool_name:
         fields.insert(0, ("tool_name", "str"))
+    narrowed = {} if context_keys is None else {"context_keys": list(context_keys)}
     return [
         {
             "field_name": name,
             "field_type": field_type,
             "extraction_instructions": f"Extract the '{name}' field. {think_instructions}",
+            **narrowed,
         }
         for name, field_type in fields
     ]
@@ -454,6 +461,71 @@ _LOOP_FIELD_CONTEXT_KEYS: tuple[str, ...] = (
 )
 
 
+def _loop_field_context_keys(extra_context_keys: Sequence[str] = ()) -> list[str]:
+    """The ``context_keys`` of a loop field prompt: ``task``, ``observations``,
+    then ``extra_context_keys`` (order kept, duplicates dropped).
+
+    Shared by :func:`_typed_field_extraction` and the think builders' tool
+    selection configs. Raises ``ValueError`` for an extra key that is
+    ``agent_trace`` or internal-prefixed (core reads a listed key from raw
+    context, with no internal-key filter).
+    """
+    bad = [
+        key
+        for key in extra_context_keys
+        if key == ContextKeys.AGENT_TRACE or has_internal_prefix(key)
+    ]
+    if bad:
+        raise ValueError(f"context keys not allowed in a field prompt: {bad}")
+    return list(dict.fromkeys((*_LOOP_FIELD_CONTEXT_KEYS, *extra_context_keys)))
+
+
+def _think_field_extractions(
+    think_instructions: str,
+    *,
+    include_tool_name: bool = True,
+    context_keys: Sequence[str] = (),
+) -> list[dict[str, Any]]:
+    """Every typed field a ReAct/Reflexion ``think`` turn extracts.
+
+    Contract: the tool selection (:func:`_tool_selection_field_extractions`,
+    unchanged types), then ``reasoning`` (str) and ``should_terminate`` (bool),
+    both optional (a null costs no retry and gates no edge). Every prompt
+    lists ``task``, ``observations``, ``agent_feedback`` and ``context_keys``,
+    never ``agent_trace``. ``think_instructions`` is the think prompt; pair
+    the result with an empty state-level ``extraction_instructions`` unless the
+    classifier owns ``tool_name`` (D-019 of plan 21cd7f8e keeps the bulk fill
+    there). Raises ``ValueError`` like :func:`_loop_field_context_keys`.
+    """
+    from .prompts import (
+        build_think_reasoning_instructions,
+        build_think_terminate_instructions,
+    )
+
+    extra = (ContextKeys.AGENT_FEEDBACK, *context_keys)
+    return [
+        *_tool_selection_field_extractions(
+            think_instructions,
+            include_tool_name=include_tool_name,
+            context_keys=_loop_field_context_keys(extra),
+        ),
+        _typed_field_extraction(
+            ContextKeys.REASONING,
+            "str",
+            build_think_reasoning_instructions(),
+            extra_context_keys=extra,
+            required=False,
+        ),
+        _typed_field_extraction(
+            ContextKeys.SHOULD_TERMINATE,
+            "bool",
+            build_think_terminate_instructions(),
+            extra_context_keys=extra,
+            required=False,
+        ),
+    ]
+
+
 def _typed_field_extraction(
     field_name: str,
     field_type: TypedFieldType,
@@ -487,14 +559,7 @@ def _typed_field_extraction(
     """
     if field_type not in get_args(TypedFieldType):
         raise ValueError(f"unsupported typed field type: {field_type!r}")
-    bad = [
-        key
-        for key in extra_context_keys
-        if key == ContextKeys.AGENT_TRACE or has_internal_prefix(key)
-    ]
-    if bad:
-        raise ValueError(f"context keys not allowed in a field prompt: {bad}")
-    context_keys = list(dict.fromkeys((*_LOOP_FIELD_CONTEXT_KEYS, *extra_context_keys)))
+    context_keys = _loop_field_context_keys(extra_context_keys)
     return {
         "field_name": field_name,
         "field_type": field_type,
@@ -578,10 +643,9 @@ def _await_approval_state() -> dict[str, Any]:
         "description": "Waiting for human approval before executing action",
         "purpose": "Present the planned action and wait for user approval",
         "extraction_instructions": build_approval_extraction_instructions(),
-        "response_instructions": (
-            "Explain what action you want to take and why, "
-            "then ask the user for approval."
-        ),
+        # LOOP-09: an intermediate state; the driver asks the approver, so no
+        # Pass-2 prose (core skips Pass 2 on empty instructions).
+        "response_instructions": "",
         "transitions": [
             {
                 "target_state": "conclude",
@@ -629,6 +693,7 @@ def build_reflexion_fsm(
     registry: ToolRegistry,
     task_description: str = "",
     include_approval_state: bool = False,
+    context_keys: Sequence[str] = (),
 ) -> dict[str, Any]:
     """
     Build a Reflexion FSM definition from a tool registry.
@@ -673,8 +738,13 @@ def build_reflexion_fsm(
                 ContextKeys.TOOL_INPUT,
                 ContextKeys.SHOULD_TERMINATE,
             ],
-            "extraction_instructions": think_instructions,
-            "field_extractions": _tool_selection_field_extractions(think_instructions),
+            # D-009 of plan 06a5ec0a: typed per-field values only, no bulk
+            # call; the episodic memory stays in the think prompts.
+            "extraction_instructions": "",
+            "field_extractions": _think_field_extractions(
+                think_instructions,
+                context_keys=(ContextKeys.EPISODIC_MEMORY, *context_keys),
+            ),
             "response_instructions": "",
             "transitions": [
                 {
@@ -1001,6 +1071,7 @@ def build_react_fsm(
     include_approval_state: bool = False,
     use_classification: bool = False,
     output_schema: type | None = None,
+    context_keys: Sequence[str] = (),
 ) -> dict[str, Any]:
     """
     Build a ReAct FSM definition from a tool registry.
@@ -1016,6 +1087,10 @@ def build_react_fsm(
     uses a ``classification_extractions`` config (backed by the core
     ``Classifier``) instead of relying solely on extraction instructions.
     This can improve tool selection accuracy for large tool registries.
+
+    ``think`` extracts only typed per-field values (see
+    :func:`_think_field_extractions`); ``context_keys`` adds caller keys to
+    those prompts (``caller_prompt_keys``).
     """
     from .prompts import (
         build_conclude_extraction_instructions,
@@ -1088,9 +1163,16 @@ def build_react_fsm(
             ContextKeys.TOOL_INPUT,
             ContextKeys.SHOULD_TERMINATE,
         ],
-        "extraction_instructions": think_instructions,
-        "field_extractions": _tool_selection_field_extractions(
-            think_instructions, include_tool_name=not use_classification
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-009: no state-level bulk
+        # call (its prompt is instructions plus "Continue.", no context). Do NOT
+        # empty it under use_classification: tool_name is classification-owned
+        # there and relies on the bulk fill when the classifier declines
+        # (21cd7f8e D-019).
+        "extraction_instructions": think_instructions if use_classification else "",
+        "field_extractions": _think_field_extractions(
+            think_instructions,
+            include_tool_name=not use_classification,
+            context_keys=context_keys,
         ),
         "response_instructions": "",
         "transitions": think_transitions,

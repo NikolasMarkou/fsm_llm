@@ -49,13 +49,18 @@ class TestBuildReactFsm:
         assert fsm_def.name == "react_agent"
 
     def test_think_state_has_tool_info(self):
+        # D-009 (plan 06a5ec0a): the tool list rides the typed per-field
+        # prompts; the state-level bulk prompt is empty.
         registry = _make_registry("search", "calc")
         fsm = build_react_fsm(registry)
         think = fsm["states"]["think"]
 
-        assert "extraction_instructions" in think
-        assert "search" in think["extraction_instructions"]
-        assert "calc" in think["extraction_instructions"]
+        assert think["extraction_instructions"] == ""
+        tool_name_cfg = next(
+            fc for fc in think["field_extractions"] if fc["field_name"] == "tool_name"
+        )
+        assert "search" in tool_name_cfg["extraction_instructions"]
+        assert "calc" in tool_name_cfg["extraction_instructions"]
 
     def test_think_transitions(self):
         registry = _make_registry("search")
@@ -168,7 +173,9 @@ class TestThinkStateToolSelectionTypes:
         cfgs = _think_configs(build_react_fsm(_make_registry("search")))
         assert cfgs["tool_name"].field_type == "str"
         assert cfgs["tool_input"].field_type == "dict"
-        assert cfgs["should_terminate"].field_type == "any"
+        # LOOP-10: the routing flag is typed too (was an auto-minted `any`).
+        assert cfgs["should_terminate"].field_type == "bool"
+        assert cfgs["reasoning"].field_type == "str"
         assert "object" in _value_types(cfgs["tool_input"])
         assert "object" not in _value_types(cfgs["tool_name"])
 
@@ -179,20 +186,34 @@ class TestThinkStateToolSelectionTypes:
         assert "object" in _value_types(cfgs["tool_input"])
 
     def test_explicit_configs_carry_the_think_instructions(self):
-        fsm = build_react_fsm(_make_registry("search"))
-        think = fsm["states"]["think"]
-        cfgs = _think_configs(fsm)
+        from fsm_llm.agents.prompts import build_think_extraction_instructions
+
+        registry = _make_registry("search")
+        cfgs = _think_configs(build_react_fsm(registry))
+        think_instructions = build_think_extraction_instructions(registry)
         for key in ("tool_name", "tool_input"):
-            assert think["extraction_instructions"] in cfgs[key].extraction_instructions
+            assert think_instructions in cfgs[key].extraction_instructions
             assert key in cfgs[key].extraction_instructions
+
+    def test_think_prompts_are_narrowed_without_agent_trace(self):
+        # LOOP-08: every think field names its context; agent_trace never.
+        fsm = build_react_fsm(_make_registry("search"), context_keys=("hint",))
+        for fc in fsm["states"]["think"]["field_extractions"]:
+            keys = fc["context_keys"]
+            assert keys[:3] == ["task", "observations", "agent_feedback"]
+            assert "hint" in keys
+            assert "agent_trace" not in keys
 
     def test_classification_owned_tool_name_is_not_redeclared(self):
         # use_classification: tool_name belongs to the classifier (D-006); an
         # explicit config would make the plain extractor fill it again.
         fsm = build_react_fsm(_make_registry("search"), use_classification=True)
         names = [fc["field_name"] for fc in fsm["states"]["think"]["field_extractions"]]
-        assert names == ["tool_input"]
+        assert names == ["tool_input", "reasoning", "should_terminate"]
         assert "tool_name" not in _think_configs(fsm)
+        # D-019 of plan 21cd7f8e: the bulk fill stays when the classifier owns
+        # tool_name (it declines below its threshold).
+        assert fsm["states"]["think"]["extraction_instructions"]
 
     def test_fsms_stay_valid_definitions(self):
         FSMDefinition(**build_react_fsm(_make_registry("search")))

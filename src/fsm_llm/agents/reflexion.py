@@ -15,7 +15,7 @@ from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, caller_prompt_keys
 from .constants import (
     ContextKeys,
     Defaults,
@@ -122,6 +122,7 @@ class ReflexionAgent(BaseAgent):
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
             include_approval_state=self._hitl_active,
+            context_keys=caller_prompt_keys(initial_context),
         )
 
         context = self._init_context(
@@ -161,6 +162,10 @@ class ReflexionAgent(BaseAgent):
             )
         self._register_tool_executor(api, ReflexionStates.ACT, handlers.execute_tool)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
+        # Only `reasoning` is refreshed here: the reflect handler sets
+        # should_terminate at max_reflections and think must still see it
+        # (Reflexion's own loop keys are step 17's).
+        self._register_think_loop_handlers(api, [ContextKeys.REASONING])
 
         api.register_handler(
             api.create_handler(HandlerNames.REFLEXION_REFLECTOR)
