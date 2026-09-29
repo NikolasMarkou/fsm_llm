@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-29
+
 ### Changed (BREAKING: `fsm_llm` is the single top-level package, 2026-09-29)
 
 The five extension packages now live under `fsm_llm` as subpackages. `src/` holds one
@@ -2576,6 +2578,7 @@ examples, signatures, and the 2-pass core contract are unchanged. New optional
 - 7 examples (basic, intermediate, advanced)
 - Comprehensive documentation
 
+[0.10.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.6.0...v0.7.0
