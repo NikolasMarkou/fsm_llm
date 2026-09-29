@@ -8,7 +8,7 @@ Purpose: Pytest suite for the FSM-LLM agents package (`src/fsm_llm/agents`, impo
 - In: 56 `test_*.py` files, `mcp_fixture_server.py` (a real stdio MCP server, not a test), empty `__init__.py`, and `conftest.py`, whose autouse fixture calls `tests.conftest.block_network`: every IPv4/IPv6 connect (loopback included) raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`. Global fixtures and `PromptGroundedLLM` come from `tests/conftest.py` (adds `src` to `sys.path`); most older files build their own mocks.
 - Also in (historical placement, not agents code): `test_review_fixes.py` covers core `API.converse_stream` auto-save, `FileSessionStore._path` validation, `FSMManager.seed_restored_conversation`, and `fsm_llm.monitor.otel.OTELExporter` thread safety; `test_strands_phase2.py` covers `fsm_llm.workflows.dependency_resolver.DependencyResolver` and `OTELExporter`.
 - Out: live-LLM agent tests (none here; no test calls a real provider, and the network block enforces it), meta-builder internals beyond the CLI.
-- Current size: 1,664 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
+- Current size: 1,695 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
 
 ## Architecture
 
@@ -52,17 +52,17 @@ Observation hooks used by loop tests:
 
 | File | Role | Notes |
 | --- | --- | --- |
-| `test_grounded_patterns.py` | Phase-1 pattern loops on `PromptGroundedLLM` | Classes per pattern (`TestReactLoop`, `TestReflexionLoop`, `TestPlanExecuteLoop`, `TestDebateLoop`, `TestSelfConsistencyVote`, `TestPromptChainLoop`, `TestMakerCheckerLoop`, `TestEvaluatorOptimizerLoop`, `TestREWOOOutcome`, `TestOrchestratorWorkers`, `TestAgentGraphOrder`, `TestSwarmHandoff`) plus the fake's self-tests, `TestOfflineNetworkGuard`, `TestSuccessContract`, `TestTypedFieldExtraction`, `TestGeneratedFieldsAreComposed`, `TestAgentInstructions`; written to fail on the parent commit of each fix |
+| `test_grounded_patterns.py` | Phase-1 pattern loops on `PromptGroundedLLM` | Classes per pattern (`TestReactLoop`, `TestReflexionLoop`, `TestPlanExecuteLoop`, `TestDebateLoop`, `TestSelfConsistencyVote`, `TestPromptChainLoop`, `TestMakerCheckerLoop`, `TestEvaluatorOptimizerLoop`, `TestREWOOOutcome`, `TestOrchestratorWorkers`, `TestAgentGraphOrder`, `TestSwarmHandoff`) plus the fake's self-tests, `TestOfflineNetworkGuard`, `TestSuccessContract`, `TestSuccessReflectsWhoConcluded` (fix 13.1), `TestTypedFieldExtraction`, `TestGeneratedFieldsAreComposed`, `TestAgentInstructions`; written to fail on the parent commit of each fix |
 | `test_trust_boundary.py` | Caller context and constructor boundary | Forged `_approval_granted`/run-output keys via `initial_context`, `AgentServer` `/invoke` and `/stream`, SelfConsistency, AgentGraph; misplaced constructor kwargs; gated-tool refusal in REWOO/PlanExecute/ParallelReact/native_fc; callback-only HITL with flagged tools |
 | `test_public_api.py` | `create_agent`, `AgentConfig`, `__all__` | Pattern-first factory and legacy prompt shim, `extra="forbid"`, `LLM_MODEL`, `instructions` reach field prompts, static `__all__` |
 | `test_secret_hygiene.py` | Secret redaction | Memory tools skip hidden buffers; secret-shaped tool args absent from observations, trace, logs, `context_summary` |
 | `test_hitl_security.py` | Gated tool needs call-bound driver grant | Forged `approval_granted`/`_approval_granted`, swapped call, empty-then-filled input, non-bool approval, forged `approval_required`, internal-key policy; parametrized over React, Reflexion, ReasoningReact |
 | `test_react.py` | ReactAgent | `_hitl_active`, policy-only builds `await_approval`, concurrent `run()` isolation (barrier in `build_react_fsm`), single-use approval |
 | `test_think_fallback.py` | `think` never BLOCKs | Null/unknown tool for React, Reflexion, ParallelReact, ReasoningReact, PlanExecute; loop bounds `MAX_ITERATIONS + 2` / `+ 3` |
-| `test_premature_terminate_guard.py` | ReAct conclude guard | `should_terminate AND (observation_count OR max_iterations_reached)` on think and act |
+| `test_premature_terminate_guard.py` | ReAct conclude guard | `(should_terminate AND observation_count > 0) OR max_iterations_reached` on think and act (D-051 of plan 06a5ec0a) |
 | `test_forced_stop_flag.py` | Forged `max_iterations_reached` | React, Reflexion, MakerChecker |
 | `test_completion_guard.py`, `test_plan_execute_evidence.py` | `_completion_is_real`, `_has_execution_evidence` | Evidence keys `WORKER_RESULTS`, `EVIDENCE`, `STEP_RESULTS`; step success tied to `TOOL_STATUS == "success"` |
-| `test_handlers.py` | `AgentHandlers`, `make_iteration_limiter`, `make_fresh_keys_handler` | ReAct-family limiter counts think exits (`max_iterations=N` gives N think turns); factory limiter forces at count `max - 1`; empty-input recovery only for string-compatible or single list params |
+| `test_handlers.py` | `AgentHandlers`, `make_iteration_limiter`, `make_fresh_keys_handler` | ReAct-family limiter counts think exits (`max_iterations=N` gives N think turns for N >= 2; N = 1 behaves like 2); factory limiter forces at count `max - 1`; empty-input recovery only for string-compatible or single list params |
 | `test_tools.py` | `ToolRegistry`, `@tool`, `normalize_tool_input` | Thread-safety with `fine_grained_gil` fixture (`sys.setswitchinterval(1e-6)`), 256-dim stub embeddings, dict/list/kwargs calling conventions |
 | `test_native_fc.py` | `NativeFunctionCallingReactAgent` | `complete_fn` injection or `litellm.completion` patch; repair turn has `response_format` and no `tools`; forced final tool; malformed tool-call degrade |
 | `test_maker_checker.py` | MakerCheckerAgent | Limiter at `max` (not `max - 1`), pass forced by `_force_pass_at_limit` only on check turns |
@@ -101,7 +101,7 @@ Behaviour these tests pin; changing agents code that breaks them is a regression
 
 - Budget hard ceiling is `max_iterations * Defaults.FSM_BUDGET_MULTIPLIER` (3); `_check_budgets` raises `BudgetExhaustedError` past it and `AgentTimeoutError` past `timeout_seconds`.
 - `think -> act` is an unconditional lowest-priority fallback; approval edge beats it. Loop states in ADaPT (`assess`, `decompose`), EvalOpt (`generate`) and MakerChecker (`check`) each have exactly one unconditional fallback with the highest priority number.
-- `max_iterations_reached` is seeded `False` in `_init_context`, so bulk extraction cannot set it.
+- `max_iterations_reached` is seeded `False` in `_init_context`; it, `forced_stop_reason`, `iteration_count` and `observation_count` are core `handler_only_keys` on every agent FSM, so no extraction can set them (D-051 of plan 06a5ec0a).
 - A forced stop, forced pass, stall, rejected verification or failed gate gives `success=False` with the matching `stop_reason`; the answer still ships.
 - A gated tool (policy set, or callback-only HITL with a `requires_approval` tool) runs only with a matching driver grant; `initial_context` can never supply the grant or run-output keys; one approval covers one call; a callback returning `None` is a denial; a model-written `approval_required` with no real gated tool triggers no ask.
 - `BaseAgent._filter_context` drops keys with internal prefixes `_`, `system_`, `internal_`, `__`, case-insensitively.

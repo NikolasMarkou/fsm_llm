@@ -9,7 +9,7 @@ from typing import Any, Literal, get_args
 
 from fsm_llm.constants import has_internal_prefix
 
-from .constants import ContextKeys, Defaults, StopReason
+from .constants import FRAMEWORK_ONLY_KEYS, ContextKeys, Defaults, StopReason
 from .definitions import ChainStep
 from .tools import ToolRegistry
 
@@ -29,9 +29,11 @@ def _finalize_fsm(
     """Assemble the top-level FSM definition dict shared by every builder here.
 
     Contract: returns ``{"name", "description", "initial_state", "persona",
-    "states"}`` where ``description`` is ``task_description[:_MAX_DESC]``, or
-    ``default_description`` when that slice is empty. ``states`` is stored by
-    reference, not copied. Never raises.
+    "states", "handler_only_keys"}`` where ``description`` is
+    ``task_description[:_MAX_DESC]``, or ``default_description`` when that
+    slice is empty, and ``handler_only_keys`` is :data:`FRAMEWORK_ONLY_KEYS`
+    (D-051 of plan 06a5ec0a). ``states`` is stored by reference, not copied.
+    Never raises.
     """
     return {
         "name": name,
@@ -39,6 +41,7 @@ def _finalize_fsm(
         "initial_state": initial_state,
         "persona": persona,
         "states": states,
+        "handler_only_keys": list(FRAMEWORK_ONLY_KEYS),
     }
 
 
@@ -596,11 +599,18 @@ def _conclude_on_evidence_logic(
 ) -> dict[str, Any]:
     """JsonLogic for a tool-loop ``conclude`` edge: terminate on evidence only.
 
-    Contract: returns a fresh ``<flag> == True AND (observation_count > 0 OR
-    max_iterations_reached == True)`` expression (``flag`` defaults to
+    Contract: returns a fresh ``(<flag> == True AND observation_count > 0)
+    OR max_iterations_reached == True`` expression (``flag`` defaults to
     ``should_terminate``). Used on the ``think`` and ``act`` conclude edges of
     the ReAct, Reflexion and ParallelReact FSMs, and with ``evaluation_passed``
     on Reflexion's ``evaluate`` conclude edge. Never raises.
+
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-051
+    A forced stop concludes on the flag ALONE. Do NOT require ``<flag>`` for
+    it again: think entry now clears a limiter-forced ``should_terminate`` so
+    the last think turn is asked for its own verdict (that verdict decides
+    ``success``), and a forced think turn whose model says nothing must still
+    conclude.
 
     # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
     Do NOT gate a tool loop's conclude edge on ``should_terminate`` alone: a
@@ -612,14 +622,14 @@ def _conclude_on_evidence_logic(
     BLOCKS ``think``.
     """
     return {
-        "and": [
-            {"==": [{"var": flag}, True]},
+        "or": [
             {
-                "or": [
+                "and": [
+                    {"==": [{"var": flag}, True]},
                     {">": [{"var": [ContextKeys.OBSERVATION_COUNT, 0]}, 0]},
-                    {"==": [{"var": ContextKeys.MAX_ITERATIONS_REACHED}, True]},
                 ]
             },
+            {"==": [{"var": ContextKeys.MAX_ITERATIONS_REACHED}, True]},
         ]
     }
 

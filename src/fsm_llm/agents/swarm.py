@@ -38,7 +38,8 @@ class SwarmAgent(BaseAgent):
     (``handoff_message``, default: the previous answer) and the accumulated
     context in its ``initial_context``. ``max_handoffs`` is the number of
     handoffs allowed; a request past it stops the run (``success=False``,
-    ``max_iterations``).
+    ``max_iterations``). A handoff to a name not in the swarm stops it with
+    ``success=False``, ``no_result`` (the requested work never ran).
 
     Nothing in the shipped patterns writes ``next_agent``: a member agent
     hands off only when its own code, a handler or a tool writes it into
@@ -109,6 +110,7 @@ class SwarmAgent(BaseAgent):
         last_result: AgentResult | None = None
         # Set when the handoff cap cut off a requested handoff (forced stop).
         capped = False
+        unrouted = False
         handoff_chain: list[str] = [current_agent_name]
 
         logger.info(
@@ -199,6 +201,9 @@ class SwarmAgent(BaseAgent):
                     f"Handoff target '{next_agent}' not found in swarm. "
                     f"Available: {sorted(self._agents.keys())}"
                 )
+                # D-051 of plan 06a5ec0a: the agent asked for work it could
+                # not do itself; dropping that request is not a success.
+                unrouted = True
                 break
 
             handoff_count += 1
@@ -257,13 +262,19 @@ class SwarmAgent(BaseAgent):
         }
 
         # A requested handoff the cap refused is a forced stop: the last
-        # answer ships with success=False (D-011).
+        # answer ships with success=False (D-011). A handoff to an unknown
+        # agent is no_result: the requested work never ran (D-051).
+        stop_reason: str | None
+        if capped:
+            success, stop_reason = False, StopReason.MAX_ITERATIONS
+        elif unrouted:
+            success, stop_reason = False, StopReason.NO_RESULT
+        else:
+            success, stop_reason = last_result.success, last_result.stop_reason
         return AgentResult(
             answer=last_result.answer,
-            success=last_result.success and not capped,
-            stop_reason=(
-                StopReason.MAX_ITERATIONS if capped else last_result.stop_reason
-            ),
+            success=success,
+            stop_reason=stop_reason,
             trace=combined_trace,
             final_context=final_context,
             structured_output=last_result.structured_output,

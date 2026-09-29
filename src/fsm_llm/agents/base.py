@@ -582,17 +582,25 @@ class BaseAgent(ABC):
 
         ``fresh_keys`` are the loop values ``think`` produces; they are cleared
         on think entry so think extracts them again (skip-if-set, D-008 of plan
-        06a5ec0a). ``agent_feedback`` is cleared on think exit, once the think
-        turn has read it. Under :attr:`_hitl_active`, ``should_terminate`` is
-        also cleared on ``await_approval`` entry (a forced True is kept).
+        06a5ec0a). A ``should_terminate`` the limiter forced is cleared too
+        (the think conclude edge reads ``max_iterations_reached`` itself), so
+        the last think turn gives its own verdict; one a forcing handler
+        recorded a reason for is kept (D-051). ``agent_feedback`` is cleared
+        on think exit, once the think turn has read it. Under
+        :attr:`_hitl_active`, ``should_terminate`` is also cleared on
+        ``await_approval`` entry (a forced True is kept).
         """
         from .handlers import make_fresh_keys_handler
 
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: keep_limiter_forced
+        # is False only here. Do NOT keep a limiter-forced should_terminate on
+        # think entry: the model is then never asked on its last turn and a
+        # real conclusion there reads as a forced max_iterations stop.
         api.register_handler(
             api.create_handler(HandlerNames.THINK_FRESH_KEYS)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(AgentStates.THINK)
-            .do(make_fresh_keys_handler(fresh_keys))
+            .do(make_fresh_keys_handler(fresh_keys, keep_limiter_forced=False))
         )
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-029
         # agent_feedback is consumed by think, so it is cleared on think EXIT.
@@ -953,7 +961,9 @@ class BaseAgent(ABC):
         return has_answer_key or tools_executed
 
     @staticmethod
-    def _forced_stop_reason(final_context: dict[str, Any]) -> str | None:
+    def _forced_stop_reason(
+        final_context: dict[str, Any], *, judged: bool = False
+    ) -> str | None:
         """The ``StopReason`` of a forced stop, or ``None`` if none was forced.
 
         Interface contract (callers: ``_run_outcome``, ``ADaPTAgent.run``):
@@ -961,12 +971,17 @@ class BaseAgent(ABC):
         stall) or a forcing handler recorded a reason under
         ``ContextKeys.FORCED_STOP_REASON`` (forced pass at a revision limit).
         Returns that recorded reason when it is one of ``StopReason.FORCED``,
-        else ``StopReason.MAX_ITERATIONS`` for a bare forced flag. Never raises.
+        else ``StopReason.MAX_ITERATIONS`` for a bare forced flag. With
+        ``judged`` (EvalOpt, MakerChecker: a judge handler rules on every
+        output that ships) only a recorded reason counts; the bare flag says
+        the budget ran out, not that the verdict was overridden. Never raises.
         """
-        recorded = final_context.get(ContextKeys.FORCED_STOP_REASON)
-        if isinstance(recorded, str) and recorded in StopReason.FORCED:
+        from .handlers import recorded_forced_reason
+
+        recorded = recorded_forced_reason(final_context)
+        if recorded is not None:
             return recorded
-        if final_context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
+        if not judged and final_context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
             return StopReason.MAX_ITERATIONS
         return None
 
@@ -976,6 +991,7 @@ class BaseAgent(ABC):
         trace: AgentTrace,
         extra_answer_keys: list[str] | None,
         execution_evidence_keys: list[str] | None = None,
+        judged: bool = False,
     ) -> tuple[bool, str]:
         """Compute ``(success, stop_reason)`` for a finished FSM run.
 
@@ -985,7 +1001,8 @@ class BaseAgent(ABC):
 
         Returns:
             ``(False, <forced reason>)`` when the run was forced to stop
-            (``_forced_stop_reason``); else, in planner mode
+            (``_forced_stop_reason``, ``judged`` passed through); else, in
+            planner mode
             (``execution_evidence_keys``), ``(True, "evidence")`` with real
             execution evidence; otherwise ``(True, "answered")`` when
             ``_completion_is_real`` (an answer key or an executed tool call);
@@ -998,7 +1015,11 @@ class BaseAgent(ABC):
         # or a tool call override the forced flag (a forced EvalOpt/MakerChecker
         # pass always has an answer key, which is how it read as success=True).
         # Do NOT compute success per pattern: this is the one rule.
-        forced = BaseAgent._forced_stop_reason(final_context)
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: `judged` patterns
+        # (EvalOpt, MakerChecker) report forced only on the judge handler's
+        # recorded override. Do NOT read their bare limiter flag here: a
+        # genuine pass on the limiter's round read as forced_pass.
+        forced = BaseAgent._forced_stop_reason(final_context, judged=judged)
         if forced is not None:
             return False, forced
         if execution_evidence_keys:
@@ -1244,11 +1265,14 @@ class BaseAgent(ABC):
         extra_answer_keys: list[str] | None = None,
         execution_evidence_keys: list[str] | None = None,
         handlers: Any = None,
+        judged: bool = False,
     ) -> AgentResult:
         """Standard run() implementation shared by most agents.
 
         Handles API creation, handler registration, conversation loop,
         answer extraction, trace building, and error wrapping.
+
+        ``judged``: see ``_forced_stop_reason`` (EvalOpt, MakerChecker).
 
         ``handlers``: optional, opaque, call-local handler-state object
         (e.g. ``AgentHandlers``) created fresh by the caller's own ``run()``
@@ -1302,7 +1326,11 @@ class BaseAgent(ABC):
             # _extract_answer's primary/secondary sources, so any pattern that
             # concludes properly (sets an answer key) or runs a tool is unaffected.
             success, stop_reason = self._run_outcome(
-                final_context, trace, extra_answer_keys, execution_evidence_keys
+                final_context,
+                trace,
+                extra_answer_keys,
+                execution_evidence_keys,
+                judged=judged,
             )
             if stop_reason in StopReason.FORCED:
                 logger.warning(

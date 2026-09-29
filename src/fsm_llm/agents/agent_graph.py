@@ -142,7 +142,8 @@ class AgentGraph:
         Its ``initial_context`` merges those predecessors' contexts in
         topological order (a later one wins a shared key), each minus
         ``RUN_OUTPUT_KEYS``, so a node starts its own run fresh. A failed
-        node takes no outgoing edge. The answer is the last executed node's,
+        node (it raised, or returned ``success=False``) takes no outgoing
+        edge, and the graph reports ``success=False`` with its reason. The answer is the last executed node's,
         which the order makes a sink of the executed subgraph.
         """
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-044: Kahn order, each node
@@ -196,6 +197,17 @@ class AgentGraph:
                     final_context=node_context,
                 )
                 execution_order.append(node_name)
+                continue
+
+            # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: a node that
+            # returned success=False takes no outgoing edge, like a raising
+            # one (D-044). Do NOT let its edges fire: a forced or empty result
+            # would feed its successors as if it had done its work.
+            if not result.success:
+                logger.warning(
+                    f"AgentGraph node '{node_name}' did not succeed "
+                    f"({result.stop_reason}); its outgoing edges are not taken"
+                )
                 continue
 
             # The source node's run outputs (final_answer, should_terminate,

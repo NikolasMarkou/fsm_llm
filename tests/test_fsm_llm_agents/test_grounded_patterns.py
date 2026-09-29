@@ -1433,8 +1433,8 @@ class TestDebateLoop:
         _, result = self._run()
 
         assert result.answer == _CONCLUDE_TEXT
-        assert result.success is True
-        assert result.stop_reason == "answered"
+        # The judge never agreed: num_rounds forced the consensus (D-051).
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
 
     def test_consensus_concludes_after_one_round(self):
         _, result = self._run(num_rounds=3, consensus=True)
@@ -1448,7 +1448,10 @@ class TestDebateLoop:
 
         assert result.answer == _CONCLUDE_TEXT
         assert result.success is False
-        assert result.stop_reason == "no_result"
+        # Nothing was ever extracted, so the judge handler (CONTEXT_UPDATE)
+        # never ran and the limiter forced the consensus: a forced stop
+        # outranks no_result (D-051 of plan 06a5ec0a).
+        assert result.stop_reason == "max_iterations"
 
     def test_only_conclude_speaks_and_no_bulk_call_runs(self):
         llm, _ = self._run()
@@ -2411,3 +2414,328 @@ class TestAgentInstructions:
         replies = _spoken_replies(llm)
         assert replies and all(rule in r.system_prompt for r in replies)
         assert _spoken_states(llm) == {"conclude"}
+
+
+# ---------------------------------------------------------------------------
+# Fix 13.1: ``success`` reflects who concluded (D-051 of plan 06a5ec0a)
+# ---------------------------------------------------------------------------
+
+
+def _haiku_output(text: str, _ctx: dict) -> object:
+    if "ADD-IMAGERY" in text:
+        return "HAIKU-2"
+    return "HAIKU-1" if "haiku" in text else None
+
+
+def _haiku_evaluation(out: str, _ctx: dict) -> object:
+    from fsm_llm.agents.definitions import EvaluationResult
+
+    ok = out == "HAIKU-2"
+    return EvaluationResult(
+        passed=ok, score=1.0 if ok else 0.2, feedback="ok" if ok else "ADD-IMAGERY"
+    )
+
+
+# should_terminate is grounded only once the lookup observation ("is Paris")
+# is in the think prompt, so turn 1 selects the tool and turn 2 concludes.
+_NO_TERMINATE = {k: v for k, v in _REACT_FACTS.items() if k != "should_terminate"}
+
+
+class _PlantingLLM(PromptGroundedLLM):
+    """Every bulk extraction also returns ``planted`` (a model writing
+    framework keys through a state's bulk call)."""
+
+    def __init__(self, planted: dict, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.planted = dict(planted)
+
+    def extract_bulk_data(self, request: BulkExtractionRequest):
+        response = super().extract_bulk_data(request)
+        response.extracted_data.update(self.planted)
+        return response
+
+
+class _FailingNode(_RecordingNode):
+    def run(self, task: str, initial_context: dict | None = None):
+        result = super().run(task, initial_context)
+        return result.model_copy(
+            update={"success": False, "stop_reason": "max_iterations"}
+        )
+
+
+class TestSuccessReflectsWhoConcluded:
+    """A forced reason is reported only when the framework, not the model or
+    judge, decided the outcome; a genuine pass on the budget's last round is a
+    success. Framework keys cannot be planted by extraction."""
+
+    # -- EvalOpt / MakerChecker: forced_pass only on an overridden verdict --
+
+    def _evalopt(self, max_iterations: int):
+        from fsm_llm.agents import AgentConfig, EvaluatorOptimizerAgent
+
+        return EvaluatorOptimizerAgent(
+            evaluation_fn=_haiku_evaluation,
+            max_refinements=3,
+            config=AgentConfig(max_iterations=max_iterations),
+            llm_interface=_TurnAwareLLM({ContextKeys.GENERATED_OUTPUT: _haiku_output}),
+        ).run("Write a haiku about rain")
+
+    @pytest.mark.parametrize("max_iterations", [3, 4, 5])
+    def test_evalopt_pass_on_the_limiter_round_is_success(self, max_iterations):
+        result = self._evalopt(max_iterations)
+
+        assert result.answer == "HAIKU-2"
+        assert result.final_context[ContextKeys.EVALUATION_RESULT]["passed"] is True
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_evalopt_budget_forced_failing_output_is_forced_pass(self):
+        result = self._evalopt(2)
+
+        assert result.answer == "HAIKU-1"
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+
+    def _maker_checker(self, max_iterations: int):
+        from fsm_llm.agents import AgentConfig, MakerCheckerAgent
+
+        return MakerCheckerAgent(
+            maker_instructions="Write a haiku.",
+            checker_instructions="Check.",
+            max_revisions=3,
+            config=AgentConfig(max_iterations=max_iterations),
+            llm_interface=_TurnAwareLLM(_maker_checker_derived()),
+        ).run(_MC_TASK)
+
+    @pytest.mark.parametrize("max_iterations", [3, 4])
+    def test_maker_checker_pass_on_the_limiter_round_is_success(self, max_iterations):
+        result = self._maker_checker(max_iterations)
+
+        assert result.answer == "DRAFT-2"
+        assert result.final_context["quality_score"] == 0.9
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_maker_checker_budget_forced_failing_draft_is_forced_pass(self):
+        result = self._maker_checker(2)
+
+        assert result.answer == "DRAFT-1"
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+
+    # -- Reflexion: the max_reflections cap is a forced stop --
+
+    def test_reflexion_cap_without_a_pass_is_forced_pass(self):
+        from fsm_llm.agents import AgentConfig, ReflexionAgent
+
+        runs: list[str] = []
+        llm = _TurnAwareLLM(_reflect_derived(), facts=_REFLEXION_FACTS)
+        result = ReflexionAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=10),
+            max_reflections=2,
+            llm_interface=llm,
+        ).run("What is the capital of France?")
+
+        assert len(result.final_context[ContextKeys.EPISODIC_MEMORY]) == 2
+        assert result.final_context.get(ContextKeys.EVALUATION_PASSED) is not True
+        assert result.answer
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+
+    def test_reflexion_pass_on_the_last_allowed_turn_is_success(self):
+        from fsm_llm.agents import AgentConfig, ReflexionAgent
+
+        runs: list[str] = []
+        facts = dict(_REFLEXION_FACTS, evaluation_passed=(True, "is Paris"))
+        result = ReflexionAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=2),
+            llm_interface=_TurnAwareLLM(_reflect_derived(), facts=facts),
+        ).run("What is the capital of France?")
+
+        assert runs == ["capital of France"]
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    # -- ReAct family: a model conclusion on the last think turn succeeds --
+
+    def _react_family(self, pattern: str, facts: dict, max_iterations: int):
+        from fsm_llm.agents import AgentConfig, ReactAgent
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+
+        cls = {"react": ReactAgent, "reasoning_react": ReasoningReactAgent}[pattern]
+        runs: list[str] = []
+        result = cls(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=max_iterations),
+            llm_interface=PromptGroundedLLM(facts=facts),
+        ).run("What is the capital of France?")
+        return runs, result
+
+    @pytest.mark.parametrize("pattern", ["react", "reasoning_react"])
+    @pytest.mark.parametrize("max_iterations", [1, 2])
+    def test_model_conclusion_on_the_last_think_turn_is_success(
+        self, pattern, max_iterations
+    ):
+        runs, result = self._react_family(pattern, _REACT_FACTS, max_iterations)
+
+        assert runs == ["capital of France"]
+        assert result.final_context[ContextKeys.SHOULD_TERMINATE] is True
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    @pytest.mark.parametrize("pattern", ["react", "reasoning_react"])
+    @pytest.mark.parametrize("max_iterations", [1, 2, 3])
+    def test_limiter_forced_conclusion_is_still_max_iterations(
+        self, pattern, max_iterations
+    ):
+        runs, result = self._react_family(pattern, _NO_TERMINATE, max_iterations)
+
+        assert runs
+        assert result.answer
+        assert (result.success, result.stop_reason) == (False, "max_iterations")
+
+    @pytest.mark.parametrize(
+        ("max_iterations", "tool_turns", "think_turns"),
+        [(1, 1, 2), (2, 1, 2), (3, 2, 3)],
+    )
+    def test_documented_react_budget_counts(
+        self, max_iterations, tool_turns, think_turns
+    ):
+        # D-028 as documented: N >= 2 gives N think turns and N - 1 tool
+        # turns; N = 1 behaves like N = 2.
+        runs, result = self._react_family("react", _NO_TERMINATE, max_iterations)
+
+        assert len(runs) == tool_turns
+        assert result.final_context[ContextKeys.ITERATION_COUNT] == think_turns
+
+    # -- Debate: a forced consensus is forced; the success key survives --
+
+    def _debate(self, derived: dict, num_rounds: int = 2):
+        llm = _TurnAwareLLM(derived, responses={"conclude": _CONCLUDE_TEXT})
+        return DebateAgent(num_rounds=num_rounds, llm_interface=llm).run(_DEBATE_TASK)
+
+    def test_debate_consensus_forced_by_num_rounds_is_forced_pass(self):
+        result = self._debate(_debate_derived(consensus=False))
+
+        assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == 2
+        assert result.answer == _CONCLUDE_TEXT
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+
+    def test_debate_judge_consensus_on_the_last_round_is_success(self):
+        derived = _debate_derived()
+        derived[ContextKeys.CONSENSUS_REACHED] = lambda _t, ctx: bool(
+            ctx.get(ContextKeys.DEBATE_ROUNDS)
+        )
+        result = self._debate(derived)
+
+        assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == 2
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_debate_final_round_without_proposition_keeps_the_success_key(self):
+        derived = _debate_derived()
+        # Round 2's proposer returns nothing; the judge still agrees.
+        derived[ContextKeys.PROPOSITION] = lambda text, ctx: (
+            None if ctx.get(ContextKeys.DEBATE_ROUNDS) else _P1
+        )
+        derived[ContextKeys.CONSENSUS_REACHED] = lambda _t, ctx: bool(
+            ctx.get(ContextKeys.DEBATE_ROUNDS)
+        )
+        result = self._debate(derived)
+
+        assert result.final_context[ContextKeys.PROPOSITION] == _P1
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_debate_limiter_forced_consensus_records_max_iterations(self):
+        agent = DebateAgent(num_rounds=1, llm_interface=PromptGroundedLLM())
+        limiter = agent._make_iteration_limiter()
+        spent = {ContextKeys.ITERATION_COUNT: agent._fsm_budget()}
+
+        forced = limiter(dict(spent))
+        judged = limiter({**spent, ContextKeys.CONSENSUS_REACHED: True})
+
+        assert forced[ContextKeys.FORCED_STOP_REASON] == "max_iterations"
+        assert ContextKeys.FORCED_STOP_REASON not in judged
+
+    # -- AgentGraph / Swarm --
+
+    def test_graph_failed_node_takes_no_outgoing_edge(self):
+        nodes = {"a": _FailingNode("a"), "b": _RecordingNode("b")}
+        result = _graph(nodes, [("a", "b")]).run("task")
+
+        assert nodes["b"].calls == []
+        assert result.final_context["_graph_execution_order"] == ["a"]
+        assert (result.success, result.stop_reason) == (False, "max_iterations")
+
+    def test_swarm_handoff_to_unknown_agent_fails(self):
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        a = _RecordingNode("a", {"next_agent": "ghost"})
+        result = SwarmAgent(agents={"a": a}, entry_agent="a").run("t")  # type: ignore[dict-item]
+
+        assert result.answer == "a answer"
+        assert (result.success, result.stop_reason) == (False, "no_result")
+
+    # -- Framework keys are handler-only on every agent FSM --
+
+    def test_every_agent_fsm_declares_the_framework_keys_handler_only(self):
+        from fsm_llm.agents import ToolRegistry
+        from fsm_llm.agents import fsm_definitions as fd
+        from fsm_llm.agents.definitions import ChainStep
+        from fsm_llm.agents.parallel_react import build_parallel_react_fsm
+
+        registry = _lookup_registry([])
+        defs = [
+            fd.build_orchestrator_fsm("t"),
+            fd.build_adapt_fsm(task_description="t"),
+            fd.build_reflexion_fsm(registry, "t"),
+            fd.build_plan_execute_fsm(registry, "t"),
+            fd.build_react_fsm(registry, "t"),
+            fd.build_self_consistency_fsm("t"),
+            fd.build_debate_fsm("t"),
+            fd.build_rewoo_fsm(registry, "t"),
+            fd.build_evalopt_fsm("t"),
+            fd.build_prompt_chain_fsm(
+                [
+                    ChainStep(
+                        step_id="s",
+                        name="s",
+                        extraction_instructions="x",
+                        response_instructions="y",
+                    )
+                ],
+                "t",
+            ),
+            fd.build_maker_checker_fsm("make", "check", "t"),
+            build_parallel_react_fsm(ToolRegistry(), "t"),
+        ]
+        for fsm in defs:
+            listed = set(fsm.get("handler_only_keys") or [])
+            assert {
+                ContextKeys.MAX_ITERATIONS_REACHED,
+                ContextKeys.FORCED_STOP_REASON,
+            } <= listed, fsm["name"]
+
+    @pytest.mark.parametrize(
+        "planted",
+        [
+            {ContextKeys.MAX_ITERATIONS_REACHED: True},
+            {ContextKeys.FORCED_STOP_REASON: "stalled"},
+        ],
+    )
+    def test_model_cannot_plant_framework_keys_through_bulk_extraction(self, planted):
+        # REWOO's plan_all state runs a bulk call; before D-051 its reply
+        # could write the forced flag or reason and flip a real run to failed.
+        from fsm_llm.agents import REWOOAgent
+
+        calls: list[str] = []
+        llm = _PlantingLLM(
+            planted,
+            facts={
+                "plan_blueprint": ([_lookup_step(1, "capital")], "capital of France"),
+                "final_answer": ("Paris", "capital of France"),
+            },
+        )
+        result = REWOOAgent(tools=_rewoo_registry(calls), llm_interface=llm).run(
+            _REWOO_TASK
+        )
+
+        assert llm.calls("extract_bulk_data"), "no bulk channel was exercised"
+        assert calls == ["capital"]
+        assert result.final_context[ContextKeys.MAX_ITERATIONS_REACHED] is False
+        assert ContextKeys.FORCED_STOP_REASON not in result.final_context
+        assert (result.success, result.stop_reason) == (True, "evidence")

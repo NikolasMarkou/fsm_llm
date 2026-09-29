@@ -16,6 +16,7 @@ from .constants import (
     ContextKeys,
     Defaults,
     LogMessages,
+    ReflexionStates,
     StopReason,
 )
 from .definitions import AgentStep, ToolCall
@@ -507,7 +508,12 @@ class AgentHandlers:
         the cycle (its call still runs). Independently, the stop is forced
         ``FORCED_STOP_MARGIN`` transitions (at most ``max``) before the
         ``max * FSM_BUDGET_MULTIPLIER`` loop ceiling, so a run with long cycles
-        concludes instead of raising ``BudgetExhaustedError``. Never raises.
+        concludes instead of raising ``BudgetExhaustedError``. A limit of 1
+        behaves like 2 (the first cycle's tool always runs). A turn that
+        concludes on its own evidence (:func:`concluded_on_evidence`) with no
+        recorded forced reason is never forced, and withdraws an earlier flag
+        (``max_iterations_reached`` back to False), so the last think turn's
+        own conclusion reports ``success=True``. Never raises.
         """
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-028
         # LOOP-04: count think exits here, on the instance. Do NOT move this
@@ -529,6 +535,25 @@ class AgentHandlers:
                 current=self._current_iteration, max=max_iterations
             )
         )
+
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: a turn whose own
+        # verdict concludes on evidence (think: should_terminate, which think
+        # entry refreshed; Reflexion evaluate: evaluation_passed) is the
+        # model's conclusion, not the budget's, even after the flag: the
+        # flag is withdrawn so the run reports success. Do NOT drop the
+        # recorded-reason check (a stall or reflection cap stays forced) and
+        # do NOT read should_terminate on a state that does not refresh it.
+        if (
+            concluded_on_evidence(leaving, context)
+            and recorded_forced_reason(context) is None
+        ):
+            update: dict[str, Any] = {
+                ContextKeys.ITERATION_COUNT: self._current_iteration
+            }
+            if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
+                logger.info("The model concluded on its own on the last turn")
+                update[ContextKeys.MAX_ITERATIONS_REACHED] = False
+            return update
 
         approved = (
             leaving == AgentStates.AWAIT_APPROVAL
@@ -650,22 +675,58 @@ def make_redraft_handlers(
     return on_entry, on_exit
 
 
+def recorded_forced_reason(context: Mapping[str, Any]) -> str | None:
+    """The ``StopReason.FORCED`` value a forcing handler recorded, else None.
+
+    Interface contract (callers: :func:`is_forced_verdict`,
+    ``AgentHandlers.check_iteration_limit``, ``BaseAgent._forced_stop_reason``,
+    the Debate limiter): reads ``forced_stop_reason`` and returns it only when
+    it is a string in ``StopReason.FORCED``. Never raises.
+    """
+    reason = context.get(ContextKeys.FORCED_STOP_REASON)
+    return reason if isinstance(reason, str) and reason in StopReason.FORCED else None
+
+
+# The verdict a ReAct-family turn concludes on, per state it leaves.
+_CONCLUDE_VERDICTS: dict[str, str] = {
+    AgentStates.THINK: ContextKeys.SHOULD_TERMINATE,
+    ReflexionStates.EVALUATE: ContextKeys.EVALUATION_PASSED,
+}
+
+
+def concluded_on_evidence(leaving: str, context: Mapping[str, Any]) -> bool:
+    """True when the turn leaving ``leaving`` concludes on its own verdict.
+
+    Interface contract (caller: ``AgentHandlers.check_iteration_limit``):
+    ``leaving`` is ``think`` with ``should_terminate is True`` or Reflexion's
+    ``evaluate`` with ``evaluation_passed is True``, and ``observation_count``
+    is above 0: the first disjunct of the conclude edge
+    (``fsm_definitions._conclude_on_evidence_logic``), so this turn takes
+    that edge. Every other state gives False. Never raises.
+    """
+    verdict = _CONCLUDE_VERDICTS.get(leaving)
+    if verdict is None or context.get(verdict) is not True:
+        return False
+    count = context.get(ContextKeys.OBSERVATION_COUNT)
+    return isinstance(count, int) and count > 0
+
+
 def is_forced_verdict(value: Any, context: dict[str, Any]) -> bool:
     """True when ``value`` is a verdict a framework handler forced to True.
 
     "Forced" is read only from framework-written flags, never from the
     verdict key itself: ``value is True`` AND either ``max_iterations_reached
     is True`` (limiters, stall detector; seeded False by ``_init_context``) or
-    ``forced_stop_reason`` holds a ``StopReason.FORCED`` value (forcing
-    handlers). Both flags are in ``RUN_OUTPUT_KEYS``, so caller context cannot
-    seed them. Never raises.
+    a recorded ``forced_stop_reason`` (:func:`recorded_forced_reason`). Both
+    flags are in ``RUN_OUTPUT_KEYS`` (caller context cannot seed them) and in
+    ``FRAMEWORK_ONLY_KEYS`` (every agent FSM lists them as core
+    ``handler_only_keys``, so no extraction writes them). Never raises.
     """
     if value is not True:
         return False
     if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
         return True
-    reason = context.get(ContextKeys.FORCED_STOP_REASON)
-    return isinstance(reason, str) and reason in StopReason.FORCED
+    return recorded_forced_reason(context) is not None
 
 
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-008: loop freshness is ONE rule,
@@ -679,6 +740,7 @@ def make_fresh_keys_handler(
     keys: Iterable[str],
     *,
     stash: Mapping[str, str] | None = None,
+    keep_limiter_forced: bool = True,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Build an entry handler that makes a producing state re-extract ``keys``.
 
@@ -702,6 +764,11 @@ def make_fresh_keys_handler(
           older stash survives a round that produced nothing. A key holding a
           forced ``True`` (:func:`is_forced_verdict`) is left untouched. The
           handler never raises.
+        - ``keep_limiter_forced``: ``False`` keeps a ``True`` only when a
+          forcing handler recorded a reason (:func:`recorded_forced_reason`);
+          a ``True`` forced by the bare ``max_iterations_reached`` flag is
+          cleared. Only for a state whose forced edge reads the flag itself
+          (ReAct-family think, D-051 of plan 06a5ec0a).
         - Raises ``ValueError`` at build time for empty ``keys`` or an invalid
           ``stash`` mapping.
     """
@@ -718,11 +785,16 @@ def make_fresh_keys_handler(
             f"stash keys must be in RESULT_DROPPED_CONTEXT_KEYS: {unlisted}"
         )
 
+    def kept(value: Any, context: dict[str, Any]) -> bool:
+        if keep_limiter_forced:
+            return is_forced_verdict(value, context)
+        return value is True and recorded_forced_reason(context) is not None
+
     def refresh_keys(context: dict[str, Any]) -> dict[str, Any]:
         delta: dict[str, Any] = {}
         for key in fresh:
             value = context.get(key)
-            if value is None or is_forced_verdict(value, context):
+            if value is None or kept(value, context):
                 continue
             delta[key] = None
             if key in stash_map:

@@ -65,16 +65,17 @@ class TestConcludeGuardStructure:
         fsm = build_react_fsm(_make_registry())
         for state_name in ("think", "act"):
             logic = _conclude_logic(fsm["states"][state_name])
-            # top-level AND of should_terminate and an OR clause
-            assert "and" in logic, f"{state_name} conclude must be an AND"
-            clauses = logic["and"]
-            text = str(clauses)
+            # (should_terminate AND observation_count > 0) OR forced: a forced
+            # stop concludes on the flag alone (D-051 of plan 06a5ec0a).
+            assert "or" in logic, f"{state_name} conclude must be an OR"
+            evidence, forced = logic["or"]
+            text = str(evidence["and"])
             assert "should_terminate" in text
             assert "observation_count" in text, (
                 f"{state_name} conclude must gate on observation_count "
                 "(re-merge-immune guard missing)"
             )
-            assert "max_iterations_reached" in text, (
+            assert "max_iterations_reached" in str(forced), (
                 f"{state_name} conclude must allow forced termination"
             )
 

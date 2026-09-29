@@ -52,17 +52,31 @@ work, is `docs/agents_roadmap.md`.
   built), then `DEFAULT_LLM_MODEL`; `default_llm_judge(model=None)` resolves the same
   way. An explicit model always wins.
 - Agents: `success` has one meaning, "the run reached its goal". A run that was forced
-  to stop (`max_iterations_reached`, three turns with no tool, an EvaluatorOptimizer or
-  MakerChecker pass forced at its revision limit, a failed PromptChain gate) still
-  returns its last answer but reports `success=False` with the matching `stop_reason`.
-  SelfConsistency is no longer always `True` (it needs a sample with text), a Debate
-  needs a proposition, and REWOO needs at least one tool call that succeeded. Monitor
-  runs and workflow `AgentStep`s show these runs as failed.
-- Agents: in the ReAct family (`ReactAgent`, `ReflexionAgent`, `ParallelReactAgent`,
-  `ReasoningReactAgent` and the ReAct subclasses) `max_iterations=N` now means N think
-  turns and at most N - 1 tool calls; before, it counted every FSM transition (about
-  half as many tool calls). A run that never concludes by itself takes about twice as
-  long before its forced stop. No tool runs after the forced-stop flag is set.
+  to stop (`max_iterations_reached`, three turns with no tool, a failing
+  EvaluatorOptimizer or MakerChecker verdict overridden at its revision or budget
+  limit, a Reflexion run that hit `max_reflections` without a passing evaluation, a
+  Debate consensus forced by `num_rounds` or the budget, a failed PromptChain gate)
+  still returns its last answer but reports `success=False` with the matching
+  `stop_reason`. A genuine pass, verdict or conclusion on the budget's last round
+  counts as success. SelfConsistency is no longer always `True` (it needs a sample
+  with text), a Debate needs a proposition (the last round that had one), and REWOO
+  needs at least one tool call that succeeded. A `SwarmAgent` handoff to an unknown
+  agent reports `success=False, no_result`. Monitor runs and workflow `AgentStep`s
+  show these runs as failed.
+- Agents: every agent FSM lists `max_iterations_reached`, `forced_stop_reason`,
+  `iteration_count` and `observation_count` in core `handler_only_keys`, so no model
+  extraction can write them.
+- Agents: in the ReAct family (`ReactAgent`, `ParallelReactAgent`,
+  `ReasoningReactAgent` and the ReAct subclasses) `max_iterations=N` now counts think
+  turns: for N >= 2 a run that never concludes gets N think turns and N - 1 tool
+  calls, and N = 1 behaves like N = 2 (2 think turns, 1 tool call). Before, it
+  counted every FSM transition (about half as many tool calls). `ReflexionAgent`
+  counts the same think turns but closes a cycle on the act exit, so its forced
+  conclusion comes from `evaluate` (N = 1, 2, 3, 4 gave 1, 1, 2, 3 think turns and
+  1, 1, 2, 2 tool calls). A run that never concludes by itself takes about twice as
+  long before its forced stop. No tool runs after the forced-stop flag is set, and
+  the model is still asked on the last think turn: its own conclusion there, backed
+  by a tool result, reports `success=True`.
 - Agents: `@tool(requires_approval=True)` now gates the tool when `HumanInTheLoop` has
   an approval callback and no policy (the flag is the default policy). With a policy,
   the policy alone decides, as before. Construction warns when flagged tools exist and
@@ -98,8 +112,9 @@ work, is `docs/agents_roadmap.md`.
   first round's judge verdict. SelfConsistency votes on each sample's last `Answer:`
   line (casefolded) and `confidence` is the share of samples that agree.
 - Agents: `AgentGraph` runs nodes in topological order, each once, after all its
-  predecessors; the answer comes from the last executed sink. A cycle raises
-  `ValueError` also for a directly constructed `AgentGraph`.
+  predecessors; the answer comes from the last executed sink. A node that raises or
+  returns `success=False` takes no outgoing edge. A cycle raises `ValueError` also for
+  a directly constructed `AgentGraph`.
 - Agents: `SwarmAgent` gives every member the original task (the hand-off message
   travels in context) and `max_handoffs=N` allows exactly N handoffs.
 - Agents: `PlanExecuteAgent` replans when a step's tool fails, `max_replans=N` allows

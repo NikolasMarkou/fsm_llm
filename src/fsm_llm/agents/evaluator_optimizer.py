@@ -109,6 +109,8 @@ class EvaluatorOptimizerAgent(BaseAgent):
             context,
             "evaluator_optimizer",
             extra_answer_keys=[ContextKeys.GENERATED_OUTPUT],
+            # Forced only on _run_evaluation's recorded override (D-051).
+            judged=True,
         )
 
     def _register_handlers(self, api: API) -> None:
@@ -230,12 +232,16 @@ class EvaluatorOptimizerAgent(BaseAgent):
 
     def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create the iteration limiter handler (shared rule, see handlers)."""
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: no forced reason
+        # here. Do NOT add FORCED_STOP_REASON back to this dict: the limiter
+        # fires on every transition past the limit, including the one after a
+        # genuine pass, so a real pass read as forced_pass. _run_evaluation
+        # records it only when it overrides a failing verdict.
         return make_iteration_limiter(
             self.config.max_iterations,
             {
                 ContextKeys.MAX_ITERATIONS_REACHED: True,
                 ContextKeys.EVALUATION_PASSED: True,
-                ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS,
             },
         )
 

@@ -14,7 +14,7 @@ from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, artifact_text
 from .constants import (
     ContextKeys,
     DebateStates,
@@ -22,10 +22,15 @@ from .constants import (
     HandlerNames,
     HandlerPriorities,
     LogMessages,
+    StopReason,
 )
 from .definitions import AgentConfig, AgentResult, DebateRound
 from .fsm_definitions import build_debate_fsm
-from .handlers import make_fresh_keys_handler, make_iteration_limiter
+from .handlers import (
+    make_fresh_keys_handler,
+    make_iteration_limiter,
+    recorded_forced_reason,
+)
 
 # Every key a debate round writes, cleared on propose entry.
 _ROUND_KEYS: tuple[str, ...] = (
@@ -214,14 +219,33 @@ class DebateAgent(BaseAgent):
                 counter_argument=context.get(ContextKeys.COUNTER_ARGUMENT, ""),
                 judge_verdict=context.get(ContextKeys.JUDGE_VERDICT, ""),
             )
-            debate_rounds.append(round_entry.model_dump(mode="json"))
-
             updates: dict[str, Any] = {
-                ContextKeys.DEBATE_ROUNDS: debate_rounds,
+                ContextKeys.DEBATE_ROUNDS: [
+                    *debate_rounds,
+                    round_entry.model_dump(mode="json"),
+                ],
             }
 
-            # Force consensus if max rounds reached
+            # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: `proposition`
+            # is the success key, and propose entry clears it every round.
+            # Do NOT let a round whose proposer returned nothing erase the
+            # debate's position: the last recorded proposition is restored
+            # (the round entry still records this round's empty one).
+            if not artifact_text(context.get(ContextKeys.PROPOSITION)).strip():
+                earlier = [
+                    r.get("proposition")
+                    for r in debate_rounds
+                    if isinstance(r, dict)
+                    and artifact_text(r.get("proposition")).strip()
+                ]
+                if earlier:
+                    updates[ContextKeys.PROPOSITION] = earlier[-1]
+
+            # Force consensus if max rounds reached. D-051: a consensus the
+            # judge did not reach itself is a forced pass (D-011), not success.
             if current_round >= num_rounds:
+                if context.get(ContextKeys.CONSENSUS_REACHED) is not True:
+                    updates[ContextKeys.FORCED_STOP_REASON] = StopReason.FORCED_PASS
                 updates[ContextKeys.CONSENSUS_REACHED] = True
 
             # Increment round for next cycle
@@ -249,10 +273,25 @@ class DebateAgent(BaseAgent):
         # Same cap as the run's max_iterations to avoid premature termination.
         # Also set CONSENSUS_REACHED so the FSM transitions to CONCLUDE cleanly
         # (A-ISSUE-006).
-        return make_iteration_limiter(
+        limiter = make_iteration_limiter(
             self._fsm_budget(),
             {
                 ContextKeys.SHOULD_TERMINATE: True,
                 ContextKeys.CONSENSUS_REACHED: True,
             },
         )
+
+        # D-051 of plan 06a5ec0a: the limiter's consensus is a forced stop
+        # unless the judge already reached one on this turn (propose entry
+        # clears consensus_reached, and every forced True records a reason,
+        # so an unrecorded True is the judge's own).
+        def check_iteration_limit(context: dict[str, Any]) -> dict[str, Any]:
+            update = limiter(context)
+            if ContextKeys.CONSENSUS_REACHED not in update:
+                return update
+            genuine = context.get(ContextKeys.CONSENSUS_REACHED) is True
+            if not genuine and recorded_forced_reason(context) is None:
+                update[ContextKeys.FORCED_STOP_REASON] = StopReason.MAX_ITERATIONS
+            return update
+
+        return check_iteration_limit

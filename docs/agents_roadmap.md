@@ -168,7 +168,7 @@ Where verification or a consumer contradicted the proposed fix, the fix was chan
 - SEC-03 (D-004): the flag is a default policy only for a callback-only HITL; with a policy, the policy alone decides and is never ANDed with the flag.
 - SEC-04 (D-005): refusal at construction and at `run()` instead of new HITL paths.
 - SEC-11, roadmap D7 (D-006): D-030 empty-input recovery kept; no half-designed `read_only` flag ahead of ToolSpec.
-- LOOP-04 (D-007, D-028): counting changed only in `AgentHandlers.check_iteration_limit`; the shared `make_iteration_limiter` is untouched. `max_iterations=N` gives N think turns and N - 1 tool turns, plus a forced stop a few transitions before the loop ceiling.
+- LOOP-04 (D-007, D-028): counting changed only in `AgentHandlers.check_iteration_limit`; the shared `make_iteration_limiter` is untouched. For N >= 2, `max_iterations=N` gives N think turns and N - 1 tool turns (N = 1 behaves like N = 2; Reflexion closes a cycle on the act exit, so its counts differ), plus a forced stop a few transitions before the loop ceiling. Fix 13.1 (D-051): the model is still asked on the last think turn and its own evidence-backed conclusion there reports success.
 - LOOP-02 (D-008): one `make_fresh_keys_handler` for producing-state entry; never clears a forced `True` verdict.
 - LOOP-01 (D-009): typed per-field extraction, but `think` with `use_classification=True` keeps its bulk fill.
 - LOOP-06 (D-021, D-029): `agent_feedback` is cleared on think exit, not think entry (an entry clear erased it unread).
@@ -176,7 +176,7 @@ Where verification or a consumer contradicted the proposed fix, the fix was chan
 - LOOP-14 (D-015): the grant is spent before the tool runs and recorded call-locally; handlers are not made `.critical()`.
 - LOOP-08 (D-017): `agent_trace` is not capped or renamed (a data path, and core reads it); it is kept out of prompts instead.
 - REACT-03 (D-010): the dead override is deleted, not repaired (a repair needs a core channel).
-- API-04 (D-011, D-027): additive `stop_reason`; a public `forced_stop_reason` context key tells forced passes apart, because `API.get_data` drops internal keys.
+- API-04 (D-011, D-027): additive `stop_reason`; a public `forced_stop_reason` context key tells forced passes apart, because `API.get_data` drops internal keys. Fix 13.1 (D-051): a forced reason only when a handler overrode the verdict (EvalOpt, MakerChecker read only the recorded reason, not the bare limiter flag); Reflexion's reflection cap and Debate's forced consensus are forced; framework keys are core `handler_only_keys` on every agent FSM; an AgentGraph node with `success=False` takes no edge; a Swarm handoff to an unknown agent is `no_result`.
 - API-01 (D-012, D-047): `create_agent` keeps a legacy positional prompt with a `DeprecationWarning`. `AgentConfig.instructions` is prefixed as an `Agent instructions:` block to every non-empty state and field instruction, not written into `persona` (persona reaches only Pass 2).
 - D-048: the core persona cap is now 4,000 characters (`MAX_PERSONA_LENGTH`), but `AgentConfig.instructions` still uses the instructions block (D-047): a longer persona still never reaches the Pass-1 field prompts.
 - PAT-13 (D-013): `AgentConfig.model` stays a `str` with an env-reading default factory; more than 20 readers use it directly.

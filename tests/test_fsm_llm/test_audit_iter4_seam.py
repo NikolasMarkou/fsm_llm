@@ -578,7 +578,8 @@ class TestHandlerOnlyKeysValidatorWarnings:
         assert _handler_only_warnings(_fsm_with_handler_only([])) == []
 
     def test_no_shipped_example_or_agent_builder_fsm_gets_a_new_warning(self):
-        """GUARD: no shipped FSM lists handler_only_keys, so the rule never runs."""
+        """GUARD: no shipped example lists handler_only_keys, and agent FSMs
+        warn only about their framework-written keys."""
         import json
         from pathlib import Path
 
@@ -602,11 +603,21 @@ class TestHandlerOnlyKeysValidatorWarnings:
             assert [w for w in result.warnings if "handler_only_keys" in w] == [], path
             checked += 1
         assert checked >= 10
+        from fsm_llm.agents.constants import FRAMEWORK_ONLY_KEYS
         from fsm_llm.agents.tools import ToolRegistry
 
+        # Agent FSMs list the framework-written keys (D-051 of plan
+        # 2026-09-29T103145-06a5ec0a); a key a state never reads warns as
+        # "unless a handler sets it", which the framework handlers do. No
+        # other handler_only_keys warning may appear.
         for fsm in (build_react_fsm(ToolRegistry()), build_plan_execute_fsm()):
             result = FSMValidator(fsm).validate()
-            assert [w for w in result.warnings if "handler_only_keys" in w] == []
+            warnings = [w for w in result.warnings if "handler_only_keys" in w]
+            expected = {
+                f"handler_only_keys lists '{key}' but no state references it"
+                for key in FRAMEWORK_ONLY_KEYS
+            }
+            assert all(w.split(" (")[0] in expected for w in warnings), warnings
 
 
 # ══════════════════════════════════════════════════════════════

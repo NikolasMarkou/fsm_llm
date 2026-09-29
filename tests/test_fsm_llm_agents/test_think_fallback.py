@@ -344,10 +344,16 @@ class TestUnknownToolThenRealTool:
         assert all(c == {"a": 1, "b": 2} for c in calls), calls
         # The fake never sets should_terminate: the ReAct family ends on its
         # iteration budget, a forced stop reported as success=False (D-011 of
-        # plan 06a5ec0a); plan_execute finishes its plan and succeeds.
-        if result.final_context.get("max_iterations_reached") is True:
-            assert result.success is False, result.final_context
+        # plan 06a5ec0a), and Reflexion on max_reflections without a passing
+        # evaluation, a forced pass (D-051); plan_execute finishes its plan
+        # and succeeds.
+        context = result.final_context
+        if context.get("max_iterations_reached") is True:
+            assert result.success is False, context
             assert result.stop_reason == "max_iterations"
+        elif context.get("forced_stop_reason"):
+            assert result.success is False, context
+            assert result.stop_reason == "forced_pass"
         else:
             assert result.success, result.final_context
         observations = [str(o) for o in result.final_context.get("observations", [])]

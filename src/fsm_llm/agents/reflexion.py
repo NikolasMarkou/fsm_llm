@@ -22,6 +22,7 @@ from .constants import (
     HandlerPriorities,
     LogMessages,
     ReflexionStates,
+    StopReason,
 )
 from .definitions import (
     AgentConfig,
@@ -168,10 +169,12 @@ class ReflexionAgent(BaseAgent):
             )
         self._register_tool_executor(api, ReflexionStates.ACT, handlers.execute_tool)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
-        # Only `reasoning` (bulk-filled when use_classification=True) is refreshed
-        # on think entry: the reflect bookkeeping sets should_terminate at
-        # max_reflections and think must still see it.
-        self._register_think_loop_handlers(api, [ContextKeys.REASONING])
+        # should_terminate is refreshed on think entry like ReAct's, so the
+        # last think turn gives its own verdict (D-051 of plan 06a5ec0a); the
+        # max_reflections stop survives, it records a forced reason.
+        self._register_think_loop_handlers(
+            api, [ContextKeys.REASONING, ContextKeys.SHOULD_TERMINATE]
+        )
 
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-031
         # The verdict is produced on evaluate ENTRY: evaluation_fn writes it
@@ -274,7 +277,14 @@ class ReflexionAgent(BaseAgent):
                 ContextKeys.EPISODIC_MEMORY: episodic_memory,
             }
             if reflection_count >= max_reflections:
+                # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: the cap
+                # stops a run whose evaluation never passed (reflect runs only
+                # after a failed or unclear verdict), so it is a forced stop
+                # like EvalOpt's refinement cap (D-011). Do NOT report it as
+                # answered: the answer ships, success is False.
                 updates[ContextKeys.SHOULD_TERMINATE] = True
+                if context.get(ContextKeys.EVALUATION_PASSED) is not True:
+                    updates[ContextKeys.FORCED_STOP_REASON] = StopReason.FORCED_PASS
             return updates
 
         return handle_reflection

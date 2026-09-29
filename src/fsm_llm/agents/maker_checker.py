@@ -118,6 +118,8 @@ class MakerCheckerAgent(BaseAgent):
             context,
             "maker_checker",
             extra_answer_keys=[ContextKeys.DRAFT_OUTPUT],
+            # Forced only on a recorded override of the checker (D-051).
+            judged=True,
         )
 
     def _register_handlers(self, api: API) -> None:
@@ -271,10 +273,14 @@ class MakerCheckerAgent(BaseAgent):
         """Force ``checker_passed`` once the limiter has flagged the budget.
 
         Registered on the check state only (D-007); returns ``{}`` otherwise.
+        A pass the checker (or its quality score) gave on this turn is not
+        overridden, so it records no forced reason (D-051 of plan 06a5ec0a).
         """
-        if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
-            return {
-                ContextKeys.CHECKER_PASSED: True,
-                ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS,
-            }
-        return {}
+        if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is not True:
+            return {}
+        if context.get(ContextKeys.CHECKER_PASSED) is True:
+            return {}
+        return {
+            ContextKeys.CHECKER_PASSED: True,
+            ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS,
+        }

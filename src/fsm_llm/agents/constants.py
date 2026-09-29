@@ -267,7 +267,10 @@ class StopReason:
     EVIDENCE = "evidence"
     # The iteration budget forced the stop; the last output still ships.
     MAX_ITERATIONS = "max_iterations"
-    # A judge verdict was forced True at a revision or budget limit.
+    # A judge overrode a failing (or missing) verdict at a revision or budget
+    # limit (EvalOpt, MakerChecker, Debate at num_rounds), or Reflexion hit
+    # max_reflections without a passing evaluation. A genuine pass on the
+    # limit's round is ANSWERED.
     FORCED_PASS = "forced_pass"
     # Consecutive turns with no tool selected forced the stop.
     STALLED = "stalled"
@@ -340,6 +343,23 @@ RUN_OUTPUT_KEYS: frozenset[str] = frozenset(
         ContextKeys.FORCED_STOP_REASON,
         ContextKeys.AGENT_FEEDBACK,
     }
+)
+
+
+# DECISION plan-2026-09-29T103145-06a5ec0a/D-051: keys only framework handlers
+# write (limiters, stall detector, forcing handlers, tool executors). Every
+# agent FSM lists them in core ``handler_only_keys``, so no extraction channel
+# (bulk, per-field, post-transition) can plant them: a model writing
+# ``max_iterations_reached`` or ``forced_stop_reason`` flipped ``success``,
+# and ``observation_count`` is the conclude evidence guard. Do NOT drop a key
+# here to let a state extract it; internal-prefixed keys
+# (``_approvals_spent``, ``_approval_granted``) need no entry, core never
+# extracts them.
+FRAMEWORK_ONLY_KEYS: tuple[str, ...] = (
+    ContextKeys.MAX_ITERATIONS_REACHED,
+    ContextKeys.FORCED_STOP_REASON,
+    ContextKeys.ITERATION_COUNT,
+    ContextKeys.OBSERVATION_COUNT,
 )
 
 

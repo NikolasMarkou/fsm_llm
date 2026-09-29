@@ -32,7 +32,12 @@ from fsm_llm import API
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
-from .constants import REACT_THINK_FRESH_KEYS, ContextKeys, Defaults
+from .constants import (
+    FRAMEWORK_ONLY_KEYS,
+    REACT_THINK_FRESH_KEYS,
+    ContextKeys,
+    Defaults,
+)
 from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall
 from .exceptions import AgentError
 from .fsm_definitions import _conclude_on_evidence_logic, _typed_field_extraction
@@ -201,6 +206,8 @@ def build_parallel_react_fsm(
         "initial_state": "think",
         "persona": persona,
         "states": states,
+        # D-051 of plan 06a5ec0a, as every _finalize_fsm builder.
+        "handler_only_keys": list(FRAMEWORK_ONLY_KEYS),
     }
 
 
