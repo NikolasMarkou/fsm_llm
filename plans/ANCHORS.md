@@ -174,3 +174,8 @@ plan-2026-09-28T090000-3c9e41d2/D-003 | 2026-09-28 | `_MonitorHandler` captures 
 plan-2026-09-28T090000-3c9e41d2/D-004 | 2026-09-28 | WebSocket streams use `events_after`/`logs_after` sequence cursors, not timestamps or list lengths, so bursts and ring-buffer eviction never drop or repeat items.
 plan-2026-09-28T090000-3c9e41d2/D-005 | 2026-09-28 | FSM snapshot routes that read files run via `asyncio.to_thread`, off the event loop.
 plan-2026-09-28T090000-3c9e41d2/D-006 | 2026-09-28 | Workflow run status and events come from the engine's `add_hook` callbacks keyed by a pre-generated run id, not from polling or return values of advance/cancel.
+plan-2026-09-29T044048-3a032517/D-003 | 2026-09-29 | `fsm_llm/__init__.py` stays lazy: it imports no subpackage and lists none in `__all__`, so extensions can `from fsm_llm import API` without a cycle and optional deps stay optional.
+plan-2026-09-29T044048-3a032517/D-004 | 2026-09-29 | One `logger.disable("fsm_llm")` silences core and all subpackages; `LIBRARY_LOGGER_NAMES = ("fsm_llm",)`; never re-add per-subpackage disables in src.
+plan-2026-09-29T044048-3a032517/D-007 | 2026-09-29 | `disable_warnings()` keeps the `fsm_llm(\.|$)` regex: all five subpackages are suppressed as the framework, a lookalike `fsm_llm_contrib` is not.
+plan-2026-09-29T044048-3a032517/D-008 | 2026-09-29 | The monitor CLI (`main_cli`) enables `fsm_llm` logging so the dashboard log panel works; `InstanceManager` must not flip global loguru state.
+plan-2026-09-29T044048-3a032517/D-016 | 2026-09-29 | CLI entry points (harness `run()`, reasoning `--verbose`) enable diagnostics via `setup_cli_logging` at process entry only, not in `main_cli` used in-process by tests.
