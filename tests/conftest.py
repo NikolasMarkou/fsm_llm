@@ -3,6 +3,7 @@ Global test configuration and fixtures for the entire test suite.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 from unittest.mock import Mock
@@ -16,6 +17,10 @@ sys.path.insert(0, str(src_path))
 # Import after path adjustment
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.definitions import (
+    BulkExtractionRequest,
+    DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
     FSMDefinition,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
@@ -124,6 +129,100 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
     mock_llm.extract_field.side_effect = _mock_extract_field
     return mock_llm
+
+
+#: Where the response prompt names the state it answers for (``prompts.py``).
+_CURRENT_STATE_TAG = re.compile(r"<current_state>([^<]+)</current_state>")
+
+
+class PromptGroundedLLM(LLMInterface):
+    """Fake LLM that knows a fact only when the prompt shows its evidence.
+
+    ``MockLLM2Interface`` answers every field from a fixed dict whatever the
+    prompt says, so it cannot tell a context-free prompt from a grounded one.
+    This fake can: a value comes back only when the text it would ground on
+    is in the request, like a real model reading its prompt.
+
+    Interface contract (shared by the agents Phase-1 tests):
+        - ``facts``: ``{field_name: (value, evidence)}``. ``evidence`` is a
+          substring; the field resolves to ``value`` only when it occurs in
+          the request text.
+        - ``extract_field``: the text is ``system_prompt``, ``user_message``
+          and the JSON-dumped ``context``. Returns ``value`` (``is_valid=True``)
+          or ``None`` (``is_valid=False``, confidence 0) for a missing fact or
+          absent evidence.
+        - ``extract_bulk_data``: returns only facts whose name the prompt asks
+          for (``"name"`` quoted in ``system_prompt``) and whose evidence is in
+          ``system_prompt`` or ``user_message``. A context-free "Continue."
+          prompt therefore yields ``{}``.
+        - ``generate_response``: ``responses[state]`` for the state named by
+          the prompt's ``<current_state>`` tag, else ``default_response``.
+        - ``requests``: every call as ``(kind, request)`` in call order, kind
+          being the method name. Never raises.
+    """
+
+    def __init__(
+        self,
+        facts: dict[str, tuple[object, str]] | None = None,
+        responses: dict[str, str] | None = None,
+        default_response: str = "ok",
+    ) -> None:
+        self.model = "prompt-grounded-fake"
+        self.facts = dict(facts or {})
+        self.responses = dict(responses or {})
+        self.default_response = default_response
+        self.requests: list[tuple[str, object]] = []
+
+    def calls(self, kind: str) -> list:
+        """The recorded requests of one kind, in call order."""
+        return [request for k, request in self.requests if k == kind]
+
+    def _grounded(self, name: str, text: str) -> object | None:
+        value, evidence = self.facts.get(name, (None, ""))
+        return value if evidence and evidence in text else None
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        self.requests.append(("extract_field", request))
+        text = "\n".join(
+            [
+                request.system_prompt,
+                request.user_message,
+                json.dumps(request.context or {}, default=str),
+            ]
+        )
+        value = self._grounded(request.field_name, text)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="prompt-grounded fake",
+            is_valid=value is not None,
+        )
+
+    def extract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
+        self.requests.append(("extract_bulk_data", request))
+        text = f"{request.system_prompt}\n{request.user_message}"
+        data = {}
+        for name in self.facts:
+            if f'"{name}"' not in request.system_prompt:
+                continue
+            value = self._grounded(name, text)
+            if value is not None:
+                data[name] = value
+        return DataExtractionResponse(extracted_data=data)
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        self.requests.append(("generate_response", request))
+        match = _CURRENT_STATE_TAG.search(request.system_prompt)
+        state = match.group(1) if match else None
+        message = self.responses.get(state or "", self.default_response)
+        return ResponseGenerationResponse(
+            message=message, message_type="response", reasoning="prompt-grounded fake"
+        )
 
 
 @pytest.fixture
