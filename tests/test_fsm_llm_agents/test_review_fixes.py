@@ -232,7 +232,7 @@ class TestOTELThreadSafety:
 
         exporter = OTELExporter(service_name="test")
         assert hasattr(exporter, "_spans_lock")
-        assert isinstance(exporter._spans_lock, threading.Lock)
+        assert isinstance(exporter._spans_lock, type(threading.Lock()))
 
     @pytest.mark.skipif(not _has_otel(), reason="opentelemetry sdk not installed")
     def test_concurrent_events_no_crash(self):
