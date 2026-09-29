@@ -1,11 +1,11 @@
 # docs
 
 Path: `docs/`
-Purpose: Long-form Markdown guides for FSM-LLM v0.11.0 (quickstart, FSM design, handlers, architecture, API reference) plus three historical Strands design records.
+Purpose: Long-form Markdown guides for FSM-LLM v0.11.0 (quickstart, FSM design, handlers, architecture, API reference) plus three historical Strands design records and one design proposal.
 
 ## Scope
 
-- In scope: 8 Markdown files at `docs/` with no subdirectories. FSM-LLM is one distribution (`fsm-llm`). The code lives in `src/fsm_llm/`, and the extensions are subpackages: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.harness`, `fsm_llm.eval`.
+- In scope: 9 Markdown files at `docs/` with no subdirectories. FSM-LLM is one distribution (`fsm-llm`). The code lives in `src/fsm_llm/`, and the extensions are subpackages: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.harness`, `fsm_llm.eval`.
 - Out of scope: runnable code, per-package READMEs, `CHANGELOG.md`, `EVALUATE.md`, planning artifacts under `plans/`. By user preference, monitor docs belong in `api_reference.md`. Do not create a separate `docs/monitor.md`.
 
 ## Architecture
@@ -16,6 +16,7 @@ Two groups of files:
 | --- | --- | --- | --- |
 | Current guides | `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md` | `> Covers FSM-LLM v0.11.0` (matches `src/fsm_llm/__version__.py`) | Must match the code |
 | Historical records | `strands_features.md`, `strands_features_phase_1.md`, `strands_features_phase_2.md` | `> **Historical design record.** ...` blockquote | Frozen snapshots. The blockquote says the counts are from the time of writing |
+| Design proposals | `vision_design_report.md` | `> **Design proposal, not implemented.** ...` blockquote | Describes planned work against a fixed commit; not a guide to current behavior. Not loaded by `test_docs_snippets.py` |
 
 Links between the docs: `fsm_design.md` ends with `**Next:** [Handler Development](./handlers.md)`. Each Strands file links to `api_reference.md`.
 
@@ -31,6 +32,7 @@ Links between the docs: `fsm_design.md` ends with `**Next:** [Handler Developmen
 | `strands_features.md` | Historical | 12 features to adapt, plus "Features NOT Recommended" |
 | `strands_features_phase_1.md` | Historical | 4 delivered features, commit `a7e3d88`, test counts from that time |
 | `strands_features_phase_2.md` | Historical | 8 features with estimated LOC and "Not yet implemented" notes from that time |
+| `vision_design_report.md` | Design proposal | Audit and plan for core vision (image input) support with a configurable vision model, propagated to all subpackages; written against commit `c632893` |
 
 ## Public interface
 
