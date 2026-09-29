@@ -4,7 +4,7 @@ The `docs/` folder at the root of the FSM-LLM repository holds the long-form use
 
 ## What it is for
 
-The package READMEs say what each part is. These guides go further: they teach you to build a bot, design states and transitions, write handlers, and they list the public API. Five files are current guides for version 0.11.0, and each one starts with the line `> Covers FSM-LLM v0.11.0`. The other three are historical design records from the "Strands" initiative. That work adapted features from the Strands Agents SDK, and all of it shipped in v0.4.0. Those three are kept to explain design choices. Do not use them as a usage guide.
+The package READMEs say what each part is. These guides go further: they teach you to build a bot, design states and transitions, write handlers, and they list the public API. Five files are current guides for version 0.11.0, and each one starts with the line `> Covers FSM-LLM v0.11.0`. The other three are historical design records from the "Strands" initiative. That work adapted features from the Strands Agents SDK, and all of it shipped in v0.4.0. Those three are kept to explain design choices. Do not use them as a usage guide. `agents_audit_and_roadmap.md` is a dated design record: an audit of the agents subpackage and a phased plan for it.
 
 ## How it works
 
@@ -35,6 +35,7 @@ Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds ev
 - `strands_features.md` - historical: the report that picked 12 Strands features to adapt, plus the features it rejected.
 - `strands_features_phase_1.md` - historical: delivery note for schema-enforced output, the hidden `metadata` memory buffer, response streaming and session persistence (commit `a7e3d88`).
 - `strands_features_phase_2.md` - historical: plan for the other 8 features (OTEL, swarm, agent graph, MCP, semantic tool retrieval, dependency-based workflow parallelism, SOPs, A2A).
+- `agents_audit_and_roadmap.md` - design record (2026-09-29): audit findings for `fsm_llm.agents`, a 2026 state-of-the-art gap analysis, a target agent runtime, and a phased implementation plan.
 
 ## How to use it
 
