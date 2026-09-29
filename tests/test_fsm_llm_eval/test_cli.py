@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from fsm_llm.eval import __main__ as cli
 from fsm_llm.eval.__main__ import build_parser, main_cli
+from fsm_llm.eval.examples import ExampleReport, ExampleResult
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -174,3 +176,68 @@ class TestRun:
         monkeypatch.setattr(fsm_logging, "setup_cli_logging", called.append)
         main_cli(["examples", "--list", "--examples-dir", str(examples_dir)])
         assert called == []
+
+
+class TestInputErrors:
+    def test_missing_examples_dir_is_named(self, tmp_path, capsys):
+        missing = tmp_path / "nowhere"
+        assert main_cli(["examples", "--list", "--examples-dir", str(missing)]) == 1
+        err = capsys.readouterr().err
+        assert "Examples directory not found" in err and str(missing) in err
+
+    def test_no_match_names_the_directory(self, examples_dir, capsys):
+        argv = ["examples", "--list", "--examples-dir", str(examples_dir)]
+        assert main_cli([*argv, "--filter", "zzz"]) == 1
+        assert str(examples_dir.resolve()) in capsys.readouterr().err
+
+    def test_non_utf8_config_exits_1_with_path(self, examples_dir, tmp_path, capsys):
+        cfg = tmp_path / "cfg.json"
+        cfg.write_bytes(b"\xff\xfe{")
+        argv = ["examples", "--list", "--examples-dir", str(examples_dir)]
+        assert main_cli([*argv, "--config", str(cfg)]) == 1
+        assert str(cfg) in capsys.readouterr().err
+
+
+def _report_scoring(score_sum: int, count: int, run_dir: Path) -> ExampleReport:
+    """A fake report of ``count`` examples whose scores add up to ``score_sum``."""
+    scores = [4] * (score_sum // 4) + ([score_sum % 4] if score_sum % 4 else [])
+    scores += [0] * (count - len(scores))
+    results = [
+        ExampleResult(f"c/e{i}", "c", 0, 0.0, "", "", False, score=s)
+        for i, s in enumerate(scores)
+    ]
+    return ExampleReport(run_dir, "m", results, score_sum / (count * 4) * 100, 0.0)
+
+
+class TestFailUnderBoundary:
+    @pytest.mark.parametrize(("threshold", "code"), [("58", 0), ("58.1", 2)])
+    def test_health_116_of_200_meets_58(
+        self, examples_dir, tmp_path, monkeypatch, threshold, code
+    ):
+        """Defect guarded: 116/200 health is 57.99999... in floats, so
+        ``--fail-under 58`` exited 2 while printing 58.0% (review W1)."""
+        monkeypatch.setattr(
+            cli,
+            "run_examples",
+            lambda targets, config, model, run_dir, progress: _report_scoring(
+                116, 50, run_dir
+            ),
+        )
+        argv = ["examples", "--examples-dir", str(examples_dir)]
+        out = ["--output-dir", str(tmp_path / "o"), "--fail-under", threshold]
+        assert main_cli([*argv, *out]) == code
+
+
+class TestInterruptExit:
+    def test_ctrl_c_exits_130_with_partial_report(
+        self, examples_dir, tmp_path, monkeypatch, capsys
+    ):
+        def ctrl_c(*_args):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(cli, "_print_progress", ctrl_c)
+        out = tmp_path / "run"
+        argv = ["examples", "--examples-dir", str(examples_dir), "--workers", "1"]
+        assert main_cli([*argv, "--output-dir", str(out)]) == 130
+        assert json.loads((out / "results.json").read_text())["interrupted"] is True
+        assert "Interrupted" in capsys.readouterr().err

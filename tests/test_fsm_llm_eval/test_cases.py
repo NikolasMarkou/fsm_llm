@@ -11,6 +11,7 @@ from __future__ import annotations
 import functools
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -23,12 +24,16 @@ from fsm_llm.eval import (
     TrialResult,
     check_expectations,
     load_cases,
+    pass_rate,
     read_rows,
     run_case_trial,
     run_cases,
+    run_dataset,
     wilson_ci,
 )
 from fsm_llm.eval import __main__ as cli
+from fsm_llm.eval import cases as cases_mod
+from fsm_llm.eval.cases import CaseReport
 from tests.conftest import MockLLM2Interface
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -508,3 +513,235 @@ class TestRunCli:
             cli.main_cli(["run", str(plain), "--output-dir", str(tmp_path / "p")]) == 0
         )
         assert len(read_rows(tmp_path / "p" / "rows.jsonl")) == 3
+
+
+# ---------------------------------------------------------------------------
+# Review-iter-1 fixes (D-009)
+# ---------------------------------------------------------------------------
+
+
+class TestUnsentTurns:
+    def test_early_end_without_ended_expectation_fails(self):
+        """Defect guarded: a case whose FSM ended early passed a final_state
+        check although later turns were never sent (review NOTE 10)."""
+        case = _case(turns=["I am Ada", "one more"], expect={"final_state": "done"})
+        result = run_case_trial(case, EvalConfig(), 1, _passing())
+        assert result.turns_sent == 1
+        assert result.passed is False
+        assert result.failures == [
+            "turns: conversation ended with 1 of 2 turns unsent "
+            "(declare expect.ended to allow it)"
+        ]
+
+    def test_declared_ended_allows_the_early_end(self):
+        case = _case(turns=["I am Ada", "one more"], expect={"ended": True})
+        assert run_case_trial(case, EvalConfig(), 1, _passing()).passed is True
+
+
+class TestChecksHook:
+    def test_custom_check_failures_are_recorded(self, tmp_path: Path):
+        def short_greeting(trial: TrialResult) -> list[str]:
+            return [] if len(trial.responses[0]) < 5 else ["greeting too long"]
+
+        report = run_cases(
+            [_case()],
+            EvalConfig(trials=2),
+            tmp_path,
+            llm_interface_factory=_passing(),
+            checks=[short_greeting],
+        )
+        assert report.overall["k"] == 0
+        assert report.cases[0]["first_failure"] == "greeting too long"
+
+    def test_raising_check_is_a_trial_error(self):
+        def boom(_trial: TrialResult) -> list[str]:
+            raise ValueError("bad check")
+
+        result = run_case_trial(_case(), EvalConfig(), 1, _passing(), checks=[boom])
+        assert result.passed is False
+        assert result.error == "ValueError: bad check"
+
+
+class TestRunDataset:
+    def test_one_call_with_layered_settings(self, tmp_path: Path):
+        dataset = _write(
+            tmp_path / "d.json",
+            {"config": {"trials": 4}, "cases": [_case().model_dump()]},
+        )
+        out = tmp_path / "out"
+        report = run_dataset(
+            dataset,
+            config={"trials": 3},
+            llm_interface_factory=_passing(),
+            output_dir=str(out),
+            trials=2,
+        )
+        assert report.run_dir == out
+        assert (report.overall["k"], report.overall["n"]) == (2, 2)
+        assert json.loads((out / "results.json").read_text())["dataset"] == str(dataset)
+
+    def test_config_file_and_model_layers(self, tmp_path: Path):
+        dataset = _write(tmp_path / "d.json", [_case().model_dump()])
+        cfg = _write(tmp_path / "c.json", {"trials": 1, "model": "file-model"})
+        report = run_dataset(
+            dataset,
+            config=cfg,
+            llm_interface_factory=_passing(),
+            output_dir=str(tmp_path / "o"),
+        )
+        assert report.overall["n"] == 1
+        assert report.model == "file-model"
+        explicit = run_dataset(
+            dataset,
+            config=EvalConfig(trials=2),
+            llm_interface_factory=_passing(),
+            output_dir=str(tmp_path / "o2"),
+        )
+        assert explicit.overall["n"] == 2
+
+    def test_unknown_override_is_a_config_error(self, tmp_path: Path):
+        dataset = _write(tmp_path / "d.json", [_case().model_dump()])
+        with pytest.raises(EvalConfigError):
+            run_dataset(dataset, trails=2)
+
+
+class _CapturingAPI:
+    """Stands in for ``fsm_llm.API``: records the constructor kwargs, then fails."""
+
+    seen: ClassVar[list[dict]] = []
+
+    @classmethod
+    def from_definition(cls, _fsm, **kwargs):
+        cls.seen.append(kwargs)
+        raise RuntimeError("captured")
+
+    from_file = from_definition
+
+
+class TestLLMSettingsReachTheAPI:
+    def test_model_temperature_max_tokens_and_llm_kwargs(self, monkeypatch):
+        """Pins the real-model branch (review NOTE 15), which every other
+        test bypasses with a factory."""
+        monkeypatch.setattr(cases_mod, "API", _CapturingAPI)
+        _CapturingAPI.seen = []
+        config = EvalConfig(
+            model="m-1",
+            temperature=0.2,
+            max_tokens=64,
+            llm_kwargs={"api_base": "http://h", "max_history_size": 2},
+        )
+        result = run_case_trial(_case(), config, 1)
+        assert result.error == "RuntimeError: captured"
+        assert _CapturingAPI.seen == [
+            {
+                "api_base": "http://h",
+                "max_history_size": 2,
+                "model": "m-1",
+                "temperature": 0.2,
+                "max_tokens": 64,
+            }
+        ]
+
+    def test_unset_settings_are_not_passed(self, monkeypatch):
+        monkeypatch.setattr(cases_mod, "API", _CapturingAPI)
+        _CapturingAPI.seen = []
+        run_case_trial(_case(), EvalConfig(model="m-1"), 1)
+        assert _CapturingAPI.seen == [{"model": "m-1"}]
+
+    def test_llm_kwargs_values_are_not_written(self, tmp_path: Path):
+        config = EvalConfig(trials=1, llm_kwargs={"api_key": "sk-secret-value"})
+        run_cases([_case()], config, tmp_path, llm_interface_factory=_passing())
+        text = (tmp_path / "results.json").read_text()
+        assert "sk-secret-value" not in text
+        assert json.loads(text)["config"]["llm_kwargs"] == {"api_key": "<not recorded>"}
+
+    def test_cli_flags_set_temperature_and_max_tokens(self, tmp_path, offline_cli):
+        offline_cli(_passing())
+        path = _write(tmp_path / "d.json", [_case().model_dump()])
+        out = tmp_path / "o"
+        argv = ["run", str(path), "--output-dir", str(out), "--trials", "1"]
+        assert cli.main_cli([*argv, "--temperature", "0.3", "--max-tokens", "50"]) == 0
+        recorded = json.loads((out / "results.json").read_text())["config"]
+        assert (recorded["temperature"], recorded["max_tokens"]) == (0.3, 50)
+
+
+class TestSampleDatasetMeasuresTheModel:
+    def test_do_nothing_model_fails_the_extraction_case(self, tmp_path: Path):
+        """Defect guarded: the shipped sample passed 100% with a mock that
+        extracts nothing, so it measured no model behaviour (review W6)."""
+        cases, _ = load_cases(_SAMPLE_DATASET)
+        report = run_cases(
+            cases,
+            EvalConfig(trials=1),
+            tmp_path,
+            llm_interface_factory=lambda: MockLLM2Interface(),
+        )
+        rates = {c["id"]: c["k"] for c in report.cases}
+        assert rates["name_is_extracted"] == 0
+        assert report.overall["k"] < report.overall["n"]
+
+    def test_extracting_model_passes_every_case(self, tmp_path: Path):
+        cases, _ = load_cases(_SAMPLE_DATASET)
+        report = run_cases(
+            cases,
+            EvalConfig(trials=1),
+            tmp_path,
+            llm_interface_factory=_factory({"user_name": "Alex"}),
+        )
+        assert report.overall["k"] == report.overall["n"] == len(cases)
+
+
+class TestInputDecoding:
+    @pytest.mark.parametrize("name", ["d.json", "d.jsonl"])
+    def test_non_utf8_dataset_exits_1_with_path(self, tmp_path, capsys, name):
+        path = tmp_path / name
+        path.write_bytes(b"\xff\xfe[")
+        assert cli.main_cli(["run", str(path)]) == 1
+        err = capsys.readouterr().err
+        assert "cannot read dataset" in err and str(path) in err
+
+
+class TestInterrupt:
+    def test_ctrl_c_writes_partial_report(self, tmp_path: Path):
+        def ctrl_c(*_args):
+            raise KeyboardInterrupt
+
+        report = run_cases(
+            [_case(id="a"), _case(id="b")],
+            EvalConfig(trials=3, workers=1),
+            tmp_path,
+            llm_interface_factory=_passing(),
+            progress=ctrl_c,
+        )
+        assert report.interrupted is True
+        assert report.overall["n"] == 1
+        assert len(read_rows(tmp_path / "rows.jsonl")) == 1
+        assert json.loads((tmp_path / "results.json").read_text())["interrupted"]
+        assert "**Interrupted**: yes" in (tmp_path / "summary.md").read_text()
+
+    def test_cli_exits_130(self, tmp_path, offline_cli, monkeypatch, capsys):
+        def ctrl_c(*_args):
+            raise KeyboardInterrupt
+
+        offline_cli(_passing())
+        monkeypatch.setattr(cli, "_print_trial", ctrl_c)
+        path = _write(tmp_path / "d.json", [_case().model_dump()])
+        out = tmp_path / "o"
+        assert cli.main_cli(["run", str(path), "--output-dir", str(out)]) == 130
+        assert "1 of 3 trials" in capsys.readouterr().err
+        assert (out / "summary.md").is_file()
+
+
+class TestFailUnderBoundary:
+    @pytest.mark.parametrize(("k", "code"), [(57, 0), (56, 2)])
+    def test_57_of_100_meets_57(self, tmp_path, monkeypatch, k, code):
+        """Defect guarded: 57/100 is 56.99999... in floats, so
+        ``--fail-under 57`` exited 2 while printing 57.0% (review W1)."""
+
+        def fake_run(cases, config, run_dir, **_kwargs):
+            return CaseReport(run_dir, "m", [], [], pass_rate(k, 100), 0.0)
+
+        monkeypatch.setattr(cli, "run_cases", fake_run)
+        path = _write(tmp_path / "d.json", [_case().model_dump()])
+        argv = ["run", str(path), "--output-dir", str(tmp_path / "o")]
+        assert cli.main_cli([*argv, "--fail-under", "57"]) == code

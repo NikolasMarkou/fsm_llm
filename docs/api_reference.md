@@ -435,14 +435,19 @@ so the builtin `eval` is not shadowed.
 fsm-llm-eval examples [--model M] [--workers N] [--timeout S] [--category C] [--filter S]
                       [--output-dir D] [--examples-dir P] [--python EXE]
                       [--config FILE] [--fail-under PCT] [--list]
-fsm-llm-eval run DATASET [--model M] [--trials N] [--workers N] [--output-dir D]
-                         [--config FILE] [--fail-under PCT] [--list]
+fsm-llm-eval run DATASET [--model M] [--trials N] [--temperature T] [--max-tokens N]
+                         [--workers N] [--output-dir D] [--config FILE]
+                         [--fail-under PCT] [--list]
 ```
 
-Exit codes: `0` success, also for low scores; `1` usage error, bad config or dataset,
-unwritable output, or nothing matched; `2` only when `--fail-under PCT` is given and
-the health score (`examples`) or overall pass rate (`run`) is below PCT. Usage errors
-exit `1`, not argparse's `2`, so CI can tell a regression from a typo.
+Exit codes: `0` success, also for low scores; `1` usage error, bad config or dataset
+(including a file that is not UTF-8 or not JSON), unwritable output, a missing
+examples directory, or nothing matched; `2` only when `--fail-under PCT` is given and
+the health score (`examples`) or overall pass rate (`run`) is below PCT (compared
+exactly: 57 of 100 meets 57); `130` interrupted by Ctrl-C. Usage errors exit `1`, not
+argparse's `2`, so CI can tell a regression from a typo. On Ctrl-C, work not yet
+started is cancelled and the report files are written for what finished, with
+`"interrupted": true`.
 
 ### Configuration (`EvalConfig`)
 
@@ -467,6 +472,14 @@ Settings precedence: built-in defaults < a dataset's embedded `config` (`run` on
 | `category_timeouts` | `{}` | examples | Seconds per category, merged over the built-in table |
 | `trials` | `3` | run | Trials per case (>= 1) |
 | `temperature` | `None` | run | LLM temperature (>= 0); `None` = framework default |
+| `max_tokens` | `None` | run | LLM max tokens per call (>= 1); `None` = framework default |
+| `llm_kwargs` | `{}` | run | Extra `API(...)` keyword arguments (e.g. `api_base`, `api_key`, `max_history_size`), merged key by key; may not set `model`, `temperature`, `max_tokens`, `llm_interface`, `fsm_definition`; values are not written to `results.json` |
+
+The model is the first set of `--model`, `--config` file, dataset `config`,
+`$LLM_MODEL`, `DEFAULT_LLM_MODEL`, so a dataset that pins `model` beats an exported
+`LLM_MODEL`. A case's `fsm` path is relative to the dataset file; `output_root` and
+`output_dir` are relative to the current directory. The LLM settings do not apply when
+an `llm_interface_factory` is given.
 
 Example timeout precedence: per-example table > category table > `timeout`.
 
@@ -476,9 +489,14 @@ Example timeout precedence: per-example table > category table > `timeout`.
 from fsm_llm.eval import (
     EvalConfig, load_config, merge_config, resolve_model,
     discover_examples, run_examples,
-    load_cases, run_cases, run_case_trial, check_expectations,
+    load_cases, run_cases, run_case_trial, run_dataset, check_expectations,
     open_run_dir, wilson_ci, fisher_exact_two_sided, pass_rate,
 )
+
+# One call, like `fsm-llm-eval run`: config layer (file path, dict or EvalConfig),
+# then keyword overrides; `checks` are callables(trial) -> list of failure messages
+report = run_dataset("cases.json", config="eval.json", trials=5,
+                     checks=[lambda t: [] if t.responses else ["no reply"]])
 
 config = merge_config({"workers": 2}, load_config("eval.json"))  # later layers win
 model = resolve_model(config)
@@ -502,7 +520,11 @@ fisher_exact_two_sided(2, 40, 40, 40)  # two-sided p for two k/n arms
 pass_rate(0, 0)                        # rate 0.0, wilson_ci [0.0, 1.0]
 ```
 
-`run_case_trial` never raises: an exception becomes a failed trial with `error` set.
+`run_case_trial(case, config, trial, llm_interface_factory=None, *, checks=())` never
+raises: an exception (a raising check included) becomes a failed trial with `error`
+set. `run_cases(..., checks=())` passes `checks` to every trial. Both runners return a
+report whose `interrupted` is `True` after Ctrl-C (results then hold only finished
+work).
 Records helpers: `append_row`, `read_rows` (JSONL), `write_json` (indent 2, sorted
 keys), `utc_now`, `git_commit` (raises on failure), `git_short_hash` (`"unknown"` on
 failure), `model_slug`, `make_run_dir` (adds `_2`, `_3`, ... on a name collision).
@@ -516,7 +538,7 @@ file with one case per line (blank lines skipped).
 |----------|----------|---------|
 | `id` | yes | Unique, non-empty |
 | `fsm` | yes | Path relative to the dataset file, or an inline FSM definition object |
-| `turns` | yes | User messages sent in order (at least one); sending stops once the conversation ends |
+| `turns` | yes | User messages sent in order (at least one); sending stops once the conversation ends, and unsent turns fail the trial unless `expect` declares `ended` |
 | `expect` | yes | At least one check (below) |
 | `initial_context` | no | Context passed to `start_conversation` |
 | `description` | no | Shown in `--list` and the report |
@@ -537,13 +559,15 @@ Each run gets `<output_root>/<YYYY-MM-DD_HH-MM>_<git-short-hash>_<model-slug>/`
 
 - `examples`: `scorecard.md`, `results.json` (`date, git_commit, model, health_score,
   total_examples, distribution, results[{name, category, score, failures, duration,
-  exit_code, timed_out}], wall_time_s, workers, default_timeout, evaluator`),
+  exit_code, timed_out}], wall_time_s, workers, default_timeout, evaluator,
+  interrupted`),
   `logs/<category>/<category>_<name>.log`.
 - `run`: `rows.jsonl` (one row per trial, appended as it finishes: `case_id, trial,
   passed, failures, error, final_state, visited_states, responses, context, ended,
   turns_sent, duration`), `results.json` (`date, git_commit, model, dataset, evaluator,
   config, overall, cases[{id, description, k, n, rate, wilson_ci, first_failure,
-  failure_counts}], wall_time_s`), `summary.md`.
+  failure_counts}], wall_time_s, interrupted`; `config.llm_kwargs` values are replaced
+  by `"<not recorded>"`), `summary.md`.
 
 ## Monitor (`fsm_llm.monitor`)
 

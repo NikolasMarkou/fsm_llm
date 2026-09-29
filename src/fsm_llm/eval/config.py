@@ -17,7 +17,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    ValidationError,
+    field_validator,
+)
 
 from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
 
@@ -31,7 +38,24 @@ from .constants import (
 from .exceptions import EvalConfigError
 
 #: Fields whose dict values are merged key by key across layers, not replaced.
-_TABLE_FIELDS = ("example_inputs", "example_timeouts", "category_timeouts")
+_TABLE_FIELDS = (
+    "example_inputs",
+    "example_timeouts",
+    "category_timeouts",
+    "llm_kwargs",
+)
+
+#: ``API`` arguments that ``llm_kwargs`` may not set: the evaluation owns them.
+_RESERVED_LLM_KWARGS = frozenset(
+    {
+        "fsm_definition",
+        "definition",
+        "llm_interface",
+        "model",
+        "temperature",
+        "max_tokens",
+    }
+)
 
 
 class EvalConfig(BaseModel):
@@ -40,9 +64,15 @@ class EvalConfig(BaseModel):
     ``model`` ``None`` means ``$LLM_MODEL``, else the framework default, read
     when the run starts (:func:`resolve_model`). ``python`` ``None`` means the
     running interpreter. The three table fields add to or override the
-    built-in repository tables in :mod:`fsm_llm.eval.constants`. ``trials``
-    and ``temperature`` are read by conversation cases only; ``temperature``
-    ``None`` keeps the framework default.
+    built-in repository tables in :mod:`fsm_llm.eval.constants`.
+
+    Read by conversation cases only: ``trials``, and the LLM settings
+    ``temperature`` and ``max_tokens`` (``None`` keeps the framework default)
+    and ``llm_kwargs``, passed as extra keyword arguments to ``fsm_llm.API``
+    (litellm options such as ``api_base`` or ``api_key``, or ``API`` options
+    such as ``max_history_size``). ``llm_kwargs`` merges key by key across
+    layers and may not set the FSM, model, temperature or max tokens. None of
+    the LLM settings apply when an ``llm_interface_factory`` is given.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -62,6 +92,18 @@ class EvalConfig(BaseModel):
     category_timeouts: dict[str, PositiveInt] = Field(default_factory=dict)
     trials: int = Field(default=DEFAULT_TRIALS, ge=1)
     temperature: float | None = Field(default=None, ge=0)
+    max_tokens: int | None = Field(default=None, ge=1)
+    llm_kwargs: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("llm_kwargs")
+    @classmethod
+    def _no_reserved_llm_kwargs(cls, value: dict[str, Any]) -> dict[str, Any]:
+        reserved = sorted(_RESERVED_LLM_KWARGS & set(value))
+        if reserved:
+            raise ValueError(
+                f"llm_kwargs may not set {reserved}; use the dedicated settings"
+            )
+        return value
 
 
 def _validated(layer: Mapping[str, Any], source: str) -> EvalConfig:
@@ -82,13 +124,13 @@ def load_config(path: str | Path) -> dict[str, Any]:
         - The file must hold one JSON object whose keys are ``EvalConfig``
           fields; it is validated on its own, so errors name the file.
         - Returns only the keys the file sets (a layer for ``merge_config``).
-        - Raises ``EvalConfigError`` for a missing or unreadable file, invalid
-          JSON, a non-object, an unknown key, or a bad value.
+        - Raises ``EvalConfigError`` for a missing or unreadable (or non-UTF-8)
+          file, invalid JSON, a non-object, an unknown key, or a bad value.
     """
     config_path = Path(path)
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise EvalConfigError(f"cannot read config file {config_path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise EvalConfigError(f"config file {config_path} is not JSON: {exc}") from exc

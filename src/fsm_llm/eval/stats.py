@@ -10,6 +10,7 @@ keeps the copies equal.
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 from typing import Any
 
 
@@ -54,3 +55,15 @@ def pass_rate(k: int, n: int) -> dict[str, Any]:
     """
     lo, hi = wilson_ci(k, n)
     return {"k": k, "n": n, "rate": k / n if n else 0.0, "wilson_ci": [lo, hi]}
+
+
+def below_percent(k: int, n: int, percent: float) -> bool:
+    """Whether ``k`` out of ``n`` is strictly below ``percent`` (0-100), exactly.
+
+    Interface contract (callers: both CLI ``--fail-under`` checks):
+        - Compares ``100 * k < percent * n`` in rationals, with ``percent``
+          taken as the decimal it prints as, so 57/100 is not below 57 and
+          116/200 is not below 58 (float division gives 56.99999... there).
+        - ``n == 0`` counts as a 0% rate: below any positive ``percent``.
+    """
+    return 100 * k < Fraction(repr(percent)) * n if n else percent > 0

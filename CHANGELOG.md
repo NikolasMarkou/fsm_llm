@@ -25,14 +25,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `responses_contain`, `ended`). Each case runs `trials` times (default 3) through
   `fsm_llm.API`; the run writes `rows.jsonl` (one row per trial, flushed as it
   finishes), `results.json` (per-case and overall pass rates with Wilson 95% intervals)
-  and `summary.md`. Sample dataset: `evaluation/datasets/simple_greeting_cases.json`.
+  and `summary.md`. Once the conversation ends, remaining turns are not sent, and that
+  fails the trial unless the case declares `ended`. Sample dataset:
+  `evaluation/datasets/simple_greeting_cases.json`: three plumbing cases over
+  `examples/basic/simple_greeting` and `name_is_extracted` over
+  `evaluation/datasets/name_capture_fsm.json`, which fails for a model that extracts
+  nothing.
 - `EvalConfig`: every setting has a default and can be set, in increasing precedence,
   by a dataset's embedded `config`, a `--config` JSON file, or a flag. Unknown keys are
   an error. The per-example stdin and timeout tables can be extended or overridden from
-  the config file.
-- Exit codes for both commands: `0` finished, `1` usage or input error, `2` only when
-  `--fail-under PCT` is given and the score is below it.
-- Python API: `run_examples`, `run_cases`, `load_cases`, `check_expectations`,
+  the config file. LLM settings for `run`: `temperature`, `max_tokens` (flags
+  `--temperature`, `--max-tokens`) and `llm_kwargs`, extra `fsm_llm.API` arguments
+  such as `api_base` (recorded in `results.json` by key only, never by value).
+- Exit codes for both commands: `0` finished, `1` usage or input error (a file that is
+  not UTF-8 or not JSON included), `2` only when `--fail-under PCT` is given and the
+  score is below it (compared exactly in integers, so 57 of 100 meets 57), `130`
+  interrupted. Ctrl-C cancels the work not yet started and writes the report files for
+  what finished, marked `"interrupted": true`.
+- Python API: `run_dataset(path, *, config=None, llm_interface_factory=None,
+  checks=(), **overrides)` runs a dataset in one call with the CLI's settings layers;
+  `checks` are callables that get each finished trial and return failure messages
+  (also on `run_cases`). Also `run_examples`, `run_cases`, `load_cases`, `check_expectations`,
   `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `append_row`/`read_rows`,
   `open_run_dir` and more; `run_cases(..., llm_interface_factory=...)` runs offline
   with a fake LLM. Exceptions `EvalError(FSMError)` -> `EvalConfigError`,
@@ -41,7 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `scripts/eval.py` is a thin shim that runs `fsm-llm-eval examples` from the
-  repository root; every old invocation keeps working.
+  repository root and takes the same flags, with two behaviour changes: an
+  `--output-dir` that already holds files is now refused (exit 1) instead of reused,
+  and a usage error (unknown flag, bad value) exits 1 instead of argparse's 2, because
+  2 now means "below `--fail-under`".
 - `scripts/harness_bench.py` is unchanged and stays stdlib-only and offline: its
   `wilson_ci`, `fisher_exact_two_sided`, `append_row`, `read_rows`, `_write_json`,
   `_utc_now` and `_git_commit` are copies of the `fsm_llm.eval` helpers, kept equal
@@ -50,8 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Example scorecards: "Total wall time" is now the real elapsed time of the run; the
   old value (sum of example durations) is reported as "Total example time". Compare
   old and new scorecards on "Total example time".
-- Example `results.json` gains `wall_time_s`, `workers`, `default_timeout` and
-  `evaluator`; every old key keeps its meaning.
+- Example `results.json` gains `wall_time_s`, `workers`, `default_timeout`,
+  `evaluator` and `interrupted`; every old key keeps its meaning.
 - Example runs use a thread pool driving one subprocess per example instead of a
   process pool.
 

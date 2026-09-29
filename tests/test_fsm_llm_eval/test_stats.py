@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.eval import fisher_exact_two_sided, pass_rate, wilson_ci
+from fsm_llm.eval.stats import below_percent
 
 
 class TestWilsonCI:
@@ -75,3 +76,28 @@ class TestPassRate:
     def test_impossible_counts_raise(self):
         with pytest.raises(ValueError):
             pass_rate(3, 2)
+
+
+class TestBelowPercent:
+    """``--fail-under`` must compare exactly: float division misreads these."""
+
+    @pytest.mark.parametrize(
+        ("k", "n", "percent"),
+        [(57, 100, 57), (116, 200, 58), (29, 50, 58), (573, 1000, 57.3), (1, 1, 100)],
+    )
+    def test_exact_threshold_is_not_below(self, k, n, percent):
+        assert below_percent(k, n, percent) is False
+
+    def test_float_division_would_misfire_here(self):
+        assert 57 / 100 * 100 < 57 and 116 / 200 * 100 < 58  # why ints are used
+
+    @pytest.mark.parametrize(
+        ("k", "n", "percent"),
+        [(56, 100, 57), (115, 200, 58), (572, 1000, 57.3), (99, 100, 100)],
+    )
+    def test_one_short_is_below(self, k, n, percent):
+        assert below_percent(k, n, percent) is True
+
+    def test_empty_counts_as_zero_percent(self):
+        assert below_percent(0, 0, 0) is False
+        assert below_percent(0, 0, 0.5) is True

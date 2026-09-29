@@ -30,8 +30,10 @@ fsm-llm-eval run evaluation/datasets/simple_greeting_cases.json --trials 3
 ```
 
 `fsm-llm-eval` is installed with the package (`fsm_llm.eval`, extra `eval`). The old
-entry point still works and takes the same flags: `.venv/bin/python scripts/eval.py
-<flags>` runs `fsm-llm-eval examples <flags>` from the repository root.
+entry point takes the same flags: `.venv/bin/python scripts/eval.py <flags>` runs
+`fsm-llm-eval examples <flags>` from the repository root. Two behaviours changed: an
+`--output-dir` that already holds files is refused (exit 1) instead of reused, and
+usage errors exit 1 instead of argparse's 2 (exit 2 now means below `--fail-under`).
 
 Output goes to a new `evaluation/<timestamp>_<hash>_<model>/` (`_2`, `_3`, ... appended if that name exists) containing:
 - `scorecard.md` -- human-readable results with scores, timing, and category breakdown
@@ -103,7 +105,7 @@ The runner auto-discovers examples, classifies them as interactive or automated,
 
 A per-example value wins over the category value, which wins over `--timeout`, so `--timeout` cannot shorten a tabled example. To change a tabled value, pass a config file, for example `{"example_timeouts": {"agents/debate": 400}, "category_timeouts": {"agents": 240}}`; table entries in the file are merged over the built-in ones. Settings precedence is built-in defaults < `--config FILE` < flags; unknown keys are an error.
 
-**Exit codes**: `0` the run finished (also with a low score), `1` usage error, bad config, unwritable output, or no example matched, `2` only when `--fail-under PCT` is given and the health score is below it.
+**Exit codes**: `0` the run finished (also with a low score), `1` usage error, bad config (including a file that is not UTF-8 or not JSON), unwritable output, a missing examples directory, or no example matched, `2` only when `--fail-under PCT` is given and the health score is below it (compared exactly: 116/200 meets 58), `130` interrupted. Ctrl-C cancels the examples not yet started and still writes `scorecard.md` and `results.json` for the finished ones, marked interrupted (`"interrupted": true`).
 
 ### Prerequisites
 
@@ -144,12 +146,12 @@ For each example, evaluate these dimensions:
 The example scores above come from a heuristic over stdout. To test a specific FSM's behaviour, write a dataset of scripted conversations with expected outcomes and run it several times:
 
 ```bash
-fsm-llm-eval run DATASET [--model M] [--trials N] [--workers N] [--output-dir D] [--config FILE] [--fail-under PCT] [--list]
+fsm-llm-eval run DATASET [--model M] [--trials N] [--temperature T] [--max-tokens N] [--workers N] [--output-dir D] [--config FILE] [--fail-under PCT] [--list]
 ```
 
-A dataset is a JSON list of cases, a JSON object `{"config": {...}, "cases": [...]}`, or a `.jsonl` file with one case per line. Each case has an `id`, an `fsm` (path relative to the dataset file, or an inline definition), optional `initial_context`, the user `turns`, and `expect` with at least one of `final_state`, `visited_states`, `context` (exact values), `context_keys` (present and not null), `responses_contain` (case-insensitive substrings) and `ended`. A trial passes when every declared check holds; a trial that raises (model down, bad FSM) is a failed trial with the error recorded. The sample `evaluation/datasets/simple_greeting_cases.json` covers `examples/basic/simple_greeting`.
+A dataset is a JSON list of cases, a JSON object `{"config": {...}, "cases": [...]}`, or a `.jsonl` file with one case per line. Each case has an `id`, an `fsm` (path relative to the dataset file, or an inline definition), optional `initial_context`, the user `turns`, and `expect` with at least one of `final_state`, `visited_states`, `context` (exact values), `context_keys` (present and not null), `responses_contain` (case-insensitive substrings) and `ended`. A trial passes when every declared check holds and every turn was sent (an FSM that ends before the last turn fails unless the case declares `ended`); a trial that raises (model down, bad FSM) is a failed trial with the error recorded. The sample `evaluation/datasets/simple_greeting_cases.json` has three plumbing cases over `examples/basic/simple_greeting` (unconditional transitions: any model passes) and `name_is_extracted` over `evaluation/datasets/name_capture_fsm.json`, which passes only when the model extracts the user's name. A useful case makes its pass depend on the model.
 
-Each case runs `trials` times (default 3), in-process through `fsm_llm.API`, one fresh `API` per trial. Settings precedence: defaults < the dataset's `config` < `--config FILE` < flags. The run directory (same naming as example runs) holds `rows.jsonl` (one row per trial, written as each finishes), `results.json` (per-case and overall `k`, `n`, `rate` and Wilson 95% `wilson_ci`, plus the config used) and `summary.md`. Report a pass rate with its interval: with 3 trials, 3/3 still has a Wilson lower bound of about 44%. `--fail-under PCT` compares the overall pass rate. Exit codes are the same as for `examples`.
+Each case runs `trials` times (default 3), in-process through `fsm_llm.API`, one fresh `API` per trial. Settings precedence: defaults < the dataset's `config` < `--config FILE` < flags, so a dataset that sets `model` beats `$LLM_MODEL`. LLM settings: `temperature`, `max_tokens`, and `llm_kwargs` (extra `fsm_llm.API` arguments such as `api_base`; recorded by key only). From Python, `fsm_llm.eval.run_dataset(path, trials=5, checks=[...])` does the same in one call; a check is a function of the finished trial returning failure messages. The run directory (same naming as example runs) holds `rows.jsonl` (one row per trial, written as each finishes), `results.json` (per-case and overall `k`, `n`, `rate` and Wilson 95% `wilson_ci`, plus the config used) and `summary.md`. Report a pass rate with its interval: with 3 trials, 3/3 still has a Wilson lower bound of about 44%. `--fail-under PCT` compares the overall pass rate exactly (57/100 meets 57). Exit codes and Ctrl-C behaviour are the same as for `examples`.
 
 ---
 

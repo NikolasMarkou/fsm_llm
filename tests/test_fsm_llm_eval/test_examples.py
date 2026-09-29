@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -182,7 +183,9 @@ class TestRunExamples:
             "workers",
             "default_timeout",
             "evaluator",
+            "interrupted",
         }
+        assert data["interrupted"] is False
         assert set(old["results"][0]) == set(data["results"][0])
         assert set(data["distribution"]) == {"0", "1", "2", "3", "4"}
         assert data["total_examples"] == 4
@@ -275,3 +278,35 @@ class TestOutputDir:
             discover_examples(config), config, "m", create_output_dir(config, "m")
         )
         assert seen == [sys.executable]
+
+
+class TestInterrupt:
+    def test_ctrl_c_cancels_queued_examples_and_writes_partial_report(
+        self, examples_dir, monkeypatch
+    ):
+        """Defect guarded: after Ctrl-C the thread pool kept running every
+        queued example and wrote no report (review-iter-1 W2)."""
+        started: list[str] = []
+
+        def fake(target, *args):
+            started.append(target.name)
+            time.sleep(0.2)
+            return examples_mod._crashed(target, "fake")
+
+        def ctrl_c(*_args):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(examples_mod, "run_example", fake)
+        config = _config(examples_dir, workers=1)
+        targets = discover_examples(config)
+        run_dir = create_output_dir(config, "m")
+        report = run_examples(targets, config, "m", run_dir, progress=ctrl_c)
+        time.sleep(0.5)  # let an in-flight example finish in the background
+        assert report.interrupted is True
+        assert len(report.results) == 1
+        assert len(started) < len(targets)  # the queue was cancelled
+        data = json.loads((run_dir / "results.json").read_text())
+        assert data["interrupted"] is True
+        assert data["total_examples"] == 1
+        scorecard = (run_dir / "scorecard.md").read_text(encoding="utf-8")
+        assert "**Interrupted**: yes" in scorecard

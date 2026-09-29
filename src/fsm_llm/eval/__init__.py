@@ -5,7 +5,8 @@ FSM-LLM Eval
 Evaluation tooling for FSM-LLM: the examples evaluator (run every example
 script, score it 0-4, write a scorecard; CLI ``fsm-llm-eval examples``),
 conversation cases (scripted multi-turn conversations against any FSM, checked
-against declared expectations over repeated trials; CLI ``fsm-llm-eval run``),
+against declared expectations over repeated trials; CLI ``fsm-llm-eval run``,
+Python ``run_dataset``),
 a layered ``EvalConfig``, binomial statistics (Wilson intervals, Fisher exact
 test), append-only result rows, and collision-safe run directories shared with
 the harness live bench.
@@ -30,6 +31,7 @@ from .cases import (
     load_cases,
     run_case_trial,
     run_cases,
+    run_dataset,
     write_case_report,
 )
 from .config import EvalConfig, load_config, merge_config, resolve_model
@@ -91,6 +93,7 @@ __all__ = [
     "resolve_model",
     "run_case_trial",
     "run_cases",
+    "run_dataset",
     "run_example",
     "run_examples",
     "utc_now",

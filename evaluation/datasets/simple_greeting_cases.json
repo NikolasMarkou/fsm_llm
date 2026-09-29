@@ -33,6 +33,17 @@
         "context": {"user_name": "Alex"},
         "final_state": "conversation"
       }
+    },
+    {
+      "id": "name_is_extracted",
+      "description": "Measures the model: the only transition fires once Pass 1 extracts user_name, so a model that extracts nothing stays in ask_name (the three cases above check plumbing: their transitions are unconditional)",
+      "fsm": "name_capture_fsm.json",
+      "turns": ["Hi, my name is Alex."],
+      "expect": {
+        "final_state": "welcome",
+        "context_keys": ["user_name"],
+        "ended": true
+      }
     }
   ]
 }

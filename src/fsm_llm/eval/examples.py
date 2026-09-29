@@ -11,8 +11,9 @@ Differences from ``scripts/eval.py`` at 0facf56 (scores are unchanged): the
 interpreter defaults to the running one, a crashed worker is recorded as a
 score-0 result instead of being dropped, the scorecard reports real wall time
 (the old sum of durations is now "Total example time"), a run directory is
-never reused, and ``results.json`` gains ``wall_time_s``, ``workers``,
-``default_timeout`` and ``evaluator``.
+never reused, Ctrl-C stops the run and still writes a partial report, and
+``results.json`` gains ``wall_time_s``, ``workers``, ``default_timeout``,
+``evaluator`` and ``interrupted``.
 """
 
 from __future__ import annotations
@@ -22,12 +23,13 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ._pool import run_interruptible
 from .config import EvalConfig
 from .constants import (
     CATEGORY_TIMEOUTS,
@@ -82,6 +84,7 @@ class ExampleReport:
     results: list[ExampleResult]
     health: float
     wall_time: float
+    interrupted: bool = False  # Ctrl-C: results hold only finished examples
 
 
 def get_timeout(
@@ -286,27 +289,35 @@ def run_examples(
           ``config.examples_dir``.
         - Each log is written as its example finishes, then ``progress`` is
           called. A worker that raises becomes a score-0 result with the
-          error text; the run always completes.
+          error text.
+        - Ctrl-C (``KeyboardInterrupt``) cancels the examples not yet started
+          and returns a partial report (``interrupted=True``, finished examples
+          only), still written to disk.
         - Returns the report with results sorted by name.
     """
     python = config.python or sys.executable
     cwd = Path(config.examples_dir).resolve().parent
     results: list[ExampleResult] = []
+
+    def record(target: ExampleTarget, future: Future[ExampleResult]) -> None:
+        try:
+            result = future.result()
+        except Exception as exc:  # runner bug or OS error: record, never drop
+            result = _crashed(target, f"runner error: {exc}")
+        results.append(result)
+        write_example_log(result, run_dir)
+        if progress is not None:
+            progress(len(results), len(targets), result)
+
     start = time.monotonic()
-    with ThreadPoolExecutor(max_workers=config.workers) as pool:
-        futures = {pool.submit(run_example, t, model, python, cwd): t for t in targets}
-        for future in as_completed(futures):
-            try:
-                result = future.result()
-            except Exception as exc:  # runner bug or OS error: record, never drop
-                result = _crashed(futures[future], f"runner error: {exc}")
-            results.append(result)
-            write_example_log(result, run_dir)
-            if progress is not None:
-                progress(len(results), len(targets), result)
+    interrupted = run_interruptible(
+        lambda t: run_example(t, model, python, cwd), targets, config.workers, record
+    )
     wall_time = time.monotonic() - start
     results.sort(key=lambda r: r.name)
-    report = ExampleReport(run_dir, model, results, health_score(results), wall_time)
+    report = ExampleReport(
+        run_dir, model, results, health_score(results), wall_time, interrupted
+    )
     write_scorecard(report, config, git_short_hash(cwd))
     return report
 
@@ -323,7 +334,7 @@ def write_scorecard(
     ``git_commit``, ``model``, ``health_score``, ``total_examples``,
     ``distribution``, ``results[name, category, score, failures, duration,
     exit_code, timed_out]``) and adds ``wall_time_s``, ``workers``,
-    ``default_timeout`` and ``evaluator``.
+    ``default_timeout``, ``evaluator`` and ``interrupted``.
     """
     now = now or datetime.now()
     results = report.results
@@ -370,6 +381,11 @@ def write_scorecard(
         "## Summary",
         "",
         f"- **Total examples**: {total}",
+        *(
+            ["- **Interrupted**: yes, partial run (finished examples only)"]
+            if report.interrupted
+            else []
+        ),
         f"- **Score distribution**: {dist[4]}x4, {dist[3]}x3, {dist[2]}x2, "
         f"{dist[1]}x1, {dist[0]}x0",
         f"- **Health Score**: {score_sum}/{max_possible} = **{report.health:.1f}%**",
@@ -421,6 +437,7 @@ def write_scorecard(
         "workers": config.workers,
         "default_timeout": config.timeout,
         "evaluator": EVALUATOR_NAME,
+        "interrupted": report.interrupted,
     }
     write_json(report.run_dir / "results.json", data)
     return scorecard_path

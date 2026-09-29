@@ -124,3 +124,35 @@ class TestResolveModel:
         assert resolve_model(EvalConfig()) == DEFAULT_LLM_MODEL
         monkeypatch.delenv(ENV_LLM_MODEL)
         assert resolve_model(EvalConfig()) == DEFAULT_LLM_MODEL
+
+
+class TestLLMSettings:
+    def test_defaults_leave_the_framework_in_charge(self):
+        config = EvalConfig()
+        assert config.temperature is None
+        assert config.max_tokens is None
+        assert config.llm_kwargs == {}
+
+    def test_llm_kwargs_merge_key_by_key(self):
+        config = merge_config(
+            {"llm_kwargs": {"api_base": "http://a", "max_history_size": 3}},
+            {"llm_kwargs": {"api_base": "http://b"}},
+        )
+        assert config.llm_kwargs == {"api_base": "http://b", "max_history_size": 3}
+
+    @pytest.mark.parametrize(
+        "key", ["model", "temperature", "max_tokens", "llm_interface"]
+    )
+    def test_reserved_llm_kwargs_rejected(self, key):
+        with pytest.raises(EvalConfigError, match="llm_kwargs may not set"):
+            merge_config({"llm_kwargs": {key: 1}})
+
+    def test_max_tokens_must_be_positive(self):
+        with pytest.raises(EvalConfigError):
+            merge_config({"max_tokens": 0})
+
+    def test_non_utf8_config_file_is_a_config_error(self, tmp_path: Path):
+        path = tmp_path / "c.json"
+        path.write_bytes(b"\xff\xfe{")
+        with pytest.raises(EvalConfigError, match=r"c\.json"):
+            load_config(path)

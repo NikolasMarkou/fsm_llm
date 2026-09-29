@@ -1,0 +1,36 @@
+{
+  "name": "Name Capture",
+  "description": "Asks for the user's name and moves on only once Pass 1 has extracted it",
+  "initial_state": "ask_name",
+  "persona": "A friendly receptionist",
+  "states": {
+    "ask_name": {
+      "id": "ask_name",
+      "description": "Ask for the user's name",
+      "purpose": "Learn the user's first name",
+      "extraction_instructions": "Extract the user's first name as 'user_name'. Leave it empty if the user has not said their name.",
+      "response_instructions": "Ask the user for their first name.",
+      "required_context_keys": ["user_name"],
+      "transitions": [
+        {
+          "target_state": "welcome",
+          "description": "The user's name is known",
+          "priority": 0,
+          "conditions": [
+            {
+              "description": "user_name was extracted",
+              "requires_context_keys": ["user_name"],
+              "logic": {"!!": [{"var": "user_name"}]}
+            }
+          ]
+        }
+      ]
+    },
+    "welcome": {
+      "id": "welcome",
+      "description": "Welcome the user by name",
+      "purpose": "Greet the user by name and end the conversation",
+      "response_instructions": "Welcome the user by their name and say goodbye."
+    }
+  }
+}

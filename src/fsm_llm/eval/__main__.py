@@ -16,8 +16,10 @@ Settings precedence: built-in defaults < a dataset's embedded ``config`` (``run`
 only) < ``--config FILE`` < explicit flags.
 
 **Exit codes.** ``0`` success, also for low scores unless ``--fail-under`` is
-given; ``1`` usage error, bad config, unwritable output, or nothing matched;
-``2`` only when ``--fail-under PCT`` is given and the score is below it.
+given; ``1`` usage error, bad config or dataset, unwritable output, or nothing
+matched; ``2`` only when ``--fail-under PCT`` is given and the score is below it;
+``130`` interrupted by Ctrl-C (queued work is cancelled and a partial report is
+written).
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
+
+from fsm_llm.constants import CLI_EXIT_INTERRUPTED
 
 from .cases import TrialResult, load_cases, run_cases
 from .config import EvalConfig, load_config, merge_config, resolve_model
@@ -45,6 +49,7 @@ from .examples import (
 )
 from .exceptions import EvalError
 from .records import open_run_dir
+from .stats import below_percent
 
 __all__ = ["main_cli", "run"]
 
@@ -127,6 +132,14 @@ def build_parser() -> argparse.ArgumentParser:
     cases.add_argument("dataset", help="Dataset file (.json list/object or .jsonl)")
     _add_common_options(cases)
     cases.add_argument("--trials", type=int, help="Trials per case (default: 3)")
+    cases.add_argument(
+        "--temperature", type=float, help="LLM temperature (default: the framework's)"
+    )
+    cases.add_argument(
+        "--max-tokens",
+        type=int,
+        help="LLM max tokens per call (default: the framework's)",
+    )
     cases.add_argument("--list", action="store_true", help="List cases and exit")
     cases.set_defaults(func=_cmd_run)
     return parser
@@ -173,9 +186,13 @@ def _cmd_examples(args: argparse.Namespace) -> int:
             "fail_under",
         ),
     )
+    examples_dir = Path(config.examples_dir).resolve()
+    if not examples_dir.is_dir():
+        print(f"Examples directory not found: {examples_dir}", file=sys.stderr)
+        return EXIT_ERROR
     targets = discover_examples(config)
     if not targets:
-        print("No examples found matching filters.", file=sys.stderr)
+        print(f"No examples found matching filters in {examples_dir}", file=sys.stderr)
         return EXIT_ERROR
     if args.list:
         print(f"Discovered {len(targets)} examples:\n")
@@ -209,13 +226,24 @@ def _cmd_examples(args: argparse.Namespace) -> int:
     print(f"  Logs:        {run_dir / 'logs'}/")
     print(f"  JSON:        {run_dir / 'results.json'}")
     print(_RULE)
-    if config.fail_under is not None and report.health < config.fail_under:
+    if report.interrupted:
+        return _interrupted(f"{len(report.results)} of {len(targets)} examples")
+    max_score = len(report.results) * MAX_SCORE
+    if config.fail_under is not None and below_percent(
+        score_sum, max_score, config.fail_under
+    ):
         print(
             f"Health score {report.health:.1f}% is below --fail-under {config.fail_under:g}%",
             file=sys.stderr,
         )
         return EXIT_BELOW_THRESHOLD
     return EXIT_OK
+
+
+def _interrupted(done: str) -> int:
+    """Report a Ctrl-C'd run (partial report already written); exit 130."""
+    print(f"Interrupted: partial report for {done} written.", file=sys.stderr)
+    return CLI_EXIT_INTERRUPTED
 
 
 def _print_trial(completed: int, total: int, trial: TrialResult) -> None:
@@ -234,7 +262,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
     cases, embedded = load_cases(args.dataset)
     config = _config_from(
         args,
-        ("model", "workers", "trials", "output_dir", "fail_under"),
+        (
+            "model",
+            "workers",
+            "trials",
+            "temperature",
+            "max_tokens",
+            "output_dir",
+            "fail_under",
+        ),
         base_layer=embedded,
     )
     if args.list:
@@ -271,7 +307,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"  Rows:       {run_dir / 'rows.jsonl'}")
     print(f"  JSON:       {run_dir / 'results.json'}")
     print(_RULE)
-    if config.fail_under is not None and rate < config.fail_under:
+    if report.interrupted:
+        planned = len(cases) * config.trials
+        return _interrupted(f"{overall['n']} of {planned} trials")
+    if config.fail_under is not None and below_percent(
+        overall["k"], overall["n"], config.fail_under
+    ):
         print(
             f"Pass rate {rate:.1f}% is below --fail-under {config.fail_under:g}%",
             file=sys.stderr,
@@ -286,9 +327,9 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
     Interface contract:
         - ``argv``: arguments WITHOUT the program name; ``None`` reads
           ``sys.argv[1:]``.
-        - Returns the exit code (0, 1, or 2 under ``--fail-under``).
-          ``EvalError`` (bad config, unwritable output) is reported on stderr
-          as exit 1, never raised.
+        - Returns the exit code (0, 1, 2 under ``--fail-under``, 130 on
+          Ctrl-C). ``EvalError`` (bad config or dataset, unwritable output) is
+          reported on stderr as exit 1, never raised.
         - Raises ``SystemExit`` only from argparse (``--help`` exits 0, a
           usage error exits 1).
     """
@@ -308,6 +349,9 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
     except EvalError as exc:
         print(f"{_PROG}: error: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    except KeyboardInterrupt:  # before or after the runs (they handle their own)
+        print(f"{_PROG}: interrupted", file=sys.stderr)
+        return CLI_EXIT_INTERRUPTED
 
 
 def run(argv: Sequence[str] | None = None) -> int:
