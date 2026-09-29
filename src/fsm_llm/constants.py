@@ -88,6 +88,11 @@ RESERVED_LLM_CALL_KWARGS = frozenset(
 DEFAULT_MAX_HISTORY_SIZE = 5
 DEFAULT_MAX_MESSAGE_LENGTH = 1000
 
+# Upper bound on `persona` (FSMDefinition and FSMInstance, definitions.py).
+# Single source for both pydantic caps. Persona is rendered only in the Pass-2
+# response prompt, through the sanitizer; it never reaches Pass-1 field prompts.
+MAX_PERSONA_LENGTH = 4000
+
 # Message processing constants
 MESSAGE_TRUNCATION_SUFFIX = "... [truncated]"
 

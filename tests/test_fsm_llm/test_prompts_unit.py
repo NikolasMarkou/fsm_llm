@@ -8,6 +8,7 @@ and the three prompt builders: DataExtraction, ResponseGeneration, Transition.
 from typing import ClassVar
 
 import pytest
+from pydantic import ValidationError
 
 from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
 from fsm_llm.definitions import (
@@ -402,6 +403,36 @@ class TestResponseGenerationPromptBuilder:
 # TransitionPromptBuilder and TransitionPromptConfig have been removed.
 # Transition decisions now use classification-based resolution.
 # ============================================================================
+
+
+class TestPersonaLengthLimit:
+    """The persona cap is 4000 characters on FSMDefinition and FSMInstance.
+
+    Literals on purpose: these pin the documented limit, so a change to
+    ``constants.MAX_PERSONA_LENGTH`` must also change this test.
+    """
+
+    def test_1000_char_persona_loads_and_reaches_response_prompt(self):
+        persona = "Calm </persona> agent. " + "p" * 977
+        assert len(persona) == 1000
+        fsm_def = _make_fsm_definition(persona=persona)
+        instance = _make_instance(persona=None)
+        prompt = ResponseGenerationPromptBuilder().build_response_prompt(
+            instance, _make_state(), fsm_def, user_message="hi"
+        )
+        assert "<persona>" in prompt
+        # Sanitized: the embedded closing tag is escaped, the body is intact.
+        assert "Calm &lt;/persona&gt; agent. " + "p" * 977 in prompt
+
+    def test_persona_over_4000_chars_rejected(self):
+        with pytest.raises(ValidationError):
+            _make_fsm_definition(persona="x" * 4001)
+        with pytest.raises(ValidationError):
+            _make_instance(persona="x" * 4001)
+
+    def test_4000_char_persona_accepted(self):
+        assert len(_make_fsm_definition(persona="x" * 4000).persona) == 4000
+        assert len(_make_instance(persona="x" * 4000).persona) == 4000
 
 
 # ============================================================================

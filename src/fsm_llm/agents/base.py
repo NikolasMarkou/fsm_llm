@@ -58,9 +58,9 @@ def with_instructions(
 
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-047
     Do NOT put the instructions in the FSM ``persona`` (the plan's first
-    choice): core caps ``persona`` at 500 chars, so an ordinary system prompt
-    would fail the FSM load, and core shows ``persona`` only to Pass 2, never
-    to the per-field calls where agents choose tools and answers. Do NOT fill
+    choice): core shows ``persona`` only to Pass 2 (capped at
+    ``MAX_PERSONA_LENGTH``, 4000 chars since D-048), never to the per-field
+    calls where agents choose tools and answers. Do NOT fill
     an EMPTY instruction slot either: an empty ``response_instructions`` skips
     Pass 2 and an empty state ``extraction_instructions`` skips the bulk call.
     """

@@ -30,6 +30,10 @@ work, is `docs/agents_roadmap.md`.
 
 ### Changed
 
+- Core: `FSMDefinition.persona` and `FSMInstance.persona` accept up to 4,000
+  characters (was 500), one constant `fsm_llm.constants.MAX_PERSONA_LENGTH`. Persona
+  is still rendered only in the Pass-2 response prompt, sanitized; a longer persona
+  makes every reply call's prompt larger.
 - Agents: `create_agent(pattern="react", tools=None, *, config=None, system_prompt=None,
   **kwargs)` takes the pattern first, so `create_agent("debate")` builds a
   `DebateAgent`. The old `create_agent(system_prompt, tools)` call still works with a

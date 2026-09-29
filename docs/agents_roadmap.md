@@ -177,7 +177,8 @@ Where verification or a consumer contradicted the proposed fix, the fix was chan
 - LOOP-08 (D-017): `agent_trace` is not capped or renamed (a data path, and core reads it); it is kept out of prompts instead.
 - REACT-03 (D-010): the dead override is deleted, not repaired (a repair needs a core channel).
 - API-04 (D-011, D-027): additive `stop_reason`; a public `forced_stop_reason` context key tells forced passes apart, because `API.get_data` drops internal keys.
-- API-01 (D-012, D-047): `create_agent` keeps a legacy positional prompt with a `DeprecationWarning`. `AgentConfig.instructions` is prefixed as an `Agent instructions:` block to every non-empty state and field instruction, not written into `persona` (500-char core cap, and persona reaches only Pass 2).
+- API-01 (D-012, D-047): `create_agent` keeps a legacy positional prompt with a `DeprecationWarning`. `AgentConfig.instructions` is prefixed as an `Agent instructions:` block to every non-empty state and field instruction, not written into `persona` (persona reaches only Pass 2).
+- D-048: the core persona cap is now 4,000 characters (`MAX_PERSONA_LENGTH`), but `AgentConfig.instructions` still uses the instructions block (D-047): a longer persona still never reaches the Pass-1 field prompts.
 - PAT-13 (D-013): `AgentConfig.model` stays a `str` with an env-reading default factory; more than 20 readers use it directly.
 - PAT-04, PAT-10 (D-014, D-042): budget errors from sub-runs go into a call-local `RunEndingErrorHolder` and are re-raised after the loop; core's handler `continue` mode would swallow a plain raise.
 - PAT-08 (D-018, D-045): Swarm transfer tools deferred; `next_agent` stays caller- or tool-written.

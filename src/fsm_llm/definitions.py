@@ -29,6 +29,7 @@ from .constants import (
     JSONLOGIC_RAW_ARGUMENT_OPERATIONS,
     MAX_JSONLOGIC_DEPTH,
     MAX_MULTI_INTENTS,
+    MAX_PERSONA_LENGTH,
     MESSAGE_TRUNCATION_SUFFIX,
     TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
     has_internal_prefix,
@@ -1037,7 +1038,9 @@ class FSMDefinition(BaseModel):
     )
 
     persona: str | None = Field(
-        None, description="Conversation persona for response generation", max_length=500
+        None,
+        description="Conversation persona for response generation",
+        max_length=MAX_PERSONA_LENGTH,
     )
 
     # DECISION plan-2026-09-19T175721-21cd7f8e/D-033: opt-in and FSM-wide. The
@@ -1432,7 +1435,7 @@ class FSMInstance(BaseModel):
     persona: str | None = Field(
         default="Helpful AI assistant",
         description="Conversation persona",
-        max_length=500,
+        max_length=MAX_PERSONA_LENGTH,
     )
 
     last_extraction_response: DataExtractionResponse | None = Field(
