@@ -23,7 +23,7 @@ import os
 
 # Try to import ReasoningReactAgent
 try:
-    from fsm_llm_agents import AgentConfig, ReasoningReactAgent, ToolRegistry
+    from fsm_llm.agents import AgentConfig, ReasoningReactAgent, ToolRegistry
 
     _HAS_AGENT = True
 except ImportError:
@@ -105,7 +105,7 @@ def main() -> None:
         return
 
     if not _HAS_AGENT:
-        print("This example requires fsm_llm_agents and fsm_llm_reasoning.")
+        print("This example requires fsm_llm.agents and fsm_llm.reasoning.")
         print("Install with: pip install fsm-llm[agents,reasoning]")
         return
 

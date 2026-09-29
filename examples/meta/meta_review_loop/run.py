@@ -30,12 +30,12 @@ def main():
     # Import the agents extra lazily so a missing install yields a friendly
     # message (matching the build_* meta examples) instead of an import traceback.
     try:
-        from fsm_llm_agents import (
+        from fsm_llm.agents import (
             AgentConfig,
             MakerCheckerAgent,
             MetaBuilderAgent,
         )
-        from fsm_llm_agents.definitions import MetaBuilderConfig
+        from fsm_llm.agents.definitions import MetaBuilderConfig
     except ImportError:
         print("This example requires the agents extra: pip install fsm-llm[agents]")
         return

@@ -12,9 +12,9 @@ Flow:
   -> Smoke Test -> Production Deploy (agent) -> Post-Deploy Verify
 
 Combines:
-    - fsm_llm_workflows: Workflow DSL (create_workflow, auto_step,
+    - fsm_llm.workflows: Workflow DSL (create_workflow, auto_step,
       retry_step, agent_step)
-    - fsm_llm_agents: ReactAgent for production deployment step
+    - fsm_llm.agents: ReactAgent for production deployment step
 
 Key Concepts:
     - auto_step: deterministic pipeline stages
@@ -36,8 +36,8 @@ import os
 import random
 from typing import Any
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
-from fsm_llm_workflows import (
+from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
+from fsm_llm.workflows import (
     WorkflowEngine,
     WorkflowStep,
     WorkflowStepResult,

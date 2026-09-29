@@ -7,7 +7,7 @@ pipeline. A ConversationStep runs an FSM to collect order details, then
 ConditionStep and APICallStep handle validation and payment processing.
 
 Combines:
-    - fsm_llm_workflows: Workflow DSL (create_workflow, conversation_step,
+    - fsm_llm.workflows: Workflow DSL (create_workflow, conversation_step,
       condition_step, api_step, auto_step)
     - fsm_llm: Core FSM via ConversationStep for order collection
 
@@ -31,7 +31,7 @@ import asyncio
 import os
 from typing import Any
 
-from fsm_llm_workflows import (
+from fsm_llm.workflows import (
     WorkflowEngine,
     WorkflowStep,
     WorkflowStepResult,

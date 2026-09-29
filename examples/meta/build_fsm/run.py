@@ -42,9 +42,9 @@ def main():
     print("=" * 60)
 
     try:
-        from fsm_llm_agents import MetaBuilderAgent, MetaBuilderConfig
+        from fsm_llm.agents import MetaBuilderAgent, MetaBuilderConfig
     except ImportError:
-        print("Error: fsm_llm_agents not installed.")
+        print("Error: fsm_llm.agents not installed.")
         print("Install with: pip install -e '.[agents]'")
         return
 
@@ -78,7 +78,7 @@ def main():
         # Optionally save to file
         output_path = os.environ.get("OUTPUT_PATH")
         if output_path:
-            from fsm_llm_agents import save_artifact
+            from fsm_llm.agents import save_artifact
 
             try:
                 path = save_artifact(result.artifact, output_path)

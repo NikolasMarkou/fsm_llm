@@ -19,7 +19,7 @@ import os
 
 from pydantic import BaseModel, Field
 
-from fsm_llm_agents import AgentConfig, EvaluationResult, EvaluatorOptimizerAgent
+from fsm_llm.agents import AgentConfig, EvaluationResult, EvaluatorOptimizerAgent
 
 
 class RecipeOutput(BaseModel):

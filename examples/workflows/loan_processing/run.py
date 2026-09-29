@@ -13,7 +13,7 @@ Flow:
     -> [denied]    -> Notification
 
 Combines:
-    - fsm_llm_workflows: Workflow DSL (create_workflow, auto_step,
+    - fsm_llm.workflows: Workflow DSL (create_workflow, auto_step,
       conversation_step, switch_step)
     - fsm_llm: Core FSM via ConversationStep for applicant intake
 
@@ -36,7 +36,7 @@ import asyncio
 import os
 from typing import Any
 
-from fsm_llm_workflows import (
+from fsm_llm.workflows import (
     WorkflowEngine,
     WorkflowStep,
     WorkflowStepResult,

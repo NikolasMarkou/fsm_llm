@@ -9,7 +9,7 @@ with structured step-by-step traces.
 
 Combines:
     - fsm_llm: Core FSM for conversation management
-    - fsm_llm_reasoning: ReasoningEngine for structured problem solving
+    - fsm_llm.reasoning: ReasoningEngine for structured problem solving
 
 Key Concepts:
     - ReasoningEngine.solve_problem() for structured solutions
@@ -29,7 +29,7 @@ Usage:
 import os
 
 from fsm_llm import API
-from fsm_llm_reasoning import ReasoningEngine
+from fsm_llm.reasoning import ReasoningEngine
 
 
 def main():

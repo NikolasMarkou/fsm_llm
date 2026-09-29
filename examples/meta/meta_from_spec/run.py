@@ -33,10 +33,10 @@ def main():
     print("=" * 60)
 
     try:
-        from fsm_llm_agents import MetaBuilderAgent
-        from fsm_llm_agents.definitions import MetaBuilderConfig
+        from fsm_llm.agents import MetaBuilderAgent
+        from fsm_llm.agents.definitions import MetaBuilderConfig
     except ImportError:
-        print("Error: fsm_llm_agents not installed.")
+        print("Error: fsm_llm.agents not installed.")
         print("Install with: pip install -e '.[agents]'")
         return
 

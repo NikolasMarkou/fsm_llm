@@ -17,7 +17,7 @@ Run:
 
 import os
 
-from fsm_llm_agents import AgentConfig, MakerCheckerAgent
+from fsm_llm.agents import AgentConfig, MakerCheckerAgent
 
 
 def main() -> None:

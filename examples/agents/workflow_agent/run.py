@@ -28,7 +28,7 @@ import os
 
 # Try to import workflows
 try:
-    from fsm_llm_workflows import (
+    from fsm_llm.workflows import (
         WorkflowEngine,
         auto_step,
         conversation_step,
@@ -41,7 +41,7 @@ except ImportError:
 
 # Try to import agents (for FSM definitions)
 try:
-    from fsm_llm_agents.fsm_definitions import build_self_consistency_fsm
+    from fsm_llm.agents.fsm_definitions import build_self_consistency_fsm
 
     _HAS_AGENTS = True
 except ImportError:
@@ -143,12 +143,12 @@ def main() -> None:
         return
 
     if not _HAS_WORKFLOWS:
-        print("This example requires fsm_llm_workflows.")
+        print("This example requires fsm_llm.workflows.")
         print("Install with: pip install fsm-llm[workflows]")
         return
 
     if not _HAS_AGENTS:
-        print("This example requires fsm_llm_agents.")
+        print("This example requires fsm_llm.agents.")
         return
 
     print("=" * 60)

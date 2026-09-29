@@ -23,7 +23,7 @@ from fsm_llm import (
     Classifier,
     IntentDefinition,
 )
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
+from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry
 
 # ──────────────────────────────────────────────
 # Tool Definitions

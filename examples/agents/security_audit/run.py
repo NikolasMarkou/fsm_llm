@@ -14,7 +14,7 @@ Run:
 import os
 from typing import Annotated
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
+from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
 
 
 @tool

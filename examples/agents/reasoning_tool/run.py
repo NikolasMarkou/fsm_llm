@@ -24,11 +24,11 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry
+from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry
 
 # Try to import reasoning engine
 try:
-    from fsm_llm_reasoning import ReasoningEngine
+    from fsm_llm.reasoning import ReasoningEngine
 
     _HAS_REASONING = True
 except ImportError:
@@ -133,7 +133,7 @@ def main() -> None:
         return
 
     if not _HAS_REASONING:
-        print("This example requires fsm_llm_reasoning.")
+        print("This example requires fsm_llm.reasoning.")
         print("Install with: pip install fsm-llm[reasoning]")
         return
 

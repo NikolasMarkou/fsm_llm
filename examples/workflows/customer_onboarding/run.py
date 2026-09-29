@@ -12,8 +12,8 @@ Flow:
   -> Welcome Communication -> Training Schedule
 
 Combines:
-    - fsm_llm_workflows: Workflow DSL (create_workflow, auto_step)
-    - fsm_llm_agents: ReactAgent with 3 compliance tools
+    - fsm_llm.workflows: Workflow DSL (create_workflow, auto_step)
+    - fsm_llm.agents: ReactAgent with 3 compliance tools
 
 Key Concepts:
     - auto_step: deterministic processing stages
@@ -35,8 +35,8 @@ import asyncio
 import os
 from typing import Any
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
-from fsm_llm_workflows import (
+from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
+from fsm_llm.workflows import (
     WorkflowEngine,
     WorkflowStep,
     WorkflowStepResult,
