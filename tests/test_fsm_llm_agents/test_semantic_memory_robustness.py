@@ -202,3 +202,220 @@ class TestCrossInstanceAtomicSave:
 
         residue = [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
         assert residue == [], f"temp files left behind after a failed save: {residue}"
+
+
+def _capture_warnings(fn):
+    """Run ``fn`` with fsm_llm logging enabled; return (result, WARNING texts)."""
+    logger.enable("fsm_llm")
+    captured: list[str] = []
+    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
+    try:
+        result = fn()
+    finally:
+        logger.remove(sink_id)
+        logger.disable("fsm_llm")
+    return result, captured
+
+
+class TestPersistPathLoadOnInit:
+    """MEM-01: a store built on an existing ``persist_path`` keeps prior sessions."""
+
+    def test_second_store_sees_first_store_entries(self, tmp_path):
+        target = str(tmp_path / "mem.json")
+        first = SemanticMemoryStore(persist_path=target, embed_fn=_fake_embed)
+        first.add("my favourite language is Python")
+        first.add("I have a cat")
+
+        second = SemanticMemoryStore(persist_path=target, embed_fn=_fake_embed)
+        assert [e.text for e in second.all_entries()] == [
+            "my favourite language is Python",
+            "I have a cat",
+        ]
+
+        # The first add of the new session keeps the old entries on disk and
+        # continues the id counter instead of reusing mem-1.
+        eid = second.add("I live in Athens")
+        assert eid == "mem-3"
+        reloaded = SemanticMemoryStore.load(target, embed_fn=_fake_embed)
+        assert len(reloaded) == 3
+
+    def test_load_on_init_makes_no_embedding_call(self, tmp_path):
+        target = str(tmp_path / "mem.json")
+        SemanticMemoryStore(persist_path=target, embed_fn=_fake_embed).add("a fact")
+
+        calls: list[str] = []
+
+        def counting_embed(text: str) -> list[float]:
+            calls.append(text)
+            return _fake_embed(text)
+
+        store = SemanticMemoryStore(persist_path=target, embed_fn=counting_embed)
+        assert len(store) == 1
+        assert calls == []
+
+    def test_missing_file_starts_empty(self, tmp_path):
+        store = SemanticMemoryStore(
+            persist_path=str(tmp_path / "absent.json"), embed_fn=_fake_embed
+        )
+        assert len(store) == 0
+
+    def test_empty_file_starts_empty(self, tmp_path):
+        target = tmp_path / "mem.json"
+        target.write_text("  \n", encoding="utf-8")
+        store = SemanticMemoryStore(persist_path=str(target), embed_fn=_fake_embed)
+        assert len(store) == 0
+
+    def test_corrupt_file_raises_and_is_not_clobbered(self, tmp_path):
+        target = tmp_path / "mem.json"
+        target.write_text("{not json", encoding="utf-8")
+        with pytest.raises(ValueError, match=r"mem\.json"):
+            SemanticMemoryStore(persist_path=str(target), embed_fn=_fake_embed)
+        assert target.read_text(encoding="utf-8") == "{not json"
+
+    def test_non_store_json_raises(self, tmp_path):
+        target = tmp_path / "mem.json"
+        target.write_text("[1, 2, 3]", encoding="utf-8")
+        with pytest.raises(ValueError, match=r"mem\.json"):
+            SemanticMemoryStore(persist_path=str(target), embed_fn=_fake_embed)
+
+    def test_init_load_warns_on_model_mismatch(self, tmp_path):
+        target = str(tmp_path / "mem.json")
+        SemanticMemoryStore(
+            embedding_model="model-A", persist_path=target, embed_fn=_fake_embed
+        ).add("hello world")
+
+        _, captured = _capture_warnings(
+            lambda: SemanticMemoryStore(
+                embedding_model="model-B", persist_path=target, embed_fn=_fake_embed
+            )
+        )
+        joined = "\n".join(captured)
+        assert "mismatch" in joined.lower()
+        assert "model-A" in joined and "model-B" in joined
+
+
+class TestUnembeddedEntriesSearchable:
+    """MEM-02: entries whose embedding failed stay reachable by substring."""
+
+    def test_unembedded_entry_found_beside_embedded_ones(self):
+        def flaky_embed(text: str) -> list[float]:
+            if text == "apple pie recipe":
+                raise RuntimeError("provider down")
+            return _fake_embed(text)
+
+        store = SemanticMemoryStore(embed_fn=flaky_embed)
+        store.add("banana bread")
+        store.add("apple pie recipe")
+        assert store.all_entries()[1].embedding is None
+
+        texts = [text for text, _score, _meta in store.search("apple", k=5)]
+        assert "apple pie recipe" in texts
+        assert "banana bread" in texts
+
+    def test_unembedded_non_matching_entry_not_returned(self):
+        def flaky_embed(text: str) -> list[float]:
+            if text == "carrot cake":
+                raise RuntimeError("provider down")
+            return _fake_embed(text)
+
+        store = SemanticMemoryStore(embed_fn=flaky_embed)
+        store.add("banana bread")
+        store.add("carrot cake")
+        texts = [text for text, _score, _meta in store.search("apple", k=5)]
+        assert texts == ["banana bread"]
+
+
+class TestMaxEntriesRoundTrip:
+    """MEM-03: ``max_entries`` survives to_dict/from_dict, save/load and init load."""
+
+    def test_to_dict_from_dict_round_trips_max_entries(self):
+        store = SemanticMemoryStore(embed_fn=_fake_embed, max_entries=3)
+        data = store.to_dict()
+        assert data["max_entries"] == 3
+        restored = SemanticMemoryStore.from_dict(data, embed_fn=_fake_embed)
+        assert restored._max_entries == 3
+
+    def test_from_dict_without_max_entries_is_unbounded(self):
+        restored = SemanticMemoryStore.from_dict(
+            {"embedding_model": "m", "counter": 0, "entries": []}, embed_fn=_fake_embed
+        )
+        assert restored._max_entries is None
+
+    def test_load_restores_cap_and_evicts_on_next_add(self, tmp_path):
+        target = str(tmp_path / "mem.json")
+        store = SemanticMemoryStore(
+            persist_path=target, embed_fn=_fake_embed, max_entries=2
+        )
+        store.add("one")
+        store.add("two")
+        loaded = SemanticMemoryStore.load(target, embed_fn=_fake_embed)
+        loaded.add("three")
+        assert [e.text for e in loaded.all_entries()] == ["two", "three"]
+
+    def test_init_load_uses_stored_cap_unless_given(self, tmp_path):
+        target = str(tmp_path / "mem.json")
+        SemanticMemoryStore(
+            persist_path=target, embed_fn=_fake_embed, max_entries=2
+        ).add("one")
+        assert (
+            SemanticMemoryStore(persist_path=target, embed_fn=_fake_embed)._max_entries
+            == 2
+        )
+        assert (
+            SemanticMemoryStore(
+                persist_path=target, embed_fn=_fake_embed, max_entries=5
+            )._max_entries
+            == 5
+        )
+
+
+class TestSaveDurability:
+    """MEM-03: save creates the parent directory and fsyncs before replacing."""
+
+    def test_missing_parent_dir_is_created(self, tmp_path):
+        target = tmp_path / "nested" / "deeper" / "mem.json"
+        store = SemanticMemoryStore(persist_path=str(target), embed_fn=_fake_embed)
+        store.add("a fact")
+        assert target.exists()
+        assert len(SemanticMemoryStore.load(str(target), embed_fn=_fake_embed)) == 1
+
+    def test_temp_file_fsynced_before_replace(self, tmp_path, monkeypatch):
+        import os
+
+        order: list[str] = []
+        real_fsync, real_replace = os.fsync, os.replace
+
+        def spy_fsync(fd):
+            order.append("fsync")
+            return real_fsync(fd)
+
+        def spy_replace(src, dst):
+            order.append("replace")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(os, "fsync", spy_fsync)
+        monkeypatch.setattr(os, "replace", spy_replace)
+        SemanticMemoryStore(embed_fn=_fake_embed).save(str(tmp_path / "mem.json"))
+        assert order[:2] == ["fsync", "replace"]
+
+
+class TestCosineDimensionMismatch:
+    """MEM-04: vectors of different width score 0.0 with a WARNING."""
+
+    def test_mismatch_scores_zero_and_warns(self):
+        from fsm_llm.agents.semantic_tools import _cosine_similarity
+
+        score, captured = _capture_warnings(
+            lambda: _cosine_similarity([1.0, 0.0], [1.0, 0.0, 5.0])
+        )
+        assert score == 0.0
+        assert any("dimension" in m.lower() for m in captured)
+
+    def test_search_ranks_mismatched_entry_last(self):
+        vectors = {"python code": [1.0, 0.0], "old model fact": [1.0, 0.0, 9.0]}
+        store = SemanticMemoryStore(embed_fn=lambda t: vectors.get(t, [1.0, 0.0]))
+        store.add("old model fact")
+        store.add("python code")
+        results = store.search("coding", k=2)
+        assert results[0][0] == "python code"
+        assert results[1][1] == 0.0

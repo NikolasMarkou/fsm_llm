@@ -89,13 +89,19 @@ class SemanticMemoryStore:
         embedding_model: litellm embedding model id. Any litellm-supported
             provider works (OpenAI, Ollama, Cohere, ...).
         persist_path: If set, :meth:`add` / :meth:`forget` auto-save to this
-            JSON file. Also used as the default path for :meth:`save`.
+            JSON file. Also used as the default path for :meth:`save`. When the
+            file already exists it is loaded here (entries, cached embeddings
+            and id counter; no embedding call), so a new process continues the
+            previous session. A missing or blank file starts empty. A file
+            that is not a store written by :meth:`save` raises ``ValueError``
+            naming the path, and is left untouched.
         embed_fn: Optional override ``(text) -> list[float]`` used instead of
             litellm. Primarily for tests and custom embedding backends.
         max_entries: Optional cap on stored entries. When set, :meth:`add`
             evicts the oldest entries (FIFO by insertion order) after appending
-            until ``len <= max_entries``. Default ``None`` → unbounded (prior
-            behavior, byte-identical).
+            until ``len <= max_entries``. Default ``None`` → unbounded, or
+            the cap stored in an existing ``persist_path`` file. An explicit
+            value wins over the stored one.
     """
 
     def __init__(
@@ -118,6 +124,8 @@ class SemanticMemoryStore:
         # MUST NOT re-acquire it — persistence runs via _save_locked() (the
         # lock-free write body) while the lock is already held.
         self._lock = threading.Lock()
+        if self._persist_path and os.path.exists(self._persist_path):
+            self._load_persisted(self._persist_path)
 
     # ------------------------------------------------------------------
     # Embedding
@@ -174,32 +182,38 @@ class SemanticMemoryStore:
     ) -> list[tuple[str, float, dict[str, Any]]]:
         """Return up to ``k`` most relevant memories as (text, score, metadata).
 
-        Uses cosine similarity over embeddings. Falls back to case-insensitive
-        substring matching when the query cannot be embedded or no entry has an
-        embedding (so recall still works offline / when the provider is down).
+        Uses cosine similarity over embedded entries. Entries stored without an
+        embedding (the provider failed at :meth:`add`) are matched by
+        case-insensitive substring instead (score 1.0) and merged into the same
+        ranking. When the query itself cannot be embedded every entry uses the
+        substring match (so recall still works offline / when the provider is
+        down).
         """
-        if not self._entries:
+        entries = list(self._entries)
+        if not entries:
             return []
 
         query_emb = self._embed(query)
-        embedded = [e for e in self._entries if e.embedding is not None]
-
-        if query_emb is None or not embedded:
-            return self._substring_search(query, k)
-
-        scored = [
-            (e, _cosine_similarity(query_emb, e.embedding))  # type: ignore[arg-type]
-            for e in embedded
-        ]
-        scored.sort(key=lambda x: x[1], reverse=True)
+        if query_emb is None:
+            scored = self._substring_search(query, entries)
+        else:
+            scored = [
+                (e, _cosine_similarity(query_emb, e.embedding))
+                for e in entries
+                if e.embedding is not None
+            ]
+            scored += self._substring_search(
+                query, [e for e in entries if e.embedding is None]
+            )
+            scored.sort(key=lambda x: x[1], reverse=True)
         return [(e.text, score, e.metadata) for e, score in scored[:k]]
 
+    @staticmethod
     def _substring_search(
-        self, query: str, k: int
-    ) -> list[tuple[str, float, dict[str, Any]]]:
+        query: str, entries: list[MemoryEntry]
+    ) -> list[tuple[MemoryEntry, float]]:
         q = query.lower().strip()
-        hits = [(e.text, 1.0, e.metadata) for e in self._entries if q in e.text.lower()]
-        return hits[:k]
+        return [(e, 1.0) for e in entries if q in e.text.lower()]
 
     def forget(self, entry_id: str) -> bool:
         """Remove an entry by id. Returns True if removed."""
@@ -229,8 +243,59 @@ class SemanticMemoryStore:
         return {
             "embedding_model": self._embedding_model,
             "counter": self._counter,
+            "max_entries": self._max_entries,
             "entries": [e.to_dict() for e in self._entries],
         }
+
+    def _load_persisted(self, path: str) -> None:
+        """Load the existing ``persist_path`` file into this fresh store."""
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+        if not raw.strip():
+            return
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-026
+        # Do NOT degrade a corrupt file to "log a WARNING and start empty": the
+        # first add() auto-persists and would overwrite the unreadable file,
+        # silently losing every stored memory. Raise and leave the file alone.
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Cannot load semantic memory file {path!r}: {e}. Refusing to "
+                "start empty and overwrite it; repair or move the file."
+            ) from e
+        self._apply_data(data, repr(path))
+
+    def _apply_data(self, data: Any, source: str) -> None:
+        """Restore entries, id counter and an unset ``max_entries`` from a
+        :meth:`to_dict` payload; warn when its embedding model differs from
+        this store's. Raises ``ValueError`` naming ``source`` when ``data`` is
+        not such a payload. Makes no embedding call."""
+        try:
+            if not isinstance(data, dict):
+                raise TypeError(f"expected a JSON object, got {type(data).__name__}")
+            entries = [MemoryEntry.from_dict(d) for d in data.get("entries", [])]
+            counter = int(data.get("counter", 0))
+            stored_cap = data.get("max_entries")
+            cap = None if stored_cap is None else int(stored_cap)
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError(
+                f"{source} is not a valid SemanticMemoryStore payload: {e}"
+            ) from e
+        self._entries = entries
+        self._counter = counter
+        if self._max_entries is None:
+            self._max_entries = cap
+        # Embedding-mismatch guard: stored vectors were produced by the saved
+        # model; comparing them against a different active model's query vectors
+        # mixes incompatible vector spaces. Warn (no behavior change on match).
+        stored_model = data.get("embedding_model")
+        if stored_model and stored_model != self._embedding_model:
+            logger.warning(
+                "SemanticMemoryStore embedding model mismatch: stored "
+                f"'{stored_model}' != active '{self._embedding_model}'; "
+                "cached vectors may be incompatible with new query embeddings."
+            )
 
     @classmethod
     def from_dict(
@@ -247,6 +312,9 @@ class SemanticMemoryStore:
         warning is emitted (the cached vectors came from the stored model and
         are incompatible with a different model's query vectors). When omitted,
         the stored model is reused (prior behavior, no warning).
+        ``max_entries`` is restored when present (files written before it was
+        stored load unbounded). ``persist_path`` is only the future save
+        target: the payload is ``data``, the file is not read.
         """
         stored_model = data.get("embedding_model")
         active_model = (
@@ -254,22 +322,9 @@ class SemanticMemoryStore:
             if embedding_model is not None
             else (stored_model or "ollama/qwen3-embedding:0.6b")
         )
-        store = cls(
-            embedding_model=active_model,
-            persist_path=persist_path,
-            embed_fn=embed_fn,
-        )
-        store._counter = int(data.get("counter", 0))
-        store._entries = [MemoryEntry.from_dict(d) for d in data.get("entries", [])]
-        # Embedding-mismatch guard: stored vectors were produced by the saved
-        # model; comparing them against a different active model's query vectors
-        # mixes incompatible vector spaces. Warn (no behavior change on match).
-        if stored_model and stored_model != active_model:
-            logger.warning(
-                "SemanticMemoryStore embedding model mismatch: stored "
-                f"'{stored_model}' != active '{active_model}'; "
-                "cached vectors may be incompatible with new query embeddings."
-            )
+        store = cls(embedding_model=active_model, embed_fn=embed_fn)
+        store._persist_path = os.path.expanduser(persist_path) if persist_path else None
+        store._apply_data(data, "from_dict data")
         return store
 
     def save(self, path: str | None = None) -> None:
@@ -300,11 +355,18 @@ class SemanticMemoryStore:
         # up on ANY failure, including a TypeError out of json.dump.
         # `parent or "."`: the temp file MUST land on the target's own
         # filesystem or os.replace raises EXDEV. A bare filename means the cwd.
+        # A missing parent is created (mkstemp would raise, and auto-persist
+        # would only log it). fsync before os.replace: without it a crash can
+        # leave the renamed target empty or truncated.
         parent = os.path.dirname(target)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=parent or ".", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(self.to_dict(), fh, ensure_ascii=False, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
             os.replace(tmp, target)
         finally:
             if os.path.exists(tmp):

@@ -18,8 +18,19 @@ from .tools import ToolRegistry
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Compute cosine similarity between two vectors."""
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    """Compute cosine similarity between two vectors.
+
+    Vectors of different length (e.g. cached under another embedding model)
+    are not comparable: they score ``0.0`` and log a WARNING instead of being
+    silently truncated to the shorter length.
+    """
+    if len(a) != len(b):
+        logger.warning(
+            f"Embedding dimension mismatch ({len(a)} vs {len(b)}); "
+            "scoring 0.0. Were the vectors made by different embedding models?"
+        )
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0 or norm_b == 0:
