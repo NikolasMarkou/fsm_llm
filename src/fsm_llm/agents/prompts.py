@@ -18,7 +18,8 @@ if TYPE_CHECKING:
     from .semantic_tools import SemanticToolRegistry
 
 
-# Generated loop values (debate rounds, drafts, chain step outputs) are
+# Generated loop values (debate rounds, drafts, chain step outputs,
+# reflections, plan step results) are
 # written, not found: the field prompt frames every value as an extraction,
 # and live qwen3.5:4b returned null ("not in the user message") for text no
 # message holds. Every generated text field opens with this sentence.
@@ -262,7 +263,7 @@ def build_evaluate_field_instructions() -> dict[str, str]:
             f"{criteria} A number from 0.0 to 1.0 rating the answer quality."
         ),
         "evaluation_feedback": (
-            f"{criteria} One or two sentences on what is good or missing."
+            f"{_COMPOSE}{criteria} One or two sentences on what is good or missing."
         ),
     }
 
@@ -276,13 +277,13 @@ def build_reflect_field_instructions() -> dict[str, str]:
     """
     return {
         "reflection": (
-            "The last evaluation found the answer insufficient (see "
+            f"{_COMPOSE}The last evaluation found the answer insufficient (see "
             "evaluation_feedback). Critique what went wrong in this attempt "
             "and what to try differently. Do not repeat a reflection already "
             "in episodic_memory."
         ),
         "lessons": (
-            "One short lesson to remember for the next attempt, based on "
+            f"{_COMPOSE}One short lesson to remember for the next attempt, based on "
             "evaluation_feedback and not already listed in episodic_memory."
         ),
     }
@@ -331,13 +332,18 @@ def build_plan_steps_instructions(
 def build_execute_step_instructions(
     registry: ToolRegistry | None = None,
     task_description: str | None = None,
+    *,
+    step_result: bool = False,
 ) -> str:
     """Per-field instructions for the ``execute_step`` state's fields.
 
     Shared by ``step_result`` and the typed tool selection (``tool_name``
     names a listed tool or "none"; ``tool_input`` is its parameter object).
+    ``step_result=True`` opens with :data:`_COMPOSE` (a generated value; a
+    tool observation still wins over it when a tool ran).
     """
     return (
+        f"{_COMPOSE if step_result else ''}"
         "Carry out the current plan step (current_step_description), using "
         "the results of earlier steps (step_results). With a tool, "
         'tool_name is the tool to call (or "none" if no tool is needed) and '
@@ -406,22 +412,6 @@ def build_rewoo_plan_extraction_instructions(
             '"tool_name": "search", "tool_input": {"query": "Y context: #E1"}}',
             "]",
         ]
-    )
-
-
-def build_rewoo_plan_response_instructions() -> str:
-    """Build response instructions for the REWOO plan_all state."""
-    return (
-        "Explain the complete plan you have created to solve the task. "
-        "List each step and describe the dependencies between them."
-    )
-
-
-def build_rewoo_execute_response_instructions() -> str:
-    """Build response instructions for the REWOO execute_plans state."""
-    return (
-        "Summarize the results of executing all planned tool calls. "
-        "List each step and its outcome."
     )
 
 

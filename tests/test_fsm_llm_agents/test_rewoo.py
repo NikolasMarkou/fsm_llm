@@ -191,16 +191,16 @@ class TestREWOOFSM:
         assert "extraction_instructions" in state
         assert len(state["extraction_instructions"]) > 0
 
-    def test_states_have_response_instructions(self):
-        """All states should have response_instructions."""
+    def test_only_solve_has_response_instructions(self):
+        """Intermediate states are silent (empty response_instructions)."""
         registry = _make_registry()
         fsm = build_rewoo_fsm(registry)
-        for state_name in fsm["states"]:
-            state = fsm["states"][state_name]
+        for state_name, state in fsm["states"].items():
             assert "response_instructions" in state, (
                 f"State '{state_name}' is missing response_instructions"
             )
-            assert len(state["response_instructions"]) > 0
+            spoken = len(state["response_instructions"]) > 0
+            assert spoken is (state_name == "solve"), state_name
 
     def test_custom_task_description(self):
         registry = _make_registry()

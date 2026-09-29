@@ -203,6 +203,9 @@ class ContextKeys:
 
     # REWOO
     EVIDENCE = "evidence"
+    # One entry per executed plan step: {"id", "tool_name", "success"}. The
+    # success rule reads it (at least one True), not the evidence mapping.
+    EVIDENCE_STATUS = "evidence_status"
     PLAN_BLUEPRINT = "plan_blueprint"
 
     # Evaluator-Optimizer

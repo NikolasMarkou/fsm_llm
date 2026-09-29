@@ -26,7 +26,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_orchestrator_fsm
-from .handlers import make_iteration_limiter
+from .handlers import RunEndingErrorHolder, make_iteration_limiter
 from .tools import ToolRegistry
 
 
@@ -102,26 +102,48 @@ class OrchestratorAgent(BaseAgent):
             },
         )
 
+        # Call-local: a worker's budget/timeout error rides out of the
+        # delegator here (plan-2026-09-29T103145-06a5ec0a/D-014).
+        holder = RunEndingErrorHolder()
+
         # DECISION plan_2026-05-31_cb91a9d5/D-001 [STALE]: require a successful worker
         # result, not just a synthesis final_answer / delegate control action,
         # before reporting success — the orchestrate->synthesize fallback else
         # passes filler off as success on weak decomposition.
-        return self._standard_run(
-            task,
-            fsm_def,
-            context,
-            "orchestrator",
-            execution_evidence_keys=[ContextKeys.WORKER_RESULTS],
-        )
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-042: re-raise a worker's
+        # AgentTimeoutError/BudgetExhaustedError HERE, after the run. Do NOT
+        # re-raise inside the delegator (core's handler error mode swallows it)
+        # and do NOT keep the holder on self (shared across runs, D-014).
+        try:
+            result = self._standard_run(
+                task,
+                fsm_def,
+                context,
+                "orchestrator",
+                execution_evidence_keys=[ContextKeys.WORKER_RESULTS],
+                handlers=holder,
+            )
+        finally:
+            holder.raise_if_set()
+        return result
 
-    def _register_handlers(self, api: API) -> None:
-        """Register orchestrator handlers with the API."""
+    def _register_handlers(
+        self, api: API, holder: RunEndingErrorHolder | None = None
+    ) -> None:
+        """Register orchestrator handlers with the API.
+
+        ``holder`` is the calling ``run()``'s error holder (passed through
+        ``_standard_run(handlers=...)``); ``run()`` re-raises what the
+        delegator captures in it. Without one a captured error still stops
+        further workers but nothing re-raises it.
+        """
+        run_holder = holder if holder is not None else RunEndingErrorHolder()
         # Worker delegator: runs on entry to 'delegate' state
         api.register_handler(
             api.create_handler(HandlerNames.ORCHESTRATOR_DELEGATOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(OrchestratorStates.DELEGATE)
-            .do(self._delegate_to_workers)
+            .do(lambda context: self._delegate_to_workers(context, run_holder))
         )
 
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
@@ -140,18 +162,34 @@ class OrchestratorAgent(BaseAgent):
         # Iteration limiter: checks budget on every pre-transition
         self._register_iteration_limiter(api, self._make_iteration_limiter())
 
-    def _delegate_to_workers(self, context: dict[str, Any]) -> dict[str, Any]:
+    def _delegate_to_workers(
+        self,
+        context: dict[str, Any],
+        holder: RunEndingErrorHolder | None = None,
+    ) -> dict[str, Any]:
         """
-        Execute worker_factory for each subtask.
+        Execute worker_factory for each subtask, one after another.
 
         Called as a POST_TRANSITION handler when entering the 'delegate' state.
+        Subtasks beyond ``max_workers`` are not run: each is recorded as a
+        failed ``skipped`` result, with a WARNING. A worker's
+        ``AgentTimeoutError``/``BudgetExhaustedError`` goes into ``holder``
+        and no further worker starts; any other worker exception is recorded
+        as a failed result.
         """
+        if holder is None:
+            holder = RunEndingErrorHolder()
         subtasks = context.get(ContextKeys.SUBTASKS, [])
         if not isinstance(subtasks, list):
             subtasks = [str(subtasks)]
 
-        # Limit to max_workers
+        skipped = [str(subtask) for subtask in subtasks[self.max_workers :]]
         subtasks = subtasks[: self.max_workers]
+        if skipped:
+            logger.warning(
+                f"Orchestrator got {len(subtasks) + len(skipped)} subtasks, "
+                f"max_workers={self.max_workers}; skipping {len(skipped)}"
+            )
 
         existing_results = context.get(ContextKeys.WORKER_RESULTS, [])
         if not isinstance(existing_results, list):
@@ -160,6 +198,8 @@ class OrchestratorAgent(BaseAgent):
         new_results: list[dict[str, Any]] = []
 
         for i, subtask in enumerate(subtasks):
+            if holder.is_set:
+                break
             subtask_str = str(subtask)
             logger.debug(
                 f"Delegating subtask {i + 1}/{len(subtasks)}: {subtask_str[:100]}"
@@ -176,6 +216,9 @@ class OrchestratorAgent(BaseAgent):
                         }
                     )
                 except Exception as e:
+                    if holder.capture(e):
+                        logger.warning(f"Worker ended the run: {e}")
+                        break
                     logger.warning(f"Worker failed for subtask: {e}", exc_info=True)
                     new_results.append(
                         {
@@ -194,6 +237,15 @@ class OrchestratorAgent(BaseAgent):
                     }
                 )
 
+        new_results.extend(
+            {
+                "subtask": subtask_str,
+                "answer": f"Skipped: over max_workers={self.max_workers}",
+                "success": False,
+                "skipped": True,
+            }
+            for subtask_str in skipped
+        )
         all_results = existing_results + new_results
 
         # Track in agent trace
@@ -204,6 +256,7 @@ class OrchestratorAgent(BaseAgent):
             {
                 "action": "delegate",
                 "subtasks_delegated": len(subtasks),
+                "subtasks_skipped": len(skipped),
                 "results_count": len(new_results),
             }
         )

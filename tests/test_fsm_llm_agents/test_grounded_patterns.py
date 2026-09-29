@@ -1775,3 +1775,194 @@ class TestEvaluatorOptimizerLoop:
         assert not llm.calls("extract_bulk_data")
         for request in _field_requests(llm, ContextKeys.GENERATED_OUTPUT):
             assert ContextKeys.AGENT_TRACE not in request.context
+
+
+_REWOO_TASK = "What is the capital of France?"
+
+
+def _rewoo_registry(calls: list[str], *, fail: bool = False) -> object:
+    from fsm_llm.agents import ToolRegistry
+
+    registry = ToolRegistry()
+
+    def lookup(query: str) -> str:
+        calls.append(query)
+        if fail:
+            raise RuntimeError("source offline")
+        return f"found[{query}]"
+
+    registry.register_function(lookup, name="lookup", description="Look up a fact")
+    return registry
+
+
+def _rewoo_run(plan: list, *, fail: bool = False) -> tuple:
+    from fsm_llm.agents import REWOOAgent
+
+    calls: list[str] = []
+    llm = PromptGroundedLLM(
+        facts={
+            "plan_blueprint": (plan, "capital of France"),
+            "final_answer": ("Paris", "capital of France"),
+        }
+    )
+    agent = REWOOAgent(tools=_rewoo_registry(calls, fail=fail), llm_interface=llm)
+    return agent.run(_REWOO_TASK), calls, llm
+
+
+def _lookup_step(plan_id: object, query: str) -> dict:
+    step = {"description": "look up", "tool_name": "lookup"}
+    step["tool_input"] = {"query": query}
+    if plan_id is not None:
+        step["plan_id"] = plan_id
+    return step
+
+
+class TestREWOOOutcome:
+    """Step 21 (PAT-09): success needs one successful evidence entry, plan ids
+    normalise to ``E<n>``, and only ``solve`` speaks."""
+
+    def test_all_tools_failing_is_no_result(self):
+        result, calls, _ = _rewoo_run([_lookup_step(1, "capital")], fail=True)
+
+        assert calls == ["capital"]
+        assert result.success is False
+        assert result.stop_reason == "no_result"
+        assert result.final_context[ContextKeys.EVIDENCE_STATUS] == [
+            {"id": "E1", "tool_name": "lookup", "success": False}
+        ]
+
+    def test_one_successful_tool_is_evidence(self):
+        result, _, _ = _rewoo_run([_lookup_step(1, "capital")])
+
+        assert (result.success, result.stop_reason) == (True, "evidence")
+
+    @pytest.mark.parametrize("plan_id", ["E1", "#E1", "e1", "1", 1.0])
+    def test_string_plan_id_resolves_its_reference(self, plan_id):
+        plan = [_lookup_step(plan_id, "capital"), _lookup_step("E2", "verify #E1")]
+        result, calls, _ = _rewoo_run(plan)
+
+        assert calls == ["capital", "verify found[capital]"]
+        assert list(result.final_context[ContextKeys.EVIDENCE]) == ["E1", "E2"]
+
+    def test_missing_plan_id_is_the_step_position(self):
+        plan = [_lookup_step(None, "capital"), _lookup_step(None, "verify #E1")]
+        result, calls, _ = _rewoo_run(plan)
+
+        assert calls == ["capital", "verify found[capital]"]
+        assert list(result.final_context[ContextKeys.EVIDENCE]) == ["E1", "E2"]
+
+    def test_only_solve_speaks(self):
+        _, _, llm = _rewoo_run([_lookup_step(1, "capital")])
+
+        assert _spoken_states(llm) <= {"solve"}
+
+
+class TestOrchestratorWorkers:
+    """Step 21 (PAT-10): excess subtasks are recorded as skipped, and a
+    worker's budget or timeout error ends the run."""
+
+    def _agent(self, worker, max_workers: int = 5):
+        from fsm_llm.agents import AgentConfig, OrchestratorAgent
+
+        llm = PromptGroundedLLM(
+            facts={
+                "subtasks": (["part one", "part two"], "Plan the trip"),
+                "final_answer": ("A plan", "Plan the trip"),
+            }
+        )
+        return OrchestratorAgent(
+            worker_factory=worker,
+            config=AgentConfig(max_iterations=8),
+            max_workers=max_workers,
+            llm_interface=llm,
+        )
+
+    @pytest.mark.parametrize(
+        "error_name", ["BudgetExhaustedError", "AgentTimeoutError"]
+    )
+    def test_worker_budget_error_propagates(self, error_name):
+        from fsm_llm.agents import exceptions
+
+        error_cls = getattr(exceptions, error_name)
+        calls: list[str] = []
+
+        def worker(subtask: str):
+            calls.append(subtask)
+            if error_name == "BudgetExhaustedError":
+                raise error_cls(budget_type="iterations", limit=1)
+            raise error_cls(timeout_seconds=1.0)
+
+        with pytest.raises(error_cls):
+            self._agent(worker).run("Plan the trip")
+        assert calls == ["part one"]
+
+    def test_subtasks_over_max_workers_are_skipped_with_a_warning(self):
+        from fsm_llm.agents import AgentResult
+
+        calls: list[str] = []
+
+        def worker(subtask: str) -> AgentResult:
+            calls.append(subtask)
+            return AgentResult(answer=f"done {subtask}", success=True)
+
+        warnings: list[str] = []
+        from fsm_llm.logging import logger
+
+        sink = logger.add(lambda m: warnings.append(str(m)), level="WARNING")
+        logger.enable("fsm_llm")
+        try:
+            result = self._agent(worker, max_workers=1).run("Plan the trip")
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+
+        assert calls == ["part one"]
+        entries = result.final_context[ContextKeys.WORKER_RESULTS]
+        skipped = [e for e in entries if e.get("skipped")]
+        assert [e["subtask"] for e in skipped] == ["part two"]
+        assert skipped[0]["success"] is False
+        assert any("skipping 1" in w for w in warnings)
+        assert result.success is True
+
+
+def _field_instructions(fsm: dict, state: str) -> dict[str, str]:
+    return {
+        f["field_name"]: f["extraction_instructions"]
+        for f in fsm["states"][state].get("field_extractions", [])
+    }
+
+
+class TestGeneratedFieldsAreComposed:
+    """Step 21 sweep: live qwen3.5:4b returned null for the Reflexion
+    reflection/lessons and PlanExecute step_result ("not in the user
+    message"); every generated text field opens with the compose sentence,
+    the tool selection fields do not."""
+
+    _SENTENCE = "compose it yourself now and never return null"
+
+    def test_reflexion_text_fields(self):
+        from fsm_llm.agents.fsm_definitions import build_reflexion_fsm
+
+        fsm = build_reflexion_fsm(_rewoo_registry([]))
+        reflect = _field_instructions(fsm, "reflect")
+        evaluate = _field_instructions(fsm, "evaluate")
+
+        for text in (
+            reflect[ContextKeys.REFLECTION],
+            reflect[ContextKeys.LESSONS],
+            evaluate[ContextKeys.EVALUATION_FEEDBACK],
+        ):
+            assert self._SENTENCE in text
+        assert self._SENTENCE not in evaluate[ContextKeys.EVALUATION_PASSED]
+
+    @pytest.mark.parametrize("with_tools", [True, False])
+    def test_plan_execute_step_result(self, with_tools):
+        from fsm_llm.agents.fsm_definitions import build_plan_execute_fsm
+
+        registry = _rewoo_registry([]) if with_tools else None
+        fields = _field_instructions(build_plan_execute_fsm(registry), "execute_step")
+
+        assert self._SENTENCE in fields[ContextKeys.STEP_RESULT]
+        for name in ("tool_name", "tool_input"):
+            if name in fields:
+                assert self._SENTENCE not in fields[name]

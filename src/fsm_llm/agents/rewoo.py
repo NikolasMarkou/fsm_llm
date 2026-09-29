@@ -28,6 +28,30 @@ from .fsm_definitions import build_rewoo_fsm
 from .handlers import make_iteration_limiter
 from .tools import ToolRegistry, redact_secret_entries
 
+# A plan id the model wrote as 1, "1", "E1" or "#E1" (any case).
+_PLAN_ID = re.compile(r"#?E?(\d+)", re.IGNORECASE)
+
+
+def _evidence_id(raw: Any, position: int) -> str:
+    """The ``E<n>`` evidence key of a plan step.
+
+    ``raw`` is the step's ``plan_id``: an integer (or integral float) or a
+    string ``"1"``/``"E1"``/``"#E1"`` gives ``E<n>``; anything else (missing,
+    bool, unparsable) gives ``E<position>``, the step's 1-based position among
+    the plan's dict steps, with a WARNING when a value was present. Never raises.
+    """
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return f"E{raw}"
+    if isinstance(raw, float) and raw.is_integer():
+        return f"E{int(raw)}"
+    if isinstance(raw, str):
+        match = _PLAN_ID.fullmatch(raw.strip())
+        if match:
+            return f"E{int(match.group(1))}"
+    if raw is not None:
+        logger.warning(f"REWOO plan_id {raw!r} is not a step number; using E{position}")
+    return f"E{position}"
+
 
 class REWOOAgent(BaseAgent):
     """
@@ -81,6 +105,7 @@ class REWOOAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.EVIDENCE: {},
+                ContextKeys.EVIDENCE_STATUS: [],
             },
         )
 
@@ -88,12 +113,16 @@ class REWOOAgent(BaseAgent):
         # evidence — the unconditional plan_all->execute_plans transition lets
         # solve() emit a final_answer from EMPTY evidence (zero tools run) when
         # the 4b model fails to produce a valid plan_blueprint.
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-041: success reads
+        # EVIDENCE_STATUS (a per-step success flag), NOT the `evidence` mapping.
+        # Do NOT go back to `evidence`: failed calls store their error text
+        # there, so a run whose every tool failed read as success=True.
         return self._standard_run(
             task,
             fsm_def,
             context,
             "rewoo",
-            execution_evidence_keys=[ContextKeys.EVIDENCE],
+            execution_evidence_keys=[ContextKeys.EVIDENCE_STATUS],
         )
 
     def _register_handlers(self, api: API) -> None:
@@ -111,9 +140,10 @@ class REWOOAgent(BaseAgent):
         plan_blueprint = context.get(ContextKeys.PLAN_BLUEPRINT, [])
         if not isinstance(plan_blueprint, list):
             logger.warning("plan_blueprint is not a list, skipping execution")
-            return {ContextKeys.EVIDENCE: {}}
+            return {ContextKeys.EVIDENCE: {}, ContextKeys.EVIDENCE_STATUS: []}
 
         evidence: dict[str, str] = {}
+        status: list[dict[str, Any]] = []
         trace_entries: list[dict[str, Any]] = list(
             context.get(ContextKeys.AGENT_TRACE, [])
         )
@@ -122,7 +152,7 @@ class REWOOAgent(BaseAgent):
             if not isinstance(step, dict):
                 continue
 
-            plan_id = step.get("plan_id", 0)
+            plan_id = _evidence_id(step.get("plan_id"), len(status) + 1)
             tool_name = step.get("tool_name", "")
             tool_input = step.get("tool_input", {})
             description = step.get("description", "")
@@ -152,9 +182,11 @@ class REWOOAgent(BaseAgent):
             )
             result = self.tools.execute(tool_call)
 
-            # Store evidence
-            evidence_key = f"E{plan_id}"
-            evidence[evidence_key] = result.summary
+            # Store evidence (a failed call stores its error text)
+            evidence[plan_id] = result.summary
+            status.append(
+                {"id": plan_id, "tool_name": tool_name, "success": result.success}
+            )
 
             if result.success:
                 logger.info(LogMessages.TOOL_EXECUTED.format(name=tool_name))
@@ -180,6 +212,7 @@ class REWOOAgent(BaseAgent):
 
         return {
             ContextKeys.EVIDENCE: evidence,
+            ContextKeys.EVIDENCE_STATUS: status,
             ContextKeys.AGENT_TRACE: trace_entries,
         }
 

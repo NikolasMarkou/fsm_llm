@@ -1008,7 +1008,9 @@ def build_plan_execute_fsm(
         _typed_field_extraction(
             ContextKeys.STEP_RESULT,
             "str",
-            step_instructions,
+            build_execute_step_instructions(
+                registry, task_description=task_description, step_result=True
+            ),
             extra_context_keys=step_context,
             # With tools the step's result is the tool observation.
             required=not has_tools,
@@ -1691,11 +1693,12 @@ def build_rewoo_fsm(
     - plan_all: single LLM call generates a complete plan with #E1, #E2 refs
     - execute_plans: handler executes all tool calls sequentially (no LLM)
     - solve: single LLM call synthesizes the final answer from all evidence
+
+    plan_all and execute_plans are silent (empty response instructions): only
+    solve speaks.
     """
     from .prompts import (
-        build_rewoo_execute_response_instructions,
         build_rewoo_plan_extraction_instructions,
-        build_rewoo_plan_response_instructions,
         build_rewoo_solve_extraction_instructions,
         build_rewoo_solve_response_instructions,
     )
@@ -1715,7 +1718,7 @@ def build_rewoo_fsm(
             "extraction_instructions": build_rewoo_plan_extraction_instructions(
                 registry, task_description=task_description
             ),
-            "response_instructions": build_rewoo_plan_response_instructions(),
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "execute_plans",
@@ -1728,7 +1731,7 @@ def build_rewoo_fsm(
             "id": "execute_plans",
             "description": "Execute all planned tool calls sequentially",
             "purpose": "Run every tool call from the plan, substituting variable references",
-            "response_instructions": build_rewoo_execute_response_instructions(),
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "solve",

@@ -233,8 +233,14 @@ class TestOrchestratorDelegation:
         assert "Pending LLM processing" in worker_results[0]["answer"]
 
     def test_delegate_respects_max_workers(self):
-        """Delegation should not exceed max_workers."""
-        agent = OrchestratorAgent(worker_factory=_dummy_worker, max_workers=2)
+        """Delegation runs at most max_workers; the rest are recorded as skipped."""
+        calls: list[str] = []
+
+        def worker(subtask: str) -> AgentResult:
+            calls.append(subtask)
+            return _dummy_worker(subtask)
+
+        agent = OrchestratorAgent(worker_factory=worker, max_workers=2)
 
         context = {
             ContextKeys.SUBTASKS: ["t1", "t2", "t3", "t4", "t5"],
@@ -244,7 +250,17 @@ class TestOrchestratorDelegation:
 
         result = agent._delegate_to_workers(context)
         worker_results = result[ContextKeys.WORKER_RESULTS]
-        assert len(worker_results) == 2
+        assert calls == ["t1", "t2"]
+        assert [r["subtask"] for r in worker_results] == ["t1", "t2", "t3", "t4", "t5"]
+        assert [r.get("skipped", False) for r in worker_results] == [
+            False,
+            False,
+            True,
+            True,
+            True,
+        ]
+        assert all(r["success"] is False for r in worker_results[2:])
+        assert result[ContextKeys.AGENT_TRACE][-1]["subtasks_skipped"] == 3
 
 
 class _DecisionLLM(LLMInterface):
