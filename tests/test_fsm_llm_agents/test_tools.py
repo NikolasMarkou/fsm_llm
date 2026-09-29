@@ -6,13 +6,19 @@ import sys
 import threading
 import time
 import typing
+from types import SimpleNamespace
 from typing import Annotated, Any
 
 import pytest
 
 from fsm_llm.agents.definitions import ToolCall, ToolDefinition
 from fsm_llm.agents.exceptions import ToolNotFoundError
-from fsm_llm.agents.tools import ToolRegistry, normalize_tool_input, tool
+from fsm_llm.agents.tools import (
+    ToolRegistry,
+    normalize_tool_input,
+    register_agent,
+    tool,
+)
 
 
 def _add(params):
@@ -445,6 +451,61 @@ class TestRegisterAgent:
         ).register_agent(FakeAgent(), name="b", description="B")
         assert result is registry
         assert len(registry) == 2
+
+    @staticmethod
+    def _agent_returning(**fields):
+        class FakeAgent:
+            def run(self, task):
+                return SimpleNamespace(**fields)
+
+        return FakeAgent()
+
+    def test_failed_sub_agent_is_a_failed_tool_result(self):
+        """TOOL-14: a sub-agent reporting success=False must not look successful."""
+        registry = ToolRegistry()
+        registry.register_agent(
+            self._agent_returning(answer="could not finish", success=False),
+            name="helper",
+            description="A helper agent",
+        )
+
+        result = registry.execute(
+            ToolCall(tool_name="helper", parameters={"task": "do it"})
+        )
+
+        assert result.success is False
+        assert "could not finish" in result.error
+        assert "helper" in result.error
+
+    def test_successful_sub_agent_returns_its_answer(self):
+        registry = ToolRegistry()
+        registry.register_agent(
+            self._agent_returning(answer="all done", success=True),
+            name="helper",
+            description="A helper agent",
+        )
+
+        result = registry.execute(
+            ToolCall(tool_name="helper", parameters={"task": "do it"})
+        )
+
+        assert result.success is True
+        assert result.result == "all done"
+
+    def test_module_register_agent_propagates_failure(self):
+        registry = ToolRegistry()
+        register_agent(
+            registry,
+            self._agent_returning(answer="nope", success=False),
+            name="helper",
+            description="A helper agent",
+        )
+
+        result = registry.execute(
+            ToolCall(tool_name="helper", parameters={"task": "x"})
+        )
+
+        assert result.success is False
 
 
 @pytest.fixture

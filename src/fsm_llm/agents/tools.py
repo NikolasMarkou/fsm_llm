@@ -479,7 +479,10 @@ class ToolRegistry:
         """Register an agent as a tool, enabling supervisor/orchestrator patterns.
 
         The agent must have a ``run(task: str)`` method returning an object with
-        an ``answer`` attribute (i.e. :class:`AgentResult`).
+        an ``answer`` attribute (i.e. :class:`AgentResult`). A result whose
+        ``success`` is ``False`` fails the tool call (``ToolExecutionError``,
+        so the caller sees a failed ``ToolResult``); a result without a
+        ``success`` attribute counts as successful.
 
         Args:
             agent: An agent instance with a ``.run()`` method.
@@ -494,7 +497,12 @@ class ToolRegistry:
 
         def _agent_tool(task: str) -> str:
             result = agent.run(task)
-            return str(getattr(result, "answer", result))
+            answer = str(getattr(result, "answer", result))
+            if getattr(result, "success", True) is False:
+                raise ToolExecutionError(
+                    f"Agent '{name}' did not succeed: {answer}", tool_name=name
+                )
+            return answer
 
         return self.register_function(
             _agent_tool,

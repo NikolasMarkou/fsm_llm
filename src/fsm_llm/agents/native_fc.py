@@ -121,6 +121,34 @@ def _is_malformed_tool_call(exc: BaseException, tools_declared: bool) -> bool:
     return any(marker in text for marker in _MALFORMED_TOOL_CALL_MARKERS)
 
 
+def _call_arguments(tool_call: dict[str, Any]) -> dict[str, Any] | None:
+    """The arguments of one normalized tool call, or ``None`` when malformed.
+
+    Interface contract (3 call sites: ``_litellm_complete``, which decodes a
+    provider's string arguments, and :meth:`NativeFunctionCallingReactAgent.run`
+    for the loop and the forced final turn, which also see ``complete_fn``
+    output):
+        - A dict is returned as-is. A JSON string is decoded; it must decode
+          to an object. Missing, ``None`` or blank arguments mean "no
+          arguments" and return ``{}``.
+        - Anything else (undecodable text, a JSON array/number/string/null, a
+          non-dict value from a custom ``complete_fn``) returns ``None``: the
+          caller must not execute that call.
+        - Never raises.
+    """
+    raw = tool_call.get("arguments")
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        if not raw.strip():
+            return {}
+        try:
+            raw = json.loads(raw)
+        except (ValueError, RecursionError):
+            return None
+    return raw if isinstance(raw, dict) else None
+
+
 def _degrades_turn(exc: BaseException) -> bool:
     """Whether *exc* may be absorbed as one failed turn instead of the run."""
     details = getattr(exc, "details", None)
@@ -319,13 +347,17 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         msg = response.choices[0].message
         tool_calls: list[dict[str, Any]] = []
         for tc in getattr(msg, "tool_calls", None) or []:
+            # A call whose arguments are not a JSON object keeps its RAW
+            # arguments so `run()` can refuse it (`_call_arguments` returns
+            # None there; D-025 of plan 06a5ec0a). Do NOT map them to `{}`.
             raw_args = tc.function.arguments
-            try:
-                args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-            except json.JSONDecodeError:
-                args = {}
+            args = _call_arguments({"arguments": raw_args})
             tool_calls.append(
-                {"id": tc.id, "name": tc.function.name, "arguments": args or {}}
+                {
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "arguments": raw_args if args is None else args,
+                }
             )
 
         content = msg.content
@@ -395,13 +427,34 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                     concluded = True
                     break
 
+                # DECISION plan-2026-09-29T103145-06a5ec0a/D-025: a tool call
+                # whose arguments are not a JSON object is a malformed turn
+                # under D-016 above: the loop ENDS (`break`, trace kept) and
+                # NO call of that turn runs. Do NOT coerce the arguments to
+                # `{}` and run the tool anyway (the old behaviour: a tool ran
+                # with parameters the model never sent), and do NOT
+                # `continue` (D-016). The whole turn is checked before any
+                # call runs so the history never holds an assistant tool-call
+                # message without its tool results.
+                parsed = [_call_arguments(tc) for tc in tool_calls]
+                if any(args is None for args in parsed):
+                    logger.warning(
+                        f"Native function-calling tool turn {iteration} sent "
+                        "tool-call arguments that are not a JSON object; "
+                        "ending the loop without running them, with the "
+                        "trace and answer gathered so far."
+                    )
+                    break
+
+                tool_calls = [
+                    {**tc, "arguments": args}
+                    for tc, args in zip(tool_calls, parsed, strict=True)
+                ]
                 messages.append(self._assistant_message(content, tool_calls))
                 for tc in tool_calls:
-                    name = tc.get("name", "")
-                    args = tc.get("arguments") or {}
-                    if not isinstance(args, dict):
-                        args = {}
-                    call = ToolCall(tool_name=name, parameters=args)
+                    call = ToolCall(
+                        tool_name=tc.get("name", ""), parameters=tc["arguments"]
+                    )
                     exec_result = self.tools.execute(call)
                     observation = exec_result.summary
                     if not exec_result.success:
@@ -471,9 +524,15 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                         forced = {"tool_calls": []}
                     for tc in forced.get("tool_calls") or []:
                         name = tc.get("name", "")
-                        args = tc.get("arguments") or {}
-                        if not isinstance(args, dict):
-                            args = {}
+                        args = _call_arguments(tc)
+                        if args is None:
+                            # Malformed like the loop's turn (D-025): never
+                            # run a write with arguments the model did not send.
+                            logger.warning(
+                                f"Forced-write call to {name!r} sent arguments "
+                                "that are not a JSON object; not running it."
+                            )
+                            continue
                         call = ToolCall(tool_name=name, parameters=args)
                         self.tools.execute(call)
                         trace_calls.append(call)

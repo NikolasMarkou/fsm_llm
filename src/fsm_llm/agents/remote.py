@@ -7,12 +7,18 @@ RemoteAgentTool wraps a remote agent URL as a local tool.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
-from typing import Any, cast
+import uuid
+from typing import Any
+
+from fsm_llm.logging import logger
 
 from .base import strip_caller_context
+from .constants import Defaults
 from .definitions import ToolDefinition
+from .exceptions import ToolExecutionError
 
 try:
     import httpx
@@ -33,6 +39,10 @@ except ImportError:
 #: Default ``AgentServer`` input bound, in characters: ``len(task) +
 #: len(json.dumps(context, ensure_ascii=False))``.
 DEFAULT_MAX_INPUT_CHARS = 100_000
+
+#: Client-facing text for an agent run that raised. The exception itself is
+#: logged server-side under the error id sent alongside it.
+_AGENT_FAILED_MESSAGE = "Agent execution failed"
 
 
 if _HAS_FASTAPI:
@@ -110,7 +120,16 @@ class AgentServer:
         context or {}, ensure_ascii=False))`` exceeds it get 413 before the agent
         runs. Default 100,000; ``None`` disables the check. The HTTP body is
         still parsed first, so a transport-level body cap belongs to a
-        reverse proxy. There is no rate limiting.
+        reverse proxy.
+        ``max_concurrent``: agent runs allowed at once (default
+        ``Defaults.SERVER_MAX_CONCURRENT``). A request arriving while all
+        slots are taken gets 503. A slot is held until the agent's thread
+        finishes, including a run that already timed out (504). There is no
+        per-client rate limiting.
+
+    A run that raises returns 500 (``/invoke``) or an SSE ``error`` event
+    (``/stream``) with a generic message and an ``error_id``; the exception
+    is logged with that id and never sent to the client.
 
     Example::
 
@@ -129,8 +148,15 @@ class AgentServer:
         timeout: float = 300.0,
         api_key: str | None = None,
         max_input_chars: int | None = DEFAULT_MAX_INPUT_CHARS,
+        max_concurrent: int = Defaults.SERVER_MAX_CONCURRENT,
     ) -> None:
         _require_fastapi()
+        if isinstance(max_concurrent, bool) or not (
+            isinstance(max_concurrent, int) and max_concurrent >= 1
+        ):
+            raise ValueError(
+                f"max_concurrent must be an int >= 1, got {max_concurrent!r}"
+            )
         self._agent = agent
         self._host = host
         self._port = port
@@ -138,6 +164,8 @@ class AgentServer:
         self._timeout = timeout
         self._api_key = _checked_api_key(api_key)
         self._max_input_chars = max_input_chars
+        self._max_concurrent = max_concurrent
+        self._slots = asyncio.Semaphore(max_concurrent)
         self._app = self._create_app()
 
     def _require_api_key(self, request: Request) -> None:
@@ -185,6 +213,62 @@ class AgentServer:
                 ),
             )
 
+    async def _start_run(self, request: _InvokeRequest) -> asyncio.Future[Any]:
+        """Take a run slot and start the agent in a worker thread.
+
+        Raises 503 when every slot is taken. The returned future is the run
+        itself; await it through :meth:`_await_run`.
+        """
+        context = _server_context(request.context)
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-024: the slot is released
+        # by the RUN FUTURE's done callback, not by `async with` around the
+        # request. Do NOT scope the slot to the handler: on a 504 `wait_for`
+        # returns while the worker thread keeps running (threads cannot be
+        # cancelled), so a handler-scoped slot would let timed-out runs pile
+        # up without bound. Do NOT wait for a slot either: saturation is 503.
+        # The `locked()` check and `acquire()` are atomic on the event loop
+        # (an unlocked semaphore's acquire never suspends).
+        if self._slots.locked():
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"server busy: {self._max_concurrent} agent run(s) "
+                    "already in flight; retry later"
+                ),
+            )
+        await self._slots.acquire()
+        try:
+            run = asyncio.ensure_future(
+                asyncio.to_thread(
+                    self._agent.run, request.task, initial_context=context
+                )
+            )
+        except BaseException:
+            self._slots.release()
+            raise
+        run.add_done_callback(self._release_slot)
+        return run
+
+    def _release_slot(self, run: asyncio.Future[Any]) -> None:
+        self._slots.release()
+        # Mark an orphaned (timed-out) run's exception as retrieved so asyncio
+        # does not log "exception was never retrieved" for it.
+        if not run.cancelled():
+            run.exception()
+
+    async def _await_run(self, run: asyncio.Future[Any]) -> Any:
+        """Await *run* up to the server timeout; the run survives a timeout."""
+        return await asyncio.wait_for(asyncio.shield(run), timeout=self._timeout)
+
+    @staticmethod
+    def _log_failure(route: str, exc: BaseException) -> str:
+        """Log *exc* with a fresh error id and return that id."""
+        error_id = uuid.uuid4().hex[:12]
+        logger.opt(exception=exc).error(
+            f"AgentServer {route} run failed (error_id={error_id}): {exc!r}"
+        )
+        return error_id
+
     def _create_app(self) -> FastAPI:
         """Create the FastAPI application with /invoke and /stream endpoints."""
         app = FastAPI(title=f"FSM-LLM Agent: {self._name}")
@@ -193,9 +277,8 @@ class AgentServer:
         @app.post("/invoke", response_model=_InvokeResponse, dependencies=guarded)
         async def invoke(request: _InvokeRequest):
             """Invoke the agent with a task and return the full result."""
-            import asyncio
-
             self._check_input_size(request)
+            run = await self._start_run(request)
             try:
                 # F10 (plan-2026-09-12T065608-089d0ec7/D-014, supersedes the
                 # D-004 note previously here): asyncio.wait_for only detaches
@@ -230,14 +313,7 @@ class AgentServer:
                 # classes. `AgentServer` may now be pointed at any of the 5
                 # agent classes above without reopening the F9-shaped
                 # cross-request corruption -- see decisions.md D-012/D-014.
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self._agent.run,
-                        request.task,
-                        initial_context=_server_context(request.context),
-                    ),
-                    timeout=self._timeout,
-                )
+                result = await self._await_run(run)
                 return _InvokeResponse(
                     answer=result.answer,
                     success=result.success,
@@ -250,7 +326,11 @@ class AgentServer:
                     detail=f"Agent execution timed out ({self._timeout}s)",
                 ) from None
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e)) from e
+                error_id = self._log_failure("/invoke", e)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"{_AGENT_FAILED_MESSAGE} (error_id={error_id})",
+                ) from None
 
         @app.post("/stream", dependencies=guarded)
         async def stream(request: _InvokeRequest):
@@ -260,22 +340,16 @@ class AgentServer:
             completion first, then one ``data:`` event with the final result
             is sent. The SSE framing exists for client compatibility only.
             """
-            import asyncio
-
-            # Before the StreamingResponse exists: a 413 raised inside the
-            # generator would arrive after a 200 status line.
+            # Before the StreamingResponse exists: a 413 or 503 raised inside
+            # the generator would arrive after a 200 status line. The run
+            # starts here too, so its slot is released by the run itself even
+            # if the generator is never iterated.
             self._check_input_size(request)
+            run = await self._start_run(request)
 
             async def event_generator():
                 try:
-                    result = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            self._agent.run,
-                            request.task,
-                            initial_context=_server_context(request.context),
-                        ),
-                        timeout=self._timeout,
-                    )
+                    result = await self._await_run(run)
                     # Send the single terminal result as one SSE event
                     data = json.dumps(
                         {
@@ -288,7 +362,9 @@ class AgentServer:
                 except asyncio.TimeoutError:
                     yield f"data: {json.dumps({'error': f'Agent execution timed out ({self._timeout}s)'})}\n\n"
                 except Exception as e:
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    error_id = self._log_failure("/stream", e)
+                    payload = {"error": _AGENT_FAILED_MESSAGE, "error_id": error_id}
+                    yield f"data: {json.dumps(payload)}\n\n"
 
             return StreamingResponse(
                 event_generator(),
@@ -360,6 +436,22 @@ class RemoteAgentTool:
         self._timeout = timeout
         self._api_key = _checked_api_key(api_key)
 
+    def _answer(self, data: Any) -> str:
+        """The answer in an ``/invoke`` response body.
+
+        Raises ``ToolExecutionError`` when the server reports
+        ``success: false``; a body without ``success`` counts as successful.
+        """
+        if not isinstance(data, dict):
+            return str(data)
+        answer = str(data.get("answer", data))
+        if data.get("success", True) is False:
+            raise ToolExecutionError(
+                f"Remote agent '{self._name}' did not succeed: {answer}",
+                tool_name=self._name,
+            )
+        return answer
+
     def _headers(self) -> dict[str, str]:
         """Auth headers shared by ``invoke`` and ``ainvoke``."""
         if self._api_key is None:
@@ -375,6 +467,9 @@ class RemoteAgentTool:
 
         Returns:
             The agent's answer as a string.
+
+        Raises:
+            ToolExecutionError: the server reported ``success: false``.
         """
         _require_httpx()
         payload: dict[str, Any] = {"task": task}
@@ -386,11 +481,10 @@ class RemoteAgentTool:
                 f"{self._url}/invoke", json=payload, headers=self._headers()
             )
             response.raise_for_status()
-            data = response.json()
-            return cast(str, data.get("answer", str(data)))
+            return self._answer(response.json())
 
     async def ainvoke(self, task: str, context: dict[str, Any] | None = None) -> str:
-        """Invoke the remote agent asynchronously."""
+        """Invoke the remote agent asynchronously (same contract as ``invoke``)."""
         _require_httpx()
         payload: dict[str, Any] = {"task": task}
         if context:
@@ -401,8 +495,7 @@ class RemoteAgentTool:
                 f"{self._url}/invoke", json=payload, headers=self._headers()
             )
             response.raise_for_status()
-            data = response.json()
-            return cast(str, data.get("answer", str(data)))
+            return self._answer(response.json())
 
     def to_tool_definition(self) -> ToolDefinition:
         """Create a ToolDefinition that calls this remote agent.

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,7 +19,10 @@ httpx = pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from fsm_llm.agents import remote
+from fsm_llm.agents.definitions import ToolCall
+from fsm_llm.agents.exceptions import ToolExecutionError
 from fsm_llm.agents.remote import AgentServer, RemoteAgentTool
+from fsm_llm.agents.tools import ToolRegistry
 
 KEY = "s3cret-key"
 ROUTES = ["/invoke", "/stream"]
@@ -262,3 +266,191 @@ class TestRemoteAgentToolAuth:
         with pytest.raises(httpx.HTTPStatusError):
             asyncio.run(bad.ainvoke("hi"))
         assert len(agent.calls) == 1
+
+
+class TestRemoteAgentToolSuccess:
+    """TOOL-14: a server reporting ``success: false`` fails the tool call."""
+
+    @staticmethod
+    def _patch(monkeypatch, body: dict) -> None:
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+        orig_client, orig_async = httpx.Client, httpx.AsyncClient
+        monkeypatch.setattr(
+            remote.httpx, "Client", lambda **kw: orig_client(transport=transport, **kw)
+        )
+        monkeypatch.setattr(
+            remote.httpx,
+            "AsyncClient",
+            lambda **kw: orig_async(transport=transport, **kw),
+        )
+
+    @staticmethod
+    def _tool() -> RemoteAgentTool:
+        return RemoteAgentTool(url="http://agent.test", name="billing", description="d")
+
+    def test_invoke_raises_on_success_false(self, monkeypatch):
+        self._patch(monkeypatch, {"answer": "gave up", "success": False})
+        with pytest.raises(ToolExecutionError, match="gave up"):
+            self._tool().invoke("hi")
+
+    def test_ainvoke_raises_on_success_false(self, monkeypatch):
+        self._patch(monkeypatch, {"answer": "gave up", "success": False})
+        with pytest.raises(ToolExecutionError, match="billing"):
+            asyncio.run(self._tool().ainvoke("hi"))
+
+    def test_tool_definition_gives_a_failed_tool_result(self, monkeypatch):
+        self._patch(monkeypatch, {"answer": "gave up", "success": False})
+        registry = ToolRegistry()
+        registry.register(self._tool().to_tool_definition())
+
+        result = registry.execute(
+            ToolCall(tool_name="billing", parameters={"task": "refund"})
+        )
+
+        assert result.success is False
+        assert "gave up" in result.error
+
+    @pytest.mark.parametrize(
+        "body", [{"answer": "ok", "success": True}, {"answer": "ok"}]
+    )
+    def test_success_true_or_absent_returns_the_answer(self, monkeypatch, body):
+        self._patch(monkeypatch, body)
+        tool = self._tool()
+        assert tool.invoke("hi") == "ok"
+        assert asyncio.run(tool.ainvoke("hi")) == "ok"
+
+
+class _FailingAgent:
+    SECRET = "db password is hunter2 at /srv/internal/path"
+
+    def run(self, task: str, initial_context: Any = None) -> Any:
+        raise RuntimeError(self.SECRET)
+
+
+class TestGenericErrorBody:
+    """SEC-09: a raising agent's exception text never reaches the client."""
+
+    @staticmethod
+    def _capture_errors():
+        from fsm_llm.logging import logger
+
+        logger.enable("fsm_llm")
+        captured: list[str] = []
+        sink_id = logger.add(lambda m: captured.append(str(m)), level="ERROR")
+        return logger, captured, sink_id
+
+    def test_invoke_500_is_generic_and_logged(self):
+        logger, captured, sink_id = self._capture_errors()
+        try:
+            client = TestClient(AgentServer(agent=_FailingAgent()).app)
+            resp = client.post("/invoke", json={"task": "t"})
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert "hunter2" not in resp.text
+        assert detail.startswith("Agent execution failed (error_id=")
+        error_id = detail.split("error_id=")[1].rstrip(")")
+        # The exception is logged server-side under the same id.
+        assert any(error_id in m and "hunter2" in m for m in captured)
+
+    def test_stream_error_event_is_generic(self):
+        client = TestClient(AgentServer(agent=_FailingAgent()).app)
+        resp = client.post("/stream", json={"task": "t"})
+
+        assert resp.status_code == 200
+        assert "hunter2" not in resp.text
+        event = json.loads(resp.text.strip().removeprefix("data: "))
+        assert event["error"] == "Agent execution failed"
+        assert event["error_id"]
+
+
+class _BlockingAgent:
+    """Holds every run in its worker thread until ``release`` is set."""
+
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.calls = 0
+
+    def run(self, task: str, initial_context: Any = None) -> Any:
+        self.calls += 1
+        self.started.set()
+        if not self.release.wait(10):
+            raise RuntimeError("test agent was never released")
+        return SimpleNamespace(
+            answer=f"done: {task}",
+            success=True,
+            trace=SimpleNamespace(total_iterations=1, tools_used=[]),
+        )
+
+
+def _async_client(server: AgentServer) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=server.app), base_url="http://agent.test"
+    )
+
+
+class TestMaxConcurrent:
+    """SEC-09: ``max_concurrent`` bounds agent runs in flight; overflow is 503."""
+
+    def test_default_comes_from_constants(self):
+        from fsm_llm.agents.constants import Defaults
+
+        server = AgentServer(agent=_StubAgent())
+        assert server._max_concurrent == Defaults.SERVER_MAX_CONCURRENT
+
+    @pytest.mark.parametrize("bad", [0, -1, True, 1.5, None])
+    def test_invalid_max_concurrent_rejected(self, bad):
+        with pytest.raises(ValueError, match="max_concurrent"):
+            AgentServer(agent=_StubAgent(), max_concurrent=bad)
+
+    @pytest.mark.parametrize("route", ROUTES)
+    def test_request_while_saturated_is_503(self, route):
+        agent = _BlockingAgent()
+        server = AgentServer(agent=agent, max_concurrent=1)
+
+        async def scenario():
+            async with _async_client(server) as client:
+                first = asyncio.create_task(client.post("/invoke", json={"task": "a"}))
+                assert await asyncio.to_thread(agent.started.wait, 5)
+                second = await client.post(route, json={"task": "b"})
+                agent.release.set()
+                first_resp = await first
+                third = await client.post(route, json={"task": "c"})
+                return first_resp, second, third
+
+        first_resp, second, third = asyncio.run(scenario())
+
+        assert second.status_code == 503
+        assert "busy" in second.json()["detail"]
+        assert first_resp.status_code == 200
+        # The slot came back, and the rejected request never ran the agent.
+        assert third.status_code == 200
+        assert agent.calls == 2
+
+    def test_timed_out_run_keeps_its_slot_until_its_thread_ends(self):
+        agent = _BlockingAgent()
+        server = AgentServer(agent=agent, max_concurrent=1, timeout=0.05)
+
+        async def scenario():
+            async with _async_client(server) as client:
+                timed_out = await client.post("/invoke", json={"task": "a"})
+                while_orphaned = await client.post("/invoke", json={"task": "b"})
+                agent.release.set()
+                for _ in range(500):
+                    if not server._slots.locked():
+                        break
+                    await asyncio.sleep(0.01)
+                server._timeout = 5.0
+                after = await client.post("/invoke", json={"task": "c"})
+                return timed_out, while_orphaned, after
+
+        timed_out, while_orphaned, after = asyncio.run(scenario())
+
+        assert timed_out.status_code == 504
+        assert while_orphaned.status_code == 503
+        assert after.status_code == 200
+        assert agent.calls == 2

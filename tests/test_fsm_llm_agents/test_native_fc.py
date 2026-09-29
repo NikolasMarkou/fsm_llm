@@ -1169,3 +1169,128 @@ class TestSystemPolicy:
 
         assert messages[1]["content"] == "GOAL: ship it"
         assert "RULES:" not in messages[1]["content"]
+
+
+class TestMalformedArgumentsAreNotExecuted:
+    """REACT-11 (D-025 of plan 06a5ec0a): a tool call whose arguments are not
+    a JSON object is a malformed turn under D-016. It never runs (the old code
+    ran it with ``{}``), the loop ends, and the trace gathered so far is kept.
+    """
+
+    @staticmethod
+    def _counting_registry() -> tuple[ToolRegistry, list[dict]]:
+        invocations: list[dict] = []
+
+        def ping(note: str = "") -> str:
+            """Record a call."""
+            invocations.append({"note": note})
+            return f"pong {note}"
+
+        reg = ToolRegistry()
+        reg.register_function(ping, name="ping", description="Record a call.")
+        return reg, invocations
+
+    @pytest.mark.parametrize("bad", ["{not json", "[1, 2]", '"text"', "null", 7, ["a"]])
+    def test_complete_fn_turn_with_bad_arguments_runs_nothing(self, bad):
+        reg, invocations = self._counting_registry()
+        calls = {"n": 0}
+
+        def complete_fn(model, messages, schemas):
+            calls["n"] += 1
+            return {
+                "content": None,
+                "tool_calls": [{"id": "c1", "name": "ping", "arguments": bad}],
+            }
+
+        agent = NativeFunctionCallingReactAgent(
+            tools=reg,
+            config=AgentConfig(model="mock/model", max_iterations=5),
+            complete_fn=complete_fn,
+        )
+        result = agent.run("q")
+
+        assert invocations == []
+        assert result.trace.tool_calls == []
+        # The loop ENDS (D-016 break), it does not retry the same turn.
+        assert calls["n"] == 1
+        assert result.success is False
+
+    def test_earlier_calls_survive_and_no_call_of_the_bad_turn_runs(self):
+        reg, invocations = self._counting_registry()
+        agent = NativeFunctionCallingReactAgent(
+            tools=reg,
+            config=AgentConfig(model="mock/model", max_iterations=5),
+            complete_fn=_scripted(
+                {
+                    "content": None,
+                    "tool_calls": [
+                        {"id": "a", "name": "ping", "arguments": {"note": "one"}}
+                    ],
+                },
+                {
+                    "content": None,
+                    "tool_calls": [
+                        {"id": "b", "name": "ping", "arguments": {"note": "two"}},
+                        {"id": "c", "name": "ping", "arguments": "{broken"},
+                    ],
+                },
+            ),
+        )
+        result = agent.run("q")
+
+        assert invocations == [{"note": "one"}]
+        assert [c.parameters for c in result.trace.tool_calls] == [{"note": "one"}]
+
+    def test_litellm_string_arguments_that_do_not_parse_are_not_run(self, monkeypatch):
+        reg, invocations = self._counting_registry()
+        _stub_completion(
+            monkeypatch,
+            _FakeMessage(
+                content=None, tool_calls=[_FakeToolCall("c1", "ping", "{oops")]
+            ),
+        )
+        agent = NativeFunctionCallingReactAgent(
+            tools=reg, config=AgentConfig(model="mock/model", max_iterations=3)
+        )
+        result = agent.run("q")
+
+        assert invocations == []
+        assert result.trace.tool_calls == []
+
+    @pytest.mark.parametrize("empty", ["", "  ", None, {}])
+    def test_blank_arguments_still_mean_no_arguments(self, empty):
+        reg, invocations = self._counting_registry()
+        agent = NativeFunctionCallingReactAgent(
+            tools=reg,
+            config=AgentConfig(model="mock/model"),
+            complete_fn=_scripted(
+                {
+                    "content": None,
+                    "tool_calls": [{"id": "c1", "name": "ping", "arguments": empty}],
+                },
+                {"content": "done", "tool_calls": []},
+            ),
+        )
+        result = agent.run("q")
+
+        assert invocations == [{"note": ""}]
+        assert result.success is True
+
+    def test_forced_final_turn_with_bad_arguments_runs_nothing(self):
+        reg, invocations = self._counting_registry()
+        agent = NativeFunctionCallingReactAgent(
+            tools=reg,
+            config=AgentConfig(model="mock/model", force_final_tool="ping"),
+            complete_fn=_scripted(
+                {"content": "prose answer", "tool_calls": []},
+                {
+                    "content": None,
+                    "tool_calls": [{"id": "f1", "name": "ping", "arguments": "{x"}],
+                },
+            ),
+        )
+        result = agent.run("q")
+
+        assert invocations == []
+        assert result.trace.tool_calls == []
+        assert result.answer == "prose answer"
