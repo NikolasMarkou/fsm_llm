@@ -256,26 +256,38 @@ def search(query: str) -> str:
     """Search the web."""
     return f"Results for: {query}"
 
-# Create agent
-agent = create_agent(tools=[search], config=AgentConfig(model="gpt-4o-mini"))  # pattern="react" is the default
+# Create agent: create_agent(pattern="react", tools=None, *, config=None, system_prompt=None, **kwargs)
+agent = create_agent("react", [search], config=AgentConfig(model="gpt-4o-mini"),
+                     system_prompt="Cite your sources.")  # stored as AgentConfig.instructions
 result = agent("task")  # or agent.run("task")
-# result.answer, result.success, result.trace, result.structured_output
+# result.answer, result.success, result.stop_reason, result.trace, result.structured_output
+for chunk in agent.run_stream("task"):  # model text only
+    print(chunk, end="")
 
 # Structured output (agent classes take a ToolRegistry, not a list)
 registry = ToolRegistry().register(search._tool_definition)
 agent = ReactAgent(tools=registry,
                    config=AgentConfig(model="gpt-4o-mini", output_schema=MyPydanticModel))
 
-# Human-in-the-loop
+# Human-in-the-loop (ReactAgent, ReflexionAgent, ReasoningReactAgent)
 # approval_policy(call, context) -> bool picks the gated calls; each approval covers one call
 hitl = HumanInTheLoop(approval_policy=lambda call, ctx: call.tool_name == "search",
                       approval_callback=fn)
 agent = ReactAgent(tools=registry, config=AgentConfig(model="gpt-4o-mini"), hitl=hitl)
+# With a callback and no policy, @tool(requires_approval=True) tools are the gated ones
 ```
 
-17 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm`, `parallel_react`, `native_fc`, `verified_react`, `auto_memory` (plus `reasoning_react` when `fsm_llm.reasoning` is importable). The source of truth is `_PATTERNS` in `src/fsm_llm/agents/__init__.py`; an unknown pattern raises `ValueError` listing the available names.
+- `AgentResult{answer, success, trace, final_context, structured_output, stop_reason=None}`. `success` is `True` only when the run reached its goal. A forced stop still returns its last answer, with `success=False`. `stop_reason` is one of the `StopReason` values (exported from `fsm_llm.agents`): `answered`, `evidence` (planner patterns with real executed work), `max_iterations`, `forced_pass` (evaluator/checker pass forced at its limit), `stalled` (three turns with no tool), `verification_failed`, `no_result`, `gate_failed` (a PromptChain gate failed). `AgentServer` responses carry it too.
+- `AgentConfig{model, max_iterations=10, timeout_seconds=300.0, temperature=0.5, max_tokens=1000, output_schema, instructions=None, ...}` rejects unknown fields. `model` defaults to env `LLM_MODEL` (read when the config is built), then `DEFAULT_LLM_MODEL`. `instructions` (max 2,000 chars) is prefixed to every non-empty prompt instruction of FSM patterns and is `NativeFunctionCallingReactAgent`'s default `system_policy`; Swarm and meta_builder do not use it.
+- ReAct family: `max_iterations=N` gives N think turns and at most N - 1 tool calls; the loop ceiling `N * 3` FSM turns raises `BudgetExhaustedError`, `timeout_seconds` raises `AgentTimeoutError`. Both also propagate from ADaPT subtasks and Orchestrator workers.
+- Constructors raise `TypeError` for `hitl=`, `tools=`, `evaluation_fn=` or `approval_callback=` on a pattern that does not take them, and for `model=`, `temperature=`, `max_tokens=` (set them on `AgentConfig`). Other keyword arguments (`seed=`, `timeout=`, `llm_interface=`, `handlers=`, ...) go to `API` and litellm. `REWOOAgent`, `PlanExecuteAgent`, `ParallelReactAgent` and `NativeFunctionCallingReactAgent` have no approval step and raise `AgentError` when their registry holds a `requires_approval` tool.
+- `initial_context` cannot set run-owned keys (`final_answer`, `should_terminate`, `observation_count`, tool and approval keys) or the driver grant `_approval_granted`: they are dropped with a warning.
+
+18 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm`, `parallel_react`, `native_fc`, `verified_react`, `auto_memory`, `reasoning_react`. The source of truth is `_PATTERNS` in `src/fsm_llm/agents/__init__.py`; an unknown pattern raises `ValueError` listing the available names. `tools=` for a pattern that takes none (`debate`, `prompt_chain`, `self_consistency`, `evaluator_optimizer`, `maker_checker`, `meta_builder`, `swarm`) raises `TypeError`. The legacy call `create_agent("You are ...", tools)` still works with a `DeprecationWarning` (a first argument that names no pattern and has whitespace or more than 32 characters is the system prompt).
 
 Multi-agent coordination and integrations (constructed directly, not via the factory): `SwarmAgent`, `AgentGraph` / `AgentGraphBuilder` (DAG orchestration), `MCPToolProvider` (MCP tools), `AgentServer` / `RemoteAgentTool` (A2A), `SemanticToolRegistry` (embedding-based tool retrieval), `SOPRegistry` / `load_builtin_sops` (reusable agent templates).
+
+User guide: `src/fsm_llm/agents/README.md`. Audit record, adjusted decisions and deferred work: `docs/agents_roadmap.md`.
 
 ## WorkflowEngine (`fsm_llm.workflows`)
 

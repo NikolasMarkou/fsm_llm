@@ -29,6 +29,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 ## Files
 
 - `__init__.py` - empty; makes the folder a package so `test_forced_stop_flag.py` can import from `test_maker_checker.py`.
+- `conftest.py` - autouse network block: any IPv4/IPv6 connection raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`.
 - `mcp_fixture_server.py` - a real stdio MCP server used by `test_mcp_stdio.py` (not a test). Tools `add`, `slow`, `fail`; flag `--hang`.
 - `test_adapt.py` - ADaPTAgent, its FSM, `DecompositionResult`, JSON-envelope leak fix, assess/decompose fallback edges.
 - `test_agent_config_passthrough.py` - newer `AgentConfig` fields and what `_create_api` forwards to `API.from_definition`.
@@ -45,6 +46,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_evaluator_optimizer.py` - EvaluatorOptimizerAgent, its FSM, refine re-extraction, forced stop.
 - `test_exceptions.py` - agent exception hierarchy.
 - `test_forced_stop_flag.py` - a model cannot forge `max_iterations_reached`.
+- `test_grounded_patterns.py` - each pattern run through the real `API` with `PromptGroundedLLM`, a fake that only answers when the prompt contains the evidence.
 - `test_fsm_definitions.py` - ReAct FSM shape, required keys on planner states, typed `tool_name`/`tool_input`.
 - `test_handlers.py` - `AgentHandlers.execute_tool`, `make_iteration_limiter`, empty-input recovery.
 - `test_hitl.py` - `HumanInTheLoop` policy, callback, timeout and escalation.
@@ -62,14 +64,16 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_premature_terminate_guard.py` - ReAct cannot conclude on turn 1 with no tool.
 - `test_prompt_chain.py` - PromptChainAgent, `ChainStep`, its FSM, gate checker.
 - `test_prompts.py` - prompt builder functions.
+- `test_public_api.py` - `create_agent` (pattern first, legacy prompt shim), `AgentConfig` strict fields, `LLM_MODEL`, `instructions`, static `__all__`.
 - `test_react.py` - ReactAgent creation, HITL gating, concurrent runs, single-use approval.
-- `test_reasoning_react.py` - ReasoningReactAgent optional import, `reason` tool, per-run handlers.
+- `test_reasoning_react.py` - ReasoningReactAgent export, `reason` tool, per-run handlers.
 - `test_reflexion.py` - ReflexionAgent, its FSM, models, conclude needs evidence, every budget ends.
 - `test_remote.py` - `AgentServer` API key and input size limit, `RemoteAgentTool` auth header.
 - `test_review_fixes.py` - mixed review fixes: MCP results, stream auto-save, OTEL, swarm, SOP, remote timeout, session paths, agent graph.
 - `test_rewoo.py` - REWOOAgent, its FSM, `#E1` evidence substitution, plan execution.
-- `test_run_stream.py` - `run_stream` token streaming.
+- `test_run_stream.py` - `run_stream` through the real `API`: model text only, no state markers, verified and memory streams.
 - `test_self_consistency.py` - SelfConsistencyAgent, its FSM, `_majority_vote`.
+- `test_secret_hygiene.py` - secret-looking tool arguments and memory values stay out of observations, traces, logs and listings.
 - `test_self_consistency_parallel.py` - parallel sampling matches serial.
 - `test_semantic_memory.py` - `SemanticMemoryStore` and its `remember`/`recall` tools.
 - `test_semantic_memory_robustness.py` - thread safety, embedding model mismatch warning, `max_entries`, atomic save.
@@ -79,6 +83,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_summarization.py` - `make_observation_summarizer` and its handler wiring.
 - `test_think_fallback.py` - `think` never BLOCKs; unknown tool names are not evidence.
 - `test_tool_registries.py` - `get_json_schemas`, `CachingToolRegistry`, `RetryingToolRegistry`.
+- `test_trust_boundary.py` - caller context cannot forge approval or a finished run (also through `AgentServer`), constructor kwargs checks, gated tools refused where there is no approval step.
 - `test_tools.py` - `ToolRegistry`, `@tool`, thread safety, `normalize_tool_input`, list and dict parameters.
 - `test_truncation.py` - `smart_truncate`.
 - `test_verified_react.py` - VerifiedReactAgent retries and periodic reflection.
@@ -94,11 +99,11 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_agents/ --collect-only -q | tail -1
 ```
 
-The whole suite runs in seconds and needs no network or API key.
+The whole suite needs no network or API key; the `conftest.py` network block makes sure of it.
 
 ## Things to know
 
-- Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`), `fastapi` and `httpx` (`test_remote.py` and some server tests), the opentelemetry SDK (OTEL tests), `fsm_llm.reasoning` (ReasoningReact tests), `fsm_llm.workflows` (one workflow-step test).
+- Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`), `fastapi` and `httpx` (`test_remote.py` and some server tests), the opentelemetry SDK (OTEL tests), `fsm_llm.workflows` (one workflow-step test).
 - The async tests in `test_strands_phase2.py` need `asyncio_mode = "auto"`, which `pyproject.toml` sets.
 - Library logging is off by default. Tests that check a warning call `logger.enable("fsm_llm")`, add a sink, and disable logging again afterwards.
 - A run can print an OpenTelemetry "I/O operation on closed file" traceback at the end. It comes from the OTEL exporter tests and does not fail the run.

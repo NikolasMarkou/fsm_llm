@@ -1,7 +1,7 @@
 # test_fsm_llm_meta
 
 Path: `tests/test_fsm_llm_meta`
-Purpose: Pytest suite (218 tests) for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, and `MetaBuilderAgent`.
+Purpose: Pytest suite (220 tests) for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, and `MetaBuilderAgent`.
 
 ## Scope
 
@@ -40,7 +40,7 @@ LLM isolation methods used:
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | Fixtures | `fsm_builder`, `workflow_builder`, `agent_builder`, `populated_fsm_builder`, `meta_config`, `offline_llm` |
-| `test_agent.py` | `MetaBuilderAgent` behavior | 44 tests; carries DECISION references |
+| `test_agent.py` | `MetaBuilderAgent` behavior | 46 tests; carries DECISION references |
 | `test_builders.py` | Builder core behavior | 71 tests |
 | `test_builders_elaborate.py` | Builder edge cases, exceptions, config validators | 44 tests |
 | `test_tools.py` | Tool registries | 26 tests; `_make_call(tool_name, **kwargs)` helper at file bottom |

@@ -1589,8 +1589,8 @@ class HarnessAgent(BaseAgent):
     ) -> tuple[AgentResult | None, Exception | None]:
         """Run one worker under the re-entrancy guard.
 
-        Mirrors ``OrchestratorAgent._delegate_to_workers``
-        (``orchestrator.py:155-182``): a raising worker is caught and reported,
+        Mirrors how ``OrchestratorAgent._delegate_to_workers`` treats an
+        ordinary worker error: a raising worker is caught and reported,
         and a missing factory degrades instead of failing.  The single
         exception is ``HarnessReentrancyError`` -- swallowing it would hide the
         very invariant the guard exists to enforce.

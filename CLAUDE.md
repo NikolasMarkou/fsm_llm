@@ -18,7 +18,7 @@ flowchart TD
     reasoning[fsm_llm.reasoning] --> core
     workflows[fsm_llm.workflows] --> core
     agents[fsm_llm.agents] --> core
-    agents -. optional ReasoningReactAgent .-> reasoning
+    agents -. ReasoningReactAgent, lazy import .-> reasoning
     monitor[fsm_llm.monitor] --> core
     monitor -. optional launch/builder .-> agents
     monitor -. optional demo workflows .-> workflows
@@ -124,7 +124,8 @@ FSM definition (JSON, v4.1):
 - Library logging is off until `setup_logging()` / `enable_debug_logging()`: one `logger.disable("fsm_llm")` at import covers every subpackage; never add a per-subpackage disable.
 - One turn per conversation at a time: a concurrent or re-entrant `converse` raises `FSMError`.
 - `# DECISION plan-<full-plan-id>/D-NNN` anchors state what NOT to do. Read them before editing nearby. `[STALE]`: plan dir retired, rule may still bind. `[SUPERSEDED BY D-nnn]`: follow the newer one.
-- Agents HITL is a security boundary in `ReactAgent`, `ReflexionAgent`, `ReasoningReactAgent` when an approval policy is set: a gated tool runs only with the driver-only grant `_approval_granted` (`ContextKeys.DRIVER_APPROVAL`) bound to that exact call. Open gaps: per-tool `requires_approval` does nothing without a policy; ParallelReact, REWOO, native_fc, PlanExecute have no HITL.
+- Agents HITL is a security boundary in `ReactAgent`, `ReflexionAgent`, `ReasoningReactAgent` when an approval policy is set, or a callback with `requires_approval=True` tools (the flag is then the policy): a gated tool runs only with the driver-only grant `_approval_granted` (`ContextKeys.DRIVER_APPROVAL`) bound to that exact call. Caller `initial_context` can never set that grant or run-output keys (`RUN_OUTPUT_KEYS`). ParallelReact, REWOO, native_fc, PlanExecute have no HITL and refuse registries holding a `requires_approval` tool.
+- Agents `AgentResult.success` means the run reached its goal; forced stops ship their answer with `success=False` and a `stop_reason`. Audit record and deferred work: `docs/agents_roadmap.md`.
 - Do NOT modify `examples/` unless explicitly asked: baselines for `fsm-llm-eval examples`, loaded by `tests/test_examples/`.
 - `scripts/bench_data/` is tracked on purpose. Blocks are pre-registered, run once at fixed n, never edited or re-run.
 - Harness status: committed block `scripts/bench_data/l6-e2e/B8/GRADING.md` (`ollama_chat/qwen3.5:4b`, n=3) has 2/3 floor rows; the 3/3 bar is NOT MET. `verification.md` stays empty after PLAN. Not production-ready.
@@ -145,7 +146,7 @@ FSM definition (JSON, v4.1):
 ## Working here
 
 ```bash
-make test           # pytest -v (7,582 tests)
+make test           # pytest -v (7,977 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
@@ -157,18 +158,18 @@ make audit          # python scripts/audit_pth.py
 ```
 
 ```bash
-pytest                                 # Run all tests (7,582 collected)
-pytest tests/test_fsm_llm/            # Core package tests (2,707 tests)
+pytest                                 # Run all tests (7,977 collected)
+pytest tests/test_fsm_llm/            # Core package tests (2,711 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (126 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (231 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (1,274 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (387 tests)
-pytest tests/test_fsm_llm_meta/       # Meta-builder tests (218 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (1,662 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (388 tests)
+pytest tests/test_fsm_llm_meta/       # Meta-builder tests (220 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,986 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (264 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (261 tests)
-# The 10 suites above sum to 7,497. The remaining 85 are three root-level files:
+# The 10 suites above sum to 7,892. The remaining 85 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (39)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests

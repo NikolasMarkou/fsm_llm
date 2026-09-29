@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The agents entries below come from the 2026-09-29 audit of `fsm_llm.agents`
+(Track A). The audit record, with each finding's status and the deferred Track B
+work, is `docs/agents_roadmap.md`.
+
+### Added
+
+- Agents: `AgentResult.stop_reason` (default `None`) and the `StopReason` constants
+  (exported from `fsm_llm.agents`): `answered`, `evidence`, `max_iterations`,
+  `forced_pass`, `stalled`, `verification_failed`, `no_result`, `gate_failed`.
+  `AgentServer` `/invoke` and `/stream` responses include `stop_reason`.
+- Agents: `AgentServer(max_concurrent=8)`. A request that finds every slot taken gets
+  503; a slot is held until the agent thread ends, even after a 504.
+- Agents: context keys `agent_feedback` (executor warnings and HITL denials the next
+  think turn reads) and `forced_stop_reason` (written only by a forcing handler).
+  Both are run-owned: caller context cannot set them.
+- Agents: `Defaults.ADAPT_MAX_SUBTASKS` (8) caps one ADaPT decomposition.
+- Tests: `tests.conftest.PromptGroundedLLM`, a fake LLM that answers a field only when
+  the prompt contains its evidence, and `block_network`, autoused by the agents and
+  meta suites so they cannot open a TCP connection.
+- `docs/agents_roadmap.md`: the agents audit record and deferred roadmap.
+
 ### Changed
 
 - Agents: `create_agent(pattern="react", tools=None, *, config=None, system_prompt=None,
@@ -26,6 +47,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agents: `AgentConfig.model` defaults to env `LLM_MODEL` (read when the config is
   built), then `DEFAULT_LLM_MODEL`; `default_llm_judge(model=None)` resolves the same
   way. An explicit model always wins.
+- Agents: `success` has one meaning, "the run reached its goal". A run that was forced
+  to stop (`max_iterations_reached`, three turns with no tool, an EvaluatorOptimizer or
+  MakerChecker pass forced at its revision limit, a failed PromptChain gate) still
+  returns its last answer but reports `success=False` with the matching `stop_reason`.
+  SelfConsistency is no longer always `True` (it needs a sample with text), a Debate
+  needs a proposition, and REWOO needs at least one tool call that succeeded. Monitor
+  runs and workflow `AgentStep`s show these runs as failed.
+- Agents: in the ReAct family (`ReactAgent`, `ReflexionAgent`, `ParallelReactAgent`,
+  `ReasoningReactAgent` and the ReAct subclasses) `max_iterations=N` now means N think
+  turns and at most N - 1 tool calls; before, it counted every FSM transition (about
+  half as many tool calls). A run that never concludes by itself takes about twice as
+  long before its forced stop. No tool runs after the forced-stop flag is set.
+- Agents: `@tool(requires_approval=True)` now gates the tool when `HumanInTheLoop` has
+  an approval callback and no policy (the flag is the default policy). With a policy,
+  the policy alone decides, as before. Construction warns when flagged tools exist and
+  no callback can approve them.
+- Agents: `REWOOAgent`, `PlanExecuteAgent`, `ParallelReactAgent` and
+  `NativeFunctionCallingReactAgent` have no approval step, so they now raise
+  `AgentError` when their registry holds a `requires_approval` tool (at construction
+  and again at the start of `run()`).
+- Agents: constructors raise `TypeError` for `hitl=`, `tools=`, `evaluation_fn=` or
+  `approval_callback=` on a pattern that does not take them, and for `model=`,
+  `temperature=`, `max_tokens=` (set them on `AgentConfig`). They used to be forwarded
+  to `litellm.completion`, so HITL was silently ignored. Other keyword arguments
+  (`seed`, `timeout`, `handlers`, `llm_interface`, ...) still pass through.
+  `create_agent` passes `tools` only to patterns whose constructor takes them and
+  raises `TypeError` for the others.
+- Agents: `initial_context` can no longer set run-owned keys (`final_answer`,
+  `should_terminate`, `observation_count`, tool selection and results, approval keys)
+  or the driver grant `_approval_granted`; they are dropped with a WARNING and
+  `observation_count` is seeded 0. `AgentServer` also drops every internal-prefix key
+  from the request context. Swarm hand-offs and AgentGraph edges strip the same keys.
+- Agents: loop values (tool selection, thoughts that route, drafts, critiques,
+  verdicts, plans, reflections, step results) are extracted as typed per-field values
+  with the task and results in the prompt, cleared before each round, instead of from
+  a context-free bulk prompt; intermediate states no longer write a Pass-2 reply.
+  `agent_trace` is kept out of these prompts. Each typed field is one LLM call.
+  PromptChain no longer bulk-extracts the keys a step's `extraction_instructions`
+  name; each step extracts one `chain_step_result`.
+- Agents: `ReactAgent.run_stream` yields only model text (the `[think]`/`[act]` skip
+  markers are dropped) and wraps errors as `AgentError` like `run()`.
+  `VerifiedReactAgent` and `AutoMemoryReactAgent` stream by running `run()` and
+  yielding the answer once, so verification and memory are kept.
+- Agents: the Debate answer is the conclusion written after the last round, not the
+  first round's judge verdict. SelfConsistency votes on each sample's last `Answer:`
+  line (casefolded) and `confidence` is the share of samples that agree.
+- Agents: `AgentGraph` runs nodes in topological order, each once, after all its
+  predecessors; the answer comes from the last executed sink. A cycle raises
+  `ValueError` also for a directly constructed `AgentGraph`.
+- Agents: `SwarmAgent` gives every member the original task (the hand-off message
+  travels in context) and `max_handoffs=N` allows exactly N handoffs.
+- Agents: `PlanExecuteAgent` replans when a step's tool fails, `max_replans=N` allows
+  exactly N replans, and a new plan replaces the old one. `plan_steps` is a typed list
+  capped at 10 steps.
+- Agents: `VerifiedReactAgent` periodic reflection notes go to `agent_feedback`, not
+  `observations` (they no longer count as evidence).
+- Agents: tool calls bind their arguments against the function signature first. A
+  `TypeError` raised inside a tool is a failed call, never a retry, and a named
+  optional argument is never moved into a missing required one. `register_function`
+  infers the parameter schema from type hints like `@tool`.
+- Core: `llm._field_value` no longer reads `data[field_name]` for a field named
+  `reasoning`, `confidence` or `field_name`; those names are the extraction envelope's
+  own keys, so the fallback returned the model's explanation instead of the value.
+
+### Deprecated
+
+- Agents: the positional system prompt `create_agent("You are ...", tools)`. It warns
+  (`DeprecationWarning`); use `create_agent(pattern, tools, system_prompt=...)`.
 
 ### Fixed
 
@@ -39,6 +128,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MAX_AGENT_ITERATIONS`.
 - `setup_cli_logging` docstring names its three call sites (harness and eval `run()`,
   reasoning `--verbose`).
+- Agents (SEC-01, LOOP-12): a caller could forge the HITL driver grant or a finished
+  run through `initial_context`, directly or via `AgentServer`, SelfConsistency, Swarm
+  or AgentGraph, and run a gated tool without asking.
+- Agents (SEC-05, SEC-06): memory tools listed, wrote and deleted the hidden
+  `metadata` buffer and printed secrets. Secret-looking tool arguments appeared in
+  observations, traces, logs and the approval `context_summary`; they are now
+  `<redacted>` there (the tool and `ApprovalRequest.parameters` keep the real values).
+- Agents (SEC-09): `AgentServer` 500 responses and `/stream` error events no longer
+  contain the exception text; they carry a generic message and an `error_id`.
+- Agents (TOOL-01, TOOL-02): a tool whose body raised `TypeError` ran twice; a nested
+  `tool_input` dropped its sibling arguments.
+- Agents (TOOL-14): `register_agent` tools and `RemoteAgentTool` reported a failed
+  sub-agent run (`success: false`) as a successful call.
+- Agents (REACT-11): `NativeFunctionCallingReactAgent` ran a tool with `{}` when its
+  arguments were not a JSON object; such a turn now ends the loop without running it.
+- Agents (MEM-01 to MEM-04): `SemanticMemoryStore(persist_path=...)` never loaded the
+  file, so the next save overwrote stored memories; entries without an embedding were
+  unreachable once any had one; `max_entries` was not saved; a missing parent directory
+  made saving fail; saves were not fsynced; vectors of different length were zipped.
+  A corrupt store file now raises `ValueError` instead of being overwritten.
+- Agents (LOOP-14): with `handler_timeout`, an approved call whose handler timed out
+  could run again on the same approval.
+- Agents (PAT-04, PAT-10): `BudgetExhaustedError` and `AgentTimeoutError` from an
+  ADaPT subtask or an Orchestrator worker were swallowed; they now end the run. ADaPT
+  answered with the failed first attempt and counted its decomposition as a tool call;
+  Orchestrator silently dropped subtasks beyond `max_workers` (now recorded as skipped).
+- Agents (REACT-01, REACT-02): Reflexion stored an empty reflection for episode 1 and
+  lagged one episode behind; `evaluation_fn` was skipped when the self-evaluation came
+  back empty.
+- Agents (PAT-01, PAT-02): PlanExecute never replanned, and a string plan was iterated
+  per character.
+- Agents (PAT-03, PAT-05, PAT-06): Debate rounds reused round 1's text; SelfConsistency
+  compared whole replies, so the first sample always won; PromptChain validation gates
+  stopped nothing and `chain_results` stayed empty.
+- Agents (PAT-09): REWOO reported success when every tool failed, and plan id `"E1"`
+  became `EE1` so `#E1` never resolved.
+- Agents (PAT-11): MakerChecker drafts and revisions did not see the task or the
+  checker's feedback.
+- Agents (REACT-04, REACT-05): a VerifiedReact answer rejected on the last attempt kept
+  its success flag and a raising verifier counted as a pass; ReasoningReact sent the
+  reasoning engine `"{}"` instead of the task, shadowed a user tool named `reason`, and
+  dropped the behaviour of Caching/Retrying registries.
+- Agents (LOOP-06, LOOP-16, LOOP-17): executor warnings and HITL denials never reached
+  the next think turn; observation step numbers repeated after 20 observations;
+  `BudgetExhaustedError` cited `max_iterations` instead of the loop ceiling. An early
+  `should_terminate` no longer drops an approved call.
+- Agents (META-06): the meta-builder's FSM few-shot example targeted an undeclared
+  `end` state.
+- Docs: `docs/api_reference.md` agent snippets passed `model=` to constructors, which
+  crashed at run time.
 
 ### Removed
 
@@ -49,6 +188,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fsm_llm.harness.PRESENTATION_CONTRACTS` no longer defines `PC-PIVOT`; the driver
   never emitted it and no artifact supplies its candidate-directions or
   ghost-constraints fields.
+- Agents: `AgentHandlers.classification_tool_override` and its registration. It read
+  a context key nothing wrote, so it never did anything (`AgentHandlers` is not
+  exported).
+- Agents: unused constants in `fsm_llm.agents.constants`: the classes
+  `MetaBuilderStates` and `DecisionWords`; `MetaDefaults.BUILD_MAX_TOKENS`;
+  `MetaLogMessages.ARTIFACT_CLASSIFIED`, `BUILD_COMPLETE`, `REVIEW_STARTED`,
+  `REVISION_STARTED`; `MetaErrorMessages.BUILDER_NOT_INITIALIZED`,
+  `INVALID_ARTIFACT_TYPE`; `ErrorMessages.APPROVAL_DENIED`, `TIMEOUT`, `NO_TOOLS`,
+  `MAX_REFLECTIONS`, `MAX_REFINEMENTS`, `MAX_REVISIONS`, `MAX_DEPTH`.
+- Agents: `fsm_llm.agents.__all__` is one static list; `ReasoningReactAgent` is always
+  exported and `create_agent("reasoning_react")` always available.
 
 ## [0.11.0] - 2026-09-29
 
