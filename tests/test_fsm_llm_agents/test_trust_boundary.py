@@ -353,3 +353,118 @@ class TestSiblingPatterns:
         assert result.final_context == {"task": "q"}
         assert "PWNED" not in json.dumps(seen)
         assert "_approval_granted" not in json.dumps(seen)
+
+
+class TestConstructorKwargRejection:
+    """SEC-02 / PAT-12 / API-02 (D-003): a constructor kwarg the pattern cannot
+    use raises at construction instead of reaching ``litellm.completion`` with
+    HITL or tools silently ignored. Open passthrough kwargs keep flowing."""
+
+    @staticmethod
+    def _tool(q: str) -> str:
+        """Look something up."""
+        return q
+
+    def _hitl(self) -> HumanInTheLoop:
+        return HumanInTheLoop(
+            approval_policy=lambda call, ctx: True, approval_callback=lambda r: False
+        )
+
+    @pytest.mark.parametrize("pattern", ["rewoo", "plan_execute", "parallel_react"])
+    def test_create_agent_hitl_on_pattern_without_hitl_raises(self, pattern):
+        from fsm_llm.agents import create_agent
+
+        with pytest.raises(TypeError, match="hitl"):
+            create_agent(pattern=pattern, tools=[self._tool], hitl=self._hitl())
+
+    def test_native_fc_hitl_raises(self):
+        with pytest.raises(TypeError, match="hitl"):
+            NativeFunctionCallingReactAgent(
+                tools=_Harness().registry, hitl=self._hitl()
+            )
+
+    def test_debate_with_tools_raises(self):
+        from fsm_llm.agents.debate import DebateAgent
+
+        with pytest.raises(TypeError, match="tools"):
+            DebateAgent(tools=_Harness().registry)
+
+    @pytest.mark.parametrize("pattern", ["debate", "self_consistency", "swarm"])
+    def test_create_agent_tools_on_toolless_pattern_raises(self, pattern):
+        from fsm_llm.agents import create_agent
+
+        with pytest.raises(TypeError, match="does not take tools"):
+            create_agent(pattern=pattern, tools=[self._tool])
+
+    @pytest.mark.parametrize(
+        "kwarg", [{"model": "x"}, {"temperature": 0.1}, {"max_tokens": 5}]
+    )
+    def test_config_owned_kwarg_raises_at_construction(self, kwarg):
+        with pytest.raises(TypeError, match="AgentConfig"):
+            ReactAgent(_Harness().registry, **kwarg)
+
+    @pytest.mark.parametrize(
+        "kwarg", [{"evaluation_fn": lambda o, c: None}, {"approval_callback": print}]
+    )
+    def test_misplaced_callable_kwarg_raises(self, kwarg):
+        with pytest.raises(TypeError):
+            ReactAgent(_Harness().registry, **kwarg)
+
+    def test_passthrough_kwargs_still_construct_and_run(self):
+        agent = ReactAgent(
+            _Harness().registry,
+            config=AgentConfig(model="mock/model", max_iterations=3),
+            seed=7,
+            timeout=5,
+            llm_interface=_SelectOnceLLM(select_tool=False),
+        )
+        result = agent.run("q")
+        assert result.answer
+        assert agent._api_kwargs["seed"] == 7
+
+    def test_litellm_passthrough_reaches_the_llm_interface(self):
+        agent = ReactAgent(
+            _Harness().registry,
+            config=AgentConfig(model="mock/model"),
+            seed=7,
+            caching=True,
+            api_base="http://127.0.0.1:9",
+        )
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
+
+        api = agent._create_api(build_react_fsm(agent.tools))
+        llm_kwargs = api.get_llm_interface().kwargs
+        assert llm_kwargs["seed"] == 7
+        assert llm_kwargs["caching"] is True
+        assert llm_kwargs["api_base"] == "http://127.0.0.1:9"
+
+    @pytest.mark.parametrize(
+        "pattern", ["react", "verified_react", "auto_memory", "parallel_react"]
+    )
+    def test_create_agent_routes_tools_through_forwarding_subclasses(self, pattern):
+        from fsm_llm.agents import create_agent
+
+        agent = create_agent(pattern=pattern, tools=[self._tool])
+        assert "tools" not in agent._api_kwargs
+        assert "_tool" in agent.tools.tool_names
+
+    def test_accepts_tools_walks_forwarding_constructors(self):
+        from fsm_llm.agents import (
+            AutoMemoryReactAgent,
+            DebateAgent,
+            MetaBuilderAgent,
+            OrchestratorAgent,
+            PromptChainAgent,
+            VerifiedReactAgent,
+        )
+        from fsm_llm.agents.base import accepts_tools
+
+        assert accepts_tools(ReactAgent)
+        assert accepts_tools(VerifiedReactAgent)
+        assert accepts_tools(AutoMemoryReactAgent)
+        assert accepts_tools(OrchestratorAgent)
+        assert not accepts_tools(DebateAgent)
+        assert not accepts_tools(SelfConsistencyAgent)
+        assert not accepts_tools(PromptChainAgent)
+        assert not accepts_tools(SwarmAgent)
+        assert not accepts_tools(MetaBuilderAgent)

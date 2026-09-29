@@ -257,19 +257,20 @@ def search(query: str) -> str:
     return f"Results for: {query}"
 
 # Create agent
-agent = create_agent(tools=[search], model="gpt-4o-mini")  # pattern="react" is the default
+agent = create_agent(tools=[search], config=AgentConfig(model="gpt-4o-mini"))  # pattern="react" is the default
 result = agent("task")  # or agent.run("task")
 # result.answer, result.success, result.trace, result.structured_output
 
-# Structured output
-agent = ReactAgent(model="gpt-4o-mini", tools=[search],
-                   config=AgentConfig(output_schema=MyPydanticModel))
+# Structured output (agent classes take a ToolRegistry, not a list)
+registry = ToolRegistry().register(search._tool_definition)
+agent = ReactAgent(tools=registry,
+                   config=AgentConfig(model="gpt-4o-mini", output_schema=MyPydanticModel))
 
 # Human-in-the-loop
 # approval_policy(call, context) -> bool picks the gated calls; each approval covers one call
 hitl = HumanInTheLoop(approval_policy=lambda call, ctx: call.tool_name == "search",
                       approval_callback=fn)
-agent = ReactAgent(model="gpt-4o-mini", tools=[search], hitl=hitl)
+agent = ReactAgent(tools=registry, config=AgentConfig(model="gpt-4o-mini"), hitl=hitl)
 ```
 
 17 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm`, `parallel_react`, `native_fc`, `verified_react`, `auto_memory` (plus `reasoning_react` when `fsm_llm.reasoning` is importable). The source of truth is `_PATTERNS` in `src/fsm_llm/agents/__init__.py`; an unknown pattern raises `ValueError` listing the available names.

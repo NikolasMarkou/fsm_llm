@@ -7,6 +7,7 @@ trace building, and context filtering from the 12 agent implementations.
 
 from __future__ import annotations
 
+import inspect
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping
@@ -21,6 +22,8 @@ from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .constants import (
+    CONFIG_OWNED_KWARGS,
+    MISPLACED_AGENT_KWARGS,
     RESULT_DROPPED_CONTEXT_KEYS,
     RUN_OUTPUT_KEYS,
     AgentStates,
@@ -135,6 +138,68 @@ def strip_caller_context(
     return kept
 
 
+def accepts_tools(agent_cls: type) -> bool:
+    """Tell whether *agent_cls*'s constructor takes a ``tools`` argument.
+
+    Interface contract (callers: ``create_agent`` and its tests):
+
+    Args:
+        agent_cls: An agent class (any class; non-agents are fine).
+
+    Returns:
+        ``True`` when some ``__init__`` on the MRO names a ``tools`` parameter
+        and every ``__init__`` before it forwards ``**kwargs`` (VerifiedReact and
+        AutoMemory forward to ReactAgent). ``BaseAgent.__init__`` ends the walk:
+        its ``**api_kwargs`` is not a tools sink (it rejects ``tools``). Never
+        raises; an uninspectable signature counts as ``False``.
+    """
+    for klass in agent_cls.__mro__:
+        init = klass.__dict__.get("__init__")
+        if init is None:
+            continue
+        if klass is BaseAgent or klass is object:
+            return False
+        try:
+            params = inspect.signature(init).parameters
+        except (TypeError, ValueError):
+            return False
+        if "tools" in params and params["tools"].kind not in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            return True
+        if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return False
+    return False
+
+
+def _reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> None:
+    """Raise ``TypeError`` when *api_kwargs* holds a name that only lands there by mistake.
+
+    Called once from ``BaseAgent.__init__``. *pattern* is the concrete class
+    name, used in the message. Every other kwarg is left alone (D-003).
+    """
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-003: a denylist, not a
+    # whitelist. `hitl=`/`tools=` on a pattern without them used to be forwarded
+    # to litellm with HITL silently ignored (SEC-02, PAT-12); `model=` crashed
+    # later with "multiple values" (API-02). Do NOT reject unknown kwargs in
+    # general: `seed`, `timeout`, `caching`, `handlers`, `llm_interface`, ... are
+    # legitimate API/litellm passthrough. See decisions.md D-003.
+    misplaced = sorted(k for k in api_kwargs if k in MISPLACED_AGENT_KWARGS)
+    if misplaced:
+        raise TypeError(
+            f"{pattern} does not accept {misplaced}; this pattern cannot use "
+            f"them and they would be forwarded to the LLM provider unchecked"
+        )
+    config_owned = sorted(k for k in api_kwargs if k in CONFIG_OWNED_KWARGS)
+    if config_owned:
+        raise TypeError(
+            f"{pattern} does not accept {config_owned} as keyword arguments; "
+            f"set them on AgentConfig instead, e.g. "
+            f"{pattern}(config=AgentConfig({config_owned[0]}=...))"
+        )
+
+
 class BaseAgent(ABC):
     """Abstract base class for FSM-LLM agents.
 
@@ -155,6 +220,7 @@ class BaseAgent(ABC):
         config: AgentConfig | None = None,
         **api_kwargs: Any,
     ) -> None:
+        _reject_misplaced_kwargs(type(self).__name__, api_kwargs)
         self.config = config or AgentConfig()
         self._api_kwargs = api_kwargs
 

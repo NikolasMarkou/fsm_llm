@@ -268,6 +268,20 @@ RUN_OUTPUT_KEYS: frozenset[str] = frozenset(
 )
 
 
+# DECISION plan-2026-09-29T103145-06a5ec0a/D-003: constructor kwargs that reach
+# ``BaseAgent.__init__(**api_kwargs)`` only by mistake. The agent-constructor
+# names mean the pattern cannot use them (HITL or tools silently ignored and
+# forwarded to litellm); the config-owned names collide with the explicit
+# ``model``/``temperature``/``max_tokens`` that ``_create_api`` passes. Do NOT
+# turn this into a whitelist of allowed kwargs: litellm passthrough (``seed``,
+# ``timeout``, ``caching``, ``api_base``, ...) and API kwargs (``handlers``,
+# ``llm_interface``, ...) are open-ended and must keep flowing.
+MISPLACED_AGENT_KWARGS: frozenset[str] = frozenset(
+    {"hitl", "tools", "evaluation_fn", "approval_callback"}
+)
+CONFIG_OWNED_KWARGS: frozenset[str] = frozenset({"model", "temperature", "max_tokens"})
+
+
 class HandlerPriorities:
     """Explicit priorities for agent handler execution order.
 

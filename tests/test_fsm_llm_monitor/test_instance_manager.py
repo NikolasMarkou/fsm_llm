@@ -849,3 +849,48 @@ class TestStubToolExecution:
             result = registry.execute(ToolCall(tool_name="lookup", parameters=params))
             assert result.success, (params, result.error)
             assert result.result == "STUB"
+
+
+class TestLaunchConstructsEveryAgentClass:
+    """plan-2026-09-29T103145-06a5ec0a D-003: agent constructors reject a
+    ``tools=`` they cannot use. The monitor passes ``tools`` only to tool-based
+    classes, so every launchable class must still construct with the monitor's
+    ``config``/``handlers``(/``tools``) kwargs, even when the request carries a
+    tools config for a tool-less class."""
+
+    def test_every_class_constructs_through_launch(self, monkeypatch):
+        import pytest
+
+        from fsm_llm.monitor import instance_manager as im
+        from fsm_llm.monitor.definitions import StubToolConfig
+
+        if not im._AGENT_CLASSES:
+            pytest.skip("fsm_llm.agents not importable")
+        assert len(im._AGENT_CLASSES) == 7
+
+        constructed: dict[str, threading.Event] = {}
+        for name, real_cls in list(im._AGENT_CLASSES.items()):
+            event = threading.Event()
+            constructed[name] = event
+
+            def _run(self, task, _event=event):
+                _event.set()
+                raise RuntimeError("stop after construction")
+
+            monkeypatch.setitem(
+                im._AGENT_CLASSES, name, type(name, (real_cls,), {"run": _run})
+            )
+
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+        launched = {}
+        for name in constructed:
+            launched[name] = mgr.launch_agent(
+                agent_type=name,
+                task="x",
+                tools_config=[
+                    StubToolConfig(name="lookup", description="d", stub_response="S")
+                ],
+            )
+        for name, event in constructed.items():
+            assert event.wait(5), f"{name} did not construct: {launched[name].error}"

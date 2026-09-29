@@ -36,7 +36,7 @@ from .auto_memory import (
     remember_interaction,
     with_auto_memory,
 )
-from .base import BaseAgent
+from .base import BaseAgent, accepts_tools
 from .composition import default_llm_judge, react_worker_factory
 from .debate import DebateAgent
 from .definitions import (
@@ -148,7 +148,13 @@ def create_agent(
         system_prompt: System prompt (used in tool descriptions, not FSM persona).
         tools: List of @tool-decorated functions or a ToolRegistry.
         pattern: Agent pattern — "react" (default), "debate", "rewoo", etc.
-        **kwargs: Passed to the agent constructor (config, hitl, etc.).
+        **kwargs: Passed to the agent constructor (config, hitl, etc.). A
+            kwarg the pattern cannot use (``hitl``, ``tools``, ``model``, ...)
+            raises ``TypeError``; set the model on ``AgentConfig``.
+
+    Raises:
+        ValueError: Unknown pattern.
+        TypeError: ``tools`` given to a pattern whose constructor takes none.
 
     Note:
         ``AgentGraph`` is intentionally excluded from ``pattern`` — it is
@@ -210,8 +216,15 @@ def create_agent(
     if cls is None:
         raise ValueError(f"Unknown pattern '{pattern}'. Available: {sorted(_PATTERNS)}")
 
-    # Tool-using agents need a registry
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-003: route tools by constructor
+    # signature. Do NOT inject `tools` into every pattern: a tool-less pattern
+    # (debate, self_consistency, ...) forwarded it to litellm (PAT-12).
     if registry is not None and "tools" not in kwargs:
+        if not accepts_tools(cls):
+            raise TypeError(
+                f"Pattern '{pattern}' ({cls.__name__}) does not take tools; "
+                f"remove the tools argument"
+            )
         kwargs["tools"] = registry
 
     return cls(**kwargs)
