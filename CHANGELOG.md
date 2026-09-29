@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-29
+
 ### Added (`fsm_llm.eval`, 2026-09-29)
 
 - New subpackage `fsm_llm.eval` (extra `eval`, no third-party dependencies, included in
@@ -2659,6 +2661,7 @@ examples, signatures, and the 2-pass core contract are unchanged. New optional
 - 7 examples (basic, intermediate, advanced)
 - Comprehensive documentation
 
+[0.11.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.7.0...v0.8.0
