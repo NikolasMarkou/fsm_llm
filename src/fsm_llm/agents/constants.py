@@ -243,6 +243,31 @@ RESULT_DROPPED_CONTEXT_KEYS: frozenset[str] = frozenset(
 )
 
 
+# DECISION plan-2026-09-29T103145-06a5ec0a/D-002: keys a run writes for itself
+# (tool selection and results, evidence counters, termination, approval state and
+# the driver-only grant). Caller context never supplies them; they are removed
+# only by ``base.strip_caller_context`` (see the anchor there). Do NOT add the
+# whole internal-prefix family here: ``_sensitive``-style policy inputs and the
+# harness roots legitimately arrive through ``initial_context``.
+RUN_OUTPUT_KEYS: frozenset[str] = frozenset(
+    {
+        ContextKeys.OBSERVATION_COUNT,
+        ContextKeys.OBSERVATIONS,
+        ContextKeys.SHOULD_TERMINATE,
+        ContextKeys.FINAL_ANSWER,
+        ContextKeys.TOOL_NAME,
+        ContextKeys.TOOL_INPUT,
+        ContextKeys.TOOL_RESULT,
+        ContextKeys.TOOL_STATUS,
+        ContextKeys.TOOL_ERROR,
+        ContextKeys.APPROVAL_REQUIRED,
+        ContextKeys.APPROVAL_GRANTED,
+        ContextKeys.REASONING,
+        ContextKeys.DRIVER_APPROVAL,
+    }
+)
+
+
 class HandlerPriorities:
     """Explicit priorities for agent handler execution order.
 

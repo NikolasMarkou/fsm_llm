@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any, cast
 
 from pydantic import BaseModel
@@ -22,6 +22,7 @@ from fsm_llm.logging import logger
 
 from .constants import (
     RESULT_DROPPED_CONTEXT_KEYS,
+    RUN_OUTPUT_KEYS,
     AgentStates,
     ContextKeys,
     Defaults,
@@ -74,6 +75,64 @@ def _output_response_format(schema: Any) -> dict[str, Any] | None:
             "schema": schema.model_json_schema(),
         },
     }
+
+
+def strip_caller_context(
+    context: Mapping[str, Any] | None,
+    *,
+    source: str,
+    drop_internal: bool = False,
+    warn: bool = True,
+) -> dict[str, Any]:
+    """Copy caller-supplied context without the keys a run owns.
+
+    Interface contract (callers: ``BaseAgent._init_context``,
+    ``SelfConsistencyAgent.run``, ``SwarmAgent.run``, ``AgentGraph.run``,
+    ``AgentServer`` ``/invoke`` and ``/stream``):
+
+    Args:
+        context: The caller's dict, or ``None`` (treated as empty).
+        source: Label naming where the dict came from, used in the log line.
+        drop_internal: Also drop every ``has_internal_prefix`` key. Only for a
+            trust boundary (``AgentServer``); in-process callers may pass
+            internal policy inputs such as ``_sensitive``.
+        warn: Log dropped keys at WARNING (default) or DEBUG. DEBUG is for
+            in-process propagation where dropping is expected (AgentGraph edges).
+
+    Returns:
+        A new dict (the input is never mutated) without ``RUN_OUTPUT_KEYS``
+        (which include ``ContextKeys.DRIVER_APPROVAL``), and without internal
+        keys when ``drop_internal``. Never raises for a mapping input.
+    """
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-002: caller context may not
+    # carry the driver-only approval grant or any run output. A forged
+    # `_approval_granted` plus `tool_name`/`tool_input` ran a gated tool with the
+    # callback never asked (SEC-01); forged `observation_count`/`should_terminate`/
+    # `final_answer` gave success=True with zero tools (LOOP-12). Do NOT
+    # blanket-drop internal-prefix keys here for in-process callers: `_sensitive`
+    # reaches the approval policy by design (TestDriverSeesRefusalContext) and the
+    # harness passes its roots this way. Only AgentServer sets `drop_internal`.
+    # Do NOT answer a forged remote key with 400 either: clients that echo
+    # context would break; the drop is logged instead. See decisions.md D-002.
+    kept: dict[str, Any] = {}
+    dropped: list[str] = []
+    for key, value in (context or {}).items():
+        if key in RUN_OUTPUT_KEYS or (
+            drop_internal and isinstance(key, str) and has_internal_prefix(key)
+        ):
+            dropped.append(str(key))
+        else:
+            kept[key] = value
+    if dropped:
+        message = (
+            f"{source}: dropped run-owned or internal keys a caller may not "
+            f"set: {sorted(dropped)}"
+        )
+        if warn:
+            logger.warning(message)
+        else:
+            logger.debug(message)
+    return kept
 
 
 class BaseAgent(ABC):
@@ -197,9 +256,12 @@ class BaseAgent(ABC):
 
         Sets ``TASK``, ``AGENT_TRACE``, ``ITERATION_COUNT`` and
         ``MAX_ITERATIONS_REACHED`` (False; so a run's ``final_context`` carries it).
+        Seeds ``OBSERVATION_COUNT`` to 0. Caller keys in ``RUN_OUTPUT_KEYS``
+        (including the driver-only approval grant) are dropped with a WARNING
+        by ``strip_caller_context``; other internal-prefix keys pass through.
         Warns if *initial_context* already contains reserved keys.
         """
-        context: dict[str, Any] = dict(initial_context) if initial_context else {}
+        context = strip_caller_context(initial_context, source="initial_context")
         reserved = {
             ContextKeys.TASK,
             ContextKeys.AGENT_TRACE,
@@ -220,6 +282,9 @@ class BaseAgent(ABC):
         # write True and pass every evidence guard (P2-W2). Only the limiter
         # and stall handlers write True. Do NOT drop the seed or set it None.
         context[ContextKeys.MAX_ITERATIONS_REACHED] = False
+        # Evidence counter starts at zero for every run; the caller's value was
+        # dropped above (D-002 of plan 06a5ec0a, LOOP-12).
+        context[ContextKeys.OBSERVATION_COUNT] = 0
 
         # Schema-enforced output: when output_schema is set, store the
         # JSON schema as response_format so the pipeline can pass it to

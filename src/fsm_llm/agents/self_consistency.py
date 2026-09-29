@@ -16,7 +16,7 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, strip_caller_context
 from .constants import (
     ContextKeys,
     Defaults,
@@ -113,6 +113,12 @@ class SelfConsistencyAgent(BaseAgent):
         import time
 
         start_time = time.monotonic()
+        # Samples build their own context (no `_init_context`), so drop the
+        # run-owned keys once here: a forged `final_answer` would otherwise
+        # become every sample's answer (D-002 of plan 06a5ec0a).
+        initial_context = strip_caller_context(
+            initial_context, source="SelfConsistencyAgent initial_context"
+        )
 
         # Build simple single-state FSM
         fsm_def = build_self_consistency_fsm(task_description=task)

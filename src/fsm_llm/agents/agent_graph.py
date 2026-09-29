@@ -15,7 +15,7 @@ from typing import Any
 
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, strip_caller_context
 from .definitions import AgentConfig, AgentResult, AgentTrace
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 
@@ -185,7 +185,9 @@ class AgentGraph:
             sequential edges or use an explicit merge node.
         """
         start_time = time.monotonic()
-        context = dict(initial_context or {})
+        context = strip_caller_context(
+            initial_context, source="AgentGraph initial_context"
+        )
         context["task"] = task
 
         results: dict[str, AgentResult] = {}
@@ -240,7 +242,15 @@ class AgentGraph:
                     continue
                 if take_edge:
                     # Pass the source's final_context merged with original context
-                    next_context = {**node_context, **result.final_context}
+                    # The source node's run outputs (final_answer,
+                    # should_terminate, observation_count, ...) must not seed
+                    # the target's run (D-002 of plan 06a5ec0a); dropping them
+                    # is expected here, so log at DEBUG.
+                    next_context = strip_caller_context(
+                        {**node_context, **result.final_context},
+                        source=f"AgentGraph edge '{node_name}'->'{target}'",
+                        warn=False,
+                    )
                     queue.append((target, next_context))
 
         elapsed = time.monotonic() - start_time

@@ -11,6 +11,7 @@ import hmac
 import json
 from typing import Any, cast
 
+from .base import strip_caller_context
 from .definitions import ToolDefinition
 
 try:
@@ -70,6 +71,19 @@ def _checked_api_key(api_key: str | None) -> str | None:
     if api_key is not None and not api_key.strip():
         raise ValueError("api_key must be a non-empty string, or None for no auth")
     return api_key
+
+
+def _server_context(context: dict[str, Any] | None) -> dict[str, Any]:
+    """Remote request context as the agent may see it.
+
+    ``AgentServer`` is a trust boundary: besides the run-owned keys every
+    agent drops, a remote client may not set ANY internal-prefix key (driver
+    grants, policy inputs, pattern counters). Dropped keys are logged, not
+    rejected (D-002 of plan 06a5ec0a).
+    """
+    return strip_caller_context(
+        context, source="AgentServer request context", drop_internal=True
+    )
 
 
 def _require_fastapi() -> None:
@@ -220,7 +234,7 @@ class AgentServer:
                     asyncio.to_thread(
                         self._agent.run,
                         request.task,
-                        initial_context=request.context,
+                        initial_context=_server_context(request.context),
                     ),
                     timeout=self._timeout,
                 )
@@ -258,7 +272,7 @@ class AgentServer:
                         asyncio.to_thread(
                             self._agent.run,
                             request.task,
-                            initial_context=request.context,
+                            initial_context=_server_context(request.context),
                         ),
                         timeout=self._timeout,
                     )

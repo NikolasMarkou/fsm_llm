@@ -14,7 +14,7 @@ from typing import Any
 from fsm_llm.logging import logger
 from fsm_llm.memory import WorkingMemory
 
-from .base import BaseAgent
+from .base import BaseAgent, strip_caller_context
 from .definitions import AgentConfig, AgentResult, AgentTrace
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 
@@ -77,7 +77,9 @@ class SwarmAgent(BaseAgent):
         Terminates when an agent returns no next_agent or max handoffs reached.
         """
         start_time = time.monotonic()
-        context = dict(initial_context or {})
+        context = strip_caller_context(
+            initial_context, source="SwarmAgent initial_context"
+        )
         context["task"] = task
 
         current_agent_name = self._entry_agent
@@ -169,7 +171,13 @@ class SwarmAgent(BaseAgent):
                 break
 
             # Update context for next agent
-            context.update(handoff_context)
+            # handoff_context is model-written: it may not seed the next
+            # agent's run outputs or approval grant (D-002 of plan 06a5ec0a).
+            context.update(
+                strip_caller_context(
+                    handoff_context, source="SwarmAgent handoff_context"
+                )
+            )
             context["handoff_message"] = handoff_message
             context["previous_agent"] = current_agent_name
             context["previous_answer"] = result.answer
