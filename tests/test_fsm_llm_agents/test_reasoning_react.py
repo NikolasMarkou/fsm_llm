@@ -248,3 +248,99 @@ class TestReasoningReactAgentConfig:
         agent = ReasoningReactAgent(tools=ToolRegistry())
 
         assert [t.name for t in agent.tools.list_tools()] == ["reason"]
+
+
+def _reason_context(tool_input, task="Is 97 prime?"):
+    return {
+        ContextKeys.TASK: task,
+        ContextKeys.TOOL_NAME: "reason",
+        ContextKeys.TOOL_INPUT: tool_input,
+        ContextKeys.OBSERVATIONS: [],
+        ContextKeys.AGENT_TRACE: [],
+    }
+
+
+class TestReasonToolInputAndShadowing:
+    """REACT-05: the reason tool gets the task, and never shadows a user tool."""
+
+    @pytest.mark.parametrize("tool_input", [None, {}, "", {"problem": "  "}])
+    def test_empty_input_reasons_about_the_task(self, tool_input):
+        from fsm_llm.agents.handlers import AgentHandlers
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+
+        registry = ToolRegistry()
+        registry.register_function(_dummy_tool, name="search", description="Search")
+        agent = ReasoningReactAgent(tools=registry)
+        executor = agent._make_reasoning_tool_executor(AgentHandlers(agent.tools))
+        with patch.object(
+            agent._reasoning_engine, "solve_problem", return_value=("yes", {})
+        ) as solve:
+            delta = executor(_reason_context(tool_input))
+        solve.assert_called_once_with("Is 97 prime?")
+        assert delta[ContextKeys.TOOL_STATUS] == "success"
+
+    def test_named_problem_wins_over_the_task(self):
+        from fsm_llm.agents.handlers import AgentHandlers
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+
+        agent = ReasoningReactAgent(tools=ToolRegistry())
+        executor = agent._make_reasoning_tool_executor(AgentHandlers(agent.tools))
+        with patch.object(
+            agent._reasoning_engine, "solve_problem", return_value=("s", {})
+        ) as solve:
+            executor(_reason_context({"problem": "Is 91 prime?"}))
+        solve.assert_called_once_with("Is 91 prime?")
+
+    def test_user_reason_tool_is_the_one_invoked(self):
+        from fsm_llm.agents.handlers import AgentHandlers
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+
+        calls: list[object] = []
+
+        def user_reason(params):
+            calls.append(params)
+            return "user reasoning"
+
+        registry = ToolRegistry()
+        registry.register_function(
+            user_reason, name="reason", description="The user's own reason tool"
+        )
+        agent = ReasoningReactAgent(tools=registry)
+        assert agent.tools.get("reason").execute_fn is user_reason
+        assert len(agent.tools) == 1  # no reasoning tool added
+        executor = agent._make_reasoning_tool_executor(AgentHandlers(agent.tools))
+        with patch.object(agent._reasoning_engine, "solve_problem") as solve:
+            delta = executor(_reason_context({"problem": "p"}))
+        solve.assert_not_called()
+        assert len(calls) == 1
+        assert delta[ContextKeys.TOOL_STATUS] == "success"
+        assert "user reasoning" in str(delta[ContextKeys.TOOL_RESULT])
+
+    def test_registry_subclass_behaviour_is_kept(self):
+        """A CachingToolRegistry still caches through the agent's copy."""
+        from fsm_llm.agents.handlers import AgentHandlers
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+        from fsm_llm.agents.tool_registries import CachingToolRegistry
+
+        runs: list[object] = []
+
+        def lookup(params):
+            runs.append(params)
+            return "found"
+
+        registry = CachingToolRegistry()
+        registry.register_function(lookup, name="lookup", description="Lookup")
+        agent = ReasoningReactAgent(tools=registry)
+        assert "reason" not in registry  # caller registry not mutated
+        handlers = AgentHandlers(agent.tools)
+        for _ in range(2):
+            ctx = {
+                ContextKeys.TASK: "t",
+                ContextKeys.TOOL_NAME: "lookup",
+                ContextKeys.TOOL_INPUT: {"q": "x"},
+                ContextKeys.OBSERVATIONS: [],
+                ContextKeys.AGENT_TRACE: [],
+            }
+            assert handlers.execute_tool(ctx)[ContextKeys.TOOL_STATUS] == "success"
+        assert len(runs) == 1
+        assert registry.cache_hits == 1

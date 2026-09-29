@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from fsm_llm.agents import AgentConfig, ToolRegistry, VerifiedReactAgent, tool
+from fsm_llm.agents.constants import ContextKeys, StopReason
 from fsm_llm.agents.definitions import AgentResult, AgentTrace
 
 
@@ -110,6 +111,18 @@ class TestVerification:
         r = agent.run("q")
         assert r.answer == "never-good"
         assert calls["n"] == 3  # 1 + 2 retries
+        # REACT-04: the answer ships, but it is not a success.
+        assert r.success is False
+        assert r.stop_reason == StopReason.VERIFICATION_FAILED
+
+    def test_passing_answer_keeps_its_outcome(self, monkeypatch):
+        def fake_run(self, task, initial_context=None):
+            return _result("good")
+
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        cfg = AgentConfig(model="mock/model", verification_fn=lambda a, c: True)
+        r = _agent(cfg).run("q")
+        assert r.success is True
 
     def test_bool_verdict_supported(self, monkeypatch):
         def fake_run(self, task, initial_context=None):
@@ -120,11 +133,12 @@ class TestVerification:
         agent = _agent(cfg)
         assert agent.run("q").answer == "ok"
 
-    def test_verification_exception_treated_as_pass(self, monkeypatch):
-        calls = {"n": 0}
+    def test_verification_exception_is_rejection(self, monkeypatch):
+        """REACT-04: a raising verifier fails closed, it never passes."""
+        tasks: list[str] = []
 
         def fake_run(self, task, initial_context=None):
-            calls["n"] += 1
+            tasks.append(task)
             return _result("x")
 
         def boom(a, c):
@@ -132,8 +146,12 @@ class TestVerification:
 
         monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         agent = _agent(AgentConfig(model="mock/model", verification_fn=boom))
-        agent.run("q")
-        assert calls["n"] == 1  # not retried
+        r = agent.run("q")
+        assert len(tasks) == 2  # retried like any rejection
+        assert "verifier crashed" in tasks[1]
+        assert r.answer == "x"
+        assert r.success is False
+        assert r.stop_reason == StopReason.VERIFICATION_FAILED
 
 
 class TestReflection:
@@ -149,7 +167,24 @@ class TestReflection:
         assert api.update_context.called
         # update_context(conv_id, {...}) — second positional arg
         payload = api.update_context.call_args[0][1]
-        assert any("Reflection" in o for o in payload["observations"])
+        assert "Reflection" in payload[ContextKeys.AGENT_FEEDBACK]
+
+    def test_reflection_is_not_an_observation(self):
+        """REACT-04: a note in observations counts as evidence (observation_count)."""
+        agent = _agent(AgentConfig(model="mock/model", reflect_every_n=1))
+        api = self._api()
+        agent._on_loop_iteration(api, "cid", 1)
+        payload = api.update_context.call_args[0][1]
+        assert ContextKeys.OBSERVATIONS not in payload
+        assert ContextKeys.OBSERVATION_COUNT not in payload
+
+    def test_reflection_keeps_pending_feedback(self):
+        agent = _agent(AgentConfig(model="mock/model", reflect_every_n=1))
+        api = MagicMock()
+        api.get_data.return_value = {ContextKeys.AGENT_FEEDBACK: "tool was denied"}
+        agent._on_loop_iteration(api, "cid", 1)
+        note = api.update_context.call_args[0][1][ContextKeys.AGENT_FEEDBACK]
+        assert note.startswith("tool was denied") and "Reflection" in note
 
     def test_no_injection_off_cadence(self):
         agent = _agent(AgentConfig(model="mock/model", reflect_every_n=3))

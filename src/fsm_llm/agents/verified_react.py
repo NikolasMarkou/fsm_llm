@@ -8,12 +8,13 @@ fields (defaults reproduce stock ReactAgent behavior):
 - **Verification / grounding** (``config.verification_fn``): after a run, the
   answer is checked by a caller-supplied predicate. On rejection the agent
   retries with the verifier's feedback folded into the task, up to
-  ``max_verify_retries`` times. No pattern verifies its own output today; this
-  closes that gap.
+  ``max_verify_retries`` times. An answer still rejected after the last
+  attempt ships with ``success=False, stop_reason="verification_failed"``; a
+  verifier that raises counts as a rejection (fail closed).
 - **Periodic self-reflection** (``config.reflect_every_n``): every N loop
-  iterations a reflection note is injected into the agent's observations
-  (which the think prompt always surfaces), nudging it to re-assess progress
-  and avoid repeating failed actions.
+  iterations a reflection note is written to ``agent_feedback`` (which the
+  think prompt surfaces for one turn), nudging it to re-assess progress and
+  avoid repeating failed actions.
 
 Fully additive: a thin :class:`ReactAgent` subclass. With neither config field
 set it behaves exactly like :class:`ReactAgent`.
@@ -39,6 +40,7 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
+from .constants import ContextKeys, StopReason
 from .definitions import AgentResult
 from .react import ReactAgent
 
@@ -73,11 +75,15 @@ class VerifiedReactAgent(ReactAgent):
         fn = self.config.verification_fn
         if fn is None:
             return True, ""
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-011: a raising verifier
+        # is a rejection (fail closed). Do NOT treat it as a pass: a verifier
+        # that crashes on a malformed answer would ship exactly that answer as
+        # verified.
         try:
             verdict = fn(result.answer, result.final_context)
         except Exception as e:
-            logger.warning(f"verification_fn raised, treating as pass: {e}")
-            return True, ""
+            logger.warning(f"verification_fn raised, treating as rejection: {e}")
+            return False, f"the verifier raised an error: {e}"
         if isinstance(verdict, dict):
             ok = bool(verdict.get("ok", verdict.get("passed", False)))
             return ok, str(verdict.get("feedback", ""))
@@ -109,7 +115,13 @@ class VerifiedReactAgent(ReactAgent):
                 f"{self.max_verify_retries + 1}: {feedback}"
             )
         assert result is not None
-        return result
+        # REACT-04: the last answer still ships, but it is not verified.
+        return result.model_copy(
+            update={
+                "success": False,
+                "stop_reason": StopReason.VERIFICATION_FAILED,
+            }
+        )
 
     def run_stream(
         self,
@@ -135,14 +147,23 @@ class VerifiedReactAgent(ReactAgent):
             self._inject_reflection(api, conv_id)
 
     def _inject_reflection(self, api: API, conv_id: str) -> None:
-        """Append a reflection note to the agent's observations."""
+        """Add a reflection note to ``agent_feedback`` for the next think turn.
+
+        Not ``observations``: a note there is not a tool result, yet it would
+        count toward ``observation_count`` (the conclude evidence guard) and
+        read to the model as a step it took (REACT-04). Any pending executor
+        feedback is kept ahead of the note.
+        """
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-046: the note goes to
+        # `agent_feedback`. Do NOT append it to `observations`: the executor
+        # sets `observation_count` from that list, and the conclude edge's
+        # evidence guard (c1d5bfbc D-008) must count real tool results only.
         try:
             data = api.get_data(conv_id)
-            observations = data.get("observations") or []
-            if not isinstance(observations, list):
-                observations = []
-            api.update_context(
-                conv_id, {"observations": [*observations, _REFLECTION_NOTE]}
-            )
+            pending = data.get(ContextKeys.AGENT_FEEDBACK)
+            note = _REFLECTION_NOTE
+            if isinstance(pending, str) and pending.strip():
+                note = f"{pending}\n{_REFLECTION_NOTE}"
+            api.update_context(conv_id, {ContextKeys.AGENT_FEEDBACK: note})
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(f"Reflection injection skipped: {e}")

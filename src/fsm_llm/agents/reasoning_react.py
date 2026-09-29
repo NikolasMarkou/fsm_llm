@@ -23,7 +23,7 @@ from .constants import (
     LogMessages,
     ReasoningIntegrationKeys,
 )
-from .definitions import AgentConfig, AgentResult, AgentStep
+from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall, ToolResult
 from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers, forced_stop_skip, next_step_number
@@ -39,13 +39,46 @@ except ImportError:
     _HAS_REASONING = False
 
 
-def _problem_text(tool_input: Any) -> str:
-    """The problem text of a ``reason`` call: a string, else ``problem``, else str()."""
-    if isinstance(tool_input, str):
-        return tool_input
+def _problem_text(tool_input: Any, task: Any = "") -> str:
+    """The problem text of a ``reason`` call.
+
+    A non-blank string input, else a non-blank ``problem`` entry, else the
+    ``str()`` of a dict holding any non-blank value. An input with nothing in
+    it (``None``, ``""``, ``{}``, ``{"problem": ""}``) falls back to ``task``,
+    so the engine never reasons about the literal ``"{}"`` (REACT-05).
+    """
     if isinstance(tool_input, dict):
-        return str(tool_input.get("problem", str(tool_input)))
-    return str(tool_input)
+        problem = tool_input.get("problem")
+        if isinstance(problem, str) and problem.strip():
+            return problem
+        if any(str(v).strip() for v in tool_input.values() if v is not None):
+            return str(tool_input)
+    elif tool_input is not None and str(tool_input).strip():
+        return str(tool_input)
+    return str(task or "")
+
+
+class _ReasonToolRegistry(ToolRegistry):
+    """The caller's tools plus the ``reason`` pseudo-tool, without mutating them.
+
+    Interface contract: built from the caller's registry ``base``; holds a
+    snapshot of ``base``'s tools (later registrations on ``base`` are not
+    seen). ``execute`` of a tool ``base`` holds goes to ``base.execute``, so a
+    ``CachingToolRegistry``/``RetryingToolRegistry`` keeps its behaviour
+    (REACT-05: a plain copy dropped it); any other name runs here. Semantic
+    prompt filtering (``SemanticToolRegistry.retrieve``) is not carried over.
+    """
+
+    def __init__(self, base: ToolRegistry) -> None:
+        super().__init__()
+        self._base = base
+        for tool_def in base.list_tools():
+            self.register(tool_def)
+
+    def execute(self, tool_call: ToolCall) -> ToolResult:
+        if tool_call.tool_name in self._base:
+            return self._base.execute(tool_call)
+        return super().execute(tool_call)
 
 
 class ReasoningReactAgent(BaseAgent):
@@ -96,12 +129,22 @@ class ReasoningReactAgent(BaseAgent):
         super().__init__(config, **api_kwargs)
         self.hitl = hitl
 
-        # Copy registry to avoid mutating the caller's ToolRegistry
-        self.tools = ToolRegistry()
-        for tool_def in tools.list_tools():
-            self.tools.register(tool_def)
         reason_name = ReasoningIntegrationKeys.REASONING_TOOL_NAME
-        if reason_name not in self.tools:
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-046: do NOT copy the
+        # caller's tools into a plain ToolRegistry (drops a Caching/Retrying
+        # subclass's execute) and do NOT intercept a user's own `reason` tool.
+        # REACT-05: a user tool named `reason` wins. The agent keeps it, runs
+        # it like any tool, and registers no reasoning tool.
+        self._reasoning_tool_enabled = reason_name not in tools
+        if not self._reasoning_tool_enabled:
+            logger.warning(
+                f"ReasoningReactAgent: the registry already has a tool named "
+                f"'{reason_name}'; keeping it, structured reasoning is off"
+            )
+            self.tools = tools
+        else:
+            # A snapshot plus `reason`, so the caller's registry is not mutated.
+            self.tools = _ReasonToolRegistry(tools)
             self.tools.register_function(
                 self._reason_placeholder,
                 name=reason_name,
@@ -215,12 +258,13 @@ class ReasoningReactAgent(BaseAgent):
         base_handler = handlers
         reason_name = ReasoningIntegrationKeys.REASONING_TOOL_NAME
         engine = self._reasoning_engine
+        intercept = self._reasoning_tool_enabled
 
         def execute_tool_with_reasoning(context: dict[str, Any]) -> dict[str, Any]:
             tool_name = context.get(ContextKeys.TOOL_NAME)
 
-            # Non-reason tools: delegate to standard handler
-            if tool_name != reason_name:
+            # Non-reason tools, and a user's own `reason` tool: standard handler
+            if tool_name != reason_name or not intercept:
                 return base_handler.execute_tool(context)
 
             # plan-2026-09-24T091842-c1d5bfbc/D-004: the same refusal and
@@ -241,10 +285,11 @@ class ReasoningReactAgent(BaseAgent):
         def run_reason(context: dict[str, Any]) -> dict[str, Any]:
             # Extract problem from tool input
             tool_input = context.get(ContextKeys.TOOL_INPUT) or {}
-            problem = _problem_text(tool_input)
+            task = context.get(ContextKeys.TASK, "")
+            problem = _problem_text(tool_input, task)
             # plan-2026-09-29T103145-06a5ec0a/D-016: the engine gets `problem`;
             # the log, observation and action get the redacted form.
-            shown = _problem_text(redact_secret_entries(tool_input))[:100]
+            shown = _problem_text(redact_secret_entries(tool_input), task)[:100]
 
             logger.info(f"ReasoningReactAgent: invoking reasoning for: {shown}")
 

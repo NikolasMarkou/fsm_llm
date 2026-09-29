@@ -19,7 +19,6 @@ from .constants import (
     AgentStates,
     ContextKeys,
     Defaults,
-    HandlerPriorities,
     LogMessages,
 )
 from .definitions import AgentConfig, AgentResult
@@ -205,17 +204,5 @@ class ReactAgent(BaseAgent):
         self._register_tool_executor(api, AgentStates.ACT, handlers.execute_tool)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
         self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)
-
-        if self.use_classification:
-            from fsm_llm.handlers import HandlerTiming
-
-            api.register_handler(
-                api.create_handler("classification_tool_override")
-                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-                .at(HandlerTiming.CONTEXT_UPDATE)
-                .on_state(AgentStates.THINK)
-                .when_keys_updated(ContextKeys.TOOL_NAME, ContextKeys.SHOULD_TERMINATE)
-                .do(handlers.classification_tool_override)
-            )
 
         self._register_approval_gate(api)
