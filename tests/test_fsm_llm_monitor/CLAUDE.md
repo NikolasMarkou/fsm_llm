@@ -1,13 +1,13 @@
 # test_fsm_llm_monitor
 
 Path: `tests/test_fsm_llm_monitor`
-Purpose: pytest suite (384 collected tests) for `fsm_llm.monitor`, the FastAPI dashboard package in `src/fsm_llm/monitor/`.
+Purpose: pytest suite (387 collected tests) for `fsm_llm.monitor`, the FastAPI dashboard package in `src/fsm_llm/monitor/`.
 
 ## Scope
 
 - Unit and HTTP-level tests for `server.py`, `instance_manager.py`, `collector.py`, `definitions.py`, `bridge.py`, `otel.py`, `__main__.py` (`_browser_url` only) and the package `__init__.py` exports.
 - No real LLM calls, no network, no browser. The FSM `API` is a `MagicMock` or a small fake; HTTP goes through `fastapi.testclient.TestClient`.
-- Not here: the monitor source itself (`src/fsm_llm/monitor/`) and the JS SPA logic (only static file presence and HTTP 200 are checked).
+- Not here: the monitor source itself (`src/fsm_llm/monitor/`) and the JS SPA logic (only static file presence, HTTP 200, and the HTML/CSS limits in `TestUiMatchesServerLimits` are checked).
 
 ## Architecture
 
@@ -30,7 +30,7 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | autouse `_clear_monitor_api_key_env` | `monkeypatch.delenv("FSM_LLM_MONITOR_API_KEY", raising=False)`; without it an exported key makes about 22 `test_app.py` tests 401 |
-| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction | 110 tests; asserts `"0.11.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
+| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 113 tests; asserts `"0.11.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
 | `test_server_security.py` | Origin/Host, body limit, headers, gated reads, WebSocket auth, error mapping, bounds, dashboard config, builder busy guard, `validate_preset_id` | 36 tests; autouse `_reset_key` reconfigures with env key `""` after each test |
 | `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools | 60 tests; contains unmarked `async def` tests |
 | `test_collector.py` | `EventCollector` | 45 tests |
@@ -46,7 +46,7 @@ Suite entry points (what a new test uses):
 - Fixtures: `_clear_monitor_api_key_env` (autouse, `conftest.py`), `_reset_key` (autouse, `test_server_security.py`), `_mock_otel` (autouse, `test_otel.py`).
 - Helpers: `_client(api_key=None) -> TestClient` (`test_server_security.py`); `_minimal_fsm_dict()` (separate copies in `test_app.py` and `test_bridge.py`); `_manager() -> InstanceManager`, `_fsm(mgr, iid, api=None) -> ManagedFSM`, `_fire(api, timing, current, target)`, `_snapshot_api(collected, extraction=None) -> MagicMock`, fakes `_FakeAPI`, `_FakeHandlerSystem`, `_Secretive` (`test_audit_2026_09_28.py`); `_build_otel_mocks()`, `_import_otel()`, `_make_event(event_type="conversation_start", conv_id="conv-1", **kwargs)` (`test_otel.py`).
 - Test classes per file:
-  - `test_app.py`: `TestWebServer`, `TestMonitorImports`, `TestServerFSMEndpoints`, `TestServerInstanceEndpoints`, `TestServerConfigEndpoints`, `TestDashboardConfigEndpoints`, `TestServerPresetEndpoints`, `TestServerErrorHandling`, `TestActivityEndpoint`, `TestServerHygieneAndWorkflow`, `TestApiKeyGate`, `TestDashboardWebsocketRedaction`.
+  - `test_app.py`: `TestWebServer`, `TestMonitorImports`, `TestUiMatchesServerLimits`, `TestServerFSMEndpoints`, `TestServerInstanceEndpoints`, `TestServerConfigEndpoints`, `TestDashboardConfigEndpoints`, `TestServerPresetEndpoints`, `TestServerErrorHandling`, `TestActivityEndpoint`, `TestServerHygieneAndWorkflow`, `TestApiKeyGate`, `TestDashboardWebsocketRedaction`.
   - `test_server_security.py`: `TestOriginAndHost`, `TestApiKeyGating`, `TestWebSocket`, `TestErrorMapping`, `TestRequestBounds`, `TestDashboardConfig`, `TestBuilderGuards`, `TestPresetValidation`.
   - `test_instance_manager.py`: `TestManagedClasses`, `TestInstanceManager`, `TestRegisterMonitorHandlers`, `TestSnapshotInternalKeyHiding`, `TestConversationCaching`, `TestInstanceManagerListFilter`, `TestDestroyInstance`, `TestActivitySnapshots`, `TestFindExamplesDir`, `TestWorkflowPresets`, `TestDisabledAgentTypes`, `TestAgentConcurrencyHardening`, `TestStubToolExecution`.
   - `test_audit_2026_09_28.py`: `TestTransitionStates`, `TestRedaction`, `TestStreamCursors`, `TestConfig`, `TestCancelAgent`, `TestHandlerLifecycle`, `TestFSMLifecycle`, `TestDefaults`, `TestWorkflowTracking`, `TestCliHelpers`.

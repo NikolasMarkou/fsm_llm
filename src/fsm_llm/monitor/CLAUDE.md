@@ -121,7 +121,7 @@ Error mapping (`_raise_http`, used by the FSM, workflow, and agent routes): `Key
 - `snapshot_from_api` / `get_conversation_snapshot` return `None` on any exception (logged at DEBUG).
 - Calling `configure()` again without `api_key` and without the env var disables auth (WARNING logged).
 - `/ws` errors other than disconnect are logged at DEBUG and the socket is closed; the frontend reconnects with backoff, and a 4401 close forces the key prompt.
-- Frontend/backend drift: the launch dialog's Max Iterations input allows 1..50 while the server allows 1..100; the Settings log-level select omits SUCCESS.
+- The static UI mirrors server limits by hand: the launch dialog's Max Iterations `max` must equal `MAX_AGENT_ITERATIONS` and the Settings log-level options must equal `LOG_LEVELS` in order; `tests/test_fsm_llm_monitor/test_app.py::TestUiMatchesServerLimits` pins both and a `.log-<level>` CSS rule per level.
 
 ## Working here
 

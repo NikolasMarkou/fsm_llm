@@ -91,8 +91,8 @@ def is_library_logging_enabled() -> bool:
 def setup_cli_logging(default_level: str) -> int:
     """Turn on library log output at a command-line process entry point.
 
-    Interface contract (2 call sites: the ``fsm-llm-harness`` entry wrapper
-    and the reasoning CLI's ``--verbose``):
+    Interface contract (3 call sites: the harness and eval ``run()`` entry
+    wrappers and the reasoning CLI's ``--verbose``):
         - ``default_level``: loguru level name used when ``FSM_LLM_LOG_LEVEL``
           is unset, blank, or not a loguru level; a valid env value wins
           (case-insensitive). An invalid one is reported on stderr, not raised.

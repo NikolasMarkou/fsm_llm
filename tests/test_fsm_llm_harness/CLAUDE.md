@@ -7,7 +7,7 @@ Purpose: Falsifying pytest suite for `fsm_llm.harness` (`src/fsm_llm/harness/`):
 
 - In: tests for `artifacts`, `hardening`, `fsm_definition`/`rules`, `harness` (the `HarnessAgent` driver), `plan_validator`, `roles`, `tools`, `storage`, `__main__` (CLI), plus the opt-in live suite and its offline guards.
 - Out: the package source itself; the bench runner `scripts/harness_bench.py` (tested by `tests/test_harness_bench.py`); committed bench rows under `scripts/bench_data/`.
-- Collection today: 1,987 tests; default run is 1,970 passed, 17 skipped (the 17 are the live-gated tests).
+- Collection today: 1,988 tests; default run is 1,971 passed, 17 skipped (the 17 are the live-gated tests).
 
 ## Architecture
 
@@ -51,7 +51,7 @@ flowchart LR
 | `test_extraction_cost.py` | Zero core Pass-1 LLM calls per turn (D-041) | 24 tests; `CountingLLM` owns `_make_llm_call` |
 | `test_fsm_definition.py` | Graph shape, gates via real `TransitionEvaluator`, priority spacing, ownership | 87 tests |
 | `test_hardening.py` | `strip_model_noise`, `parse_json_payload`, `parse_role_output`, coercers, `retry` | 258 tests; drives the real `_WORKER_WRITABLE` table |
-| `test_harness_agent.py` | `HarnessAgent` behaviour end to end | 353 tests; class-to-decision map in module docstring |
+| `test_harness_agent.py` | `HarnessAgent` behaviour end to end | 354 tests; class-to-decision map in module docstring |
 | `test_live_ollama.py` | L1-L8 live criteria and their offline guards | 94 tests; 17 gated |
 | `test_plan_validator.py` | `pre_step_gate`, `audit`, anchor scan | 191 tests; base fixture is audit-clean |
 | `test_roles_and_tools.py` | Role specs, prompts, tool scope, `PlanMemory`, `Workspace`, write evidence | 484 tests; D-057 says keep separate from agent tests |

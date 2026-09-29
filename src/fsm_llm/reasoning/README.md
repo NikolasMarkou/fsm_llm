@@ -83,4 +83,4 @@ print(trace["summary"])
 - If a strategy FSM cannot be loaded, the engine falls back to `analytical` only, never to another style.
 - Unknown words passed to `map_reasoning_type` fall back to `analytical` with a warning.
 - `--list-types` and `--verbose` messages are printed as log lines on stderr, not as plain stdout text.
-- In `--output json` and in `.json` save files, `reasoning_types_used` is written as the string `"<redacted:set>"`, because the value is a Python set and the JSON writer redacts sets instead of listing them.
+- In `--output json` and in `.json` save files, `reasoning_types_used` is a sorted list of type names.

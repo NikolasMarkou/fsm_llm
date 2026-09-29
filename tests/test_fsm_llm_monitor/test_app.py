@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Tests for fsm_llm.monitor web server and package."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from fsm_llm.monitor.bridge import MonitorBridge
+from fsm_llm.monitor.constants import LOG_LEVELS, MAX_AGENT_ITERATIONS
 from fsm_llm.monitor.instance_manager import InstanceManager
 from fsm_llm.monitor.server import app, configure
 
@@ -338,6 +340,37 @@ class TestMonitorImports:
             / "templates"
         )
         assert (templates / "index.html").exists()
+
+
+class TestUiMatchesServerLimits:
+    """The static UI mirrors the server constants by hand; pin them together."""
+
+    _MONITOR_DIR = Path(__file__).parent.parent.parent / "src" / "fsm_llm" / "monitor"
+
+    def _html(self) -> str:
+        return (self._MONITOR_DIR / "templates" / "index.html").read_text(
+            encoding="utf-8"
+        )
+
+    def test_log_level_select_lists_every_server_level_in_order(self):
+        match = re.search(r'<select id="set-level"[^>]*>(.*?)</select>', self._html())
+        assert match is not None
+        options = re.findall(r"<option[^>]*>([^<]*)</option>", match.group(1))
+        assert options == list(LOG_LEVELS)
+
+    def test_launch_max_iterations_matches_server_limit(self):
+        match = re.search(r'<input[^>]*id="launch-agent-iters"[^>]*>', self._html())
+        assert match is not None
+        max_attr = re.search(r'\bmax="(\d+)"', match.group(0))
+        assert max_attr is not None
+        assert int(max_attr.group(1)) == MAX_AGENT_ITERATIONS
+
+    def test_css_styles_every_log_level(self):
+        css = (self._MONITOR_DIR / "static" / "style.css").read_text(encoding="utf-8")
+        for level in LOG_LEVELS:
+            name = level.lower()
+            assert f".log-{name} " in css, f"missing .log-{name}"
+            assert f".log-level-dot.{name} " in css, f"missing .log-level-dot.{name}"
 
 
 def _minimal_fsm_dict():

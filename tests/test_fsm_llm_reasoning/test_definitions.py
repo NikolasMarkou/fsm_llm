@@ -2,6 +2,7 @@
 Unit tests for reasoning engine Pydantic models.
 """
 
+import json
 from datetime import datetime
 
 import pytest
@@ -17,6 +18,7 @@ from fsm_llm.reasoning.definitions import (
     TimestampedModel,
     ValidationResult,
 )
+from fsm_llm.utilities import redacting_json_default
 
 
 class TestTimestampedModel:
@@ -162,6 +164,17 @@ class TestReasoningTrace:
         assert moderate.reasoning_complexity == "moderate"
         assert complex_t.reasoning_complexity == "complex"
         assert highly.reasoning_complexity == "highly_complex"
+
+    def test_reasoning_types_dump_as_sorted_list(self):
+        trace = ReasoningTrace(reasoning_types_used={"b", "a"})
+        assert trace.model_dump()["reasoning_types_used"] == ["a", "b"]
+        assert trace.model_dump(mode="json")["reasoning_types_used"] == ["a", "b"]
+
+    def test_reasoning_types_dump_is_not_redacted_by_json_hook(self):
+        dump = ReasoningTrace(reasoning_types_used={"analytical"}).model_dump()
+        text = json.dumps(dump, default=redacting_json_default)
+        assert "redacted" not in text
+        assert json.loads(text)["reasoning_types_used"] == ["analytical"]
 
     def test_average_step_time(self):
         trace = ReasoningTrace(steps=[{"x": 1}] * 10, execution_time_seconds=5.0)

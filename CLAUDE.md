@@ -145,7 +145,7 @@ FSM definition (JSON, v4.1):
 ## Working here
 
 ```bash
-make test           # pytest -v (7,590 tests)
+make test           # pytest -v (7,599 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
@@ -157,18 +157,18 @@ make audit          # python scripts/audit_pth.py
 ```
 
 ```bash
-pytest                                 # Run all tests (7,590 collected)
+pytest                                 # Run all tests (7,599 collected)
 pytest tests/test_fsm_llm/            # Core package tests (2,707 tests)
-pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (121 tests)
+pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (126 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (231 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (1,278 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (384 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (387 tests)
 pytest tests/test_fsm_llm_meta/       # Meta-builder tests (218 tests)
-pytest tests/test_fsm_llm_harness/    # Harness tests (1,987 tests)
+pytest tests/test_fsm_llm_harness/    # Harness tests (1,988 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (275 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (261 tests)
-# The 10 suites above sum to 7,505. The remaining 85 are three root-level files:
+# The 10 suites above sum to 7,514. The remaining 85 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (39)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests

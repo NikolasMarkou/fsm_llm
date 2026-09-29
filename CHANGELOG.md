@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reasoning: `ReasoningTrace` now dumps `reasoning_types_used` as a sorted list, so
+  `python -m fsm_llm.reasoning --output json` and `--save` JSON files list the types
+  instead of writing `"<redacted:set>"`. `model_dump()` returns a list too, so the
+  `ReasoningReactAgent` observation shows `type=['analytical']` instead of a set repr.
+- Monitor UI: the launch dialog's Max Iterations input now allows 1 to 100 like the
+  server, the Settings log-level select lists SUCCESS, and SUCCESS and TRACE log lines
+  get their own CSS classes. A test ties the HTML to `LOG_LEVELS` and
+  `MAX_AGENT_ITERATIONS`.
+- `setup_cli_logging` docstring names its three call sites (harness and eval `run()`,
+  reasoning `--verbose`).
+
+### Removed
+
+- `fsm_llm.harness.constants.HandlerPriorities` and `HandlerNames` no longer define
+  `PRE_STEP_GATE`, `END_CONVERSATION` or `ERROR`. Nothing registered them: the pre-step
+  gate runs inside the EXECUTE dispatch, and end and error handlers come from
+  `BaseAgent`.
+
 ## [0.11.0] - 2026-09-29
 
 ### Added (`fsm_llm.eval`, 2026-09-29)

@@ -320,14 +320,19 @@ class HandlerPriorities:
 
     Lower numbers execute first.  When multiple handlers share the same timing
     hook, priority determines their order.
+
+    Only the handlers ``HarnessAgent`` registers are listed; end-of-conversation
+    and error handlers come from ``BaseAgent`` with the agents' own constants.
     """
 
+    # DECISION plan-2026-09-29T091843-0051e159/D-003
+    # Do NOT re-add a pre-step gate handler (the old PRE_STEP_GATE = 50): the
+    # gate runs inside `_dispatch_if_needed`, because it must read the state.md
+    # written by an earlier event (D-038/D-040). Do NOT add END_CONVERSATION or
+    # ERROR copies here either; nothing in the harness registers them.
     EXTRACTION_GUARD = 5  # Revert driver-owned keys the LLM's extraction wrote
     START_DISPATCH = 10  # Dispatch into the initial state before anything else
-    PRE_STEP_GATE = 50  # Cheap HARD gate, runs before an EXECUTE dispatch
     STATE_DISPATCH = 100  # One worker dispatch per state entry
-    END_CONVERSATION = 200  # Finalize artifacts on conversation end
-    ERROR = 200  # Record errors
 
 
 class HandlerNames:
@@ -341,9 +346,6 @@ class HandlerNames:
     REFLECT_DISPATCH = "HarnessReflectDispatch"
     PIVOT_DISPATCH = "HarnessPivotDispatch"
     CLOSE_DISPATCH = "HarnessCloseDispatch"
-    PRE_STEP_GATE = "HarnessPreStepGate"
-    END_CONVERSATION = "HarnessEndConversation"
-    ERROR = "HarnessErrorHandler"
 
     #: state id -> dispatch handler name.  The driver registers exactly one
     #: dispatch handler per state; this map is the single source of that pairing.

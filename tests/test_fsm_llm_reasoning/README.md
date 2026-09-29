@@ -15,13 +15,14 @@ Each test imports from `fsm_llm.reasoning.*` and calls classes or static methods
 - `__init__.py` - empty, marks the directory as a package.
 - `test_audit_fixes.py` - 28 tests that pin audit fixes: context size limits, pruning constants, solution key coverage, exception re-raise order, removed dead code, and redacted JSON output.
 - `test_cli_logging.py` - 2 tests that the CLI `--verbose` flag turns library logging on and that it stays off without it.
+- `test_cli_output.py` - 3 tests that CLI JSON output and JSON save files list `reasoning_types_used` as a sorted list built from a real `ReasoningTrace`.
 - `test_constants.py` - 19 tests for `ReasoningType`, state name constants, `ContextKeys`, `HandlerNames`, `Defaults`, and message templates.
-- `test_definitions.py` - 26 tests for the Pydantic models (`ReasoningStep`, `ValidationResult`, `ReasoningTrace`, `ProblemContext`, `SolutionResult`, and others).
+- `test_definitions.py` - 28 tests for the Pydantic models (`ReasoningStep`, `ValidationResult`, `ReasoningTrace`, `ProblemContext`, `SolutionResult`, and others).
 - `test_engine.py` - 10 tests for models, handlers, `map_reasoning_type`, and the rule that a missing reasoning FSM may only fall back to analytical.
 - `test_exceptions.py` - 8 tests for `ReasoningEngineError`, `ReasoningExecutionError`, `ReasoningClassificationError`.
 - `test_handlers.py` - 28 tests for `ReasoningHandlers`, `ContextManager`, and `OutputFormatter`.
 
-121 tests in total.
+126 tests in total.
 
 ## How to use it
 

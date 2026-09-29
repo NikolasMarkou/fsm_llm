@@ -16,6 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     computed_field,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -254,6 +255,16 @@ class ReasoningTrace(TimestampedModel):
         default_factory=set,
         description="Types of reasoning employed during the process",
     )
+
+    # DECISION plan-2026-09-29T091843-0051e159/D-002
+    # Serialize the set here, as a sorted list, so every writer (model_dump,
+    # CLI --output json, --save) gets JSON-native deterministic output. Do NOT
+    # teach `redacting_json_default` about sets and do NOT use `default=str`
+    # in the JSON writers (D-008 of plan 8b258a25): a set there is redacted.
+    @field_serializer("reasoning_types_used")
+    def _serialize_reasoning_types(self, value: set[str]) -> list[str]:
+        """Dump the reasoning types as a sorted list."""
+        return sorted(value)
 
     final_confidence: float = Field(
         default=0.0,

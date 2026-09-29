@@ -60,6 +60,7 @@ from fsm_llm.harness.constants import (
     Defaults,
     GateSlug,
     HandlerNames,
+    HandlerPriorities,
     HarnessStates,
     PlanSchema,
     Role,
@@ -1552,6 +1553,28 @@ class TestDriverOwnedTable:
         assert guard.priority < min(
             h.priority for h in handlers if h.name != HandlerNames.EXTRACTION_GUARD
         )
+
+    def test_every_handler_constant_is_registered(self, halted) -> None:
+        """``HandlerNames``/``HandlerPriorities`` list only what the driver registers.
+
+        D-003 of plan 0051e159 removed PRE_STEP_GATE, END_CONVERSATION and
+        ERROR, which nothing registered; this keeps a dead member from returning.
+        """
+        handlers = halted.agent.api.handler_system.handlers
+        declared = {
+            value
+            for key, value in vars(HandlerNames).items()
+            if key.isupper() and isinstance(value, str)
+        }
+        harness_handlers = [h for h in handlers if h.name.startswith("Harness")]
+        assert {h.name for h in harness_handlers} == declared
+
+        priorities = {
+            value
+            for key, value in vars(HandlerPriorities).items()
+            if key.isupper() and isinstance(value, int)
+        }
+        assert {h.priority for h in harness_handlers} == priorities
 
     @pytest.mark.parametrize("key", sorted(DRIVER_OWNED_SEEDS))
     def test_the_guard_restores_a_seeded_key(self, halted, key: str) -> None:

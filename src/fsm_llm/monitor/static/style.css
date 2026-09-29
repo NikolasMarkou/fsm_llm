@@ -1627,8 +1627,10 @@ tr.clickable-row.selected td {
     vertical-align: middle;
 }
 
+.log-level-dot.trace    { background: var(--text-dim); }
 .log-level-dot.debug    { background: var(--text-dim); }
 .log-level-dot.info     { background: var(--primary); }
+.log-level-dot.success  { background: var(--success); }
 .log-level-dot.warning  { background: var(--warning); }
 .log-level-dot.error    { background: var(--danger); }
 .log-level-dot.critical { background: var(--danger); }
@@ -2232,8 +2234,10 @@ button.btn.btn-warning:hover {
 .state-default { color: var(--text-dim); font-weight: 600; }
 
 /* Log level classes (legacy) */
+.log-trace { color: var(--text-dim); }
 .log-debug { color: var(--text-dim); }
 .log-info { color: var(--primary); }
+.log-success { color: var(--success); }
 .log-warning { color: var(--warning); }
 .log-error { color: var(--danger); }
 .log-critical { color: var(--danger); font-weight: 700; }
