@@ -119,3 +119,33 @@ def make_run_dir(
         f"no free run directory name for {base!r} under {root_path}",
         details={"root": str(root_path), "base": base},
     )
+
+
+def open_run_dir(
+    output_dir: PathLike | None,
+    output_root: PathLike,
+    model: str,
+    cwd: PathLike | None = None,
+) -> Path:
+    """Create the directory one run writes into and return it.
+
+    Interface contract (callers: the examples and conversation-case runners):
+        - ``output_dir`` given: used verbatim; it may exist only if it is an
+          empty directory (a run never writes over another run's files).
+        - ``output_dir`` ``None``: a fresh directory under ``output_root`` from
+          :func:`make_run_dir`, named after the git commit of ``cwd``.
+        - Raises ``EvalError`` when neither is possible.
+    """
+    if output_dir is None:
+        return make_run_dir(output_root, model, cwd=cwd)
+    out = Path(output_dir)
+    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+        raise EvalError(
+            f"output directory {out} already exists and is not empty",
+            details={"path": str(out)},
+        )
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise EvalError(f"cannot create output directory {out}: {exc}") from exc
+    return out

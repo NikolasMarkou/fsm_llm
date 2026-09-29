@@ -25,6 +25,7 @@ from .constants import (
     DEFAULT_EXAMPLES_DIR,
     DEFAULT_OUTPUT_ROOT,
     DEFAULT_TIMEOUT,
+    DEFAULT_TRIALS,
     DEFAULT_WORKERS,
 )
 from .exceptions import EvalConfigError
@@ -39,7 +40,9 @@ class EvalConfig(BaseModel):
     ``model`` ``None`` means ``$LLM_MODEL``, else the framework default, read
     when the run starts (:func:`resolve_model`). ``python`` ``None`` means the
     running interpreter. The three table fields add to or override the
-    built-in repository tables in :mod:`fsm_llm.eval.constants`.
+    built-in repository tables in :mod:`fsm_llm.eval.constants`. ``trials``
+    and ``temperature`` are read by conversation cases only; ``temperature``
+    ``None`` keeps the framework default.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -57,6 +60,8 @@ class EvalConfig(BaseModel):
     example_inputs: dict[str, str] = Field(default_factory=dict)
     example_timeouts: dict[str, PositiveInt] = Field(default_factory=dict)
     category_timeouts: dict[str, PositiveInt] = Field(default_factory=dict)
+    trials: int = Field(default=DEFAULT_TRIALS, ge=1)
+    temperature: float | None = Field(default=None, ge=0)
 
 
 def _validated(layer: Mapping[str, Any], source: str) -> EvalConfig:

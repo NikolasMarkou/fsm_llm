@@ -8,8 +8,12 @@ Usage::
     fsm-llm-eval examples --filter react --model gpt-4o-mini
     fsm-llm-eval examples --list                  # discovered examples only
     fsm-llm-eval examples --config eval.json --fail-under 80
+    fsm-llm-eval run cases.json                   # 3 trials per case
+    fsm-llm-eval run cases.jsonl --trials 5 --fail-under 90
+    fsm-llm-eval run cases.json --list            # case ids only
 
-Settings precedence: built-in defaults < ``--config FILE`` < explicit flags.
+Settings precedence: built-in defaults < a dataset's embedded ``config`` (``run``
+only) < ``--config FILE`` < explicit flags.
 
 **Exit codes.** ``0`` success, also for low scores unless ``--fail-under`` is
 given; ``1`` usage error, bad config, unwritable output, or nothing matched;
@@ -21,8 +25,10 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
+from .cases import TrialResult, load_cases, run_cases
 from .config import EvalConfig, load_config, merge_config, resolve_model
 from .constants import (
     EXIT_BELOW_THRESHOLD,
@@ -38,6 +44,7 @@ from .examples import (
     run_examples,
 )
 from .exceptions import EvalError
+from .records import open_run_dir
 
 __all__ = ["main_cli", "run"]
 
@@ -109,16 +116,33 @@ def build_parser() -> argparse.ArgumentParser:
         "--list", action="store_true", help="List discovered examples and exit"
     )
     examples.set_defaults(func=_cmd_examples)
+
+    cases = subparsers.add_parser(
+        "run",
+        help="Run scripted conversations and check expectations",
+        description="Run every case of a conversation dataset (.json or .jsonl) "
+        "N times and write rows.jsonl, results.json and summary.md to a new run "
+        "directory.",
+    )
+    cases.add_argument("dataset", help="Dataset file (.json list/object or .jsonl)")
+    _add_common_options(cases)
+    cases.add_argument("--trials", type=int, help="Trials per case (default: 3)")
+    cases.add_argument("--list", action="store_true", help="List cases and exit")
+    cases.set_defaults(func=_cmd_run)
     return parser
 
 
-def _config_from(args: argparse.Namespace, fields: Sequence[str]) -> EvalConfig:
-    """Merge defaults < ``--config`` file < the flags in ``fields`` that were given."""
+def _config_from(
+    args: argparse.Namespace,
+    fields: Sequence[str],
+    base_layer: dict[str, Any] | None = None,
+) -> EvalConfig:
+    """Merge defaults < ``base_layer`` < ``--config`` file < the given flags in ``fields``."""
     file_layer = load_config(args.config) if args.config else None
     flag_layer = {
         name: getattr(args, name) for name in fields if getattr(args, name) is not None
     }
-    return merge_config(file_layer, flag_layer)
+    return merge_config(base_layer, file_layer, flag_layer)
 
 
 def _print_progress(completed: int, total: int, result: ExampleResult) -> None:
@@ -188,6 +212,68 @@ def _cmd_examples(args: argparse.Namespace) -> int:
     if config.fail_under is not None and report.health < config.fail_under:
         print(
             f"Health score {report.health:.1f}% is below --fail-under {config.fail_under:g}%",
+            file=sys.stderr,
+        )
+        return EXIT_BELOW_THRESHOLD
+    return EXIT_OK
+
+
+def _print_trial(completed: int, total: int, trial: TrialResult) -> None:
+    """One line per finished trial."""
+    status = "PASS" if trial.passed else "FAIL"
+    why = f" [{trial.first_failure()}]" if not trial.passed else ""
+    label = f"{trial.case_id}#{trial.trial}"
+    print(
+        f"  [{completed:2d}/{total}] {label:45s} {status} {trial.duration:6.1f}s{why}",
+        flush=True,
+    )
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    """Handle ``run``: list, or run the cases, report and apply ``--fail-under``."""
+    cases, embedded = load_cases(args.dataset)
+    config = _config_from(
+        args,
+        ("model", "workers", "trials", "output_dir", "fail_under"),
+        base_layer=embedded,
+    )
+    if args.list:
+        print(f"Loaded {len(cases)} cases from {args.dataset}:\n")
+        for case in cases:
+            print(f"  {case.id:45s} [{len(case.turns)} turns] {case.description}")
+        return EXIT_OK
+
+    model = resolve_model(config)
+    git_cwd = Path(args.dataset).resolve().parent
+    run_dir = open_run_dir(config.output_dir, config.output_root, model, cwd=git_cwd)
+    print("FSM-LLM Conversation Evaluation", _RULE, sep="\n")
+    print(f"  Model:    {model}")
+    print(f"  Dataset:  {args.dataset}")
+    print(f"  Cases:    {len(cases)} x {config.trials} trials")
+    print(f"  Workers:  {config.workers}")
+    print(f"  Output:   {run_dir}")
+    print(_RULE, flush=True)
+    print()
+
+    report = run_cases(
+        cases, config, run_dir, progress=_print_trial, dataset=args.dataset
+    )
+    overall = report.overall
+    rate = overall["rate"] * 100
+    lo, hi = overall["wilson_ci"]
+    print(f"\n{_RULE}")
+    print(
+        f"  Pass rate:  {overall['k']}/{overall['n']} = {rate:.1f}% "
+        f"(Wilson 95% CI [{lo * 100:.1f}%, {hi * 100:.1f}%])"
+    )
+    print(f"  Wall time:  {report.wall_time:.1f}s")
+    print(f"  Summary:    {run_dir / 'summary.md'}")
+    print(f"  Rows:       {run_dir / 'rows.jsonl'}")
+    print(f"  JSON:       {run_dir / 'results.json'}")
+    print(_RULE)
+    if config.fail_under is not None and rate < config.fail_under:
+        print(
+            f"Pass rate {rate:.1f}% is below --fail-under {config.fail_under:g}%",
             file=sys.stderr,
         )
         return EXIT_BELOW_THRESHOLD

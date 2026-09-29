@@ -47,6 +47,19 @@ DEFAULT_TIMEOUT = 120
 DEFAULT_EXAMPLES_DIR = "examples"
 #: Script names discovered as examples; ``run_<x>.py`` becomes ``<dir>_<x>``.
 EXAMPLE_SCRIPT_NAMES = ("run.py", "run_manual.py")
+#: Trials per conversation case (the repository's N=3 practice).
+DEFAULT_TRIALS = 3
+
+# ---------------------------------------------------------------------------
+# Conversation cases (``fsm-llm-eval run``)
+# ---------------------------------------------------------------------------
+
+#: Recorded in a conversation run's ``results.json`` and ``summary.md``.
+CASES_EVALUATOR_NAME = "fsm-llm-eval run (conversation cases)"
+#: Dataset files with this suffix hold one case per line; others hold JSON.
+JSONL_SUFFIX = ".jsonl"
+#: Per-trial rows, appended and flushed as each trial finishes.
+ROWS_FILENAME = "rows.jsonl"
 
 # ---------------------------------------------------------------------------
 # Example scoring (heuristic 0-4 rubric, EVALUATE.md section 3)

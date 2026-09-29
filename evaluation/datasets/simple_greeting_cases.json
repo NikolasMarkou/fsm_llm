@@ -1,0 +1,38 @@
+{
+  "config": {"trials": 3},
+  "cases": [
+    {
+      "id": "greeting_moves_to_conversation",
+      "description": "The first user turn leaves the greeting state (its only transition is unconditional)",
+      "fsm": "../../examples/basic/simple_greeting/fsm.json",
+      "turns": ["Hello there! I'm feeling great today."],
+      "expect": {
+        "final_state": "conversation",
+        "visited_states": ["greeting", "conversation"],
+        "ended": false
+      }
+    },
+    {
+      "id": "two_turns_reach_farewell",
+      "description": "From conversation the farewell transition has the unique lowest priority, so the second turn ends the chat",
+      "fsm": "../../examples/basic/simple_greeting/fsm.json",
+      "turns": ["Hi!", "That's all, thanks. Bye!"],
+      "expect": {
+        "final_state": "farewell",
+        "visited_states": ["greeting", "conversation", "farewell"],
+        "ended": true
+      }
+    },
+    {
+      "id": "initial_context_is_kept",
+      "description": "Context passed at start is still there after a turn",
+      "fsm": "../../examples/basic/simple_greeting/fsm.json",
+      "initial_context": {"user_name": "Alex"},
+      "turns": ["Hello, my name is Alex."],
+      "expect": {
+        "context": {"user_name": "Alex"},
+        "final_state": "conversation"
+      }
+    }
+  ]
+}

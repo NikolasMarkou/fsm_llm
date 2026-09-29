@@ -38,8 +38,7 @@ from .constants import (
     MAX_SCORE,
     SCORE_LABELS,
 )
-from .exceptions import EvalError
-from .records import git_short_hash, make_run_dir, write_json
+from .records import git_short_hash, open_run_dir, write_json
 from .scoring import classify_result
 
 #: Called once per finished example: ``(completed, total, result)``.
@@ -262,28 +261,13 @@ def health_score(results: list[ExampleResult]) -> float:
 
 
 def create_output_dir(config: EvalConfig, model: str) -> Path:
-    """Create the run directory: ``config.output_dir`` verbatim, else a fresh one.
+    """Create the run directory (:func:`fsm_llm.eval.records.open_run_dir`).
 
-    A named ``output_dir`` may exist only if it is empty (a run never writes
-    over another run's files). Otherwise a new directory is made under
-    ``config.output_root`` by :func:`fsm_llm.eval.records.make_run_dir`, named
-    after the examples tree's git commit. Raises ``EvalError`` when neither is
-    possible.
+    A fresh directory is named after the git commit of the examples tree's
+    parent. Raises ``EvalError`` when no directory can be created.
     """
-    if config.output_dir is None:
-        repo = Path(config.examples_dir).resolve().parent
-        return make_run_dir(config.output_root, model, cwd=repo)
-    out = Path(config.output_dir)
-    if out.exists() and (not out.is_dir() or any(out.iterdir())):
-        raise EvalError(
-            f"output directory {out} already exists and is not empty",
-            details={"path": str(out)},
-        )
-    try:
-        out.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise EvalError(f"cannot create output directory {out}: {exc}") from exc
-    return out
+    repo = Path(config.examples_dir).resolve().parent
+    return open_run_dir(config.output_dir, config.output_root, model, cwd=repo)
 
 
 def run_examples(

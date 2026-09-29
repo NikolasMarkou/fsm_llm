@@ -34,6 +34,13 @@ class TestDefaults:
         assert config.examples_dir == "examples"
         assert config.python is None
         assert config.example_timeouts == {}
+        assert config.trials == 3
+        assert config.temperature is None
+
+    @pytest.mark.parametrize("layer", [{"trials": 0}, {"temperature": -0.1}])
+    def test_case_settings_are_validated(self, layer):
+        with pytest.raises(EvalConfigError):
+            merge_config(layer)
 
     def test_merge_of_nothing_is_the_defaults(self):
         assert merge_config() == EvalConfig()
