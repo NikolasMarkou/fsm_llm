@@ -62,6 +62,7 @@ class PlanExecuteAgent(BaseAgent):
         """
         super().__init__(config, **api_kwargs)
         self.tools = tools
+        self._refuse_flagged_tools()
         self.max_replans = max_replans
         # DECISION plan-2026-09-12T135914-45a654de/D-012
         # No `self._handlers` here (matches react.py's D-014 pattern) — a
@@ -90,6 +91,7 @@ class PlanExecuteAgent(BaseAgent):
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
+        self._refuse_flagged_tools()
         fsm_def = build_plan_execute_fsm(self.tools, task_description=task)
 
         # DECISION plan-2026-09-12T135914-45a654de/D-012

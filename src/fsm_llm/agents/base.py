@@ -177,7 +177,7 @@ def flagged_tool_names(tools: Any) -> list[str]:
     """Names of the tools in *tools* registered with ``requires_approval=True``.
 
     Interface contract (callers: ``BaseAgent._hitl_active``, the construction
-    warning, and the tool-less-HITL refusal of step 6):
+    warning, and ``BaseAgent._refuse_flagged_tools``):
 
     Args:
         tools: a ``ToolRegistry``, or ``None``/any object without
@@ -511,6 +511,27 @@ class BaseAgent(ABC):
                     if hitl is None or not hitl.has_approval_policy
                     else "; a gated call will raise ApprovalDeniedError"
                 )
+            )
+
+    def _refuse_flagged_tools(self) -> None:
+        """Raise ``AgentError`` when ``self.tools`` holds a ``requires_approval`` tool.
+
+        For patterns with no HITL path (REWOO, PlanExecute, ParallelReact,
+        native_fc). Call it in ``__init__`` after ``self.tools`` is set and at
+        the start of ``run()``, before any LLM call: a registry can gain a
+        flagged tool after construction. No-op without a registry.
+        """
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-005: fail closed. Do NOT
+        # downgrade this to a warning, and do NOT drop the run() re-check: these
+        # patterns execute tools with no approval gate, so a flagged tool would
+        # run unapproved. Lift it only when the pattern gains real HITL (Track B).
+        flagged = flagged_tool_names(getattr(self, "tools", None))
+        if flagged:
+            raise AgentError(
+                f"{type(self).__name__} has no human-in-the-loop approval, but "
+                f"tools {flagged} have requires_approval=True. Use ReactAgent, "
+                f"ReflexionAgent or ReasoningReactAgent with a HumanInTheLoop, "
+                f"or register these tools without requires_approval."
             )
 
     def _handle_hitl_approval(self, api: API, conv_id: str) -> None:

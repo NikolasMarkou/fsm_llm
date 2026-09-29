@@ -344,8 +344,9 @@ class TestSiblingPatterns:
             seen.append(list(messages))
             return {"content": "real answer", "tool_calls": []}
 
+        # Unflagged registry: native_fc refuses requires_approval tools (D-005).
         agent = NativeFunctionCallingReactAgent(
-            tools=_Harness().registry,
+            tools=_safe_registry(),
             config=AgentConfig(model="mock/model"),
             complete_fn=complete_fn,
         )
@@ -689,3 +690,145 @@ class TestUngatedFlaggedToolWarning:
         assert not self._warnings(
             lambda: ReactAgent(tools=registry, config=AgentConfig(model="m/m"))
         )
+
+
+# ---------------------------------------------------------------------------
+# SEC-04 (D-005): patterns with no HITL refuse approval-gated tools
+# ---------------------------------------------------------------------------
+
+
+def _rewoo(**kwargs: Any) -> Any:
+    from fsm_llm.agents.rewoo import REWOOAgent
+
+    return REWOOAgent(**kwargs)
+
+
+def _plan_execute(**kwargs: Any) -> Any:
+    from fsm_llm.agents.plan_execute import PlanExecuteAgent
+
+    return PlanExecuteAgent(**kwargs)
+
+
+def _parallel_react(**kwargs: Any) -> Any:
+    from fsm_llm.agents.parallel_react import ParallelReactAgent
+
+    return ParallelReactAgent(**kwargs)
+
+
+class _RecordingLLM(_SelectOnceLLM):
+    """Records every LLM request; the refusal must come before the first."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[str] = []
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        self.calls.append("extract_field")
+        return super().extract_field(request)
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        self.calls.append("extract_bulk_data")
+        return super().extract_bulk_data(request)
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        self.calls.append("generate_response")
+        return super().generate_response(request)
+
+
+def _no_hitl_agent(factory: Any, registry: ToolRegistry, calls: list[str]) -> Any:
+    """Build a no-HITL pattern whose every LLM request is appended to *calls*."""
+    config = AgentConfig(model="mock/model", max_iterations=4)
+    if factory is NativeFunctionCallingReactAgent:
+
+        def complete(*args: Any, **kwargs: Any) -> Any:
+            calls.append("completion")
+            raise AssertionError("LLM called before the refusal")
+
+        return factory(tools=registry, config=config, complete_fn=complete)
+    llm = _RecordingLLM()
+    llm.calls = calls
+    return factory(tools=registry, config=config, llm_interface=llm)
+
+
+_NO_HITL_AGENTS = [
+    _rewoo,
+    _plan_execute,
+    _parallel_react,
+    NativeFunctionCallingReactAgent,
+]
+_NO_HITL_IDS = ["rewoo", "plan_execute", "parallel_react", "native_fc"]
+
+
+def _safe_registry(cls: type[ToolRegistry] = ToolRegistry) -> ToolRegistry:
+    registry = cls()
+    registry.register_function(
+        lambda x: x,
+        name="safe",
+        description="Harmless",
+        parameter_schema={"properties": {"x": {"type": "string"}}},
+    )
+    return registry
+
+
+def _add_danger(registry: ToolRegistry, runs: list[str]) -> None:
+    def danger(x: str) -> str:
+        runs.append(x)
+        return "BOOM"
+
+    registry.register_function(
+        danger,
+        name="danger",
+        description="Irreversible action",
+        parameter_schema={"properties": {"x": {"type": "string"}}},
+        requires_approval=True,
+    )
+
+
+class TestNoHitlPatternsRefuseGatedTools:
+    """REWOO, PlanExecute, ParallelReact and native_fc have no approval gate,
+    so a ``requires_approval`` tool there would run unapproved."""
+
+    @pytest.mark.parametrize("factory", _NO_HITL_AGENTS, ids=_NO_HITL_IDS)
+    def test_constructor_refuses_flagged_tool(self, factory):
+        from fsm_llm.agents.exceptions import AgentError
+
+        registry = _safe_registry()
+        _add_danger(registry, [])
+        with pytest.raises(AgentError, match="requires_approval=True"):
+            _no_hitl_agent(factory, registry, [])
+
+    @pytest.mark.parametrize("factory", _NO_HITL_AGENTS, ids=_NO_HITL_IDS)
+    def test_flag_added_after_construction_refused_before_any_llm_call(self, factory):
+        from fsm_llm.agents.exceptions import AgentError
+
+        registry = _safe_registry()
+        calls: list[str] = []
+        runs: list[str] = []
+        agent = _no_hitl_agent(factory, registry, calls)
+        _add_danger(registry, runs)
+        with pytest.raises(AgentError, match="danger"):
+            agent.run("do it")
+        assert calls == [], f"LLM called before the refusal: {calls}"
+        assert runs == []
+
+    @pytest.mark.parametrize(
+        "registry_cls",
+        ["CachingToolRegistry", "RetryingToolRegistry"],
+    )
+    def test_wrapping_registries_are_covered(self, registry_cls):
+        from fsm_llm.agents import tool_registries
+        from fsm_llm.agents.exceptions import AgentError
+
+        registry = _safe_registry(getattr(tool_registries, registry_cls))
+        _add_danger(registry, [])
+        with pytest.raises(AgentError, match="danger"):
+            _no_hitl_agent(_rewoo, registry, [])
+
+    @pytest.mark.parametrize("factory", _NO_HITL_AGENTS, ids=_NO_HITL_IDS)
+    def test_unflagged_registry_constructs(self, factory):
+        _no_hitl_agent(factory, _safe_registry(), [])
+
+    def test_plan_execute_without_registry_constructs(self):
+        _plan_execute(config=AgentConfig(model="mock/model"))

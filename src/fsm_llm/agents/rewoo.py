@@ -53,6 +53,7 @@ class REWOOAgent(BaseAgent):
 
         super().__init__(config, **api_kwargs)
         self.tools = tools
+        self._refuse_flagged_tools()
 
         logger.info(
             LogMessages.AGENT_STARTED.format(
@@ -72,6 +73,7 @@ class REWOOAgent(BaseAgent):
         :param initial_context: Optional initial context data
         :return: AgentResult with answer, trace, and metadata
         """
+        self._refuse_flagged_tools()
         fsm_def = build_rewoo_fsm(self.tools, task_description=task)
 
         context = self._init_context(

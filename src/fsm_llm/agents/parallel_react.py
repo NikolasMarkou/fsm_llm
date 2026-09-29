@@ -193,6 +193,7 @@ class ParallelReactAgent(BaseAgent):
             raise AgentError("max_parallel must be >= 1")
         super().__init__(config, **api_kwargs)
         self.tools = tools
+        self._refuse_flagged_tools()
         self.max_parallel = max_parallel
         # DECISION plan-2026-09-12T065608-089d0ec7/D-014
         # No `self._handlers` here (and none is ever assigned anywhere in this
@@ -216,6 +217,7 @@ class ParallelReactAgent(BaseAgent):
         # did not achieve that (both calls could still read back the SAME,
         # most-recently-assigned instance). Do NOT reintroduce
         # `self._handlers = AgentHandlers(...)` here. See decisions.md D-014.
+        self._refuse_flagged_tools()
         handlers = AgentHandlers(self.tools)
         fsm_def = build_parallel_react_fsm(
             self.tools,

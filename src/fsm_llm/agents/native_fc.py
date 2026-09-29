@@ -155,6 +155,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             raise AgentError("Cannot create agent with empty tool registry")
         super().__init__(config, **api_kwargs)
         self.tools = tools
+        self._refuse_flagged_tools()
         self._complete_fn = complete_fn
         self.seed = seed
         #: Public and mutable on purpose -- see :meth:`_system_message`.
@@ -346,6 +347,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         task: str,
         initial_context: dict[str, Any] | None = None,
     ) -> AgentResult:
+        self._refuse_flagged_tools()
         start_time = time.monotonic()
         schemas = self.tools.get_json_schemas()
         messages: list[dict[str, Any]] = [
