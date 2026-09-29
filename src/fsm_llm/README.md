@@ -1,12 +1,12 @@
 # fsm_llm
 
-The core FSM-LLM framework. It runs chatbots defined as finite state machines, where a large language model reads each user message, fills in data, and writes the reply.
+The `fsm_llm` package at `src/fsm_llm` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Six subpackages built on that core add reasoning, workflows, agents, a web dashboard, a planning harness, and evaluation tools.
 
 ## What it is for
 
 A plain LLM chat has no built-in structure: it can forget what it asked, skip steps, or wander off topic. A finite state machine (FSM) is a fixed set of named states, each with its own job, plus rules for moving from one state to another. This package combines the two. You describe the conversation as states in a JSON file (for example "greeting", "collect email", "confirm", "goodbye"). The LLM does the language work: pulling facts out of what the user typed and phrasing replies. Plain rules decide when to move between states, so the flow stays predictable and testable.
 
-Every other package in this repository (reasoning, workflows, agents, monitor, harness) is built on top of this one.
+The subpackages reuse the same engine for bigger jobs: multi-step reasoning, agents that call tools, async pipelines, live monitoring, and measuring how well a model does.
 
 ## How it works
 
@@ -19,7 +19,7 @@ flowchart TD
     C --> CL[Optional: classify the message into an intent]
     CL --> T{Evaluate transition rules}
     T -- one clear winner --> S[Move to the new state]
-    T -- several fit --> L[Ask the LLM to pick one] --> S
+    T -- several tie --> L[Ask the LLM to pick one] --> S
     T -- none fit --> K[Stay in the current state]
     S --> P2[Pass 2: write the reply for the state we are now in]
     K --> P2
@@ -27,10 +27,40 @@ flowchart TD
 ```
 
 - **Pass 1** asks the LLM to pull named values (such as `name` or `email`) out of the message and stores them in the conversation's context, a dictionary of everything collected so far.
-- **Transition rules** are written in JsonLogic, a small JSON rule language (for example `{">=": [{"var": "age"}, 18]}`). They are checked in plain Python, not by the LLM. The LLM is only asked when several transitions pass at once.
-- **Pass 2** writes the reply from the state the conversation ends up in, so the bot never answers from a state it has already left.
+- **Transition rules** are written in JsonLogic, a small JSON rule language (for example `{">=": [{"var": "age"}, 18]}`). They are checked in plain Python, not by the LLM. If several transitions pass, the one with the lowest `priority` number wins; the LLM is asked only when two or more tie at that lowest priority.
+- **Pass 2** writes the reply from the state the conversation ends up in, so the bot never answers from a state it has already left. A state with empty `response_instructions` skips Pass 2.
 - **Handlers** are your own Python functions that run at 8 fixed points in this flow (start, before and after processing, before and after a transition, on context update, at the end, on error).
 - **FSM stacking** lets one conversation temporarily hand control to a second FSM (for example an address form) and come back with its results.
+
+How the subpackages sit on the core:
+
+```mermaid
+flowchart TD
+    core[fsm_llm core: API, FSMManager, MessagePipeline]
+    reasoning[fsm_llm.reasoning] --> core
+    workflows[fsm_llm.workflows] --> core
+    agents[fsm_llm.agents] --> core
+    agents -. ReasoningReactAgent .-> reasoning
+    monitor[fsm_llm.monitor] --> core
+    monitor -. launches .-> agents
+    monitor -. demo workflows .-> workflows
+    harness[fsm_llm.harness] --> agents
+    harness --> core
+    eval[fsm_llm.eval] --> core
+```
+
+`import fsm_llm` loads only the core. Each subpackage is imported on its own, for example `from fsm_llm.agents import ReactAgent`.
+
+## Subpackages
+
+| Subpackage | What it does | Entry points |
+| --- | --- | --- |
+| `reasoning/` | Solves a problem step by step: an orchestrator FSM picks one of 9 reasoning strategies (calculator, deductive, analogical, ...), runs it as a stacked FSM, checks the answer and retries up to 3 times | `ReasoningEngine(model).solve_problem(problem) -> (solution, trace)`, `python -m fsm_llm.reasoning "problem"` |
+| `workflows/` | Async, in-memory workflow engine: named steps over a shared context, 11 step types (Python function, API call, branch, LLM prompt, FSM conversation, agent, timer, wait for event, parallel, retry, ...) and a Python DSL | `WorkflowEngine`, `create_workflow`, `auto_step`, `condition_step`, ... |
+| `agents/` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan and execute, debate, swarm, agent graph, ...), mostly built as generated FSMs; tools, human approval, memory, MCP and HTTP integration, and a meta-builder that designs an FSM, workflow or agent from a chat | `create_agent`, `ReactAgent`, `ToolRegistry`, `@tool`, `fsm-llm-meta` |
+| `monitor/` | FastAPI web dashboard to launch, watch and talk to FSMs, agents and workflows; optional OpenTelemetry export | `fsm-llm-monitor` (http://127.0.0.1:8420), `MonitorBridge`, `OTELExporter` |
+| `harness/` | Experimental "iterative planner" as a 6-state FSM (explore, plan, execute, reflect, pivot, close) whose gates count files on disk instead of trusting the model | `fsm-llm-harness new "goal"`, `HarnessAgent` |
+| `eval/` | Runs the repository examples and scores them 0 to 4, or runs scripted conversations against any FSM over several trials and reports pass rates with confidence intervals | `fsm-llm-eval examples`, `fsm-llm-eval run cases.json`, `run_dataset` |
 
 ## Files
 
@@ -50,10 +80,11 @@ flowchart TD
 - `session.py` - save and restore conversations to JSON files.
 - `validator.py`, `visualizer.py` - check an FSM file for problems; draw it as ASCII art.
 - `runner.py`, `__main__.py` - the interactive command-line chat.
-- `utilities.py` - JSON extraction from LLM text, FSM file loading, shared helpers.
+- `utilities.py` - JSON extraction from LLM text, FSM file loading, shared context walkers.
 - `security.py` - the two key checks every context filter uses: internal keys (`has_internal_prefix`) and secret-looking keys (`is_forbidden_context_entry`).
 - `constants.py` - defaults, limits, environment variable names and shared key names; it also re-exports the names from `security.py`.
 - `logging.py` - loguru setup (logging is off until you turn it on).
+- `__init__.py`, `__version__.py`, `py.typed` - public exports, version (0.11.0, shared by all subpackages), type-hint marker.
 
 ## How to use it
 
@@ -127,12 +158,24 @@ api.register_handler(
 )
 ```
 
+The subpackages have their own commands:
+
+```bash
+python -m fsm_llm.reasoning "What is 15% of 240?"
+fsm-llm-meta --output my_bot.json        # design an FSM by chatting
+fsm-llm-monitor                          # needs: pip install "fsm-llm[monitor]"
+fsm-llm-eval examples --category basic   # run from the repository root
+fsm-llm-harness new "add a retry to the uploader" --create-only
+```
+
 ## Things to know
 
 - Any provider litellm supports works. The default model is `ollama_chat/qwen3.5:4b`, or whatever `LLM_MODEL` is set to. API keys come from the usual provider environment variables.
+- Extras: `reasoning`, `workflows`, `agents` and `eval` add no packages; `harness` pulls in `agents`; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
 - A state with no transitions is terminal: once reached, `converse` raises an error.
 - `required_context_keys` only says what to extract. To block a transition until data exists, add a condition with `logic`.
 - Context keys starting with `_`, `system_`, `internal_`, or `__` are internal and hidden from `get_data()`. Keys that look like passwords, tokens, or API keys are filtered out of prompts.
-- The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`.
+- The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`. This covers the subpackages too.
 - `FileSessionStore` saves state to JSON, so values like `datetime` come back as strings.
 - One conversation can only process one message at a time. A second concurrent call for the same conversation raises an error instead of waiting.
+- Errors from the core, reasoning, workflows, agents, harness and eval all derive from `FSMError`. The monitor's `MonitorError` does not.
