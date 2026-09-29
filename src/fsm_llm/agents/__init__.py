@@ -40,6 +40,7 @@ from .auto_memory import (
 )
 from .base import BaseAgent, accepts_tools
 from .composition import default_llm_judge, react_worker_factory
+from .constants import StopReason
 from .debate import DebateAgent
 from .definitions import (
     AgentConfig,
@@ -111,6 +112,7 @@ from .parallel_react import ParallelReactAgent, build_parallel_react_fsm
 from .plan_execute import PlanExecuteAgent
 from .prompt_chain import PromptChainAgent
 from .react import ReactAgent
+from .reasoning_react import ReasoningReactAgent
 from .reflexion import ReflexionAgent
 from .remote import AgentServer, RemoteAgentTool
 from .rewoo import REWOOAgent
@@ -128,14 +130,6 @@ from .swarm import SwarmAgent
 from .tool_registries import CachingToolRegistry, RetryingToolRegistry
 from .tools import ToolRegistry, tool
 from .verified_react import VerifiedReactAgent
-
-_has_reasoning_react = False
-try:
-    from .reasoning_react import ReasoningReactAgent
-
-    _has_reasoning_react = True
-except ImportError:
-    pass
 
 # Pattern name -> agent class for create_agent. AgentGraph is intentionally
 # absent: it is built only via AgentGraphBuilder (a node/edge graph, not the
@@ -158,9 +152,8 @@ _PATTERNS: dict[str, type] = {
     "native_fc": NativeFunctionCallingReactAgent,
     "verified_react": VerifiedReactAgent,
     "auto_memory": AutoMemoryReactAgent,
+    "reasoning_react": ReasoningReactAgent,
 }
-if _has_reasoning_react:
-    _PATTERNS["reasoning_react"] = ReasoningReactAgent
 
 # Patterns whose own prompts never see AgentConfig.instructions: Swarm hands
 # the task to member agents, and MetaBuilderAgent is not an FSM agent.
@@ -331,8 +324,7 @@ __all__ = [
     "load_builtin_sops",
     "AgentServer",
     "RemoteAgentTool",
-    # Conditionally available (requires fsm_llm.reasoning)
-    *((["ReasoningReactAgent"]) if _has_reasoning_react else []),
+    "ReasoningReactAgent",
     # Decorator + factory + skill loading
     "tool",
     "create_agent",
@@ -369,6 +361,7 @@ __all__ = [
     "AgentTrace",
     "AgentConfig",
     "AgentResult",
+    "StopReason",
     "ArtifactType",
     "BuildProgress",
     "MetaBuilderConfig",

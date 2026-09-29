@@ -86,12 +86,12 @@ class TestReasoningReactAgentImport:
             rr_module._HAS_REASONING = original
 
     def test_conditional_import_in_init(self):
-        """__init__.py should not fail if reasoning is not installed."""
-        # The import should always succeed (ReasoningReactAgent may or may not be in namespace)
+        """ReasoningReactAgent is imported unconditionally (reasoning always ships)."""
         import fsm_llm.agents
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
 
-        # Check that __all__ contains it regardless
         assert "ReasoningReactAgent" in fsm_llm.agents.__all__
+        assert fsm_llm.agents.ReasoningReactAgent is ReasoningReactAgent
 
 
 class TestReasonReToolAutoRegistration:

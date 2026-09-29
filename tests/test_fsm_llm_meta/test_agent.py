@@ -368,6 +368,49 @@ class TestCreateBuilder:
         assert isinstance(builder, AgentBuilder)
 
 
+class TestFewShotFSMExample:
+    """Step 25 (META-06): the FSM few-shot example in the extraction prompt is
+    a valid FSM. A model that copies it must get a loadable definition with
+    its transition kept (the example once pointed at an undeclared state)."""
+
+    def test_copied_example_builds_a_loadable_fsm(self, monkeypatch):
+        import json
+        import re
+
+        from fsm_llm.agents.meta_builders import FSMBuilder
+        from fsm_llm.definitions import FSMDefinition
+
+        agent = MetaBuilderAgent()
+        prompts: list[str] = []
+
+        def echo_example(prompt, **_kw):
+            prompts.append(prompt)
+            match = re.search(r"Example:\n(\{.*\})\n", prompt)
+            assert match, prompt
+            return match.group(1)
+
+        monkeypatch.setattr(agent, "_llm_call", echo_example)
+        builder = FSMBuilder()
+        agent._run_deterministic_pipeline("a greeter", ArtifactType.FSM, builder)
+
+        spec = json.loads(re.search(r"Example:\n(\{.*\})\n", prompts[0]).group(1))
+        declared = {s["state_id"] for s in spec["states"]}
+        for trans in spec["transitions"]:
+            assert trans["from_state"] in declared
+            assert trans["target_state"] in declared
+
+        assert builder.validate_complete() == []
+        definition = FSMDefinition.model_validate(builder.to_dict())
+        edges = [
+            (sid, t.target_state)
+            for sid, state in definition.states.items()
+            for t in state.transitions
+        ]
+        assert edges == [
+            (t["from_state"], t["target_state"]) for t in spec["transitions"]
+        ]
+
+
 class TestLegacyFSMDefinition:
     """Test that the legacy FSM definition still loads."""
 

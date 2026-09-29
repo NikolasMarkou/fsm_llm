@@ -294,7 +294,8 @@ class MetaBuilderAgent:
                 "Add transitions between states. The first state is the initial state.\n"
                 "Example:\n"
                 '{"name":"MyBot","description":"A bot","persona":"friendly",'
-                '"states":[{"state_id":"start","description":"Welcome","purpose":"Greet user"}],'
+                '"states":[{"state_id":"start","description":"Welcome","purpose":"Greet user"},'
+                '{"state_id":"end","description":"Goodbye","purpose":"Close the conversation"}],'
                 '"transitions":[{"from_state":"start","target_state":"end","description":"Done"}]}'
             ),
             "workflow": (

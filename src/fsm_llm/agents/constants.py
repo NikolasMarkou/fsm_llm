@@ -501,25 +501,8 @@ class ReasoningIntegrationKeys:
 
 
 # ---------------------------------------------------------------------------
-# Meta-builder states and constants
+# Meta-builder constants
 # ---------------------------------------------------------------------------
-
-
-class MetaBuilderStates:
-    """Legacy state constants for MetaBuilderAgent.
-
-    MetaBuilderAgent now uses ReactAgent internally, which has its own
-    FSM states (think, act, conclude). These constants are kept for
-    backward compatibility with tests and the monitor server.
-    """
-
-    # Legacy aliases
-    INTAKE = "collecting"
-    REVIEW = "collecting"
-    CLASSIFY = "collecting"
-    COLLECT = "collecting"
-    CONFIRM = "collecting"
-    OUTPUT = "complete"
 
 
 class MetaDefaults:
@@ -538,7 +521,6 @@ class MetaDefaults:
     BUILD_MAX_ITERATIONS = 25
     BUILD_TIMEOUT_SECONDS = 120.0
     BUILD_TEMPERATURE = 0.3
-    BUILD_MAX_TOKENS = 1000
 
     # Agent builder defaults (for the agent artifact being built)
     AGENT_MODEL = "gpt-4o-mini"
@@ -548,110 +530,18 @@ class MetaDefaults:
     AGENT_MAX_TOKENS = 1000
 
 
-class DecisionWords:
-    """Word sets for detecting user approval or revision intent."""
-
-    APPROVE: frozenset[str] = frozenset(
-        {
-            "approve",
-            "approved",
-            "yes",
-            "y",
-            "ok",
-            "okay",
-            "looks good",
-            "lgtm",
-            "accept",
-            "accepted",
-            "confirm",
-            "confirmed",
-            "good",
-            "great",
-            "perfect",
-            "ship it",
-            "go ahead",
-            "sounds good",
-            "fine",
-            "done",
-            "correct",
-            "right",
-            "build it",
-            "just build it",
-            "do it",
-            "that works",
-            "sure",
-            "yep",
-            "yeah",
-            "nice",
-            "awesome",
-            "keep it",
-            "give it to me",
-            "give me",
-            "show me",
-            "let me see",
-            "send it",
-            "save it",
-            "export",
-            "output",
-            "generate",
-            "finish",
-            "complete",
-            "wrap up",
-            "all good",
-            "no changes",
-        }
-    )
-
-    REVISE: frozenset[str] = frozenset(
-        {
-            "revise",
-            "revision",
-            "change",
-            "changes",
-            "modify",
-            "edit",
-            "update",
-            "fix",
-            "no",
-            "nope",
-            "redo",
-            "wrong",
-            "incorrect",
-            "not right",
-            "needs work",
-            "not quite",
-            "try again",
-            "add",
-            "remove",
-            "delete",
-            "rename",
-            "replace",
-            "move",
-            "instead",
-            "different",
-            "but",
-        }
-    )
-
-
 class MetaLogMessages:
     """Standard log message templates for meta-builder."""
 
     META_STARTED = "Meta-agent started with model={model}"
-    ARTIFACT_CLASSIFIED = "Artifact type classified as: {artifact_type}"
     BUILD_STARTED = "Build phase started for {artifact_type}"
-    BUILD_COMPLETE = "Build complete: {artifact_type} '{name}'"
-    REVIEW_STARTED = "Review phase: {error_count} errors, {warning_count} warnings"
-    REVISION_STARTED = "Revision requested: {revision}"
 
 
 class MetaErrorMessages:
     """Standard error messages for meta-builder."""
 
-    BUILDER_NOT_INITIALIZED = "Builder has not been initialized yet"
     CONVERSATION_NOT_STARTED = "Conversation has not been started"
     CONVERSATION_ALREADY_STARTED = "Conversation has already been started"
-    INVALID_ARTIFACT_TYPE = "Invalid artifact type: '{artifact_type}'"
 
 
 class ErrorMessages:
@@ -660,13 +550,6 @@ class ErrorMessages:
     BUDGET_EXHAUSTED = "Agent exceeded maximum iterations ({limit})"
     TOOL_NOT_FOUND = "Tool '{name}' not found in registry"
     TOOL_EXECUTION_FAILED = "Tool '{name}' execution failed: {error}"
-    APPROVAL_DENIED = "Human denied approval for: {action}"
-    TIMEOUT = "Agent timed out after {seconds:.1f}s"
-    NO_TOOLS = "Cannot create agent with empty tool registry"
-    MAX_REFLECTIONS = "Maximum reflections ({limit}) reached"
-    MAX_REFINEMENTS = "Maximum refinements ({limit}) reached"
-    MAX_REVISIONS = "Maximum revisions ({limit}) reached"
-    MAX_DEPTH = "Maximum decomposition depth ({limit}) reached"
     EMPTY_CHAIN = "Cannot create prompt chain agent with empty chain"
     NO_SAMPLES = "num_samples must be at least 1"
 

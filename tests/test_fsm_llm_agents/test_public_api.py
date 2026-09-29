@@ -7,7 +7,9 @@ fields and carries ``instructions``, and the default model honours
 
 from __future__ import annotations
 
+import ast
 import warnings
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -217,4 +219,58 @@ class TestWithInstructions:
                 "extraction_instructions"
             ]
             == "get a"
+        )
+
+
+class TestStaticAll:
+    """Step 25 (API-05): ``fsm_llm.agents.__all__`` is one static list."""
+
+    _INIT = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "fsm_llm"
+        / "agents"
+        / "__init__.py"
+    )
+
+    def _all_bindings(self) -> list[ast.stmt]:
+        tree = ast.parse(self._INIT.read_text())
+        bindings: list[ast.stmt] = []
+        for node in ast.walk(tree):
+            targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+                targets = [node.target]
+            if any(isinstance(t, ast.Name) and t.id == "__all__" for t in targets):
+                bindings.append(node)
+        return bindings
+
+    def test_all_is_a_single_list_of_string_literals(self):
+        bindings = self._all_bindings()
+        assert len(bindings) == 1
+        (binding,) = bindings
+        assert isinstance(binding, ast.Assign)
+        assert isinstance(binding.value, ast.List)
+        assert all(
+            isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+            for elt in binding.value.elts
+        )
+
+    def test_all_names_resolve_once(self):
+        import fsm_llm.agents as agents
+
+        assert len(agents.__all__) == len(set(agents.__all__))
+        for name in agents.__all__:
+            assert hasattr(agents, name), name
+
+    def test_reasoning_react_and_stop_reason_exported(self):
+        import fsm_llm.agents as agents
+        from fsm_llm.agents.constants import StopReason
+
+        assert "ReasoningReactAgent" in agents.__all__
+        assert agents.StopReason is StopReason
+        assert "StopReason" in agents.__all__
+        assert type(create_agent("reasoning_react", [_search])).__name__ == (
+            "ReasoningReactAgent"
         )
