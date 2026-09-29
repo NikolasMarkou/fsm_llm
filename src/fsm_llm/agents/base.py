@@ -22,7 +22,7 @@ from collections.abc import (
 )
 from typing import Any, ClassVar, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from fsm_llm import API
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
@@ -38,6 +38,7 @@ from .constants import (
     AgentStates,
     ContextKeys,
     Defaults,
+    ErrorMessages,
     HandlerNames,
     HandlerPriorities,
     LogMessages,
@@ -51,7 +52,12 @@ from .hitl import ApprovalPolicy, HumanInTheLoop, make_hitl_checker
 def with_instructions(
     fsm_def: dict[str, Any], instructions: str | None
 ) -> dict[str, Any]:
-    """Return *fsm_def* with ``AgentConfig.instructions`` in every LLM prompt.
+    """Return *fsm_def* with ``AgentConfig.instructions`` in every non-empty
+    state and per-field instruction.
+
+    Not reached: ``classification_extractions`` (the ``use_classification``
+    think path), core's AMBIGUOUS transition classifier, ReasoningReact's
+    reasoning-engine call, and any empty slot (see below).
 
     Interface contract (2 call sites: :meth:`BaseAgent._create_api` and
     ``SelfConsistencyAgent``, the one pattern that builds its ``API``
@@ -92,6 +98,48 @@ def with_instructions(
             ]
         states[name] = state
     return {**fsm_def, "states": states}
+
+
+_INSTRUCTION_SLOTS = frozenset({"extraction_instructions", "response_instructions"})
+
+
+def prompt_overflow_error(
+    exc: ValueError, instructions: str | None, tools: Any
+) -> AgentError | None:
+    """Translate core's FSM-load length error into an actionable ``AgentError``.
+
+    Interface contract (2 call sites: :meth:`BaseAgent._create_api` and
+    ``SelfConsistencyAgent``, the two places that load an agent FSM):
+        - *exc* is the ``ValueError`` ``API.from_definition`` raised for a
+          dict definition; its ``__cause__`` is core's pydantic
+          ``ValidationError``.
+        - Returns an ``AgentError`` naming the overflowing slot, core's limit
+          (read from the error, never a copy of core's literal), the length of
+          *instructions* and the number of *tools* (anything with ``len``, or
+          ``None``), when the cause is a ``string_too_long`` error on an
+          ``extraction_instructions``/``response_instructions`` slot.
+        - Returns ``None`` for any other error (the caller re-raises it).
+        - Never raises.
+    """
+    cause = exc.__cause__
+    if not isinstance(cause, ValidationError):
+        return None
+    for err in cause.errors():
+        loc = err.get("loc") or ()
+        if (
+            err.get("type") == "string_too_long"
+            and loc
+            and loc[-1] in _INSTRUCTION_SLOTS
+        ):
+            return AgentError(
+                ErrorMessages.PROMPT_SLOT_OVERFLOW.format(
+                    slot=".".join(str(part) for part in loc),
+                    limit=(err.get("ctx") or {}).get("max_length", "?"),
+                    instructions=len((instructions or "").strip()),
+                    tools=len(tools) if hasattr(tools, "__len__") else 0,
+                )
+            )
+    return None
 
 
 def _output_response_format(schema: Any) -> dict[str, Any] | None:
@@ -1195,13 +1243,21 @@ class BaseAgent(ABC):
         if self.config.enable_prompt_cache and "caching" not in kwargs:
             # litellm response-cache flag; no-op where the provider/cache is unset.
             kwargs["caching"] = True
-        return API.from_definition(
-            with_instructions(fsm_def, self.config.instructions),
-            model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            **kwargs,
-        )
+        try:
+            return API.from_definition(
+                with_instructions(fsm_def, self.config.instructions),
+                model=self.config.model,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+                **kwargs,
+            )
+        except ValueError as exc:
+            error = prompt_overflow_error(
+                exc, self.config.instructions, getattr(self, "tools", None)
+            )
+            if error is None:
+                raise
+            raise error from exc
 
     # ------------------------------------------------------------------
     # Lifecycle handler registration (shared by run + run_stream)

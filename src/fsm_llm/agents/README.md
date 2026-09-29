@@ -94,7 +94,7 @@ for chunk in agent.run_stream("What is 4 + 5?"):  # only the model's text, no st
     print(chunk, end="")
 ```
 
-The old form `create_agent("You are ...", tools)` still works but warns (`DeprecationWarning`): a first argument that is not a pattern name and contains a space, or is longer than 32 characters, is taken as the system prompt. A short unknown name such as `"debat"` raises `ValueError`.
+The old form `create_agent("You are ...", tools)` still works but warns (`DeprecationWarning`): a first argument that is not a pattern name and contains a space, or is longer than 32 characters, is taken as the system prompt. A short unknown name such as `"debat"` raises `ValueError`; names are matched after `strip().lower()`. The old prompt used to be ignored; it is now applied, so it counts against the prompt limits below.
 
 Build a new FSM by chatting (say "build it" when ready):
 
@@ -105,7 +105,7 @@ fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
 ## Things to know
 
 - `pip install "fsm-llm[agents]"` adds no dependencies. `mcp.py` needs `fsm-llm[mcp]`; `RemoteAgentTool` needs `fsm-llm[a2a]` (httpx); `AgentServer` needs fastapi (for example via `fsm-llm[monitor]`). `ReasoningReactAgent` uses `fsm_llm.reasoning`, which ships in every install.
-- `AgentConfig` rejects unknown fields (a typo raises). `model` defaults to the `LLM_MODEL` environment variable, read when the config is built, then `ollama_chat/qwen3.5:4b`. `instructions` (at most 2,000 characters; `create_agent(system_prompt=...)` sets it) is added to every prompt the pattern sends; `NativeFunctionCallingReactAgent` uses it as its system policy. Swarm and the meta-builder do not use it.
+- `AgentConfig` rejects unknown fields (a typo raises). `model` defaults to the `LLM_MODEL` environment variable, read when the config is built, then `ollama_chat/qwen3.5:4b`. `instructions` (at most 2,000 characters; `create_agent(system_prompt=...)` sets it) is added to every non-empty state and per-field instruction (not to `classification_extractions`, the core transition classifier or ReasoningReact's reasoning engine). Together with a large tool catalogue it can overflow core's 5,000-character instruction slot; that raises `AgentError` at `run()` naming the slot, the instructions length and the tool count; `NativeFunctionCallingReactAgent` uses it as its system policy. Swarm and the meta-builder do not use it.
 - Constructor mistakes raise `TypeError` instead of being passed to the LLM provider: `hitl=`, `tools=` or a `HumanInTheLoop` argument (`approval_policy=`, `approval_callback=`, `on_escalation=`, ...) on a pattern that cannot use them, and `model=`, `temperature=` or `max_tokens=` as keyword arguments (put them in `AgentConfig`). Other keyword arguments, such as `seed=`, `timeout=` or `llm_interface=`, still pass through.
 - `ReactAgent`, `REWOOAgent`, `ReflexionAgent`, `ParallelReactAgent` and `NativeFunctionCallingReactAgent` refuse an empty tool registry.
 - Each `run()` makes many LLM calls. Small models can hit the iteration limit and fail with `BudgetExhaustedError`.

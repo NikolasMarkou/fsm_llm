@@ -40,7 +40,7 @@ flowchart TD
 
 | Folder | Tests | What it checks |
 | --- | --- | --- |
-| `test_fsm_llm/` | 2,722 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/` |
+| `test_fsm_llm/` | 2,724 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/` |
 | `test_fsm_llm_agents/` | 1,695 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI |
 | `test_fsm_llm_meta/` | 220 | The meta-builder in `fsm_llm.agents`: FSM, workflow and agent builders, builder tools, prompts, `MetaBuilderAgent` |
 | `test_fsm_llm_reasoning/` | 126 | Reasoning engine constants, models, exceptions, handlers, strategy fallback, CLI logging and JSON output |

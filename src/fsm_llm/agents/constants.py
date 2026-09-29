@@ -575,6 +575,13 @@ class ErrorMessages:
     TOOL_EXECUTION_FAILED = "Tool '{name}' execution failed: {error}"
     EMPTY_CHAIN = "Cannot create prompt chain agent with empty chain"
     NO_SAMPLES = "num_samples must be at least 1"
+    PROMPT_SLOT_OVERFLOW = (
+        "Agent prompt too long: {slot} exceeds core's {limit}-character "
+        "instruction limit. It holds AgentConfig.instructions ({instructions} "
+        "characters) and, in tool-using patterns, the tool catalogue ({tools} "
+        "tools). Shorten AgentConfig.instructions (create_agent system_prompt=), "
+        "shorten tool descriptions or register fewer tools."
+    )
 
 
 class LogMessages:

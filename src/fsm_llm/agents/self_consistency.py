@@ -18,6 +18,7 @@ from fsm_llm.logging import logger
 from .base import (
     BaseAgent,
     pattern_run_output_keys,
+    prompt_overflow_error,
     strip_caller_context,
     with_instructions,
 )
@@ -324,13 +325,19 @@ class SelfConsistencyAgent(BaseAgent):
             terminal ``generate`` state never extracts, so the reply is the
             sample; its ``Answer:`` line is what the vote compares.
         """
-        api = API.from_definition(
-            with_instructions(fsm_def, self.config.instructions),
-            model=self.config.model,
-            temperature=temperature,
-            max_tokens=self.config.max_tokens,
-            **self._api_kwargs,
-        )
+        try:
+            api = API.from_definition(
+                with_instructions(fsm_def, self.config.instructions),
+                model=self.config.model,
+                temperature=temperature,
+                max_tokens=self.config.max_tokens,
+                **self._api_kwargs,
+            )
+        except ValueError as exc:
+            error = prompt_overflow_error(exc, self.config.instructions, None)
+            if error is None:
+                raise
+            raise error from exc
 
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
         context[ContextKeys.TASK] = task

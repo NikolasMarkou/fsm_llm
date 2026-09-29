@@ -204,7 +204,12 @@ def create_agent(
         a first argument that names no pattern and contains whitespace or is
         longer than 32 characters is taken as ``system_prompt`` with a
         ``DeprecationWarning``, and the pattern is "react". A short unknown
-        name raises ``ValueError``.
+        name raises ``ValueError``. Pattern names are matched after
+        ``strip().lower()``, so ``"Debate "`` is the debate pattern. The
+        legacy prompt now reaches the model (it used to be ignored), so it
+        counts against the prompt limits: at most 2,000 characters, and an
+        FSM instruction slot that overflows core's limit raises ``AgentError``
+        at ``run()``.
 
     Returns:
         A configured agent instance with ``__call__`` support.
@@ -225,6 +230,10 @@ def create_agent(
     # Do NOT treat every unknown first argument as a legacy prompt (a typo like
     # "debat" must raise), and do NOT drop the shim: before this a positional
     # prompt was silently ignored, so old callers must keep running, warned.
+    # Normalise first (fix 24.1): "debate " or " React" name a pattern, not a
+    # legacy prompt.
+    if isinstance(pattern, str) and pattern.strip().lower() in _PATTERNS:
+        pattern = pattern.strip().lower()
     if pattern not in _PATTERNS and _is_legacy_system_prompt(pattern):
         warnings.warn(
             "create_agent(system_prompt, tools) is deprecated: the first "

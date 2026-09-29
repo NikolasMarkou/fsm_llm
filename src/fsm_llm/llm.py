@@ -118,7 +118,8 @@ _BULK_ENVELOPE_KEYS = frozenset({"confidence", "reasoning"})
 
 # Top-level keys of the single-field extraction envelope
 # (`{"field_name": ..., "value": ..., "confidence": ..., "reasoning": ...}`)
-# besides `value`. A field with one of these names never reads that key as its
+# besides `value`. In an envelope-shaped reply (one carrying `value` or
+# `field_name`) a field with one of these names never reads that key as its
 # value in `_field_value` (plan-2026-09-29T103145-06a5ec0a D-035).
 _FIELD_ENVELOPE_KEYS = frozenset({"field_name", "confidence", "reasoning"})
 
@@ -132,17 +133,24 @@ def _field_value(data: dict[str, Any], field_name: str) -> Any:
     return ``None`` (audit D11). Never raises for a ``dict``.
 
     A field named after a single-field envelope key (``_FIELD_ENVELOPE_KEYS``)
-    reads ``data["value"]`` only.
+    reads ``data["value"]`` only when the reply is envelope-shaped (it carries
+    ``value`` or ``field_name``); a flat ``{"confidence": 0.8}`` for a field
+    named ``confidence`` still returns ``0.8``.
     """
     value = data.get("value")
+    if value is not None:
+        return value
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-035: do NOT fall back to
-    # data[field_name] when field_name is an envelope key: for a field named
-    # `reasoning` that key is the model's own explanation of the extraction, not
-    # the field's value (it fed meta-commentary back into later prompts). The D11
-    # fallback stays for every other name. See decisions.md D-035.
-    if value is None and field_name not in _FIELD_ENVELOPE_KEYS:
-        return data.get(field_name)
-    return value
+    # data[field_name] when field_name is an envelope key AND the reply is
+    # envelope-shaped: there that key is the model's own explanation (or score,
+    # or echoed name), not the field's value (it fed meta-commentary back into
+    # later prompts). Do NOT widen the guard to flat replies: a flat
+    # `{"confidence": 0.8}` has no envelope, so the key is the value (fix
+    # 24.1). The D11 fallback stays for every other name. See decisions.md.
+    enveloped = "value" in data or "field_name" in data
+    if enveloped and field_name in _FIELD_ENVELOPE_KEYS:
+        return None
+    return data.get(field_name)
 
 
 # The opening of a single-field extraction envelope, `{"field_name": "<name>",

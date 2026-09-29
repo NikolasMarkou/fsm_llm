@@ -4148,6 +4148,19 @@ class TestStep15D6D12B8:
         )
         assert result.value is None
 
+    @pytest.mark.parametrize(
+        ("name", "flat_value"),
+        [("confidence", 0.8), ("reasoning", "because the sky is blue")],
+    )
+    def test_envelope_named_field_reads_a_flat_reply(self, name, flat_value):
+        # Fix 24.1 (review api #3): the D-035 guard applies to envelope-shaped
+        # replies only; a flat reply (no `value`, no `field_name`, possible on
+        # providers that get only json_object) keeps its value.
+        result = _d_llm()._parse_field_extraction_response(
+            _d_response(json.dumps({name: flat_value})), _d_field_request(name)
+        )
+        assert result.value == flat_value
+
     def test_envelope_named_field_still_reads_its_value(self):
         content = json.dumps(
             {"field_name": "reasoning", "value": "real", "reasoning": "meta"}

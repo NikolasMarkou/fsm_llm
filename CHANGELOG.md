@@ -38,13 +38,27 @@ work, is `docs/agents_roadmap.md`.
   **kwargs)` takes the pattern first, so `create_agent("debate")` builds a
   `DebateAgent`. The old `create_agent(system_prompt, tools)` call still works with a
   `DeprecationWarning` when the first argument names no pattern and contains whitespace
-  or is longer than 32 characters; a short unknown name raises `ValueError`. A third
+  or is longer than 32 characters; a short unknown name raises `ValueError`. Pattern
+  names are matched after `strip().lower()` (`"Debate "` is the debate pattern). The
+  legacy prompt is now applied (before, it was ignored), so it counts against the
+  prompt limits: over 2,000 characters raises `ValidationError`, and one that makes an
+  FSM instruction slot exceed core's 5,000-character limit together with the tool
+  catalogue raises `AgentError` at `run()` (naming the slot, the instructions length
+  and the tool count). A third
   positional argument, or a positional prompt together with `pattern=`, is now a
   `TypeError`.
 - Agents: `system_prompt` (new `AgentConfig.instructions`, at most 2,000 characters)
-  now reaches the model. FSM patterns prefix it to every non-empty prompt instruction
-  (replies and per-field extractions); `NativeFunctionCallingReactAgent` uses it as its
-  default `system_policy`. Swarm and meta_builder reject it in `create_agent`.
+  now reaches the model. FSM patterns prefix it to every non-empty state and per-field
+  instruction (replies and per-field extractions); it does not reach
+  `classification_extractions` (the `use_classification=True` think path), core's
+  AMBIGUOUS transition classifier or ReasoningReact's reasoning engine.
+  `NativeFunctionCallingReactAgent` uses it as its default `system_policy`. Swarm and
+  meta_builder reject it in `create_agent`.
+- Agents: `AgentStep.thought`, `ToolCall.reasoning` and `ApprovalRequest.reasoning`
+  are now empty in the ReAct family unless `use_classification=True`: the think state
+  no longer extracts a `reasoning` field (it collided with the extraction envelope's
+  own key), so an approval UI no longer gets the model's stated rationale. Known open
+  (LOOP-16, `docs/agents_roadmap.md`).
 - Agents: `AgentConfig` and `MetaBuilderConfig` reject unknown fields
   (`extra="forbid"`). A misspelt key, the removed `MetaBuilderConfig.output_path`, or a
   typo in an SOP's `config_overrides` now raises instead of being ignored.
@@ -83,8 +97,8 @@ work, is `docs/agents_roadmap.md`.
   `ReasoningReactAgent` raise `AgentError` when a flagged tool exists and nobody can
   decide on it (`hitl=None`, or a `HumanInTheLoop` with neither a callback nor a
   policy), at construction and again at the start of `run()`/`run_stream()`; before,
-  the tool ran unasked after a warning. A policy without a callback still constructs
-  (with a warning): the policy decides, and a call it gates raises
+  the tool ran unasked after a logged WARNING. A policy without a callback still
+  constructs (it logs a WARNING): the policy decides, and a call it gates raises
   `ApprovalDeniedError`.
 - Agents: `REWOOAgent`, `PlanExecuteAgent`, `ParallelReactAgent` and
   `NativeFunctionCallingReactAgent` have no approval step, so they now raise
@@ -145,14 +159,18 @@ work, is `docs/agents_roadmap.md`.
   covers one execution. A tool gated only by an approval policy is still retried.
 - Agents: `ReasoningReactAgent`'s tool view follows the caller's registry live, so a
   tool re-registered there with `requires_approval=True` after construction is gated.
-- Core: `llm._field_value` no longer reads `data[field_name]` for a field named
-  `reasoning`, `confidence` or `field_name`; those names are the extraction envelope's
-  own keys, so the fallback returned the model's explanation instead of the value.
+- Core: in an envelope-shaped single-field reply (one carrying `value` or
+  `field_name`), `llm._field_value` no longer falls back to `data[field_name]` for a
+  field named `reasoning`, `confidence` or `field_name`: there that key is the
+  envelope's own explanation, score or echoed name, so with a null `value` the
+  fallback returned it as the field's value. A flat reply without `value` or
+  `field_name` (`{"confidence": 0.8}` for a field named `confidence`) keeps its value.
 
 ### Deprecated
 
-- Agents: the positional system prompt `create_agent("You are ...", tools)`. It warns
-  (`DeprecationWarning`); use `create_agent(pattern, tools, system_prompt=...)`.
+- Agents: the positional system prompt `create_agent("You are ...", tools)`. It emits a
+  `DeprecationWarning` and is now applied as `AgentConfig.instructions` (see Changed);
+  use `create_agent(pattern, tools, system_prompt=...)`.
 
 ### Fixed
 

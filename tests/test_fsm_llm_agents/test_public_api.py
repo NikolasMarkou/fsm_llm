@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from fsm_llm.agents import (
     AgentConfig,
+    AgentError,
     DebateAgent,
     NativeFunctionCallingReactAgent,
     ReactAgent,
@@ -28,6 +29,7 @@ from fsm_llm.agents.base import with_instructions
 from fsm_llm.agents.definitions import MetaBuilderConfig
 from fsm_llm.agents.sop import SOPDefinition, SOPRegistry
 from fsm_llm.constants import DEFAULT_LLM_MODEL
+from tests.conftest import PromptGroundedLLM
 
 
 def _search(query: str) -> str:
@@ -65,7 +67,25 @@ class TestCreateAgentPatternFirst:
 
         assert agent.config.instructions == word
 
-    @pytest.mark.parametrize("name", ["debat", "React", "x" * 32])
+    @pytest.mark.parametrize(
+        ("name", "cls"),
+        [("debate ", DebateAgent), (" React", ReactAgent), ("DEBATE", DebateAgent)],
+    )
+    def test_pattern_names_are_stripped_and_lowercased(self, name, cls):
+        # Fix 24.1 (review api #4): "debate " was a legacy prompt that built a
+        # ReactAgent without tools; " react" silently became instructions.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            agent = (
+                create_agent(name, [_search])
+                if cls is ReactAgent
+                else (create_agent(name))
+            )
+
+        assert type(agent) is cls
+        assert agent.config.instructions is None
+
+    @pytest.mark.parametrize("name", ["debat", "Reactt", "x" * 32])
     def test_short_unknown_name_raises_listing_patterns(self, name):
         with warnings.catch_warnings():
             warnings.simplefilter("error")
@@ -180,6 +200,46 @@ class TestModelResolution:
         default_llm_judge(model="explicit", complete_fn=complete)("out", {})
 
         assert seen == ["judge-env", "explicit"]
+
+
+class TestPromptSlotOverflow:
+    """Fix 24.1 (review api #1): instructions plus a tool catalogue that
+    overflow core's instruction limit fail with an actionable AgentError, not
+    core's bare FSM-load ValueError."""
+
+    @staticmethod
+    def _big_registry(count: int) -> ToolRegistry:
+        registry = ToolRegistry()
+        for i in range(count):
+            registry.register_function(
+                _search,
+                name=f"tool_{i}",
+                description=f"Searches the knowledge base for topic {i}. " * 6,
+            )
+        return registry
+
+    def test_overflow_raises_agent_error_naming_the_budget(self):
+        agent = ReactAgent(
+            tools=self._big_registry(8),
+            config=AgentConfig(instructions="Be careful. " * 100),
+            llm_interface=PromptGroundedLLM(),
+        )
+
+        with pytest.raises(AgentError) as info:
+            agent.run("hello")
+
+        message = str(info.value)
+        assert "AgentConfig.instructions (1199 characters)" in message
+        assert "(8 tools)" in message
+        assert "5000-character" in message
+        assert "states.think" in message
+        assert isinstance(info.value.__cause__, ValueError)
+
+    def test_other_load_errors_are_not_rewritten(self):
+        agent = ReactAgent(tools=_registry(), llm_interface=None)
+
+        with pytest.raises(ValueError, match="Invalid FSM definition"):
+            agent._create_api({"name": "x"})
 
 
 class TestWithInstructions:
