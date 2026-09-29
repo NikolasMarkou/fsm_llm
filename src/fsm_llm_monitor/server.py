@@ -38,6 +38,7 @@ from .definitions import (
     BuilderSendRequest,
     BuilderStartRequest,
     EndConversationRequest,
+    FSMSnapshot,
     LaunchAgentRequest,
     LaunchFSMRequest,
     LaunchWorkflowRequest,
@@ -619,7 +620,7 @@ def _parse_dashboard_config(req: dict[str, Any]) -> Any:
         panels = [
             DashboardPanel(
                 panel_id=str(pid),
-                title=pdata.get("title", pid),
+                title=pdata.get("title", str(pid)),
                 panel_type=pdata.get("panel_type", "metric"),
                 metric=pdata.get("metric", ""),
                 description=pdata.get("description", ""),
@@ -1052,7 +1053,7 @@ async def api_fsm_load(request: Request) -> dict[str, Any]:
     return _snapshot_or_400(data).model_dump()
 
 
-def _snapshot_or_400(data: Any) -> Any:
+def _snapshot_or_400(data: Any) -> FSMSnapshot:
     """Parse an FSM definition dict into a snapshot, or raise 400."""
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="failed to parse FSM definition")

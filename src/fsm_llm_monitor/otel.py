@@ -44,8 +44,11 @@ try:
 except ImportError:
     _HAS_OTEL = False
 
+_OtelContext: Any
 try:
-    from opentelemetry.context import Context as _OtelContext
+    from opentelemetry.context import Context
+
+    _OtelContext = Context
 except ImportError:  # pragma: no cover - optional / mocked in tests
     _OtelContext = None
 
