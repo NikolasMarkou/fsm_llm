@@ -7,7 +7,7 @@ Purpose: Falsifying pytest suite for `fsm_llm.harness` (`src/fsm_llm/harness/`):
 
 - In: tests for `artifacts`, `hardening`, `fsm_definition`/`rules`, `harness` (the `HarnessAgent` driver), `plan_validator`, `roles`, `tools`, `storage`, `__main__` (CLI), plus the opt-in live suite and its offline guards.
 - Out: the package source itself; the bench runner `scripts/harness_bench.py` (tested by `tests/test_harness_bench.py`); committed bench rows under `scripts/bench_data/`.
-- Collection today: 1,988 tests; default run is 1,971 passed, 17 skipped (the 17 are the live-gated tests).
+- Collection today: 1,986 tests; default run is 1,969 passed, 17 skipped (the 17 are the live-gated tests).
 
 ## Architecture
 
@@ -46,7 +46,7 @@ flowchart LR
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | Shared fixtures and recorders | D-056, D-057 anchors |
-| `test_artifacts.py` | Artifact models: round-trip, grammar, fail-closed parse | 273 tests; fixtures copied from real `plans/` files |
+| `test_artifacts.py` | Artifact models: round-trip, grammar, fail-closed parse | 271 tests; fixtures copied from real `plans/` files |
 | `test_cli.py` | `fsm_llm.harness.__main__` subcommands and exit codes | 108 tests; monkeypatches `harness_module.HarnessAgent` with `_RecordingAgent` |
 | `test_extraction_cost.py` | Zero core Pass-1 LLM calls per turn (D-041) | 24 tests; `CountingLLM` owns `_make_llm_call` |
 | `test_fsm_definition.py` | Graph shape, gates via real `TransitionEvaluator`, priority spacing, ownership | 87 tests |

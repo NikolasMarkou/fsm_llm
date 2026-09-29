@@ -1201,14 +1201,13 @@ class TestCrossPlanTier:
 
 
 class TestPresentationContracts:
-    def test_all_six_are_declared(self) -> None:
+    def test_all_five_are_declared(self) -> None:
         assert list(PRESENTATION_CONTRACTS) == [
             "PC-EXPLORE",
             "PC-PLAN",
             "PC-EXECUTE-STEP",
             "PC-EXECUTE-LEASH",
             "PC-REFLECT",
-            "PC-PIVOT",
         ]
 
     @pytest.mark.parametrize(
@@ -1219,7 +1218,6 @@ class TestPresentationContracts:
             ("PC-EXECUTE-STEP", 5),
             ("PC-EXECUTE-LEASH", 5),
             ("PC-REFLECT", 5),
-            ("PC-PIVOT", 5),
         ],
     )
     def test_required_field_counts(self, name: str, count: int) -> None:
@@ -1238,14 +1236,10 @@ class TestPresentationContracts:
         contract = PRESENTATION_CONTRACTS[name]
         assert contract.floor == set(contract.required)
 
-    def test_the_two_partial_floors(self) -> None:
+    def test_the_explore_partial_floor(self) -> None:
         assert PRESENTATION_CONTRACTS["PC-EXPLORE"].floor == {
             "findings-index",
             "key-constraints",
-        }
-        assert PRESENTATION_CONTRACTS["PC-PIVOT"].floor == {
-            "checkpoints",
-            "candidate-directions",
         }
 
     def test_the_plan_floor_is_the_five_named_sections(self) -> None:

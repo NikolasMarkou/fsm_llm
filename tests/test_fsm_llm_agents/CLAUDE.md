@@ -8,7 +8,7 @@ Purpose: Pytest suite for the FSM-LLM agents package (`src/fsm_llm/agents`, impo
 - In: 52 `test_*.py` files, `mcp_fixture_server.py` (a real stdio MCP server, not a test), empty `__init__.py`. No `conftest.py` here; global fixtures come from `tests/conftest.py` (adds `src` to `sys.path`), but these files build their own mocks.
 - Also in (historical placement, not agents code): `test_review_fixes.py` covers core `API.converse_stream` auto-save, `FileSessionStore._path` validation, `FSMManager.seed_restored_conversation`, and `fsm_llm.monitor.otel.OTELExporter` thread safety; `test_strands_phase2.py` covers `fsm_llm.workflows.dependency_resolver.DependencyResolver` and `OTELExporter`.
 - Out: live-LLM agent tests (none here; no test calls a real provider), meta-builder internals beyond the CLI.
-- Current size: 1,278 collected (1,274 passed, 5 skipped with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
+- Current size: 1,274 collected (1,274 passed; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
 
 ## Architecture
 
@@ -118,7 +118,6 @@ Test-writing constraints:
 
 ## Failure modes
 
-- Always skipped: four `test_run_requires_llm` placeholders (react, reflexion, rewoo, plan_execute), marked `slow`.
 - The project `.venv` has no `mcp`, so `test_mcp_stdio.py` skips locally; CI installs the extra.
 - An OpenTelemetry "I/O operation on closed file" traceback may print after the session; it is exporter shutdown noise, not a failure.
 - Loop tests that regress usually fail as `BudgetExhaustedError` (a BLOCKED state) or with a loop-count assertion, not as a wrong answer.

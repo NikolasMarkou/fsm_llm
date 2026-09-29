@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-import pytest
-
 from fsm_llm.agents.constants import (
     ContextKeys,
     Defaults,
@@ -381,20 +379,6 @@ class TestPlanExecuteConstants:
             PlanExecuteStates.SYNTHESIZE,
         }
         assert state_names == constant_values
-
-
-# ---------------------------------------------------------------------------
-# Plan-Execute integration (skip without LLM)
-# ---------------------------------------------------------------------------
-
-
-class TestPlanExecuteAgentIntegration:
-    """Integration tests for PlanExecuteAgent.run() -- require mocking LLM."""
-
-    @pytest.mark.slow
-    def test_run_requires_llm(self):
-        """PlanExecuteAgent.run() needs a real or mock LLM -- skip in unit tests."""
-        pytest.skip("Requires LLM interface -- run with real_llm marker")
 
 
 # ---------------------------------------------------------------------------

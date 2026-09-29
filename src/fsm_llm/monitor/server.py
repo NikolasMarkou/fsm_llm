@@ -1674,7 +1674,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     else {"active": False, "config": None}
                 )
 
-            # DECISION plan-2026-09-22T080837-8b258a25/D-044
+            # DECISION plan-2026-09-22T080837-8b258a25/D-008
             # `default=str` pushed an arbitrary object's `__str__` (a secret in
             # a context value) to every dashboard browser. Share the core hook;
             # do NOT re-implement the scalar keep-set here.

@@ -380,20 +380,6 @@ class TestReflexionConstants:
 
 
 # ---------------------------------------------------------------------------
-# Reflexion integration (skip without LLM)
-# ---------------------------------------------------------------------------
-
-
-class TestReflexionAgentIntegration:
-    """Integration tests for ReflexionAgent.run() -- require mocking LLM."""
-
-    @pytest.mark.slow
-    def test_run_requires_llm(self):
-        """ReflexionAgent.run() needs a real or mock LLM -- skip in unit tests."""
-        pytest.skip("Requires LLM interface -- run with real_llm marker")
-
-
-# ---------------------------------------------------------------------------
 # D-008: conclude needs tool evidence (plan-2026-09-24T091842-c1d5bfbc)
 # ---------------------------------------------------------------------------
 

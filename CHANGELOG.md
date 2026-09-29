@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PRE_STEP_GATE`, `END_CONVERSATION` or `ERROR`. Nothing registered them: the pre-step
   gate runs inside the EXECUTE dispatch, and end and error handlers come from
   `BaseAgent`.
+- `fsm_llm.harness.PRESENTATION_CONTRACTS` no longer defines `PC-PIVOT`; the driver
+  never emitted it and no artifact supplies its candidate-directions or
+  ghost-constraints fields.
 
 ## [0.11.0] - 2026-09-29
 

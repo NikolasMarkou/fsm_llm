@@ -23,7 +23,7 @@ Three rules shape everything here.
    protocol gate that reads a half-parsed artifact is a gate that opens on
    noise.
 
-3. **Contracts are data.**  The 6 Presentation Contracts, the 9 decision entry
+3. **Contracts are data.**  The 5 Presentation Contracts, the 9 decision entry
    types, the 3 mandatory Additional Checks and the 5 Verdict bullets live here
    as required-field/floor tables, not as rendering logic.  ``harness.py``
    renders; this module only says what a rendering must contain.
@@ -1447,7 +1447,7 @@ class IndexDoc(Artifact):
 
 
 # ---------------------------------------------------------------------------
-# The 6 Presentation Contracts -- data, not rendering
+# The 5 Presentation Contracts -- data, not rendering
 # ---------------------------------------------------------------------------
 
 
@@ -1566,19 +1566,6 @@ PRESENTATION_CONTRACTS: Mapping[str, PresentationContract] = MappingProxyType(
                     "issues",
                     "recommendation",
                 ),
-            ),
-            _contract(
-                "PC-PIVOT",
-                "at the REFLECT -> PIVOT routing decision, before PLAN",
-                "verbatim for checkpoints and ghost constraints",
-                (
-                    "pivot-reason",
-                    "checkpoints",
-                    "ghost-constraints",
-                    "candidate-directions",
-                    "prompt",
-                ),
-                floor=("checkpoints", "candidate-directions"),
             ),
         )
     }

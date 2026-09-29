@@ -99,7 +99,6 @@ The whole suite runs in seconds and needs no network or API key.
 ## Things to know
 
 - Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`), `fastapi` and `httpx` (`test_remote.py` and some server tests), the opentelemetry SDK (OTEL tests), `fsm_llm.reasoning` (ReasoningReact tests), `fsm_llm.workflows` (one workflow-step test).
-- Four tests named `test_run_requires_llm` (react, reflexion, rewoo, plan_execute) are marked `slow` and always skip themselves.
 - The async tests in `test_strands_phase2.py` need `asyncio_mode = "auto"`, which `pyproject.toml` sets.
 - Library logging is off by default. Tests that check a warning call `logger.enable("fsm_llm")`, add a sink, and disable logging again afterwards.
 - A run can print an OpenTelemetry "I/O operation on closed file" traceback at the end. It comes from the OTEL exporter tests and does not fail the run.

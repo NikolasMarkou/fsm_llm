@@ -117,15 +117,6 @@ class TestReactAgentHitlGating:
         assert "await_approval" in fsm["states"]
 
 
-class TestReactAgentIntegration:
-    """Integration tests for ReactAgent.run() — require mocking LLM."""
-
-    @pytest.mark.slow
-    def test_run_requires_llm(self):
-        """ReactAgent.run() needs a real or mock LLM — skip in unit tests."""
-        pytest.skip("Requires LLM interface — run with real_llm marker")
-
-
 class _DeterministicMockLLM(LLMInterface):
     """Field-name-keyed mock LLM: every extract_field call's answer depends
     ONLY on the requested field_name, never on call order/index.

@@ -410,17 +410,3 @@ class TestREWOOPlanExecution:
         # Only the valid dict step should produce evidence
         assert "E1" in result[ContextKeys.EVIDENCE]
         assert len(result[ContextKeys.AGENT_TRACE]) == 1
-
-
-# ---------------------------------------------------------------------------
-# REWOO integration (skip without LLM)
-# ---------------------------------------------------------------------------
-
-
-class TestREWOOAgentIntegration:
-    """Integration tests for REWOOAgent.run() -- require mocking LLM."""
-
-    @pytest.mark.slow
-    def test_run_requires_llm(self):
-        """REWOOAgent.run() needs a real or mock LLM -- skip in unit tests."""
-        pytest.skip("Requires LLM interface -- run with real_llm marker")
