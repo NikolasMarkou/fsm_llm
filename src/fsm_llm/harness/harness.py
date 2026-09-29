@@ -95,6 +95,7 @@ from typing import Any, TypeVar
 
 from fsm_llm import API
 from fsm_llm.agents.base import BaseAgent
+from fsm_llm.agents.constants import StopReason
 from fsm_llm.agents.definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.hitl import ApprovalCallback, HumanInTheLoop
@@ -1181,9 +1182,17 @@ class HarnessAgent(BaseAgent):
         final_context[ContextKeys.HALT_REASON] = halt.reason
         if halt.slug is not None:
             final_context[ContextKeys.LAST_GATE_SLUG] = halt.slug
+        # Reporting only: the halt semantics above are unchanged.
+        if halt.slug == GateSlug.ITERATION_CAP:
+            stop_reason = StopReason.MAX_ITERATIONS
+        elif halt.slug is not None:
+            stop_reason = StopReason.GATE_FAILED
+        else:
+            stop_reason = StopReason.STALLED
         return AgentResult(
             answer=halt.reason,
             success=False,
+            stop_reason=stop_reason,
             trace=AgentTrace(tool_calls=[], total_iterations=0),
             final_context=self._filter_context(final_context),
         )

@@ -257,8 +257,13 @@ class TestReactAgentConcurrentRuns:
             "both concurrent run() calls dispatched into the SAME "
             "AgentHandlers instance — the F9/D-014 fix regressed"
         )
-        assert results["a"].success is True
-        assert results["b"].success is True
+        # The mock never sets should_terminate, so each run ends on its own
+        # iteration budget: a forced stop ships its answer with success=False
+        # (D-011 of plan 06a5ec0a), identically for both isolated runs.
+        for key in ("a", "b"):
+            assert results[key].answer == "ok"
+            assert results[key].success is False
+            assert results[key].stop_reason == "max_iterations"
         assert len(results["a"].trace.tool_calls) == 1
         assert len(results["b"].trace.tool_calls) == 1
 

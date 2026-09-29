@@ -150,6 +150,16 @@ class ContextKeys:
     # Budget tracking
     ITERATION_COUNT = "iteration_count"
     MAX_ITERATIONS_REACHED = "max_iterations_reached"
+    # Why a run was forced to stop (a ``StopReason`` value), written only by
+    # the handler that forced it (stall, forced pass); unset on a forced stop
+    # means ``StopReason.MAX_ITERATIONS``.
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-027: public, NOT
+    # internal-prefixed. Do NOT rename it to `_forced_stop_reason`:
+    # `API.get_data` drops internal keys, so the result seam never saw it and a
+    # forced pass read as success=True. Only a `StopReason.FORCED` value counts
+    # and it can only lower `success`; caller context never supplies it
+    # (`RUN_OUTPUT_KEYS`).
+    FORCED_STOP_REASON = "forced_stop_reason"
 
     # HITL
     APPROVAL_REQUIRED = "approval_required"
@@ -230,6 +240,35 @@ class ContextKeys:
     CURRENT_DEPTH = "current_depth"
 
 
+class StopReason:
+    """Why an agent run ended: the value of ``AgentResult.stop_reason``.
+
+    ``ANSWERED`` and ``EVIDENCE`` go with ``success=True``; every other
+    value goes with ``success=False``.
+    """
+
+    # Concluded with a real answer: an answer key or an executed tool call.
+    ANSWERED = "answered"
+    # Succeeded on executed work: planner evidence, subtasks, a harness role.
+    EVIDENCE = "evidence"
+    # The iteration budget forced the stop; the last output still ships.
+    MAX_ITERATIONS = "max_iterations"
+    # A judge verdict was forced True at a revision or budget limit.
+    FORCED_PASS = "forced_pass"
+    # Consecutive turns with no tool selected forced the stop.
+    STALLED = "stalled"
+    # The answer was rejected by a verifier.
+    VERIFICATION_FAILED = "verification_failed"
+    # The run ended without a real result (prose fallback only, no evidence,
+    # a malformed or failed turn, no successful subtask or sample).
+    NO_RESULT = "no_result"
+    # A prompt-chain validation gate failed.
+    GATE_FAILED = "gate_failed"
+
+    # Reasons a forcing handler may record in ``ContextKeys.FORCED_STOP_REASON``.
+    FORCED: frozenset[str] = frozenset({MAX_ITERATIONS, FORCED_PASS, STALLED})
+
+
 # ---------------------------------------------------------------------------
 # Handler names
 # ---------------------------------------------------------------------------
@@ -268,6 +307,7 @@ RUN_OUTPUT_KEYS: frozenset[str] = frozenset(
         ContextKeys.REASONING,
         ContextKeys.DRIVER_APPROVAL,
         ContextKeys.APPROVALS_SPENT,
+        ContextKeys.FORCED_STOP_REASON,
     }
 )
 

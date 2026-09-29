@@ -45,6 +45,7 @@ from typing import Any
 from pydantic import BaseModel, Field, create_model
 
 from fsm_llm.agents import create_agent
+from fsm_llm.agents.constants import StopReason
 from fsm_llm.agents.definitions import AgentConfig, AgentResult
 from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm.agents.tools import ToolRegistry
@@ -1469,6 +1470,18 @@ def build_default_worker_factory(
         return AgentResult(
             answer=answer,
             success=success,
+            # The role's verdict, not the agent's: a parsed payload with a
+            # verified write is evidence; the agent's own reason explains a
+            # failure it reported, anything else failed here.
+            stop_reason=(
+                StopReason.EVIDENCE
+                if success
+                else (
+                    result.stop_reason
+                    if not result.success and result.stop_reason
+                    else StopReason.NO_RESULT
+                )
+            ),
             trace=result.trace,
             # ONLY the state's writable keys, already exact-type filtered.
             # Anything else the agent left in its own final_context -- task

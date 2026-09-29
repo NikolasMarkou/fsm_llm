@@ -32,6 +32,7 @@ from .constants import (
     HandlerNames,
     HandlerPriorities,
     LogMessages,
+    StopReason,
 )
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
@@ -742,6 +743,65 @@ class BaseAgent(ABC):
         tools_executed = len(trace.tool_calls) > 0
         return has_answer_key or tools_executed
 
+    @staticmethod
+    def _forced_stop_reason(final_context: dict[str, Any]) -> str | None:
+        """The ``StopReason`` of a forced stop, or ``None`` if none was forced.
+
+        Interface contract (callers: ``_run_outcome``, ``ADaPTAgent.run``):
+        a run was forced when ``max_iterations_reached is True`` (limiter,
+        stall) or a forcing handler recorded a reason under
+        ``ContextKeys.FORCED_STOP_REASON`` (forced pass at a revision limit).
+        Returns that recorded reason when it is one of ``StopReason.FORCED``,
+        else ``StopReason.MAX_ITERATIONS`` for a bare forced flag. Never raises.
+        """
+        recorded = final_context.get(ContextKeys.FORCED_STOP_REASON)
+        if isinstance(recorded, str) and recorded in StopReason.FORCED:
+            return recorded
+        if final_context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
+            return StopReason.MAX_ITERATIONS
+        return None
+
+    @staticmethod
+    def _run_outcome(
+        final_context: dict[str, Any],
+        trace: AgentTrace,
+        extra_answer_keys: list[str] | None,
+        execution_evidence_keys: list[str] | None = None,
+    ) -> tuple[bool, str]:
+        """Compute ``(success, stop_reason)`` for a finished FSM run.
+
+        Interface contract (callers: ``_standard_run``; ``ADaPTAgent.run``
+        for an undecomposed run): the one success rule for every pattern
+        whose result comes from an FSM run.
+
+        Returns:
+            ``(False, <forced reason>)`` when the run was forced to stop
+            (``_forced_stop_reason``); else, in planner mode
+            (``execution_evidence_keys``), ``(True, "evidence")`` with real
+            execution evidence; otherwise ``(True, "answered")`` when
+            ``_completion_is_real`` (an answer key or an executed tool call);
+            and ``(False, "no_result")`` in every other case. Never raises.
+        """
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-011: a forced stop, forced
+        # pass or stall reports success=False with its reason, and the caller
+        # still ships the last answer. Do NOT raise here (c1d5bfbc D-022: a
+        # forced budget stop ships its output), and do NOT let the answer key
+        # or a tool call override the forced flag (a forced EvalOpt/MakerChecker
+        # pass always has an answer key, which is how it read as success=True).
+        # Do NOT compute success per pattern: this is the one rule.
+        forced = BaseAgent._forced_stop_reason(final_context)
+        if forced is not None:
+            return False, forced
+        if execution_evidence_keys:
+            if BaseAgent._has_execution_evidence(
+                final_context, execution_evidence_keys
+            ):
+                return True, StopReason.EVIDENCE
+            return False, StopReason.NO_RESULT
+        if BaseAgent._completion_is_real(final_context, trace, extra_answer_keys):
+            return True, StopReason.ANSWERED
+        return False, StopReason.NO_RESULT
+
     def _build_trace(
         self,
         final_context: dict[str, Any],
@@ -1012,10 +1072,15 @@ class BaseAgent(ABC):
             # than passing leaked filler off as a completed task. Mirrors
             # _extract_answer's primary/secondary sources, so any pattern that
             # concludes properly (sets an answer key) or runs a tool is unaffected.
-            success = self._completion_is_real(
+            success, stop_reason = self._run_outcome(
                 final_context, trace, extra_answer_keys, execution_evidence_keys
             )
-            if not success:
+            if stop_reason in StopReason.FORCED:
+                logger.warning(
+                    f"Agent '{agent_type}' was forced to stop ({stop_reason}); "
+                    f"shipping its last answer with success=False."
+                )
+            elif not success:
                 if execution_evidence_keys:
                     logger.warning(
                         f"Agent '{agent_type}' completed with no execution "
@@ -1043,6 +1108,7 @@ class BaseAgent(ABC):
                     if k not in RESULT_DROPPED_CONTEXT_KEYS
                 },
                 structured_output=structured,
+                stop_reason=stop_reason,
             )
 
         except (AgentTimeoutError, BudgetExhaustedError):

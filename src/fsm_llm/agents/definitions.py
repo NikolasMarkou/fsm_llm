@@ -263,6 +263,11 @@ class AgentResult(BaseModel):
     final_context: dict[str, Any] = Field(default_factory=dict)
     structured_output: Any = None
     """Validated Pydantic model instance when ``AgentConfig.output_schema`` is set."""
+    stop_reason: str | None = None
+    """Why the run ended, a ``constants.StopReason`` value (``None`` when the
+    result was built outside an agent pattern). ``success`` is True only for
+    ``answered`` and ``evidence``; a forced stop keeps its answer but reports
+    ``success=False``."""
 
     @property
     def iterations_used(self) -> int:

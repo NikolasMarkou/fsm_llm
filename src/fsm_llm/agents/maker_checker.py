@@ -22,6 +22,7 @@ from .constants import (
     HandlerPriorities,
     LogMessages,
     MakerCheckerStates,
+    StopReason,
 )
 from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_maker_checker_fsm
@@ -257,6 +258,10 @@ class MakerCheckerAgent(BaseAgent):
                 f"Max revisions ({max_revisions}) reached, forcing checker approval"
             )
             result[ContextKeys.CHECKER_PASSED] = True
+            # The draft ships, but a pass the checker did not give itself
+            # reports success=False (D-011).
+            if context.get(ContextKeys.CHECKER_PASSED) is not True:
+                result[ContextKeys.FORCED_STOP_REASON] = StopReason.FORCED_PASS
 
         return result
 
@@ -279,5 +284,8 @@ class MakerCheckerAgent(BaseAgent):
         Registered on the check state only (D-007); returns ``{}`` otherwise.
         """
         if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
-            return {ContextKeys.CHECKER_PASSED: True}
+            return {
+                ContextKeys.CHECKER_PASSED: True,
+                ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS,
+            }
         return {}

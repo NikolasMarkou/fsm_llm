@@ -22,6 +22,7 @@ from .constants import (
     Defaults,
     ErrorMessages,
     LogMessages,
+    StopReason,
 )
 from .definitions import AgentConfig, AgentResult, AgentTrace
 from .exceptions import AgentError
@@ -163,9 +164,12 @@ class SelfConsistencyAgent(BaseAgent):
 
         structured = self._try_parse_structured_output(aggregated)
 
+        # An empty aggregate is no result, not a success (D-011).
+        answered = bool(str(aggregated or "").strip())
         return AgentResult(
             answer=aggregated,
-            success=True,
+            success=answered,
+            stop_reason=StopReason.ANSWERED if answered else StopReason.NO_RESULT,
             trace=trace,
             final_context={
                 ContextKeys.SAMPLES: samples,

@@ -60,6 +60,7 @@ if _HAS_FASTAPI:
     class _InvokeResponse(PydanticBaseModel):
         answer: str
         success: bool
+        stop_reason: str | None = None
         iterations: int = 0
         tools_used: list[str] = []
 
@@ -317,6 +318,7 @@ class AgentServer:
                 return _InvokeResponse(
                     answer=result.answer,
                     success=result.success,
+                    stop_reason=getattr(result, "stop_reason", None),
                     iterations=result.trace.total_iterations,
                     tools_used=result.trace.tools_used,
                 )
@@ -355,6 +357,7 @@ class AgentServer:
                         {
                             "answer": result.answer,
                             "success": result.success,
+                            "stop_reason": getattr(result, "stop_reason", None),
                             "iterations": result.trace.total_iterations,
                         }
                     )

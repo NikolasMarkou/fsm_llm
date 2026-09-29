@@ -10,7 +10,7 @@ from typing import Any
 
 from fsm_llm.logging import logger
 
-from .constants import ContextKeys, Defaults, LogMessages
+from .constants import ContextKeys, Defaults, LogMessages, StopReason
 from .definitions import AgentStep, ToolCall
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 from .hitl import ApprovalPolicy
@@ -177,6 +177,7 @@ class AgentHandlers:
                     # termination here too — otherwise the guard would block
                     # conclude and the loop would run to the hard budget ceiling.
                     ContextKeys.MAX_ITERATIONS_REACHED: True,
+                    ContextKeys.FORCED_STOP_REASON: StopReason.STALLED,
                 }
 
             if not should_terminate or unknown:

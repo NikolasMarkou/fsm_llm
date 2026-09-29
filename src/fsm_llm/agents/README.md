@@ -24,7 +24,7 @@ flowchart TD
 - Tools run inside handlers (hooks that FSM-LLM calls at fixed points), not inside the LLM. A tool failure is shown to the model as an observation marked `[TOOL FAILED]` instead of crashing the run.
 - Limits stop runaway loops: `max_iterations` (default 10; the hard ceiling is three times that in FSM turns, which raises `BudgetExhaustedError`) and `timeout_seconds` (default 300, raises `AgentTimeoutError`).
 - The ReAct family cannot conclude before a tool has run unless the loop was forced to stop, so a small model cannot answer from memory on turn one.
-- `success` is `True` only when the run produced a real answer or ran at least one tool. Planner patterns (orchestrator, ReWOO, plan and execute) must also show real executed work.
+- `success` is `True` only when the run reached its goal: a real answer or at least one tool run. Planner patterns (orchestrator, ReWOO, plan and execute) must also show real executed work. A run that was forced to stop (iteration budget, three turns with no tool, or an evaluator/checker pass forced at its revision limit) still returns its last answer but reports `success=False`. `result.stop_reason` says why the run ended: `answered`, `evidence`, `max_iterations`, `forced_pass`, `stalled`, `verification_failed`, `no_result` or `gate_failed`.
 
 ## Patterns
 

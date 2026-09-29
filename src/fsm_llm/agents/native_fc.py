@@ -54,6 +54,7 @@ from fsm_llm.ollama import (
 from fsm_llm.utilities import _resolve_reasoning_trace
 
 from .base import BaseAgent, _output_response_format
+from .constants import StopReason
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError
 from .tools import ToolRegistry, redact_secret_entries
@@ -401,6 +402,9 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         max_iters = self.config.max_iterations
         answer = ""
         concluded = False
+        # Only a loop that ran out of turns is a forced stop; a malformed turn
+        # ends it early with no result.
+        exhausted = False
 
         try:
             for iteration in range(1, max_iters + 1):
@@ -480,6 +484,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                     )
             else:
                 # Loop exhausted without a final (tool-call-free) answer.
+                exhausted = True
                 logger.warning(
                     "NativeFunctionCallingReactAgent hit max_iterations without "
                     "a final answer."
@@ -599,9 +604,16 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             # unfinished work and must NOT be relabelled a success. For "did it
             # do anything at all?", read `trace.tool_calls`, unchanged.
             success = concluded and bool(answer)
+            if success:
+                stop_reason = StopReason.ANSWERED
+            elif exhausted:
+                stop_reason = StopReason.MAX_ITERATIONS
+            else:
+                stop_reason = StopReason.NO_RESULT
             return AgentResult(
                 answer=answer,
                 success=success,
+                stop_reason=stop_reason,
                 trace=trace,
                 final_context={"task": task},
                 structured_output=structured,

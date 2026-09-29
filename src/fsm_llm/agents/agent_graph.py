@@ -16,6 +16,7 @@ from typing import Any
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, strip_caller_context
+from .constants import StopReason
 from .definitions import AgentConfig, AgentResult, AgentTrace
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 
@@ -221,6 +222,7 @@ class AgentGraph:
                 results[node_name] = AgentResult(
                     answer=f"Node '{node_name}' failed: {e}",
                     success=False,
+                    stop_reason=StopReason.NO_RESULT,
                     trace=AgentTrace(),
                     final_context=node_context,
                 )
@@ -260,6 +262,7 @@ class AgentGraph:
             return AgentResult(
                 answer="No agents executed",
                 success=False,
+                stop_reason=StopReason.NO_RESULT,
                 trace=AgentTrace(),
                 final_context=context,
             )
@@ -290,9 +293,17 @@ class AgentGraph:
             "_graph_elapsed_seconds": elapsed,
         }
 
+        # Success needs every executed node; the reason is the first failed
+        # node's in execution order, else the answering node's.
+        failed = [results[n] for n in execution_order if not results[n].success]
         return AgentResult(
             answer=last_result.answer,
-            success=all(r.success for r in results.values()),
+            success=not failed,
+            stop_reason=(
+                failed[0].stop_reason or StopReason.NO_RESULT
+                if failed
+                else last_result.stop_reason
+            ),
             trace=combined_trace,
             final_context=final_context,
             structured_output=last_result.structured_output,

@@ -22,6 +22,7 @@ from .constants import (
     HandlerNames,
     HandlerPriorities,
     LogMessages,
+    StopReason,
 )
 from .definitions import AgentConfig, AgentResult, EvaluationResult
 from .fsm_definitions import build_evalopt_fsm
@@ -214,6 +215,8 @@ class EvaluatorOptimizerAgent(BaseAgent):
                 ContextKeys.EVALUATION_RESULT: eval_result.model_dump(mode="json"),
                 ContextKeys.REFINEMENT_FEEDBACK: eval_result.feedback,
                 ContextKeys.AGENT_TRACE: trace,
+                # The output ships, but the run reports success=False (D-011).
+                ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS,
             }
 
         # Evaluation failed, provide feedback for refinement
@@ -232,6 +235,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
             {
                 ContextKeys.MAX_ITERATIONS_REACHED: True,
                 ContextKeys.EVALUATION_PASSED: True,
+                ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS,
             },
         )
 

@@ -285,3 +285,286 @@ class TestOfflineNetworkGuard:
         )
 
         assert network_exempt(node) is exempt
+
+
+# ---------------------------------------------------------------------------
+# Step 13: one success contract with ``stop_reason`` (D-011 of plan 06a5ec0a)
+# ---------------------------------------------------------------------------
+
+_HAIKU = "Rain on tin roofs sings"
+
+
+def _failing_evaluation(output: str, context: dict) -> object:
+    from fsm_llm.agents.definitions import EvaluationResult
+
+    return EvaluationResult(passed=False, score=0.1, feedback="more imagery")
+
+
+def _passing_evaluation(output: str, context: dict) -> object:
+    from fsm_llm.agents.definitions import EvaluationResult
+
+    return EvaluationResult(passed=True, score=0.9, feedback="good")
+
+
+def _lookup_registry(runs: list[str]) -> object:
+    from fsm_llm.agents import ToolRegistry
+
+    registry = ToolRegistry()
+
+    def lookup(query: str) -> str:
+        runs.append(query)
+        return "The capital of France is Paris."
+
+    registry.register_function(lookup, name="lookup", description="Look up a fact")
+    return registry
+
+
+# The tool observation carries "is Paris", so should_terminate is grounded only
+# after the lookup ran.
+_REACT_FACTS: dict[str, tuple[object, str]] = {
+    "tool_name": ("lookup", "capital"),
+    "tool_input": ({"query": "capital of France"}, "capital"),
+    "should_terminate": (True, "is Paris"),
+}
+
+
+class TestSuccessContract:
+    """``success`` means the run reached its goal; ``stop_reason`` says why it
+    ended. A forced stop or forced pass still ships its answer but reports
+    ``success=False`` (c1d5bfbc D-022 forbids raising, not reporting)."""
+
+    def test_stop_reason_is_an_optional_serialisable_field(self):
+        from fsm_llm.agents.definitions import AgentResult
+
+        legacy = AgentResult(answer="a", success=True)
+        assert legacy.stop_reason is None
+        dumped = AgentResult(answer="a", success=False, stop_reason="stalled")
+        assert '"stop_reason":"stalled"' in dumped.model_dump_json()
+
+    def test_evalopt_forced_pass_at_max_refinements_reports_failure(self):
+        from fsm_llm.agents import AgentConfig, EvaluatorOptimizerAgent
+
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=_failing_evaluation,
+            max_refinements=1,
+            config=AgentConfig(max_iterations=10),
+            llm_interface=PromptGroundedLLM(
+                facts={"generated_output": (_HAIKU, "haiku")}
+            ),
+        )
+        result = agent.run("Write a haiku about rain")
+
+        assert result.answer == _HAIKU  # the forced output still ships
+        assert result.success is False
+        assert result.stop_reason == "forced_pass"
+
+    def test_evalopt_real_pass_is_answered(self):
+        from fsm_llm.agents import AgentConfig, EvaluatorOptimizerAgent
+
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=_passing_evaluation,
+            max_refinements=1,
+            config=AgentConfig(max_iterations=10),
+            llm_interface=PromptGroundedLLM(
+                facts={"generated_output": (_HAIKU, "haiku")}
+            ),
+        )
+        result = agent.run("Write a haiku about rain")
+
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def _maker_checker(self, facts: dict[str, tuple[object, str]]):
+        from fsm_llm.agents import AgentConfig, MakerCheckerAgent
+
+        return MakerCheckerAgent(
+            maker_instructions="Write a haiku.",
+            checker_instructions="Review the haiku.",
+            max_revisions=1,
+            config=AgentConfig(max_iterations=10),
+            llm_interface=PromptGroundedLLM(facts=facts),
+        )
+
+    def test_maker_checker_forced_pass_at_max_revisions_reports_failure(self):
+        agent = self._maker_checker(
+            {
+                "draft_output": (_HAIKU, "haiku"),
+                "checker_passed": (False, "haiku"),
+                "quality_score": (0.2, "haiku"),
+            }
+        )
+        result = agent.run("Write a haiku about rain")
+
+        assert result.answer == _HAIKU  # the forced draft still ships
+        assert result.success is False
+        assert result.stop_reason == "forced_pass"
+
+    def test_maker_checker_quality_pass_is_answered(self):
+        agent = self._maker_checker(
+            {
+                "draft_output": (_HAIKU, "haiku"),
+                "quality_score": (0.95, "haiku"),
+            }
+        )
+        result = agent.run("Write a haiku about rain")
+
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_react_answer_is_answered(self):
+        from fsm_llm.agents import AgentConfig, ReactAgent
+
+        runs: list[str] = []
+        agent = ReactAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=6),
+            llm_interface=PromptGroundedLLM(facts=_REACT_FACTS),
+        )
+        result = agent.run("What is the capital of France?")
+
+        assert runs == ["capital of France"]
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_react_forced_stop_reports_max_iterations(self):
+        from fsm_llm.agents import AgentConfig, ReactAgent
+
+        runs: list[str] = []
+        facts = {k: v for k, v in _REACT_FACTS.items() if k != "should_terminate"}
+        agent = ReactAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=6),
+            llm_interface=PromptGroundedLLM(facts=facts),
+        )
+        result = agent.run("What is the capital of France?")
+
+        assert runs, "the tool never ran"
+        assert result.final_context[ContextKeys.MAX_ITERATIONS_REACHED] is True
+        assert result.answer  # the last answer still ships
+        assert result.success is False
+        assert result.stop_reason == "max_iterations"
+
+    def test_react_stall_reports_stalled(self):
+        from fsm_llm.agents import AgentConfig, ReactAgent
+
+        runs: list[str] = []
+        agent = ReactAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=10),
+            llm_interface=PromptGroundedLLM(facts={}),
+        )
+        result = agent.run("What is the capital of France?")
+
+        assert runs == []
+        assert (result.success, result.stop_reason) == (False, "stalled")
+
+    def test_caller_cannot_seed_the_forced_reason(self):
+        from fsm_llm.agents import AgentConfig, ReactAgent
+
+        runs: list[str] = []
+        agent = ReactAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=6),
+            llm_interface=PromptGroundedLLM(facts=_REACT_FACTS),
+        )
+        result = agent.run(
+            "What is the capital of France?",
+            initial_context={ContextKeys.FORCED_STOP_REASON: "forced_pass"},
+        )
+
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_native_fc_exhausted_loop_reports_max_iterations(self):
+        from fsm_llm.agents import AgentConfig
+        from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
+
+        runs: list[str] = []
+        call = {
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "name": "lookup", "arguments": {"query": "France"}}
+            ],
+        }
+        agent = NativeFunctionCallingReactAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(model="mock/model", max_iterations=2),
+            complete_fn=lambda model, messages, schemas: call,
+        )
+        result = agent.run("What is the capital of France?")
+
+        assert len(runs) == 2
+        assert (result.success, result.stop_reason) == (False, "max_iterations")
+
+    def test_native_fc_answer_is_answered(self):
+        from fsm_llm.agents import AgentConfig
+        from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
+
+        agent = NativeFunctionCallingReactAgent(
+            tools=_lookup_registry([]),
+            config=AgentConfig(model="mock/model"),
+            complete_fn=lambda model, messages, schemas: {
+                "content": "Paris",
+                "tool_calls": [],
+            },
+        )
+        result = agent.run("What is the capital of France?")
+
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_self_consistency_empty_aggregate_is_no_result(self):
+        from fsm_llm.agents import AgentConfig
+        from fsm_llm.agents.self_consistency import SelfConsistencyAgent
+
+        agent = SelfConsistencyAgent(
+            num_samples=2,
+            aggregation_fn=lambda samples: "",
+            config=AgentConfig(max_iterations=5),
+            llm_interface=PromptGroundedLLM(default_response="Paris"),
+        )
+        result = agent.run("What is the capital of France?")
+
+        assert (result.success, result.stop_reason) == (False, "no_result")
+
+    def test_swarm_handoff_cap_is_a_forced_stop(self):
+        from fsm_llm.agents.definitions import AgentResult
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        class _Handoff:
+            """Always asks to hand off to the other agent."""
+
+            def __init__(self, target: str) -> None:
+                self.target = target
+
+            def run(self, task: str, initial_context: object = None) -> AgentResult:
+                return AgentResult(
+                    answer=f"to {self.target}",
+                    success=True,
+                    stop_reason="answered",
+                    final_context={"next_agent": self.target},
+                )
+
+        swarm = SwarmAgent(
+            agents={"a": _Handoff("b"), "b": _Handoff("a")},  # type: ignore[dict-item]
+            entry_agent="a",
+            max_handoffs=2,
+        )
+        result = swarm.run("ping")
+
+        assert result.answer.startswith("to ")
+        assert (result.success, result.stop_reason) == (False, "max_iterations")
+
+    def test_agent_server_exposes_stop_reason(self):
+        pytest.importorskip("fastapi")
+        from fastapi.testclient import TestClient
+
+        from fsm_llm.agents.definitions import AgentResult
+        from fsm_llm.agents.remote import AgentServer
+
+        class _Forced:
+            def run(self, task: str, initial_context: object = None) -> AgentResult:
+                return AgentResult(
+                    answer="best effort", success=False, stop_reason="forced_pass"
+                )
+
+        client = TestClient(AgentServer(agent=_Forced()).app)  # type: ignore[arg-type]
+        body = client.post("/invoke", json={"task": "t"}).json()
+
+        assert body["success"] is False
+        assert body["stop_reason"] == "forced_pass"

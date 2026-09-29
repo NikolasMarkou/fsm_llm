@@ -15,6 +15,7 @@ from fsm_llm.logging import logger
 from fsm_llm.memory import WorkingMemory
 
 from .base import BaseAgent, strip_caller_context
+from .constants import StopReason
 from .definitions import AgentConfig, AgentResult, AgentTrace
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 
@@ -87,6 +88,8 @@ class SwarmAgent(BaseAgent):
         all_traces: list[dict[str, Any]] = []
         all_tool_calls: list[Any] = []
         last_result: AgentResult | None = None
+        # Set when the handoff cap cut off a requested handoff (forced stop).
+        capped = False
         handoff_chain: list[str] = [current_agent_name]
 
         logger.info(
@@ -126,6 +129,7 @@ class SwarmAgent(BaseAgent):
                 return AgentResult(
                     answer=f"Swarm failed at agent '{current_agent_name}': {e}",
                     success=False,
+                    stop_reason=StopReason.NO_RESULT,
                     trace=AgentTrace(total_iterations=handoff_count),
                     final_context={
                         **context,
@@ -161,6 +165,7 @@ class SwarmAgent(BaseAgent):
                 logger.warning(
                     f"Swarm reached max handoffs ({self._max_handoffs}), stopping"
                 )
+                capped = True
                 break
 
             if next_agent not in self._agents:
@@ -196,6 +201,7 @@ class SwarmAgent(BaseAgent):
             return AgentResult(
                 answer="Swarm produced no results",
                 success=False,
+                stop_reason=StopReason.NO_RESULT,
                 trace=AgentTrace(total_iterations=0),
                 final_context=context,
             )
@@ -214,9 +220,14 @@ class SwarmAgent(BaseAgent):
             "_swarm_elapsed_seconds": elapsed,
         }
 
+        # A requested handoff the cap refused is a forced stop: the last
+        # answer ships with success=False (D-011).
         return AgentResult(
             answer=last_result.answer,
-            success=last_result.success,
+            success=last_result.success and not capped,
+            stop_reason=(
+                StopReason.MAX_ITERATIONS if capped else last_result.stop_reason
+            ),
             trace=combined_trace,
             final_context=final_context,
             structured_output=last_result.structured_output,

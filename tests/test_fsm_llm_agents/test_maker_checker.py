@@ -402,7 +402,11 @@ class TestMakerCheckerHandlers:
         assert result[ContextKeys.MAX_ITERATIONS_REACHED] is True
         # D-007: the pass is forced by a check-only handler, not the limiter.
         assert ContextKeys.CHECKER_PASSED not in result
-        assert agent._force_pass_at_limit(result) == {ContextKeys.CHECKER_PASSED: True}
+        # The forced pass records why, so the run reports success=False (D-011).
+        assert agent._force_pass_at_limit(result) == {
+            ContextKeys.CHECKER_PASSED: True,
+            ContextKeys.FORCED_STOP_REASON: "forced_pass",
+        }
 
     def test_extract_answer_from_final_answer(self):
         agent = MakerCheckerAgent(

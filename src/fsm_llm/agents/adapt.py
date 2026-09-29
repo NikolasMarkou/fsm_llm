@@ -24,6 +24,7 @@ from .constants import (
     HandlerNames,
     HandlerPriorities,
     LogMessages,
+    StopReason,
 )
 from .definitions import AgentConfig, AgentResult
 from .exceptions import AgentError
@@ -129,12 +130,19 @@ class ADaPTAgent(BaseAgent):
             # (a FAILED attempt's attempt_result is partial/garbage, not a real
             # completion).
             subtask_results = self._subtask_entries(final_context)
-            if subtask_results:
+            forced = self._forced_stop_reason(final_context)
+            stop_reason: str
+            if forced is not None:
+                # Same rule as every FSM pattern (D-011): a forced stop ships
+                # its answer with success=False.
+                success, stop_reason = False, forced
+            elif subtask_results:
                 # A decomposed run succeeds on its subtasks, not on the combine
                 # text: AND needs every executed subtask, OR needs one.
                 oks = [bool(entry.get("success")) for entry in subtask_results]
                 operator = self._normalize_operator(final_context.get("operator"))
                 success = any(oks) if operator == "OR" else all(oks)
+                stop_reason = StopReason.EVIDENCE if success else StopReason.NO_RESULT
                 if not success:
                     logger.warning(
                         f"ADaPT decomposition failed ({operator}: "
@@ -147,8 +155,10 @@ class ADaPTAgent(BaseAgent):
                     if final_context.get(ContextKeys.ATTEMPT_SUCCEEDED)
                     else None
                 )
-                success = self._completion_is_real(final_context, trace, attempt_keys)
-            if not success and not subtask_results:
+                success, stop_reason = self._run_outcome(
+                    final_context, trace, attempt_keys
+                )
+            if not success and not subtask_results and forced is None:
                 logger.warning(
                     "ADaPT completed with no final_answer and no tool calls — "
                     "answer is fallback-only; marking success=False."
@@ -157,6 +167,7 @@ class ADaPTAgent(BaseAgent):
             return AgentResult(
                 answer=answer,
                 success=success,
+                stop_reason=stop_reason,
                 trace=trace,
                 final_context=self._filter_context(final_context),
             )
