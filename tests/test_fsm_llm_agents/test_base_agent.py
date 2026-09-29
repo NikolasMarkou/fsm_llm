@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from fsm_llm_agents.base import BaseAgent
-from fsm_llm_agents.definitions import AgentConfig, AgentResult
-from fsm_llm_agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+from fsm_llm.agents.base import BaseAgent
+from fsm_llm.agents.definitions import AgentConfig, AgentResult
+from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
 
 
 class ConcreteAgent(BaseAgent):
@@ -198,7 +198,7 @@ class TestBaseAgentContextFiltering:
 class TestBaseAgentCreateApi:
     """Tests for API factory helper."""
 
-    @patch("fsm_llm_agents.base.API.from_definition")
+    @patch("fsm_llm.agents.base.API.from_definition")
     def test_create_api(self, mock_from_def):
         agent = ConcreteAgent(config=AgentConfig(model="test-model"))
         fsm_def = {"name": "test", "initial_state": "start", "states": {}}
@@ -235,8 +235,8 @@ class TestCreateAgent:
     """Tests for create_agent() convenience function."""
 
     def test_create_react_agent(self):
-        from fsm_llm_agents import create_agent
-        from fsm_llm_agents.tools import tool
+        from fsm_llm.agents import create_agent
+        from fsm_llm.agents.tools import tool
 
         @tool
         def search(query: str) -> str:
@@ -244,18 +244,18 @@ class TestCreateAgent:
             return "results"
 
         agent = create_agent(tools=[search])
-        from fsm_llm_agents import ReactAgent
+        from fsm_llm.agents import ReactAgent
 
         assert isinstance(agent, ReactAgent)
 
     def test_create_debate_agent(self):
-        from fsm_llm_agents import DebateAgent, create_agent
+        from fsm_llm.agents import DebateAgent, create_agent
 
         agent = create_agent(pattern="debate")
         assert isinstance(agent, DebateAgent)
 
     def test_create_with_registry(self):
-        from fsm_llm_agents import ToolRegistry, create_agent
+        from fsm_llm.agents import ToolRegistry, create_agent
 
         registry = ToolRegistry()
         registry.register_function(lambda p: "ok", name="test", description="Test tool")
@@ -263,21 +263,21 @@ class TestCreateAgent:
         assert len(agent.tools) == 1
 
     def test_unknown_pattern_raises(self):
-        from fsm_llm_agents import create_agent
+        from fsm_llm.agents import create_agent
 
         with pytest.raises(ValueError, match="Unknown pattern"):
             create_agent(pattern="nonexistent")
 
     def test_create_with_config(self):
-        from fsm_llm_agents import AgentConfig, create_agent
+        from fsm_llm.agents import AgentConfig, create_agent
 
         config = AgentConfig(max_iterations=5)
         agent = create_agent(pattern="debate", config=config)
         assert agent.config.max_iterations == 5
 
     def test_create_parallel_react_agent(self):
-        from fsm_llm_agents import ParallelReactAgent, create_agent
-        from fsm_llm_agents.tools import tool
+        from fsm_llm.agents import ParallelReactAgent, create_agent
+        from fsm_llm.agents.tools import tool
 
         @tool
         def search(query: str) -> str:
@@ -288,8 +288,8 @@ class TestCreateAgent:
         assert isinstance(agent, ParallelReactAgent)
 
     def test_create_native_fc_agent(self):
-        from fsm_llm_agents import NativeFunctionCallingReactAgent, create_agent
-        from fsm_llm_agents.tools import tool
+        from fsm_llm.agents import NativeFunctionCallingReactAgent, create_agent
+        from fsm_llm.agents.tools import tool
 
         @tool
         def search(query: str) -> str:
@@ -300,8 +300,8 @@ class TestCreateAgent:
         assert isinstance(agent, NativeFunctionCallingReactAgent)
 
     def test_create_verified_react_agent(self):
-        from fsm_llm_agents import VerifiedReactAgent, create_agent
-        from fsm_llm_agents.tools import tool
+        from fsm_llm.agents import VerifiedReactAgent, create_agent
+        from fsm_llm.agents.tools import tool
 
         @tool
         def search(query: str) -> str:
@@ -312,8 +312,8 @@ class TestCreateAgent:
         assert isinstance(agent, VerifiedReactAgent)
 
     def test_create_auto_memory_agent(self):
-        from fsm_llm_agents import AutoMemoryReactAgent, create_agent
-        from fsm_llm_agents.tools import tool
+        from fsm_llm.agents import AutoMemoryReactAgent, create_agent
+        from fsm_llm.agents.tools import tool
 
         @tool
         def search(query: str) -> str:

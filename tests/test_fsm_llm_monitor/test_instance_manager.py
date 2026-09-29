@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_monitor.instance_manager."""
+"""Tests for fsm_llm.monitor.instance_manager."""
 
 import threading
 from typing import ClassVar
 from unittest import mock
 from unittest.mock import MagicMock
 
-from fsm_llm_monitor.constants import EVENT_INSTANCE_LAUNCHED
-from fsm_llm_monitor.definitions import MonitorConfig
-from fsm_llm_monitor.instance_manager import (
+from fsm_llm.monitor.constants import EVENT_INSTANCE_LAUNCHED
+from fsm_llm.monitor.definitions import MonitorConfig
+from fsm_llm.monitor.instance_manager import (
     InstanceManager,
     ManagedAgent,
     ManagedFSM,
@@ -182,7 +182,7 @@ class TestInstanceManager:
         mgr = self._make_manager()
         import pytest
 
-        import fsm_llm_monitor.instance_manager as im
+        import fsm_llm.monitor.instance_manager as im
 
         old = im._HAS_AGENTS
         try:
@@ -196,7 +196,7 @@ class TestInstanceManager:
         mgr = self._make_manager()
         import pytest
 
-        import fsm_llm_monitor.instance_manager as im
+        import fsm_llm.monitor.instance_manager as im
 
         old = im._HAS_WORKFLOWS
         try:
@@ -209,7 +209,7 @@ class TestInstanceManager:
 
 class TestRegisterMonitorHandlers:
     def test_registers_7_handlers(self):
-        from fsm_llm_monitor.collector import EventCollector
+        from fsm_llm.monitor.collector import EventCollector
 
         api = MagicMock()
         collector = EventCollector()
@@ -304,7 +304,7 @@ class TestConversationCaching:
         mgr._max_ended_conversations = 3
 
         # Manually add entries to the cache
-        from fsm_llm_monitor.definitions import ConversationSnapshot
+        from fsm_llm.monitor.definitions import ConversationSnapshot
 
         for i in range(5):
             mgr._ended_conversations[f"conv-{i}"] = ConversationSnapshot(
@@ -328,7 +328,7 @@ class TestConversationCaching:
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
 
-        from fsm_llm_monitor.definitions import ConversationSnapshot
+        from fsm_llm.monitor.definitions import ConversationSnapshot
 
         snap = ConversationSnapshot(
             conversation_id="cached-1",
@@ -346,7 +346,7 @@ class TestConversationCaching:
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
 
-        from fsm_llm_monitor.definitions import ConversationSnapshot
+        from fsm_llm.monitor.definitions import ConversationSnapshot
 
         for i in range(3):
             mgr._ended_conversations[f"ended-{i}"] = ConversationSnapshot(
@@ -414,7 +414,7 @@ class TestDestroyInstance:
         mgr.global_collector.cleanup()
 
         agent = ManagedAgent(instance_id="ag1")
-        from fsm_llm_monitor.collector import EventCollector
+        from fsm_llm.monitor.collector import EventCollector
 
         collector = EventCollector()
         with mgr._lock:
@@ -432,7 +432,7 @@ class TestDestroyInstance:
         mgr.global_collector.cleanup()
 
         wf = ManagedWorkflow(instance_id="wf1")
-        from fsm_llm_monitor.collector import EventCollector
+        from fsm_llm.monitor.collector import EventCollector
 
         collector = EventCollector()
         with mgr._lock:
@@ -462,14 +462,14 @@ class TestDestroyInstance:
         agent.thread = thread
         thread.start()
 
-        from fsm_llm_monitor.collector import EventCollector
+        from fsm_llm.monitor.collector import EventCollector
 
         collector = EventCollector()
         with mgr._lock:
             mgr._instances["ag-hang"] = agent
             mgr._collectors["ag-hang"] = collector
 
-        with mock.patch("fsm_llm_monitor.instance_manager.logger") as mock_logger:
+        with mock.patch("fsm_llm.monitor.instance_manager.logger") as mock_logger:
             start = time.monotonic()
             mgr.destroy_instance("ag-hang")
             elapsed = time.monotonic() - start
@@ -503,14 +503,14 @@ class TestDestroyInstance:
         agent.thread = thread
         thread.start()
 
-        from fsm_llm_monitor.collector import EventCollector
+        from fsm_llm.monitor.collector import EventCollector
 
         collector = EventCollector()
         with mgr._lock:
             mgr._instances["ag-quick"] = agent
             mgr._collectors["ag-quick"] = collector
 
-        with mock.patch("fsm_llm_monitor.instance_manager.logger") as mock_logger:
+        with mock.patch("fsm_llm.monitor.instance_manager.logger") as mock_logger:
             mgr.destroy_instance("ag-quick")
 
         thread.join(timeout=2.0)
@@ -539,7 +539,7 @@ class TestActivitySnapshots:
         )
         agent.max_iterations = 10
 
-        from fsm_llm_monitor.collector import EventCollector
+        from fsm_llm.monitor.collector import EventCollector
 
         collector = EventCollector()
         with mgr._lock:
@@ -560,7 +560,7 @@ class TestActivitySnapshots:
         agent = ManagedAgent(instance_id="a1", agent_type="ReactAgent", task="t")
         agent.status = "running"
 
-        from fsm_llm_monitor.collector import EventCollector
+        from fsm_llm.monitor.collector import EventCollector
 
         collector = EventCollector()
         with mgr._lock:
@@ -578,7 +578,7 @@ class TestActivitySnapshots:
         wf = ManagedWorkflow(instance_id="wf1")
         wf.status = "running"
 
-        from fsm_llm_monitor.collector import EventCollector
+        from fsm_llm.monitor.collector import EventCollector
 
         collector = EventCollector()
         with mgr._lock:
@@ -588,6 +588,18 @@ class TestActivitySnapshots:
         metrics = mgr.get_metrics()
         assert metrics.active_agents == 0
         assert metrics.active_workflows == 1
+
+
+class TestFindExamplesDir:
+    def test_examples_dir_resolves_to_repo_examples(self):
+        # instance_manager.py sits one level deeper since the move under
+        # src/fsm_llm/monitor/; a wrong depth silently returns None.
+        from pathlib import Path
+
+        from fsm_llm.monitor.instance_manager import _find_examples_dir
+
+        repo = Path(__file__).resolve().parents[2]
+        assert _find_examples_dir() == repo / "examples"
 
 
 class TestWorkflowPresets:
@@ -724,7 +736,7 @@ class TestDisabledAgentTypes:
             mgr.launch_agent(agent_type="MakerCheckerAgent", task="x")
 
     def test_supported_agent_types(self):
-        from fsm_llm_monitor.instance_manager import _AGENT_CLASSES
+        from fsm_llm.monitor.instance_manager import _AGENT_CLASSES
 
         assert "EvaluatorOptimizerAgent" not in _AGENT_CLASSES
         assert "MakerCheckerAgent" not in _AGENT_CLASSES
@@ -742,7 +754,7 @@ class TestAgentConcurrencyHardening:
         return mgr
 
     def _inject_agent(self, mgr, inst):
-        from fsm_llm_monitor.collector import EventCollector
+        from fsm_llm.monitor.collector import EventCollector
 
         with mgr._lock:
             mgr._instances[inst.instance_id] = inst
@@ -789,7 +801,7 @@ class TestAgentConcurrencyHardening:
         assert rr["error"] == "Agent has not completed yet"
 
     def test_dashboard_config_version_increments_under_lock(self):
-        from fsm_llm_monitor.definitions import DashboardConfig
+        from fsm_llm.monitor.definitions import DashboardConfig
 
         mgr = self._make_manager()
         v0 = mgr.dashboard_config_version
@@ -804,10 +816,10 @@ class TestStubToolExecution:
     def test_launched_agent_stub_tool_returns_its_response(self, monkeypatch):
         import pytest
 
-        pytest.importorskip("fsm_llm_agents")
-        from fsm_llm_agents.definitions import ToolCall
-        from fsm_llm_monitor import instance_manager as im
-        from fsm_llm_monitor.definitions import StubToolConfig
+        pytest.importorskip("fsm_llm.agents")
+        from fsm_llm.agents.definitions import ToolCall
+        from fsm_llm.monitor import instance_manager as im
+        from fsm_llm.monitor.definitions import StubToolConfig
 
         captured: dict = {}
         done = threading.Event()

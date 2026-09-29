@@ -8,6 +8,15 @@ from typing import Any
 
 import pytest
 
+from fsm_llm.agents import (
+    AgentConfig,
+    ParallelReactAgent,
+    ToolRegistry,
+    build_parallel_react_fsm,
+    tool,
+)
+from fsm_llm.agents.constants import ContextKeys
+from fsm_llm.agents.parallel_react import TOOL_CALLS_KEY
 from fsm_llm.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -16,15 +25,6 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.expressions import evaluate_logic
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents import (
-    AgentConfig,
-    ParallelReactAgent,
-    ToolRegistry,
-    build_parallel_react_fsm,
-    tool,
-)
-from fsm_llm_agents.constants import ContextKeys
-from fsm_llm_agents.parallel_react import TOOL_CALLS_KEY
 
 
 @tool

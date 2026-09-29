@@ -1,4 +1,4 @@
-"""Falsifying tests for ``fsm_llm_harness.roles`` and ``fsm_llm_harness.tools``.
+"""Falsifying tests for ``fsm_llm.harness.roles`` and ``fsm_llm.harness.tools``.
 
 These two modules had **zero** test references before step 7d: a ``grep`` over
 ``tests/`` for ``tool_scope`` / ``READ_ONLY_TOOLS`` / ``WRITE_TOOLS`` /
@@ -39,6 +39,10 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
+from fsm_llm.agents.constants import ContextKeys as AgentKeys
+from fsm_llm.agents.definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
+from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
+from fsm_llm.agents.react import ReactAgent
 from fsm_llm.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -47,13 +51,8 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
     StateNotFoundError,
 )
-from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface, LLMInterface
-from fsm_llm_agents.constants import ContextKeys as AgentKeys
-from fsm_llm_agents.definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
-from fsm_llm_agents.native_fc import NativeFunctionCallingReactAgent
-from fsm_llm_agents.react import ReactAgent
-from fsm_llm_harness import build_harness_fsm
-from fsm_llm_harness.constants import (
+from fsm_llm.harness import build_harness_fsm
+from fsm_llm.harness.constants import (
     ArtifactNames,
     ContextKeys,
     Defaults,
@@ -61,15 +60,15 @@ from fsm_llm_harness.constants import (
     PlanSchema,
     Role,
 )
-from fsm_llm_harness.exceptions import (
+from fsm_llm.harness.exceptions import (
     HarnessArtifactError,
     HarnessConfinementError,
     HarnessError,
     HarnessOwnershipError,
 )
-from fsm_llm_harness.hardening import coerce_worker_output, parse_role_output
-from fsm_llm_harness.harness import _WORKER_WRITABLE, RoleRequest
-from fsm_llm_harness.roles import (
+from fsm_llm.harness.hardening import coerce_worker_output, parse_role_output
+from fsm_llm.harness.harness import _WORKER_WRITABLE, RoleRequest
+from fsm_llm.harness.roles import (
     ROLE_SPECS,
     _default_agent_builder,
     _verified_writes,
@@ -81,7 +80,7 @@ from fsm_llm_harness.roles import (
     get_role_spec,
     held_tools,
 )
-from fsm_llm_harness.rules import (
+from fsm_llm.harness.rules import (
     EXPLORE_TOPICS,
     OWNERSHIP,
     ROLE_BY_STATE,
@@ -90,7 +89,7 @@ from fsm_llm_harness.rules import (
     explore_topics,
     get_rules,
 )
-from fsm_llm_harness.tools import (
+from fsm_llm.harness.tools import (
     _COUNTERPART_TOOL,
     _PER_PLAN_DIRS,
     COMMAND_ALLOWLIST,
@@ -120,6 +119,7 @@ from fsm_llm_harness.tools import (
     derive_disk_counts,
     gate_files,
 )
+from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface, LLMInterface
 
 # DECISION plan-2026-07-21T125237-191b2eb2/D-057
 # THIS FILE IS THE ANSWER TO "why did 139 green tests coexist with review C2".
@@ -236,7 +236,7 @@ def _role_request(
         - ``plan_dir=None`` reproduces the production degrade shape: no plan
           directory means the role holds no plan-file tool at all.
     """
-    from fsm_llm_harness.rules import get_rules
+    from fsm_llm.harness.rules import get_rules
 
     rules = get_rules(state)
     return RoleRequest(
@@ -3791,7 +3791,7 @@ class TestWriteEvidenceLabelNormalization:
         path ``Workspace.resolve`` refuses (a ``..`` escape).  The label is
         attribution metadata: a labeling error must never fail the dispatch.
         """
-        import fsm_llm_harness.roles as roles_module
+        import fsm_llm.harness.roles as roles_module
 
         monkeypatch.setattr(roles_module, "has_bytes", lambda reader, path: True)
         ws = tmp_path / "ws"
@@ -4042,9 +4042,9 @@ class TestDefaultAgentBuilder:
             assert seed is None, "the default factory shape carries no seed"
             return _Stub()
 
-        monkeypatch.setattr("fsm_llm_harness.roles.create_agent", _fake_create_agent)
+        monkeypatch.setattr("fsm_llm.harness.roles.create_agent", _fake_create_agent)
         monkeypatch.setattr(
-            "fsm_llm_harness.roles.NativeFunctionCallingReactAgent", _fake_native
+            "fsm_llm.harness.roles.NativeFunctionCallingReactAgent", _fake_native
         )
         factory = build_default_worker_factory(Workspace(tmp_path / "ws"))
 
@@ -4242,7 +4242,7 @@ class TestRunCommandFailurePaths:
     ) -> None:
         """An allowlisted command absent from PATH is a normal tool failure."""
         ws = Workspace(tmp_path / "ws", allow_shell=True)
-        monkeypatch.setattr("fsm_llm_harness.tools.shutil.which", lambda *a, **k: None)
+        monkeypatch.setattr("fsm_llm.harness.tools.shutil.which", lambda *a, **k: None)
 
         result = ws.run_command([COMMAND_ALLOWLIST[0]])
 
@@ -4257,7 +4257,7 @@ class TestRunCommandFailurePaths:
         def _boom(*args: Any, **kwargs: Any) -> Any:
             raise subprocess.TimeoutExpired(cmd="x", timeout=1.0)
 
-        monkeypatch.setattr("fsm_llm_harness.tools.subprocess.run", _boom)
+        monkeypatch.setattr("fsm_llm.harness.tools.subprocess.run", _boom)
 
         result = ws.run_command([COMMAND_ALLOWLIST[0]])
 
@@ -4272,7 +4272,7 @@ class TestRunCommandFailurePaths:
         def _boom(*args: Any, **kwargs: Any) -> Any:
             raise OSError("exec format error")
 
-        monkeypatch.setattr("fsm_llm_harness.tools.subprocess.run", _boom)
+        monkeypatch.setattr("fsm_llm.harness.tools.subprocess.run", _boom)
 
         result = ws.run_command([COMMAND_ALLOWLIST[0]])
 

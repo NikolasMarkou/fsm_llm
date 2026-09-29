@@ -10,6 +10,12 @@ Two fixes for the recall/chat-turn filler:
 """
 
 
+from fsm_llm.agents.auto_memory import AutoMemoryReactAgent
+from fsm_llm.agents.constants import ContextKeys
+from fsm_llm.agents.definitions import AgentConfig, ToolCall
+from fsm_llm.agents.prompts import build_conclude_extraction_instructions
+from fsm_llm.agents.semantic_memory import SemanticMemoryStore
+from fsm_llm.agents.tools import ToolRegistry, tool
 from fsm_llm.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -17,12 +23,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.auto_memory import AutoMemoryReactAgent
-from fsm_llm_agents.constants import ContextKeys
-from fsm_llm_agents.definitions import AgentConfig, ToolCall
-from fsm_llm_agents.prompts import build_conclude_extraction_instructions
-from fsm_llm_agents.semantic_memory import SemanticMemoryStore
-from fsm_llm_agents.tools import ToolRegistry, tool
 
 
 @tool
@@ -70,7 +70,7 @@ class _ScoredMemory:
 
 
 def test_augment_filters_below_min_score():
-    from fsm_llm_agents.auto_memory import augment_task_with_memories
+    from fsm_llm.agents.auto_memory import augment_task_with_memories
 
     mem = _ScoredMemory([("Name: Nikolas", 0.81, {}), ("Q: 25*4 A: 100", 0.12, {})])
     out = augment_task_with_memories(
@@ -81,7 +81,7 @@ def test_augment_filters_below_min_score():
 
 
 def test_augment_min_score_zero_keeps_all():
-    from fsm_llm_agents.auto_memory import augment_task_with_memories
+    from fsm_llm.agents.auto_memory import augment_task_with_memories
 
     mem = _ScoredMemory([("a", 0.9, {}), ("b", 0.01, {})])
     out = augment_task_with_memories("q", mem, recall_k=3, min_score=0.0)

@@ -1,4 +1,4 @@
-"""Tests for ``fsm_llm_harness.artifacts``.
+"""Tests for ``fsm_llm.harness.artifacts``.
 
 The fixtures below are deliberately NOT minimal.  Every one is shaped from a
 real artifact in this repository's own ``plans/`` tree and keeps the awkward
@@ -26,7 +26,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from fsm_llm_harness.artifacts import (
+from fsm_llm.harness.artifacts import (
     ARTIFACT_MODELS,
     DECISION_ENTRY_SCHEMAS,
     MANDATORY_ADDITIONAL_CHECKS,
@@ -61,8 +61,8 @@ from fsm_llm_harness.artifacts import (
     parse_changelog_line,
     parse_markdown_table,
 )
-from fsm_llm_harness.constants import ArtifactNames, Defaults, PlanSchema
-from fsm_llm_harness.exceptions import HarnessArtifactError
+from fsm_llm.harness.constants import ArtifactNames, Defaults, PlanSchema
+from fsm_llm.harness.exceptions import HarnessArtifactError
 
 # ---------------------------------------------------------------------------
 # Fixtures -- shaped from this repository's real plan directory
@@ -80,9 +80,9 @@ STATE_MD = """# Current State: EXECUTE
 - Step 4b, attempt 1: raised turn budgets — bytes on disk still 0/5
 - Step 4b, attempt 2: added a writable path shape — bytes on disk still 0/5
 ## Change Manifest (current iteration)
-- step 1 (`f63104f`): `src/fsm_llm_agents/native_fc.py` (+59/-10, net +49 source),
+- step 1 (`f63104f`): `src/fsm_llm/agents/native_fc.py` (+59/-10, net +49 source),
   `tests/test_fsm_llm_agents/test_native_fc.py` (+228/-1, 11 → 19 tests).
-- step 3 (`9101369`): `src/fsm_llm_harness/tools.py` (CODE +24)
+- step 3 (`9101369`): `src/fsm_llm/harness/tools.py` (CODE +24)
 ## Last Transition: REFLECT → EXECUTE (2026-07-22T00:45:00Z)
 ## Transition History:
 - INIT → EXPLORE (task started)
@@ -92,13 +92,13 @@ STATE_MD = """# Current State: EXECUTE
 """
 
 _PLAN_SECTION_BODY = {
-    "Goal": "Make `src/fsm_llm_harness` run the protocol on `:4b`.",
+    "Goal": "Make `src/fsm_llm/harness` run the protocol on `:4b`.",
     "Problem Statement": "The two agent arms have COMPLEMENTARY failures.",
     "Context": "Read `findings.md` and the four detail files.",
     "Files To Modify": (
         "| File | Change | Reason |\n"
         "|---|---|---|\n"
-        "| `src/fsm_llm_harness/artifacts.py` | new | artifact models |"
+        "| `src/fsm_llm/harness/artifacts.py` | new | artifact models |"
     ),
     "Assumptions": "- **A1.** `tools=` and `response_format=` are not stacked.",
     "Failure Modes": (
@@ -184,7 +184,7 @@ cost of** more dispatches reporting failure in the short term.
 **Reasoning**: The evidence that wording cannot carry this is repeated.
 **Outcome (step 4b, iter 1) — TARGET NOT MET.** Budgets raised 8 → 14; the
 prompt gained a HOW TO FINISH section.
-**Anchor-Refs**: `src/fsm_llm_harness/roles.py:268`
+**Anchor-Refs**: `src/fsm_llm/harness/roles.py:268`
 """
 
 FINDINGS_MD = """# Findings
@@ -224,7 +224,7 @@ The remaining tier is independent of the role layer at two named seams.
 ## Constraints
 | Constraint | Class | Source |
 |---|---|---|
-| `MANIFEST.in` omits `fsm_llm_monitor` | HARD | `MANIFEST.in:1` |
+| `MANIFEST.in` omits `fsm_llm.monitor` | HARD | `MANIFEST.in:1` |
 | review-iter-1's C2 is closed | GHOST | `tools.py:668` |
 
 ## Code Patterns
@@ -294,9 +294,9 @@ CHANGELOG_MD = """# Changelog
 *Append-only per-edit ledger. One line per file edit. Owner: ip-executor.*
 *Format: `UTC | iter-N/step-M | commit | path | OP(+N,-M) | radius:TIER(score) | D-NNN-or-dash | reason`*
 *Step 4b is recorded as `iter-1/step-18`: the ledger schema requires numeric M.*
-2026-07-21T20:10:30Z | iter-1/step-1 | f63104f | src/fsm_llm_agents/native_fc.py | EDIT(+59,-10) | radius:LOW(0) | D-003 | apply ollama call prep behind is_ollama_model
-2026-07-22T00:05:00Z | iter-1/step-3 | 9101369 | src/fsm_llm_harness/tools.py | EDIT(+77,-2) | radius:MED(3) | D-006 | repair sentinel-prefixed absolute paths | keeps D-032 ordering
-2026-07-22T01:20:00Z | iter-1/step-18 | 751fda0 | src/fsm_llm_harness/roles.py | CREATE(+77) | radius:HIGH(6) | - | raise per-role turn budgets
+2026-07-21T20:10:30Z | iter-1/step-1 | f63104f | src/fsm_llm/agents/native_fc.py | EDIT(+59,-10) | radius:LOW(0) | D-003 | apply ollama call prep behind is_ollama_model
+2026-07-22T00:05:00Z | iter-1/step-3 | 9101369 | src/fsm_llm/harness/tools.py | EDIT(+77,-2) | radius:MED(3) | D-006 | repair sentinel-prefixed absolute paths | keeps D-032 ordering
+2026-07-22T01:20:00Z | iter-1/step-18 | 751fda0 | src/fsm_llm/harness/roles.py | CREATE(+77) | radius:HIGH(6) | - | raise per-role turn budgets
 2026-07-22T01:25:00Z | iter-1/step-18 | uncommitted | docs/api_reference.md | DELETE(-12) | radius:UNKNOWN(script-missing) | - | drop the stale section
 """
 
@@ -335,10 +335,10 @@ Partially complete. Closed at the user's explicit direction.
 65 decisions recorded (D-001..D-065) across PLAN and EXECUTE/REFLECT.
 
 ## Files Changed
-`src/fsm_llm_harness/` (11 files) + `tests/test_fsm_llm_harness/` (5 files).
+`src/fsm_llm/harness/` (11 files) + `tests/test_fsm_llm_harness/` (5 files).
 
 ## Decision Anchors Registry
-- `src/fsm_llm_harness/tools.py:428` — `plan-2026-07-21T125237-191b2eb2/D-032`
+- `src/fsm_llm/harness/tools.py:428` — `plan-2026-07-21T125237-191b2eb2/D-032`
 
 ## Lessons
 See `plans/LESSONS.md` (rewritten at this CLOSE) for the importance-tagged set.
@@ -373,13 +373,13 @@ FSM-LLM (v0.5.0): a Python framework for stateful conversational AI.
 
 ## Components
 - `fsm_llm` (core, 23 files) — FSM orchestration and the 2-pass pipeline.
-- `fsm_llm_harness` (11 files, PARTIAL) — protocol emulation.
+- `fsm_llm.harness` (11 files, PARTIAL) — protocol emulation.
 
 ## Boundaries
 - In scope: `src/`, `tests/`. Out of scope: `examples/`.
 
 ## Invariants
-- Core never imports `fsm_llm_agents` (see plan-2026-07-21T125237-191b2eb2/D-002).
+- Core never imports `fsm_llm.agents` (see plan-2026-07-21T125237-191b2eb2/D-002).
 
 ## Flows
 - turn: extract → evaluate transitions → generate response.
@@ -396,7 +396,7 @@ INDEX_MD = """# Plan Index
 
 | Plan | Date | Goal | Key Topics |
 |------|------|------|------------|
-| plan-2026-07-21T125237-191b2eb2 | 2026-07-21 | Build `src/fsm_llm_harness` | harness, protocol |
+| plan-2026-07-21T125237-191b2eb2 | 2026-07-21 | Build `src/fsm_llm/harness` | harness, protocol |
 | plan-2026-07-21T110044-ed1ae68b | 2026-07-21 | Prototype the planner in agents |  |
 """
 
@@ -652,7 +652,7 @@ class TestDecisionsDoc:
     def test_anchor_refs_are_kept_as_an_ordinary_field(self) -> None:
         entry = DecisionsDoc.from_markdown(DECISIONS_MD).entry("D-002")
         assert entry is not None
-        assert entry.field("Anchor-Refs") == "`src/fsm_llm_harness/roles.py:268`"
+        assert entry.field("Anchor-Refs") == "`src/fsm_llm/harness/roles.py:268`"
 
     # -- header grammar ---------------------------------------------------
 

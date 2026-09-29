@@ -316,9 +316,9 @@ def redact_non_json_leaf(value: Any) -> Any:
 def redacting_json_default(value: Any) -> str:
     """``json.dumps`` ``default=`` hook for every writer that emits context or
     trace values outside the process: on disk (``FileSessionStore.save``,
-    ``fsm_llm_agents.memory_persistence``), into an LLM prompt
-    (``fsm_llm_reasoning.engine``) or over a socket
-    (``fsm_llm_monitor``'s dashboard websocket).
+    ``fsm_llm.agents.memory_persistence``), into an LLM prompt
+    (``fsm_llm.reasoning.engine``) or over a socket
+    (``fsm_llm.monitor``'s dashboard websocket).
 
     Returns ``str(value)`` only for an exact stdlib value scalar (the
     ``redact_non_json_leaf`` keep-set; json never calls ``default`` for its
@@ -656,7 +656,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
     # A text that parses cleanly to a non-object returns None immediately; it
     # does NOT fall through to the brace scan. Falling through would recover
     # the first object inside a top-level array (`[{"a":1}]` -> `{"a":1}`), a
-    # "recover more" change that would reach fsm_llm_harness/hardening.py,
+    # "recover more" change that would reach fsm_llm/harness/hardening.py,
     # whose documented contract is that a top-level array is not a payload.
     # Do NOT return the list/scalar either: the `dict | None` annotation was a
     # lie and Classifier._parse_single died on it with AttributeError.
@@ -862,7 +862,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # their capture here, which flipped a previously-None result into a dict
         # for garbled free text that merely mentions one of them — a real
         # cross-package hazard for non-classification callers (e.g. a lenient
-        # all-optional structured-output schema in fsm_llm_agents/base.py would
+        # all-optional structured-output schema in fsm_llm/agents/base.py would
         # then build a partial model from a stray `"confidence": 0.8` substring).
         # Keep a lone auxiliary key ONLY when a co-occurring PRIMARY payload key
         # is present IN THE TEXT — message/selected_transition/value/

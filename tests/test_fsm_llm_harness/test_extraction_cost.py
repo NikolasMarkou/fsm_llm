@@ -34,6 +34,8 @@ import pytest
 
 from fsm_llm.definitions import FSMContext, FSMDefinition, FSMInstance
 from fsm_llm.handlers import HandlerSystem
+from fsm_llm.harness import build_harness_fsm
+from fsm_llm.harness.constants import DRIVER_OWNED_SEEDS, ContextKeys, HarnessStates
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
@@ -41,8 +43,6 @@ from fsm_llm.prompts import (
     ResponseGenerationPromptBuilder,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
-from fsm_llm_harness import build_harness_fsm
-from fsm_llm_harness.constants import DRIVER_OWNED_SEEDS, ContextKeys, HarnessStates
 from tests.conftest import MockLLM2Interface
 
 # ---------------------------------------------------------------------------
@@ -328,7 +328,7 @@ class TestTheHarnessDriverIssuesNoExtractionCall:
         every state an ``extraction_instructions`` string, which is the ONLY
         thing the real one no longer does.  The same run then trips the spy.
         """
-        import fsm_llm_harness.harness as harness_module
+        import fsm_llm.harness.harness as harness_module
 
         real_builder = harness_module.build_harness_fsm
 

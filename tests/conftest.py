@@ -60,7 +60,7 @@ def ollama_available(model_tag: str = OLLAMA_MODEL_TAG) -> bool:
 def has_workflows():
     """Check if workflows extension is available."""
     try:
-        import fsm_llm_workflows  # noqa: F401
+        import fsm_llm.workflows  # noqa: F401
 
         return True
     except ImportError:
@@ -71,7 +71,7 @@ def has_workflows():
 def pytest_collection_modifyitems(config, items):
     """Skip workflows tests if extension not installed."""
     try:
-        import fsm_llm_workflows  # noqa: F401
+        import fsm_llm.workflows  # noqa: F401
     except ImportError:
         skip_workflows = pytest.mark.skip(reason="workflows extension not installed")
         for item in items:

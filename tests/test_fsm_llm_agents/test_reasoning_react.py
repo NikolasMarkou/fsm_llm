@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.reasoning_react module."""
+"""Tests for fsm_llm.agents.reasoning_react module."""
 
 
 from unittest.mock import patch
 
 import pytest
 
-from fsm_llm_agents.constants import ContextKeys, ReasoningIntegrationKeys
-from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.agents.constants import ContextKeys, ReasoningIntegrationKeys
+from fsm_llm.agents.definitions import AgentConfig
+from fsm_llm.agents.exceptions import AgentError
+from fsm_llm.agents.tools import ToolRegistry
 
 
 def _dummy_tool(params):
@@ -64,16 +64,16 @@ class TestReasoningReactAgentImport:
     def test_import_succeeds_when_reasoning_available(self):
         """ReasoningReactAgent should be importable when reasoning is installed."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.agents.reasoning_react import ReasoningReactAgent
 
             assert ReasoningReactAgent is not None
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
 
     def test_missing_reasoning_raises_agent_error(self):
         """ReasoningReactAgent should raise AgentError if reasoning is missing."""
         # Mock the _HAS_REASONING flag to simulate missing package
-        import fsm_llm_agents.reasoning_react as rr_module
+        import fsm_llm.agents.reasoning_react as rr_module
 
         original = rr_module._HAS_REASONING
 
@@ -83,7 +83,7 @@ class TestReasoningReactAgentImport:
             registry = ToolRegistry()
             registry.register_function(_dummy_tool, name="dummy", description="Dummy")
 
-            with pytest.raises(AgentError, match="requires fsm_llm_reasoning"):
+            with pytest.raises(AgentError, match=r"requires fsm_llm\.reasoning"):
                 rr_module.ReasoningReactAgent(tools=registry)
         finally:
             rr_module._HAS_REASONING = original
@@ -91,10 +91,10 @@ class TestReasoningReactAgentImport:
     def test_conditional_import_in_init(self):
         """__init__.py should not fail if reasoning is not installed."""
         # The import should always succeed (ReasoningReactAgent may or may not be in namespace)
-        import fsm_llm_agents
+        import fsm_llm.agents
 
         # Check that __all__ contains it regardless
-        assert "ReasoningReactAgent" in fsm_llm_agents.__all__
+        assert "ReasoningReactAgent" in fsm_llm.agents.__all__
 
 
 class TestReasonReToolAutoRegistration:
@@ -103,9 +103,9 @@ class TestReasonReToolAutoRegistration:
     def test_reason_tool_auto_registered(self):
         """ReasoningReactAgent should auto-register a 'reason' tool."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
 
         registry = ToolRegistry()
         registry.register_function(_dummy_tool, name="search", description="Search")
@@ -126,9 +126,9 @@ class TestReasonReToolAutoRegistration:
     def test_existing_reason_tool_not_overwritten(self):
         """If 'reason' already exists in registry, don't overwrite it."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
 
         def custom_fn(params):
             return "custom reason"
@@ -153,9 +153,9 @@ class TestReasoningReactAgentPlaceholder:
     def test_placeholder_returns_string(self):
         """Placeholder should return a descriptive string."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
 
         result = ReasoningReactAgent._reason_placeholder({})
         assert isinstance(result, str)
@@ -176,9 +176,9 @@ class TestReasoningReactAgentHandlerReset:
         """AgentHandlers is call-local (built inside run()), never stored on
         self — the attribute must not exist post-construction or post-run."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
 
         registry = ToolRegistry()
         registry.register_function(_dummy_tool, name="search", description="Search")
@@ -205,9 +205,9 @@ class TestReasoningReactAgentHandlerReset:
         race this fix closes cannot reoccur (a stale `_current_iteration`
         from a prior call can never leak into the next call's instance)."""
         try:
-            from fsm_llm_agents import reasoning_react as rr_module
+            from fsm_llm.agents import reasoning_react as rr_module
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
         registry = ToolRegistry()
         registry.register_function(_dummy_tool, name="search", description="Search")
 
@@ -251,9 +251,9 @@ class TestReasoningReactAgentConfig:
     def test_default_config(self):
         """Should accept default config."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
 
         registry = ToolRegistry()
         registry.register_function(_dummy_tool, name="search", description="Search")
@@ -267,9 +267,9 @@ class TestReasoningReactAgentConfig:
     def test_custom_config(self):
         """Should accept custom config."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
 
         registry = ToolRegistry()
         registry.register_function(_dummy_tool, name="search", description="Search")
@@ -284,9 +284,9 @@ class TestReasoningReactAgentConfig:
     def test_empty_registry_raises(self):
         """Empty registry should raise AgentError."""
         try:
-            from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+            from fsm_llm.agents.reasoning_react import ReasoningReactAgent
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
 
         registry = ToolRegistry()
         # Even with auto-registration of 'reason', the initial check is on tools param

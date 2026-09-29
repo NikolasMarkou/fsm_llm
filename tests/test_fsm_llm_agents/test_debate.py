@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.debate module."""
+"""Tests for fsm_llm.agents.debate module."""
 
 
 import re
@@ -8,6 +8,10 @@ from typing import Any
 
 import pytest
 
+from fsm_llm.agents.constants import ContextKeys, DebateStates, Defaults, HandlerNames
+from fsm_llm.agents.debate import DebateAgent
+from fsm_llm.agents.definitions import AgentConfig, DebateRound
+from fsm_llm.agents.fsm_definitions import build_debate_fsm
 from fsm_llm.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -17,10 +21,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.constants import ContextKeys, DebateStates, Defaults, HandlerNames
-from fsm_llm_agents.debate import DebateAgent
-from fsm_llm_agents.definitions import AgentConfig, DebateRound
-from fsm_llm_agents.fsm_definitions import build_debate_fsm
 
 
 class TestDebateAgentCreation:

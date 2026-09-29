@@ -296,13 +296,22 @@ __all__ = [
 # Optional Extensions Check
 # --------------------------------------------------------------
 
+# DECISION plan-2026-09-29T044048-3a032517/D-003
+# The subpackages fsm_llm.{agents,reasoning,workflows,monitor,harness} are
+# NOT imported here and NOT listed in __all__. They import core as
+# `from fsm_llm import API`, so an eager import from this module would hit a
+# partially initialised fsm_llm, and monitor would drag in fastapi on
+# core-only installs. Do NOT add eager imports or a module __getattr__
+# loader; `from fsm_llm import agents` already works via the submodule
+# import protocol. The has_*/get_* helpers below probe the dotted names.
+
 
 @lru_cache(maxsize=1)
 def has_workflows():
     """Check if workflows extension is available."""
     import importlib.util
 
-    return importlib.util.find_spec("fsm_llm_workflows") is not None
+    return importlib.util.find_spec("fsm_llm.workflows") is not None
 
 
 def _import_extension(package: str, hint: str):
@@ -329,7 +338,7 @@ def _import_extension(package: str, hint: str):
 def get_workflows():
     """Get workflows module if available, otherwise raise ImportError."""
     return _import_extension(
-        "fsm_llm_workflows",
+        "fsm_llm.workflows",
         "Workflows functionality requires the workflows extra. "
         "Install with: pip install fsm-llm[workflows]",
     )
@@ -340,13 +349,13 @@ def has_reasoning():
     """Check if reasoning extension is available."""
     import importlib.util
 
-    return importlib.util.find_spec("fsm_llm_reasoning") is not None
+    return importlib.util.find_spec("fsm_llm.reasoning") is not None
 
 
 def get_reasoning():
     """Get reasoning module if available, otherwise raise ImportError."""
     return _import_extension(
-        "fsm_llm_reasoning",
+        "fsm_llm.reasoning",
         "Reasoning functionality requires the reasoning extra. "
         "Install with: pip install fsm-llm[reasoning]",
     )
@@ -357,14 +366,14 @@ def has_agents():
     """Check if agents extension is available."""
     import importlib.util
 
-    return importlib.util.find_spec("fsm_llm_agents") is not None
+    return importlib.util.find_spec("fsm_llm.agents") is not None
 
 
 def get_agents():
     """Get agents module if available, otherwise raise ImportError."""
     return _import_extension(
-        "fsm_llm_agents",
-        "Agents functionality requires the fsm_llm_agents package. "
+        "fsm_llm.agents",
+        "Agents functionality requires the agents extra. "
         "Install with: pip install fsm-llm[agents]",
     )
 
@@ -467,9 +476,13 @@ def enable_debug_logging():
 
 def disable_warnings():
     """Disable framework warnings."""
-    # C10: the module pattern is a prefix match, so a bare "fsm_llm" also
-    # silenced fsm_llm_agents, fsm_llm_workflows, ... Match the package and
-    # its submodules only.
+    # DECISION plan-2026-09-29T044048-3a032517/D-007
+    # C10: the module pattern is a prefix match, so a bare "fsm_llm" would
+    # also silence lookalike siblings such as fsm_llm_contrib. Match the
+    # package and its submodules only; the submodules include the five
+    # subpackages (fsm_llm.agents, fsm_llm.workflows, ...), which are part of
+    # the framework. Do NOT drop the "(\.|$)" boundary and do NOT add a
+    # per-subpackage exclusion list.
     warnings.filterwarnings("ignore", category=UserWarning, module=r"fsm_llm(\.|$)")
 
 

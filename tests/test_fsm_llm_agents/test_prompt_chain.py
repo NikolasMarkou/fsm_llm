@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.prompt_chain module."""
+"""Tests for fsm_llm.agents.prompt_chain module."""
 
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
-from fsm_llm_agents.constants import (
+from fsm_llm.agents.constants import (
     ContextKeys,
     Defaults,
     ErrorMessages,
     HandlerNames,
     PromptChainStates,
 )
-from fsm_llm_agents.definitions import AgentConfig, ChainStep
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.fsm_definitions import build_prompt_chain_fsm
-from fsm_llm_agents.prompt_chain import PromptChainAgent
+from fsm_llm.agents.definitions import AgentConfig, ChainStep
+from fsm_llm.agents.exceptions import AgentError
+from fsm_llm.agents.fsm_definitions import build_prompt_chain_fsm
+from fsm_llm.agents.prompt_chain import PromptChainAgent
+from fsm_llm.definitions import FSMDefinition
 
 
 def _make_step(step_id: str, name: str, validation_fn=None) -> ChainStep:

@@ -144,7 +144,7 @@ METADATA_KEY_TRANSITION_CLASSIFICATION = "transition_classification"
 # pipeline itself extracted (never the values). D-015 of the pipeline.
 PROVENANCE_METADATA_KEY = "_pipeline_extracted"
 
-# Context key an agent (`fsm_llm_agents.BaseAgent._init_context`) sets to the
+# Context key an agent (`fsm_llm.agents.BaseAgent._init_context`) sets to the
 # structured-output schema; Pass 2 enforces it on terminal states only.
 CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT = "_output_response_format"
 

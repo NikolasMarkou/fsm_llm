@@ -1,4 +1,4 @@
-"""Tests for ``fsm_llm_harness.storage``.
+"""Tests for ``fsm_llm.harness.storage``.
 
 Every fixture below is lifted from this repository's own ``plans/`` tree and
 keeps the details a synthetic stub would smooth away.  ``plans/`` is gitignored
@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from fsm_llm_harness.artifacts import (
+from fsm_llm.harness.artifacts import (
     ConsolidatedDoc,
     LessonsDoc,
     Section,
@@ -42,13 +42,13 @@ from fsm_llm_harness.artifacts import (
     compression_marker_issues,
     lesson_importance,
 )
-from fsm_llm_harness.constants import ArtifactNames, Defaults, Role
-from fsm_llm_harness.exceptions import (
+from fsm_llm.harness.constants import ArtifactNames, Defaults, Role
+from fsm_llm.harness.exceptions import (
     HarnessArtifactError,
     HarnessConfinementError,
     HarnessOwnershipError,
 )
-from fsm_llm_harness.storage import (
+from fsm_llm.harness.storage import (
     COMPRESSED_SUMMARY_CLOSE,
     COMPRESSED_SUMMARY_OPEN,
     COMPRESSED_SUMMARY_SECTION,
@@ -119,8 +119,8 @@ turn cycle drives an explicit FSM per conversation.
 
 ## Components
 - `fsm_llm` (core, 23 files) — FSM orchestration, 2-pass message pipeline.
-- `fsm_llm_agents` (49 files) — 12 agentic patterns + swarm/graph/MCP/A2A.
-- `fsm_llm_harness` (11 files, PARTIAL) — protocol emulation.
+- `fsm_llm.agents` (49 files) — 12 agentic patterns + swarm/graph/MCP/A2A.
+- `fsm_llm.harness` (11 files, PARTIAL) — protocol emulation.
 
 ## Boundaries
 - `examples/` (100 dirs) are stable evaluation baselines — never modify.
@@ -140,7 +140,7 @@ _SUMMARY_BLOCK = f"""{COMPRESSED_SUMMARY_OPEN}
 *Auto-compressed from 2600 lines (4 plan sections). Read full content below if needed.*
 
 ### Key Outcomes
-- **{PLAN_E}** (fsm_llm_harness, 65 decisions) — PARTIALLY COMPLETE, closed at
+- **{PLAN_E}** (fsm_llm.harness, 65 decisions) — PARTIALLY COMPLETE, closed at
   user direction.
 
 ### Anchored Decisions (high-value, non-obvious)
@@ -201,7 +201,7 @@ STATE_MD = """# Current State: EXECUTE
 - Step 4b, attempt 1
 - Step 4b, attempt 2
 ## Change Manifest (current iteration)
-- step 7 (`65fc547`): `src/fsm_llm_harness/artifacts.py` NEW (1,627 lines).
+- step 7 (`65fc547`): `src/fsm_llm/harness/artifacts.py` NEW (1,627 lines).
 ## Last Transition: REFLECT → EXECUTE (2026-07-22T00:45:00Z)
 ## Transition History:
 - INIT → EXPLORE (task started)
@@ -698,7 +698,7 @@ class TestPlanDirectoryLayout:
     def test_create_gives_up_rather_than_colliding(
         self, memory_root: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        from fsm_llm_harness import storage
+        from fsm_llm.harness import storage
 
         monkeypatch.setattr(storage, "mint_plan_id", lambda **kwargs: PLAN_A)
         (memory_root / PLAN_A).mkdir()

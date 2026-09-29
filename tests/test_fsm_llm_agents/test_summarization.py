@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents import (
+from fsm_llm.agents import (
     AgentConfig,
     ReactAgent,
     ToolRegistry,
     make_observation_summarizer,
     tool,
 )
-from fsm_llm_agents.constants import ContextKeys
+from fsm_llm.agents.constants import ContextKeys
 
 
 @tool

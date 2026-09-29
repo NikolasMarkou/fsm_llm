@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_monitor.otel module."""
+"""Tests for fsm_llm.monitor.otel module."""
 
 import sys
 import threading
@@ -49,7 +49,7 @@ def _mock_otel():
         sys.modules[name] = mod
 
     # Force reimport of otel module so it picks up the mocked packages
-    mod_key = "fsm_llm_monitor.otel"
+    mod_key = "fsm_llm.monitor.otel"
     saved_otel = sys.modules.pop(mod_key, None)
 
     yield mocks
@@ -67,13 +67,13 @@ def _mock_otel():
 
 def _import_otel():
     """Import the otel module (must be called after fixture injects mocks)."""
-    from fsm_llm_monitor.otel import OTELExporter
+    from fsm_llm.monitor.otel import OTELExporter
 
     return OTELExporter
 
 
 def _make_event(event_type="conversation_start", conv_id="conv-1", **kwargs):
-    from fsm_llm_monitor.definitions import MonitorEvent
+    from fsm_llm.monitor.definitions import MonitorEvent
 
     return MonitorEvent(
         event_type=event_type,

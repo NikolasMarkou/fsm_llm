@@ -1,4 +1,4 @@
-"""Falsifying tests for ``fsm_llm_harness.harness.HarnessAgent``.
+"""Falsifying tests for ``fsm_llm.harness.harness.HarnessAgent``.
 
 These tests exist to CATCH REGRESSIONS in the driver, not to document that it
 works.  Each class corresponds to a mechanism decision recorded in
@@ -41,18 +41,18 @@ from typing import Any
 
 import pytest
 
+from fsm_llm.agents.definitions import AgentResult
+from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.handlers import HandlerTiming
-from fsm_llm_agents.definitions import AgentResult
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_harness import harness as harness_module
-from fsm_llm_harness import storage as storage_module
-from fsm_llm_harness.artifacts import (
+from fsm_llm.harness import harness as harness_module
+from fsm_llm.harness import storage as storage_module
+from fsm_llm.harness.artifacts import (
     PRESENTATION_CONTRACTS,
     PlanDoc,
     Section,
     StateDoc,
 )
-from fsm_llm_harness.constants import (
+from fsm_llm.harness.constants import (
     DRIVER_OWNED_SEEDS,
     DRIVER_OWNED_UNSET,
     ArtifactNames,
@@ -64,12 +64,12 @@ from fsm_llm_harness.constants import (
     PlanSchema,
     Role,
 )
-from fsm_llm_harness.exceptions import (
+from fsm_llm.harness.exceptions import (
     HarnessError,
     HarnessOwnershipError,
     HarnessReentrancyError,
 )
-from fsm_llm_harness.harness import (
+from fsm_llm.harness.harness import (
     EXECUTE_TARGET_ASSIGNED,
     EXECUTE_TARGET_ASSIGNED_PROSE,
     EXECUTE_TARGET_NO_PLAN_DIR,
@@ -80,9 +80,9 @@ from fsm_llm_harness.harness import (
     _derive_prose_target,
     derive_execute_target,
 )
-from fsm_llm_harness.plan_validator import Issue, _is_placeholder
-from fsm_llm_harness.roles import get_role_spec
-from fsm_llm_harness.rules import EXPLORE_TOPICS, ROLE_BY_STATE, get_rules
+from fsm_llm.harness.plan_validator import Issue, _is_placeholder
+from fsm_llm.harness.roles import get_role_spec
+from fsm_llm.harness.rules import EXPLORE_TOPICS, ROLE_BY_STATE, get_rules
 from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm_harness.conftest import (
     APPROVAL_CLOSE,
@@ -250,7 +250,7 @@ def _hollow_plan_doc() -> PlanDoc:
 #: A ``changelog.md`` whose ledger line names the step the fixture runs.
 _CHANGELOG_MD = """# Changelog
 *Append-only per-edit ledger. One line per file edit. Owner: ip-executor.*
-2026-07-22T09:00:00Z | iter-1/step-1 | abc1234 | src/fsm_llm_harness/harness.py | EDIT(+300,-40) | radius:HIGH(9) | D-040 | wire the four-slug action table
+2026-07-22T09:00:00Z | iter-1/step-1 | abc1234 | src/fsm_llm/harness/harness.py | EDIT(+300,-40) | radius:HIGH(9) | D-040 | wire the four-slug action table
 """
 
 _FINDINGS_MD = """# Findings
@@ -4501,7 +4501,7 @@ class TestDriverAssignedExecuteTarget:
         """
         from dataclasses import replace
 
-        from fsm_llm_harness.roles import build_role_prompt, get_role_spec
+        from fsm_llm.harness.roles import build_role_prompt, get_role_spec
 
         rules = get_rules(HarnessStates.EXECUTE)
         base = RoleRequest(
@@ -5326,7 +5326,7 @@ class TestPresentationContracts:
             p for p in harness.agent.presentations if p.name == "PC-EXECUTE-STEP"
         ]
         assert step_blocks
-        assert step_blocks[0].fields["files"] == "src/fsm_llm_harness/harness.py"
+        assert step_blocks[0].fields["files"] == "src/fsm_llm/harness/harness.py"
         assert step_blocks[0].fields["commit"] == "abc1234"
         assert "invented.py" not in step_blocks[0].fields["files"]
 

@@ -1,30 +1,30 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.plan_execute module and Plan-Execute FSM definition."""
+"""Tests for fsm_llm.agents.plan_execute module and Plan-Execute FSM definition."""
 
 from typing import ClassVar
 
 import pytest
 
+from fsm_llm.agents.constants import (
+    ContextKeys,
+    Defaults,
+    HandlerNames,
+    PlanExecuteStates,
+)
+from fsm_llm.agents.definitions import (
+    AgentConfig,
+    PlanStep,
+)
+from fsm_llm.agents.fsm_definitions import build_plan_execute_fsm
+from fsm_llm.agents.plan_execute import PlanExecuteAgent
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
     FieldExtractionResponse,
     FSMDefinition,
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.constants import (
-    ContextKeys,
-    Defaults,
-    HandlerNames,
-    PlanExecuteStates,
-)
-from fsm_llm_agents.definitions import (
-    AgentConfig,
-    PlanStep,
-)
-from fsm_llm_agents.fsm_definitions import build_plan_execute_fsm
-from fsm_llm_agents.plan_execute import PlanExecuteAgent
-from fsm_llm_agents.tools import ToolRegistry
 
 
 def _search(params):
@@ -116,7 +116,7 @@ class TestPlanExecuteAgentCreation:
         when a real AgentHandlers is passed in (tools-configured mode)."""
         from unittest.mock import Mock
 
-        from fsm_llm_agents.handlers import AgentHandlers
+        from fsm_llm.agents.handlers import AgentHandlers
 
         registry = _make_registry()
         agent = PlanExecuteAgent(tools=registry)

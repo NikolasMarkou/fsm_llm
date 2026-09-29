@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.definitions module."""
+"""Tests for fsm_llm.agents.definitions module."""
 
 import pytest
 
-from fsm_llm_agents.definitions import (
+from fsm_llm.agents.definitions import (
     AgentConfig,
     AgentResult,
     AgentStep,

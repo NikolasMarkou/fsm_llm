@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.agents.tools import ToolRegistry
 
 
 def _noop(params):
@@ -83,7 +83,7 @@ class TestBuildReactFsmForWorkflow:
 
     def test_react_fsm_is_valid_dict(self):
         """build_react_fsm() should produce a valid FSM definition dict."""
-        from fsm_llm_agents.fsm_definitions import build_react_fsm
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
 
         registry = ToolRegistry()
         registry.register_function(_noop, name="search", description="Search")
@@ -100,7 +100,7 @@ class TestBuildReactFsmForWorkflow:
 
     def test_react_fsm_has_persona(self):
         """Generated FSM should have a persona."""
-        from fsm_llm_agents.fsm_definitions import build_react_fsm
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
 
         registry = ToolRegistry()
         registry.register_function(_noop, name="search", description="Search")
@@ -111,7 +111,7 @@ class TestBuildReactFsmForWorkflow:
 
     def test_self_consistency_fsm_is_valid_dict(self):
         """build_self_consistency_fsm() should produce a valid FSM definition."""
-        from fsm_llm_agents.fsm_definitions import build_self_consistency_fsm
+        from fsm_llm.agents.fsm_definitions import build_self_consistency_fsm
 
         fsm_def = build_self_consistency_fsm(task_description="test task")
 
@@ -122,8 +122,8 @@ class TestBuildReactFsmForWorkflow:
 
     def test_react_fsm_accepted_by_fsm_definition(self):
         """Generated FSM dict should be accepted by FSMDefinition validator."""
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
         from fsm_llm.definitions import FSMDefinition
-        from fsm_llm_agents.fsm_definitions import build_react_fsm
 
         registry = ToolRegistry()
         registry.register_function(_noop, name="search", description="Search")
@@ -137,9 +137,9 @@ class TestBuildReactFsmForWorkflow:
 
     def test_react_fsm_accepted_by_conversation_step(self):
         """Generated FSM dict should be accepted as ConversationStep input."""
-        workflows = pytest.importorskip("fsm_llm_workflows")
+        workflows = pytest.importorskip("fsm_llm.workflows")
 
-        from fsm_llm_agents.fsm_definitions import build_react_fsm
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
 
         registry = ToolRegistry()
         registry.register_function(_noop, name="search", description="Search")
@@ -164,7 +164,7 @@ class TestReasoningIntegrationKeysUniqueness:
 
     def test_all_values_unique(self):
         """All key values in ReasoningIntegrationKeys should be unique."""
-        from fsm_llm_agents.constants import ReasoningIntegrationKeys
+        from fsm_llm.agents.constants import ReasoningIntegrationKeys
 
         values = [
             v
@@ -175,7 +175,7 @@ class TestReasoningIntegrationKeysUniqueness:
 
     def test_no_overlap_with_all_agent_constants(self):
         """ReasoningIntegrationKeys should not overlap with any agent ContextKeys."""
-        from fsm_llm_agents.constants import ContextKeys, ReasoningIntegrationKeys
+        from fsm_llm.agents.constants import ContextKeys, ReasoningIntegrationKeys
 
         r_values = {
             v

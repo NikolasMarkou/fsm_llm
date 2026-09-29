@@ -1,16 +1,16 @@
-"""Tests for fsm_llm_agents.skills.SkillLoader file discovery."""
+"""Tests for fsm_llm.agents.skills.SkillLoader file discovery."""
 
 from __future__ import annotations
 
 import textwrap
 from pathlib import Path
 
-from fsm_llm_agents.skills import SkillLoader
+from fsm_llm.agents.skills import SkillLoader
 
 _MODULE_BOTH_SOURCES = textwrap.dedent(
     """
-    from fsm_llm_agents.skills import SkillDefinition
-    from fsm_llm_agents.tools import tool
+    from fsm_llm.agents.skills import SkillDefinition
+    from fsm_llm.agents.tools import tool
 
 
     @tool
@@ -49,7 +49,7 @@ class TestSkillLoaderDedupe:
         path.write_text(
             textwrap.dedent(
                 """
-                from fsm_llm_agents.tools import tool
+                from fsm_llm.agents.tools import tool
 
 
                 @tool
@@ -67,7 +67,7 @@ class TestSkillLoaderDedupe:
 
 _MODULE_ALIASED_TOOL = textwrap.dedent(
     """
-    from fsm_llm_agents.tools import tool
+    from fsm_llm.agents.tools import tool
 
 
     @tool
@@ -83,7 +83,7 @@ _MODULE_ALIASED_TOOL = textwrap.dedent(
 
 _MODULE_NAME_COLLISION = textwrap.dedent(
     """
-    from fsm_llm_agents.tools import tool
+    from fsm_llm.agents.tools import tool
 
 
     @tool(name="lookup")

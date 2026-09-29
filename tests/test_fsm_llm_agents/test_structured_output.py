@@ -6,8 +6,8 @@ import json
 
 from pydantic import BaseModel
 
-from fsm_llm_agents.base import BaseAgent
-from fsm_llm_agents.definitions import AgentConfig, AgentResult
+from fsm_llm.agents.base import BaseAgent
+from fsm_llm.agents.definitions import AgentConfig, AgentResult
 
 
 class SimpleReport(BaseModel):
@@ -157,6 +157,7 @@ class TestStructuredOutputDiagnostic:
         from fsm_llm.logging import logger
 
         msgs: list[str] = []
+        logger.enable("fsm_llm")  # library logging is off by default (D-004)
         sink_id = logger.add(lambda m: msgs.append(str(m)), level="DEBUG")
         try:
             config = AgentConfig(output_schema=SimpleReport)
@@ -167,6 +168,7 @@ class TestStructuredOutputDiagnostic:
             )
         finally:
             logger.remove(sink_id)
+            logger.disable("fsm_llm")
 
         # Falls through to JSON parse (prose → None), no crash.
         assert result is None

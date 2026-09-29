@@ -146,8 +146,8 @@ def _fixture_hash(live: Any) -> str:
 
 def _execute_render(live: Any) -> tuple[Any, Any]:
     """EXECUTE request+spec with FIXED placeholder paths: hash the TEMPLATE."""
-    from fsm_llm_harness.constants import HarnessStates
-    from fsm_llm_harness.roles import get_role_spec
+    from fsm_llm.harness.constants import HarnessStates
+    from fsm_llm.harness.roles import get_role_spec
 
     request = live._execute_request(Path("/plan-dir"), Path("/workspace"))
     return request, get_role_spec(HarnessStates.EXECUTE)
@@ -155,7 +155,7 @@ def _execute_render(live: Any) -> tuple[Any, Any]:
 
 def _prompt_hash(live: Any) -> str:
     """sha256 of the rendered EXECUTE system+task prompt templates."""
-    from fsm_llm_harness.roles import build_role_system_prompt, build_role_task_prompt
+    from fsm_llm.harness.roles import build_role_system_prompt, build_role_task_prompt
 
     request, spec = _execute_render(live)
     system = build_role_system_prompt(request, spec)
@@ -165,7 +165,7 @@ def _prompt_hash(live: Any) -> str:
 
 def _tool_surface(live: Any, native: bool) -> dict[str, Any]:
     """The worker-factory kwargs plus the tool names the dispatch holds."""
-    from fsm_llm_harness.roles import held_tools
+    from fsm_llm.harness.roles import held_tools
 
     request, spec = _execute_render(live)
     return {
@@ -256,7 +256,7 @@ def _run_one(
     live: Any, tmp: Path, run: int, *, native: bool, seed: int | None
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """One dispatch plus its tool trace (the helper's spy stacks over ours)."""
-    from fsm_llm_agents.tools import ToolRegistry
+    from fsm_llm.agents.tools import ToolRegistry
 
     trace: list[dict[str, Any]] = []
     original = live._spy_on_tools(trace)

@@ -1175,7 +1175,7 @@ class LiteLLMInterface(LLMInterface):
         #
         # Reuses this class's own `_looks_like_json` and the module's
         # `extract_json_from_text`; core must not import the equivalent
-        # `_is_extraction_envelope` from fsm_llm_agents/adapt.py.
+        # `_is_extraction_envelope` from fsm_llm/agents/adapt.py.
         #
         # DECISION plan-2026-09-19T175721-21cd7f8e/D-030 (supersedes the shape-only
         # test above; D-022's accepted `{"a": 1}` case is unchanged). The braces

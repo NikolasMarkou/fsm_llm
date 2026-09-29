@@ -1,0 +1,908 @@
+"""
+The plan directory: minting, atomic writes, line caps and the sliding window.
+
+``artifacts.py`` turns Markdown into typed models.  This module is the layer
+below it: it decides WHERE a file lives, gets bytes onto disk without ever
+leaving a half-written artifact behind, and enforces the three size policies the
+protocol states as numbers -- LESSONS' 200-line ``[I:N]`` eviction, SYSTEM's
+300-line cap, and the 4-plan sliding window over the consolidated cross-plan
+files.
+
+Three rules shape everything here.
+
+1. **Confinement and ownership are NOT reimplemented.**  Every path this module
+   touches is resolved by :class:`~.tools.PlanMemory`, which composes
+   ``Workspace`` (the single confinement chokepoint) and checks
+   ``rules.OWNERSHIP`` before any write.  This module adds atomicity on top of
+   that authorisation; it never decides for itself whether a path is legal.
+
+2. **A write is atomic or it did not happen.**  ``Workspace.write_text`` is a
+   plain ``Path.write_text``: a crash mid-write leaves a truncated artifact,
+   and a truncated artifact is worse than a missing one because a gate will
+   happily parse it.  :func:`_atomic_write_text` writes a temp file beside the
+   target and ``os.replace``\\ s it into position, so a reader sees the old
+   content or the new content and never a blend.
+
+3. **Refuse rather than mangle.**  A cap this module cannot enforce by a rule
+   the protocol actually states is raised as
+   :class:`~.exceptions.HarnessArtifactError`, not resolved by truncating
+   somebody's memory at line 300.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import secrets
+from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import ClassVar
+
+from pydantic import BaseModel, ConfigDict
+
+from fsm_llm.logging import logger
+
+from ._atomic import atomic_write_text as _atomic_write_text
+from .artifacts import (
+    ARTIFACT_MODELS,
+    Artifact,
+    ConsolidatedDoc,
+    LessonsDoc,
+    Section,
+    StateDoc,
+    SystemAtlasDoc,
+    _parse_bullets,
+    _render_bullets,
+    lesson_importance,
+)
+from .constants import ArtifactNames, Defaults, Role
+from .exceptions import HarnessArtifactError
+from .tools import PlanMemory
+
+__all__ = [
+    "COMPRESSED_SUMMARY_CLOSE",
+    "COMPRESSED_SUMMARY_OPEN",
+    "COMPRESSED_SUMMARY_SECTION",
+    "DRIVER_READ_MAX_BYTES",
+    "PLAN_ID_RE",
+    "CapReport",
+    "PlanDirectory",
+    "RunState",
+    "WindowReport",
+    "apply_sliding_window",
+    "check_system_cap",
+    "evict_lessons",
+    "mint_plan_id",
+]
+
+#: The id shape this module MINTS.  It is deliberately narrower than
+#: ``artifacts``' recogniser, which also accepts the protocol's legacy
+#: ``plan_YYYY-MM-DD_hex8`` directories: a reader must tolerate what history
+#: left on disk, a writer must emit exactly one form.
+PLAN_ID_RE = re.compile(r"^plan-\d{4}-\d{2}-\d{2}T\d{6}-[0-9a-f]{8}$")
+
+_MINT_STAMP = "%Y-%m-%dT%H%M%S"
+_MINT_ENTROPY_BYTES = 4
+_MINT_MAX_ATTEMPTS = 8
+
+COMPRESSED_SUMMARY_OPEN = Defaults.COMPRESSED_SUMMARY_MARKER
+COMPRESSED_SUMMARY_CLOSE = COMPRESSED_SUMMARY_OPEN.replace("<!-- ", "<!-- /")
+#: The ``## `` heading the protocol's own consolidated files use for the block
+#: (see ``plans/DECISIONS.md``).  It is not a plan id, so the window below can
+#: never select it for trimming -- which is the failsafe, expressed structurally.
+COMPRESSED_SUMMARY_SECTION = "Summary (compressed)"
+
+# DECISION plan-2026-07-21T191807-bf7ffe24/D-037
+# The DRIVER's read of its own protocol memory is bounded HERE, and this bound
+# is deliberately ~62x `tools.MAX_READ_BYTES`. Do NOT "align" the two, and above
+# all do NOT raise `MAX_READ_BYTES` to fix an oversized artifact: that cap exists
+# to bound what an UNTRUSTED WORKER can pull into an LLM context window, and
+# raising it widens exactly the surface it was put there to narrow. The driver
+# is a different actor with a different risk profile -- it parses these bytes
+# with a pydantic model, never renders them into a prompt, and reads only fixed
+# `ArtifactNames` under a root it supplied itself.
+# MEASURED: this plan's own `decisions.md` is ~108 KB. Read through the
+# agent-facing cap it comes back TRUNCATED, and a truncated artifact is worse
+# than a missing one -- `decisions-schema`, the plan-id preamble checks, the
+# `Anchor-Refs` back-links and the compression-marker scan all go dark on the
+# missing tail, which is precisely where an appended entry lives.
+# The bound is not removed, only moved: a runaway artifact still fails CLOSED
+# with `HarnessArtifactError` rather than being silently shortened or read into
+# memory without limit. Confinement is untouched -- every path still resolves
+# through `PlanMemory.locate_path` -> `Workspace.resolve`, the single chokepoint.
+# See decisions.md D-037.
+#: Sanity bound on the driver's own read of one protocol artifact.
+DRIVER_READ_MAX_BYTES = 4_000_000
+
+
+# ---------------------------------------------------------------------------
+# Plan-id minting
+# ---------------------------------------------------------------------------
+
+
+def mint_plan_id(*, now: datetime | None = None) -> str:
+    """Mint a fresh ``plan-YYYY-MM-DDTHHMMSS-<hex8>`` id.
+
+    Interface contract (2 call sites: :meth:`PlanDirectory.create` and callers
+    that need an id before a directory):
+        - ``now``: the timestamp to stamp; defaults to UTC now.  A naive
+          datetime is stamped verbatim, so a caller controlling the clock in a
+          test gets exactly the id it asked for.
+        - Returns a string matching :data:`PLAN_ID_RE`.  Uniqueness comes from
+          32 bits of :mod:`secrets` entropy, NOT from the timestamp: two plans
+          minted in the same second must not collide.
+    """
+    stamp = (now or datetime.now(timezone.utc)).strftime(_MINT_STAMP)
+    return f"plan-{stamp}-{secrets.token_hex(_MINT_ENTROPY_BYTES)}"
+
+
+# ---------------------------------------------------------------------------
+# Atomic write
+# ---------------------------------------------------------------------------
+
+# `_atomic_write_text` now lives in `._atomic` (imported above, aliased back
+# to this name) so that `tools.PlanMemory` can use the same primitive without
+# creating an import cycle (`storage` imports `PlanMemory` from `tools`).
+# Kept as a module-level name here -- do not delete this alias -- because
+# `tests/test_fsm_llm_harness/test_storage.py` imports it from this module by
+# name (`from fsm_llm.harness.storage import _atomic_write_text`).
+# See decisions.md D-009.
+
+
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+
+
+class CapReport(BaseModel):
+    """What a line-cap enforcement pass did, and what it removed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    artifact: str
+    cap: int
+    lines_before: int
+    lines_after: int
+    evicted: tuple[str, ...] = ()
+
+    @property
+    def changed(self) -> bool:
+        """Whether enforcement actually removed anything."""
+        return bool(self.evicted)
+
+    @property
+    def over_cap(self) -> bool:
+        """Whether the artifact is STILL over cap after enforcement.
+
+        True means the protected content alone exceeds the cap -- a human
+        signal, not a failure: an ``[I:5]``-only LESSONS.md over 200 lines is
+        the protocol asking for a rewrite, not for a deletion.
+        """
+        return self.lines_after > self.cap
+
+
+class WindowReport(BaseModel):
+    """What the cross-plan sliding window trimmed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    artifact: str
+    keep: int
+    kept_plans: tuple[str, ...] = ()
+    trimmed_plans: tuple[str, ...] = ()
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.trimmed_plans)
+
+
+class RunState(BaseModel):
+    """The resumable slice of a run: which plan, and that plan's ``state.md``."""
+
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-018
+    # Do NOT add a `run.json` (or any other sidecar) next to the artifacts to
+    # carry resume data. Two reasons, and the first is mechanical:
+    # `rules.OWNERSHIP` is the WHOLE of what may be written under a plan
+    # directory, and `PlanMemory._classify` returns None -- refused -- for any
+    # path that is not a listed artifact. A sidecar is therefore unwritable
+    # without widening the ownership table, i.e. without weakening the very
+    # invariant (I7, exactly one writing role per artifact) that makes the
+    # protocol auditable. The second reason is that it would be a SECOND source
+    # of truth for "where am I?", and the two would drift the first time a
+    # human edited state.md by hand -- which the protocol expects them to do.
+    # See decisions.md D-018.
+    model_config = ConfigDict(extra="forbid")
+
+    plan_id: str
+    doc: StateDoc
+
+    @property
+    def state(self) -> str:
+        return self.doc.state
+
+    @property
+    def iteration(self) -> int:
+        return self.doc.iteration
+
+    @property
+    def current_step(self) -> str:
+        return self.doc.current_step
+
+    @property
+    def fix_attempts(self) -> int:
+        """Recorded fix attempts, counted by ``state.md``'s own line grammar."""
+        return self.doc.fix_attempt_count
+
+
+# ---------------------------------------------------------------------------
+# LESSONS.md -- 200 lines, [I:N] eviction
+# ---------------------------------------------------------------------------
+
+
+def _rebuild_lessons(doc: LessonsDoc, bullets: Sequence[Sequence[str]]) -> LessonsDoc:
+    """Return *doc* with each section's bullet list replaced, in order."""
+    return LessonsDoc(
+        title=doc.title,
+        preamble=doc.preamble,
+        sections=[
+            Section(name=section.name, body=_render_bullets(items))
+            for section, items in zip(doc.sections, bullets, strict=True)
+        ],
+    )
+
+
+def evict_lessons(
+    doc: LessonsDoc, *, cap: int | None = None
+) -> tuple[LessonsDoc, CapReport]:
+    """Trim ``LESSONS.md`` to its line cap, lowest ``[I:N]`` and oldest first.
+
+    Interface contract (2 call sites: :meth:`PlanDirectory.enforce_lessons_cap`
+    and direct use by the archivist's CLOSE pass):
+        - Returns ``(document, report)``.  Under cap, the SAME document is
+          returned untouched and ``report.changed`` is False.
+        - Eviction order is importance ascending, then document order
+          ascending, so the least important and oldest bullet goes first.
+        - A bullet at :attr:`LessonsDoc.PROTECTED_IMPORTANCE` (``[I:5]``) is
+          NEVER evicted, even when that leaves the file over cap; the report
+          says so via :attr:`CapReport.over_cap`.
+        - Raises :class:`HarnessArtifactError` when a section carries content
+          that is not part of a bullet (see the anchor below).
+    """
+    limit = LessonsDoc.LINE_CAP if cap is None else cap
+    before = doc.line_count
+
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-017
+    # This is the precondition, and it is deliberately strict: a section is
+    # only rewritable if `_render_bullets(_parse_bullets(body))` reproduces the
+    # body BYTE FOR BYTE. Do NOT relax this to "parse what you can and rewrite
+    # anyway". `_parse_bullets` silently DISCARDS every line that is not a
+    # bullet or its indented continuation, so a rewrite of a section containing
+    # a paragraph, a table or a fenced block would delete that content while
+    # reporting success -- the protocol would lose institutional memory to a
+    # size policy, which is the opposite of what the cap is for.
+    # Verified against the real `plans/LESSONS.md`: all 4 sections reproduce
+    # exactly. `plans/SYSTEM.md` does NOT (its Identity section is prose), which
+    # is the measured reason SYSTEM is checked and refused rather than evicted.
+    # See decisions.md D-017.
+    for section in doc.sections:
+        items = _parse_bullets(section.body)
+        if _render_bullets(items) != section.body:
+            raise HarnessArtifactError(
+                doc.ARTIFACT,
+                f"section '## {section.name}' holds content that is not a "
+                "bullet; refusing to rewrite it to enforce the line cap",
+            )
+
+    bullets: list[list[str]] = [
+        _parse_bullets(section.body) for section in doc.sections
+    ]
+    evicted: list[str] = []
+    current = doc
+    while current.line_count > limit:
+        candidate = _weakest_lesson(bullets)
+        if candidate is None:
+            break
+        section_index, bullet_index = candidate
+        evicted.append(bullets[section_index].pop(bullet_index))
+        current = _rebuild_lessons(doc, bullets)
+
+    report = CapReport(
+        artifact=doc.ARTIFACT,
+        cap=limit,
+        lines_before=before,
+        lines_after=current.line_count,
+        evicted=tuple(evicted),
+    )
+    if report.changed:
+        logger.debug(
+            f"LESSONS.md evicted {len(evicted)} bullets "
+            f"({before} -> {report.lines_after} lines, cap {limit})"
+        )
+    return current, report
+
+
+def _weakest_lesson(bullets: Sequence[Sequence[str]]) -> tuple[int, int] | None:
+    """Index of the next bullet to evict, or ``None`` when all are protected."""
+    # (importance, section index, bullet index).  The comparison below is
+    # STRICTLY less-than, so among equally unimportant bullets the first one
+    # reached in document order wins -- i.e. oldest-first within a tier.
+    weakest: tuple[int, int, int] | None = None
+    for section_index, items in enumerate(bullets):
+        for bullet_index, item in enumerate(items):
+            importance = lesson_importance(item)
+            if importance >= LessonsDoc.PROTECTED_IMPORTANCE:
+                continue
+            if weakest is None or importance < weakest[0]:
+                weakest = (importance, section_index, bullet_index)
+    return None if weakest is None else (weakest[1], weakest[2])
+
+
+# ---------------------------------------------------------------------------
+# SYSTEM.md -- 300 lines, checked but never auto-trimmed
+# ---------------------------------------------------------------------------
+
+
+def check_system_cap(doc: SystemAtlasDoc, *, cap: int | None = None) -> CapReport:
+    """Measure ``SYSTEM.md`` against its 300-line cap.
+
+    Interface contract (2 call sites: :meth:`PlanDirectory.enforce_system_cap`
+    and :meth:`PlanDirectory.write_artifact`'s pre-write gate):
+        - Never modifies the document; ``report.evicted`` is always empty and
+          ``report.changed`` is always False.
+        - ``report.over_cap`` is the answer the caller acts on.
+    """
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-017
+    # SYSTEM.md is CHECKED, not evicted, and that asymmetry with LESSONS.md is
+    # the point. LESSONS carries an explicit, protocol-defined eviction ORDER
+    # (`[I:N]` importance, then recency); SYSTEM carries none, and all six of
+    # its sections are required. Any automatic trim would therefore have to
+    # invent a priority the protocol never stated and delete part of a required
+    # section -- so the honest enforcement is to refuse the write and make the
+    # archivist rewrite the atlas, which is what the source protocol asks for.
+    # Do NOT "finish the job" by adding a tail-truncate here.
+    # See decisions.md D-017.
+    limit = SystemAtlasDoc.LINE_CAP if cap is None else cap
+    count = doc.line_count
+    return CapReport(
+        artifact=doc.ARTIFACT, cap=limit, lines_before=count, lines_after=count
+    )
+
+
+# ---------------------------------------------------------------------------
+# The 4-plan sliding window over FINDINGS.md / DECISIONS.md
+# ---------------------------------------------------------------------------
+
+Summariser = Callable[[str, Section], str]
+
+
+def _default_summary_line(plan_id: str, section: Section) -> str:
+    """One honest bullet per trimmed plan: what it was, and where it still is."""
+    lines = len(section.body.split("\n")) if section.body else 0
+    return (
+        f"**{plan_id}** — {lines} lines trimmed from the cross-plan window; "
+        f"full content remains in `{plan_id}/`."
+    )
+
+
+def apply_sliding_window(
+    doc: ConsolidatedDoc,
+    *,
+    keep: int | None = None,
+    summarise: Summariser | None = None,
+) -> tuple[ConsolidatedDoc, WindowReport]:
+    """Keep only the *keep* most recent ``## <plan-id>`` sections.
+
+    Interface contract (2 call sites: :meth:`PlanDirectory.apply_sliding_window`
+    and direct use by the archivist's CLOSE pass):
+        - Sections are newest-first on disk, so the kept set is the first
+          *keep* plan-id sections in document order.
+        - Trimmed plans are recorded as bullets inside the single
+          ``<!-- COMPRESSED-SUMMARY -->`` block, which is created if absent.
+        - Non-plan-id sections (the summary block itself, and anything a human
+          added) are never candidates and are left in place.
+        - Raises :class:`HarnessArtifactError` if the result's compression
+          markers are unbalanced, nested or duplicated.
+    """
+    window = ConsolidatedDoc.WINDOW if keep is None else keep
+    if window < 1:
+        raise HarnessArtifactError(
+            doc.ARTIFACT, f"sliding window must keep at least 1 plan (got {window})"
+        )
+    plan_ids = doc.plan_ids()
+    if len(plan_ids) <= window:
+        return doc, WindowReport(
+            artifact=doc.ARTIFACT, keep=window, kept_plans=tuple(plan_ids)
+        )
+
+    kept_ids = plan_ids[:window]
+    trimmed_ids = plan_ids[window:]
+    summariser = summarise or _default_summary_line
+    by_name = {section.name: section for section in doc.sections}
+    new_bullets = [summariser(plan_id, by_name[plan_id]) for plan_id in trimmed_ids]
+
+    trimmed = set(trimmed_ids)
+    survivors = [section for section in doc.sections if section.name not in trimmed]
+    preamble, sections = _record_compression(doc.preamble, survivors, new_bullets)
+
+    result = ConsolidatedDoc(title=doc.title, preamble=preamble, sections=sections)
+    issues = result.marker_issues()
+    if issues:
+        raise HarnessArtifactError(
+            doc.ARTIFACT, f"compression markers are malformed: {'; '.join(issues)}"
+        )
+    logger.debug(f"{doc.ARTIFACT}: window kept {kept_ids}, trimmed {trimmed_ids}")
+    return result, WindowReport(
+        artifact=doc.ARTIFACT,
+        keep=window,
+        kept_plans=tuple(kept_ids),
+        trimmed_plans=tuple(trimmed_ids),
+    )
+
+
+def _record_compression(
+    preamble: str, sections: Sequence[Section], bullets: Sequence[str]
+) -> tuple[str, list[Section]]:
+    """Add *bullets* to the compressed-summary block, creating it if absent."""
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-020
+    # The source protocol's explicit failsafe is that a compressed summary must
+    # never be summarised into itself. That is enforced STRUCTURALLY here, in
+    # two places, and neither may be replaced by a check-afterwards:
+    #   1. the window's candidate set is exactly the sections whose heading is a
+    #      plan id (`ConsolidatedDoc.plan_ids`), and this block's heading is
+    #      "Summary (compressed)", so it can never be selected for trimming;
+    #   2. new bullets are inserted INSIDE the existing block, above its closing
+    #      marker -- the block is never wrapped in a fresh one, which is the
+    #      only way nesting could arise.
+    # Do NOT "simplify" this to prepending a new marker pair each pass: two
+    # passes would then nest, `compression_marker_issues` would report it, and
+    # the file would need hand repair. Live examples of the shape being
+    # preserved: `plans/DECISIONS.md:3-68`.
+    # See decisions.md D-020.
+    rendered = _render_bullets(bullets)
+    remaining = list(sections)
+    for index, section in enumerate(remaining):
+        if section.name != COMPRESSED_SUMMARY_SECTION:
+            continue
+        body = section.body.split("\n")
+        close = len(body)
+        for offset in range(len(body) - 1, -1, -1):
+            if COMPRESSED_SUMMARY_CLOSE in body[offset]:
+                close = offset
+                break
+        merged = [*body[:close], rendered, *body[close:]]
+        remaining[index] = Section(
+            name=section.name, body="\n".join(line for line in merged if line)
+        )
+        return preamble, remaining
+    if COMPRESSED_SUMMARY_OPEN in preamble:
+        opened = preamble
+    else:
+        opened = f"{preamble}\n{COMPRESSED_SUMMARY_OPEN}".lstrip("\n")
+    block = Section(
+        name=COMPRESSED_SUMMARY_SECTION,
+        body=f"{rendered}\n{COMPRESSED_SUMMARY_CLOSE}",
+    )
+    return opened, [block, *remaining]
+
+
+# ---------------------------------------------------------------------------
+# The plan directory
+# ---------------------------------------------------------------------------
+
+
+class PlanDirectory:
+    """A plan directory, addressed through one role's ``PlanMemory``.
+
+    Every read and write goes through :class:`~.tools.PlanMemory`, so this
+    class inherits confinement (``Workspace.resolve``) and ownership
+    (``rules.OWNERSHIP``) rather than restating them.  What it adds is
+    atomicity, the protocol's path layout, and the three size policies.
+
+    Args:
+        plan_dir: The plan directory.  Created if absent.
+        role: The role every write is authorised against.  Defaults to
+            ``Role.ORCHESTRATOR``, the driver itself.
+
+    Example::
+
+        directory = PlanDirectory.create("plans", role=Role.ORCHESTRATOR)
+        directory.write_text(ArtifactNames.STATE, state_doc.to_markdown())
+        resumed = directory.load_run_state()
+    """
+
+    #: Cross-plan files the sliding window applies to.
+    WINDOWED: ClassVar[tuple[str, ...]] = (
+        ArtifactNames.CROSS_FINDINGS,
+        ArtifactNames.CROSS_DECISIONS,
+    )
+
+    def __init__(
+        self, plan_dir: str | os.PathLike[str], *, role: str = Role.ORCHESTRATOR
+    ) -> None:
+        self._memory = PlanMemory(plan_dir, role=role)
+
+    @classmethod
+    def create(
+        cls,
+        parent: str | os.PathLike[str],
+        *,
+        role: str = Role.ORCHESTRATOR,
+        now: datetime | None = None,
+    ) -> PlanDirectory:
+        """Mint a fresh plan id under *parent* and open its directory.
+
+        Raises:
+            HarnessArtifactError: If a free id could not be minted, which means
+                :mod:`secrets` returned the same 32 bits eight times running.
+        """
+        base = Path(parent).expanduser()
+        for _ in range(_MINT_MAX_ATTEMPTS):
+            plan_id = mint_plan_id(now=now)
+            if not (base / plan_id).exists():
+                logger.debug(f"minted plan directory {plan_id}")
+                return cls(base / plan_id, role=role)
+        raise HarnessArtifactError(
+            str(base), f"could not mint an unused plan id in {_MINT_MAX_ATTEMPTS} tries"
+        )
+
+    # -- properties -----------------------------------------------------
+
+    @property
+    def memory(self) -> PlanMemory:
+        """The confined, ownership-scoped accessor every path goes through."""
+        return self._memory
+
+    @property
+    def plan_id(self) -> str:
+        return self._memory.plan_id
+
+    @property
+    def path(self) -> Path:
+        """The resolved plan directory."""
+        return self._memory.plan_dir
+
+    @property
+    def root(self) -> Path:
+        """The cross-plan tier's directory: the plan directory's parent."""
+        return self._memory.root
+
+    @property
+    def role(self) -> str:
+        return self._memory.role
+
+    def __repr__(self) -> str:
+        return f"PlanDirectory(plan_id={self.plan_id!r}, role={self.role!r})"
+
+    # -- layout ---------------------------------------------------------
+
+    @staticmethod
+    def finding_path(topic: str) -> str:
+        """The plan-relative path of a topic finding: ``findings/<slug>.md``."""
+        slug = re.sub(r"[^a-z0-9]+", "-", topic.strip().lower()).strip("-")
+        if not slug:
+            raise HarnessArtifactError(
+                ArtifactNames.FINDINGS_DIR, f"topic {topic!r} has no usable slug"
+            )
+        return f"{ArtifactNames.FINDINGS_DIR}/{slug}.md"
+
+    @staticmethod
+    def checkpoint_path(index: int, iteration: int) -> str:
+        """The plan-relative path of a checkpoint: ``checkpoints/cp-NNN-iterN.md``."""
+        if index < 0 or iteration < 0:
+            raise HarnessArtifactError(
+                ArtifactNames.CHECKPOINTS_DIR,
+                f"checkpoint index/iteration must be non-negative "
+                f"(got {index}/{iteration})",
+            )
+        return f"{ArtifactNames.CHECKPOINTS_DIR}/cp-{index:03d}-iter{iteration}.md"
+
+    # -- reads ----------------------------------------------------------
+
+    def exists(self, path: str) -> bool:
+        return self._memory.exists(path)
+
+    def list_dir(self, path: str = ".") -> list[str]:
+        return self._memory.list_dir(path)
+
+    def read_text(self, path: str) -> str:
+        """Read a protocol artifact WHOLE, on the driver's read path (D-037).
+
+        Interface contract (3+ call sites: :meth:`read_artifact`,
+        :meth:`append_text`, and ``plan_validator``'s shared reader):
+            - Returns the file's ENTIRE text.  This class is the driver's own
+              accessor -- it is never handed to a role -- so it deliberately
+              does not inherit ``PlanMemory.read_text``'s agent-facing 64 KB
+              cap, which would silently truncate a real ``decisions.md``.
+            - Still confined: the path resolves through
+              ``PlanMemory.locate_path`` -> ``Workspace.resolve``.
+            - Still bounded: :data:`DRIVER_READ_MAX_BYTES`.
+
+        Raises:
+            HarnessArtifactError: If the file is absent, unreadable, or over
+                the driver read bound.
+        """
+        target = self._memory.locate_path(path)
+        try:
+            size = target.stat().st_size
+        except OSError as exc:
+            raise HarnessArtifactError(path, "could not be read", cause=exc) from exc
+        if size > DRIVER_READ_MAX_BYTES:
+            raise HarnessArtifactError(
+                path,
+                f"is {size} bytes, over the {DRIVER_READ_MAX_BYTES}-byte driver "
+                "read bound; it must be split or compressed, not truncated",
+            )
+        try:
+            return target.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise HarnessArtifactError(path, "could not be read", cause=exc) from exc
+
+    def read_artifact(self, path: str) -> Artifact:
+        """Read and parse an artifact into its typed model.
+
+        The model is chosen by ``PlanMemory.artifact_for``, the same
+        classification the ownership check uses, so a path that is not a
+        protocol artifact is refused here rather than parsed as a guess.
+        """
+        model = self._model_for(path)
+        return model.from_markdown(self.read_text(path))
+
+    def _model_for(self, path: str) -> type[Artifact]:
+        artifact = self._memory.artifact_for(path)
+        model = ARTIFACT_MODELS.get(artifact) if artifact is not None else None
+        if model is None:
+            raise HarnessArtifactError(
+                path, "is not a protocol artifact, so it has no schema"
+            )
+        return model
+
+    # -- writes ---------------------------------------------------------
+
+    def write_text(self, path: str, content: str) -> str:
+        """Authorise *path*, then write it atomically.
+
+        Interface contract (3 call sites: :meth:`write_artifact`,
+        :meth:`append_text`, and direct callers):
+            - Returns the memory-root-relative path written.
+            - Raises ``HarnessConfinementError`` / ``HarnessOwnershipError``
+              BEFORE touching the filesystem, and :class:`HarnessArtifactError`
+              if the write itself fails.
+        """
+        # DECISION plan-2026-07-21T191807-bf7ffe24/D-019
+        # (UPDATED plan-2026-09-12T135914-45a654de/D-009: `PlanMemory.write_text`
+        # is now ALSO atomic, via the same `atomic_write_text` primitive -- see
+        # tools.py. This call is kept split into `authorise` (no write) +
+        # `_atomic_write_text` anyway, rather than calling `PlanMemory.write_text`
+        # directly, purely to keep this method's own return convention
+        # (`self._memory.locate(path)`, the memory-root-relative STRING form)
+        # rather than `PlanMemory.write_text`'s resolved-`Path`-relative form --
+        # not for atomicity, which both paths now have.)
+        # Do NOT "fix" this by making `Workspace.write_text` atomic instead:
+        # that class is the AGENT-facing tool surface, and its writes go to the
+        # user's source tree where a temp file appearing beside every edited
+        # file is a visible side effect. See decisions.md D-019, D-009.
+        target = self._memory.authorise(path)
+        _atomic_write_text(target, content, artifact=path)
+        return self._memory.locate(path)
+
+    def append_text(self, path: str, content: str) -> str:
+        """Append to an owned artifact, atomically.
+
+        Read-modify-write rather than ``O_APPEND``: the whole point of this
+        module is that a reader never sees a partial artifact, and an
+        interrupted ``O_APPEND`` leaves exactly that.
+        """
+        existing = self.read_text(path) if self.exists(path) else ""
+        return self.write_text(path, existing + content)
+
+    def write_artifact(self, path: str, artifact: Artifact) -> str:
+        """Serialize and atomically write a typed artifact.
+
+        Raises:
+            HarnessArtifactError: If *artifact* is not the model *path* holds,
+                or if it is a ``SYSTEM.md`` over its line cap (D-017).
+        """
+        model = self._model_for(path)
+        if not isinstance(artifact, model):
+            raise HarnessArtifactError(
+                path,
+                f"expects a {model.__name__}, got {type(artifact).__name__}",
+            )
+        if isinstance(artifact, SystemAtlasDoc):
+            report = check_system_cap(artifact)
+            if report.over_cap:
+                raise HarnessArtifactError(
+                    path,
+                    f"is {report.lines_before} lines, over its {report.cap}-line "
+                    "cap; the atlas must be rewritten, not truncated",
+                )
+        return self.write_text(path, artifact.to_markdown())
+
+    # -- bootstrap -------------------------------------------------------
+
+    #: Names :meth:`seed_protocol_skeleton` must NEVER create, subtracted from
+    #: the constants tables rather than worked around by hand-listing what IS
+    #: seeded.  ``STATE`` is the driver's own first write and carries the
+    #: position an empty file would misreport; ``FINDINGS_DIR`` and
+    #: ``CHECKPOINTS_DIR`` are directories whose contents are DERIVED gate
+    #: evidence (invariant I3).
+    NEVER_SEEDED: ClassVar[tuple[str, ...]] = (
+        ArtifactNames.STATE,
+        ArtifactNames.FINDINGS_DIR,
+        ArtifactNames.CHECKPOINTS_DIR,
+    )
+
+    def seed_protocol_skeleton(self) -> tuple[str, ...]:
+        """Bring the protocol's artifacts into EXISTENCE as zero-byte files.
+
+        Interface contract (call sites: the plan-creation paths, plus the L7
+        bench's ``seeded`` arm, which calls this PRODUCT method rather than a
+        fixture):
+            - Creates each per-plan artifact (``ArtifactNames.PER_PLAN`` minus
+              :data:`NEVER_SEEDED`) and each cross-plan file
+              (``ArtifactNames.CROSS_PLAN``) **only if it does not already
+              exist**, with **zero bytes**.
+            - Returns the memory-root-relative paths created by THIS call, in
+              seeding order -- so a second call returns ``()``.
+            - Idempotent, and never truncates, overwrites or appends.
+
+        Raises:
+            HarnessArtifactError: If a file that does not exist cannot be
+                created -- a half-skeleton fails loudly rather than silently.
+        """
+        # DECISION plan-2026-07-22T212329-16de43da/D-002
+        # This is a BOOTSTRAP-ONLY, CREATE-IF-ABSENT, ZERO-BYTE capability, and
+        # all three words are load-bearing restrictions, not a description of
+        # the current implementation.
+        #
+        # Do NOT widen it to write CONTENT. The zero-byte restriction is what
+        # makes this method structurally incapable of destroying or fabricating
+        # anything: it cannot overwrite a populated cross-plan `LESSONS.md`
+        # belonging to a whole different plan (the tier is SHARED -- see D-047's
+        # note that the confinement root is the plan directory's PARENT), and it
+        # cannot invent institutional memory that a first-ever plan legitimately
+        # does not have. Header stubs were considered and rejected for exactly
+        # that reason. The `x` open mode, not an `exists()` check plus a write,
+        # is what enforces "never truncate" at the syscall rather than by
+        # inspection.
+        #
+        # Do NOT let it seed a `findings/` path -- not a file, not the
+        # directory. `findings/*.md` is DISK-DERIVED gate evidence
+        # (`tools.derive_disk_counts` / `tools.gate_files` count non-empty
+        # findings files, and `harness._assign_explore_topic` deliberately
+        # writes nothing), so a pre-created reserved topic file would fabricate
+        # the very count the EXPLORE gate exists to measure. `NEVER_SEEDED`
+        # subtracts it from the constants tables; do not "simplify" that
+        # subtraction into a hand-written list of what IS seeded, because a
+        # hand-written duplicate drifting from `ArtifactNames` is the defect
+        # class this project keeps rediscovering.
+        #
+        # Why it exists: `_cmd_new` writes only `state.md` and
+        # `PlanDirectory.create` writes nothing, so EXPLORE's FIRST operative
+        # rule (`rules.py:372-374`: "read the current state and the cross-plan
+        # memory files before the first search") is structurally UNEXECUTABLE on
+        # a first-ever plan -- the files it names exist nowhere. L5 scores 5/5
+        # over a fixture that HAS them; L6 scores 0/3 over a bare `mkdir`.
+        #
+        # The cross-plan five are ARCHIVIST-owned (`rules.OWNERSHIP`), so they
+        # are reached through an explicitly ARCHIVIST-scoped `PlanMemory` opened
+        # here. Do NOT instead widen `OWNERSHIP`: that table drives what a LIVE
+        # worker may write (`roles.held_tools`, `PlanMemory.authorise`), and a
+        # bootstrap need must never change a dispatched role's write scope.
+        #
+        # DELIBERATELY UNWIRED -- the L7 A/B (`l7-explore-coldstart/B0`, `bare`
+        # vs `seeded`) measured this lever NOT VALIDATED (bare 5/12, seeded
+        # 7/12, Fisher two-sided p=0.6843; D-003/D-006). The method is retained
+        # as the committed bench's reproducibility dependency, NOT wired into
+        # any plan-creation path. See decisions.md D-002/D-003/D-006.
+        tiers = (
+            (Role.ORCHESTRATOR, ArtifactNames.PER_PLAN),
+            (Role.ARCHIVIST, ArtifactNames.CROSS_PLAN),
+        )
+        created: list[str] = []
+        for role, table in tiers:
+            memory = PlanMemory(self.path, role=role)
+            for name in table:
+                if name in self.NEVER_SEEDED:
+                    continue
+                target = memory.authorise(name)
+                try:
+                    target.open("x", encoding="utf-8").close()
+                except FileExistsError:
+                    continue
+                except OSError as exc:
+                    raise HarnessArtifactError(
+                        name, "could not be seeded", cause=exc
+                    ) from exc
+                created.append(memory.locate(name))
+        logger.debug(f"seeded {len(created)} protocol placeholders in {self.plan_id}")
+        return tuple(created)
+
+    # -- resumable run state --------------------------------------------
+
+    def load_run_state(self) -> RunState | None:
+        """Read ``state.md`` back into a :class:`RunState`, or ``None`` if absent."""
+        if not self.exists(ArtifactNames.STATE):
+            return None
+        doc = self.read_artifact(ArtifactNames.STATE)
+        if not isinstance(doc, StateDoc):  # pragma: no cover - registry invariant
+            raise HarnessArtifactError(
+                ArtifactNames.STATE, "did not parse as a StateDoc"
+            )
+        return RunState(plan_id=self.plan_id, doc=doc)
+
+    def save_run_state(self, run_state: RunState) -> str:
+        """Write a :class:`RunState` back to ``state.md``.
+
+        Raises:
+            HarnessArtifactError: If the state belongs to a different plan --
+                writing plan A's position into plan B's memory is a bug, never
+                an intention.
+        """
+        if run_state.plan_id != self.plan_id:
+            raise HarnessArtifactError(
+                ArtifactNames.STATE,
+                f"belongs to plan '{run_state.plan_id}', not '{self.plan_id}'",
+            )
+        return self.write_artifact(ArtifactNames.STATE, run_state.doc)
+
+    # -- size policies ---------------------------------------------------
+
+    def enforce_lessons_cap(self, *, cap: int | None = None) -> CapReport:
+        """Evict ``LESSONS.md`` down to its cap, archiving what was removed.
+
+        Evicted bullets are appended to ``LESSONS-archive.md`` -- the protocol's
+        append-only overflow file -- so the cap costs the cross-plan tier
+        nothing but its working-set size.  Nothing is written when the file is
+        already under cap.
+        """
+        doc = self.read_artifact(ArtifactNames.LESSONS)
+        if not isinstance(doc, LessonsDoc):  # pragma: no cover - registry invariant
+            raise HarnessArtifactError(
+                ArtifactNames.LESSONS, "did not parse as LESSONS"
+            )
+        trimmed, report = evict_lessons(doc, cap=cap)
+        if not report.changed:
+            return report
+        self.append_text(
+            ArtifactNames.LESSONS_ARCHIVE,
+            f"\n## Evicted from {ArtifactNames.LESSONS} "
+            f"({datetime.now(timezone.utc).strftime('%Y-%m-%d')})\n"
+            f"{_render_bullets(report.evicted)}\n",
+        )
+        self.write_artifact(ArtifactNames.LESSONS, trimmed)
+        return report
+
+    def enforce_system_cap(self, *, cap: int | None = None) -> CapReport:
+        """Measure ``SYSTEM.md`` against its cap; never rewrites it (D-017)."""
+        doc = self.read_artifact(ArtifactNames.SYSTEM)
+        if not isinstance(doc, SystemAtlasDoc):  # pragma: no cover - registry
+            raise HarnessArtifactError(ArtifactNames.SYSTEM, "did not parse as SYSTEM")
+        return check_system_cap(doc, cap=cap)
+
+    def apply_sliding_window(
+        self,
+        artifact: str,
+        *,
+        keep: int | None = None,
+        summarise: Summariser | None = None,
+    ) -> WindowReport:
+        """Trim a consolidated cross-plan file to the *keep* most recent plans.
+
+        ``INDEX.md`` is what preserves a trimmed plan's discoverability; keeping
+        it current is the archivist's job, not this method's.  Nothing is
+        written when the file is already within the window.
+        """
+        if artifact not in self.WINDOWED:
+            raise HarnessArtifactError(
+                artifact,
+                f"has no sliding window; windowed files are {', '.join(self.WINDOWED)}",
+            )
+        doc = self.read_artifact(artifact)
+        if not isinstance(doc, ConsolidatedDoc):  # pragma: no cover - registry
+            raise HarnessArtifactError(artifact, "did not parse as a consolidated file")
+        trimmed, report = apply_sliding_window(doc, keep=keep, summarise=summarise)
+        if report.changed:
+            self.write_text(artifact, trimmed.to_markdown())
+        return report

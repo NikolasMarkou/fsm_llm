@@ -1,5 +1,5 @@
 """
-Tests verifying fixes for audit findings in fsm_llm_workflows.
+Tests verifying fixes for audit findings in fsm_llm.workflows.
 Covers: F-001 (ParallelStep), F-002 (event race), F-004 (ConversationStep),
         F-007 (LLMProcessingStep template), F-010 (dead code removal).
 """
@@ -11,10 +11,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm_workflows.engine import WorkflowEngine
-from fsm_llm_workflows.exceptions import WorkflowTimeoutError
-from fsm_llm_workflows.models import WorkflowEvent
-from fsm_llm_workflows.steps import (
+from fsm_llm.workflows.engine import WorkflowEngine
+from fsm_llm.workflows.exceptions import WorkflowTimeoutError
+from fsm_llm.workflows.models import WorkflowEvent
+from fsm_llm.workflows.steps import (
     AutoTransitionStep,
     ConversationStep,
     LLMProcessingStep,
@@ -237,8 +237,8 @@ class TestInstanceLockConcurrency:
         each time it actually runs."""
         import asyncio as _asyncio
 
-        from fsm_llm_workflows.models import WorkflowStepResult
-        from fsm_llm_workflows.steps import WorkflowStep
+        from fsm_llm.workflows.models import WorkflowStepResult
+        from fsm_llm.workflows.steps import WorkflowStep
 
         class _CountingTerminalStep(WorkflowStep):
             async def execute(self, context):
@@ -256,8 +256,8 @@ class TestInstanceLockConcurrency:
         an event (not terminal), incrementing ``counter`` each run."""
         import asyncio as _asyncio
 
-        from fsm_llm_workflows.models import WorkflowStepResult
-        from fsm_llm_workflows.steps import WorkflowStep
+        from fsm_llm.workflows.models import WorkflowStepResult
+        from fsm_llm.workflows.steps import WorkflowStep
 
         class _CountingWaitingStep(WorkflowStep):
             async def execute(self, context):
@@ -281,8 +281,8 @@ class TestInstanceLockConcurrency:
         instance must only ever execute the step body once: whichever call
         loses the lock race must observe the (by-then) terminal instance via
         is_active() and no-op, rather than re-running the step concurrently."""
-        from fsm_llm_workflows.definitions import WorkflowDefinition
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.definitions import WorkflowDefinition
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
         for _ in range(5):
             counter: list = []
@@ -323,8 +323,8 @@ class TestInstanceLockConcurrency:
         more than once, and must never raise (WAITING->CANCELLED is always a
         valid transition, so no ordering of the two calls can hit an invalid
         status transition)."""
-        from fsm_llm_workflows.definitions import WorkflowDefinition
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.definitions import WorkflowDefinition
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
         for _ in range(5):
             counter: list = []
@@ -363,7 +363,7 @@ class TestInstanceLockConcurrency:
     def test_instance_lock_removed_on_remove_instance(self):
         """F4 cleanup: remove_instance must also drop the per-instance lock
         so _instance_locks does not grow unbounded."""
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
         engine = WorkflowEngine()
         instance = WorkflowInstance(
@@ -384,7 +384,7 @@ class TestInstanceLockConcurrency:
         per-instance locks of purged instances."""
         from datetime import datetime, timezone
 
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
         engine = WorkflowEngine(max_completed_instances=1)
         for i in range(3):
@@ -417,7 +417,7 @@ class TestHandleStepExceptionTerminalGuard:
 
     @staticmethod
     def _make_instance(status, workflow_id="wf-terminal"):
-        from fsm_llm_workflows.models import WorkflowInstance
+        from fsm_llm.workflows.models import WorkflowInstance
 
         return WorkflowInstance(
             instance_id="terminal-1",
@@ -429,7 +429,7 @@ class TestHandleStepExceptionTerminalGuard:
     async def test_noop_when_instance_already_cancelled(self):
         """Calling _handle_step_exception on an already-CANCELLED instance
         must not raise WorkflowStateError and must not overwrite the status."""
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.workflows.models import WorkflowStatus
 
         engine = WorkflowEngine()
         instance = self._make_instance(WorkflowStatus.CANCELLED)
@@ -442,7 +442,7 @@ class TestHandleStepExceptionTerminalGuard:
 
     async def test_noop_when_instance_already_completed(self):
         """Same guard, COMPLETED variant."""
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.workflows.models import WorkflowStatus
 
         engine = WorkflowEngine()
         instance = self._make_instance(WorkflowStatus.COMPLETED)
@@ -459,9 +459,9 @@ class TestHandleStepExceptionTerminalGuard:
         _execute_workflow_step re-raises unconditionally (pre-existing,
         out-of-scope non-timeout-exception swallowing is unaffected by this
         fix)."""
-        from fsm_llm_workflows.definitions import WorkflowDefinition
-        from fsm_llm_workflows.models import WorkflowStatus
-        from fsm_llm_workflows.steps import WorkflowStep
+        from fsm_llm.workflows.definitions import WorkflowDefinition
+        from fsm_llm.workflows.models import WorkflowStatus
+        from fsm_llm.workflows.steps import WorkflowStep
 
         class _RaisingStep(WorkflowStep):
             async def execute(self, context):
@@ -505,7 +505,7 @@ class TestCancelWorkflowTerminalGuard:
 
     @staticmethod
     def _make_instance(status, workflow_id="wf-cancel-terminal"):
-        from fsm_llm_workflows.models import WorkflowInstance
+        from fsm_llm.workflows.models import WorkflowInstance
 
         return WorkflowInstance(
             instance_id="cancel-terminal-1",
@@ -515,7 +515,7 @@ class TestCancelWorkflowTerminalGuard:
         )
 
     async def test_cancel_already_completed_instance_returns_false_no_raise(self):
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.workflows.models import WorkflowStatus
 
         engine = WorkflowEngine()
         instance = self._make_instance(WorkflowStatus.COMPLETED)
@@ -529,7 +529,7 @@ class TestCancelWorkflowTerminalGuard:
         assert instance.status == WorkflowStatus.COMPLETED
 
     async def test_cancel_already_cancelled_instance_returns_false_no_raise(self):
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.workflows.models import WorkflowStatus
 
         engine = WorkflowEngine()
         instance = self._make_instance(WorkflowStatus.CANCELLED)
@@ -541,7 +541,7 @@ class TestCancelWorkflowTerminalGuard:
         assert instance.status == WorkflowStatus.CANCELLED
 
     async def test_cancel_already_failed_instance_returns_false_no_raise(self):
-        from fsm_llm_workflows.models import WorkflowStatus
+        from fsm_llm.workflows.models import WorkflowStatus
 
         engine = WorkflowEngine()
         instance = self._make_instance(WorkflowStatus.FAILED)
@@ -568,8 +568,8 @@ class TestCancelWorkflowTerminalGuard:
           instead of raising WorkflowStateError (the reviewer's exact
           repro).
         """
-        from fsm_llm_workflows.definitions import WorkflowDefinition
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.definitions import WorkflowDefinition
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
         for _ in range(20):
             counter: list = []
@@ -627,9 +627,9 @@ class TestFloatTimeoutSecondsEndToEnd:
     async def test_expired_deadline_reports_subsecond_float_timeout(self):
         from datetime import datetime, timedelta, timezone
 
-        from fsm_llm_workflows.definitions import WorkflowDefinition
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
-        from fsm_llm_workflows.steps import AutoTransitionStep, WorkflowStep
+        from fsm_llm.workflows.definitions import WorkflowDefinition
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.steps import AutoTransitionStep, WorkflowStep
 
         class _TerminalStep(WorkflowStep):
             async def execute(self, context):

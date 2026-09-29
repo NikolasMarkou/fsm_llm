@@ -14,6 +14,12 @@ from typing import Any
 
 import pytest
 
+from fsm_llm.agents.constants import ContextKeys
+from fsm_llm.agents.definitions import AgentConfig
+from fsm_llm.agents.maker_checker import MakerCheckerAgent
+from fsm_llm.agents.react import ReactAgent
+from fsm_llm.agents.reflexion import ReflexionAgent
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -22,12 +28,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.constants import ContextKeys
-from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.maker_checker import MakerCheckerAgent
-from fsm_llm_agents.react import ReactAgent
-from fsm_llm_agents.reflexion import ReflexionAgent
-from fsm_llm_agents.tools import ToolRegistry
 
 from .test_maker_checker import _AlwaysRejectLLM
 

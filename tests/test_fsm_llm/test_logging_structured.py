@@ -88,9 +88,9 @@ class TestPrepareLogRecord:
         assert result["extra"]["package"] == "fsm_llm"
 
     def test_preserves_existing_package(self):
-        record = {"extra": {"package": "fsm_llm_agents"}}
+        record = {"extra": {"package": "fsm_llm.agents"}}
         result = prepare_log_record(record)
-        assert result["extra"]["package"] == "fsm_llm_agents"
+        assert result["extra"]["package"] == "fsm_llm.agents"
 
 
 class TestSetupLogging:
@@ -136,7 +136,7 @@ class TestSetupLogging:
 
         log = logger.bind(
             conversation_id="conv-abc",
-            package="fsm_llm_agents",
+            package="fsm_llm.agents",
             agent_type="react",
         )
         log.info("agent running")
@@ -144,7 +144,7 @@ class TestSetupLogging:
         output = buf.getvalue().strip()
         entry = json.loads(output)
         assert entry["conversation_id"] == "conv-abc"
-        assert entry["package"] == "fsm_llm_agents"
+        assert entry["package"] == "fsm_llm.agents"
         assert entry["agent_type"] == "react"
         assert entry["message"] == "agent running"
 

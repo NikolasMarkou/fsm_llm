@@ -479,7 +479,7 @@ class TestLiveMemoryAgent:
         ``examples/agents/memory_agent/run.py`` (0.7 / 5) so this test and the
         example exercise the same configuration; the assertions are unchanged.
         """
-        from fsm_llm_agents import (
+        from fsm_llm.agents import (
             AgentConfig,
             ReactAgent,
             ToolRegistry,

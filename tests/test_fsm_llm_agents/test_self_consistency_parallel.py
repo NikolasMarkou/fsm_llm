@@ -10,8 +10,8 @@ import threading
 
 import pytest
 
-from fsm_llm_agents import AgentConfig, SelfConsistencyAgent
-from fsm_llm_agents.exceptions import AgentError
+from fsm_llm.agents import AgentConfig, SelfConsistencyAgent
+from fsm_llm.agents.exceptions import AgentError
 
 
 def _make_agent(num_samples, max_workers):

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 """Tests for meta-agent prompt builders (hybrid architecture)."""
 
-from fsm_llm_agents.definitions import ArtifactType
-from fsm_llm_agents.meta_builders import FSMBuilder
-from fsm_llm_agents.meta_prompts import (
+from fsm_llm.agents.definitions import ArtifactType
+from fsm_llm.agents.meta_builders import FSMBuilder
+from fsm_llm.agents.meta_prompts import (
     build_followup_message,
     build_output_message,
     build_review_presentation,

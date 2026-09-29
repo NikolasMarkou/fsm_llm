@@ -10,7 +10,7 @@ def _clear_monitor_api_key_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent ambient FSM_LLM_MONITOR_API_KEY from leaking into tests.
 
     Bug (plan-2026-09-12T065608-089d0ec7/D-020): `configure()`
-    (`fsm_llm_monitor/server.py`) falls back to
+    (`fsm_llm/monitor/server.py`) falls back to
     ``os.environ["FSM_LLM_MONITOR_API_KEY"]`` whenever a test/fixture calls
     it without an explicit ``api_key=`` argument — which almost every
     `setup_method`/test in this package does. If a developer's or CI's

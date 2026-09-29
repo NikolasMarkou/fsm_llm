@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_monitor.definitions models."""
+"""Tests for fsm_llm.monitor.definitions models."""
 
 from datetime import datetime
 
-from fsm_llm_monitor.definitions import (
+from fsm_llm.monitor.definitions import (
     ActivityItem,
     ConversationSnapshot,
     FSMSnapshot,
@@ -296,13 +296,13 @@ class TestInstanceInfo:
 
 class TestStubToolConfig:
     def test_defaults(self):
-        from fsm_llm_monitor.definitions import StubToolConfig
+        from fsm_llm.monitor.definitions import StubToolConfig
 
         cfg = StubToolConfig(name="search", description="Search the web")
         assert cfg.stub_response == "Tool executed successfully"
 
     def test_custom_response(self):
-        from fsm_llm_monitor.definitions import StubToolConfig
+        from fsm_llm.monitor.definitions import StubToolConfig
 
         cfg = StubToolConfig(name="calc", description="Calculate", stub_response="42")
         assert cfg.stub_response == "42"
@@ -312,7 +312,7 @@ class TestRequestModels:
     """Verify request model defaults and serialization."""
 
     def test_launch_fsm_request_defaults(self):
-        from fsm_llm_monitor.definitions import LaunchFSMRequest
+        from fsm_llm.monitor.definitions import LaunchFSMRequest
 
         req = LaunchFSMRequest()
         assert req.preset_id is None
@@ -321,13 +321,13 @@ class TestRequestModels:
         assert req.label == ""
 
     def test_send_message_request(self):
-        from fsm_llm_monitor.definitions import SendMessageRequest
+        from fsm_llm.monitor.definitions import SendMessageRequest
 
         req = SendMessageRequest(message="hello", conversation_id="c1")
         assert req.message == "hello"
 
     def test_launch_agent_request_defaults(self):
-        from fsm_llm_monitor.definitions import LaunchAgentRequest
+        from fsm_llm.monitor.definitions import LaunchAgentRequest
 
         req = LaunchAgentRequest(task="Do something")
         assert req.agent_type == "ReactAgent"
@@ -335,7 +335,7 @@ class TestRequestModels:
         assert req.tools == []
 
     def test_workflow_advance_request(self):
-        from fsm_llm_monitor.definitions import WorkflowAdvanceRequest
+        from fsm_llm.monitor.definitions import WorkflowAdvanceRequest
 
         req = WorkflowAdvanceRequest(workflow_instance_id="w1", user_input="yes")
         assert req.user_input == "yes"
@@ -345,14 +345,14 @@ class TestDashboardConfigModels:
     """Tests for custom dashboard configuration models."""
 
     def test_dashboard_panel(self):
-        from fsm_llm_monitor.definitions import DashboardPanel
+        from fsm_llm.monitor.definitions import DashboardPanel
 
         p = DashboardPanel(panel_id="p1", title="CPU", panel_type="gauge", metric="cpu")
         assert p.panel_id == "p1"
         assert p.panel_type == "gauge"
 
     def test_dashboard_alert(self):
-        from fsm_llm_monitor.definitions import DashboardAlert
+        from fsm_llm.monitor.definitions import DashboardAlert
 
         a = DashboardAlert(
             alert_id="a1", metric="errors", condition=">", threshold=10.0
@@ -361,7 +361,7 @@ class TestDashboardConfigModels:
         assert a.condition == ">"
 
     def test_dashboard_config(self):
-        from fsm_llm_monitor.definitions import (
+        from fsm_llm.monitor.definitions import (
             DashboardAlert,
             DashboardConfig,
             DashboardPanel,
@@ -378,7 +378,7 @@ class TestDashboardConfigModels:
         assert cfg.refresh_interval_seconds == 30
 
     def test_dashboard_config_defaults(self):
-        from fsm_llm_monitor.definitions import DashboardConfig
+        from fsm_llm.monitor.definitions import DashboardConfig
 
         cfg = DashboardConfig()
         assert cfg.panels == []
@@ -498,7 +498,7 @@ class TestBuilderStartRequestBounds:
         import pytest
         from pydantic import ValidationError
 
-        from fsm_llm_monitor.definitions import BuilderStartRequest
+        from fsm_llm.monitor.definitions import BuilderStartRequest
 
         BuilderStartRequest(temperature=0.0)
         BuilderStartRequest(temperature=2.0)
@@ -511,12 +511,12 @@ class TestBuilderStartRequestBounds:
         import pytest
         from pydantic import ValidationError
 
-        from fsm_llm_monitor.definitions import BuilderStartRequest
+        from fsm_llm.monitor.definitions import BuilderStartRequest
 
         with pytest.raises(ValidationError):
             BuilderStartRequest(max_tokens=0)
 
     def test_apply_dashboard_request_removed(self):
-        import fsm_llm_monitor.definitions as d
+        import fsm_llm.monitor.definitions as d
 
         assert not hasattr(d, "ApplyDashboardRequest")

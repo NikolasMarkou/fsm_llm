@@ -42,14 +42,14 @@ from typing import Any
 # Allow running from a source checkout without installation.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from fsm_llm_agents import AgentConfig, ToolRegistry, create_agent, tool
-from fsm_llm_agents.auto_memory import AutoMemoryReactAgent
-from fsm_llm_agents.exceptions import (
+from fsm_llm.agents import AgentConfig, ToolRegistry, create_agent, tool
+from fsm_llm.agents.auto_memory import AutoMemoryReactAgent
+from fsm_llm.agents.exceptions import (
     AgentTimeoutError,
     BudgetExhaustedError,
 )
-from fsm_llm_agents.native_fc import NativeFunctionCallingReactAgent
-from fsm_llm_agents.semantic_memory import SemanticMemoryStore
+from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
+from fsm_llm.agents.semantic_memory import SemanticMemoryStore
 
 # --------------------------------------------------------------------------- #
 # Tools — small, deterministic, deliberately mixed (one flaky) for bug-hunting #

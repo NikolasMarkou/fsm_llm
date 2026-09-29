@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.rewoo module and REWOO FSM definition."""
+"""Tests for fsm_llm.agents.rewoo module and REWOO FSM definition."""
 
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
-from fsm_llm_agents.constants import (
+from fsm_llm.agents.constants import (
     ContextKeys,
     Defaults,
     HandlerNames,
     REWOOStates,
 )
-from fsm_llm_agents.definitions import (
+from fsm_llm.agents.definitions import (
     AgentConfig,
 )
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.fsm_definitions import build_rewoo_fsm
-from fsm_llm_agents.rewoo import REWOOAgent
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.agents.exceptions import AgentError
+from fsm_llm.agents.fsm_definitions import build_rewoo_fsm
+from fsm_llm.agents.rewoo import REWOOAgent
+from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.definitions import FSMDefinition
 
 
 def _search(params):

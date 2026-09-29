@@ -1,11 +1,21 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.adapt module."""
+"""Tests for fsm_llm.agents.adapt module."""
 
 from typing import Any
 
 import pytest
 
+from fsm_llm.agents.adapt import ADaPTAgent
+from fsm_llm.agents.constants import (
+    ADaPTStates,
+    ContextKeys,
+    Defaults,
+    HandlerNames,
+)
+from fsm_llm.agents.definitions import AgentConfig, DecompositionResult
+from fsm_llm.agents.fsm_definitions import build_adapt_fsm
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -14,16 +24,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.adapt import ADaPTAgent
-from fsm_llm_agents.constants import (
-    ADaPTStates,
-    ContextKeys,
-    Defaults,
-    HandlerNames,
-)
-from fsm_llm_agents.definitions import AgentConfig, DecompositionResult
-from fsm_llm_agents.fsm_definitions import build_adapt_fsm
-from fsm_llm_agents.tools import ToolRegistry
 
 
 def _dummy_tool(params):
@@ -309,7 +309,7 @@ class TestADaPTJSONLeakFix:
 
     # --- Part A: success guard (same call adapt.run() now makes) --------------
     def test_degenerate_completion_is_not_success(self):
-        from fsm_llm_agents.definitions import AgentTrace
+        from fsm_llm.agents.definitions import AgentTrace
 
         # No final_answer, no tool calls → degenerate (was hard-coded True).
         assert (
@@ -322,7 +322,7 @@ class TestADaPTJSONLeakFix:
         )
 
     def test_real_completion_is_success(self):
-        from fsm_llm_agents.definitions import AgentTrace
+        from fsm_llm.agents.definitions import AgentTrace
 
         assert ADaPTAgent._completion_is_real(
             {ContextKeys.FINAL_ANSWER: "Paris vs Tokyo: equal length."},
@@ -335,7 +335,7 @@ class TestADaPTJSONLeakFix:
         # answer (no separate final_answer). run() passes ATTEMPT_RESULT as an
         # answer key ONLY when attempt_succeeded is true — distinguishing it from
         # the leak case above (failed attempt → attempt_result is partial).
-        from fsm_llm_agents.definitions import AgentTrace
+        from fsm_llm.agents.definitions import AgentTrace
 
         assert ADaPTAgent._completion_is_real(
             {ContextKeys.ATTEMPT_RESULT: "Complete answer here."},

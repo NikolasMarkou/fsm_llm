@@ -131,7 +131,7 @@ class WorkingMemory:
         # every read and write of `_buffers`. Acquisitions must NEVER nest: a public
         # method that needs another's body calls the lock-free `_*_locked()` twin
         # (`_get_all_data_locked`, `_update_buffer_locked`), mirroring
-        # `fsm_llm_agents/semantic_memory.py`'s `_save_locked` pattern. Do NOT
+        # `fsm_llm/agents/semantic_memory.py`'s `_save_locked` pattern. Do NOT
         # "simplify" this to an RLock to allow nesting — the shell/`_locked()` split
         # is what makes the lock scope auditable at each call site.
         self._lock = threading.Lock()
@@ -286,7 +286,7 @@ class WorkingMemory:
     # not kept in lockstep across 3-4 near-duplicate sites (review-iter-3
     # WARNING 1: `to_dict()` unconditionally overwrites
     # `result["_hidden_buffers"]`, so a buffer literally named that --
-    # reachable from LLM-chosen input via `fsm_llm_agents/memory_tools.py`'s
+    # reachable from LLM-chosen input via `fsm_llm/agents/memory_tools.py`'s
     # `remember(buffer=...)`, which calls `WorkingMemory.set()` with a
     # free-form string -- had its entire contents silently destroyed on the
     # next serialization). Rejecting the name HERE, at every buffer-creation
@@ -602,7 +602,7 @@ class WorkingMemory:
         # accepted `hidden_buffers` as a caller-supplied kwarg, defaulting to
         # `DEFAULT_HIDDEN_BUFFERS` when omitted -- so a caller that round-tripped
         # through `to_dict()`/`from_dict()` (or a file, see
-        # `fsm_llm_agents/memory_persistence.py`'s `save_working_memory`/
+        # `fsm_llm/agents/memory_persistence.py`'s `save_working_memory`/
         # `load_working_memory`, which call these two with NO `hidden_buffers`
         # kwarg at all) silently lost a custom hidden-buffer set and fell back
         # to the default on every reload. The extra `"_hidden_buffers"` key

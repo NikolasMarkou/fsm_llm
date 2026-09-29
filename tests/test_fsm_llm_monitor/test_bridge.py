@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_monitor.bridge."""
+"""Tests for fsm_llm.monitor.bridge."""
 
 import json
 import tempfile
 from unittest.mock import MagicMock
 
-from fsm_llm_monitor.bridge import MonitorBridge, _fsm_dict_to_snapshot
-from fsm_llm_monitor.definitions import (
+from fsm_llm.monitor.bridge import MonitorBridge, _fsm_dict_to_snapshot
+from fsm_llm.monitor.definitions import (
     MonitorConfig,
 )
 

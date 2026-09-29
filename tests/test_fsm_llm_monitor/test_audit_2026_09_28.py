@@ -1,5 +1,5 @@
 """
-Regression tests for the 2026-09-28 fsm_llm_monitor audit (non-HTTP parts).
+Regression tests for the 2026-09-28 fsm_llm.monitor audit (non-HTTP parts).
 
 Each class pins one finding; every test here failed on the pre-fix code.
 """
@@ -14,22 +14,22 @@ from unittest.mock import MagicMock
 import pytest
 
 from fsm_llm.handlers import HandlerTiming
-from fsm_llm_monitor.bridge import MonitorBridge, _fsm_dict_to_snapshot
-from fsm_llm_monitor.collector import EventCollector, redact_context
-from fsm_llm_monitor.constants import (
+from fsm_llm.monitor.bridge import MonitorBridge, _fsm_dict_to_snapshot
+from fsm_llm.monitor.collector import EventCollector, redact_context
+from fsm_llm.monitor.constants import (
     EVENT_STATE_TRANSITION,
     EVENT_WORKFLOW_ADVANCED,
     EVENT_WORKFLOW_COMPLETED,
     EVENT_WORKFLOW_EVENT_DELIVERED,
 )
-from fsm_llm_monitor.definitions import (
+from fsm_llm.monitor.definitions import (
     LogRecord,
     MonitorConfig,
     MonitorEvent,
     TransitionInfo,
 )
-from fsm_llm_monitor.exceptions import MonitorCapacityError
-from fsm_llm_monitor.instance_manager import (
+from fsm_llm.monitor.exceptions import MonitorCapacityError
+from fsm_llm.monitor.instance_manager import (
     InstanceManager,
     ManagedAgent,
     ManagedFSM,
@@ -117,7 +117,7 @@ class TestTransitionStates:
     def test_capture_log_records_transition_and_end_state(self):
         agent = ManagedAgent("a1")
         collector = EventCollector()
-        from fsm_llm_monitor.instance_manager import _build_context_capture_handlers
+        from fsm_llm.monitor.instance_manager import _build_context_capture_handlers
 
         api = _FakeAPI()
         for h in _build_context_capture_handlers(collector, agent):
@@ -433,7 +433,7 @@ class TestDefaults:
 # ---------------------------------------------------------------
 
 
-workflows = pytest.importorskip("fsm_llm_workflows")
+workflows = pytest.importorskip("fsm_llm.workflows")
 
 
 class TestWorkflowTracking:
@@ -493,7 +493,7 @@ class TestWorkflowTracking:
 
 class TestCliHelpers:
     def test_browser_url_for_wildcard_and_ipv6_binds(self):
-        from fsm_llm_monitor.__main__ import _browser_url
+        from fsm_llm.monitor.__main__ import _browser_url
 
         assert _browser_url("0.0.0.0", 8420) == "http://127.0.0.1:8420"
         assert _browser_url("::", 8420) == "http://127.0.0.1:8420"

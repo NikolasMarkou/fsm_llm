@@ -582,11 +582,11 @@ class TestHandlerOnlyKeysValidatorWarnings:
         import json
         from pathlib import Path
 
-        from fsm_llm.validator import FSMValidator
-        from fsm_llm_agents.fsm_definitions import (
+        from fsm_llm.agents.fsm_definitions import (
             build_plan_execute_fsm,
             build_react_fsm,
         )
+        from fsm_llm.validator import FSMValidator
 
         root = Path(__file__).resolve().parents[2]
         checked = 0
@@ -602,7 +602,7 @@ class TestHandlerOnlyKeysValidatorWarnings:
             assert [w for w in result.warnings if "handler_only_keys" in w] == [], path
             checked += 1
         assert checked >= 10
-        from fsm_llm_agents.tools import ToolRegistry
+        from fsm_llm.agents.tools import ToolRegistry
 
         for fsm in (build_react_fsm(ToolRegistry()), build_plan_execute_fsm()):
             result = FSMValidator(fsm).validate()

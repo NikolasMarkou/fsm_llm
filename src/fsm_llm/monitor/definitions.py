@@ -1,0 +1,377 @@
+"""
+Pydantic models for fsm_llm.monitor.
+
+Defines event, metric, configuration, and snapshot models used by
+the collector, bridge, and web dashboard.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
+
+from fsm_llm.constants import DEFAULT_LLM_MODEL
+
+from .constants import (
+    DEFAULT_LOG_LEVEL,
+    DEFAULT_MAX_EVENTS,
+    DEFAULT_MAX_INSTANCES,
+    DEFAULT_MAX_LOG_LINES,
+    DEFAULT_MAX_RUNNING_AGENTS,
+    DEFAULT_REFRESH_INTERVAL,
+    LOG_LEVELS,
+    MAX_AGENT_ITERATIONS,
+    MAX_AGENT_TIMEOUT_SECONDS,
+    MAX_BUFFER_SIZE,
+    MAX_MESSAGE_LENGTH,
+    MAX_REFRESH_INTERVAL,
+    MAX_STUB_TOOLS,
+    MAX_TASK_LENGTH,
+    MIN_BUFFER_SIZE,
+    MIN_REFRESH_INTERVAL,
+)
+
+
+class MonitorEvent(BaseModel):
+    """A single observable event captured from the FSM system."""
+
+    event_type: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    conversation_id: str | None = None
+    source_state: str | None = None
+    target_state: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+    level: str = "INFO"
+    message: str = ""
+
+
+class LogRecord(BaseModel):
+    """A captured log record from loguru."""
+
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    level: str = "INFO"
+    message: str = ""
+    module: str = ""
+    function: str = ""
+    line: int = 0
+    conversation_id: str | None = None
+
+
+class MetricSnapshot(BaseModel):
+    """Point-in-time metric snapshot of the FSM system."""
+
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    active_conversations: int = 0
+    total_events: int = 0
+    total_errors: int = 0
+    total_transitions: int = 0
+    events_per_type: dict[str, int] = Field(default_factory=dict)
+    states_visited: dict[str, int] = Field(default_factory=dict)
+    # Agent/workflow counters
+    active_agents: int = 0
+    active_workflows: int = 0
+    total_agent_iterations: int = 0
+    total_tool_calls: int = 0
+    total_workflow_steps: int = 0
+
+
+def normalize_message_history(
+    messages: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Normalize message format to {role, content} for the frontend.
+
+    Handles both standard format ({"role": "user", "content": "..."}) and
+    shorthand format ({"user": "..."} / {"system": "..."}).
+    """
+    normalized = []
+    for msg in messages:
+        if "role" in msg and "content" in msg:
+            normalized.append(msg)
+        elif "user" in msg:
+            normalized.append({"role": "user", "content": msg["user"]})
+        elif "system" in msg:
+            normalized.append({"role": "system", "content": msg["system"]})
+        else:
+            keys = list(msg.keys())
+            if keys:
+                normalized.append({"role": keys[0], "content": msg[keys[0]]})
+    return normalized
+
+
+class ConversationSnapshot(BaseModel):
+    """Snapshot of a single conversation's state."""
+
+    conversation_id: str
+    instance_id: str = ""  # owning FSM instance ID
+    current_state: str = ""
+    state_description: str = ""
+    is_terminal: bool = False
+    context_data: dict[str, Any] = Field(default_factory=dict)
+    message_history: list[dict[str, str]] = Field(default_factory=list)
+    stack_depth: int = 1
+    last_extraction: dict[str, Any] | None = None
+    last_transition: dict[str, Any] | None = None
+    last_response: dict[str, Any] | None = None
+
+
+class ActivityItem(BaseModel):
+    """Unified activity item representing an FSM conversation, agent task, or workflow instance."""
+
+    item_id: str
+    item_type: str  # "fsm_conversation" | "agent_task" | "workflow_instance"
+    instance_id: str = ""
+    label: str = ""
+    status: str = "active"  # "active" | "completed" | "failed" | "cancelled" | "ended"
+    current_step: str = ""  # state for FSM, iteration info for agent, step for workflow
+    detail: str = ""  # extra info (agent type, workflow name, etc.)
+    message_count: int = 0  # messages for FSM, iterations for agent, steps for workflow
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    is_terminal: bool = False
+
+
+class StateInfo(BaseModel):
+    """Information about a single FSM state."""
+
+    state_id: str
+    description: str = ""
+    purpose: str = ""
+    is_initial: bool = False
+    is_terminal: bool = False
+    transition_count: int = 0
+    transitions: list[TransitionInfo] = Field(default_factory=list)
+
+
+class TransitionInfo(BaseModel):
+    """Information about a single FSM transition."""
+
+    target_state: str
+    description: str = ""
+    priority: int = 100  # the core's default transition priority
+    condition_count: int = 0
+    has_logic: bool = False
+
+
+class FSMSnapshot(BaseModel):
+    """Snapshot of an FSM definition for display."""
+
+    name: str = ""
+    description: str = ""
+    version: str = ""
+    initial_state: str = ""
+    persona: str | None = None
+    state_count: int = 0
+    states: list[StateInfo] = Field(default_factory=list)
+
+
+class MonitorConfig(BaseModel):
+    """Configuration for the monitor.
+
+    ``log_level`` is the minimum level the log sink records.
+    ``max_events``/``max_log_lines`` size the global buffers (applied on
+    change) and the buffers of instances launched afterwards.
+    ``max_instances`` caps managed instances (the oldest finished ones are
+    evicted first) and ``max_running_agents`` caps concurrent agent threads.
+    ``auto_scroll_logs`` is a dashboard display preference.
+    """
+
+    refresh_interval: float = Field(
+        default=DEFAULT_REFRESH_INTERVAL,
+        ge=MIN_REFRESH_INTERVAL,
+        le=MAX_REFRESH_INTERVAL,
+        allow_inf_nan=False,
+    )
+    max_events: int = Field(
+        default=DEFAULT_MAX_EVENTS, ge=MIN_BUFFER_SIZE, le=MAX_BUFFER_SIZE
+    )
+    max_log_lines: int = Field(
+        default=DEFAULT_MAX_LOG_LINES, ge=MIN_BUFFER_SIZE, le=MAX_BUFFER_SIZE
+    )
+    log_level: str = DEFAULT_LOG_LEVEL
+    show_internal_keys: bool = False
+    auto_scroll_logs: bool = True
+    max_instances: int = Field(default=DEFAULT_MAX_INSTANCES, ge=1, le=10_000)
+    max_running_agents: int = Field(default=DEFAULT_MAX_RUNNING_AGENTS, ge=1, le=256)
+
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, v: str) -> str:
+        level = str(v).upper()
+        if level not in LOG_LEVELS:
+            raise ValueError(f"log_level must be one of {', '.join(LOG_LEVELS)}")
+        return level
+
+
+# --- Instance Management Models ---
+
+
+class InstanceInfo(BaseModel):
+    """Summary of a managed instance for listing."""
+
+    instance_id: str
+    instance_type: str  # "fsm" | "workflow" | "agent"
+    label: str = ""
+    status: str = "running"  # "running" | "completed" | "failed" | "cancelled"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    source: str = "custom"  # preset ID or "custom"
+    conversation_count: int = 0
+    active_workflows: int = 0
+    agent_type: str = ""
+    task: str = ""  # agent task (truncated)
+
+
+class LaunchFSMRequest(BaseModel):
+    """Request to launch an FSM from preset or raw JSON."""
+
+    preset_id: str | None = None
+    fsm_json: dict[str, Any] | None = None
+    model: str = DEFAULT_LLM_MODEL
+    temperature: float = Field(default=0.5, ge=0.0, le=2.0)
+    label: str = ""
+
+
+class StartConversationRequest(BaseModel):
+    """Request to start a conversation on a launched FSM."""
+
+    initial_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class SendMessageRequest(BaseModel):
+    """Request to send a message to an FSM conversation."""
+
+    message: str = Field(..., max_length=MAX_MESSAGE_LENGTH)
+    conversation_id: str
+
+
+class EndConversationRequest(BaseModel):
+    """Request to end a conversation."""
+
+    conversation_id: str
+
+
+class StubToolConfig(BaseModel):
+    """Configuration for a stub tool (code-free agent tool)."""
+
+    name: str
+    description: str
+    stub_response: str = "Tool executed successfully"
+
+
+class LaunchAgentRequest(BaseModel):
+    """Request to launch an agent."""
+
+    agent_type: str = "ReactAgent"
+    task: str = Field(..., min_length=1, max_length=MAX_TASK_LENGTH)
+    model: str = DEFAULT_LLM_MODEL
+    max_iterations: int = Field(default=10, ge=1, le=MAX_AGENT_ITERATIONS)
+    timeout_seconds: float = Field(
+        default=120.0, gt=0, le=MAX_AGENT_TIMEOUT_SECONDS, allow_inf_nan=False
+    )
+    tools: list[StubToolConfig] = Field(default_factory=list, max_length=MAX_STUB_TOOLS)
+    label: str = ""
+
+
+class LaunchWorkflowRequest(BaseModel):
+    """Request to launch a workflow."""
+
+    preset_id: str | None = None
+    definition_json: dict[str, Any] | None = None
+    initial_context: dict[str, Any] = Field(default_factory=dict)
+    label: str = ""
+
+
+class WorkflowAdvanceRequest(BaseModel):
+    """Request to advance a workflow instance."""
+
+    workflow_instance_id: str
+    user_input: str = ""
+
+
+class WorkflowCancelRequest(BaseModel):
+    """Request to cancel a workflow instance."""
+
+    workflow_instance_id: str
+    reason: str = ""
+
+
+class WorkflowEventRequest(BaseModel):
+    """Request to deliver an event to a managed workflow engine.
+
+    ``workflow_instance_id`` targets one workflow instance; empty broadcasts
+    to every instance waiting for ``event_type``.
+    """
+
+    event_type: str = Field(..., min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    workflow_instance_id: str = ""
+
+
+# --- Custom Dashboard Configuration ---
+
+
+class DashboardPanel(BaseModel):
+    """A custom dashboard panel from MonitorBuilder output."""
+
+    panel_id: str
+    title: str
+    panel_type: str = "metric"
+    metric: str = ""
+    description: str = ""
+
+
+class DashboardAlert(BaseModel):
+    """A custom alert rule from MonitorBuilder output."""
+
+    alert_id: str
+    metric: str = ""
+    condition: str = ">"
+    threshold: float = 0.0
+    description: str = ""
+
+
+class DashboardConfig(BaseModel):
+    """Custom dashboard configuration produced by MonitorBuilder.
+
+    Applied via ``POST /api/dashboard/config``. When present, the
+    dashboard renders custom panels alongside the built-in metrics.
+    """
+
+    name: str = ""
+    description: str = ""
+    panels: list[DashboardPanel] = Field(default_factory=list)
+    alerts: list[DashboardAlert] = Field(default_factory=list)
+    refresh_interval_seconds: int = 30
+    retention_hours: int = 24
+
+
+class BuilderStartRequest(BaseModel):
+    """Request to start a new builder session."""
+
+    artifact_type: str = ""
+    model: str = DEFAULT_LLM_MODEL
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=2000, ge=1, le=100000)
+
+
+class BuilderSendRequest(BaseModel):
+    """Request to send a message to a builder session."""
+
+    session_id: str
+    message: str = Field(..., max_length=MAX_MESSAGE_LENGTH)
+
+
+def model_to_dict(obj: Any) -> dict[str, Any] | None:
+    """Convert a Pydantic model or dict to a plain dict."""
+    if obj is None:
+        return None
+    if hasattr(obj, "model_dump"):
+        result: dict[str, Any] = obj.model_dump()
+        return result
+    if isinstance(obj, dict):
+        return obj
+    return None
+
+
+# Update forward references
+StateInfo.model_rebuild()

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.handlers module."""
+"""Tests for fsm_llm.agents.handlers module."""
 
 from typing import ClassVar
 
-from fsm_llm_agents.constants import ContextKeys, Defaults
-from fsm_llm_agents.handlers import AgentHandlers, make_iteration_limiter
-from fsm_llm_agents.tools import ToolRegistry, tool
+from fsm_llm.agents.constants import ContextKeys, Defaults
+from fsm_llm.agents.handlers import AgentHandlers, make_iteration_limiter
+from fsm_llm.agents.tools import ToolRegistry, tool
 
 
 def _echo(params):

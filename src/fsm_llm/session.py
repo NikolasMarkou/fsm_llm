@@ -45,7 +45,7 @@ _SESSION_ID_RE = re.compile(r"[a-zA-Z0-9_\-]+")
 
 
 # The on-disk writers' name for the shared hook (`FileSessionStore.save` and
-# `fsm_llm_agents.memory_persistence.save_working_memory` import it from here).
+# `fsm_llm.agents.memory_persistence.save_working_memory` import it from here).
 # The body lives in `utilities` because the prompt and websocket writers need
 # the same rule; do NOT re-implement it per writer.
 session_json_default = redacting_json_default
@@ -79,7 +79,7 @@ class SessionState(BaseModel):
     # WorkingMemory.from_dict on restore, so the embedded copy inside
     # "buffers" is read but never relied on here) -- see decisions.md D-021
     # for why the embedded key exists at all (a DIFFERENT caller,
-    # fsm_llm_agents/memory_persistence.py, has no sibling key and depends on
+    # fsm_llm/agents/memory_persistence.py, has no sibling key and depends on
     # it). The flat context_data does NOT carry WorkingMemory, so it is
     # persisted here. Default None keeps old session files (written before
     # this field existed) loadable unchanged.

@@ -18,6 +18,11 @@ from typing import Any
 
 import pytest
 
+from fsm_llm.agents.definitions import AgentConfig
+from fsm_llm.agents.parallel_react import ParallelReactAgent
+from fsm_llm.agents.react import ReactAgent
+from fsm_llm.agents.reflexion import ReflexionAgent
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -26,11 +31,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.parallel_react import ParallelReactAgent
-from fsm_llm_agents.react import ReactAgent
-from fsm_llm_agents.reflexion import ReflexionAgent
-from fsm_llm_agents.tools import ToolRegistry
 
 MAX_ITERATIONS = 6
 _MISSING = object()
@@ -94,8 +94,8 @@ _PARALLEL_EMPTY = {"tool_calls": [], "should_terminate": False}
 
 
 def _build_reasoning_react(registry: ToolRegistry, config: AgentConfig, llm):
-    pytest.importorskip("fsm_llm_reasoning")
-    from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+    pytest.importorskip("fsm_llm.reasoning")
+    from fsm_llm.agents.reasoning_react import ReasoningReactAgent
 
     return ReasoningReactAgent(tools=registry, config=config, llm_interface=llm)
 
@@ -221,7 +221,7 @@ class TestUnknownToolIsNotEvidence:
         assert loops <= max_loops
 
     def test_unknown_tool_feedback_names_it_and_counts_as_stall(self):
-        from fsm_llm_agents.handlers import AgentHandlers
+        from fsm_llm.agents.handlers import AgentHandlers
 
         handlers = AgentHandlers(_make_registry())
         handlers._current_iteration = 2
@@ -286,7 +286,7 @@ class _UnknownThenRealLLM(LLMInterface):
 
 
 def _build_plan_execute(registry: ToolRegistry, config: AgentConfig, llm):
-    from fsm_llm_agents.plan_execute import PlanExecuteAgent
+    from fsm_llm.agents.plan_execute import PlanExecuteAgent
 
     return PlanExecuteAgent(tools=registry, config=config, llm_interface=llm)
 
@@ -351,7 +351,7 @@ class TestUnknownToolThenRealTool:
             assert any(e["success"] is True for e in steps), steps
 
     def test_unknown_name_clears_selection(self):
-        from fsm_llm_agents.handlers import AgentHandlers
+        from fsm_llm.agents.handlers import AgentHandlers
 
         handlers = AgentHandlers(_make_registry())
         handlers._current_iteration = 2

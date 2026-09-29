@@ -9,16 +9,16 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
-from fsm_llm.ollama import apply_ollama_params, prepare_ollama_messages
-from fsm_llm_agents import (
+from fsm_llm.agents import (
     AgentConfig,
     NativeFunctionCallingReactAgent,
     ToolRegistry,
     tool,
 )
-from fsm_llm_agents.base import _output_response_format
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.native_fc import _SYSTEM_PROMPT
+from fsm_llm.agents.base import _output_response_format
+from fsm_llm.agents.exceptions import AgentError
+from fsm_llm.agents.native_fc import _SYSTEM_PROMPT
+from fsm_llm.ollama import apply_ollama_params, prepare_ollama_messages
 
 
 @tool
@@ -285,9 +285,9 @@ class TestOllamaHelperGating:
             seen["messages"].append((messages, model, response_format))
             return prepare_ollama_messages(messages, model, response_format)
 
-        monkeypatch.setattr("fsm_llm_agents.native_fc.apply_ollama_params", spy_params)
+        monkeypatch.setattr("fsm_llm.agents.native_fc.apply_ollama_params", spy_params)
         monkeypatch.setattr(
-            "fsm_llm_agents.native_fc.prepare_ollama_messages", spy_messages
+            "fsm_llm.agents.native_fc.prepare_ollama_messages", spy_messages
         )
         return seen
 
@@ -410,7 +410,7 @@ class TestReasoningTraceRecovery:
             calls.append(message)
             return "SHOULD NOT BE USED"
 
-        monkeypatch.setattr("fsm_llm_agents.native_fc._resolve_reasoning_trace", spy)
+        monkeypatch.setattr("fsm_llm.agents.native_fc._resolve_reasoning_trace", spy)
         _stub_completion(
             monkeypatch,
             _FakeMessage(

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.maker_checker module."""
+"""Tests for fsm_llm.agents.maker_checker module."""
 
 from typing import Any
 
 import pytest
 
+from fsm_llm.agents.constants import (
+    ContextKeys,
+    Defaults,
+    HandlerNames,
+    MakerCheckerStates,
+)
+from fsm_llm.agents.definitions import AgentConfig
+from fsm_llm.agents.fsm_definitions import build_maker_checker_fsm
+from fsm_llm.agents.maker_checker import MakerCheckerAgent
 from fsm_llm.definitions import (
     BulkExtractionRequest,
     DataExtractionResponse,
@@ -16,15 +25,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.constants import (
-    ContextKeys,
-    Defaults,
-    HandlerNames,
-    MakerCheckerStates,
-)
-from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.fsm_definitions import build_maker_checker_fsm
-from fsm_llm_agents.maker_checker import MakerCheckerAgent
 
 # -------------------------------------------------------------------------
 # MakerCheckerAgent creation

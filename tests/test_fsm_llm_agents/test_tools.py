@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.tools module."""
+"""Tests for fsm_llm.agents.tools module."""
 
 import sys
 import threading
@@ -10,9 +10,9 @@ from typing import Annotated, Any
 
 import pytest
 
-from fsm_llm_agents.definitions import ToolCall, ToolDefinition
-from fsm_llm_agents.exceptions import ToolNotFoundError
-from fsm_llm_agents.tools import ToolRegistry, normalize_tool_input, tool
+from fsm_llm.agents.definitions import ToolCall, ToolDefinition
+from fsm_llm.agents.exceptions import ToolNotFoundError
+from fsm_llm.agents.tools import ToolRegistry, normalize_tool_input, tool
 
 
 def _add(params):
@@ -661,7 +661,7 @@ class TestSemanticToolRegistryConcurrency:
     TOOLS_PER_TRIAL = 40
 
     def _registry(self, monkeypatch):
-        from fsm_llm_agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.agents.semantic_tools import SemanticToolRegistry
 
         monkeypatch.setattr(SemanticToolRegistry, "_get_embedding", _stub_embedding)
         registry = SemanticToolRegistry(top_k=5)
@@ -793,8 +793,8 @@ class TestNormalizeToolInput:
 
     def test_ra06_kwargs_tool_called_through_agent_handler(self):
         """Port of repro ra06: a kwargs tool driven by the grammar-forced JSON string."""
-        from fsm_llm_agents.constants import ContextKeys
-        from fsm_llm_agents.handlers import AgentHandlers
+        from fsm_llm.agents.constants import ContextKeys
+        from fsm_llm.agents.handlers import AgentHandlers
 
         seen: dict = {}
 
@@ -851,8 +851,8 @@ class TestListToolInput:
         assert result.result == 5
 
     def test_list_through_agent_handler(self):
-        from fsm_llm_agents.constants import ContextKeys
-        from fsm_llm_agents.handlers import AgentHandlers
+        from fsm_llm.agents.constants import ContextKeys
+        from fsm_llm.agents.handlers import AgentHandlers
 
         seen: dict = {}
 
@@ -877,8 +877,8 @@ class TestListToolInput:
     def test_single_str_param_tool_keeps_the_old_string_form(self):
         """A list reaching a string parameter gets ``str(list)``, exactly as
         before D-011 (review W2: ``.lower()`` on the raw list failed)."""
-        from fsm_llm_agents.constants import ContextKeys
-        from fsm_llm_agents.handlers import AgentHandlers
+        from fsm_llm.agents.constants import ContextKeys
+        from fsm_llm.agents.handlers import AgentHandlers
 
         @tool
         def search(query: str) -> str:
@@ -975,7 +975,7 @@ class TestListToolInput:
     def test_approval_grant_binds_the_list_consistently(self):
         """The driver writes the grant from an already-normalized input and the
         refusal recomputes it from the raw context value: both must agree."""
-        from fsm_llm_agents.handlers import approval_grant
+        from fsm_llm.agents.handlers import approval_grant
 
         raw = ["a", "b"]
         driver = approval_grant("t", normalize_tool_input(raw))

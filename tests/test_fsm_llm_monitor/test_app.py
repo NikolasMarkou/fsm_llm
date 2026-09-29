@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_monitor web server and package."""
+"""Tests for fsm_llm.monitor web server and package."""
 
 from pathlib import Path
 
@@ -8,9 +8,9 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from fsm_llm_monitor.bridge import MonitorBridge
-from fsm_llm_monitor.instance_manager import InstanceManager
-from fsm_llm_monitor.server import app, configure
+from fsm_llm.monitor.bridge import MonitorBridge
+from fsm_llm.monitor.instance_manager import InstanceManager
+from fsm_llm.monitor.server import app, configure
 
 
 class TestWebServer:
@@ -248,7 +248,7 @@ class TestMonitorImports:
     """Verify all public exports import correctly."""
 
     def test_core_imports(self):
-        from fsm_llm_monitor import (
+        from fsm_llm.monitor import (
             EventCollector,
             MonitorBridge,
         )
@@ -257,7 +257,7 @@ class TestMonitorImports:
         assert EventCollector is not None
 
     def test_definition_imports(self):
-        from fsm_llm_monitor import (
+        from fsm_llm.monitor import (
             MetricSnapshot,
             MonitorEvent,
         )
@@ -266,7 +266,7 @@ class TestMonitorImports:
         assert MetricSnapshot is not None
 
     def test_exception_imports(self):
-        from fsm_llm_monitor import (
+        from fsm_llm.monitor import (
             MetricCollectionError,
             MonitorConnectionError,
             MonitorError,
@@ -278,7 +278,7 @@ class TestMonitorImports:
         assert issubclass(MonitorConnectionError, MonitorError)
 
     def test_constant_imports(self):
-        from fsm_llm_monitor import (
+        from fsm_llm.monitor import (
             COLOR_PRIMARY,
             DEFAULT_REFRESH_INTERVAL,
             THEME_NAME,
@@ -289,19 +289,23 @@ class TestMonitorImports:
         assert DEFAULT_REFRESH_INTERVAL == 1.0
 
     def test_version(self):
-        from fsm_llm_monitor import __version__
+        from fsm_llm.monitor import __version__
 
         assert __version__ == "0.9.0"
 
     def test_server_import(self):
-        from fsm_llm_monitor.server import app, configure
+        from fsm_llm.monitor.server import app, configure
 
         assert app is not None
         assert callable(configure)
 
     def test_static_files_exist(self):
         static = (
-            Path(__file__).parent.parent.parent / "src" / "fsm_llm_monitor" / "static"
+            Path(__file__).parent.parent.parent
+            / "src"
+            / "fsm_llm"
+            / "monitor"
+            / "static"
         )
         assert (static / "style.css").exists()
         assert (static / "app.js").exists()
@@ -329,7 +333,8 @@ class TestMonitorImports:
         templates = (
             Path(__file__).parent.parent.parent
             / "src"
-            / "fsm_llm_monitor"
+            / "fsm_llm"
+            / "monitor"
             / "templates"
         )
         assert (templates / "index.html").exists()
@@ -945,7 +950,7 @@ class TestApiKeyGate:
         test pins that `compare_digest` is actually the mechanism used, so a
         regression back to a plain `!=` comparison would be caught if this
         spy is ever tightened to assert call counts."""
-        import fsm_llm_monitor.server as server_module
+        import fsm_llm.monitor.server as server_module
 
         calls: list[tuple[bytes, bytes]] = []
         original = server_module.hmac.compare_digest
@@ -988,7 +993,7 @@ class TestApiKeyGate:
         """
         from starlette.requests import Request
 
-        import fsm_llm_monitor.server as server_module
+        import fsm_llm.monitor.server as server_module
 
         configure(manager=InstanceManager(), api_key="s3cr3t")
         scope = {
@@ -1004,7 +1009,7 @@ class TestApiKeyGate:
         """D-020: same guarantee via the Authorization: Bearer header path."""
         from starlette.requests import Request
 
-        import fsm_llm_monitor.server as server_module
+        import fsm_llm.monitor.server as server_module
 
         configure(manager=InstanceManager(), api_key="s3cr3t")
         scope = {
@@ -1028,11 +1033,13 @@ class TestApiKeyGate:
 
         configure(manager=InstanceManager(), api_key="s3cr3t")
         buf = io.StringIO()
+        logger.enable("fsm_llm")  # library logging is off by default (D-004)
         sink_id = logger.add(buf, level="WARNING")
         try:
             configure(manager=InstanceManager())
         finally:
             logger.remove(sink_id)
+            logger.disable("fsm_llm")
         output = buf.getvalue()
         assert "previously configured API key is being cleared" in output
 
@@ -1046,11 +1053,13 @@ class TestApiKeyGate:
         # Ensure a clean slate (no previously-set key) before the "first" call.
         configure(manager=InstanceManager())
         buf = io.StringIO()
+        logger.enable("fsm_llm")  # library logging is off by default (D-004)
         sink_id = logger.add(buf, level="WARNING")
         try:
             configure(manager=InstanceManager())
         finally:
             logger.remove(sink_id)
+            logger.disable("fsm_llm")
         output = buf.getvalue()
         assert "previously configured API key is being cleared" not in output
 
@@ -1059,7 +1068,7 @@ class TestApiKeyGate:
         """D-006 (P2-W5): an empty or whitespace-only programmatic key raises.
         Accepting "" let an empty X-API-Key header authenticate
         (compare_digest(b"", b"") is True); the prior key must stay in force."""
-        from fsm_llm_monitor import server as server_module
+        from fsm_llm.monitor import server as server_module
 
         configure(manager=InstanceManager(), api_key="s3cr3t")
         with pytest.raises(ValueError, match="api_key"):
@@ -1071,7 +1080,7 @@ class TestApiKeyGate:
 
     def test_empty_env_api_key_still_means_unset(self, monkeypatch):
         """D-006: FSM_LLM_MONITOR_API_KEY="" keeps its unset meaning (no auth)."""
-        from fsm_llm_monitor import server as server_module
+        from fsm_llm.monitor import server as server_module
 
         monkeypatch.setenv("FSM_LLM_MONITOR_API_KEY", "")
         configure(manager=InstanceManager())
@@ -1134,7 +1143,7 @@ class TestDashboardWebsocketRedaction:
         import inspect
         import re
 
-        from fsm_llm_monitor import server as server_mod
+        from fsm_llm.monitor import server as server_mod
 
         source = inspect.getsource(server_mod)
         assert "default=redacting_json_default" in source

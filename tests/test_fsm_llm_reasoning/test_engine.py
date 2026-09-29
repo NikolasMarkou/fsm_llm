@@ -4,17 +4,17 @@ Unit tests for the reasoning engine components.
 
 import pytest
 
-from fsm_llm_reasoning.constants import ContextKeys, ReasoningType
-from fsm_llm_reasoning.definitions import (
+from fsm_llm.reasoning.constants import ContextKeys, ReasoningType
+from fsm_llm.reasoning.definitions import (
     ReasoningClassificationResult,
     ReasoningStep,
     ReasoningStepType,
     ValidationResult,
 )
-from fsm_llm_reasoning.engine import ReasoningEngine
-from fsm_llm_reasoning.exceptions import ReasoningExecutionError
-from fsm_llm_reasoning.handlers import ReasoningHandlers
-from fsm_llm_reasoning.utilities import map_reasoning_type
+from fsm_llm.reasoning.engine import ReasoningEngine
+from fsm_llm.reasoning.exceptions import ReasoningExecutionError
+from fsm_llm.reasoning.handlers import ReasoningHandlers
+from fsm_llm.reasoning.utilities import map_reasoning_type
 
 
 class TestReasoningModels:
@@ -170,11 +170,13 @@ class TestReasoningTypeFallback:
         from fsm_llm.logging import logger
 
         buf = StringIO()
+        logger.enable("fsm_llm")  # library logging is off by default (D-004)
         sink_id = logger.add(buf, level="WARNING")
         try:
             result = engine._prepare_reasoning_execution(context)
         finally:
             logger.remove(sink_id)
+            logger.disable("fsm_llm")
 
         assert result[ContextKeys.REASONING_TYPE_SELECTED] == (
             ReasoningType.ANALYTICAL.value

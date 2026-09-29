@@ -1,20 +1,23 @@
-"""Repo-wide packaging invariants: every `src/` package is wired into every slot.
+"""Repo-wide packaging invariants: one `src/` package, wired into every slot.
 
-Five hand-maintained files enumerate the project's packages one name at a time:
-`pyproject.toml`, `Makefile`, `tox.ini`, `.github/workflows/python-package.yml`
-and `MANIFEST.in`. Adding a package means editing all of them, and a miss is
+Five hand-maintained files name the package: `pyproject.toml`, `Makefile`,
+`tox.ini`, `.github/workflows/python-package.yml` and `MANIFEST.in`. A miss is
 SILENT -- the package just quietly stops being type-checked, stops being counted
 in coverage, or stops shipping in the sdist. Nothing errors.
 
-This file is that missing check. The expected package list is derived from the
-filesystem (`src/*/__init__.py`), never hardcoded, so it cannot go stale on the
-one day it matters: the day a seventh package lands.
+This file is that missing check. The package list is derived from the
+filesystem (`src/*/__init__.py`), never hardcoded, so it cannot go stale. Since
+plan-2026-09-29T044048-3a032517 the layout is ONE top-level package, `fsm_llm`,
+with five subpackages (`src/fsm_llm/*/__init__.py`); both sets are derived and
+pinned exactly, so a stray second top-level package fails here.
 """
 
 from __future__ import annotations
 
 import ast
 import collections
+import importlib
+import importlib.util
 import os
 import pathlib
 import re
@@ -25,29 +28,31 @@ import pytest
 
 _REPO_ROOT = pathlib.Path(__file__).parents[1]
 
-#: Every importable package under `src/`, derived from disk. `src/*.egg-info/`
-#: and any stray directory without an `__init__.py` are excluded by construction.
-SRC_PACKAGES: frozenset[str] = frozenset(
-    p.name
-    for p in sorted((_REPO_ROOT / "src").iterdir())
-    if p.is_dir() and (p / "__init__.py").is_file()
+
+def _packages_under(root: pathlib.Path) -> frozenset[str]:
+    """Names of the directories under `root` that have an `__init__.py`."""
+    return frozenset(
+        p.name
+        for p in sorted(root.iterdir())
+        if p.is_dir() and (p / "__init__.py").is_file()
+    )
+
+
+#: Every importable top-level package under `src/`, derived from disk.
+#: `src/*.egg-info/` and any stray directory without an `__init__.py` are
+#: excluded by construction.
+SRC_PACKAGES: frozenset[str] = _packages_under(_REPO_ROOT / "src")
+
+#: Every subpackage of `fsm_llm`, derived from disk.
+SUBPACKAGES: frozenset[str] = _packages_under(_REPO_ROOT / "src" / "fsm_llm")
+
+#: The five former sibling packages that now live under `fsm_llm`.
+_EXPECTED_SUBPACKAGES = frozenset(
+    {"agents", "reasoning", "workflows", "monitor", "harness"}
 )
 
 #: Matches a package name wherever one is spelled out in a build file.
 _PKG = r"(fsm_llm[a-z_]*)"
-
-# DECISION plan-2026-07-21T191807-bf7ffe24/D-045
-# `MANIFEST.in` has never listed `fsm_llm_monitor`. That is a PRE-EXISTING defect
-# that predates the harness package, and fixing it is out of scope here (it
-# changes what ships in the sdist, which deserves its own decision).
-#
-# Do NOT "fix" the failure by dropping the MANIFEST slot, by asserting a subset
-# instead of set equality, or by adding further names to this set -- any of those
-# turns a named, ratcheted exception back into an invisible hole. The exception is
-# itself pinned by `test_manifest_known_gaps_are_closed` below, which is
-# `xfail(strict=True)`: the moment someone adds the missing line, that test XPASSes
-# and FAILS the suite, forcing this set to shrink. See decisions.md D-045.
-_MANIFEST_KNOWN_GAPS = frozenset({"fsm_llm_monitor"})
 
 
 def _read(rel: str) -> str:
@@ -121,53 +126,44 @@ def _slot_manifest() -> set[str]:
     )
 
 
-#: slot id -> (extractor, packages this slot is documented NOT to cover)
-_SLOTS: dict[str, tuple[object, frozenset[str]]] = {
-    "pyproject:package-data": (_slot_pyproject_package_data, frozenset()),
-    "pyproject:ruff-isort-known-first-party": (_slot_pyproject_isort, frozenset()),
-    "makefile:type-check": (_slot_makefile_type_check, frozenset()),
-    "makefile:coverage": (_slot_makefile_coverage, frozenset()),
-    "tox:testenv-coverage": (_slot_tox_coverage, frozenset()),
-    "tox:testenv-type": (_slot_tox_type, frozenset()),
-    "ci:mypy": (_slot_ci_mypy, frozenset()),
-    "manifest.in:recursive-include": (_slot_manifest, _MANIFEST_KNOWN_GAPS),
+#: slot id -> extractor
+_SLOTS = {
+    "pyproject:package-data": _slot_pyproject_package_data,
+    "pyproject:ruff-isort-known-first-party": _slot_pyproject_isort,
+    "makefile:type-check": _slot_makefile_type_check,
+    "makefile:coverage": _slot_makefile_coverage,
+    "tox:testenv-coverage": _slot_tox_coverage,
+    "tox:testenv-type": _slot_tox_type,
+    "ci:mypy": _slot_ci_mypy,
+    "manifest.in:recursive-include": _slot_manifest,
 }
 
 
 class TestEveryPackageIsWired:
-    """Every package under `src/` appears in every slot that enumerates packages."""
+    """The one package under `src/` appears in every slot that names packages."""
 
-    def test_package_list_is_not_empty(self):
+    def test_package_list_is_exactly_fsm_llm(self):
         # Guards the derivation itself: an empty set would make every other
-        # assertion below vacuously true.
-        assert len(SRC_PACKAGES) >= 5, SRC_PACKAGES
-        assert "fsm_llm" in SRC_PACKAGES
+        # assertion below vacuously true, and a second top-level package would
+        # undo the single-package layout.
+        assert SRC_PACKAGES == {"fsm_llm"}, SRC_PACKAGES
+
+    def test_subpackage_list_is_exactly_the_five(self):
+        assert SUBPACKAGES == _EXPECTED_SUBPACKAGES, SUBPACKAGES
 
     @pytest.mark.parametrize("slot_id", sorted(_SLOTS))
     def test_slot_enumerates_every_package(self, slot_id: str):
-        extract, gaps = _SLOTS[slot_id]
-        expected = SRC_PACKAGES - gaps
-        actual = extract()  # type: ignore[operator]
-        assert actual == expected, (
+        actual = _SLOTS[slot_id]()
+        assert actual == SRC_PACKAGES, (
             f"slot {slot_id} is out of sync with src/: "
-            f"missing {sorted(expected - actual)}, "
-            f"stale {sorted(actual - expected)}"
+            f"missing {sorted(SRC_PACKAGES - actual)}, "
+            f"stale {sorted(actual - SRC_PACKAGES)}"
         )
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "PRE-EXISTING: MANIFEST.in has never listed fsm_llm_monitor. When this "
-            "XPASSes the gap has been closed -- remove fsm_llm_monitor from "
-            "_MANIFEST_KNOWN_GAPS and delete this xfail marker."
-        ),
-    )
-    def test_manifest_known_gaps_are_closed(self):
-        assert _slot_manifest() == SRC_PACKAGES
 
     def test_every_package_ships_a_py_typed_marker(self):
         # Makes the package-data slot meaningful: listing `py.typed` in
         # package-data does nothing if the marker file is absent from the tree.
+        # PEP 561: the top-level marker covers every subpackage (D-010).
         missing = [
             pkg
             for pkg in sorted(SRC_PACKAGES)
@@ -177,23 +173,71 @@ class TestEveryPackageIsWired:
 
     def test_packages_find_stays_on_auto_discovery(self):
         # Slot 5 of the wiring checklist is deliberately a no-op: setuptools
-        # auto-discovers everything under `where = ["src"]`. If anyone ever adds
-        # an explicit include/exclude here it becomes a NINTH enumerating slot,
-        # and this file must grow an entry for it -- so pin the assumption.
+        # auto-discovers everything under `where = ["src"]`, subpackages
+        # included. If anyone ever adds an explicit include/exclude here it
+        # becomes a NINTH enumerating slot, and this file must grow an entry
+        # for it -- so pin the assumption.
         body = _section("pyproject.toml", "[tool.setuptools.packages.find]")
         assert "include" not in body and "exclude" not in body, (
             "packages.find is no longer bare auto-discovery; add it to _SLOTS"
         )
 
 
-class TestPackageBackedExtrasAreInstalled:
-    """Each non-core package has an extra, and every install list requests it."""
+class TestSubpackagesImport:
+    """`from fsm_llm import <sub>` works; the old top-level names are gone."""
 
-    #: `fsm_llm` is the core package and has no extra; every other package's
-    #: extra is its name minus the `fsm_llm_` prefix.
-    EXPECTED = frozenset(
-        pkg.removeprefix("fsm_llm_") for pkg in SRC_PACKAGES if pkg != "fsm_llm"
-    )
+    @pytest.mark.parametrize("sub", sorted(_EXPECTED_SUBPACKAGES))
+    def test_subpackages_importable_from_fsm_llm(self, sub: str):
+        if sub == "monitor":
+            pytest.importorskip("fastapi")
+        module = importlib.import_module("fsm_llm")
+        importlib.import_module(f"fsm_llm.{sub}")
+        assert getattr(module, sub).__name__ == f"fsm_llm.{sub}"
+
+    @pytest.mark.parametrize("sub", sorted(_EXPECTED_SUBPACKAGES))
+    def test_old_top_level_name_is_gone(self, sub: str):
+        assert importlib.util.find_spec(f"fsm_llm_{sub}") is None
+
+
+def _monitor_package_data_globs() -> list[str]:
+    body = _section("pyproject.toml", "[tool.setuptools.package-data]")
+    line = re.search(r'^"fsm_llm\.monitor" = \[(.*)\]$', body, re.MULTILINE)
+    assert line is not None, '"fsm_llm.monitor" package-data entry not found'
+    return re.findall(r'"([^"]+)"', line.group(1))
+
+
+class TestMonitorPackageData:
+    """Every monitor frontend file is shipped (D-006: `static/*` missed the
+    `pages/`, `services/` and `utils/` subdirectories)."""
+
+    def test_monitor_package_data_covers_every_static_file(self):
+        monitor = _REPO_ROOT / "src" / "fsm_llm" / "monitor"
+        covered = {
+            path
+            for pattern in _monitor_package_data_globs()
+            for path in monitor.glob(pattern)
+            if path.is_file()
+        }
+        wanted = {
+            path
+            for sub in ("static", "templates")
+            for path in (monitor / sub).rglob("*")
+            if path.is_file()
+        }
+        # Non-vacuity: nested frontend files exist, which a flat `static/*`
+        # glob would not cover.
+        static = monitor / "static"
+        assert any(p.parent != static for p in static.rglob("*") if p.is_file())
+        missing = sorted(str(p.relative_to(monitor)) for p in wanted - covered)
+        assert not missing, f"monitor files not covered by package-data: {missing}"
+
+
+class TestPackageBackedExtrasAreInstalled:
+    """Each subpackage has an extra, and every install list requests it."""
+
+    #: `fsm_llm` is the core package and has no extra; every subpackage's
+    #: extra is its name.
+    EXPECTED = SUBPACKAGES
 
     def test_every_package_backed_extra_is_declared(self):
         body = _section("pyproject.toml", "[project.optional-dependencies]")
@@ -391,7 +435,7 @@ class TestDocumentedTestCountsMatchCollection:
 
     Same defect class as the package-wiring tests above: hand-maintained
     parallel copies of a filesystem-derivable fact. CLAUDE.md, README.md and
-    src/fsm_llm_harness/CLAUDE.md each spell test counts as prose literals
+    src/fsm_llm/harness/CLAUDE.md each spell test counts as prose literals
     ("5,107 tests", a 9-suite breakdown table, "1,751 tests"); every new test
     silently strands them, and nothing errors. In the predecessor plans the
     literals drifted for days at a time (3,305/2,382 stated vs 5,107 measured)
@@ -471,12 +515,12 @@ class TestDocumentedTestCountsMatchCollection:
         )
 
     def test_harness_package_doc_literals(self, measured):
-        # src/fsm_llm_harness/CLAUDE.md spells its own suite's count twice
+        # src/fsm_llm/harness/CLAUDE.md spells its own suite's count twice
         # ("1,751 tests, 10 test files" and the status paragraph). EVERY
         # "N tests" token in that file must equal the measured harness count,
         # and "N test files" must equal the on-disk test_*.py file count.
         _, per_suite, _ = measured
-        rel = "src/fsm_llm_harness/CLAUDE.md"
+        rel = "src/fsm_llm/harness/CLAUDE.md"
         harness = per_suite["test_fsm_llm_harness"]
         for documented in _pinned_counts(rel, rf"{_COUNT} tests"):
             assert documented == harness, (

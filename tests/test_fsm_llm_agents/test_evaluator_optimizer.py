@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.evaluator_optimizer module."""
+"""Tests for fsm_llm.agents.evaluator_optimizer module."""
 
 import pytest
 
+from fsm_llm.agents.constants import ContextKeys, Defaults, EvalOptStates, HandlerNames
+from fsm_llm.agents.definitions import AgentConfig, EvaluationResult
+from fsm_llm.agents.evaluator_optimizer import EvaluatorOptimizerAgent
+from fsm_llm.agents.fsm_definitions import build_evalopt_fsm
 from fsm_llm.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -12,10 +16,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.constants import ContextKeys, Defaults, EvalOptStates, HandlerNames
-from fsm_llm_agents.definitions import AgentConfig, EvaluationResult
-from fsm_llm_agents.evaluator_optimizer import EvaluatorOptimizerAgent
-from fsm_llm_agents.fsm_definitions import build_evalopt_fsm
 
 
 def _always_pass(output: str, context: dict) -> EvaluationResult:
@@ -410,7 +410,7 @@ class TestGeneratedOutputCountsAsAnAnswer:
     def test_an_empty_generated_output_is_still_a_failure(self):
         # The empty case is pinned at the completion check ``run()`` delegates
         # to (TestGenerateStateNeverBlocks covers a never-extracted output).
-        from fsm_llm_agents.definitions import AgentTrace
+        from fsm_llm.agents.definitions import AgentTrace
 
         trace = AgentTrace(tool_calls=[], total_iterations=1)
         keys = [ContextKeys.GENERATED_OUTPUT]

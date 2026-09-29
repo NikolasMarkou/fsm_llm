@@ -1,4 +1,4 @@
-"""Fixtures for the ``fsm_llm_harness`` unit tests.
+"""Fixtures for the ``fsm_llm.harness`` unit tests.
 
 Everything here is deterministic and offline: the FSM is driven by
 ``MockLLM2Interface`` (the repo's 2-pass mock, ``tests/conftest.py``) and every
@@ -12,7 +12,7 @@ Design notes that matter for the tests that use these fixtures:
   object hides exactly the bugs these tests exist to catch
   (``plans/LESSONS.md``, fixture anti-patterns).
 * :class:`ApprovalRecorder` records the real
-  :class:`~fsm_llm_agents.definitions.ApprovalRequest` objects the driver
+  :class:`~fsm_llm.agents.definitions.ApprovalRequest` objects the driver
   produced, so a test can assert the callback **was consulted** rather than
   only that a gate stayed shut (decisions.md D-023).
 * Nothing here pre-satisfies a gate.  The default script is empty, so a state
@@ -36,17 +36,15 @@ from typing import Any
 
 import pytest
 
+from fsm_llm.agents.definitions import AgentResult, ApprovalRequest
 from fsm_llm.definitions import FSMDefinition
-from fsm_llm.logging import logger
-from fsm_llm.transition_evaluator import TransitionEvaluator
-from fsm_llm_agents.definitions import AgentResult, ApprovalRequest
-from fsm_llm_harness import build_harness_fsm
-from fsm_llm_harness.constants import (
+from fsm_llm.harness import build_harness_fsm
+from fsm_llm.harness.constants import (
     DRIVER_OWNED_SEEDS,
     DRIVER_OWNED_UNSET,
     ContextKeys,
 )
-from fsm_llm_harness.harness import (
+from fsm_llm.harness.harness import (
     _APPROVAL_CLOSE,
     _APPROVAL_LEASH,
     _APPROVAL_PLAN,
@@ -55,6 +53,8 @@ from fsm_llm_harness.harness import (
     HarnessAgent,
     RoleRequest,
 )
+from fsm_llm.logging import logger
+from fsm_llm.transition_evaluator import TransitionEvaluator
 from tests.conftest import MockLLM2Interface
 
 #: The three human approval gates, re-exported under public names.  Imported
@@ -206,13 +206,20 @@ def workspace(tmp_path: Path) -> Path:
 # observe these messages. See decisions.md D-057.
 @pytest.fixture
 def captured_logs() -> Any:
-    """Every loguru message emitted during the test, as plain strings."""
+    """Every loguru message emitted during the test, as plain strings.
+
+    ``fsm_llm.harness`` sits under the library-wide ``logger.disable("fsm_llm")``
+    (plan-2026-09-29T044048-3a032517 D-004), so the fixture enables library
+    logging for the test and restores the library default afterwards.
+    """
     lines: list[str] = []
+    logger.enable("fsm_llm")
     sink_id = logger.add(lines.append, level="DEBUG", format="{level}|{message}")
     try:
         yield lines
     finally:
         logger.remove(sink_id)
+        logger.disable("fsm_llm")
 
 
 @pytest.fixture

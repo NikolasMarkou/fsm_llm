@@ -1,5 +1,5 @@
 """
-Regression tests for the 2026-09-27 fsm_llm_workflows audit.
+Regression tests for the 2026-09-27 fsm_llm.workflows audit.
 
 Each class pins one finding (H = high, M = medium, L = low). Every test here
 failed on the pre-fix code.
@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from fsm_llm_workflows import (
+from fsm_llm.workflows import (
     DependencyResolver,
     WorkflowEngine,
     WorkflowHistoryEntry,
@@ -27,8 +27,8 @@ from fsm_llm_workflows import (
     timer_step,
     wait_event_step,
 )
-from fsm_llm_workflows.definitions import WorkflowDefinition
-from fsm_llm_workflows.exceptions import (
+from fsm_llm.workflows.definitions import WorkflowDefinition
+from fsm_llm.workflows.exceptions import (
     WorkflowDefinitionError,
     WorkflowEventError,
     WorkflowInstanceError,
@@ -37,13 +37,13 @@ from fsm_llm_workflows.exceptions import (
     WorkflowTimeoutError,
     WorkflowValidationError,
 )
-from fsm_llm_workflows.models import (
+from fsm_llm.workflows.models import (
     WaitEventConfig,
     WorkflowEvent,
     WorkflowStatus,
     WorkflowStepResult,
 )
-from fsm_llm_workflows.steps import (
+from fsm_llm.workflows.steps import (
     AgentStep,
     APICallStep,
     AutoTransitionStep,
@@ -902,7 +902,7 @@ class TestResourceRelease:
         assert len(engine.workflow_instances) == 2
 
     def test_history_is_capped(self):
-        from fsm_llm_workflows.models import WorkflowInstance
+        from fsm_llm.workflows.models import WorkflowInstance
 
         inst = WorkflowInstance(
             instance_id="i", workflow_id="w", current_step_id="s", max_history_entries=3
@@ -1012,7 +1012,7 @@ class TestLoggingOffByDefault:
             """
             import asyncio
             from loguru import logger
-            import fsm_llm_workflows as wfl
+            import fsm_llm.workflows as wfl
             from fsm_llm.logging import enable_library_logging
 
             lines = []

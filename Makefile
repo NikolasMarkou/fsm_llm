@@ -14,10 +14,10 @@ format: ## Format code with ruff
 	python -m ruff format src/ tests/
 
 type-check: ## Run type checker (mypy)
-	python -m mypy src/fsm_llm/ src/fsm_llm_reasoning/ src/fsm_llm_workflows/ src/fsm_llm_agents/ src/fsm_llm_monitor/ src/fsm_llm_harness/ --ignore-missing-imports
+	python -m mypy src/fsm_llm/ --ignore-missing-imports
 
 coverage: ## Run tests with coverage report
-	python -m pytest tests/ --cov=fsm_llm --cov=fsm_llm_reasoning --cov=fsm_llm_workflows --cov=fsm_llm_agents --cov=fsm_llm_monitor --cov=fsm_llm_harness --cov-report=term-missing --cov-report=html
+	python -m pytest tests/ --cov=fsm_llm --cov-report=term-missing --cov-report=html
 
 build: ## Build wheel and sdist
 	@echo "Building package..."
@@ -32,9 +32,6 @@ clean: ## Remove build artifacts and caches
 	rm -rf src/logs*
 	rm -rf src/fsm_llm*egg-info
 	rm -rf src/fsm_llm/__pycache__
-	rm -rf src/fsm_llm_workflows/__pycache__
-	rm -rf src/fsm_llm_reasoning/__pycache__
-	rm -rf src/fsm_llm_agents/__pycache__
 	rm -rf htmlcov/ .coverage
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true

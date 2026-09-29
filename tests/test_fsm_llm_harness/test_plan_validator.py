@@ -1,4 +1,4 @@
-"""Tests for ``fsm_llm_harness.plan_validator``.
+"""Tests for ``fsm_llm.harness.plan_validator``.
 
 Every fixture below is lifted from this repository's own ``plans/`` tree.
 ``plans/`` is gitignored (``.gitignore:183``) so the content is EMBEDDED here
@@ -37,8 +37,8 @@ from pathlib import Path
 
 import pytest
 
-from fsm_llm_harness.constants import ArtifactNames, Defaults, GateSlug, Severity
-from fsm_llm_harness.plan_validator import (
+from fsm_llm.harness.constants import ArtifactNames, Defaults, GateSlug, Severity
+from fsm_llm.harness.plan_validator import (
     _TEMPLATE_SLOT_RE,
     CHECKS,
     GateResult,
@@ -51,8 +51,8 @@ from fsm_llm_harness.plan_validator import (
     audit,
     pre_step_gate,
 )
-from fsm_llm_harness.storage import DRIVER_READ_MAX_BYTES
-from fsm_llm_harness.tools import MAX_READ_BYTES
+from fsm_llm.harness.storage import DRIVER_READ_MAX_BYTES
+from fsm_llm.harness.tools import MAX_READ_BYTES
 
 # ---------------------------------------------------------------------------
 # Real fixtures
@@ -85,7 +85,7 @@ See references/planning-rigor.md for definitions. -->
 PLAN_MD = """# Plan v1: Make the harness actually run on `:4b`, then finish it
 
 ## Goal
-Make `src/fsm_llm_harness` run the iterative-planner protocol end-to-end on
+Make `src/fsm_llm/harness` run the iterative-planner protocol end-to-end on
 `ollama_chat/qwen3.5:4b`.
 
 ## Problem Statement
@@ -153,7 +153,7 @@ DECISIONS_MD = f"""# Decision Log
 **Trade-off**: Reliable, measured tool selection under role-weight prompts **at the cost of**
 losing the free constrained decoding ReAct gets from `output_schema`.
 **Reasoning**: The failure ReAct exhibits is the one the protocol cannot tolerate.
-**Anchor-Refs**: `src/fsm_llm_harness/roles.py:12`
+**Anchor-Refs**: `src/fsm_llm/harness/roles.py:12`
 **Outcome (step 2, iter 1)** — Pre-Mortem #1's trigger did NOT fire; see
 `bench_step2.py:40` for the harness used. This line carries NO colon after its
 bold run, so the decisions parser folds it into the PRECEDING field's value.
@@ -247,8 +247,8 @@ VERIFICATION_MD = """# Verification Results (Iteration 1)
 CHANGELOG_MD = """# Changelog
 *Append-only per-edit ledger. One line per file edit. Owner: ip-executor.*
 *Format: `UTC | iter-N/step-M | commit | path | OP(+N,-M) | radius:TIER(score) | D-NNN-or-dash | reason`*
-2026-07-21T20:10:30Z | iter-1/step-1 | f63104f | src/fsm_llm_agents/native_fc.py | EDIT(+59,-10) | radius:LOW(0) | D-001 | apply ollama call prep behind is_ollama_model
-2026-07-22T00:05:00Z | iter-1/step-3 | 9101369 | src/fsm_llm_harness/tools.py | EDIT(+77,-2) | radius:LOW(2) | - | repair sentinel-prefixed absolute paths
+2026-07-21T20:10:30Z | iter-1/step-1 | f63104f | src/fsm_llm/agents/native_fc.py | EDIT(+59,-10) | radius:LOW(0) | D-001 | apply ollama call prep behind is_ollama_model
+2026-07-22T00:05:00Z | iter-1/step-3 | 9101369 | src/fsm_llm/harness/tools.py | EDIT(+77,-2) | radius:LOW(2) | - | repair sentinel-prefixed absolute paths
 """
 
 CHECKPOINT_MD = """# Checkpoint cp-000-iter1
@@ -297,7 +297,7 @@ A Python framework for stateful conversational AI combining LLMs with FSMs.
 - `fsm_llm` — the core 2-pass engine.
 
 ## Boundaries
-- Core never imports `fsm_llm_agents`.
+- Core never imports `fsm_llm.agents`.
 
 ## Invariants
 - The driver is the sole writer of all nine gate flags.
@@ -567,7 +567,7 @@ class TestPreStepGate:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Short-circuit, proven by non-evaluation rather than by outcome."""
-        import fsm_llm_harness.plan_validator as module
+        import fsm_llm.harness.plan_validator as module
 
         called: list[str] = []
 
@@ -591,7 +591,7 @@ class TestPreStepGate:
     def test_no_plan_evaluates_no_predicate_whatsoever(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import fsm_llm_harness.plan_validator as module
+        import fsm_llm.harness.plan_validator as module
 
         def explode(*args: object, **kwargs: object) -> str | None:
             raise AssertionError("no predicate may run once state.md is unreadable")
@@ -1450,7 +1450,7 @@ class TestAnchorScan:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
         write_source(
-            source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
+            source, "fsm_llm/harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
         )
         assert [
             tag
@@ -1530,12 +1530,12 @@ class TestAnchorScan:
         self, tmp_path: Path
     ) -> None:
         broken = DECISIONS_MD.replace(
-            "**Anchor-Refs**: `src/fsm_llm_harness/roles.py:12`\n", ""
+            "**Anchor-Refs**: `src/fsm_llm/harness/roles.py:12`\n", ""
         )
         plan_dir = make_plan_dir(tmp_path, decisions_md=broken)
         source = tmp_path / "src"
         write_source(
-            source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
+            source, "fsm_llm/harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
         )
         issues = only(audit(plan_dir, workspace_root=source), "anchor-refs-missing")
         assert [issue.severity for issue in issues] == [Severity.ERROR]
@@ -1546,7 +1546,7 @@ class TestAnchorScan:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
         write_source(
-            source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
+            source, "fsm_llm/harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
         )
         assert only(audit(plan_dir, workspace_root=source), "anchor-refs-missing") == []
 
@@ -1556,7 +1556,7 @@ class TestAnchorScan:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
         write_source(
-            source, "fsm_llm_harness/tools.py", "\n" * 11 + anchor("D-001") + "\n"
+            source, "fsm_llm/harness/tools.py", "\n" * 11 + anchor("D-001") + "\n"
         )
         issues = only(audit(plan_dir, workspace_root=source), "anchor-refs-stale")
         assert [issue.severity for issue in issues] == [Severity.WARNING]
@@ -1568,7 +1568,7 @@ class TestAnchorScan:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
         write_source(
-            source, "fsm_llm_harness/roles.py", "\n" * 40 + anchor("D-001") + "\n"
+            source, "fsm_llm/harness/roles.py", "\n" * 40 + anchor("D-001") + "\n"
         )
         issues = only(audit(plan_dir, workspace_root=source), "anchor-refs-stale")
         assert [issue.severity for issue in issues] == [Severity.INFO]
@@ -1582,7 +1582,7 @@ class TestAnchorScan:
         plan_dir = make_plan_dir(tmp_path)
         source = tmp_path / "src"
         write_source(
-            source, "fsm_llm_harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
+            source, "fsm_llm/harness/roles.py", "\n" * 11 + anchor("D-001") + "\n"
         )
         issues = only(audit(plan_dir, workspace_root=source), "anchor-refs-stale")
         assert issues == []
@@ -1604,11 +1604,11 @@ class TestAnchorHelpers:
     @pytest.mark.parametrize(
         ("reference", "scanned", "same"),
         [
-            ("src/fsm_llm_harness/roles.py", "fsm_llm_harness/roles.py", True),
-            ("fsm_llm_harness/roles.py", "src/fsm_llm_harness/roles.py", True),
-            ("src/fsm_llm_harness/roles.py", "src/fsm_llm_harness/roles.py", True),
-            ("src/fsm_llm_harness/roles.py", "src/fsm_llm_harness/rules.py", False),
-            ("roles.py", "src/fsm_llm_agents/heroles.py", False),
+            ("src/fsm_llm/harness/roles.py", "fsm_llm/harness/roles.py", True),
+            ("fsm_llm/harness/roles.py", "src/fsm_llm/harness/roles.py", True),
+            ("src/fsm_llm/harness/roles.py", "src/fsm_llm/harness/roles.py", True),
+            ("src/fsm_llm/harness/roles.py", "src/fsm_llm/harness/rules.py", False),
+            ("roles.py", "src/fsm_llm/agents/heroles.py", False),
         ],
     )
     def test_same_file_matches_by_path_suffix_both_ways(

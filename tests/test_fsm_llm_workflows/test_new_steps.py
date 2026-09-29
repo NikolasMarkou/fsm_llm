@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm_workflows.models import WorkflowStepResult
-from fsm_llm_workflows.steps import (
+from fsm_llm.workflows.models import WorkflowStepResult
+from fsm_llm.workflows.steps import (
     AgentStep,
     AutoTransitionStep,
     RetryStep,
@@ -290,7 +290,7 @@ class TestNewDSLFunctions:
     """Test DSL factory functions for new step types."""
 
     def test_agent_step_factory(self):
-        from fsm_llm_workflows.dsl import agent_step
+        from fsm_llm.workflows.dsl import agent_step
 
         mock_agent = MagicMock()
         step = agent_step(
@@ -304,7 +304,7 @@ class TestNewDSLFunctions:
         assert step.step_id == "research"
 
     def test_retry_step_factory(self):
-        from fsm_llm_workflows.dsl import retry_step
+        from fsm_llm.workflows.dsl import retry_step
 
         inner = AutoTransitionStep(step_id="inner", name="Inner", next_state="done")
         step = retry_step("retry", "Retry", inner, max_retries=5)
@@ -312,7 +312,7 @@ class TestNewDSLFunctions:
         assert step.max_retries == 5
 
     def test_switch_step_factory(self):
-        from fsm_llm_workflows.dsl import switch_step
+        from fsm_llm.workflows.dsl import switch_step
 
         step = switch_step(
             "route",
@@ -334,8 +334,8 @@ class TestWorkflowInstanceCleanup:
     """Test instance removal and auto-purge."""
 
     def test_remove_terminal_instance(self):
-        from fsm_llm_workflows.engine import WorkflowEngine
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.engine import WorkflowEngine
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
         engine = WorkflowEngine()
         instance = WorkflowInstance(
@@ -350,8 +350,8 @@ class TestWorkflowInstanceCleanup:
         assert "test-1" not in engine.workflow_instances
 
     def test_cannot_remove_active_instance(self):
-        from fsm_llm_workflows.engine import WorkflowEngine
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.engine import WorkflowEngine
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
         engine = WorkflowEngine()
         instance = WorkflowInstance(
@@ -366,7 +366,7 @@ class TestWorkflowInstanceCleanup:
         assert "test-1" in engine.workflow_instances
 
     def test_remove_nonexistent_instance(self):
-        from fsm_llm_workflows.engine import WorkflowEngine
+        from fsm_llm.workflows.engine import WorkflowEngine
 
         engine = WorkflowEngine()
         assert engine.remove_instance("nonexistent") is False
@@ -374,8 +374,8 @@ class TestWorkflowInstanceCleanup:
     def test_max_completed_instances_purge(self):
         from datetime import datetime, timezone
 
-        from fsm_llm_workflows.engine import WorkflowEngine
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.engine import WorkflowEngine
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
         engine = WorkflowEngine(max_completed_instances=2)
 
@@ -401,8 +401,8 @@ class TestWorkflowInstanceCleanup:
         assert "test-1" not in engine.workflow_instances
 
     def test_no_purge_when_limit_none(self):
-        from fsm_llm_workflows.engine import WorkflowEngine
-        from fsm_llm_workflows.models import WorkflowInstance, WorkflowStatus
+        from fsm_llm.workflows.engine import WorkflowEngine
+        from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
         engine = WorkflowEngine(max_completed_instances=None)
 

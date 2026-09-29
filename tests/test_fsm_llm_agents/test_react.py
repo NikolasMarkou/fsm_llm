@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.react module."""
+"""Tests for fsm_llm.agents.react module."""
 
 import threading
 
 import pytest
 
+from fsm_llm.agents.definitions import AgentConfig
+from fsm_llm.agents.exceptions import AgentError
+from fsm_llm.agents.handlers import AgentHandlers
+from fsm_llm.agents.react import ReactAgent
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -13,11 +18,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.handlers import AgentHandlers
-from fsm_llm_agents.react import ReactAgent
-from fsm_llm_agents.tools import ToolRegistry
 
 
 def _search(params):
@@ -60,7 +60,7 @@ class TestReactAgentCreation:
             ReactAgent(tools=registry)
 
     def test_create_with_hitl(self):
-        from fsm_llm_agents.hitl import HumanInTheLoop
+        from fsm_llm.agents.hitl import HumanInTheLoop
 
         registry = _make_registry()
         hitl = HumanInTheLoop(
@@ -82,7 +82,7 @@ class TestReactAgentHitlGating:
 
     @staticmethod
     def _policy_only_hitl():
-        from fsm_llm_agents.hitl import HumanInTheLoop
+        from fsm_llm.agents.hitl import HumanInTheLoop
 
         # Tools from _make_registry() default to requires_approval=False.
         return HumanInTheLoop(
@@ -99,7 +99,7 @@ class TestReactAgentHitlGating:
         assert agent._hitl_active is False
 
     def test_hitl_inactive_without_policy(self):
-        from fsm_llm_agents.hitl import HumanInTheLoop
+        from fsm_llm.agents.hitl import HumanInTheLoop
 
         hitl = HumanInTheLoop(approval_callback=lambda req: True)  # no policy
         agent = ReactAgent(tools=_make_registry(), hitl=hitl)
@@ -110,7 +110,7 @@ class TestReactAgentHitlGating:
         # await_approval gate state; otherwise the gate handler sets
         # approval_required=True with no state to intercept it and the tool
         # executes before _handle_hitl_approval can request approval.
-        from fsm_llm_agents.fsm_definitions import build_react_fsm
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
 
         agent = ReactAgent(tools=_make_registry(), hitl=self._policy_only_hitl())
         fsm = build_react_fsm(agent.tools, include_approval_state=agent._hitl_active)
@@ -221,7 +221,7 @@ class TestReactAgentConcurrentRuns:
         seen_lock = threading.Lock()
         barrier = threading.Barrier(2, timeout=10)
 
-        import fsm_llm_agents.react as react_module
+        import fsm_llm.agents.react as react_module
 
         original_build_react_fsm = react_module.build_react_fsm
 
@@ -302,8 +302,8 @@ class TestReactAgentApprovalIsSingleUse:
 
     @staticmethod
     def _run(decide):
-        from fsm_llm_agents.exceptions import AgentError
-        from fsm_llm_agents.hitl import HumanInTheLoop
+        from fsm_llm.agents.exceptions import AgentError
+        from fsm_llm.agents.hitl import HumanInTheLoop
 
         executions: list[dict] = []
         asks: list[bool] = []

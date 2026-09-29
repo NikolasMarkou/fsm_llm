@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_monitor.collector."""
+"""Tests for fsm_llm.monitor.collector."""
 
 import threading
 from datetime import timezone
 
-from fsm_llm_monitor.collector import EventCollector
-from fsm_llm_monitor.constants import (
+from fsm_llm.monitor.collector import EventCollector
+from fsm_llm.monitor.constants import (
     EVENT_AGENT_ITERATION,
     EVENT_AGENT_TOOL_CALL,
     EVENT_CONVERSATION_END,
@@ -15,7 +15,7 @@ from fsm_llm_monitor.constants import (
     EVENT_STATE_TRANSITION,
     EVENT_WORKFLOW_ADVANCED,
 )
-from fsm_llm_monitor.definitions import LogRecord, MonitorEvent
+from fsm_llm.monitor.definitions import LogRecord, MonitorEvent
 
 
 class TestEventCollector:
@@ -408,7 +408,7 @@ class TestHandlerCallbackBehavior:
 
     def test_handler_name_and_priority(self):
         collector = EventCollector()
-        assert collector.handler_name == "fsm_llm_monitor"
+        assert collector.handler_name == "fsm_llm.monitor"
         assert collector.handler_priority == 9999
 
 

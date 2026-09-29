@@ -1,8 +1,8 @@
-"""Smoke tests for the fsm_llm_agents CLI entry points.
+"""Smoke tests for the fsm_llm.agents CLI entry points.
 
-Covers ``fsm_llm_agents.meta_cli.main_cli`` (the ``fsm-llm-meta`` script)
+Covers ``fsm_llm.agents.meta_cli.main_cli`` (the ``fsm-llm-meta`` script)
 with ``MetaBuilderAgent`` replaced by a fake, so no LLM is ever called, and
-``python -m fsm_llm_agents`` (``fsm_llm_agents.__main__.main``).
+``python -m fsm_llm.agents`` (``fsm_llm.agents.__main__.main``).
 """
 
 from __future__ import annotations
@@ -11,11 +11,11 @@ import json
 
 import pytest
 
-from fsm_llm_agents import __main__ as agents_main
-from fsm_llm_agents import meta_cli
-from fsm_llm_agents.__version__ import __version__
-from fsm_llm_agents.definitions import MetaBuilderResult
-from fsm_llm_agents.exceptions import MetaBuilderError
+from fsm_llm.agents import __main__ as agents_main
+from fsm_llm.agents import meta_cli
+from fsm_llm.agents.__version__ import __version__
+from fsm_llm.agents.definitions import MetaBuilderResult
+from fsm_llm.agents.exceptions import MetaBuilderError
 
 _ARTIFACT = {"name": "Bot", "initial_state": "start", "states": {}}
 
@@ -104,16 +104,16 @@ class TestMetaCli:
 
 class TestAgentsMain:
     def test_info_exits_0_and_prints_version(self, monkeypatch, capsys):
-        monkeypatch.setattr("sys.argv", ["fsm_llm_agents", "--info"])
+        monkeypatch.setattr("sys.argv", ["fsm_llm.agents", "--info"])
 
         with pytest.raises(SystemExit) as exc:
             agents_main.main()
 
         assert exc.value.code == 0
-        assert f"fsm_llm_agents v{__version__}" in capsys.readouterr().out
+        assert f"fsm_llm.agents v{__version__}" in capsys.readouterr().out
 
     def test_list_tools_is_rejected(self, monkeypatch, capsys):
-        monkeypatch.setattr("sys.argv", ["fsm_llm_agents", "--list-tools"])
+        monkeypatch.setattr("sys.argv", ["fsm_llm.agents", "--list-tools"])
 
         with pytest.raises(SystemExit) as exc:
             agents_main.main()

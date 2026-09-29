@@ -3481,7 +3481,7 @@ def _c8_run(api: MagicMock) -> Any:
 
 
 class _C10RaisingFinder:
-    """A meta-path finder that fails the import of one top-level module."""
+    """A meta-path finder that fails the import of one (dotted) module."""
 
     def __init__(self, target: str, missing: str) -> None:
         self.target, self.missing = target, missing
@@ -3498,14 +3498,16 @@ class _C10RaisingFinder:
 def _c10_failing_import(missing: str):
     import sys
 
-    saved = sys.modules.pop("fsm_llm_workflows")
-    finder = _C10RaisingFinder("fsm_llm_workflows", missing)
+    import fsm_llm.workflows  # noqa: F401  (ensure the key exists to pop)
+
+    saved = sys.modules.pop("fsm_llm.workflows")
+    finder = _C10RaisingFinder("fsm_llm.workflows", missing)
     sys.meta_path.insert(0, finder)
     try:
         yield
     finally:
         sys.meta_path.remove(finder)
-        sys.modules["fsm_llm_workflows"] = saved
+        sys.modules["fsm_llm.workflows"] = saved
 
 
 def _c11_sub_fsm() -> FSMDefinition:
@@ -3687,7 +3689,7 @@ class TestStep14C6C12:
     def test_c10_missing_package_still_gets_install_hint(self):
         from fsm_llm import get_workflows
 
-        with _c10_failing_import("fsm_llm_workflows"):
+        with _c10_failing_import("fsm_llm.workflows"):
             with pytest.raises(ImportError, match=r"fsm-llm\[workflows\]"):
                 get_workflows()
 
@@ -3699,11 +3701,19 @@ class TestStep14C6C12:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             disable_warnings()
-            for module in ("fsm_llm", "fsm_llm.pipeline", "fsm_llm_agents.react"):
+            # D-007: the subpackages are part of the framework now, so
+            # fsm_llm.agents.react is suppressed; a lookalike sibling
+            # (fsm_llm_contrib) must still not be (no prefix bleed).
+            for module in (
+                "fsm_llm",
+                "fsm_llm.pipeline",
+                "fsm_llm.agents.react",
+                "fsm_llm_contrib.x",
+            ):
                 warnings.warn_explicit(
                     f"from {module}", UserWarning, "f.py", 1, module=module
                 )
-        assert [str(w.message) for w in caught] == ["from fsm_llm_agents.react"]
+        assert [str(w.message) for w in caught] == ["from fsm_llm_contrib.x"]
 
     # -- C11 --------------------------------------------------------------
     def test_c11_sub_conversation_summary_uses_fsm_name(self):

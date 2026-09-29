@@ -1,5 +1,5 @@
 """
-Tests verifying fixes for audit findings in fsm_llm_reasoning.
+Tests verifying fixes for audit findings in fsm_llm.reasoning.
 Covers: F-003 (malformed user_message), F-005 (context pruning),
         F-011 (magic numbers extracted to constants),
         senior-review fixes (extract keys, double-wrap, dead code, hardcoded keys).
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 
-from fsm_llm_reasoning.constants import ContextKeys, Defaults
-from fsm_llm_reasoning.handlers import (
+from fsm_llm.reasoning.constants import ContextKeys, Defaults
+from fsm_llm.reasoning.handlers import (
     ContextManager,
     OutputFormatter,
     ReasoningHandlers,
@@ -28,7 +28,7 @@ class TestMalformedUserMessage:
         """Verify the malformed string was fixed in engine.py."""
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine)
         # The old malformed string should NOT be present
@@ -205,7 +205,7 @@ class TestClassificationExceptionHandling:
         """Verify the except block re-raises ReasoningClassificationError directly."""
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._classify_problem)
         # Must have a bare re-raise for our own exception type
@@ -225,17 +225,17 @@ class TestDeadCodeRemoved:
     """Unused utility functions in reasoning_modes.py should not exist."""
 
     def test_no_get_fsm_by_name(self):
-        from fsm_llm_reasoning import reasoning_modes
+        from fsm_llm.reasoning import reasoning_modes
 
         assert not hasattr(reasoning_modes, "get_fsm_by_name")
 
     def test_no_list_available_fsms(self):
-        from fsm_llm_reasoning import reasoning_modes
+        from fsm_llm.reasoning import reasoning_modes
 
         assert not hasattr(reasoning_modes, "list_available_fsms")
 
     def test_no_get_reasoning_fsms_only(self):
-        from fsm_llm_reasoning import reasoning_modes
+        from fsm_llm.reasoning import reasoning_modes
 
         assert not hasattr(reasoning_modes, "get_reasoning_fsms_only")
 
@@ -252,7 +252,7 @@ class TestNoHardcodedKeys:
     def test_no_problem_domain_classified_string_in_source(self):
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._classify_problem)
         assert "problem_domain_classified" not in source
@@ -261,7 +261,7 @@ class TestNoHardcodedKeys:
         """The return dict keys should match ContextKeys constants."""
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._classify_problem)
         assert "ContextKeys.PROBLEM_DOMAIN" in source
@@ -283,7 +283,7 @@ class TestJsonDumpsSafety:
     def test_continue_reasoning_uses_the_redacting_hook(self):
         import inspect
 
-        from fsm_llm_reasoning.engine import ReasoningEngine
+        from fsm_llm.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._solve_problem_locked)
         assert "default=redacting_json_default" in source
@@ -293,7 +293,7 @@ class TestJsonDumpsSafety:
         import inspect
         import re
 
-        from fsm_llm_reasoning import engine as engine_mod
+        from fsm_llm.reasoning import engine as engine_mod
 
         source = inspect.getsource(engine_mod)
         # The two prompt sites are the only json.dumps calls in this module
@@ -307,13 +307,13 @@ class TestJsonDumpsSafety:
         """
         import inspect
 
-        from fsm_llm_reasoning import handlers as handlers_mod
+        from fsm_llm.reasoning import handlers as handlers_mod
 
         source = inspect.getsource(handlers_mod)
         assert "never emitted" in source
 
     def test_cli_json_output_redacts_an_objects_str(self):
-        from fsm_llm_reasoning.__main__ import _format_json_output
+        from fsm_llm.reasoning.__main__ import _format_json_output
 
         class Leaky:
             def __str__(self):
@@ -324,7 +324,7 @@ class TestJsonDumpsSafety:
         assert "<redacted:Leaky>" in text
 
     def test_saved_results_file_redacts_an_objects_str(self, tmp_path):
-        from fsm_llm_reasoning.__main__ import _save_as_json
+        from fsm_llm.reasoning.__main__ import _save_as_json
 
         class Leaky:
             def __str__(self):

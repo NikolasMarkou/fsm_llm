@@ -1564,7 +1564,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         sections.append(f"User message: {self._sanitize_text_for_prompt(user_message)}")
 
         # DECISION plan_2026-05-31_f08da86d/D-002 [STALE]: literal "Continue." is INLINED,
-        # NOT imported from fsm_llm_agents.constants.CONTINUE_MESSAGE — core
+        # NOT imported from fsm_llm.agents.constants.CONTINUE_MESSAGE — core
         # (src/fsm_llm/) must never import the agents package. Do NOT replace this
         # with that import. The branch only ADDS guidance (it never suppresses
         # normal user-message extraction) so a real user typing "Continue." is

@@ -1,4 +1,4 @@
-"""Falsifying tests for ``fsm_llm_harness.fsm_definition`` and ``rules``.
+"""Falsifying tests for ``fsm_llm.harness.fsm_definition`` and ``rules``.
 
 Every gate assertion below is driven through the **real**
 ``fsm_llm.transition_evaluator.TransitionEvaluator``.  A bespoke evaluator
@@ -24,11 +24,11 @@ from fsm_llm.definitions import (
     TransitionEvaluationResult,
     _walk_logic_operators,
 )
+from fsm_llm.harness import build_harness_fsm
+from fsm_llm.harness.constants import ArtifactNames, ContextKeys, HarnessStates, Role
+from fsm_llm.harness.rules import OWNERSHIP, ROLE_BY_STATE, RULES
 from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.validator import FSMValidator
-from fsm_llm_harness import build_harness_fsm
-from fsm_llm_harness.constants import ArtifactNames, ContextKeys, HarnessStates, Role
-from fsm_llm_harness.rules import OWNERSHIP, ROLE_BY_STATE, RULES
 
 BLOCKED = TransitionEvaluationResult.BLOCKED
 DETERMINISTIC = TransitionEvaluationResult.DETERMINISTIC

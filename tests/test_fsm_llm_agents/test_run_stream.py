@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from fsm_llm_agents import AgentConfig, ReactAgent, ToolRegistry, tool
+from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
 
 
 @tool

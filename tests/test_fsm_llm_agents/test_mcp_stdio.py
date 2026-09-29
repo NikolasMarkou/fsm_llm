@@ -17,10 +17,10 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from fsm_llm_agents.definitions import ToolCall
-from fsm_llm_agents.exceptions import AgentTimeoutError
-from fsm_llm_agents.mcp import MCPToolProvider
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.agents.definitions import ToolCall
+from fsm_llm.agents.exceptions import AgentTimeoutError
+from fsm_llm.agents.mcp import MCPToolProvider
+from fsm_llm.agents.tools import ToolRegistry
 
 _FIXTURE = Path(__file__).with_name("mcp_fixture_server.py")
 # Discovery spawns a Python child that imports mcp; keep it well clear of that.

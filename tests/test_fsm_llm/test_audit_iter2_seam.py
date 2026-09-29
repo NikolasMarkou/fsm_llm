@@ -926,7 +926,7 @@ class TestExtractJsonFencedNonDictAndDepth:
         assert extract_json_from_text(deep) is None
 
     def test_harness_parse_json_payload_fenced_array_is_none(self):
-        from fsm_llm_harness.hardening import parse_json_payload
+        from fsm_llm.harness.hardening import parse_json_payload
 
         assert parse_json_payload('```json\n[{"a":1}]\n```') is None
         assert parse_json_payload('```json\n{"a":1}\n```') == {"a": 1}

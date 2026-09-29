@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.fsm_definitions module."""
+"""Tests for fsm_llm.agents.fsm_definitions module."""
 
-from fsm_llm.definitions import FSMDefinition, State
-from fsm_llm.ollama import build_ollama_response_format
-from fsm_llm.pipeline import MessagePipeline
-from fsm_llm_agents.fsm_definitions import (
+from fsm_llm.agents.fsm_definitions import (
     build_orchestrator_fsm,
     build_plan_execute_fsm,
     build_react_fsm,
     build_reflexion_fsm,
     build_rewoo_fsm,
 )
-from fsm_llm_agents.tools import ToolRegistry
+from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.definitions import FSMDefinition, State
+from fsm_llm.ollama import build_ollama_response_format
+from fsm_llm.pipeline import MessagePipeline
 
 
 def _dummy_tool(params):

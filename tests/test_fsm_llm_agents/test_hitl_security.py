@@ -18,6 +18,13 @@ from typing import Any
 
 import pytest
 
+from fsm_llm.agents.constants import ContextKeys
+from fsm_llm.agents.definitions import AgentConfig
+from fsm_llm.agents.handlers import AgentHandlers
+from fsm_llm.agents.hitl import HumanInTheLoop
+from fsm_llm.agents.react import ReactAgent
+from fsm_llm.agents.reflexion import ReflexionAgent
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.constants import RESERVED_CONTEXT_KEYS, has_internal_prefix
 from fsm_llm.definitions import (
     DataExtractionResponse,
@@ -27,13 +34,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.constants import ContextKeys
-from fsm_llm_agents.definitions import AgentConfig
-from fsm_llm_agents.handlers import AgentHandlers
-from fsm_llm_agents.hitl import HumanInTheLoop
-from fsm_llm_agents.react import ReactAgent
-from fsm_llm_agents.reflexion import ReflexionAgent
-from fsm_llm_agents.tools import ToolRegistry
 
 MAX_ITERATIONS = 8
 _INPUT = {"x": "1"}
@@ -120,8 +120,8 @@ def _hitl(decide: Callable[[int], bool], asks: list[str]) -> HumanInTheLoop:
 
 
 def _build_reasoning_react(**kwargs: Any):
-    pytest.importorskip("fsm_llm_reasoning")
-    from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+    pytest.importorskip("fsm_llm.reasoning")
+    from fsm_llm.agents.reasoning_react import ReasoningReactAgent
 
     return ReasoningReactAgent(**kwargs)
 
@@ -466,7 +466,7 @@ class TestReflexionAsksFirst:
         assert refusals == [], "Reflexion burned turns on refused gated calls"
 
     def test_fsm_has_await_approval_under_policy(self):
-        from fsm_llm_agents.fsm_definitions import build_reflexion_fsm
+        from fsm_llm.agents.fsm_definitions import build_reflexion_fsm
 
         agent = ReflexionAgent(
             tools=_registry([], "danger"),
@@ -519,7 +519,7 @@ class TestReasoningReactAsks:
 
     def test_policy_only_builds_await_approval(self):
         """One predicate: a policy alone (no tool flag) builds the state."""
-        from fsm_llm_agents.fsm_definitions import build_react_fsm
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
 
         registry = ToolRegistry()
         registry.register_function(

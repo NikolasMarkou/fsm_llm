@@ -1,11 +1,21 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.orchestrator module."""
+"""Tests for fsm_llm.agents.orchestrator module."""
 
 
 import re
 from typing import Any
 
+from fsm_llm.agents.constants import (
+    ContextKeys,
+    Defaults,
+    HandlerNames,
+    OrchestratorStates,
+)
+from fsm_llm.agents.definitions import AgentConfig, AgentResult
+from fsm_llm.agents.fsm_definitions import build_orchestrator_fsm
+from fsm_llm.agents.orchestrator import OrchestratorAgent
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -15,16 +25,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.constants import (
-    ContextKeys,
-    Defaults,
-    HandlerNames,
-    OrchestratorStates,
-)
-from fsm_llm_agents.definitions import AgentConfig, AgentResult
-from fsm_llm_agents.fsm_definitions import build_orchestrator_fsm
-from fsm_llm_agents.orchestrator import OrchestratorAgent
-from fsm_llm_agents.tools import ToolRegistry
 
 
 def _dummy_tool(params):

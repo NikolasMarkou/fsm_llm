@@ -1,1 +1,1 @@
-"""Tests for the fsm_llm_harness package."""
+"""Tests for the fsm_llm.harness package."""

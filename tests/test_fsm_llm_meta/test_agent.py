@@ -6,18 +6,18 @@ from typing import ClassVar
 
 import pytest
 
-from fsm_llm_agents.definitions import (
+from fsm_llm.agents.definitions import (
     ArtifactType,
     MetaBuilderConfig,
     MetaBuilderResult,
 )
-from fsm_llm_agents.exceptions import (
+from fsm_llm.agents.exceptions import (
     AgentError,
     BuilderError,
     MetaBuilderError,
     MetaValidationError,
 )
-from fsm_llm_agents.meta_builder import MetaBuilderAgent
+from fsm_llm.agents.meta_builder import MetaBuilderAgent
 
 
 class TestSchemaEchoRejection:
@@ -177,7 +177,7 @@ class TestInternalState:
         assert state["builder_summary"] is None
 
     def test_state_with_builder(self):
-        from fsm_llm_agents.meta_builders import FSMBuilder
+        from fsm_llm.agents.meta_builders import FSMBuilder
 
         agent = MetaBuilderAgent()
         agent._artifact_type = ArtifactType.FSM
@@ -192,7 +192,7 @@ class TestInternalState:
 
 class TestMetaAgentOutput:
     def test_output_module_imports(self):
-        from fsm_llm_agents.meta_output import (
+        from fsm_llm.agents.meta_output import (
             format_artifact_json,
             format_summary,
             save_artifact,
@@ -203,13 +203,13 @@ class TestMetaAgentOutput:
         assert callable(save_artifact)
 
     def test_format_artifact_json(self):
-        from fsm_llm_agents.meta_output import format_artifact_json
+        from fsm_llm.agents.meta_output import format_artifact_json
 
         result = format_artifact_json({"name": "test", "states": {}})
         assert '"name": "test"' in result
 
     def test_format_summary(self):
-        from fsm_llm_agents.meta_output import format_summary
+        from fsm_llm.agents.meta_output import format_summary
 
         result = MetaBuilderResult(
             artifact_type=ArtifactType.FSM,
@@ -223,7 +223,7 @@ class TestMetaAgentOutput:
         assert "5" in summary
 
     def test_save_artifact(self, tmp_path):
-        from fsm_llm_agents.meta_output import save_artifact
+        from fsm_llm.agents.meta_output import save_artifact
 
         artifact = {"name": "test", "states": {}}
         path = save_artifact(artifact, tmp_path / "test.json")
@@ -233,7 +233,7 @@ class TestMetaAgentOutput:
 
     def test_save_artifact_resolves_dotdot_segments(self, tmp_path):
         """save_artifact trusts its caller and writes to the resolved path."""
-        from fsm_llm_agents.meta_output import save_artifact
+        from fsm_llm.agents.meta_output import save_artifact
 
         artifact = {"name": "test", "states": {}}
         raw = tmp_path / "a" / "b" / ".." / ".." / "out" / "test.json"
@@ -247,28 +247,28 @@ class TestMetaAgentOutput:
 
 class TestMetaAgentImports:
     def test_main_imports(self):
-        import fsm_llm_agents
+        import fsm_llm.agents
 
-        assert hasattr(fsm_llm_agents, "MetaBuilderAgent")
-        assert hasattr(fsm_llm_agents, "FSMBuilder")
-        assert hasattr(fsm_llm_agents, "WorkflowBuilder")
-        assert hasattr(fsm_llm_agents, "AgentBuilder")
-        assert hasattr(fsm_llm_agents, "ArtifactType")
-        assert hasattr(fsm_llm_agents, "MetaBuilderConfig")
-        assert hasattr(fsm_llm_agents, "MetaBuilderResult")
-        assert hasattr(fsm_llm_agents, "MetaBuilderError")
-        assert hasattr(fsm_llm_agents, "create_builder_tools")
-        assert hasattr(fsm_llm_agents, "create_fsm_tools")
+        assert hasattr(fsm_llm.agents, "MetaBuilderAgent")
+        assert hasattr(fsm_llm.agents, "FSMBuilder")
+        assert hasattr(fsm_llm.agents, "WorkflowBuilder")
+        assert hasattr(fsm_llm.agents, "AgentBuilder")
+        assert hasattr(fsm_llm.agents, "ArtifactType")
+        assert hasattr(fsm_llm.agents, "MetaBuilderConfig")
+        assert hasattr(fsm_llm.agents, "MetaBuilderResult")
+        assert hasattr(fsm_llm.agents, "MetaBuilderError")
+        assert hasattr(fsm_llm.agents, "create_builder_tools")
+        assert hasattr(fsm_llm.agents, "create_fsm_tools")
 
     def test_version(self):
-        from fsm_llm_agents import __version__
+        from fsm_llm.agents import __version__
 
         assert isinstance(__version__, str)
 
 
 class TestBuildResult:
     def test_build_result_with_valid_builder(self):
-        from fsm_llm_agents.meta_builders import FSMBuilder
+        from fsm_llm.agents.meta_builders import FSMBuilder
 
         agent = MetaBuilderAgent()
         agent._artifact_type = ArtifactType.FSM
@@ -325,21 +325,21 @@ class TestStartSendFlow:
 
 class TestCreateBuilder:
     def test_creates_fsm_builder(self):
-        from fsm_llm_agents.meta_builders import FSMBuilder
+        from fsm_llm.agents.meta_builders import FSMBuilder
 
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.FSM)
         assert isinstance(builder, FSMBuilder)
 
     def test_creates_workflow_builder(self):
-        from fsm_llm_agents.meta_builders import WorkflowBuilder
+        from fsm_llm.agents.meta_builders import WorkflowBuilder
 
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.WORKFLOW)
         assert isinstance(builder, WorkflowBuilder)
 
     def test_creates_agent_builder(self):
-        from fsm_llm_agents.meta_builders import AgentBuilder
+        from fsm_llm.agents.meta_builders import AgentBuilder
 
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.AGENT)
@@ -350,7 +350,7 @@ class TestLegacyFSMDefinition:
     """Test that the legacy FSM definition still loads."""
 
     def test_builds_fsm_dict(self):
-        from fsm_llm_agents.meta_fsm import build_meta_builder_fsm
+        from fsm_llm.agents.meta_fsm import build_meta_builder_fsm
 
         fsm = build_meta_builder_fsm()
         assert isinstance(fsm, dict)
@@ -462,7 +462,7 @@ class TestWorkflowStepTypeEnum:
         return schema["properties"]["steps"]["items"]["properties"]["step_type"]
 
     def test_schema_step_type_is_the_valid_set(self):
-        from fsm_llm_agents.meta_builders import WorkflowBuilder
+        from fsm_llm.agents.meta_builders import WorkflowBuilder
 
         prop = self._step_type_prop(MetaBuilderAgent._ARTIFACT_SCHEMAS["workflow"])
         assert prop["type"] == "string"
@@ -473,7 +473,7 @@ class TestWorkflowStepTypeEnum:
 
         from litellm.llms.ollama.chat.transformation import OllamaChatConfig
 
-        from fsm_llm_agents.meta_builders import WorkflowBuilder
+        from fsm_llm.agents.meta_builders import WorkflowBuilder
 
         sent: list[dict] = []
         spec = {

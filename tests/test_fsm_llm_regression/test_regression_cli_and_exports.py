@@ -83,9 +83,9 @@ class TestPhantomEntryPointRemoved:
     """Verify phantom workflow CLI config is gone."""
 
     def test_no_workflow_cli_module(self):
-        """H-3: fsm_llm_workflows.cli should not exist."""
+        """H-3: fsm_llm.workflows.cli should not exist."""
         with pytest.raises(ModuleNotFoundError):
-            import fsm_llm_workflows.cli  # noqa: F401
+            import fsm_llm.workflows.cli  # noqa: F401
 
 
 # ----------------------------------------------------------------
@@ -138,11 +138,10 @@ class TestQuickstartReferences:
 class TestPyTypedFiles:
     """Verify PEP 561 py.typed marker files exist."""
 
-    @pytest.mark.parametrize(
-        "package", ["fsm_llm", "fsm_llm_reasoning", "fsm_llm_workflows"]
-    )
+    # D-010: one top-level marker covers every subpackage (PEP 561).
+    @pytest.mark.parametrize("package", ["fsm_llm"])
     def test_py_typed_exists(self, package):
-        """M-3: py.typed must exist in each package."""
+        """M-3: py.typed must exist in the top-level package."""
         src_dir = os.path.join(os.path.dirname(__file__), "..", "..", "src", package)
         py_typed = os.path.join(src_dir, "py.typed")
         assert os.path.exists(py_typed), f"Missing py.typed in {package}"
@@ -182,13 +181,13 @@ class TestUnifiedVersioning:
     def test_reasoning_version_matches(self):
         """L-3: Reasoning extension version must match main package."""
         from fsm_llm.__version__ import __version__ as main_version
-        from fsm_llm_reasoning.__version__ import __version__ as reasoning_version
+        from fsm_llm.reasoning.__version__ import __version__ as reasoning_version
 
         assert reasoning_version == main_version
 
     def test_workflows_version_matches(self):
         """Baseline: Workflows extension version must match main package."""
         from fsm_llm.__version__ import __version__ as main_version
-        from fsm_llm_workflows import __version__ as workflows_version
+        from fsm_llm.workflows import __version__ as workflows_version
 
         assert workflows_version == main_version

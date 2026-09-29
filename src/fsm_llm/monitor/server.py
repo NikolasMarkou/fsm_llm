@@ -1,0 +1,1689 @@
+"""
+FastAPI web server for fsm_llm.monitor.
+
+Serves the Grafana-inspired dark dashboard UI and provides REST + WebSocket APIs
+for real-time monitoring, launching, and controlling FSM conversations, agents,
+and workflows.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hmac
+import json
+import os
+import re
+import time
+import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, NoReturn
+from urllib.parse import urlsplit
+
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.requests import Request
+
+from fsm_llm.definitions import ConversationBusyError
+from fsm_llm.logging import logger
+from fsm_llm.utilities import redacting_json_default
+
+from .bridge import MonitorBridge, _fsm_dict_to_snapshot
+from .constants import MAX_BUILDER_SESSIONS, MAX_REQUEST_BODY_BYTES
+from .definitions import (
+    BuilderSendRequest,
+    BuilderStartRequest,
+    EndConversationRequest,
+    FSMSnapshot,
+    LaunchAgentRequest,
+    LaunchFSMRequest,
+    LaunchWorkflowRequest,
+    MonitorConfig,
+    SendMessageRequest,
+    StartConversationRequest,
+    WorkflowAdvanceRequest,
+    WorkflowCancelRequest,
+    WorkflowEventRequest,
+)
+from .exceptions import MonitorCapacityError, MonitorError
+from .instance_manager import InstanceManager, _find_examples_dir, validate_preset_id
+
+STATIC_DIR = Path(__file__).parent / "static"
+TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+# Default timeout for synchronous FSM/LLM operations wrapped in asyncio.to_thread
+_LLM_OPERATION_TIMEOUT = 120.0
+# Builder builds run a multi-step LLM loop — needs more time
+_BUILDER_OPERATION_TIMEOUT = 300.0
+# Preset cache: (result, timestamp). Presets rarely change; avoid re-scanning disk.
+_PRESET_CACHE_TTL = 60.0
+_preset_cache: tuple[dict[str, list[dict[str, str]]], float] | None = None
+
+# Counter tracking how many HTTP requests have been processed since server start.
+# Used by configure() to warn when CORS mutation would be a no-op (Starlette
+# builds its middleware stack lazily on the first request).
+_requests_processed: int = 0
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    """Manage server startup/shutdown lifecycle."""
+    yield
+    # Shutdown: remove loguru sink to prevent resource leaks
+    if _manager is not None:
+        _manager.global_collector.cleanup()
+
+
+def _env_list(name: str) -> list[str]:
+    raw = os.environ.get(name, "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+# CORS origins -- the dashboard is served by this same server, so it needs no
+# CORS; these only allow OTHER origins to read the API. Defaults to the
+# default port on localhost. Override via configure(cors_origins=[...]) or the
+# FSM_LLM_MONITOR_CORS_ORIGINS env var (comma-separated).
+_CORS_ORIGINS: list[str] = _env_list("FSM_LLM_MONITOR_CORS_ORIGINS") or [
+    "http://localhost:8420",
+    "http://127.0.0.1:8420",
+]
+# DECISION plan-2026-09-28T090000-3c9e41d2/D-001
+# No default origin regex: `https?://(localhost|127.0.0.1)(:\d+)?` trusted
+# every local dev server on any port. Same-origin requests need no entry.
+_CORS_ORIGIN_REGEX: str | None = None
+
+# Host header allow-list (DNS-rebinding defence). "*" disables the check.
+# "testserver" is the Host Starlette's TestClient sends.
+_TRUSTED_HOSTS: list[str] = _env_list("FSM_LLM_MONITOR_TRUSTED_HOSTS") or [
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "testserver",
+]
+
+app = FastAPI(title="FSM-LLM Monitor", docs_url="/api/docs", lifespan=_lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_origin_regex=_CORS_ORIGIN_REGEX,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+_SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; "
+        "base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    ),
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+def _host_only(host_header: str) -> str:
+    """The host part of a Host header value (port removed, IPv6 unbracketed)."""
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        return host[1 : host.find("]")] if "]" in host else host[1:]
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def _host_allowed(host_header: str | None) -> bool:
+    if "*" in _TRUSTED_HOSTS:
+        return True
+    if not host_header:
+        return False
+    host = _host_only(host_header)
+    return any(host == _host_only(h) for h in _TRUSTED_HOSTS)
+
+
+def _origin_allowed(origin: str | None, host_header: str | None) -> bool:
+    """A browser request may act on the monitor only from the monitor's own
+    origin or a configured CORS origin. No Origin header (curl, scripts,
+    same-origin GETs in some browsers) is allowed; auth still applies."""
+    if not origin:
+        return True
+    if origin == "null":
+        return False
+    if "*" in _CORS_ORIGINS or origin in _CORS_ORIGINS:
+        return True
+    if _CORS_ORIGIN_REGEX and re.fullmatch(_CORS_ORIGIN_REGEX, origin):
+        return True
+    if not host_header:
+        return False
+    return urlsplit(origin).netloc.lower() == host_header.strip().lower()
+
+
+@app.middleware("http")
+async def _security_guard(request: Request, call_next):
+    """Host allow-list, same-origin check for state-changing requests, body
+    size cap, and security headers on every response.
+
+    # DECISION plan-2026-09-28T090000-3c9e41d2/D-001
+    # A cross-site page could POST to the monitor (a no-cors fetch with no
+    # Content-Type is parsed as JSON) and a rebinding DNS name could read it.
+    # Do NOT drop the Origin check on unsafe methods or the Host check: CORS
+    # only governs READING responses, not sending requests.
+    """
+    host = request.headers.get("host")
+    if not _host_allowed(host):
+        return JSONResponse({"detail": "invalid host header"}, status_code=400)
+    if request.method in _UNSAFE_METHODS and not _origin_allowed(
+        request.headers.get("origin"), host
+    ):
+        return JSONResponse({"detail": "cross-origin request refused"}, status_code=403)
+    length = request.headers.get("content-length")
+    if length is not None:
+        try:
+            too_big = int(length) > MAX_REQUEST_BODY_BYTES
+        except ValueError:
+            too_big = True
+        if too_big:
+            return JSONResponse({"detail": "request body too large"}, status_code=413)
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
+@app.middleware("http")
+async def _count_requests(request: Request, call_next):
+    """Increment _requests_processed on each HTTP request so configure() can
+    warn when CORS mutation is called too late (after the first request)."""
+    global _requests_processed
+    _requests_processed += 1
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    """Prevent browser caching of static JS/CSS files during development."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
+
+# Global instance manager — set via configure()
+_manager: InstanceManager | None = None
+
+# DECISION plan-2026-09-12T065608-089d0ec7/D-008: optional API-key gate for
+# mutating monitor routes (F2). `_api_key` is re-derived on EVERY configure()
+# call (api_key param, else FSM_LLM_MONITOR_API_KEY env var, else None) —
+# unlike `_CORS_ORIGINS` (only mutated when `cors_origins is not None`, so a
+# repeat configure() call intentionally leaves a prior CORS override in
+# place). Do NOT copy the CORS "only overwrite if not None" pattern here: it
+# would let a previously-set `_api_key` leak across independent configure()
+# calls (e.g. between tests), which is exactly the isolation `_api_key` needs.
+# See `_require_api_key` below for the per-request timing note (D-008).
+# Initialised from the env var at import so `uvicorn fsm_llm.monitor.server:app`
+# (which never calls configure()) still honours FSM_LLM_MONITOR_API_KEY.
+_api_key: str | None = os.environ.get("FSM_LLM_MONITOR_API_KEY") or None
+
+# Flow data loaded from static/flows.json
+_flows: dict[str, Any] = {}
+
+
+def _load_flows() -> dict[str, Any]:
+    """Load agent/workflow flow definitions from the JSON data file."""
+    flows_path = STATIC_DIR / "flows.json"
+    if flows_path.exists():
+        result: dict[str, Any] = json.loads(flows_path.read_text())
+        return result
+    return {"agents": {}, "workflows": {}}
+
+
+def configure(
+    bridge: MonitorBridge | None = None,
+    manager: InstanceManager | None = None,
+    cors_origins: list[str] | None = None,
+    api_key: str | None = None,
+    trusted_hosts: list[str] | None = None,
+) -> None:
+    """Configure the global instance manager for the web server.
+
+    Accepts either a MonitorBridge (backward compat) or an InstanceManager.
+    If a bridge is provided, an InstanceManager is created wrapping it.
+
+    :param cors_origins: List of allowed CORS origins. Defaults to localhost only.
+        Pass ``["*"]`` to allow all origins (not recommended for production).
+    :param api_key: Optional API key required (via an ``Authorization: Bearer
+        <key>`` or ``X-API-Key`` header) to reach mutating REST routes. Falls
+        back to the ``FSM_LLM_MONITOR_API_KEY`` env var when not given
+        explicitly. Defaults to ``None`` (no auth — byte-identical to prior
+        behavior). Unlike ``cors_origins``, this is re-derived on EVERY call
+        (see the D-008 comment on the ``_api_key`` global) — **calling
+        ``configure()`` again later (e.g. only to change ``cors_origins``)
+        without also re-passing ``api_key`` silently clears any previously
+        configured key** (falling through to the env var, or to ``None`` if
+        the env var is also unset). If you configure a key once, you must
+        re-pass it (or rely on the env var) on every subsequent ``configure()``
+        call in the same process, or auth will silently disable itself. A
+        WARNING is logged (D-016) when this specific case — a previously-set
+        key being cleared by a call that did not itself supply ``api_key`` —
+        is detected. An empty or whitespace-only ``api_key`` raises
+        ``ValueError``; an empty env var still means no key.
+    :param trusted_hosts: Host header values the server answers to (DNS
+        rebinding defence). Defaults to localhost; ``["*"]`` disables the
+        check (needed when serving on a LAN address). Like ``cors_origins``,
+        only changed when given.
+    """
+    global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX, _api_key
+    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006: raise on an empty or
+    # whitespace-only api_key, before any global changes. Do NOT store it
+    # (compare_digest(b"", b"") is True, so an empty header would authenticate)
+    # and do NOT map it to None (a caller passing os.getenv("KEY", "") would
+    # silently get an open monitor). The env var "" still means unset.
+    if api_key is not None and not api_key.strip():
+        raise ValueError("api_key must be a non-empty string, or None for no auth")
+    new_api_key = (
+        api_key
+        if api_key is not None
+        else (os.environ.get("FSM_LLM_MONITOR_API_KEY") or None)
+    )
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-016: warn (rather than stay
+    # silent) when a previously-configured key is about to be cleared by a
+    # re-configure() call that did not itself pass api_key= — mirroring the
+    # existing CORS-mutation warning below. Guarded so it never fires on the
+    # first configure() call (nothing to clear yet) or when the caller
+    # explicitly re-supplies the same/a new key.
+    if api_key is None and _api_key is not None and new_api_key is None:
+        logger.warning(
+            "configure() called without api_key= and FSM_LLM_MONITOR_API_KEY "
+            "is unset; a previously configured API key is being cleared — "
+            "mutating routes will no longer require authentication."
+        )
+    _api_key = new_api_key
+    if _requests_processed > 0:
+        logger.warning(
+            f"configure() called after server has processed {_requests_processed} "
+            "request(s); CORS changes will not take effect until the next server "
+            "restart."
+        )
+    if trusted_hosts is not None:
+        _TRUSTED_HOSTS[:] = trusted_hosts
+    if cors_origins is not None:
+        _CORS_ORIGINS[:] = cors_origins
+        _CORS_ORIGIN_REGEX = None  # Disable regex when explicit origins are provided
+        # NOTE: This mutates FastAPI's internal middleware kwargs directly.
+        # This only works when called BEFORE the first request, because Starlette
+        # builds its middleware stack lazily on first request. After that, these
+        # kwargs are no longer consulted. Do not call configure() after startup.
+        for middleware in app.user_middleware:
+            if hasattr(middleware, "kwargs"):
+                if "allow_origins" in middleware.kwargs:
+                    middleware.kwargs["allow_origins"] = cors_origins
+                if "allow_origin_regex" in middleware.kwargs:
+                    middleware.kwargs["allow_origin_regex"] = None
+    _flows = _load_flows()
+    _bridge_cache = None  # Reset cached bridge
+
+    # Detach the old manager (log sink, handlers on its APIs) -- but never the
+    # manager being re-installed: configure(manager=current, api_key=...) is
+    # how a caller rotates the key, and cleaning it up killed its log feed.
+    if _manager is not None and _manager is not manager:
+        _manager.shutdown()
+
+    if manager is not None:
+        _manager = manager
+    elif bridge is not None:
+        _manager = InstanceManager(config=bridge.config)
+        if bridge.connected and bridge.api is not None:
+            # The bridge's own collector handlers are switched off so the API
+            # does not feed two collectors (connect_bridge is idempotent).
+            bridge.disconnect()
+            _manager.connect_bridge(bridge.api)
+    else:
+        _manager = InstanceManager()
+
+
+def get_manager() -> InstanceManager:
+    global _manager, _flows
+    if _manager is None:
+        _manager = InstanceManager()
+    if not _flows:
+        _flows = _load_flows()
+    return _manager
+
+
+# Backward compatibility alias — cached to avoid creating detached instances
+_bridge_cache: MonitorBridge | None = None
+
+
+def get_bridge() -> MonitorBridge:
+    """Backward compat: returns a MonitorBridge-compatible wrapper."""
+    global _bridge_cache
+    mgr = get_manager()
+    if _bridge_cache is None or _bridge_cache.collector is not mgr.global_collector:
+        _bridge_cache = MonitorBridge(config=mgr.config)
+        # Use the public setter to share the global collector
+        _bridge_cache.set_collector(mgr.global_collector)
+    return _bridge_cache
+
+
+def _require_api_key(request: Request) -> None:
+    """FastAPI dependency gating mutating routes behind an optional API key.
+
+    DECISION plan-2026-09-12T065608-089d0ec7/D-008: no-op when `_api_key` is
+    `None` (the default) — byte-identical to pre-F2 behavior for every
+    existing caller who never sets `FSM_LLM_MONITOR_API_KEY`/`api_key`. When
+    `_api_key` is set, requires a matching `Authorization: Bearer <key>` OR
+    `X-API-Key` header, else raises 401.
+
+    Timing note (do NOT assume this mirrors the CORS gotcha in `configure()`
+    above): `configure()`'s CORS mutation only takes effect if called BEFORE
+    the first request, because Starlette builds its middleware stack lazily
+    on first request. `_require_api_key` has NO such restriction — FastAPI
+    resolves `Depends(_require_api_key)` fresh on every request, reading the
+    module-level `_api_key` global at THAT time, so `configure(api_key=...)`
+    can be (and in tests, is) called again after the server has already
+    processed requests, and the new key takes effect immediately.
+    """
+    if _api_key is None:
+        return
+    auth_header = request.headers.get("authorization", "")
+    token: str | None = None
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[len("bearer ") :].strip()
+    if token is None:
+        token = request.headers.get("x-api-key")
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-016: use hmac.compare_digest
+    # instead of `!=` — plain string comparison short-circuits on the first
+    # differing byte, letting an attacker who can measure response-time
+    # differences across many requests narrow down the correct key
+    # character-by-character (a timing side-channel). `token is not None` is
+    # checked first because compare_digest requires both arguments to be
+    # str/bytes — `hmac.compare_digest(None, _api_key)` raises TypeError,
+    # it does not return False. See decisions.md D-016.
+    #
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-020: do NOT pass `token`/
+    # `_api_key` to `hmac.compare_digest` as `str` — CPython's `str` overload
+    # of `compare_digest` refuses to compare two `str` objects unless BOTH
+    # are ASCII-only and raises `TypeError` otherwise (this is a NEW crash
+    # D-016's own fix introduced: the old `token != _api_key` never raised on
+    # non-ASCII input). A single non-ASCII byte in an `X-API-Key`/
+    # `Authorization` header — attacker-controlled, unauthenticated — would
+    # therefore turn a 401 into an unhandled 500. Encode both sides to
+    # `bytes` first (`surrogateescape` so an un-decodable header byte still
+    # encodes losslessly instead of raising `UnicodeEncodeError`); comparing
+    # `bytes` is always well-defined for `compare_digest` and preserves the
+    # constant-time property D-016 needs. See decisions.md D-020.
+    if token is None or not hmac.compare_digest(
+        token.encode("utf-8", "surrogateescape"),
+        _api_key.encode("utf-8", "surrogateescape"),
+    ):
+        raise HTTPException(status_code=401, detail="missing or invalid API key")
+
+
+def _api_key_matches(token: str | None) -> bool:
+    if _api_key is None:
+        return True
+    return token is not None and hmac.compare_digest(
+        token.encode("utf-8", "surrogateescape"),
+        _api_key.encode("utf-8", "surrogateescape"),
+    )
+
+
+def _raise_http(e: Exception, action: str) -> NoReturn:
+    """Map a manager exception to an HTTP error (one mapping for all routes).
+
+    KeyError -> 404, TypeError (wrong instance type) / ValueError -> 400,
+    ConversationBusyError -> 409, MonitorCapacityError -> 429,
+    NotImplementedError (extension missing) -> 501, anything else -> 500
+    with a generic detail (the exception text is logged, never returned).
+    """
+    if isinstance(e, HTTPException):
+        raise e
+    if isinstance(e, KeyError):
+        raise HTTPException(status_code=404, detail="not found") from e
+    if isinstance(e, FileNotFoundError):
+        raise HTTPException(status_code=404, detail="not found") from e
+    if isinstance(e, ConversationBusyError):
+        raise HTTPException(
+            status_code=409, detail="conversation is busy with another turn"
+        ) from e
+    if isinstance(e, MonitorCapacityError):
+        raise HTTPException(status_code=429, detail=str(e)) from e
+    if isinstance(e, NotImplementedError):
+        raise HTTPException(status_code=501, detail=str(e) or "not available") from e
+    if isinstance(e, TypeError | ValueError):
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    logger.error(f"Failed to {action}: {e}")
+    raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+_GATED = [Depends(_require_api_key)]
+
+
+# --- HTML Pages ---
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "index.html")
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/api/auth")
+async def api_auth() -> dict[str, bool]:
+    """Whether an API key is required (never gated, never reveals the key)."""
+    return {"auth_required": _api_key is not None}
+
+
+# --- REST API: Monitoring ---
+
+
+@app.get("/api/metrics")
+async def api_metrics() -> dict[str, Any]:
+    mgr = get_manager()
+    try:
+        metrics = mgr.get_metrics()
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+    return metrics.model_dump()
+
+
+# DECISION plan-2026-09-28T090000-3c9e41d2/D-005
+# Conversation snapshots wait on the conversation's turn lock (a whole LLM
+# call). Do NOT call them on the event loop: every route and /ws froze for the
+# length of a turn. They run in a worker thread.
+
+
+@app.get("/api/conversations", dependencies=_GATED)
+async def api_conversations(
+    include_ended: bool = True,
+) -> list[dict[str, Any]]:
+    mgr = get_manager()
+    try:
+        snapshots = await asyncio.to_thread(
+            mgr.get_all_conversation_snapshots, include_ended=include_ended
+        )
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+    return [s.model_dump() for s in snapshots]
+
+
+@app.get("/api/conversations/{conversation_id}", dependencies=_GATED)
+async def api_conversation(conversation_id: str) -> dict[str, Any]:
+    mgr = get_manager()
+    snap = await asyncio.to_thread(mgr.get_conversation_snapshot, conversation_id)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return snap.model_dump()
+
+
+@app.get("/api/activity", dependencies=_GATED)
+async def api_activity(
+    include_ended: bool = True,
+) -> list[dict[str, Any]]:
+    """Get unified activity list: FSM conversations, agent tasks, workflow instances."""
+    mgr = get_manager()
+    try:
+        items = await asyncio.to_thread(
+            mgr.get_all_activity_snapshots, include_ended=include_ended
+        )
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+    return [item.model_dump() for item in items]
+
+
+@app.get("/api/events", dependencies=_GATED)
+async def api_events(limit: int = 50) -> list[dict[str, Any]]:
+    mgr = get_manager()
+    try:
+        events = mgr.get_events(limit=limit)
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+    return [e.model_dump() for e in events]
+
+
+@app.get("/api/logs", dependencies=_GATED)
+async def api_logs(limit: int = 100, level: str = "INFO") -> list[dict[str, Any]]:
+    mgr = get_manager()
+    try:
+        logs = mgr.global_collector.get_logs(limit=limit, level=level)
+    except MonitorError as e:
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+    return [r.model_dump() for r in logs]
+
+
+@app.get("/api/config")
+async def api_config_get() -> dict[str, Any]:
+    mgr = get_manager()
+    return mgr.config.model_dump()
+
+
+@app.post("/api/config", dependencies=_GATED)
+async def api_config_set(config: MonitorConfig) -> dict[str, str]:
+    mgr = get_manager()
+    mgr.config = config
+    return {"status": "ok"}
+
+
+# --- REST API: Custom Dashboard Config ---
+
+
+@app.get("/api/dashboard/config")
+async def api_dashboard_config_get() -> dict[str, Any]:
+    """Get the active custom dashboard configuration."""
+    mgr = get_manager()
+    cfg = mgr.dashboard_config
+    if cfg is None:
+        return {"active": False, "config": None}
+    return {"active": True, "config": cfg.model_dump()}
+
+
+def _parse_dashboard_config(req: dict[str, Any]) -> Any:
+    """Build a DashboardConfig from MonitorBuilder ``to_dict()`` output.
+
+    Accepts the output itself (``{"name", "panels", "alerts", "config":
+    {refresh_interval_seconds, retention_hours}}``) or that output wrapped as
+    ``{"config": <output>}``. Raises ``ValueError`` on a malformed body.
+    """
+    from pydantic import ValidationError
+
+    from .definitions import DashboardAlert, DashboardConfig, DashboardPanel
+
+    wrapped = req.get("config")
+    is_wrapped = (
+        isinstance(wrapped, dict)
+        and set(req) <= {"config"}
+        and any(k in wrapped for k in ("name", "panels", "alerts", "description"))
+    )
+    raw = wrapped if is_wrapped else req
+    if not isinstance(raw, dict):
+        raise ValueError("dashboard config must be an object")
+
+    panels_raw = raw.get("panels") or {}
+    alerts_raw = raw.get("alerts") or {}
+    settings = raw.get("config") or {}
+    if not isinstance(panels_raw, dict) or not isinstance(alerts_raw, dict):
+        raise ValueError("'panels' and 'alerts' must be objects keyed by id")
+    if not isinstance(settings, dict):
+        raise ValueError("'config' must be an object")
+
+    try:
+        panels = [
+            DashboardPanel(
+                panel_id=str(pid),
+                title=pdata.get("title", str(pid)),
+                panel_type=pdata.get("panel_type", "metric"),
+                metric=pdata.get("metric", ""),
+                description=pdata.get("description", ""),
+            )
+            for pid, pdata in panels_raw.items()
+            if isinstance(pdata, dict)
+        ]
+        alerts = [
+            DashboardAlert(
+                alert_id=str(aid),
+                metric=adata.get("metric", ""),
+                condition=adata.get("condition", ">"),
+                threshold=float(adata.get("threshold", 0)),
+                description=adata.get("description", ""),
+            )
+            for aid, adata in alerts_raw.items()
+            if isinstance(adata, dict)
+        ]
+        return DashboardConfig(
+            name=raw.get("name", ""),
+            description=raw.get("description", ""),
+            panels=panels,
+            alerts=alerts,
+            refresh_interval_seconds=settings.get("refresh_interval_seconds", 30),
+            retention_hours=settings.get("retention_hours", 24),
+        )
+    except (ValidationError, TypeError) as e:
+        raise ValueError(f"invalid dashboard config: {e}") from e
+
+
+@app.post("/api/dashboard/config", dependencies=_GATED)
+async def api_dashboard_config_set(req: dict[str, Any]) -> dict[str, str]:
+    """Apply a custom dashboard config from MonitorBuilder output (either the
+    ``to_dict()`` output itself or wrapped as ``{"config": ...}``)."""
+    mgr = get_manager()
+    try:
+        cfg = _parse_dashboard_config(req)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    mgr.dashboard_config = cfg
+    logger.info(
+        f"Dashboard config applied: {cfg.name} "
+        f"({len(cfg.panels)} panels, {len(cfg.alerts)} alerts)"
+    )
+    return {"status": "ok"}
+
+
+@app.delete("/api/dashboard/config", dependencies=_GATED)
+async def api_dashboard_config_delete() -> dict[str, str]:
+    """Remove the custom dashboard configuration."""
+    mgr = get_manager()
+    mgr.dashboard_config = None
+    return {"status": "ok"}
+
+
+@app.get("/api/info")
+async def api_info() -> dict[str, str]:
+    from .__version__ import __version__
+
+    info: dict[str, str] = {"monitor_version": __version__}
+    try:
+        from fsm_llm import __version__ as cv
+
+        info["fsm_llm_version"] = cv
+    except ImportError:
+        pass
+    return info
+
+
+# --- REST API: Capabilities ---
+
+
+@app.get("/api/capabilities")
+async def api_capabilities() -> dict[str, bool]:
+    """Return which extensions are installed."""
+    mgr = get_manager()
+    return mgr.get_capabilities()
+
+
+# --- REST API: Instance Management ---
+
+
+@app.get("/api/instances")
+async def api_instances(type: str | None = None) -> list[dict[str, Any]]:
+    """List all managed instances."""
+    mgr = get_manager()
+    instances = mgr.list_instances(type_filter=type)
+    return [i.model_dump() for i in instances]
+
+
+@app.get("/api/instances/{instance_id}")
+async def api_instance_detail(instance_id: str) -> dict[str, Any]:
+    """Get detailed info for a managed instance."""
+    mgr = get_manager()
+    inst = mgr.get_instance(instance_id)
+    if inst is None:
+        raise HTTPException(status_code=404, detail="instance not found")
+    return inst.to_info().model_dump()
+
+
+@app.get("/api/instances/{instance_id}/events", dependencies=_GATED)
+async def api_instance_events(
+    instance_id: str, limit: int = 50
+) -> list[dict[str, Any]]:
+    """Get events for a specific managed instance."""
+    mgr = get_manager()
+    collector = mgr.get_instance_collector(instance_id)
+    if collector is None:
+        raise HTTPException(status_code=404, detail="instance not found")
+    events = collector.get_events(limit=limit)
+    return [e.model_dump() for e in events]
+
+
+@app.delete("/api/instances/{instance_id}", dependencies=_GATED)
+async def api_instance_destroy(instance_id: str) -> dict[str, str]:
+    """Destroy a managed instance."""
+    mgr = get_manager()
+    try:
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-007: destroy_instance can
+        # now block for up to its bounded agent-teardown join timeout (see
+        # instance_manager.py); keep it off the event loop the same way the
+        # launch routes already do, rather than shrinking the join timeout to
+        # sub-second (which would make the teardown warning fire on every
+        # merely-slow agent, not just a genuinely hung one).
+        await asyncio.to_thread(mgr.destroy_instance, instance_id)
+        return {"status": "ok"}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="instance not found") from e
+
+
+# --- REST API: FSM Launch/Control ---
+
+
+@app.post("/api/fsm/launch", dependencies=_GATED)
+async def api_fsm_launch(req: LaunchFSMRequest) -> dict[str, Any]:
+    """Launch a new FSM instance."""
+    mgr = get_manager()
+    try:
+        # launch_fsm reads preset files from disk; keep it off the event loop.
+        managed = await asyncio.to_thread(
+            mgr.launch_fsm,
+            preset_id=req.preset_id,
+            fsm_json=req.fsm_json,
+            model=req.model,
+            temperature=req.temperature,
+            label=req.label,
+        )
+        return managed.to_info().model_dump()
+    except Exception as e:
+        _raise_http(e, "launch FSM")
+
+
+@app.post("/api/fsm/{instance_id}/start", dependencies=_GATED)
+async def api_fsm_start_conversation(
+    instance_id: str, req: StartConversationRequest
+) -> dict[str, Any]:
+    """Start a new conversation on a managed FSM."""
+    mgr = get_manager()
+    try:
+        conv_id, response = await asyncio.wait_for(
+            asyncio.to_thread(mgr.start_conversation, instance_id, req.initial_context),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+        return {"conversation_id": conv_id, "response": response}
+    except asyncio.TimeoutError:
+        # The worker thread cannot be stopped: the conversation may still be
+        # created and will then appear in the instance's conversation list.
+        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
+    except Exception as e:
+        _raise_http(e, f"start conversation on instance {instance_id}")
+
+
+@app.post("/api/fsm/{instance_id}/converse", dependencies=_GATED)
+async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[str, Any]:
+    """Send a message to an FSM conversation."""
+    mgr = get_manager()
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                mgr.send_message, instance_id, req.conversation_id, req.message
+            ),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+        return result
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
+    except Exception as e:
+        _raise_http(e, f"send message to instance {instance_id}")
+
+
+@app.post("/api/fsm/{instance_id}/end", dependencies=_GATED)
+async def api_fsm_end_conversation(
+    instance_id: str, req: EndConversationRequest
+) -> dict[str, str]:
+    """End a conversation on a managed FSM."""
+    mgr = get_manager()
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(mgr.end_conversation, instance_id, req.conversation_id),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+        return {"status": "ok"}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
+    except Exception as e:
+        _raise_http(e, f"end conversation on instance {instance_id}")
+
+
+@app.get("/api/fsm/{instance_id}/conversations", dependencies=_GATED)
+async def api_fsm_conversations(instance_id: str) -> list[dict[str, Any]]:
+    """List conversations on a managed FSM instance."""
+    mgr = get_manager()
+    try:
+        snapshots = await asyncio.to_thread(mgr.get_fsm_conversations, instance_id)
+        return [s.model_dump() for s in snapshots]
+    except Exception as e:
+        _raise_http(e, f"get conversations for instance {instance_id}")
+
+
+# --- REST API: Workflow Launch/Control ---
+
+
+@app.get("/api/workflow/presets")
+async def api_workflow_presets() -> dict[str, list[dict[str, str]]]:
+    """List built-in workflow presets available for launch."""
+    mgr = get_manager()
+    return {"workflows": mgr.get_workflow_presets()}
+
+
+@app.post("/api/workflow/launch", dependencies=_GATED)
+async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
+    """Launch a workflow preset and start an instance."""
+    mgr = get_manager()
+    try:
+        managed = mgr.launch_workflow(
+            preset_id=req.preset_id,
+            definition_json=req.definition_json,
+            label=req.label,
+        )
+    except Exception as e:
+        _raise_http(e, "launch workflow")
+    try:
+        wf_instance_id = await asyncio.wait_for(
+            mgr.start_workflow_instance(
+                managed.instance_id,
+                managed.workflow_id,
+                req.initial_context,
+            ),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+    except BaseException as e:
+        # Do not leave a half-launched engine behind.
+        try:
+            await asyncio.to_thread(mgr.destroy_instance, managed.instance_id)
+        except Exception as cleanup_err:
+            logger.debug(f"Failed to clean up workflow launch: {cleanup_err}")
+        if isinstance(e, asyncio.TimeoutError):
+            raise HTTPException(
+                status_code=504, detail="Workflow start timed out"
+            ) from None
+        if not isinstance(e, Exception):
+            raise
+        _raise_http(e, "start workflow")
+    info = managed.to_info().model_dump()
+    info["workflow_instance_id"] = wf_instance_id
+    return info
+
+
+@app.post("/api/workflow/{instance_id}/advance", dependencies=_GATED)
+async def api_workflow_advance(
+    instance_id: str, req: WorkflowAdvanceRequest
+) -> dict[str, Any]:
+    """Advance a workflow instance."""
+    mgr = get_manager()
+    try:
+        result = await asyncio.wait_for(
+            mgr.advance_workflow(instance_id, req.workflow_instance_id, req.user_input),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+        return {"advanced": result}
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Workflow advance timed out",
+        ) from None
+    except Exception as e:
+        _raise_http(e, f"advance workflow on instance {instance_id}")
+
+
+@app.post("/api/workflow/{instance_id}/cancel", dependencies=_GATED)
+async def api_workflow_cancel(
+    instance_id: str, req: WorkflowCancelRequest
+) -> dict[str, Any]:
+    """Cancel a workflow instance."""
+    mgr = get_manager()
+    try:
+        result = await asyncio.wait_for(
+            mgr.cancel_workflow(instance_id, req.workflow_instance_id, req.reason),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+        return {"cancelled": result}
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Workflow cancel timed out",
+        ) from None
+    except Exception as e:
+        _raise_http(e, f"cancel workflow on instance {instance_id}")
+
+
+@app.post("/api/workflow/{instance_id}/event", dependencies=_GATED)
+async def api_workflow_event(
+    instance_id: str, req: WorkflowEventRequest
+) -> dict[str, Any]:
+    """Deliver an event to a workflow engine (wakes waiting instances)."""
+    mgr = get_manager()
+    try:
+        affected = await asyncio.wait_for(
+            mgr.send_workflow_event(
+                instance_id,
+                req.event_type,
+                req.payload,
+                req.workflow_instance_id or None,
+            ),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+        return {"affected": affected}
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Workflow event delivery timed out",
+        ) from None
+    except Exception as e:
+        _raise_http(e, f"deliver workflow event on instance {instance_id}")
+
+
+@app.get("/api/workflow/{instance_id}/status", dependencies=_GATED)
+async def api_workflow_status(
+    instance_id: str, workflow_instance_id: str = ""
+) -> dict[str, Any]:
+    """Get workflow instance status."""
+    if not workflow_instance_id:
+        raise HTTPException(
+            status_code=400,
+            detail="workflow_instance_id query parameter is required",
+        )
+    mgr = get_manager()
+    try:
+        return mgr.get_workflow_status(instance_id, workflow_instance_id)
+    except Exception as e:
+        _raise_http(e, f"get workflow status for instance {instance_id}")
+
+
+@app.get("/api/workflow/{instance_id}/instances", dependencies=_GATED)
+async def api_workflow_instances(instance_id: str) -> list[dict[str, Any]]:
+    """List all workflow instances on a managed workflow engine."""
+    mgr = get_manager()
+    try:
+        return mgr.get_workflow_instances(instance_id)
+    except Exception as e:
+        _raise_http(e, f"list workflow instances for {instance_id}")
+
+
+# --- REST API: Agent Launch/Control ---
+
+
+@app.post("/api/agent/launch", dependencies=_GATED)
+async def api_agent_launch(req: LaunchAgentRequest) -> dict[str, Any]:
+    """Launch an agent in a background thread."""
+    mgr = get_manager()
+    try:
+        managed = await asyncio.to_thread(
+            mgr.launch_agent,
+            agent_type=req.agent_type,
+            task=req.task,
+            tools_config=req.tools,
+            model=req.model,
+            max_iterations=req.max_iterations,
+            timeout_seconds=req.timeout_seconds,
+            label=req.label,
+        )
+        return managed.to_info().model_dump()
+    except Exception as e:
+        # Unknown/disabled agent type or missing tools -> 400; capacity -> 429;
+        # extension unavailable -> 501.
+        _raise_http(e, "launch agent")
+
+
+@app.get("/api/agent/{instance_id}/status", dependencies=_GATED)
+async def api_agent_status(instance_id: str) -> dict[str, Any]:
+    """Get agent execution status."""
+    mgr = get_manager()
+    try:
+        return mgr.get_agent_status(instance_id)
+    except Exception as e:
+        _raise_http(e, f"get agent status for instance {instance_id}")
+
+
+@app.get("/api/agent/{instance_id}/result", dependencies=_GATED)
+async def api_agent_result(instance_id: str) -> dict[str, Any]:
+    """Get final agent result."""
+    mgr = get_manager()
+    try:
+        return mgr.get_agent_result(instance_id)
+    except Exception as e:
+        _raise_http(e, f"get agent result for instance {instance_id}")
+
+
+@app.post("/api/agent/{instance_id}/cancel", dependencies=_GATED)
+async def api_agent_cancel(instance_id: str) -> dict[str, Any]:
+    """Cancel a running agent (``cancelled`` is False when it had finished)."""
+    mgr = get_manager()
+    try:
+        cancelled = mgr.cancel_agent(instance_id)
+        return {"status": "ok", "cancelled": cancelled}
+    except Exception as e:
+        _raise_http(e, f"cancel agent {instance_id}")
+
+
+# --- REST API: FSM Visualization ---
+
+
+@app.post("/api/fsm/load")
+async def api_fsm_load(request: Request) -> dict[str, Any]:
+    """Load FSM definition from JSON body."""
+    try:
+        data = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="invalid JSON") from e
+    return _snapshot_or_400(data).model_dump()
+
+
+def _snapshot_or_400(data: Any) -> FSMSnapshot:
+    """Parse an FSM definition dict into a snapshot, or raise 400."""
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="failed to parse FSM definition")
+    try:
+        return _fsm_dict_to_snapshot(data)
+    except Exception as e:
+        logger.debug(f"Failed to convert FSM dict to snapshot: {e}")
+        raise HTTPException(
+            status_code=400, detail="failed to parse FSM definition"
+        ) from e
+
+
+def _fsm_snapshot_to_viz(snap: Any) -> dict[str, Any]:
+    """Convert an FSMSnapshot to visualization data (nodes + edges)."""
+    nodes = []
+    edges = []
+    for i, state in enumerate(snap.states):
+        nodes.append(
+            {
+                "id": state.state_id,
+                "label": state.state_id,
+                "description": state.description,
+                "purpose": state.purpose,
+                "is_initial": state.is_initial,
+                "is_terminal": state.is_terminal,
+                "x": 150 + (i % 4) * 200,
+                "y": 80 + (i // 4) * 140,
+            }
+        )
+        for t in state.transitions:
+            edges.append(
+                {
+                    "from": state.state_id,
+                    "to": t.target_state,
+                    "label": t.description[:30] if t.description else "",
+                    "priority": t.priority,
+                }
+            )
+    return {"fsm": snap.model_dump(), "nodes": nodes, "edges": edges}
+
+
+@app.post("/api/fsm/visualize")
+async def api_fsm_visualize(request: Request) -> dict[str, Any]:
+    """Accept FSM JSON definition and return visualization data."""
+    try:
+        data = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="invalid JSON") from e
+    return _fsm_snapshot_to_viz(_snapshot_or_400(data))
+
+
+def _resolve_preset_path(preset_id: str) -> Path:
+    """Validate and resolve a preset ID to a filesystem path.
+
+    Raises HTTPException on invalid/missing preset.
+    """
+    base = _find_examples_dir()
+    if base is None:
+        raise HTTPException(status_code=404, detail="examples directory not found")
+    try:
+        return validate_preset_id(preset_id, base)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid preset ID") from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail="preset not found") from e
+
+
+def _read_preset_json(preset_id: str) -> dict[str, Any]:
+    """Load a preset JSON file by ID with path traversal protection."""
+    file_path = _resolve_preset_path(preset_id)
+    try:
+        result: dict[str, Any] = json.loads(file_path.read_text())
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="failed to read preset") from e
+
+
+@app.get("/api/fsm/visualize/preset/{preset_id:path}")
+async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
+    """Load an FSM preset by ID and return visualization data."""
+    data = _read_preset_json(preset_id)
+    return _fsm_snapshot_to_viz(_snapshot_or_400(data))
+
+
+# --- REST API: Presets ---
+
+
+def _scan_fsm_presets() -> dict[str, list[dict[str, str]]]:
+    """Scan the examples/ directory for FSM presets (blocking disk I/O).
+
+    Returns preset metadata only — no filesystem paths exposed. Run off the
+    event loop via ``asyncio.to_thread``.
+    """
+    base = _find_examples_dir()
+    if base is None:
+        return {"fsm": []}
+
+    fsm_presets: list[dict[str, str]] = []
+    for category in [
+        "basic",
+        "intermediate",
+        "advanced",
+        "classification",
+        "reasoning",
+    ]:
+        cat_dir = base / category
+        if not cat_dir.exists():
+            continue
+        for example_dir in sorted(cat_dir.iterdir()):
+            if not example_dir.is_dir():
+                continue
+            fsm_files = list(example_dir.glob("*.json"))
+            for f in fsm_files:
+                name = example_dir.name.replace("_", " ").title()
+                preset_id = f"{category}/{example_dir.name}/{f.name}"
+                parse_error = ""
+                try:
+                    data = json.loads(f.read_text())
+                    desc = data.get("description", "")
+                except Exception as parse_err:
+                    logger.debug(f"Failed to parse preset {f}: {parse_err}")
+                    desc = ""
+                    parse_error = str(parse_err)
+                preset_entry: dict[str, str] = {
+                    "name": f"{name} ({f.name})",
+                    "id": preset_id,
+                    "category": category,
+                    "description": desc,
+                }
+                if parse_error:
+                    preset_entry["parse_error"] = parse_error
+                fsm_presets.append(preset_entry)
+
+    return {"fsm": fsm_presets}
+
+
+@app.get("/api/presets")
+async def api_presets() -> dict[str, list[dict[str, str]]]:
+    """Return FSM presets, cached for _PRESET_CACHE_TTL seconds.
+
+    The filesystem scan runs off the event loop via ``asyncio.to_thread``.
+    """
+    global _preset_cache
+    if _preset_cache is not None:
+        cached_result, cached_at = _preset_cache
+        if time.monotonic() - cached_at < _PRESET_CACHE_TTL:
+            return cached_result
+
+    result = await asyncio.to_thread(_scan_fsm_presets)
+    _preset_cache = (result, time.monotonic())
+    return result
+
+
+@app.get("/api/preset/fsm/{preset_id:path}")
+async def api_preset_fsm(preset_id: str) -> dict[str, Any]:
+    """Load an FSM preset by ID and return its JSON content."""
+    return _read_preset_json(preset_id)
+
+
+# --- REST API: Pattern Visualization (from flows.json) ---
+
+
+@app.get("/api/agent/visualize")
+async def api_agent_visualize(agent_type: str = "ReactAgent") -> dict[str, Any]:
+    """Return visualization data for an agent pattern flow."""
+    agents = _flows.get("agents", {})
+    flow = agents.get(agent_type)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=f"unknown agent type: {agent_type}")
+
+    nodes = []
+    for i, node in enumerate(flow["nodes"]):
+        nodes.append(
+            {
+                **node,
+                "x": 150 + (i % 4) * 200,
+                "y": 80 + (i // 4) * 140,
+            }
+        )
+
+    return {
+        "info": {
+            "name": agent_type,
+            "description": flow["description"],
+            "state_count": len(flow["nodes"]),
+        },
+        "nodes": nodes,
+        "edges": flow["edges"],
+        "agent_types": list(agents.keys()),
+    }
+
+
+@app.get("/api/workflow/visualize")
+async def api_workflow_visualize(
+    workflow_id: str = "order_processing",
+) -> dict[str, Any]:
+    """Return visualization data for a workflow pattern."""
+    workflows = _flows.get("workflows", {})
+    flow = workflows.get(workflow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=f"unknown workflow: {workflow_id}")
+
+    nodes = []
+    for i, node in enumerate(flow["nodes"]):
+        nodes.append(
+            {
+                **node,
+                "x": 150 + (i % 4) * 200,
+                "y": 80 + (i // 4) * 140,
+            }
+        )
+
+    return {
+        "info": {
+            "name": flow["name"],
+            "description": flow["description"],
+            "step_count": len(flow["nodes"]),
+        },
+        "nodes": nodes,
+        "edges": flow["edges"],
+        "workflow_ids": list(workflows.keys()),
+    }
+
+
+# --- Builder (Meta-Agent) ---
+
+# Session store: session_id -> (agent, last_used_timestamp)
+_builder_sessions: dict[str, tuple[Any, float]] = {}
+_BUILDER_SESSION_TTL = 3600.0  # 1 hour since last use
+# Session IDs with an in-flight `send` — guards against concurrent sends to the
+# same MetaBuilderAgent corrupting its internal state (the agent is not
+# re-entrant). Mutated only under _get_builder_lock().
+_builder_busy: set[str] = set()
+# Strong references to fire-and-forget tasks (the loop keeps only weak ones).
+_background_tasks: set[asyncio.Future[Any]] = set()
+# Lock protecting _builder_sessions. Initialized lazily (not at module import
+# time) to avoid creating an asyncio.Lock before an event loop exists (Python
+# 3.10+ deprecates that pattern).
+_builder_sessions_lock: asyncio.Lock | None = None
+
+
+def _get_builder_lock() -> asyncio.Lock:
+    """Return the asyncio.Lock for _builder_sessions, creating it lazily."""
+    global _builder_sessions_lock
+    if _builder_sessions_lock is None:
+        _builder_sessions_lock = asyncio.Lock()
+    return _builder_sessions_lock
+
+
+def _get_builder_internal_state(agent: Any) -> dict[str, Any]:
+    """Safely extract internal state from a builder agent using public API."""
+    try:
+        result: dict[str, Any] = agent.get_internal_state()
+        return result
+    except Exception:
+        return {"phase": "unknown", "turn_count": 0}
+
+
+async def _cleanup_stale_builder_sessions() -> None:
+    """Remove builder sessions unused for longer than the TTL (never one with
+    a send in flight)."""
+    now = time.time()
+    async with _get_builder_lock():
+        stale = [
+            sid
+            for sid, (_, ts) in _builder_sessions.items()
+            if now - ts > _BUILDER_SESSION_TTL and sid not in _builder_busy
+        ]
+        for sid in stale:
+            _builder_sessions.pop(sid, None)
+            logger.debug(f"Cleaned up stale builder session: {sid}")
+
+
+@app.post("/api/builder/start", dependencies=_GATED)
+async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
+    """Start a new builder session using the meta-agent."""
+    await _cleanup_stale_builder_sessions()
+    async with _get_builder_lock():
+        if len(_builder_sessions) >= MAX_BUILDER_SESSIONS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"too many builder sessions (max {MAX_BUILDER_SESSIONS})",
+            )
+    try:
+        from fsm_llm.agents.meta_builder import (
+            MetaBuilderAgent as MetaAgent,
+        )
+        from fsm_llm.agents.meta_builder import (
+            MetaBuilderConfig as MetaAgentConfig,
+        )
+    except ImportError:
+        raise HTTPException(
+            status_code=501,
+            detail="fsm_llm.agents meta-builder not available",
+        ) from None
+
+    config_kwargs: dict[str, Any] = {
+        "model": req.model,
+        "temperature": req.temperature,
+        "max_tokens": req.max_tokens,
+    }
+
+    config = MetaAgentConfig(**config_kwargs)
+    agent = MetaAgent(config=config)
+
+    try:
+        initial_message = req.artifact_type or ""
+        response = await asyncio.wait_for(
+            asyncio.to_thread(agent.start, initial_message),
+            timeout=_LLM_OPERATION_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
+    except Exception as e:
+        logger.error(f"Builder start failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+    session_id = f"builder-{uuid.uuid4().hex[:8]}"
+    async with _get_builder_lock():
+        _builder_sessions[session_id] = (agent, time.time())
+
+    result: dict[str, Any] = {
+        "session_id": session_id,
+        "response": response,
+        "is_complete": agent.is_complete(),
+    }
+
+    result["internal_state"] = _get_builder_internal_state(agent)
+
+    return result
+
+
+@app.post("/api/builder/send", dependencies=_GATED)
+async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
+    """Send a message to an existing builder session.
+
+    Concurrent sends to the same session are rejected (409) — the underlying
+    MetaBuilderAgent is not re-entrant and a second in-flight send would corrupt
+    its state.
+    """
+    async with _get_builder_lock():
+        entry = _builder_sessions.get(req.session_id)
+        busy = entry is not None and req.session_id in _builder_busy
+        if entry is not None and not busy:
+            _builder_busy.add(req.session_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Builder session not found")
+    if busy:
+        raise HTTPException(
+            status_code=409, detail="Builder session is processing another message"
+        )
+    agent = entry[0]
+
+    # The worker thread cannot be stopped on timeout; the session stays busy
+    # until it really finishes, so a second send can never run concurrently
+    # on the non-re-entrant agent.
+    work = asyncio.ensure_future(asyncio.to_thread(agent.send, req.message))
+
+    async def _release() -> None:
+        async with _get_builder_lock():
+            _builder_busy.discard(req.session_id)
+            if req.session_id in _builder_sessions:
+                _builder_sessions[req.session_id] = (agent, time.time())
+
+    def _release_when_done(_fut: asyncio.Future[Any]) -> None:
+        task = asyncio.ensure_future(_release())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
+    try:
+        response = await asyncio.wait_for(
+            asyncio.shield(work), timeout=_BUILDER_OPERATION_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        work.add_done_callback(_release_when_done)
+        raise HTTPException(
+            status_code=504, detail="Builder operation timed out"
+        ) from None
+    except Exception as e:
+        await _release()
+        logger.error(f"Builder send failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+    try:
+        result: dict[str, Any] = {
+            "response": response,
+            "is_complete": agent.is_complete(),
+        }
+
+        result["internal_state"] = _get_builder_internal_state(agent)
+
+        if agent.is_complete():
+            result.update(_builder_result_fields(agent))
+            # Clean up completed session
+            async with _get_builder_lock():
+                _builder_sessions.pop(req.session_id, None)
+
+        return result
+    except Exception as e:
+        logger.error(f"Builder send failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+    finally:
+        await _release()
+
+
+def _builder_result_fields(agent: Any) -> dict[str, Any]:
+    """The built artifact of a completed builder agent (no exception text)."""
+    try:
+        build_result = agent.get_result()
+        return {
+            "artifact": build_result.artifact,
+            "artifact_json": build_result.artifact_json,
+            "artifact_type": build_result.artifact_type.value,
+            "is_valid": build_result.is_valid,
+            "validation_errors": build_result.validation_errors,
+        }
+    except Exception as e:
+        logger.error(f"Builder result extraction failed: {e}")
+        return {
+            "artifact": {},
+            "artifact_json": "{}",
+            "artifact_type": "unknown",
+            "is_valid": False,
+            "validation_errors": ["Result extraction failed"],
+            "error": "Result extraction failed",
+        }
+
+
+@app.get("/api/builder/result/{session_id}", dependencies=_GATED)
+async def api_builder_result(session_id: str) -> dict[str, Any]:
+    """Get the current state of a builder session.
+
+    While a send is in flight the agent is being mutated by a worker thread,
+    so only ``{"busy": true}`` is reported.
+    """
+    async with _get_builder_lock():
+        entry = _builder_sessions.get(session_id)
+        busy = session_id in _builder_busy
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Builder session not found")
+    if busy:
+        return {"session_id": session_id, "busy": True}
+    agent = entry[0]
+
+    result: dict[str, Any] = {
+        "session_id": session_id,
+        "busy": False,
+        "is_complete": agent.is_complete(),
+    }
+
+    # Always include internal state for live monitoring
+    result["internal_state"] = _get_builder_internal_state(agent)
+
+    if agent.is_complete():
+        result.update(_builder_result_fields(agent))
+
+    return result
+
+
+@app.delete("/api/builder/{session_id}", dependencies=_GATED)
+async def api_builder_delete(session_id: str) -> dict[str, Any]:
+    """Delete a builder session (refused with 409 while a send is in flight)."""
+    async with _get_builder_lock():
+        if session_id in _builder_busy:
+            raise HTTPException(
+                status_code=409, detail="Builder session is processing a message"
+            )
+        removed = _builder_sessions.pop(session_id, None)
+    return {"deleted": removed is not None}
+
+
+# --- WebSocket for real-time updates ---
+
+
+_WS_AUTH_TIMEOUT = 5.0
+_WS_CLOSE_UNAUTHORIZED = 4401
+_WS_CLOSE_FORBIDDEN = 4403
+
+
+async def _ws_authorized(websocket: WebSocket) -> bool:
+    """Origin and API-key checks for ``/ws`` (browsers apply no CORS to
+    WebSockets, so the Origin must be checked here).
+
+    # DECISION plan-2026-09-28T090000-3c9e41d2/D-001
+    # With a key configured the client must send ``{"type": "auth",
+    # "api_key": "..."}`` as its first message within 5 s. Do NOT move the
+    # key into the URL (it would land in access logs and browser history).
+    """
+    host = websocket.headers.get("host")
+    if not _host_allowed(host) or not _origin_allowed(
+        websocket.headers.get("origin"), host
+    ):
+        await websocket.close(code=_WS_CLOSE_FORBIDDEN)
+        return False
+    if _api_key is None:
+        return True
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), _WS_AUTH_TIMEOUT)
+        message = json.loads(raw)
+        token = message.get("api_key") if isinstance(message, dict) else None
+    except Exception:
+        token = None
+    if not isinstance(token, str) or not _api_key_matches(token):
+        await websocket.close(code=_WS_CLOSE_UNAUTHORIZED)
+        return False
+    return True
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket) -> None:
+    await websocket.accept()
+    if not await _ws_authorized(websocket):
+        return
+    mgr = get_manager()
+    event_cursor = mgr.global_collector.get_metrics().total_events
+    log_cursor = mgr.global_collector.total_logs
+    # Replay a little history to a new client.
+    event_cursor = max(0, event_cursor - 50)
+    log_cursor = max(0, log_cursor - 50)
+    last_dashboard_config_version = mgr.dashboard_config_version
+
+    try:
+        _cleanup_counter = 0
+        while True:
+            await asyncio.sleep(get_manager().config.refresh_interval)
+            # Re-read the manager each cycle so a re-configure() takes effect.
+            current = get_manager()
+            if current is not mgr:
+                mgr = current
+                event_cursor = mgr.global_collector.get_metrics().total_events
+                log_cursor = mgr.global_collector.total_logs
+            # Periodic cleanup of stale builder sessions (every ~60 cycles)
+            _cleanup_counter += 1
+            if _cleanup_counter >= 60:
+                _cleanup_counter = 0
+                await _cleanup_stale_builder_sessions()
+            metrics = mgr.get_metrics()
+
+            data: dict[str, Any] = {
+                "type": "metrics",
+                "data": metrics.model_dump(),
+            }
+
+            # DECISION plan-2026-09-28T090000-3c9e41d2/D-004
+            # Oldest-first slices from a cursor taken with the slice; sent
+            # newest-first as before. Bursts beyond 50 continue next cycle.
+            events, event_cursor = mgr.global_collector.events_after(
+                event_cursor, limit=50
+            )
+            if events:
+                data["events"] = [e.model_dump() for e in reversed(events)]
+
+            logs, log_cursor = mgr.global_collector.logs_after(log_cursor, limit=50)
+            if logs:
+                data["logs"] = [r.model_dump() for r in reversed(logs)]
+            data["log_count"] = mgr.global_collector.total_logs
+
+            # Always include instance list so status changes propagate
+            instances = mgr.list_instances()
+            data["instances"] = [i.model_dump() for i in instances]
+
+            # Include real-time status for running agents
+            running_agents = [
+                i
+                for i in instances
+                if i.instance_type == "agent" and i.status == "running"
+            ]
+            if running_agents:
+                agent_updates: dict[str, Any] = {}
+                for i in running_agents:
+                    try:
+                        agent_updates[i.instance_id] = mgr.get_agent_status(
+                            i.instance_id
+                        )
+                    except KeyError:
+                        pass  # Instance destroyed mid-poll; skip it
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to get agent status for {i.instance_id}: {e}"
+                        )
+                if agent_updates:
+                    data["agent_updates"] = agent_updates
+
+            # Include real-time status for running workflows
+            running_workflows = [
+                i
+                for i in instances
+                if i.instance_type == "workflow" and i.status == "running"
+            ]
+            if running_workflows:
+                workflow_updates: dict[str, Any] = {}
+                for i in running_workflows:
+                    try:
+                        wf_instances = mgr.get_workflow_instances(i.instance_id)
+                        workflow_updates[i.instance_id] = {
+                            "instance_id": i.instance_id,
+                            "label": i.label,
+                            "status": i.status,
+                            "workflow_instances": wf_instances,
+                        }
+                    except KeyError:
+                        pass  # Instance destroyed mid-poll; skip it
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to get workflow instances for {i.instance_id}: {e}"
+                        )
+                if workflow_updates:
+                    data["workflow_updates"] = workflow_updates
+
+            # Push dashboard config when it changes
+            current_cfg_version = mgr.dashboard_config_version
+            if current_cfg_version != last_dashboard_config_version:
+                last_dashboard_config_version = current_cfg_version
+                cfg = mgr.dashboard_config
+                data["dashboard_config"] = (
+                    {"active": True, "config": cfg.model_dump()}
+                    if cfg is not None
+                    else {"active": False, "config": None}
+                )
+
+            # DECISION plan-2026-09-22T080837-8b258a25/D-044
+            # `default=str` pushed an arbitrary object's `__str__` (a secret in
+            # a context value) to every dashboard browser. Share the core hook;
+            # do NOT re-implement the scalar keep-set here.
+            await websocket.send_text(json.dumps(data, default=redacting_json_default))
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug(f"WebSocket error: {e}")
+        try:
+            await websocket.close()
+        except Exception as close_err:
+            logger.debug(f"WebSocket close failed: {close_err}")

@@ -7,13 +7,13 @@ import threading
 
 import pytest
 
-from fsm_llm.memory import BUFFER_CORE, WorkingMemory
-from fsm_llm.session import SessionState
-from fsm_llm_agents import (
+from fsm_llm.agents import (
     MemorySessionStore,
     load_working_memory,
     save_working_memory,
 )
+from fsm_llm.memory import BUFFER_CORE, WorkingMemory
+from fsm_llm.session import SessionState
 
 
 def _memory():
@@ -198,7 +198,7 @@ class TestConcurrentSaveIsAtomic:
             raise RuntimeError("serialization blew up")
 
         monkeypatch.setattr(
-            "fsm_llm_agents.memory_persistence.json.dump", exploding_dump
+            "fsm_llm.agents.memory_persistence.json.dump", exploding_dump
         )
         with pytest.raises(RuntimeError):
             save_working_memory(_memory(), path)

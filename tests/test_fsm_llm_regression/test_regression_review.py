@@ -40,8 +40,8 @@ class TestContextPruningLog:
     """C2: prune_context should compute actual new size."""
 
     def test_prune_reports_different_sizes(self):
-        from fsm_llm_reasoning.constants import ContextKeys, Defaults
-        from fsm_llm_reasoning.handlers import ReasoningHandlers
+        from fsm_llm.reasoning.constants import ContextKeys, Defaults
+        from fsm_llm.reasoning.handlers import ReasoningHandlers
 
         # Create context large enough to trigger pruning
         large_list = [f"item_{i}" for i in range(50)]
@@ -74,7 +74,7 @@ class TestContextKeysConstants:
 
     def test_no_raw_strings_in_merge(self):
         """All keys in merge_reasoning_results should come from ContextKeys."""
-        from fsm_llm_reasoning.handlers import ContextManager
+        from fsm_llm.reasoning.handlers import ContextManager
 
         source = inspect.getsource(ContextManager.merge_reasoning_results)
 
@@ -101,8 +101,8 @@ class TestContextKeysConstants:
 
     def test_all_reasoning_types_covered(self):
         """merge_reasoning_results should handle all ReasoningType values."""
-        from fsm_llm_reasoning.constants import ReasoningType
-        from fsm_llm_reasoning.handlers import ContextManager
+        from fsm_llm.reasoning.constants import ReasoningType
+        from fsm_llm.reasoning.handlers import ContextManager
 
         for rt in ReasoningType:
             # Should not crash for any reasoning type
@@ -204,7 +204,7 @@ class TestNoMergeStrategyAlias:
     """H4: reasoning engine should use ContextMergeStrategy directly."""
 
     def test_engine_imports_context_merge_strategy(self):
-        from fsm_llm_reasoning import engine
+        from fsm_llm.reasoning import engine
 
         source = inspect.getsource(engine)
         # Should import from public API (not internal fsm_llm.api)

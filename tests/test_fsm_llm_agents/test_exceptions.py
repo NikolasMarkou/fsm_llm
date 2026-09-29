@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.exceptions module."""
+"""Tests for fsm_llm.agents.exceptions module."""
 
 import pytest
 
-from fsm_llm.definitions import FSMError
-from fsm_llm_agents.exceptions import (
+from fsm_llm.agents.exceptions import (
     AgentError,
     AgentTimeoutError,
     ApprovalDeniedError,
@@ -14,6 +13,7 @@ from fsm_llm_agents.exceptions import (
     ToolNotFoundError,
     ToolValidationError,
 )
+from fsm_llm.definitions import FSMError
 
 
 class TestExceptionHierarchy:

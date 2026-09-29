@@ -4,9 +4,9 @@ from __future__ import annotations
 plan_2026-05-30_26c9510a/D-001 [STALE]) — a run with neither an answer key nor a tool
 call must report success=False instead of leaking planner prose."""
 
-from fsm_llm_agents.base import BaseAgent
-from fsm_llm_agents.constants import ContextKeys
-from fsm_llm_agents.definitions import AgentTrace, ToolCall
+from fsm_llm.agents.base import BaseAgent
+from fsm_llm.agents.constants import ContextKeys
+from fsm_llm.agents.definitions import AgentTrace, ToolCall
 
 
 def _trace(*tool_names: str) -> AgentTrace:

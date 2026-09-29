@@ -197,8 +197,8 @@ class TestSchemaEnforcedOutput:
 
     def test_agent_sets_output_response_format_in_context(self):
         """When output_schema is set, agents store response_format in context."""
-        from fsm_llm_agents.base import BaseAgent
-        from fsm_llm_agents.definitions import AgentConfig, AgentResult
+        from fsm_llm.agents.base import BaseAgent
+        from fsm_llm.agents.definitions import AgentConfig, AgentResult
 
         class DummyAgent(BaseAgent):
             def run(self, task, initial_context=None):

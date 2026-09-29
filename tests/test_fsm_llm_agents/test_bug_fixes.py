@@ -23,6 +23,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fsm_llm.agents.definitions import AgentConfig, EvaluationResult
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -30,8 +32,6 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.definitions import AgentConfig, EvaluationResult
-from fsm_llm_agents.tools import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -128,7 +128,7 @@ class TestReflexionEvaluationFnActuallyCalled:
 
     def test_evaluation_fn_is_called(self):
         """evaluation_fn must be called at least once during agent execution."""
-        from fsm_llm_agents.reflexion import ReflexionAgent
+        from fsm_llm.agents.reflexion import ReflexionAgent
 
         registry = _make_registry()
 
@@ -185,7 +185,7 @@ class TestReflexionEvaluationFnActuallyCalled:
     def test_evaluation_fn_result_drives_transition(self):
         """When evaluation_fn returns passed=True, the agent should conclude
         (not reflect). When it returns passed=False, the agent should reflect."""
-        from fsm_llm_agents.reflexion import ReflexionAgent
+        from fsm_llm.agents.reflexion import ReflexionAgent
 
         registry = _make_registry()
 
@@ -271,16 +271,16 @@ class TestReasoningReactAgentInterception:
 
     @pytest.fixture(autouse=True)
     def _check_reasoning_installed(self):
-        """Skip if fsm_llm_reasoning is not installed."""
+        """Skip if fsm_llm.reasoning is not installed."""
         try:
-            import fsm_llm_reasoning  # noqa: F401
+            import fsm_llm.reasoning  # noqa: F401
         except ImportError:
-            pytest.skip("fsm_llm_reasoning not installed")
+            pytest.skip("fsm_llm.reasoning not installed")
 
     def test_reasoning_engine_invoked_for_reason_tool(self):
         """When the LLM picks tool_name='reason', ReasoningEngine.solve_problem
         must be called — not the placeholder function."""
-        from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
 
         registry = _make_registry()
 
@@ -305,7 +305,7 @@ class TestReasoningReactAgentInterception:
 
         # Patch ReasoningEngine to track if solve_problem is called
         with patch(
-            "fsm_llm_agents.reasoning_react.ReasoningEngine"
+            "fsm_llm.agents.reasoning_react.ReasoningEngine"
         ) as MockReasoningEngine:
             mock_engine_instance = MagicMock()
             mock_engine_instance.solve_problem.return_value = (
@@ -337,7 +337,7 @@ class TestReasoningReactAgentInterception:
     def test_non_reason_tool_delegates_normally(self):
         """When the LLM picks a regular tool (not 'reason'), the standard
         execute_tool handler should run it normally."""
-        from fsm_llm_agents.reasoning_react import ReasoningReactAgent
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
 
         # Only states with required_context_keys trigger extract_field.
         # Flow: think -> act -> think -> conclude
@@ -360,7 +360,7 @@ class TestReasoningReactAgentInterception:
         config = AgentConfig(max_iterations=10, timeout_seconds=30.0)
 
         with patch(
-            "fsm_llm_agents.reasoning_react.ReasoningEngine"
+            "fsm_llm.agents.reasoning_react.ReasoningEngine"
         ) as MockReasoningEngine:
             mock_engine_instance = MagicMock()
             MockReasoningEngine.return_value = mock_engine_instance
@@ -397,7 +397,7 @@ class TestADaPTSubtaskExecution:
     def test_execute_subtasks_is_called(self):
         """When attempt fails and subtasks are produced, _execute_subtasks
         must be called during the DECOMPOSE->COMBINE transition."""
-        from fsm_llm_agents.adapt import ADaPTAgent
+        from fsm_llm.agents.adapt import ADaPTAgent
 
         # Extraction sequence for ADaPT FSM:
         #   attempt -> extract attempt_result
@@ -486,7 +486,7 @@ class TestADaPTSubtaskExecution:
 
     def test_subtasks_not_executed_when_attempt_succeeds(self):
         """When the attempt succeeds, _execute_subtasks should NOT be called."""
-        from fsm_llm_agents.adapt import ADaPTAgent
+        from fsm_llm.agents.adapt import ADaPTAgent
 
         extraction_sequence = [
             # 1. attempt: produce attempt result

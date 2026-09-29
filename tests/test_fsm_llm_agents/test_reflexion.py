@@ -1,11 +1,26 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm_agents.reflexion module and Reflexion FSM definition."""
+"""Tests for fsm_llm.agents.reflexion module and Reflexion FSM definition."""
 
 from typing import Any
 
 import pytest
 
+from fsm_llm.agents.constants import (
+    ContextKeys,
+    Defaults,
+    HandlerNames,
+    ReflexionStates,
+)
+from fsm_llm.agents.definitions import (
+    AgentConfig,
+    EvaluationResult,
+    ReflexionMemory,
+)
+from fsm_llm.agents.exceptions import AgentError
+from fsm_llm.agents.fsm_definitions import build_reflexion_fsm
+from fsm_llm.agents.reflexion import ReflexionAgent
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -16,21 +31,6 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.expressions import evaluate_logic
 from fsm_llm.llm import LLMInterface
-from fsm_llm_agents.constants import (
-    ContextKeys,
-    Defaults,
-    HandlerNames,
-    ReflexionStates,
-)
-from fsm_llm_agents.definitions import (
-    AgentConfig,
-    EvaluationResult,
-    ReflexionMemory,
-)
-from fsm_llm_agents.exceptions import AgentError
-from fsm_llm_agents.fsm_definitions import build_reflexion_fsm
-from fsm_llm_agents.reflexion import ReflexionAgent
-from fsm_llm_agents.tools import ToolRegistry
 
 
 def _search(params):
@@ -106,7 +106,7 @@ class TestReflexionAgentCreation:
         assert agent.max_reflections == Defaults.MAX_REFLECTIONS
 
     def test_create_with_hitl(self):
-        from fsm_llm_agents.hitl import HumanInTheLoop
+        from fsm_llm.agents.hitl import HumanInTheLoop
 
         registry = _make_registry()
         hitl = HumanInTheLoop(

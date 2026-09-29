@@ -16,8 +16,8 @@ import threading
 
 import pytest
 
+from fsm_llm.agents import SemanticMemoryStore
 from fsm_llm.logging import logger
-from fsm_llm_agents import SemanticMemoryStore
 
 
 def _fake_embed(text: str) -> list[float]:

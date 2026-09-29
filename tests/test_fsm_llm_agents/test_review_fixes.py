@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from fsm_llm_agents.definitions import AgentResult, AgentTrace
+from fsm_llm.agents.definitions import AgentResult, AgentTrace
 
 # ============================================================================
 # C1: MCP Session Lifecycle Fix
@@ -20,7 +20,7 @@ class TestMCPSessionLifecycle:
 
     def test_executor_does_not_capture_session(self):
         """Executor closure captures server_params, not session."""
-        from fsm_llm_agents.mcp import MCPToolProvider
+        from fsm_llm.agents.mcp import MCPToolProvider
 
         provider = MCPToolProvider.__new__(MCPToolProvider)
         provider._server_params = "mock_params"
@@ -37,7 +37,7 @@ class TestMCPSessionLifecycle:
 
     def test_format_mcp_result_with_text(self):
         """_format_mcp_result extracts text from content items."""
-        from fsm_llm_agents.mcp import _format_mcp_result
+        from fsm_llm.agents.mcp import _format_mcp_result
 
         result = Mock()
         item1 = Mock()
@@ -50,7 +50,7 @@ class TestMCPSessionLifecycle:
 
     def test_format_mcp_result_fallback(self):
         """_format_mcp_result falls back to str() for non-content results."""
-        from fsm_llm_agents.mcp import _format_mcp_result
+        from fsm_llm.agents.mcp import _format_mcp_result
 
         assert _format_mcp_result("plain string") == "plain string"
 
@@ -59,8 +59,8 @@ class TestMCPSessionLifecycle:
         """An MCP error result (1.x isError, 2.x is_error) is a failed call (D-026)."""
         from types import SimpleNamespace
 
-        from fsm_llm_agents.exceptions import ToolExecutionError
-        from fsm_llm_agents.mcp import _format_mcp_result
+        from fsm_llm.agents.exceptions import ToolExecutionError
+        from fsm_llm.agents.mcp import _format_mcp_result
 
         result = SimpleNamespace(content=[SimpleNamespace(text="boom")], **{flag: True})
         with pytest.raises(ToolExecutionError, match="boom") as exc:
@@ -75,9 +75,9 @@ class TestMCPSessionLifecycle:
         from contextlib import asynccontextmanager
         from types import SimpleNamespace
 
-        from fsm_llm_agents import mcp as mcp_mod
-        from fsm_llm_agents.definitions import ToolCall
-        from fsm_llm_agents.tools import ToolRegistry
+        from fsm_llm.agents import mcp as mcp_mod
+        from fsm_llm.agents.definitions import ToolCall
+        from fsm_llm.agents.tools import ToolRegistry
 
         err = SimpleNamespace(
             content=[SimpleNamespace(text="bad input")], **{flag: True}
@@ -216,7 +216,7 @@ class TestStreamingTryFinally:
 def _has_otel() -> bool:
     """Same gate as test_strands_phase2: the exporter's own api+sdk import."""
     try:
-        from fsm_llm_monitor.otel import _HAS_OTEL
+        from fsm_llm.monitor.otel import _HAS_OTEL
     except ImportError:
         return False
     return _HAS_OTEL
@@ -228,7 +228,7 @@ class TestOTELThreadSafety:
     @pytest.mark.skipif(not _has_otel(), reason="opentelemetry sdk not installed")
     def test_has_spans_lock(self):
         """OTELExporter has _spans_lock attribute."""
-        from fsm_llm_monitor.otel import OTELExporter
+        from fsm_llm.monitor.otel import OTELExporter
 
         exporter = OTELExporter(service_name="test")
         assert hasattr(exporter, "_spans_lock")
@@ -237,8 +237,8 @@ class TestOTELThreadSafety:
     @pytest.mark.skipif(not _has_otel(), reason="opentelemetry sdk not installed")
     def test_concurrent_events_no_crash(self):
         """Concurrent event recording doesn't crash."""
-        from fsm_llm_monitor.definitions import MonitorEvent
-        from fsm_llm_monitor.otel import OTELExporter
+        from fsm_llm.monitor.definitions import MonitorEvent
+        from fsm_llm.monitor.otel import OTELExporter
 
         exporter = OTELExporter(service_name="test")
         collector = Mock()
@@ -286,7 +286,7 @@ class TestSwarmMemorySharing:
 
     def test_swarm_memory_not_in_context(self):
         """_swarm_memory key NOT in sub-agent context (not serializable)."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.agents.swarm import SwarmAgent
 
         agent = Mock()
         agent.run = Mock(
@@ -311,7 +311,7 @@ class TestSwarmMemorySharing:
         """Sub-agent context dict is JSON-serializable."""
         import json
 
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.agents.swarm import SwarmAgent
 
         agent = Mock()
         agent.run = Mock(
@@ -342,7 +342,7 @@ class TestSOPConfigValidation:
 
     def test_invalid_config_raises_at_register(self):
         """ValueError raised for invalid config_overrides."""
-        from fsm_llm_agents.sop import SOPDefinition, SOPRegistry
+        from fsm_llm.agents.sop import SOPDefinition, SOPRegistry
 
         registry = SOPRegistry()
         sop = SOPDefinition(
@@ -354,7 +354,7 @@ class TestSOPConfigValidation:
 
     def test_valid_config_registers_ok(self):
         """Valid config_overrides register without error."""
-        from fsm_llm_agents.sop import SOPDefinition, SOPRegistry
+        from fsm_llm.agents.sop import SOPDefinition, SOPRegistry
 
         registry = SOPRegistry()
         sop = SOPDefinition(
@@ -366,7 +366,7 @@ class TestSOPConfigValidation:
 
     def test_empty_config_registers_ok(self):
         """Empty config_overrides register without validation."""
-        from fsm_llm_agents.sop import SOPDefinition, SOPRegistry
+        from fsm_llm.agents.sop import SOPDefinition, SOPRegistry
 
         registry = SOPRegistry()
         sop = SOPDefinition(name="empty-sop")
@@ -384,14 +384,14 @@ class TestSemanticToolsLogLevel:
 
     def test_embed_failure_logs_warning(self):
         """Failed embedding logs warning, not debug."""
-        from fsm_llm_agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.agents.semantic_tools import SemanticToolRegistry
 
         with patch.object(
             SemanticToolRegistry,
             "_get_embedding",
             side_effect=RuntimeError("no model"),
         ):
-            with patch("fsm_llm_agents.semantic_tools.logger") as mock_logger:
+            with patch("fsm_llm.agents.semantic_tools.logger") as mock_logger:
                 registry = SemanticToolRegistry(auto_embed=True)
                 registry.register_function(
                     lambda x: x, name="test-tool", description="Test"
@@ -420,7 +420,7 @@ class TestRemoteAgentTimeout:
         """AgentServer /invoke uses asyncio.wait_for with timeout."""
         import inspect
 
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.agents.remote import AgentServer
 
         agent = Mock()
         agent.__class__.__name__ = "TestAgent"
@@ -441,7 +441,7 @@ class TestRemoteAgentTimeout:
     )
     def test_timeout_is_configurable(self):
         """AgentServer accepts custom timeout parameter."""
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.agents.remote import AgentServer
 
         agent = Mock()
         agent.__class__.__name__ = "TestAgent"
@@ -454,7 +454,7 @@ class TestRemoteAgentTimeout:
     )
     def test_default_timeout_is_300(self):
         """AgentServer default timeout is 300 seconds."""
-        from fsm_llm_agents.remote import AgentServer
+        from fsm_llm.agents.remote import AgentServer
 
         agent = Mock()
         agent.__class__.__name__ = "TestAgent"
@@ -557,7 +557,7 @@ class TestAgentGraphEdgeConditionSafety:
 
     def test_failing_condition_skips_edge(self):
         """Edge with failing condition is skipped, not crashing."""
-        from fsm_llm_agents.agent_graph import AgentGraphBuilder
+        from fsm_llm.agents.agent_graph import AgentGraphBuilder
 
         def _make_agent(answer):
             agent = Mock()
@@ -600,7 +600,7 @@ class TestSwarmRegisterHandlersSignature:
 
     def test_register_handlers_accepts_single_arg(self):
         """_register_handlers(api) works without extra args."""
-        from fsm_llm_agents.swarm import SwarmAgent
+        from fsm_llm.agents.swarm import SwarmAgent
 
         agent = Mock()
         swarm = SwarmAgent(agents={"a": agent}, entry_agent="a")

@@ -445,7 +445,7 @@ class TestWorkingMemorySerialization:
 # _hidden_buffers; from_dict() accepted it only as a separate kwarg,
 # defaulting to DEFAULT_HIDDEN_BUFFERS when omitted -- so a caller that
 # round-trips through to_dict()/from_dict() with NO explicit kwarg (e.g.
-# fsm_llm_agents.memory_persistence.save_working_memory/load_working_memory)
+# fsm_llm.agents.memory_persistence.save_working_memory/load_working_memory)
 # silently lost a custom hidden_buffers set on every reload.
 # ==================================================================
 
@@ -776,7 +776,7 @@ class TestWorkingMemoryReservedBufferNameRejected:
     ``"_hidden_buffers"`` is the one key ``to_dict()`` embeds that is NOT a
     buffer name (D-021). Before D-026, a buffer literally named that --
     reachable from LLM-chosen input via
-    ``fsm_llm_agents/memory_tools.py``'s ``remember(buffer=...)`` tool, which
+    ``fsm_llm/agents/memory_tools.py``'s ``remember(buffer=...)`` tool, which
     passes a free-form string straight into ``WorkingMemory.set()`` -- had
     its ENTIRE CONTENTS silently destroyed the next time ``to_dict()`` ran
     (``result["_hidden_buffers"] = hidden`` unconditionally overwrote it).

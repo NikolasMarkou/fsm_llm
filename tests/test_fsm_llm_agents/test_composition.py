@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents import (
+from fsm_llm.agents import (
     AgentConfig,
     ToolRegistry,
     default_llm_judge,
     react_worker_factory,
     tool,
 )
-from fsm_llm_agents.composition import _default_complete
-from fsm_llm_agents.definitions import AgentResult, AgentTrace, EvaluationResult
-from fsm_llm_agents.exceptions import AgentError, EvaluationError
+from fsm_llm.agents.composition import _default_complete
+from fsm_llm.agents.definitions import AgentResult, AgentTrace, EvaluationResult
+from fsm_llm.agents.exceptions import AgentError, EvaluationError
 
 
 @tool
@@ -44,7 +44,7 @@ class TestReactWorkerFactory:
                 trace=AgentTrace(tool_calls=[], total_iterations=1),
             )
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         worker = react_worker_factory(_registry(), AgentConfig(model="mock/model"))
         r = worker("subtask-A")
         assert isinstance(r, AgentResult)
@@ -55,7 +55,7 @@ class TestReactWorkerFactory:
         instances = []
 
         orig_init = __import__(
-            "fsm_llm_agents.react", fromlist=["ReactAgent"]
+            "fsm_llm.agents.react", fromlist=["ReactAgent"]
         ).ReactAgent.__init__
 
         def tracking_init(self, *a, **k):
@@ -69,8 +69,8 @@ class TestReactWorkerFactory:
                 trace=AgentTrace(tool_calls=[], total_iterations=1),
             )
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.__init__", tracking_init)
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.__init__", tracking_init)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         worker = react_worker_factory(_registry(), AgentConfig(model="mock/model"))
         worker("a")
         worker("b")

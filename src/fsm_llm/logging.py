@@ -54,11 +54,17 @@ _library_handler_ids: list[int] = []
 logger.disable("fsm_llm")
 
 #: Top-level packages of this distribution whose log output is library output.
-#: loguru's `disable("fsm_llm")` matches `fsm_llm` and its SUBmodules only, so
-#: an extension that is its own top-level package (``fsm_llm_workflows``)
-#: disables itself at import, and `setup_logging()` /
+#: loguru's `disable("fsm_llm")` matches `fsm_llm` and all its submodules,
+#: which include the subpackages fsm_llm.agents, fsm_llm.reasoning,
+#: fsm_llm.workflows, fsm_llm.monitor and fsm_llm.harness, so the one disable
+#: above silences all of them and `setup_logging()` /
 #: `enable_debug_logging()` re-enable every name listed here.
-LIBRARY_LOGGER_NAMES: tuple[str, ...] = ("fsm_llm", "fsm_llm_workflows")
+# DECISION plan-2026-09-29T044048-3a032517/D-004
+# One name only. Do NOT add a subpackage here and do NOT call
+# logger.disable("fsm_llm.<sub>") in a subpackage: loguru keeps the more
+# specific rule, so enable("fsm_llm") would no longer re-enable that
+# subpackage. Tests that capture subpackage logs enable "fsm_llm" themselves.
+LIBRARY_LOGGER_NAMES: tuple[str, ...] = ("fsm_llm",)
 
 
 _library_logging_enabled = False

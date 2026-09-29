@@ -1,5 +1,5 @@
 """
-Server-level regression tests for the 2026-09-28 fsm_llm_monitor audit:
+Server-level regression tests for the 2026-09-28 fsm_llm.monitor audit:
 origin/host checks, API-key gating of sensitive reads and the WebSocket,
 error mapping, request bounds, dashboard config parsing and builder guards.
 """
@@ -17,11 +17,11 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from fsm_llm.definitions import ConversationBusyError
-from fsm_llm_monitor import server as server_module
-from fsm_llm_monitor.definitions import MonitorConfig
-from fsm_llm_monitor.exceptions import MonitorCapacityError
-from fsm_llm_monitor.instance_manager import InstanceManager, validate_preset_id
-from fsm_llm_monitor.server import app, configure
+from fsm_llm.monitor import server as server_module
+from fsm_llm.monitor.definitions import MonitorConfig
+from fsm_llm.monitor.exceptions import MonitorCapacityError
+from fsm_llm.monitor.instance_manager import InstanceManager, validate_preset_id
+from fsm_llm.monitor.server import app, configure
 
 
 def _client(api_key: str | None = None) -> TestClient:
@@ -95,7 +95,7 @@ class TestApiKeyGating:
     def test_env_key_applies_without_configure(self):
         script = (
             "import os; os.environ['FSM_LLM_MONITOR_API_KEY']='k1';"
-            "from fsm_llm_monitor import server; print(server._api_key)"
+            "from fsm_llm.monitor import server; print(server._api_key)"
         )
         proc = subprocess.run(
             [sys.executable, "-c", script], capture_output=True, text=True, timeout=120

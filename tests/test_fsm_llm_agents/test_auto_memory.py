@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents import (
+from fsm_llm.agents import (
     AgentConfig,
     AutoMemoryReactAgent,
     SemanticMemoryStore,
@@ -13,7 +13,7 @@ from fsm_llm_agents import (
     remember_interaction,
     tool,
 )
-from fsm_llm_agents.definitions import AgentResult, AgentTrace
+from fsm_llm.agents.definitions import AgentResult, AgentTrace
 
 
 def _fake_embed(text: str) -> list[float]:
@@ -95,7 +95,7 @@ class TestAutoMemoryReactAgent:
             )
 
         # Patch the ReactAgent.run that super().run() resolves to.
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         return agent, captured
 
     def test_recall_injected_into_task(self, monkeypatch):
@@ -131,7 +131,7 @@ class TestAutoMemoryReactAgent:
                 trace=AgentTrace(tool_calls=[], total_iterations=1),
             )
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
 
     def test_default_persists_unsuccessful_run(self, monkeypatch):
         # New default (remember_only_on_success=False): conversational turns
@@ -167,7 +167,7 @@ class TestAutoMemoryReactAgent:
         def boom(self, task, initial_context=None):
             raise RuntimeError("budget exhausted")
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", boom)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", boom)
         with pytest.raises(RuntimeError):
             agent.run("remember: my name is Nikolas")
         assert len(store) == 1  # fact preserved despite the raise
@@ -184,7 +184,7 @@ class TestAutoMemoryReactAgent:
         def boom(self, task, initial_context=None):
             raise RuntimeError("x")
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", boom)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", boom)
         with pytest.raises(RuntimeError):
             agent.run("q")
         assert len(store) == 0

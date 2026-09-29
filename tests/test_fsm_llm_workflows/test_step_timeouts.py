@@ -9,8 +9,8 @@ import asyncio
 
 import pytest
 
-from fsm_llm_workflows.exceptions import WorkflowStepError
-from fsm_llm_workflows.steps import (
+from fsm_llm.workflows.exceptions import WorkflowStepError
+from fsm_llm.workflows.steps import (
     APICallStep,
     AutoTransitionStep,
     ConditionStep,

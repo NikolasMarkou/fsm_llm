@@ -1,4 +1,4 @@
-"""Tests for ``fsm_llm_harness.hardening``.
+"""Tests for ``fsm_llm.harness.hardening``.
 
 This module is the harness's small-model survival layer, and every one of its
 four jobs exists because a MEASURED core behaviour is unavailable or wrong for
@@ -42,9 +42,9 @@ from typing import Any, TypeVar
 import pytest
 
 from fsm_llm.definitions import LLMResponseError
-from fsm_llm_harness import hardening
-from fsm_llm_harness.constants import Defaults
-from fsm_llm_harness.hardening import (
+from fsm_llm.harness import hardening
+from fsm_llm.harness.constants import Defaults
+from fsm_llm.harness.hardening import (
     RETRYABLE_EXCEPTIONS,
     RoleOutput,
     as_int,
@@ -55,7 +55,7 @@ from fsm_llm_harness.hardening import (
     strip_model_noise,
     type_matches,
 )
-from fsm_llm_harness.harness import _WORKER_WRITABLE
+from fsm_llm.harness.harness import _WORKER_WRITABLE
 
 # ---------------------------------------------------------------------------
 # Shared hostile inputs

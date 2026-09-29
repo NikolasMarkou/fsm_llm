@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm_agents.definitions import MetaBuilderConfig
-from fsm_llm_agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from fsm_llm.agents.definitions import MetaBuilderConfig
+from fsm_llm.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
 
 
 @pytest.fixture

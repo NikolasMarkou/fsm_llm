@@ -17,8 +17,8 @@ httpx = pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
-from fsm_llm_agents import remote
-from fsm_llm_agents.remote import AgentServer, RemoteAgentTool
+from fsm_llm.agents import remote
+from fsm_llm.agents.remote import AgentServer, RemoteAgentTool
 
 KEY = "s3cret-key"
 ROUTES = ["/invoke", "/stream"]

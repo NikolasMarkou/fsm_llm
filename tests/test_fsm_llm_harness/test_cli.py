@@ -1,5 +1,5 @@
 """
-Tests for ``fsm_llm_harness.__main__`` -- the five-subcommand CLI.
+Tests for ``fsm_llm.harness.__main__`` -- the five-subcommand CLI.
 
 The load-bearing properties, and why each is here:
 
@@ -26,12 +26,12 @@ from typing import Any, ClassVar
 
 import pytest
 
+from fsm_llm.agents.definitions import AgentResult
 from fsm_llm.constants import DEFAULT_LLM_MODEL
-from fsm_llm_agents.definitions import AgentResult
-from fsm_llm_harness import __main__ as cli
-from fsm_llm_harness import harness as harness_module
-from fsm_llm_harness.artifacts import StateDoc
-from fsm_llm_harness.constants import (
+from fsm_llm.harness import __main__ as cli
+from fsm_llm.harness import harness as harness_module
+from fsm_llm.harness.artifacts import StateDoc
+from fsm_llm.harness.constants import (
     ArtifactNames,
     ContextKeys,
     Defaults,
@@ -40,8 +40,8 @@ from fsm_llm_harness.constants import (
     PlanSchema,
     Severity,
 )
-from fsm_llm_harness.harness import HarnessAgent, Presentation, RevertDirective
-from fsm_llm_harness.plan_validator import Issue
+from fsm_llm.harness.harness import HarnessAgent, Presentation, RevertDirective
+from fsm_llm.harness.plan_validator import Issue
 
 # ---------------------------------------------------------------------------
 # Helpers and fixtures
@@ -196,7 +196,7 @@ class TestEntryPoints:
         }
 
     def test_version(self, capsys: pytest.CaptureFixture[str]) -> None:
-        from fsm_llm_harness.__version__ import __version__
+        from fsm_llm.harness.__version__ import __version__
 
         assert cli.main_cli(["--version"]) == cli.EXIT_PASS
         assert __version__ in capsys.readouterr().out
@@ -208,9 +208,9 @@ class TestEntryPoints:
         assert "usage:" in capsys.readouterr().err
 
     def test_subprocess_help(self) -> None:
-        """The real ``python -m fsm_llm_harness --help`` entry point."""
+        """The real ``python -m fsm_llm.harness --help`` entry point."""
         completed = subprocess.run(
-            [sys.executable, "-m", "fsm_llm_harness", "--help"],
+            [sys.executable, "-m", "fsm_llm.harness", "--help"],
             capture_output=True,
             text=True,
         )
@@ -645,7 +645,7 @@ class TestStatus:
         that test).  Spying on the single atomic-write chokepoint names the
         property instead of a proxy for it.
         """
-        from fsm_llm_harness import storage
+        from fsm_llm.harness import storage
 
         writes: list[str] = []
         monkeypatch.setattr(
@@ -687,7 +687,7 @@ class TestStatus:
         # two pragma-marked siblings: this test REACHES it through the CLI.
         # The divergence is the driver read bound, which the gate's plain read
         # deliberately does not share. See decisions.md D-007.
-        from fsm_llm_harness.storage import DRIVER_READ_MAX_BYTES
+        from fsm_llm.harness.storage import DRIVER_READ_MAX_BYTES
 
         entry = "INIT " + "x" * 100
         doc = StateDoc(
@@ -712,7 +712,7 @@ class TestValidate:
     def test_warnings_only_exits_zero(
         self, monkeypatch: pytest.MonkeyPatch, seeded_plan: Path
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        from fsm_llm.harness import plan_validator
 
         warnings = [
             Issue(severity=Severity.WARNING, check="progress", message="advisory"),
@@ -724,7 +724,7 @@ class TestValidate:
     def test_one_error_exits_one(
         self, monkeypatch: pytest.MonkeyPatch, seeded_plan: Path
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        from fsm_llm.harness import plan_validator
 
         mixed = [
             Issue(severity=Severity.WARNING, check="progress", message="advisory"),
@@ -736,7 +736,7 @@ class TestValidate:
     def test_validate_never_returns_the_gate_code(
         self, monkeypatch: pytest.MonkeyPatch, seeded_plan: Path
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        from fsm_llm.harness import plan_validator
 
         errors = [Issue(severity=Severity.ERROR, check="state", message="broken")]
         monkeypatch.setattr(plan_validator, "audit", lambda *a, **k: errors)
@@ -759,7 +759,7 @@ class TestValidate:
     def test_workspace_flag_reaches_audit(
         self, monkeypatch: pytest.MonkeyPatch, seeded_plan: Path, tmp_path: Path
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        from fsm_llm.harness import plan_validator
 
         seen: dict[str, Any] = {}
 
@@ -775,7 +775,7 @@ class TestValidate:
     def test_no_workspace_means_no_anchor_scan(
         self, monkeypatch: pytest.MonkeyPatch, seeded_plan: Path
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        from fsm_llm.harness import plan_validator
 
         seen: dict[str, Any] = {}
 
@@ -827,7 +827,7 @@ class TestClose:
         plans_root: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        from fsm_llm.harness import plan_validator
 
         monkeypatch.setattr(plan_validator, "audit", lambda *a, **k: [])
         _seed_cross_plan(plans_root, lessons_lines=10)
@@ -851,7 +851,7 @@ class TestClose:
         only to read.  Spying on the single atomic-write chokepoint names the
         property; the byte diff stays as a belt-and-suspenders secondary check.
         """
-        from fsm_llm_harness import plan_validator, storage
+        from fsm_llm.harness import plan_validator, storage
 
         monkeypatch.setattr(plan_validator, "audit", lambda *a, **k: [])
         writes: list[str] = []
@@ -874,7 +874,7 @@ class TestClose:
         seeded_plan: Path,
         plans_root: Path,
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        from fsm_llm.harness import plan_validator
 
         monkeypatch.setattr(plan_validator, "audit", lambda *a, **k: [])
         _seed_cross_plan(plans_root, lessons_lines=Defaults.LESSONS_LINE_CAP + 50)
@@ -892,8 +892,8 @@ class TestClose:
         plans_root: Path,
     ) -> None:
         """D-044: the cross-plan tier is ARCHIVIST-owned; ORCHESTRATOR is refused."""
-        from fsm_llm_harness import plan_validator
-        from fsm_llm_harness.constants import Role
+        from fsm_llm.harness import plan_validator
+        from fsm_llm.harness.constants import Role
 
         monkeypatch.setattr(plan_validator, "audit", lambda *a, **k: [])
         _seed_cross_plan(plans_root, lessons_lines=10)
@@ -914,7 +914,7 @@ class TestClose:
         seeded_plan: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        from fsm_llm.harness import plan_validator
 
         monkeypatch.setattr(plan_validator, "audit", lambda *a, **k: [])
         assert cli.main_cli(["close", str(seeded_plan)]) == cli.EXIT_PASS
@@ -926,7 +926,7 @@ class TestClose:
         seeded_plan: Path,
         plans_root: Path,
     ) -> None:
-        from fsm_llm_harness import plan_validator
+        from fsm_llm.harness import plan_validator
 
         monkeypatch.setattr(plan_validator, "audit", lambda *a, **k: [])
         (plans_root / ArtifactNames.LESSONS).write_text(
@@ -1119,9 +1119,9 @@ class TestPublicSurface:
         """Repo rule: one literal ``__all__``, no dynamic extend/append."""
         import ast
 
-        import fsm_llm_harness
+        import fsm_llm.harness
 
-        tree = ast.parse(Path(fsm_llm_harness.__file__).read_text(encoding="utf-8"))
+        tree = ast.parse(Path(fsm_llm.harness.__file__).read_text(encoding="utf-8"))
         assignments = [
             node
             for node in tree.body
@@ -1139,19 +1139,19 @@ class TestPublicSurface:
         }
 
     def test_every_exported_name_resolves(self) -> None:
-        import fsm_llm_harness
+        import fsm_llm.harness
 
         missing = [
             name
-            for name in fsm_llm_harness.__all__
-            if not hasattr(fsm_llm_harness, name)
+            for name in fsm_llm.harness.__all__
+            if not hasattr(fsm_llm.harness, name)
         ]
         assert missing == []
 
     def test_no_duplicates(self) -> None:
-        import fsm_llm_harness
+        import fsm_llm.harness
 
-        assert len(fsm_llm_harness.__all__) == len(set(fsm_llm_harness.__all__))
+        assert len(fsm_llm.harness.__all__) == len(set(fsm_llm.harness.__all__))
 
     @pytest.mark.parametrize(
         "name",
@@ -1179,12 +1179,12 @@ class TestPublicSurface:
         ],
     )
     def test_expected_names_are_exported(self, name: str) -> None:
-        import fsm_llm_harness
+        import fsm_llm.harness
 
-        assert name in fsm_llm_harness.__all__
+        assert name in fsm_llm.harness.__all__
 
     def test_main_cli_is_not_exported_from_the_package(self) -> None:
         """Importing ``__main__`` from ``__init__`` double-imports it under -m."""
-        import fsm_llm_harness
+        import fsm_llm.harness
 
-        assert "main_cli" not in fsm_llm_harness.__all__
+        assert "main_cli" not in fsm_llm.harness.__all__

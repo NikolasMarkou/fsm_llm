@@ -1,4 +1,4 @@
-"""LIVE end-to-end tests for ``fsm_llm_harness`` against a real small model.
+"""LIVE end-to-end tests for ``fsm_llm.harness`` against a real small model.
 
 These are the shipped form of plan.md's five live success criteria.  They are
 DOUBLE-GATED and skip by default:
@@ -63,10 +63,10 @@ import pytest
 
 pytestmark = [pytest.mark.integration, pytest.mark.real_llm, pytest.mark.slow]
 
-from fsm_llm_agents.definitions import AgentResult, ApprovalRequest, ToolCall
-from fsm_llm_agents.tools import ToolRegistry
-from fsm_llm_harness.artifacts import PlanDoc, Section, StateDoc
-from fsm_llm_harness.constants import (
+from fsm_llm.agents.definitions import AgentResult, ApprovalRequest, ToolCall
+from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.harness.artifacts import PlanDoc, Section, StateDoc
+from fsm_llm.harness.constants import (
     ArtifactNames,
     ContextKeys,
     Defaults,
@@ -76,26 +76,26 @@ from fsm_llm_harness.constants import (
     Role,
     Severity,
 )
-from fsm_llm_harness.exceptions import HarnessArtifactError
-from fsm_llm_harness.hardening import as_int
-from fsm_llm_harness.harness import (
+from fsm_llm.harness.exceptions import HarnessArtifactError
+from fsm_llm.harness.hardening import as_int
+from fsm_llm.harness.harness import (
     EXECUTE_TARGET_ASSIGNED,
     HarnessAgent,
     RoleRequest,
     _plan_is_approvable,
     derive_execute_target,
 )
-from fsm_llm_harness.plan_validator import Issue, _is_placeholder, audit
-from fsm_llm_harness.roles import (
+from fsm_llm.harness.plan_validator import Issue, _is_placeholder, audit
+from fsm_llm.harness.roles import (
     build_default_worker_factory,
     build_role_system_prompt,
     build_role_task_prompt,
     get_role_spec,
     held_tools,
 )
-from fsm_llm_harness.rules import explore_topics, get_rules
-from fsm_llm_harness.storage import PlanDirectory
-from fsm_llm_harness.tools import (
+from fsm_llm.harness.rules import explore_topics, get_rules
+from fsm_llm.harness.storage import PlanDirectory
+from fsm_llm.harness.tools import (
     PlanMemory,
     Workspace,
     build_plan_tools,
@@ -446,7 +446,7 @@ class ScriptedRoles:
       PIVOT and every later one a pass, which is what the loop-back is measured
       against.
     * Every plan-directory write goes through a role-scoped
-      :class:`~fsm_llm_harness.tools.PlanMemory`, so ``rules.OWNERSHIP`` refuses
+      :class:`~fsm_llm.harness.tools.PlanMemory`, so ``rules.OWNERSHIP`` refuses
       a write this class has no business making -- the artifacts are produced
       under the shipped authorisation path, not around it.
     * ``requests`` holds every :class:`RoleRequest` in dispatch order;
@@ -2215,7 +2215,7 @@ class TestTheL6ApprovalStubIsDenyDefaultAndDiskBound:
 
     def test_the_gate_names_are_the_drivers_own(self) -> None:
         """A renamed gate must break HERE, not silently deny everything."""
-        from fsm_llm_harness import harness as harness_module
+        from fsm_llm.harness import harness as harness_module
 
         assert _GATE_PLAN == harness_module._APPROVAL_PLAN
         assert _GATE_CLOSE == harness_module._APPROVAL_CLOSE

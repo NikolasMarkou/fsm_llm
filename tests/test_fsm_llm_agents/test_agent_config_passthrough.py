@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm_agents import AgentConfig, ReactAgent, tool
+from fsm_llm.agents import AgentConfig, ReactAgent, tool
 
 
 @tool
@@ -16,7 +16,7 @@ def noop(query: str) -> str:
 
 
 def _registry():
-    from fsm_llm_agents import ToolRegistry
+    from fsm_llm.agents import ToolRegistry
 
     reg = ToolRegistry()
     reg.register(noop._tool_definition)
@@ -68,7 +68,7 @@ class TestCreateApiPassthrough:
 
         agent = ReactAgent(tools=_registry(), config=config)
         with patch(
-            "fsm_llm_agents.base.API.from_definition",
+            "fsm_llm.agents.base.API.from_definition",
             side_effect=fake_from_definition,
         ):
             agent._create_api({"name": "x", "initial_state": "s", "states": {}})

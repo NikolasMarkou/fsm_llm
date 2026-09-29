@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm_agents import AgentConfig, ToolRegistry, VerifiedReactAgent, tool
-from fsm_llm_agents.definitions import AgentResult, AgentTrace
+from fsm_llm.agents import AgentConfig, ToolRegistry, VerifiedReactAgent, tool
+from fsm_llm.agents.definitions import AgentResult, AgentTrace
 
 
 @tool
@@ -50,7 +50,7 @@ class TestVerification:
             calls["n"] += 1
             return _result("ans")
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         agent = _agent(AgentConfig(model="mock/model"))
         r = agent.run("q")
         assert r.answer == "ans"
@@ -63,7 +63,7 @@ class TestVerification:
             calls["n"] += 1
             return _result("good")
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         cfg = AgentConfig(
             model="mock/model",
             verification_fn=lambda a, c: {"ok": a == "good", "feedback": "x"},
@@ -80,7 +80,7 @@ class TestVerification:
             tasks.append(task)
             return _result(next(answers))
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         cfg = AgentConfig(
             model="mock/model",
             verification_fn=lambda a, c: {
@@ -102,7 +102,7 @@ class TestVerification:
             calls["n"] += 1
             return _result("never-good")
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         cfg = AgentConfig(
             model="mock/model", verification_fn=lambda a, c: {"ok": False}
         )
@@ -115,7 +115,7 @@ class TestVerification:
         def fake_run(self, task, initial_context=None):
             return _result("ok")
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         cfg = AgentConfig(model="mock/model", verification_fn=lambda a, c: True)
         agent = _agent(cfg)
         assert agent.run("q").answer == "ok"
@@ -130,7 +130,7 @@ class TestVerification:
         def boom(a, c):
             raise RuntimeError("verifier crashed")
 
-        monkeypatch.setattr("fsm_llm_agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
         agent = _agent(AgentConfig(model="mock/model", verification_fn=boom))
         agent.run("q")
         assert calls["n"] == 1  # not retried
