@@ -8,6 +8,7 @@ trace building, and context filtering from the 12 agent implementations.
 from __future__ import annotations
 
 import inspect
+import json
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -359,6 +360,24 @@ def _drop_skip_marker(
         state = None
     if state != markers[held]:
         yield held
+
+
+def artifact_text(value: Any) -> str:
+    """The text form of a generated artifact read from context.
+
+    Contract: ``None`` -> ``""``; a ``str`` as is; a ``dict``/``list`` (an
+    ``any`` artifact field the model returned as native JSON) -> indented
+    JSON text, so ``AgentResult.answer`` stays a string that
+    ``output_schema`` validation can parse; any other value -> ``str(value)``.
+    Never raises (unserialisable leaves go through ``str``).
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict | list):
+        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    return str(value)
 
 
 class BaseAgent(ABC):
@@ -844,9 +863,9 @@ class BaseAgent(ABC):
 
         # Secondary: extra context keys (pattern-specific)
         for key in extra_keys or []:
-            val = final_context.get(key)
-            if val and isinstance(val, str) and val.strip():
-                return str(val).strip()
+            val = artifact_text(final_context.get(key)).strip()
+            if val:
+                return val
 
         # Tertiary: last non-empty response
         for response in reversed(responses):
@@ -927,7 +946,8 @@ class BaseAgent(ABC):
         has_answer_key = bool(
             str(final_context.get(ContextKeys.FINAL_ANSWER) or "").strip()
         ) or any(
-            str(final_context.get(k) or "").strip() for k in (extra_answer_keys or [])
+            artifact_text(final_context.get(k)).strip()
+            for k in (extra_answer_keys or [])
         )
         tools_executed = len(trace.tool_calls) > 0
         return has_answer_key or tools_executed

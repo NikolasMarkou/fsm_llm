@@ -145,6 +145,78 @@ def _field_value(data: dict[str, Any], field_name: str) -> Any:
     return value
 
 
+# The opening of a single-field extraction envelope, `{"field_name": "<name>",
+# "value": ` (whitespace-tolerant), anchored at the start of the reply.
+_FIELD_ENVELOPE_PREFIX = re.compile(
+    r'\{\s*"field_name"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"value"\s*:\s*', re.DOTALL
+)
+
+
+def _decode_json_string_prefix(body: str) -> str | None:
+    """Decode the body of a JSON string literal that may be cut off.
+
+    Args:
+        body: the text after the opening quote.
+
+    Returns:
+        The unescaped text up to the closing quote, or up to the cut when
+        there is none (a dangling ``\\`` or partial ``\\uXXXX`` is dropped);
+        ``None`` when the kept text is not a decodable JSON string body.
+    """
+    end = len(body)
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch == "\\":
+            step = 6 if body[i + 1 : i + 2] == "u" else 2
+            if i + step > len(body):
+                end = i  # escape cut in half
+                break
+            i += step
+            continue
+        if ch == '"':
+            end = i
+            break
+        i += 1
+    try:
+        decoded = json.JSONDecoder(strict=False).decode(f'"{body[:end]}"')
+    except json.JSONDecodeError:
+        return None
+    return decoded if isinstance(decoded, str) else None
+
+
+def _salvage_envelope_value(raw: str, field_name: str) -> tuple[bool, Any]:
+    """Read the value out of raw text that is this field's extraction envelope.
+
+    Args:
+        raw: stripped reply text that the JSON rungs could not parse.
+        field_name: the field being extracted.
+
+    Returns:
+        ``(False, None)`` when ``raw`` does not open with
+        ``{"field_name": "<field_name>", "value": ``. Otherwise ``(True,
+        value)``: the fully decoded value when it is complete, else the
+        decoded prefix of a cut-off string value, else the raw text of a
+        cut-off object/array/number; ``None`` when nothing usable is left.
+
+    Failure mode: none, never raises.
+    """
+    match = _FIELD_ENVELOPE_PREFIX.match(raw)
+    if match is None or _decode_json_string_prefix(match.group(1)) != field_name:
+        return False, None
+    rest = raw[match.end() :]
+    try:
+        value, _ = json.JSONDecoder(strict=False).raw_decode(rest)
+    except json.JSONDecodeError:
+        if rest.startswith('"'):
+            value = _decode_json_string_prefix(rest[1:])
+        else:
+            value = rest.rstrip()
+    if isinstance(value, str) and not value.strip():
+        value = None
+    return True, value
+
+
 def _safe_str(value: Any) -> str | None:
     """Coerce a MODEL-SUPPLIED value into a value the capped models will accept.
 
@@ -1330,7 +1402,31 @@ class LiteLLMInterface(LLMInterface):
         if isinstance(content, str) and content.strip():
             raw = content.strip()
             coerced_value: Any = None
-            if request.field_type == "str":
+            coerced_reasoning = "Unstructured response coerced to expected type"
+            # DECISION plan-2026-09-29T103145-06a5ec0a/D-050
+            # Raw text that opens this field's own `{"field_name": ..., "value":`
+            # envelope (it reaches this rung when max_tokens cut it off) yields
+            # the salvaged value, or nothing. Do NOT store the envelope text: a
+            # str/any field then carried `{"field_name": "generated_output",
+            # "value": "...` into the agent answer. Do NOT widen this to prose
+            # that merely contains JSON (D-022 above still binds): only a reply
+            # that STARTS with the envelope prefix is unwrapped.
+            is_envelope, salvaged = False, None
+            if request.field_type in ("str", "any"):
+                is_envelope, salvaged = _salvage_envelope_value(raw, request.field_name)
+            if is_envelope:
+                if request.field_type == "str" and isinstance(salvaged, dict | list):
+                    salvaged = json.dumps(salvaged, ensure_ascii=False)
+                elif request.field_type == "str" and salvaged is not None:
+                    salvaged = str(salvaged)
+                coerced_value = salvaged
+                coerced_reasoning = "Value salvaged from a cut-off extraction envelope"
+                logger.warning(
+                    f"Field '{request.field_name}': the reply was an unparseable "
+                    "extraction envelope (likely cut off by max_tokens); "
+                    "kept its value only"
+                )
+            elif request.field_type == "str":
                 # DECISION plan-2026-07-18T162030-a02151fe/D-022 [STALE]
                 # This rung hands the raw text back as the field value even when
                 # that text is a prose-wrapped envelope. D-016 guarded it with
@@ -1383,7 +1479,7 @@ class LiteLLMInterface(LLMInterface):
                     field_name=request.field_name,
                     value=coerced_value,
                     confidence=0.5,
-                    reasoning="Unstructured response coerced to expected type",
+                    reasoning=coerced_reasoning,
                 )
 
         return FieldExtractionResponse(

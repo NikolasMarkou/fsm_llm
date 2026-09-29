@@ -315,12 +315,12 @@ class TestTypedFieldExtraction:
         assert "from the task" in config.extraction_instructions
         assert "Name the weakest point." in config.extraction_instructions
 
-    @pytest.mark.parametrize("field_type", ["str", "float", "list", "bool"])
+    @pytest.mark.parametrize("field_type", ["str", "float", "list", "bool", "any"])
     def test_supported_types(self, field_type):
         field = _typed_field_extraction("item", field_type, "x")
         assert FieldExtractionConfig.model_validate(field).field_type == field_type
 
-    @pytest.mark.parametrize("field_type", ["any", "dict", "int"])
+    @pytest.mark.parametrize("field_type", ["dict", "int"])
     def test_other_types_rejected(self, field_type):
         with pytest.raises(ValueError, match="unsupported"):
             _typed_field_extraction("item", field_type, "x")  # type: ignore[arg-type]
@@ -1776,6 +1776,86 @@ class TestEvaluatorOptimizerLoop:
         assert not llm.calls("extract_bulk_data")
         for request in _field_requests(llm, ContextKeys.GENERATED_OUTPUT):
             assert ContextKeys.AGENT_TRACE not in request.context
+
+
+class TestCutOffArtifactEnvelopeNeverShips:
+    """Fix 20.1 (D-050): a real ``LiteLLMInterface`` whose ``generated_output``
+    reply is an extraction envelope cut off by ``max_tokens`` must not ship
+    the envelope as the EvalOpt answer (live eval_opt_structured did)."""
+
+    _CUT = (
+        '{"field_name": "generated_output", "value": "{\\"name\\": '
+        '\\"Carbonara\\", \\"steps\\": [\\"Boil the wat'
+    )
+
+    def _run(self):
+        from fsm_llm.agents import AgentConfig, EvaluatorOptimizerAgent
+        from fsm_llm.agents.definitions import EvaluationResult
+        from fsm_llm.llm import LiteLLMInterface
+
+        seen: list[str] = []
+
+        def reply(messages, call_type, response_format=None):
+            if call_type == "field_extraction":
+                content = self._CUT
+            elif call_type == "data_extraction":
+                content = '{"extracted_data": {}, "confidence": 1.0}'
+            else:
+                content = '{"message": "Done."}'
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+            )
+
+        llm = LiteLLMInterface(model="test", api_key="test")
+        llm._make_llm_call = reply  # type: ignore[method-assign]
+
+        def evaluate(out: str, _ctx: dict) -> EvaluationResult:
+            seen.append(out)
+            return EvaluationResult(passed=True, score=1.0, feedback="ok")
+
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=evaluate,
+            config=AgentConfig(max_iterations=6),
+            llm_interface=llm,
+        )
+        return seen, agent.run("Write a carbonara recipe as JSON")
+
+    def test_answer_is_the_salvaged_value_not_the_envelope(self):
+        seen, result = self._run()
+
+        assert '"field_name"' not in result.answer
+        assert result.answer == '{"name": "Carbonara", "steps": ["Boil the wat'
+        assert seen and all('"field_name"' not in out for out in seen)
+
+    def test_native_json_artifact_ships_as_parseable_json_text(self):
+        # An `any` artifact the model returned as a dict/list reaches the
+        # evaluator and the answer as JSON text, so output_schema parses it.
+        from pydantic import BaseModel
+
+        from fsm_llm.agents import AgentConfig, EvaluatorOptimizerAgent
+        from fsm_llm.agents.base import artifact_text
+        from fsm_llm.agents.definitions import EvaluationResult
+
+        class Recipe(BaseModel):
+            name: str
+            steps: list[str]
+
+        recipe = {"name": "Carbonara", "steps": ["Boil", "Toss"]}
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=lambda out, _ctx: EvaluationResult(passed=True),
+            config=AgentConfig(output_schema=Recipe),
+            llm_interface=PromptGroundedLLM(),
+        )
+        answer = agent._extract_answer({ContextKeys.GENERATED_OUTPUT: recipe}, [])
+
+        assert json.loads(answer) == recipe
+        assert agent._try_parse_structured_output(answer) == Recipe(**recipe)
+        assert artifact_text(["a"]) == '[\n  "a"\n]'
+        assert (artifact_text(None), artifact_text("x"), artifact_text(2)) == (
+            "",
+            "x",
+            "2",
+        )
 
 
 _REWOO_TASK = "What is the capital of France?"

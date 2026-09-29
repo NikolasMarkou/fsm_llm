@@ -13,7 +13,7 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, artifact_text
 from .constants import (
     ContextKeys,
     Defaults,
@@ -223,9 +223,9 @@ class PromptChainAgent(BaseAgent):
         # Fall back to last chain step result
         chain_results = final_context.get(ContextKeys.CHAIN_RESULTS, [])
         if chain_results:
-            last = chain_results[-1]
-            if isinstance(last, str) and len(last.strip()) > Defaults.MIN_ANSWER_LENGTH:
-                return last.strip()
+            last = artifact_text(chain_results[-1]).strip()
+            if len(last) > Defaults.MIN_ANSWER_LENGTH:
+                return last
 
         # Fall back to last non-empty response
         for response in reversed(responses):

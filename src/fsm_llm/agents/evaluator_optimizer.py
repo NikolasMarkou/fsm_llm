@@ -14,7 +14,7 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, artifact_text
 from .constants import (
     ContextKeys,
     Defaults,
@@ -159,7 +159,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
 
         # Run the external evaluation
         try:
-            eval_result = self.evaluation_fn(str(generated_output), context)
+            eval_result = self.evaluation_fn(artifact_text(generated_output), context)
         except Exception as e:
             logger.warning(
                 f"Evaluation function raised an exception: {e}", exc_info=True
@@ -255,13 +255,10 @@ class EvaluatorOptimizerAgent(BaseAgent):
         ):
             return str(answer)
 
-        output = final_context.get(ContextKeys.GENERATED_OUTPUT)
-        if (
-            output
-            and isinstance(output, str)
-            and len(output) > Defaults.MIN_ANSWER_LENGTH
-        ):
-            return str(output)
+        # A native JSON artifact (`any` field, D-050) ships as JSON text.
+        output = artifact_text(final_context.get(ContextKeys.GENERATED_OUTPUT))
+        if len(output) > Defaults.MIN_ANSWER_LENGTH:
+            return output
 
         for response in reversed(responses):
             if response and len(response.strip()) > Defaults.MIN_ANSWER_LENGTH:

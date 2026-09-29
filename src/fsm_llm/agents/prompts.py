@@ -496,7 +496,7 @@ def build_maker_checker_field_instructions(
     """Per-field instructions for the Maker-Checker typed fields.
 
     Returns ``{name: instructions}`` for ``make`` and ``revise`` (both the
-    ``draft_output`` str field of that state), ``checker_feedback`` (str),
+    ``draft_output`` any field of that state), ``checker_feedback`` (str),
     ``quality_score`` (float) and ``checker_passed`` (bool). The revise
     prompt shows ``previous_draft`` and ``checker_feedback``; the check
     prompts show ``draft_output``.
@@ -760,7 +760,7 @@ def build_chain_step_field_instructions(
 ) -> str:
     """Per-field instructions for step ``index`` (0-based) of a prompt chain.
 
-    ``chain_step_result`` (str) is the step's output. The ChainStep's
+    ``chain_step_result`` (any) is the step's output. The ChainStep's
     ``response_instructions`` say what the step does and its
     ``extraction_instructions`` what the output must hold; the prompt shows
     ``chain_results`` (the earlier steps' outputs).

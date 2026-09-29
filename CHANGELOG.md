@@ -122,6 +122,16 @@ work, is `docs/agents_roadmap.md`.
 
 ### Fixed
 
+- Core: a single-field extraction reply that opens with this field's
+  `{"field_name": ..., "value": ` envelope but does not parse (cut off by
+  `max_tokens`) now yields the envelope's `value` on the `str`/`any` rung (the decoded
+  prefix of a cut-off string), never the envelope text. Prose that merely contains
+  JSON is still kept verbatim.
+- Agents: EvalOpt `generated_output`, MakerChecker `draft_output` and PromptChain
+  `chain_step_result` are typed `any` again (whole artifacts), and a dict/list value
+  reaches `evaluation_fn` and `AgentResult.answer` as indented JSON text, so
+  `output_schema` validation parses it. Before, a long JSON deliverable could ship as
+  the raw cut-off extraction envelope and fail schema validation.
 - Reasoning: `ReasoningTrace` now dumps `reasoning_types_used` as a sorted list, so
   `python -m fsm_llm.reasoning --output json` and `--save` JSON files list the types
   instead of writing `"<redacted:set>"`. `model_dump()` returns a list too, so the

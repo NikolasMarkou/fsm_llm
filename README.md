@@ -60,7 +60,7 @@ Features of the core:
 ## Files
 
 - `src/fsm_llm/` - the one source package: the core at the top level, and the subpackages `reasoning`, `workflows`, `agents`, `monitor`, `harness`, `eval`.
-- `tests/` - the pytest suite (7,980 tests): one folder per part of the package, plus regression, example and packaging checks. The default run replaces the LLM with a fake.
+- `tests/` - the pytest suite (7,990 tests): one folder per part of the package, plus regression, example and packaging checks. The default run replaces the LLM with a fake.
 - `examples/` - 100 runnable examples in 8 categories, each a folder with `run.py` and its FSM JSON.
 - `docs/` - long guides: `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md`, plus three dated Strands design records.
 - `scripts/audit_pth.py` - scans installed packages for malicious or code-bearing `.pth` files (used by `make audit` and CI).
@@ -284,7 +284,7 @@ The examples are evaluation baselines: `fsm-llm-eval examples` runs them all in 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 make install-dev    # Install in dev mode with all extras + pre-commit hooks
-make test           # Run full test suite (7,980 tests)
+make test           # Run full test suite (7,990 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on src/fsm_llm/ (core and subpackages)

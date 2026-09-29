@@ -452,7 +452,16 @@ def _bool_decision_field_extractions(
     ]
 
 
-TypedFieldType = Literal["str", "float", "list", "bool"]
+# DECISION plan-2026-09-29T103145-06a5ec0a/D-050
+# `any` is for whole generated ARTIFACTS: EvalOpt `generated_output`,
+# MakerChecker `draft_output`, PromptChain `chain_step_result`. Do NOT type
+# them `str`: a JSON deliverable then comes back as an escaped JSON string
+# inside the extraction envelope, which doubles its tokens, hits max_tokens and
+# shipped the cut-off envelope as the answer (live eval_opt_structured,
+# architecture_review). Short prose fields (feedback, critiques, reflections,
+# plan step results) stay `str`. Answer paths serialise a dict/list with
+# base.artifact_text.
+TypedFieldType = Literal["str", "float", "list", "bool", "any"]
 
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-035
 # Keys of core's extraction reply envelopes (single-field
@@ -538,8 +547,9 @@ def _typed_field_extraction(
     """One typed ``field_extraction`` for a loop value an agent state produces.
 
     Contract: returns a raw dict for ``State(field_extractions=[...])``
-    declaring ``field_name`` as ``field_type`` (``str``, ``float``, ``list`` or
-    ``bool``; core coerces and rejects mismatches). The prompt context is
+    declaring ``field_name`` as ``field_type`` (``str``, ``float``, ``list``,
+    ``bool``, or ``any`` for a whole generated artifact; core coerces and
+    rejects mismatches). The prompt context is
     narrowed to ``task``, ``observations`` and ``extra_context_keys`` (in that
     order, duplicates dropped), and the instructions tell the model to read the
     value from the task and those keys, not from the "Continue." loop message
@@ -1359,7 +1369,7 @@ def build_prompt_chain_fsm(
     Build a Prompt Chain FSM definition from a list of ChainStep objects.
 
     Creates a linear pipeline of states: step_0 -> step_1 -> ... -> output.
-    Each step extracts one typed ``chain_step_result`` (str) whose prompt
+    Each step extracts one typed ``chain_step_result`` (any, D-050) whose prompt
     shows the task and ``chain_results``; the ChainStep's instructions word
     that field, and its ``response_instructions`` stay the step's reply
     (user-owned). A step after a gated step (one with ``validation_fn``) also
@@ -1421,7 +1431,7 @@ def build_prompt_chain_fsm(
             "field_extractions": [
                 _typed_field_extraction(
                     ContextKeys.CHAIN_STEP_RESULT,
-                    "str",
+                    "any",
                     build_chain_step_field_instructions(
                         i,
                         step.name,
@@ -1777,7 +1787,7 @@ def build_evalopt_fsm(
     - refine: LLM refines based on feedback
     - output: terminal state with final answer
 
-    generate and refine each extract one typed ``generated_output`` (str) and
+    generate and refine each extract one typed ``generated_output`` (any) and
     are silent (empty response instructions); ``evaluation_passed`` is written
     only by the evaluation handler, never extracted.
     """
@@ -1803,7 +1813,7 @@ def build_evalopt_fsm(
             "extraction_instructions": "",
             "field_extractions": [
                 _typed_field_extraction(
-                    ContextKeys.GENERATED_OUTPUT, "str", fields["generate"]
+                    ContextKeys.GENERATED_OUTPUT, "any", fields["generate"]
                 )
             ],
             "response_instructions": "",
@@ -1879,7 +1889,7 @@ def build_evalopt_fsm(
             "field_extractions": [
                 _typed_field_extraction(
                     ContextKeys.GENERATED_OUTPUT,
-                    "str",
+                    "any",
                     fields["refine"],
                     extra_context_keys=(
                         ContextKeys.PREVIOUS_OUTPUT,
@@ -1961,7 +1971,7 @@ def build_maker_checker_fsm(
             "purpose": "Produce a high-quality draft following the maker instructions",
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(draft, "str", fields["make"])
+                _typed_field_extraction(draft, "any", fields["make"])
             ],
             "response_instructions": "",
             "transitions": [
@@ -2067,7 +2077,7 @@ def build_maker_checker_fsm(
             "field_extractions": [
                 _typed_field_extraction(
                     draft,
-                    "str",
+                    "any",
                     fields["revise"],
                     extra_context_keys=(
                         ContextKeys.PREVIOUS_DRAFT,

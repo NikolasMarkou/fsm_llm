@@ -863,3 +863,84 @@ class TestMultiJsonTieBreakDivergence:
         from fsm_llm.utilities import extract_json_from_text
 
         assert extract_json_from_text(text) == expected
+
+
+class TestCutOffFieldEnvelopeIsUnwrapped:
+    """D-050 (plan 06a5ec0a): a single-field envelope the JSON rungs cannot
+    parse (``max_tokens`` cut it off) yields its ``value``, never the envelope.
+
+    Before the fix the unstructured ``str`` rung stored the whole
+    ``{"field_name": ..., "value": ...`` text as the field value, and agents
+    shipped it as their answer. D-022 still binds: prose that merely contains
+    JSON is kept verbatim.
+    """
+
+    @staticmethod
+    def _parse(llm, content: str, field_type: str = "str"):
+        return llm._parse_field_extraction_response(
+            _FakeResponse(content),
+            FieldExtractionRequest(
+                system_prompt="write the draft",
+                user_message="Continue.",
+                field_name="draft_output",
+                field_type=field_type,
+            ),
+        )
+
+    def test_truncated_string_value_is_salvaged(self, llm):
+        content = (
+            '{"field_name": "draft_output", "value": "# REPORT\\n\\n## 1. DATA '
+            'PRIVACY\\n- \\"quoted\\" finding\\n- finding tw'
+        )
+        result = self._parse(llm, content)
+
+        assert result.value == (
+            '# REPORT\n\n## 1. DATA PRIVACY\n- "quoted" finding\n- finding tw'
+        )
+        assert '"field_name"' not in result.value
+
+    def test_escape_cut_in_half_is_dropped(self, llm):
+        result = self._parse(
+            llm, '{"field_name": "draft_output", "value": "caf\\u00e9 ok\\u00'
+        )
+
+        assert result.value == "café ok"
+
+    def test_truncated_native_object_keeps_the_value_text_only(self, llm):
+        content = '{"field_name": "draft_output", "value": {"name": "Pasta", "x": [1,'
+        for field_type in ("str", "any"):
+            result = self._parse(llm, content, field_type)
+
+            assert result.value == '{"name": "Pasta", "x": [1,'
+
+    def test_complete_value_before_a_cut_is_decoded(self, llm):
+        content = '{"field_name": "draft_output", "value": {"name": "Pasta"}, "conf'
+
+        assert self._parse(llm, content, "any").value == {"name": "Pasta"}
+        assert json.loads(self._parse(llm, content).value) == {"name": "Pasta"}
+
+    def test_complete_envelope_with_string_value(self, llm):
+        content = (
+            '{"field_name": "draft_output", "value": "the draft", "confidence": 0.9}'
+        )
+        result = self._parse(llm, content)
+
+        assert result.value == "the draft"
+        assert result.confidence == 0.9
+
+    def test_envelope_cut_before_any_value_is_invalid(self, llm):
+        result = self._parse(llm, '{"field_name": "draft_output", "value": "')
+
+        assert result.value is None
+        assert result.is_valid is False
+
+    def test_prose_containing_json_is_unchanged(self, llm):
+        prose = 'The API returned {"error": "not_found"} when I tried to save.'
+
+        assert self._parse(llm, prose).value == prose
+
+    def test_another_fields_envelope_is_not_unwrapped(self, llm):
+        # Only this field's envelope is unwrapped (the rung's scope is narrow).
+        content = '{"field_name": "other", "value": "zzz'
+
+        assert self._parse(llm, content).value == content
