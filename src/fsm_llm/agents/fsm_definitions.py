@@ -52,6 +52,7 @@ def _finalize_fsm(
 
 def build_orchestrator_fsm(
     task_description: str = "",
+    context_keys: Sequence[str] = (),
 ) -> dict[str, Any]:
     """
     Build an Orchestrator-Workers FSM definition.
@@ -59,6 +60,11 @@ def build_orchestrator_fsm(
     The FSM implements task decomposition and delegation:
     orchestrate -> delegate -> collect -> synthesize (all collected)
                                        -> orchestrate (more work needed)
+
+    ``subtasks`` and ``all_collected`` are explicit typed fields whose prompts
+    show the task, ``worker_results`` and the caller's ``context_keys``
+    (never ``agent_trace`` or ``skipped_subtasks``). Raises ``ValueError``
+    like :func:`_typed_field_extraction` for a disallowed context key.
     """
     from .prompts import (
         build_collect_extraction_instructions,
@@ -66,6 +72,7 @@ def build_orchestrator_fsm(
         build_delegate_response_instructions,
         build_orchestrate_extraction_instructions,
         build_orchestrate_response_instructions,
+        build_orchestrator_field_instructions,
         build_orchestrator_synthesize_extraction_instructions,
         build_orchestrator_synthesize_response_instructions,
     )
@@ -75,6 +82,12 @@ def build_orchestrator_fsm(
         "into subtasks and delegating to workers. You analyze results, determine "
         "if more work is needed, and synthesize a final answer from all results."
     )
+    fields = build_orchestrator_field_instructions()
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-053: explicit narrowed
+    # configs replace core's auto-minted ones (whole context, agent_trace
+    # included). `subtasks` stays `any`: the delegator also takes a lone
+    # string as one subtask. Do NOT add `skipped_subtasks` here (D-049).
+    judged = (ContextKeys.WORKER_RESULTS, *context_keys)
 
     states: dict[str, Any] = {
         "orchestrate": {
@@ -83,6 +96,14 @@ def build_orchestrator_fsm(
             "purpose": "Analyze the task and create a delegation plan",
             "required_context_keys": [ContextKeys.SUBTASKS],
             "extraction_instructions": build_orchestrate_extraction_instructions(),
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.SUBTASKS,
+                    "any",
+                    fields[ContextKeys.SUBTASKS],
+                    extra_context_keys=judged,
+                )
+            ],
             "response_instructions": build_orchestrate_response_instructions(),
             "transitions": [
                 {
@@ -122,9 +143,14 @@ def build_orchestrator_fsm(
             "description": "Review worker results and decide if more work is needed",
             "purpose": "Assess completeness of gathered results",
             "extraction_instructions": build_collect_extraction_instructions(),
-            "field_extractions": _bool_decision_field_extractions(
-                ContextKeys.ALL_COLLECTED, build_collect_extraction_instructions()
-            ),
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.ALL_COLLECTED,
+                    "bool",
+                    fields[ContextKeys.ALL_COLLECTED],
+                    extra_context_keys=judged,
+                )
+            ],
             "response_instructions": build_collect_response_instructions(),
             "transitions": [
                 {
@@ -188,6 +214,7 @@ def build_adapt_fsm(
     registry: ToolRegistry | None = None,
     task_description: str = "",
     max_depth: int = 3,
+    context_keys: Sequence[str] = (),
 ) -> dict[str, Any]:
     """
     Build an ADaPT (Adaptive Decomposition and Planning for Tasks) FSM definition.
@@ -196,8 +223,14 @@ def build_adapt_fsm(
     attempt -> assess -> combine (success)
                       -> decompose (failure) -> combine (depth limit)
                                              -> [triggers recursive run()]
+
+    ``attempt_result`` (str), ``attempt_succeeded`` (bool) and ``subtasks``
+    (list) are explicit typed fields whose prompts show the task, the
+    attempt (assess, decompose) and the caller's ``context_keys``, never
+    ``agent_trace``. Raises ``ValueError`` like :func:`_typed_field_extraction`.
     """
     from .prompts import (
+        build_adapt_field_instructions,
         build_assess_extraction_instructions,
         build_assess_response_instructions,
         build_attempt_extraction_instructions,
@@ -214,6 +247,12 @@ def build_adapt_fsm(
         "simpler subtasks and solve them recursively. "
         "Always try the direct approach before decomposing."
     )
+    fields = build_adapt_field_instructions(registry, task_description=task_description)
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-053: explicit narrowed
+    # configs replace core's auto-minted `any` ones (whole context). Do NOT
+    # type `subtasks` `any`: the subtask executor needs a list, and `list`
+    # also parses a JSON-string list.
+    judged = (ContextKeys.ATTEMPT_RESULT, *context_keys)
 
     states: dict[str, Any] = {
         "attempt": {
@@ -224,6 +263,14 @@ def build_adapt_fsm(
             "extraction_instructions": build_attempt_extraction_instructions(
                 registry, task_description=task_description
             ),
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.ATTEMPT_RESULT,
+                    "str",
+                    fields[ContextKeys.ATTEMPT_RESULT],
+                    extra_context_keys=context_keys,
+                )
+            ],
             "response_instructions": build_attempt_response_instructions(),
             "transitions": [
                 {
@@ -252,6 +299,14 @@ def build_adapt_fsm(
             "purpose": "Determine if the attempt is satisfactory or needs decomposition",
             "required_context_keys": [ContextKeys.ATTEMPT_SUCCEEDED],
             "extraction_instructions": build_assess_extraction_instructions(),
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.ATTEMPT_SUCCEEDED,
+                    "bool",
+                    fields[ContextKeys.ATTEMPT_SUCCEEDED],
+                    extra_context_keys=judged,
+                )
+            ],
             "response_instructions": build_assess_response_instructions(),
             "transitions": [
                 {
@@ -337,6 +392,14 @@ def build_adapt_fsm(
             "purpose": "Break the task down for recursive solving",
             "required_context_keys": [ContextKeys.SUBTASKS],
             "extraction_instructions": build_decompose_extraction_instructions(),
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.SUBTASKS,
+                    "list",
+                    fields[ContextKeys.SUBTASKS],
+                    extra_context_keys=judged,
+                )
+            ],
             "response_instructions": build_decompose_response_instructions(),
             "transitions": [
                 {
@@ -431,27 +494,6 @@ def _tool_selection_field_extractions(
             **narrowed,
         }
         for name, field_type in fields
-    ]
-
-
-def _bool_decision_field_extractions(
-    field_name: str, instructions: str
-) -> list[dict[str, Any]]:
-    """Typed ``field_extractions`` for a state's one boolean routing decision.
-
-    Contract: ``instructions`` is the state's ``extraction_instructions``;
-    returns a one-entry list of raw dicts for ``State(field_extractions=...)``
-    declaring ``field_name`` as ``bool``, worded like
-    :func:`_tool_selection_field_extractions`. Never raises.
-    """
-    return [
-        {
-            "field_name": field_name,
-            "field_type": "bool",
-            "extraction_instructions": (
-                f"Extract the '{field_name}' field. {instructions}"
-            ),
-        }
     ]
 
 
@@ -1634,9 +1676,14 @@ def build_debate_fsm(
                 # The verdict is recorded, never routed on: a null costs no
                 # retry call.
                 _debate_field(ContextKeys.JUDGE_VERDICT, round_values, required=False),
-                *_bool_decision_field_extractions(
+                # Narrowed to this round's values and its number (fix 21.1):
+                # the old bool helper showed the whole context, agent_trace
+                # included.
+                _typed_field_extraction(
                     ContextKeys.CONSENSUS_REACHED,
+                    "bool",
                     fields[ContextKeys.CONSENSUS_REACHED],
+                    extra_context_keys=(*round_values, ContextKeys.CURRENT_ROUND),
                 ),
             ],
             "response_instructions": "",
@@ -1705,6 +1752,7 @@ def build_debate_fsm(
 def build_rewoo_fsm(
     registry: ToolRegistry,
     task_description: str = "",
+    context_keys: Sequence[str] = (),
 ) -> dict[str, Any]:
     """
     Build a REWOO FSM definition from a tool registry.
@@ -1715,10 +1763,15 @@ def build_rewoo_fsm(
     - solve: single LLM call synthesizes the final answer from all evidence
 
     plan_all and execute_plans are silent (empty response instructions): only
-    solve speaks.
+    solve speaks. ``plan_blueprint`` is an explicit ``list`` field whose
+    prompt shows the task and the caller's ``context_keys``, never
+    ``agent_trace`` (DECISION D-053 of plan 06a5ec0a, anchored in
+    :func:`build_adapt_fsm`). Raises ``ValueError`` like
+    :func:`_typed_field_extraction`.
     """
     from .prompts import (
         build_rewoo_plan_extraction_instructions,
+        build_rewoo_plan_field_instructions,
         build_rewoo_solve_extraction_instructions,
         build_rewoo_solve_response_instructions,
     )
@@ -1738,6 +1791,16 @@ def build_rewoo_fsm(
             "extraction_instructions": build_rewoo_plan_extraction_instructions(
                 registry, task_description=task_description
             ),
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.PLAN_BLUEPRINT,
+                    "list",
+                    build_rewoo_plan_field_instructions(
+                        registry, task_description=task_description
+                    ),
+                    extra_context_keys=context_keys,
+                )
+            ],
             "response_instructions": "",
             "transitions": [
                 {

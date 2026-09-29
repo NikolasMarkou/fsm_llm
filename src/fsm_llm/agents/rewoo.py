@@ -14,7 +14,7 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, caller_prompt_keys
 from .constants import (
     ContextKeys,
     HandlerNames,
@@ -107,7 +107,11 @@ class REWOOAgent(BaseAgent):
         :return: AgentResult with answer, trace, and metadata
         """
         self._refuse_flagged_tools()
-        fsm_def = build_rewoo_fsm(self.tools, task_description=task)
+        fsm_def = build_rewoo_fsm(
+            self.tools,
+            task_description=task,
+            context_keys=caller_prompt_keys(initial_context, self._run_output_keys),
+        )
 
         context = self._init_context(
             task,

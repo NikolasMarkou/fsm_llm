@@ -16,7 +16,7 @@ from fsm_llm import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, caller_prompt_keys
 from .constants import (
     ADaPTStates,
     ContextKeys,
@@ -92,6 +92,7 @@ class ADaPTAgent(BaseAgent):
             registry=self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
             max_depth=self.max_depth,
+            context_keys=caller_prompt_keys(initial_context, self._run_output_keys),
         )
 
         # Create API instance

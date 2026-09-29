@@ -2001,12 +2001,147 @@ class TestOrchestratorWorkers:
             logger.disable("fsm_llm")
 
         assert calls == ["part one"]
+        # D-049: skipped subtasks are reported beside, not inside,
+        # worker_results.
         entries = result.final_context[ContextKeys.WORKER_RESULTS]
-        skipped = [e for e in entries if e.get("skipped")]
-        assert [e["subtask"] for e in skipped] == ["part two"]
-        assert skipped[0]["success"] is False
+        assert [e["subtask"] for e in entries] == ["part one"]
+        assert result.final_context[ContextKeys.SKIPPED_SUBTASKS] == ["part two"]
         assert any("skipping 1" in w for w in warnings)
         assert result.success is True
+
+    def test_collect_prompt_never_shows_skipped_subtasks(self):
+        # D-049: the collect judge read skipped entries in worker_results as
+        # unfinished work and re-delegated (live 23 -> 66 calls).
+        from fsm_llm.agents import AgentResult
+
+        def worker(subtask: str) -> AgentResult:
+            return AgentResult(answer=f"done {subtask}", success=True)
+
+        agent = self._agent(worker, max_workers=1)
+        agent.run("Plan the trip")
+        llm = agent._api_kwargs["llm_interface"]
+
+        collects = _field_requests(llm, ContextKeys.ALL_COLLECTED)
+        assert collects
+        for request in collects:
+            text = request.system_prompt + json.dumps(request.context, default=str)
+            assert "part two" not in text
+            assert "skipped" not in text.lower()
+            assert request.context[ContextKeys.WORKER_RESULTS] == [
+                {"subtask": "part one", "answer": "done part one", "success": True}
+            ]
+
+
+def _no_trace_run_requests(pattern: str) -> tuple[PromptGroundedLLM, dict]:
+    """Run ``pattern`` through the real API on the grounded fake with a
+    caller hint; returns the fake and the caller context used."""
+    from fsm_llm.agents import (
+        ADaPTAgent,
+        AgentConfig,
+        AgentResult,
+        DebateAgent,
+        OrchestratorAgent,
+        REWOOAgent,
+    )
+
+    hint = {"audience": "hint-for-kids"}
+    if pattern == "rewoo":
+        llm = PromptGroundedLLM(
+            facts={
+                "plan_blueprint": ([_lookup_step(1, "capital")], "capital of France"),
+                "final_answer": ("Paris", "capital of France"),
+            }
+        )
+        REWOOAgent(tools=_rewoo_registry([]), llm_interface=llm).run(
+            _REWOO_TASK, initial_context=hint
+        )
+    elif pattern == "orchestrator":
+        llm = PromptGroundedLLM(
+            facts={
+                "subtasks": (["part one"], "Plan the trip"),
+                "all_collected": (True, "done part one"),
+            }
+        )
+        OrchestratorAgent(
+            worker_factory=lambda t: AgentResult(answer=f"done {t}", success=True),
+            config=AgentConfig(max_iterations=8),
+            llm_interface=llm,
+        ).run("Plan the trip", initial_context=hint)
+    elif pattern.startswith("adapt"):
+        decompose = pattern == "adapt_decompose"
+        llm = PromptGroundedLLM(
+            facts={
+                "attempt_result": ("A direct answer to the plan", "Plan the trip"),
+                "attempt_succeeded": (not decompose, "A direct answer"),
+                "subtasks": (["pick dates"], "A direct answer"),
+            }
+        )
+        ADaPTAgent(
+            config=AgentConfig(max_iterations=10), max_depth=1, llm_interface=llm
+        ).run("Plan the trip", initial_context=hint)
+    else:
+        llm = _TurnAwareLLM(_debate_derived(), responses={"conclude": _CONCLUDE_TEXT})
+        DebateAgent(num_rounds=2, llm_interface=llm).run(_DEBATE_TASK)
+    return llm, hint
+
+
+_NARROWED_FIELDS: dict[str, list[str]] = {
+    "orchestrator": [ContextKeys.SUBTASKS, ContextKeys.ALL_COLLECTED],
+    "adapt": [ContextKeys.ATTEMPT_RESULT, ContextKeys.ATTEMPT_SUCCEEDED],
+    "adapt_decompose": [ContextKeys.SUBTASKS],
+    "rewoo": [ContextKeys.PLAN_BLUEPRINT],
+    "debate": [ContextKeys.CONSENSUS_REACHED],
+}
+
+
+class TestNarrowedPlannerFields:
+    """Fix 21.1 (review loops #7): the fields core used to auto-mint with the
+    whole context (``agent_trace`` included) are explicit typed configs whose
+    prompts show the task, the values they judge and the caller's keys."""
+
+    @pytest.mark.parametrize("pattern", list(_NARROWED_FIELDS))
+    def test_field_prompts_exclude_agent_trace(self, pattern):
+        llm, hint = _no_trace_run_requests(pattern)
+
+        for name in _NARROWED_FIELDS[pattern]:
+            requests = _field_requests(llm, name)
+            assert requests, name
+            for request in requests:
+                assert ContextKeys.AGENT_TRACE not in (request.context or {}), name
+                assert ContextKeys.TASK in request.context, name
+                if pattern != "debate":
+                    assert request.context.get("audience") == hint["audience"]
+
+    @pytest.mark.parametrize(
+        ("builder", "state", "field", "field_type"),
+        [
+            ("orchestrator", "orchestrate", ContextKeys.SUBTASKS, "any"),
+            ("orchestrator", "collect", ContextKeys.ALL_COLLECTED, "bool"),
+            ("adapt", "attempt", ContextKeys.ATTEMPT_RESULT, "str"),
+            ("adapt", "assess", ContextKeys.ATTEMPT_SUCCEEDED, "bool"),
+            ("adapt", "decompose", ContextKeys.SUBTASKS, "list"),
+            ("rewoo", "plan_all", ContextKeys.PLAN_BLUEPRINT, "list"),
+            ("debate", "judge", ContextKeys.CONSENSUS_REACHED, "bool"),
+        ],
+    )
+    def test_builders_declare_typed_narrowed_configs(
+        self, builder, state, field, field_type
+    ):
+        from fsm_llm.agents import fsm_definitions as defs
+
+        fsm = {
+            "orchestrator": lambda: defs.build_orchestrator_fsm("t"),
+            "adapt": lambda: defs.build_adapt_fsm(None, "t"),
+            "rewoo": lambda: defs.build_rewoo_fsm(_rewoo_registry([]), "t"),
+            "debate": lambda: defs.build_debate_fsm("t"),
+        }[builder]()
+        configs = {
+            c["field_name"]: c for c in fsm["states"][state]["field_extractions"]
+        }
+
+        assert configs[field]["field_type"] == field_type
+        assert ContextKeys.AGENT_TRACE not in configs[field]["context_keys"]
+        assert ContextKeys.SKIPPED_SUBTASKS not in configs[field]["context_keys"]
 
 
 def _field_instructions(fsm: dict, state: str) -> dict[str, str]:
@@ -2618,8 +2753,9 @@ class TestSuccessReflectsWhoConcluded:
 
     def test_debate_judge_consensus_on_the_last_round_is_success(self):
         derived = _debate_derived()
-        derived[ContextKeys.CONSENSUS_REACHED] = lambda _t, ctx: bool(
-            ctx.get(ContextKeys.DEBATE_ROUNDS)
+        # The judge prompt shows current_round, not debate_rounds (fix 21.1).
+        derived[ContextKeys.CONSENSUS_REACHED] = lambda _t, ctx: (
+            ctx.get(ContextKeys.CURRENT_ROUND, 1) > 1
         )
         result = self._debate(derived)
 
@@ -2632,8 +2768,9 @@ class TestSuccessReflectsWhoConcluded:
         derived[ContextKeys.PROPOSITION] = lambda text, ctx: (
             None if ctx.get(ContextKeys.DEBATE_ROUNDS) else _P1
         )
-        derived[ContextKeys.CONSENSUS_REACHED] = lambda _t, ctx: bool(
-            ctx.get(ContextKeys.DEBATE_ROUNDS)
+        # The judge prompt shows current_round, not debate_rounds (fix 21.1).
+        derived[ContextKeys.CONSENSUS_REACHED] = lambda _t, ctx: (
+            ctx.get(ContextKeys.CURRENT_ROUND, 1) > 1
         )
         result = self._debate(derived)
 

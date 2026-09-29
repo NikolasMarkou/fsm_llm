@@ -201,7 +201,10 @@ work, is `docs/agents_roadmap.md`.
 - Agents (PAT-04, PAT-10): `BudgetExhaustedError` and `AgentTimeoutError` from an
   ADaPT subtask or an Orchestrator worker were swallowed; they now end the run. ADaPT
   answered with the failed first attempt and counted its decomposition as a tool call;
-  Orchestrator silently dropped subtasks beyond `max_workers` (now recorded as skipped).
+  Orchestrator silently dropped subtasks beyond `max_workers` (now listed in
+  `skipped_subtasks`, kept out of `worker_results` so the collect step does not
+  re-delegate them). Orchestrator, ADaPT, REWOO and the Debate judge extract their
+  planning and verdict fields through typed prompts that no longer carry `agent_trace`.
 - Agents (REACT-01, REACT-02): Reflexion stored an empty reflection for episode 1 and
   lagged one episode behind; `evaluation_fn` was skipped when the self-evaluation came
   back empty.

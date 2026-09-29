@@ -415,6 +415,22 @@ def build_rewoo_plan_extraction_instructions(
     )
 
 
+def build_rewoo_plan_field_instructions(
+    registry: ToolRegistry,
+    task_description: str | None = None,
+) -> str:
+    """Instructions for the REWOO ``plan_blueprint`` typed field.
+
+    The plan is generated, so the text opens with :data:`_COMPOSE`, then the
+    tool list, reference rules and example of
+    :func:`build_rewoo_plan_extraction_instructions` (fix 21.1 of plan
+    06a5ec0a).
+    """
+    return _COMPOSE + build_rewoo_plan_extraction_instructions(
+        registry, task_description=task_description
+    )
+
+
 def build_rewoo_solve_extraction_instructions() -> str:
     """Build extraction instructions for the REWOO solve state."""
     return "\n".join(
@@ -612,6 +628,32 @@ def build_collect_response_instructions() -> str:
     )
 
 
+def build_orchestrator_field_instructions() -> dict[str, str]:
+    """Per-field instructions for the orchestrator's typed fields.
+
+    Returns ``{field_name: instructions}`` for ``subtasks`` (orchestrate) and
+    ``all_collected`` (collect). Both prompts show the task and
+    ``worker_results`` only (fix 21.1 of plan 06a5ec0a). ``subtasks`` is
+    generated, so it opens with :data:`_COMPOSE`; the ``all_collected``
+    wording is permissive, like the debate judge's (D-035): a false sends
+    the run back to orchestrate for another delegation round.
+    """
+    return {
+        ContextKeys.SUBTASKS: (
+            f"{_COMPOSE}Your decomposition of the task: a JSON list of subtask "
+            "description strings, each specific, self-contained and actionable "
+            "for one worker. If worker_results holds results from earlier "
+            "rounds, list only the work those results do not cover yet."
+        ),
+        ContextKeys.ALL_COLLECTED: (
+            "Weigh the worker_results value against the task. true when those "
+            "results are enough to write a useful final answer, even if some "
+            "detail is thin; false only when a clearly required part of the "
+            "task has no result at all."
+        ),
+    }
+
+
 def build_orchestrator_synthesize_extraction_instructions() -> str:
     """Build extraction instructions for the orchestrator synthesize state."""
     return "\n".join(
@@ -723,6 +765,44 @@ def build_decompose_response_instructions() -> str:
         "Explain how you are breaking the task into subtasks and "
         "why this decomposition should help solve the problem."
     )
+
+
+def build_adapt_field_instructions(
+    registry: ToolRegistry | None = None,
+    task_description: str | None = None,
+) -> dict[str, str]:
+    """Per-field instructions for the ADaPT states' typed fields.
+
+    Returns ``{field_name: instructions}`` for ``attempt_result`` (attempt),
+    ``attempt_succeeded`` (assess) and ``subtasks`` (decompose); fix 21.1 of
+    plan 06a5ec0a. The generated values open with :data:`_COMPOSE`; the
+    ``attempt_succeeded`` wording is permissive (a false costs a whole
+    decomposition). ``registry``/``task_description`` list the tools like
+    :func:`build_attempt_extraction_instructions`.
+    """
+    tool_section = ""
+    if registry is not None and len(registry) > 0:
+        tool_text, _ = _get_tool_list(registry, task_description)
+        tool_section = "\n\n" + tool_text
+    return {
+        ContextKeys.ATTEMPT_RESULT: (
+            f"{_COMPOSE}Your direct attempt at the task: a complete answer "
+            "written from your own knowledge." + tool_section
+        ),
+        ContextKeys.ATTEMPT_SUCCEEDED: (
+            "Weigh the attempt_result value against the task. true when it "
+            "answers the task usefully and completely enough to hand over, "
+            "even if it could be polished; false only when it is missing, "
+            "off-task, or leaves a clearly required part of the task "
+            "unanswered."
+        ),
+        ContextKeys.SUBTASKS: (
+            f"{_COMPOSE}The attempt_result value was judged insufficient. Your "
+            "decomposition of the task: a JSON list of short subtask "
+            "description strings, each simpler than the task and solvable on "
+            "its own, together covering what the attempt missed."
+        ),
+    }
 
 
 def build_combine_extraction_instructions() -> str:
@@ -866,7 +946,8 @@ def build_debate_field_instructions(
             "Weigh the proposition, critique and counter_argument values. "
             "true when the proposition, as defended in the counter-argument, "
             "is a satisfactory answer to the task; false only when another "
-            f"round (at most {max_rounds} in total) would clearly improve it."
+            f"round (at most {max_rounds} in total; current_round is this "
+            "round's number) would clearly improve it."
             f"{_persona_line(judge_persona)}"
         ),
     }

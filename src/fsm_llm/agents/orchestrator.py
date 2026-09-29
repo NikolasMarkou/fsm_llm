@@ -16,7 +16,7 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, caller_prompt_keys
 from .constants import (
     ContextKeys,
     Defaults,
@@ -54,6 +54,7 @@ class OrchestratorAgent(BaseAgent):
         {
             ContextKeys.SUBTASKS,
             ContextKeys.WORKER_RESULTS,
+            ContextKeys.SKIPPED_SUBTASKS,
             ContextKeys.DELEGATION_PLAN,
             ContextKeys.ALL_COLLECTED,
         }
@@ -100,7 +101,10 @@ class OrchestratorAgent(BaseAgent):
         :return: AgentResult with answer, trace, and metadata
         """
         # Build FSM
-        fsm_def = build_orchestrator_fsm(task_description=task)
+        fsm_def = build_orchestrator_fsm(
+            task_description=task,
+            context_keys=caller_prompt_keys(initial_context, self._run_output_keys),
+        )
 
         # Build initial context
         context = self._init_context(
@@ -181,8 +185,9 @@ class OrchestratorAgent(BaseAgent):
         Execute worker_factory for each subtask, one after another.
 
         Called as a POST_TRANSITION handler when entering the 'delegate' state.
-        Subtasks beyond ``max_workers`` are not run: each is recorded as a
-        failed ``skipped`` result, with a WARNING. A worker's
+        Subtasks beyond ``max_workers`` are not run: they go to
+        ``skipped_subtasks`` (never into ``worker_results``), with a WARNING
+        and a trace count. A worker's
         ``AgentTimeoutError``/``BudgetExhaustedError`` goes into ``holder``
         and no further worker starts; any other worker exception is recorded
         as a failed result.
@@ -247,16 +252,22 @@ class OrchestratorAgent(BaseAgent):
                     }
                 )
 
-        new_results.extend(
-            {
-                "subtask": subtask_str,
-                "answer": f"Skipped: over max_workers={self.max_workers}",
-                "success": False,
-                "skipped": True,
-            }
-            for subtask_str in skipped
-        )
         all_results = existing_results + new_results
+
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-049: skipped subtasks go
+        # to their own key, never into worker_results. Do NOT record them as
+        # failed worker entries: the collect judge reads worker_results, took
+        # them for unfinished work and re-delegated (hierarchical_orchestrator
+        # 23 -> 66 calls). Do NOT drop them silently either (PAT-10, D-042).
+        ran = {str(entry.get("subtask")) for entry in all_results}
+        previous = context.get(ContextKeys.SKIPPED_SUBTASKS)
+        skipped_all = [
+            subtask_str
+            for subtask_str in dict.fromkeys(
+                [*(previous if isinstance(previous, list) else []), *skipped]
+            )
+            if subtask_str not in ran
+        ]
 
         # Track in agent trace
         trace = context.get(ContextKeys.AGENT_TRACE, [])
@@ -273,6 +284,7 @@ class OrchestratorAgent(BaseAgent):
 
         return {
             ContextKeys.WORKER_RESULTS: all_results,
+            ContextKeys.SKIPPED_SUBTASKS: skipped_all,
             ContextKeys.AGENT_TRACE: trace,
             # Clear subtasks so orchestrate can set new ones if needed
             ContextKeys.SUBTASKS: None,

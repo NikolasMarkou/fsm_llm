@@ -233,7 +233,8 @@ class TestOrchestratorDelegation:
         assert "Pending LLM processing" in worker_results[0]["answer"]
 
     def test_delegate_respects_max_workers(self):
-        """Delegation runs at most max_workers; the rest are recorded as skipped."""
+        """Delegation runs at most max_workers; the rest go to
+        ``skipped_subtasks``, never into ``worker_results`` (D-049)."""
         calls: list[str] = []
 
         def worker(subtask: str) -> AgentResult:
@@ -251,16 +252,24 @@ class TestOrchestratorDelegation:
         result = agent._delegate_to_workers(context)
         worker_results = result[ContextKeys.WORKER_RESULTS]
         assert calls == ["t1", "t2"]
-        assert [r["subtask"] for r in worker_results] == ["t1", "t2", "t3", "t4", "t5"]
-        assert [r.get("skipped", False) for r in worker_results] == [
-            False,
-            False,
-            True,
-            True,
-            True,
-        ]
-        assert all(r["success"] is False for r in worker_results[2:])
+        assert [r["subtask"] for r in worker_results] == ["t1", "t2"]
+        assert not any("skipped" in r for r in worker_results)
+        assert result[ContextKeys.SKIPPED_SUBTASKS] == ["t3", "t4", "t5"]
         assert result[ContextKeys.AGENT_TRACE][-1]["subtasks_skipped"] == 3
+
+    def test_later_round_that_runs_a_skipped_subtask_unlists_it(self):
+        agent = OrchestratorAgent(worker_factory=_dummy_worker, max_workers=1)
+        first = agent._delegate_to_workers(
+            {ContextKeys.SUBTASKS: ["t1", "t2", "t3"], ContextKeys.AGENT_TRACE: []}
+        )
+        second = agent._delegate_to_workers({**first, ContextKeys.SUBTASKS: ["t2"]})
+
+        assert first[ContextKeys.SKIPPED_SUBTASKS] == ["t2", "t3"]
+        assert second[ContextKeys.SKIPPED_SUBTASKS] == ["t3"]
+        assert [r["subtask"] for r in second[ContextKeys.WORKER_RESULTS]] == [
+            "t1",
+            "t2",
+        ]
 
 
 class _DecisionLLM(LLMInterface):

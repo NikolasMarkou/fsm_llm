@@ -448,9 +448,10 @@ class _DecomposeScriptLLM(LLMInterface):
     """Scripted ADaPT model: the root attempt fails and decomposes into
     ``subtasks``; each subtask run answers from ``sub_success``.
 
-    Extraction reads ``current_depth``/``task`` from the request context, so
-    root and subtask runs (fresh FSMs of the same agent) are told apart the way
-    the real pipeline shows them. ``sub_tasks_seen`` records every subtask run
+    Extraction reads ``task`` from the request context: a task that is one of
+    ``subtasks`` is a subtask run (depth 1), anything else the root run. The
+    typed ADaPT field prompts no longer show ``current_depth`` (fix 21.1 of
+    plan 06a5ec0a narrowed them to the task and the attempt). ``sub_tasks_seen`` records every subtask run
     in order (one entry per subtask ``attempt`` extraction).
     """
 
@@ -489,11 +490,8 @@ class _DecomposeScriptLLM(LLMInterface):
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         context = request.context or {}
-        value = self._value(
-            request.field_name,
-            int(context.get(ContextKeys.CURRENT_DEPTH, 0) or 0),
-            str(context.get(ContextKeys.TASK, "")),
-        )
+        task = str(context.get(ContextKeys.TASK, ""))
+        value = self._value(request.field_name, 1 if task in self.subtasks else 0, task)
         return FieldExtractionResponse(
             field_name=request.field_name,
             value=value,

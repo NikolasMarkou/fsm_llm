@@ -11,7 +11,15 @@ import inspect
 import json
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Set
+from collections.abc import (
+    Callable,
+    Collection,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+    Set,
+)
 from typing import Any, ClassVar, cast
 
 from pydantic import BaseModel
@@ -214,16 +222,20 @@ def pattern_run_output_keys(agent: Any) -> frozenset[str]:
     return frozenset(k for k in keys if isinstance(k, str))
 
 
-def caller_prompt_keys(context: Mapping[str, Any] | None) -> tuple[str, ...]:
-    """Caller context keys a think turn's narrowed field prompts must list.
+def caller_prompt_keys(
+    context: Mapping[str, Any] | None, exclude: Collection[str] = ()
+) -> tuple[str, ...]:
+    """Caller context keys a pattern's narrowed field prompts must list.
 
     Interface contract (callers: ``ReactAgent``, ``ReflexionAgent``,
-    ``ReasoningReactAgent``, ``ParallelReactAgent`` ``run``): the think field
-    configs name their prompt keys (``context_keys``, D-017 of plan 06a5ec0a),
-    so a caller's hint such as ``suggested_tool`` would otherwise vanish from
-    the prompt. Returns the caller's string keys in order, without
-    internal-prefixed keys, ``RUN_OUTPUT_KEYS`` and ``agent_trace``. Core's
-    prompt filter still drops secret-looking entries. Never raises.
+    ``ReasoningReactAgent``, ``ParallelReactAgent``, ``OrchestratorAgent``,
+    ``ADaPTAgent``, ``REWOOAgent`` ``run``): typed field configs name their
+    prompt keys (``context_keys``, D-017 of plan 06a5ec0a), so a caller's
+    hint such as ``suggested_tool`` would otherwise vanish from the prompt.
+    Returns the caller's string keys in order, without internal-prefixed
+    keys, ``RUN_OUTPUT_KEYS``, ``agent_trace`` and ``exclude`` (a pattern's
+    own ``_run_output_keys``). Core's prompt filter still drops
+    secret-looking entries. Never raises.
     """
     return tuple(
         key
@@ -232,6 +244,7 @@ def caller_prompt_keys(context: Mapping[str, Any] | None) -> tuple[str, ...]:
         and not has_internal_prefix(key)
         and key not in RUN_OUTPUT_KEYS
         and key != ContextKeys.AGENT_TRACE
+        and key not in exclude
     )
 
 
