@@ -15,6 +15,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, get_type_hints
 
 from fsm_llm.logging import logger
+from fsm_llm.runner import _redact_context
 
 from .constants import ContextKeys, ErrorMessages
 from .definitions import ToolCall, ToolDefinition, ToolResult
@@ -43,6 +44,37 @@ def _as_param_value(value: Any, prop: dict[str, Any] | None) -> Any:
     if isinstance(value, list) and (prop or {}).get("type") != "array":
         return str(value)
     return value
+
+
+# Wrapper key for `redact_secret_entries`: `_redact_context` matches mapping
+# keys only, so a bare list or scalar is wrapped once. Not a secret-shaped name.
+_REDACT_WRAPPER_KEY = "value"
+
+
+def redact_secret_entries(value: Any) -> Any:
+    """A copy of *value* with secret-looking entries' values redacted, for display.
+
+    Contract:
+        - Every mapping entry, at any nesting level (dicts inside dicts and
+          inside lists/tuples), whose ``(key, value)`` matches
+          ``fsm_llm.constants.is_forbidden_context_entry`` keeps its key and
+          gets the value ``"<redacted>"``. Other values are unchanged.
+        - A non-container value (a string, number, ``None``) is returned as is:
+          it carries no key to match.
+        - Never mutates *value*; mappings and lists in the result are new
+          objects. Depth-bounded (fail closed) like the CLI log redaction.
+        - Shared by every agent site that shows tool input or memory values in
+          an observation, a trace, a log line or a tool reply.
+
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-016
+    # Redact a COPY for what is shown; the tool still receives the real input
+    # and `ApprovalRequest.parameters` stays raw (the approver must see the
+    # exact call). Do NOT inline a new key matcher or a second recursive walk
+    # here: this reuses the core CLI redaction (`is_forbidden_context_entry`
+    # at every level). Do NOT drop the key: the model and the reader should
+    # still see which argument was passed. See decisions.md D-016.
+    """
+    return _redact_context({_REDACT_WRAPPER_KEY: value})[_REDACT_WRAPPER_KEY]
 
 
 def normalize_tool_input(raw: Any) -> dict[str, Any]:
@@ -117,7 +149,7 @@ def _unwrap_nested_tool_input(
     skip = {ContextKeys.TOOL_INPUT, ContextKeys.TOOL_NAME}
     merged = {k: v for k, v in parameters.items() if k not in skip}
     merged.update(nested)
-    logger.debug(f"Unwrapped nested tool_input: {merged}")
+    logger.debug(f"Unwrapped nested tool_input: {redact_secret_entries(merged)}")
     return merged
 
 

@@ -36,7 +36,7 @@ from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall
 from .exceptions import AgentError
 from .fsm_definitions import _conclude_on_evidence_logic
 from .handlers import AgentHandlers
-from .tools import ToolRegistry, normalize_tool_input
+from .tools import ToolRegistry, normalize_tool_input, redact_secret_entries
 from .truncation import smart_truncate
 
 TOOL_CALLS_KEY = "tool_calls"
@@ -300,19 +300,21 @@ class ParallelReactAgent(BaseAgent):
             if not result.success:
                 observation = f"[TOOL FAILED] {observation}"
             step_num = len(observations) + 1
+            # plan-2026-09-29T103145-06a5ec0a/D-016: show a redacted copy.
+            shown_input = redact_secret_entries(call.parameters)
             entry = smart_truncate(
                 f"[Step {step_num}] Tool: {call.tool_name} | "
-                f"Input: {call.parameters} | Result: {observation}",
+                f"Input: {shown_input} | Result: {observation}",
                 Defaults.MAX_OBSERVATION_LENGTH,
             )
             observations.append(entry)
             trace_step = AgentStep(
                 iteration=step_num,
                 thought="",
-                action=f"{call.tool_name}({call.parameters})",
+                action=f"{call.tool_name}({shown_input})",
                 observation=observation,
             ).model_dump(mode="json")
-            trace_step["tool_input"] = call.parameters
+            trace_step["tool_input"] = shown_input
             trace.append(trace_step)
 
         if len(observations) > Defaults.MAX_OBSERVATIONS:

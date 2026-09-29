@@ -27,7 +27,7 @@ from typing import Annotated
 from fsm_llm.memory import BUFFER_CORE, WorkingMemory
 
 from .definitions import ToolDefinition
-from .tools import _infer_schema_from_hints
+from .tools import _infer_schema_from_hints, redact_secret_entries
 
 
 def create_memory_tools(
@@ -43,7 +43,14 @@ def create_memory_tools(
 
     Returns:
         List of 4 tool definitions: remember, recall, forget, list_memories.
+
+    Hidden buffers (``memory.hidden_buffers``, e.g. ``metadata``) are never
+    listed, forgotten or written, and secret-looking values are shown as
+    ``<redacted>`` (``redact_secret_entries``, D-016).
     """
+
+    def visible_buffers() -> list[str]:
+        return [b for b in memory.list_buffers() if b not in memory.hidden_buffers]
 
     def remember(
         key: Annotated[str, "The key/name to store the value under"],
@@ -58,6 +65,8 @@ def create_memory_tools(
         Use this to remember important facts, intermediate results,
         or user preferences for later use.
         """
+        if buffer in memory.hidden_buffers:
+            raise ValueError(f"Buffer '{buffer}' is hidden and cannot be written.")
         memory.set(buffer, key, value)
         return f"Remembered '{key}' in {buffer} buffer."
 
@@ -74,7 +83,8 @@ def create_memory_tools(
             return f"No memories found matching '{query}'."
 
         lines = [f"Found {len(results)} matching memories:"]
-        for buffer_name, key, value in results:
+        for buffer_name, key, raw in results:
+            value = redact_secret_entries({key: raw})[key]
             value_preview = str(value)[:200]
             if len(str(value)) > 200:
                 value_preview += "..."
@@ -88,7 +98,7 @@ def create_memory_tools(
 
         Searches all buffers and removes the first match found.
         """
-        for buffer_name in memory.list_buffers():
+        for buffer_name in visible_buffers():
             if memory.delete(buffer_name, key):
                 return f"Forgot '{key}' from {buffer_name} buffer."
         return f"Key '{key}' not found in any memory buffer."
@@ -104,9 +114,9 @@ def create_memory_tools(
         Shows key names and value previews organized by buffer.
         """
         if buffer != "all":
-            if not memory.has_buffer(buffer):
+            if not memory.has_buffer(buffer) or buffer in memory.hidden_buffers:
                 return f"Buffer '{buffer}' does not exist."
-            data = memory.get_buffer(buffer)
+            data = redact_secret_entries(memory.get_buffer(buffer))
             if not data:
                 return f"Buffer '{buffer}' is empty."
             lines = [f"Buffer '{buffer}' ({len(data)} entries):"]
@@ -118,17 +128,19 @@ def create_memory_tools(
             return "\n".join(lines)
 
         # List all buffers
-        all_buffers = memory.list_buffers()
+        all_buffers = visible_buffers()
         if not all_buffers:
             return "No memory buffers exist."
 
-        total = len(memory)
+        shown = {
+            name: redact_secret_entries(memory.get_buffer(name)) for name in all_buffers
+        }
+        total = sum(len(data) for data in shown.values())
         if total == 0:
             return "All memory buffers are empty."
 
         lines = [f"Working memory ({total} total entries):"]
-        for buf_name in all_buffers:
-            data = memory.get_buffer(buf_name)
+        for buf_name, data in shown.items():
             lines.append(f"\n  [{buf_name}] ({len(data)} entries):")
             for key, value in data.items():
                 preview = str(value)[:100]

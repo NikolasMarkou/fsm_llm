@@ -11,13 +11,13 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm.constants import has_internal_prefix
+from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.logging import logger
 
 from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import ApprovalRequest, ToolCall
 from .exceptions import ApprovalDeniedError
-from .tools import normalize_tool_input
+from .tools import normalize_tool_input, redact_secret_entries
 
 # Type aliases
 ApprovalCallback = Callable[[ApprovalRequest], bool]
@@ -88,7 +88,8 @@ class HumanInTheLoop:
         """
         logger.info(
             LogMessages.APPROVAL_REQUESTED.format(
-                action=f"{tool_call.tool_name}({tool_call.parameters})"
+                action=f"{tool_call.tool_name}"
+                f"({redact_secret_entries(tool_call.parameters)})"
             )
         )
 
@@ -97,6 +98,10 @@ class HumanInTheLoop:
                 "No approval callback configured; cannot request approval"
             )
 
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-016
+        # `parameters` stays RAW: the approver must see the exact call it
+        # authorises. Do NOT redact it. The context summary is background, so
+        # secret-looking entries are dropped (top level) and redacted (nested).
         request = ApprovalRequest(
             tool_name=tool_call.tool_name,
             parameters=tool_call.parameters,
@@ -105,11 +110,15 @@ class HumanInTheLoop:
             # This summary is handed to the approval callback (a human-facing
             # surface). Do NOT re-inline `k.startswith("_")`: it misses
             # `system_`/`internal_`/`__` and is case-sensitive. See D-003.
-            context_summary={
-                k: v
-                for k, v in context.items()
-                if not has_internal_prefix(k) and k != "observations"
-            },
+            context_summary=redact_secret_entries(
+                {
+                    k: v
+                    for k, v in context.items()
+                    if not has_internal_prefix(k)
+                    and k != "observations"
+                    and not is_forbidden_context_entry(k, v)
+                }
+            ),
         )
 
         if self._approval_timeout is not None:

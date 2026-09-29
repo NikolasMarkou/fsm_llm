@@ -26,7 +26,7 @@ from .definitions import AgentConfig, AgentResult, ToolCall
 from .exceptions import AgentError
 from .fsm_definitions import build_rewoo_fsm
 from .handlers import make_iteration_limiter
-from .tools import ToolRegistry
+from .tools import ToolRegistry, redact_secret_entries
 
 
 class REWOOAgent(BaseAgent):
@@ -170,7 +170,8 @@ class REWOOAgent(BaseAgent):
                     "thought": description,
                     "plan_id": plan_id,
                     "tool_name": tool_name,
-                    "tool_input": tool_input,
+                    # plan-2026-09-29T103145-06a5ec0a/D-016: redacted copy.
+                    "tool_input": redact_secret_entries(tool_input),
                     "description": description,
                     "result": result.summary,
                     "success": result.success,

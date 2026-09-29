@@ -13,7 +13,7 @@ from fsm_llm.logging import logger
 from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import AgentStep, ToolCall
 from .hitl import ApprovalPolicy
-from .tools import ToolRegistry, normalize_tool_input
+from .tools import ToolRegistry, normalize_tool_input, redact_secret_entries
 from .truncation import smart_truncate
 
 
@@ -189,7 +189,10 @@ class AgentHandlers:
                     tool_input = {param_name: [task]}
                     logger.info(f"Recovered empty tool_input: {param_name}=[<task>]")
 
-        logger.info(LogMessages.TOOL_SELECTED.format(name=tool_name, input=tool_input))
+        # plan-2026-09-29T103145-06a5ec0a/D-016: the tool gets `tool_input`;
+        # the log, observation, action and trace get this redacted copy.
+        shown_input = redact_secret_entries(tool_input)
+        logger.info(LogMessages.TOOL_SELECTED.format(name=tool_name, input=shown_input))
 
         tool_call = ToolCall(
             tool_name=tool_name,
@@ -219,7 +222,7 @@ class AgentHandlers:
         step_num = len(observations) + 1
         observation_entry = (
             f"[Step {step_num}] Tool: {tool_name} | "
-            f"Input: {tool_input} | "
+            f"Input: {shown_input} | "
             f"Result: {observation}"
         )
         # The raw result is capped in ToolResult.summary, but the prefix +
@@ -246,12 +249,12 @@ class AgentHandlers:
         trace_step = AgentStep(
             iteration=step_num,
             thought=reasoning,
-            action=f"{tool_name}({tool_input})",
+            action=f"{tool_name}({shown_input})",
             observation=observation,
         ).model_dump(mode="json")
         # Preserve structured tool input so _build_trace can recover parameters
         # (mirrors REWOOAgent, which stores tool_input on the trace dict).
-        trace_step["tool_input"] = tool_input
+        trace_step["tool_input"] = shown_input
         trace.append(trace_step)
 
         return {

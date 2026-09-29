@@ -56,7 +56,7 @@ from fsm_llm.utilities import _resolve_reasoning_trace
 from .base import BaseAgent, _output_response_format
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError
-from .tools import ToolRegistry
+from .tools import ToolRegistry, redact_secret_entries
 
 CompleteFn = Callable[[str, list[dict[str, Any]], list[dict[str, Any]]], dict[str, Any]]
 
@@ -119,6 +119,17 @@ def _is_malformed_tool_call(exc: BaseException, tools_declared: bool) -> bool:
         return False
     text = str(exc).lower()
     return any(marker in text for marker in _MALFORMED_TOOL_CALL_MARKERS)
+
+
+def _shown_call(call: ToolCall) -> ToolCall:
+    """The trace copy of an executed call, secret-looking arguments redacted.
+
+    plan-2026-09-29T103145-06a5ec0a/D-016: the tool ran with ``call``; the
+    returned trace (read by the monitor and the harness) gets this copy.
+    """
+    return call.model_copy(
+        update={"parameters": redact_secret_entries(call.parameters)}
+    )
 
 
 def _call_arguments(tool_call: dict[str, Any]) -> dict[str, Any] | None:
@@ -459,7 +470,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                     observation = exec_result.summary
                     if not exec_result.success:
                         observation = f"[TOOL FAILED] {observation}"
-                    trace_calls.append(call)
+                    trace_calls.append(_shown_call(call))
                     messages.append(
                         {
                             "role": "tool",
@@ -535,7 +546,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                             continue
                         call = ToolCall(tool_name=name, parameters=args)
                         self.tools.execute(call)
-                        trace_calls.append(call)
+                        trace_calls.append(_shown_call(call))
 
             trace = AgentTrace(
                 tool_calls=trace_calls,

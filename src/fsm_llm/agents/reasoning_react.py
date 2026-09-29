@@ -27,7 +27,7 @@ from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers
 from .hitl import HumanInTheLoop
-from .tools import ToolRegistry
+from .tools import ToolRegistry, redact_secret_entries
 
 # Optional import — reasoning package may not be installed
 try:
@@ -36,6 +36,15 @@ try:
     _HAS_REASONING = True
 except ImportError:
     _HAS_REASONING = False
+
+
+def _problem_text(tool_input: Any) -> str:
+    """The problem text of a ``reason`` call: a string, else ``problem``, else str()."""
+    if isinstance(tool_input, str):
+        return tool_input
+    if isinstance(tool_input, dict):
+        return str(tool_input.get("problem", str(tool_input)))
+    return str(tool_input)
 
 
 class ReasoningReactAgent(BaseAgent):
@@ -223,14 +232,12 @@ class ReasoningReactAgent(BaseAgent):
         def run_reason(context: dict[str, Any]) -> dict[str, Any]:
             # Extract problem from tool input
             tool_input = context.get(ContextKeys.TOOL_INPUT) or {}
-            if isinstance(tool_input, str):
-                problem = tool_input
-            elif isinstance(tool_input, dict):
-                problem = tool_input.get("problem", str(tool_input))
-            else:
-                problem = str(tool_input)
+            problem = _problem_text(tool_input)
+            # plan-2026-09-29T103145-06a5ec0a/D-016: the engine gets `problem`;
+            # the log, observation and action get the redacted form.
+            shown = _problem_text(redact_secret_entries(tool_input))[:100]
 
-            logger.info(f"ReasoningReactAgent: invoking reasoning for: {problem[:100]}")
+            logger.info(f"ReasoningReactAgent: invoking reasoning for: {shown}")
 
             try:
                 solution, trace_info = engine.solve_problem(problem)
@@ -253,7 +260,7 @@ class ReasoningReactAgent(BaseAgent):
                 step_num = len(observations) + 1
                 observation_entry = (
                     f"[Step {step_num}] Tool: reason | "
-                    f"Input: {problem[:100]} | "
+                    f"Input: {shown} | "
                     f"Result: {observation}"
                 )
                 observations.append(observation_entry)
@@ -266,7 +273,7 @@ class ReasoningReactAgent(BaseAgent):
                     AgentStep(
                         iteration=step_num,
                         thought=context.get(ContextKeys.REASONING, ""),
-                        action=f"reason({problem[:100]})",
+                        action=f"reason({shown})",
                         observation=observation,
                     ).model_dump(mode="json")
                 )
