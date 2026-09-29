@@ -9,6 +9,7 @@ agent returns no next_agent or the max handoff limit is reached.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from fsm_llm.logging import logger
@@ -19,13 +20,31 @@ from .constants import StopReason
 from .definitions import AgentConfig, AgentResult, AgentTrace
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 
+# DECISION plan-2026-09-29T103145-06a5ec0a/D-045: per-hop routing outputs.
+# The swarm reads them from one agent's result and never forwards them: an
+# agent echoes its initial context into its result, so a forwarded
+# ``next_agent`` would re-request the same handoff every hop. For the same
+# reason a ``handoff_message`` equal to the one the agent was handed is an
+# echo, not a new message. Do NOT forward these keys or trust an echoed message.
+_ROUTING_KEYS = frozenset({"next_agent", "handoff_context"})
+
 
 class SwarmAgent(BaseAgent):
     """Emergent coordination pattern where agents hand off to each other.
 
     Each agent in the swarm runs to completion, and its result is inspected
     for a ``next_agent`` key in ``final_context``.  If present, the named
-    agent is run next with the handoff message and accumulated context.
+    agent is run next on the original task, with the handoff message
+    (``handoff_message``, default: the previous answer) and the accumulated
+    context in its ``initial_context``. ``max_handoffs`` is the number of
+    handoffs allowed; a request past it stops the run (``success=False``,
+    ``max_iterations``).
+
+    Nothing in the shipped patterns writes ``next_agent``: a member agent
+    hands off only when its own code, a handler or a tool writes it into
+    its context (swarm transfer tools are deferred, D-018 of plan 06a5ec0a).
+    ``handoff_context`` must be a mapping; anything else is ignored with a
+    WARNING.
 
     Example::
 
@@ -78,8 +97,8 @@ class SwarmAgent(BaseAgent):
         Terminates when an agent returns no next_agent or max handoffs reached.
         """
         start_time = time.monotonic()
-        context = strip_caller_context(
-            initial_context, source="SwarmAgent initial_context"
+        context = _without_routing_keys(
+            strip_caller_context(initial_context, source="SwarmAgent initial_context")
         )
         context["task"] = task
 
@@ -106,8 +125,8 @@ class SwarmAgent(BaseAgent):
                 logger.error(f"Agent '{current_agent_name}' not found in swarm")
                 break
 
-            # Run the current agent
-            current_task = context.get("handoff_message", task)
+            # Every agent works on the original task; the handoff message
+            # travels in its context (PAT-08: it used to replace the task).
             agent_context = {
                 **context,
                 "_swarm_agent_name": current_agent_name,
@@ -120,7 +139,7 @@ class SwarmAgent(BaseAgent):
             self._memory.set("metadata", "handoff_count", handoff_count)
 
             try:
-                result = agent.run(current_task, initial_context=agent_context)
+                result = agent.run(task, initial_context=agent_context)
                 last_result = result
             except (BudgetExhaustedError, AgentTimeoutError):
                 raise
@@ -150,8 +169,14 @@ class SwarmAgent(BaseAgent):
 
             # Check for handoff
             next_agent = result.final_context.get("next_agent")
-            handoff_message = result.final_context.get("handoff_message", result.answer)
-            handoff_context = result.final_context.get("handoff_context", {})
+            handoff_message = result.final_context.get("handoff_message")
+            if handoff_message is None or handoff_message == agent_context.get(
+                "handoff_message"
+            ):
+                # Absent, or the message this agent was handed echoed back
+                # through its final_context: the agent's own answer travels.
+                handoff_message = result.answer
+            handoff_context = result.final_context.get("handoff_context") or {}
 
             if not next_agent:
                 logger.info(
@@ -160,7 +185,8 @@ class SwarmAgent(BaseAgent):
                 )
                 break
 
-            handoff_count += 1
+            # max_handoffs is the number of handoffs allowed: the cap refuses
+            # the request past it (PAT-08: it used to allow max_handoffs - 1).
             if handoff_count >= self._max_handoffs:
                 logger.warning(
                     f"Swarm reached max handoffs ({self._max_handoffs}), stopping"
@@ -175,14 +201,24 @@ class SwarmAgent(BaseAgent):
                 )
                 break
 
+            handoff_count += 1
             # Update context for next agent
             # handoff_context is model-written: it may not seed the next
             # agent's run outputs or approval grant (D-002 of plan 06a5ec0a).
-            context.update(
-                strip_caller_context(
-                    handoff_context, source="SwarmAgent handoff_context"
+            if isinstance(handoff_context, Mapping):
+                context.update(
+                    _without_routing_keys(
+                        strip_caller_context(
+                            handoff_context, source="SwarmAgent handoff_context"
+                        )
+                    )
                 )
-            )
+            else:
+                logger.warning(
+                    f"SwarmAgent: agent '{current_agent_name}' returned a "
+                    f"non-mapping handoff_context "
+                    f"({type(handoff_context).__name__}); ignored"
+                )
             context["handoff_message"] = handoff_message
             context["previous_agent"] = current_agent_name
             context["previous_answer"] = result.answer
@@ -251,3 +287,8 @@ class SwarmAgent(BaseAgent):
     def _register_handlers(self, api: Any) -> None:
         """No handler registration needed — swarm delegates to sub-agents."""
         pass
+
+
+def _without_routing_keys(context: dict[str, Any]) -> dict[str, Any]:
+    """Return *context* without the per-hop ``_ROUTING_KEYS``."""
+    return {k: v for k, v in context.items() if k not in _ROUTING_KEYS}

@@ -73,7 +73,12 @@ class AgentGraphBuilder:
         return self
 
     def build(self) -> AgentGraph:
-        """Build and validate the AgentGraph."""
+        """Build and validate the AgentGraph.
+
+        Raises:
+            ValueError: No entry, an unknown entry or edge endpoint, or a cycle
+                (raised by ``AgentGraph``).
+        """
         if self._entry is None:
             raise ValueError("Entry node must be set with set_entry()")
         if self._entry not in self._nodes:
@@ -94,58 +99,11 @@ class AgentGraphBuilder:
         for source, target, condition in self._edges:
             adjacency[source].append((target, condition))
 
-        # Check for cycles
-        if self._has_cycles(adjacency):
-            raise ValueError(
-                "Agent graph contains cycles. "
-                "Use SwarmAgent for cyclic coordination patterns."
-            )
-
         return AgentGraph(
             nodes=dict(self._nodes),
             adjacency=dict(adjacency),
             entry=self._entry,
         )
-
-    def _has_cycles(
-        self,
-        adjacency: dict[str, list[tuple[str, Callable | None]]],
-    ) -> bool:
-        """Detect cycles using an iterative DFS with WHITE/GRAY/BLACK coloring.
-
-        Iterative (explicit stack) to avoid RecursionError on graphs with
-        ~1000+ chained nodes (AG-001). Mirrors the shipped iterative pattern in
-        fsm_llm/workflows/definitions.py:has_cycles (W-ISSUE-003 / D-005).
-        """
-        # DECISION plan_2026-05-29_73c30922/D-001 [STALE] (AG-001)
-        # NOTE: do NOT revert to a recursive inner dfs() -- Python's default
-        # recursion limit (~1000) causes RecursionError on long chain graphs.
-        WHITE, GRAY, BLACK = 0, 1, 2
-        color: dict[str, int] = {name: WHITE for name in self._nodes}
-
-        for start in self._nodes:
-            if color.get(start, WHITE) != WHITE:
-                continue
-            stack: list[tuple[str, bool]] = [(start, False)]
-            while stack:
-                node, returning = stack.pop()
-                if returning:
-                    color[node] = BLACK
-                    continue
-                node_color = color.get(node, WHITE)
-                if node_color == GRAY:
-                    return True
-                if node_color == BLACK:
-                    continue
-                color[node] = GRAY
-                stack.append((node, True))  # post-visit marker (close back-edge)
-                for target, _ in adjacency.get(node, []):
-                    target_color = color.get(target, WHITE)
-                    if target_color == GRAY:
-                        return True
-                    if target_color == WHITE:
-                        stack.append((target, False))
-        return False
 
 
 class AgentGraph:
@@ -153,6 +111,9 @@ class AgentGraph:
 
     Created via AgentGraphBuilder. Executes agents in topological order,
     evaluating edge conditions to determine the execution path.
+
+    Raises:
+        ValueError: The edges form a cycle.
     """
 
     def __init__(
@@ -164,6 +125,7 @@ class AgentGraph:
         self._nodes = nodes
         self._adjacency = adjacency
         self._entry = entry
+        self._order = _topological_order(nodes, adjacency)
 
     def run(
         self,
@@ -173,18 +135,21 @@ class AgentGraph:
     ) -> AgentResult:
         """Execute the graph starting from the entry node.
 
-        Follows edges whose conditions evaluate to True against the
-        source node's final_context. When multiple edges match, all
-        targets are queued for execution.
-
-        Note:
-            Diamond convergence: When multiple paths converge on a
-            single node, that node executes once using the context from
-            whichever path reaches it first (BFS order). Contexts from
-            later paths are not merged. If you need all upstream
-            contexts merged before a convergence node, restructure as
-            sequential edges or use an explicit merge node.
+        Nodes run in topological order. A node other than the entry runs
+        once every predecessor has been decided, and only if at least one
+        predecessor that ran has a satisfied edge to it (``condition`` is
+        None or returns True against that predecessor's ``final_context``).
+        Its ``initial_context`` merges those predecessors' contexts in
+        topological order (a later one wins a shared key), each minus
+        ``RUN_OUTPUT_KEYS``, so a node starts its own run fresh. A failed
+        node takes no outgoing edge. The answer is the last executed node's,
+        which the order makes a sink of the executed subgraph.
         """
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-044: Kahn order, each node
+        # once after all its predecessors, contexts merged. Do NOT go back to a
+        # BFS with first-arrival contexts: a convergence node ran before a
+        # longer branch reached it, with one branch's context, and the answer
+        # came from whichever node the queue popped last (PAT-07).
         start_time = time.monotonic()
         context = strip_caller_context(
             initial_context, source="AgentGraph initial_context"
@@ -193,17 +158,21 @@ class AgentGraph:
 
         results: dict[str, AgentResult] = {}
         execution_order: list[str] = []
+        # Context each executed node hands to its successors.
+        outgoing: dict[str, dict[str, Any]] = {}
+        # target -> predecessors that ran and took their edge to it.
+        activated_by: dict[str, list[str]] = defaultdict(list)
 
-        # BFS-style execution from entry
-        queue: deque[tuple[str, dict[str, Any]]] = deque()
-        queue.append((self._entry, context))
-        visited: set[str] = set()
-
-        while queue:
-            node_name, node_context = queue.popleft()
-            if node_name in visited:
+        for node_name in self._order:
+            if node_name == self._entry:
+                node_context = context
+            elif activated_by.get(node_name):
+                node_context = {}
+                for source in activated_by[node_name]:
+                    node_context.update(outgoing[source])
+                node_context["task"] = task
+            else:
                 continue
-            visited.add(node_name)
 
             agent = self._nodes[node_name]
             logger.info(f"AgentGraph executing node '{node_name}'")
@@ -229,11 +198,17 @@ class AgentGraph:
                 execution_order.append(node_name)
                 continue
 
+            # The source node's run outputs (final_answer, should_terminate,
+            # observation_count, ...) must not seed a successor's run (D-002
+            # of plan 06a5ec0a); dropping them is expected here, so log at DEBUG.
+            outgoing[node_name] = strip_caller_context(
+                {**node_context, **result.final_context},
+                source=f"AgentGraph node '{node_name}' output",
+                warn=False,
+            )
+
             # Evaluate outgoing edges
-            edges = self._adjacency.get(node_name, [])
-            for target, condition in edges:
-                if target in visited:
-                    continue
+            for target, condition in self._adjacency.get(node_name, []):
                 try:
                     take_edge = condition is None or condition(result.final_context)
                 except Exception as e:
@@ -242,18 +217,8 @@ class AgentGraph:
                         f"raised {type(e).__name__}: {e}; skipping edge"
                     )
                     continue
-                if take_edge:
-                    # Pass the source's final_context merged with original context
-                    # The source node's run outputs (final_answer,
-                    # should_terminate, observation_count, ...) must not seed
-                    # the target's run (D-002 of plan 06a5ec0a); dropping them
-                    # is expected here, so log at DEBUG.
-                    next_context = strip_caller_context(
-                        {**node_context, **result.final_context},
-                        source=f"AgentGraph edge '{node_name}'->'{target}'",
-                        warn=False,
-                    )
-                    queue.append((target, next_context))
+                if take_edge and node_name not in activated_by[target]:
+                    activated_by[target].append(node_name)
 
         elapsed = time.monotonic() - start_time
 
@@ -326,3 +291,36 @@ class AgentGraph:
     def get_terminal_nodes(self) -> list[str]:
         """Return nodes with no outgoing edges."""
         return [name for name in self._nodes if not self._adjacency.get(name)]
+
+
+def _topological_order(
+    nodes: dict[str, Any],
+    adjacency: dict[str, list[tuple[str, Callable | None]]],
+) -> list[str]:
+    """Kahn's topological order of *nodes*, ties broken by insertion order.
+
+    Iterative, so a long chain cannot hit the recursion limit (AG-001).
+
+    Raises:
+        ValueError: The edges form a cycle (some node never reaches in-degree 0).
+    """
+    in_degree = {name: 0 for name in nodes}
+    for source in nodes:
+        for target, _ in adjacency.get(source, []):
+            in_degree[target] += 1
+    ready = deque(name for name, degree in in_degree.items() if degree == 0)
+    order: list[str] = []
+    while ready:
+        name = ready.popleft()
+        order.append(name)
+        for target, _ in adjacency.get(name, []):
+            in_degree[target] -= 1
+            if in_degree[target] == 0:
+                ready.append(target)
+    if len(order) != len(nodes):
+        cyclic = sorted(name for name in nodes if name not in order)
+        raise ValueError(
+            f"Agent graph contains cycles (nodes {cyclic}). "
+            "Use SwarmAgent for cyclic coordination patterns."
+        )
+    return order

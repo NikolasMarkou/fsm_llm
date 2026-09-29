@@ -289,7 +289,9 @@ class TestSwarmAgent:
             max_handoffs=3,
         )
         result = swarm.run("loop task")
-        assert result.final_context["_swarm_handoff_count"] >= 3
+        # max_handoffs=N allows exactly N handoffs (PAT-08).
+        assert result.final_context["_swarm_handoff_count"] == 3
+        assert agent_a.run.call_count == 4
 
     def test_swarm_invalid_handoff_target(self):
         """Swarm stops when handoff target doesn't exist."""

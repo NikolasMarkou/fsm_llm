@@ -7,6 +7,7 @@ the task or the prior turns in front of it (the RC1 loop class).
 
 from __future__ import annotations
 
+import itertools
 import json
 import socket
 import time
@@ -1966,3 +1967,295 @@ class TestGeneratedFieldsAreComposed:
         for name in ("tool_name", "tool_input"):
             if name in fields:
                 assert self._SENTENCE not in fields[name]
+
+
+class _RecordingNode:
+    """A graph or swarm member that records each call and echoes its context.
+
+    Real agents return their initial context inside ``final_context``; this
+    one does too, plus ``outputs``. ``calls`` holds ``(task, initial_context)``.
+    """
+
+    def __init__(self, name: str, outputs: dict | None = None) -> None:
+        self.name = name
+        self.outputs = dict(outputs or {})
+        self.calls: list[tuple[str, dict]] = []
+
+    def run(self, task: str, initial_context: dict | None = None):
+        from fsm_llm.agents.definitions import AgentResult
+
+        context = dict(initial_context or {})
+        self.calls.append((task, context))
+        return AgentResult(
+            answer=f"{self.name} answer",
+            success=True,
+            stop_reason="answered",
+            final_context={**context, f"from_{self.name}": True, **self.outputs},
+        )
+
+
+def _graph(nodes: dict, edges: list[tuple[str, str]], entry: str = "a"):
+    from fsm_llm.agents.agent_graph import AgentGraphBuilder
+
+    builder = AgentGraphBuilder()
+    for name, node in nodes.items():
+        builder.add_node(name, node)
+    for source, target in edges:
+        builder.add_edge(source, target)
+    return builder.set_entry(entry).build()
+
+
+class TestAgentGraphOrder:
+    """Step 22 (PAT-07): nodes run in topological order, a convergence node
+    runs once after all its predecessors on their merged contexts, and the
+    answer comes from the last executed sink."""
+
+    def test_diamond_runs_the_join_once_on_both_contexts(self):
+        nodes = {n: _RecordingNode(n) for n in "abcd"}
+        graph = _graph(nodes, [("a", "b"), ("a", "c"), ("b", "d"), ("c", "d")])
+
+        result = graph.run("task")
+
+        assert result.final_context["_graph_execution_order"] == ["a", "b", "c", "d"]
+        assert len(nodes["d"].calls) == 1
+        _, d_context = nodes["d"].calls[0]
+        assert d_context["from_b"] is True
+        assert d_context["from_c"] is True
+        assert result.answer == "d answer"
+
+    def test_join_waits_for_the_longer_branch(self):
+        # BFS ran d straight after a (shortcut edge), before b and c, and
+        # answered from c.
+        nodes = {n: _RecordingNode(n) for n in "adbc"}
+        graph = _graph(nodes, [("a", "d"), ("a", "b"), ("b", "c"), ("c", "d")])
+
+        result = graph.run("task")
+
+        assert result.final_context["_graph_execution_order"] == ["a", "b", "c", "d"]
+        assert result.answer == "d answer"
+        assert nodes["d"].calls[0][1]["from_c"] is True
+
+    def test_later_predecessor_wins_a_shared_key(self):
+        nodes = {
+            "a": _RecordingNode("a"),
+            "b": _RecordingNode("b", {"shared": "from b"}),
+            "c": _RecordingNode("c", {"shared": "from c"}),
+            "d": _RecordingNode("d"),
+        }
+        graph = _graph(nodes, [("a", "b"), ("a", "c"), ("b", "d"), ("c", "d")])
+
+        graph.run("task")
+
+        assert nodes["d"].calls[0][1]["shared"] == "from c"
+
+    def test_join_runs_on_the_satisfied_edge_only(self):
+        from fsm_llm.agents.agent_graph import AgentGraphBuilder
+
+        nodes = {n: _RecordingNode(n) for n in "abcd"}
+        graph = (
+            AgentGraphBuilder()
+            .add_node("a", nodes["a"])
+            .add_node("b", nodes["b"])
+            .add_node("c", nodes["c"])
+            .add_node("d", nodes["d"])
+            .add_edge("a", "b")
+            .add_edge("a", "c")
+            .add_edge("b", "d", condition=lambda ctx: False)
+            .add_edge("c", "d")
+            .set_entry("a")
+            .build()
+        )
+
+        result = graph.run("task")
+
+        assert result.final_context["_graph_execution_order"] == ["a", "b", "c", "d"]
+        d_context = nodes["d"].calls[0][1]
+        assert d_context.get("from_c") is True
+        assert "from_b" not in d_context
+
+    def test_unreachable_and_untaken_nodes_do_not_run(self):
+        from fsm_llm.agents.agent_graph import AgentGraphBuilder
+
+        nodes = {n: _RecordingNode(n) for n in "xab"}
+        graph = (
+            AgentGraphBuilder()
+            .add_node("x", nodes["x"])  # upstream of the entry: never runs
+            .add_node("a", nodes["a"])
+            .add_node("b", nodes["b"])
+            .add_edge("x", "a")
+            .add_edge("a", "b", condition=lambda ctx: False)
+            .set_entry("a")
+            .build()
+        )
+
+        result = graph.run("task")
+
+        assert result.final_context["_graph_execution_order"] == ["a"]
+        assert result.answer == "a answer"
+        assert nodes["x"].calls == [] and nodes["b"].calls == []
+
+    def test_direct_construction_rejects_a_cycle(self):
+        from fsm_llm.agents.agent_graph import AgentGraph
+
+        with pytest.raises(ValueError, match="cycle"):
+            AgentGraph(
+                nodes={"a": _RecordingNode("a"), "b": _RecordingNode("b")},  # type: ignore[dict-item]
+                adjacency={"a": [("b", None)], "b": [("a", None)]},
+                entry="a",
+            )
+
+    def test_long_chain_builds_and_runs(self):
+        # AG-001: the cycle check must stay iterative.
+        names = [f"n{i}" for i in range(1500)]
+        nodes = {n: _RecordingNode(n) for n in names}
+        graph = _graph(nodes, list(itertools.pairwise(names)), entry="n0")
+
+        assert graph.run("task").answer == "n1499 answer"
+
+    def test_downstream_react_does_not_conclude_from_leaked_keys(self):
+        # The upstream ReAct concludes with should_terminate, observation_count
+        # and final_answer in its final_context; the downstream one must run
+        # its own tool before it may conclude.
+        from fsm_llm.agents import AgentConfig, ReactAgent
+
+        runs: list[str] = []
+
+        def react() -> ReactAgent:
+            return ReactAgent(
+                tools=_lookup_registry(runs),
+                config=AgentConfig(max_iterations=6),
+                llm_interface=PromptGroundedLLM(facts=_REACT_FACTS),
+            )
+
+        graph = _graph({"a": react(), "b": react()}, [("a", "b")])
+        result = graph.run("What is the capital of France?")
+
+        assert runs == ["capital of France", "capital of France"]
+        assert len(result.trace.tool_calls) == 2
+        assert result.final_context[ContextKeys.OBSERVATION_COUNT] == 1
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+
+class TestSwarmHandoff:
+    """Step 22 (PAT-08): every member works on the original task, the handoff
+    message travels as context, and ``max_handoffs=N`` allows N handoffs."""
+
+    def test_task_preserved_and_message_passed_as_context(self):
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        a = _RecordingNode(
+            "a", {"next_agent": "b", "handoff_message": "check the bill"}
+        )
+        b = _RecordingNode("b")
+        result = SwarmAgent(agents={"a": a, "b": b}, entry_agent="a").run("my task")  # type: ignore[dict-item]
+
+        assert [task for task, _ in a.calls + b.calls] == ["my task", "my task"]
+        b_context = b.calls[0][1]
+        assert b_context["handoff_message"] == "check the bill"
+        assert b_context["previous_agent"] == "a"
+        assert result.answer == "b answer"
+
+    def test_missing_message_passes_the_previous_answer(self):
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        a = _RecordingNode("a", {"next_agent": "b"})
+        b = _RecordingNode("b")
+        SwarmAgent(agents={"a": a, "b": b}, entry_agent="a").run("t")  # type: ignore[dict-item]
+
+        assert b.calls[0][1]["handoff_message"] == "a answer"
+
+    def test_echoed_message_is_not_forwarded_again(self):
+        # b echoes the message it was handed; c must get b's own answer.
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        a = _RecordingNode("a", {"next_agent": "b", "handoff_message": "from a"})
+        b = _RecordingNode("b", {"next_agent": "c"})
+        c = _RecordingNode("c")
+        SwarmAgent(agents={"a": a, "b": b, "c": c}, entry_agent="a").run("t")  # type: ignore[dict-item]
+
+        assert c.calls[0][1]["handoff_message"] == "b answer"
+
+    @pytest.mark.parametrize("max_handoffs", [0, 1, 2, 3])
+    def test_max_handoffs_allows_exactly_n(self, max_handoffs):
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        a = _RecordingNode("a", {"next_agent": "b"})
+        b = _RecordingNode("b", {"next_agent": "a"})
+        result = SwarmAgent(
+            agents={"a": a, "b": b},  # type: ignore[dict-item]
+            entry_agent="a",
+            max_handoffs=max_handoffs,
+        ).run("t")
+
+        assert result.final_context["_swarm_handoff_count"] == max_handoffs
+        assert len(a.calls) + len(b.calls) == max_handoffs + 1
+        assert (result.success, result.stop_reason) == (False, "max_iterations")
+
+    def test_budget_not_spent_when_the_chain_ends(self):
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        a = _RecordingNode("a", {"next_agent": "b"})
+        b = _RecordingNode("b")
+        result = SwarmAgent(
+            agents={"a": a, "b": b},  # type: ignore[dict-item]
+            entry_agent="a",
+            max_handoffs=1,
+        ).run("t")
+
+        assert (result.success, result.stop_reason) == (True, "answered")
+        assert result.final_context["_swarm_handoff_chain"] == ["a", "b"]
+
+    def test_caller_next_agent_is_not_forwarded(self):
+        # An echoing member would otherwise re-request the handoff every hop.
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        a = _RecordingNode("a")
+        result = SwarmAgent(agents={"a": a}, entry_agent="a").run(  # type: ignore[dict-item]
+            "t", initial_context={"next_agent": "a", "handoff_context": {"x": 1}}
+        )
+
+        assert len(a.calls) == 1
+        assert "next_agent" not in a.calls[0][1]
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    @pytest.mark.parametrize("bad", ["a string", ["list"], 7])
+    def test_non_mapping_handoff_context_is_ignored_with_a_warning(self, bad):
+        from fsm_llm.agents.swarm import SwarmAgent
+        from fsm_llm.logging import logger
+
+        a = _RecordingNode("a", {"next_agent": "b", "handoff_context": bad})
+        b = _RecordingNode("b")
+        warnings: list[str] = []
+        sink = logger.add(lambda m: warnings.append(str(m)), level="WARNING")
+        logger.enable("fsm_llm")
+        try:
+            result = SwarmAgent(agents={"a": a, "b": b}, entry_agent="a").run("t")  # type: ignore[dict-item]
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+
+        assert result.answer == "b answer"
+        assert any("non-mapping handoff_context" in w for w in warnings)
+
+    def test_mapping_handoff_context_reaches_the_next_agent_filtered(self):
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        a = _RecordingNode(
+            "a",
+            {
+                "next_agent": "b",
+                "handoff_context": {
+                    "account": "42",
+                    "final_answer": "PWNED",
+                    "next_agent": "a",
+                },
+            },
+        )
+        b = _RecordingNode("b")
+        result = SwarmAgent(agents={"a": a, "b": b}, entry_agent="a").run("t")  # type: ignore[dict-item]
+
+        b_context = b.calls[0][1]
+        assert b_context["account"] == "42"
+        assert "final_answer" not in b_context
+        assert "next_agent" not in b_context
+        assert result.final_context["_swarm_handoff_chain"] == ["a", "b"]
