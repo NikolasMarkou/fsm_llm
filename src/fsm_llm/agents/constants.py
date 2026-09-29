@@ -157,6 +157,9 @@ class ContextKeys:
     # Driver-only grant: the exact approved call. Internal prefix, so core drops
     # it from every model extraction; only the approval driver writes it.
     DRIVER_APPROVAL = "_approval_granted"
+    # Count of driver grants the executor spent, written by its delta. A value
+    # behind the executor's own count means a spending delta was discarded.
+    APPROVALS_SPENT = "_approvals_spent"
 
     # Agent trace
     AGENT_TRACE = "agent_trace"
@@ -264,6 +267,7 @@ RUN_OUTPUT_KEYS: frozenset[str] = frozenset(
         ContextKeys.APPROVAL_GRANTED,
         ContextKeys.REASONING,
         ContextKeys.DRIVER_APPROVAL,
+        ContextKeys.APPROVALS_SPENT,
     }
 )
 

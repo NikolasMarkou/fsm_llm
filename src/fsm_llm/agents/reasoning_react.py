@@ -223,11 +223,15 @@ class ReasoningReactAgent(BaseAgent):
 
             # plan-2026-09-24T091842-c1d5bfbc/D-004: the same refusal and
             # one-call grant consumption as execute_tool; `reason` is a tool
-            # the HITL policy may gate too.
+            # the HITL policy may gate too. The grant is spent before the
+            # engine runs (plan-2026-09-29T103145-06a5ec0a/D-015).
             refusal = base_handler.approval_refusal(context)
             if refusal is not None:
                 return refusal
-            return base_handler.consume_approval(context, run_reason(context))
+            spent = base_handler.spend_grant(context)
+            return base_handler.consume_approval(
+                context, {**spent, **run_reason(context)}
+            )
 
         def run_reason(context: dict[str, Any]) -> dict[str, Any]:
             # Extract problem from tool input

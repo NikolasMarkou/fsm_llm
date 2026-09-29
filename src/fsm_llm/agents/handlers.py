@@ -50,11 +50,17 @@ class AgentHandlers:
         self.requires_approval = requires_approval
         self._current_iteration = 0
         self._consecutive_no_tool = 0
+        # Last driver grant this instance spent and how many it has spent;
+        # see approval_refusal (plan-2026-09-29T103145-06a5ec0a/D-015).
+        self._spent_grant: dict[str, Any] | None = None
+        self._grants_spent = 0
 
     def reset(self) -> None:
         """Reset handler state for a new run."""
         self._current_iteration = 0
         self._consecutive_no_tool = 0
+        self._spent_grant = None
+        self._grants_spent = 0
 
     def _run_selected_tool(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -151,6 +157,10 @@ class AgentHandlers:
 
         # Reset stall counter — a tool was actually selected
         self._consecutive_no_tool = 0
+
+        # Spend the grant and clear the selection before the tool runs, so a
+        # delta core discards (handler timeout) cannot leave a reusable grant.
+        spent = self.spend_grant(context)
 
         tool_input = normalize_tool_input(tool_input)
 
@@ -258,17 +268,36 @@ class AgentHandlers:
         trace.append(trace_step)
 
         return {
+            **spent,
             ContextKeys.TOOL_RESULT: observation,
             ContextKeys.TOOL_STATUS: "success" if result.success else "failed",
             ContextKeys.TOOL_ERROR: result.error,
             ContextKeys.OBSERVATIONS: observations,
             ContextKeys.OBSERVATION_COUNT: len(observations),
             ContextKeys.AGENT_TRACE: trace,
-            # Clear tool selection for next iteration
-            ContextKeys.TOOL_NAME: None,
-            ContextKeys.TOOL_INPUT: None,
             ContextKeys.SHOULD_TERMINATE: None,
         }
+
+    def spend_grant(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Record a driver grant as spent; return the selection and grant clears.
+
+        Call it after :meth:`approval_refusal` returned None and before the tool
+        runs (``execute_tool``, ReasoningReact's ``reason`` path); merge the
+        returned delta into the executor's delta. The record lives on this
+        call-local instance, so it survives a delta core discards. Never raises.
+        """
+        spent: dict[str, Any] = {
+            ContextKeys.TOOL_NAME: None,
+            ContextKeys.TOOL_INPUT: None,
+        }
+        if context.get(ContextKeys.DRIVER_APPROVAL) is not None:
+            self._grants_spent += 1
+            self._spent_grant = approval_grant(
+                context.get(ContextKeys.TOOL_NAME), context.get(ContextKeys.TOOL_INPUT)
+            )
+            spent[ContextKeys.DRIVER_APPROVAL] = None
+            spent[ContextKeys.APPROVALS_SPENT] = self._grants_spent
+        return spent
 
     def execute_tool(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -298,7 +327,17 @@ class AgentHandlers:
         )
         if not self.requires_approval(tool_call, context):
             return None
-        if context.get(ContextKeys.DRIVER_APPROVAL) == call:
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-015
+        # A grant this instance already spent, still in context because core
+        # discarded the spending delta (handler_timeout), is void: the tool ran.
+        # The count the delta writes tells a discarded spend (context behind this
+        # instance) from a fresh approval of the same call after a landed one.
+        # Do NOT key this on the call alone (an identical call approved twice
+        # must run twice) and do NOT mark the executor .critical() instead (every
+        # handler timeout would fail the run).
+        spent = context.get(ContextKeys.APPROVALS_SPENT, 0)
+        stale = call == self._spent_grant and spent != self._grants_spent
+        if context.get(ContextKeys.DRIVER_APPROVAL) == call and not stale:
             return None
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-004
         # The security boundary is HERE, not the FSM route: a model can extract
@@ -311,8 +350,9 @@ class AgentHandlers:
         # Do NOT reduce the grant to a bare True: the model can fill an empty
         # tool_input on the await_approval turn after the human approved the
         # empty call (D-023, pinned by TestEmptyThenFilledCall).
-        logger.warning(f"Refused gated tool '{tool_name}': no approval for this call")
-        return {
+        reason = "its approval was already spent" if stale else "no approval"
+        logger.warning(f"Refused gated tool '{tool_name}': {reason} for this call")
+        refusal = {
             ContextKeys.TOOL_RESULT: (
                 f"Tool '{tool_name}' needs human approval before it can run."
             ),
@@ -321,6 +361,9 @@ class AgentHandlers:
             ContextKeys.APPROVAL_GRANTED: None,
             ContextKeys.DRIVER_APPROVAL: None,
         }
+        if stale:  # resync, so the next fresh approval of this call runs
+            refusal[ContextKeys.APPROVALS_SPENT] = self._grants_spent
+        return refusal
 
     def consume_approval(
         self, context: dict[str, Any], delta: dict[str, Any]

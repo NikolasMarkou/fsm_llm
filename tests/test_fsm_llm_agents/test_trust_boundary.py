@@ -832,3 +832,145 @@ class TestNoHitlPatternsRefuseGatedTools:
 
     def test_plan_execute_without_registry_constructs(self):
         _plan_execute(config=AgentConfig(model="mock/model"))
+
+
+# ---------------------------------------------------------------------------
+# LOOP-14: one approval = one call, even when a timed-out executor's delta is
+# discarded (plan-2026-09-29T103145-06a5ec0a / D-015)
+# ---------------------------------------------------------------------------
+
+_GRANT = {"tool_name": "danger", "parameters": dict(_INPUT)}
+
+
+def _approved_context() -> dict[str, Any]:
+    """The context the executor sees on ``act`` entry after an approval."""
+    return {
+        ContextKeys.TASK: "do it",
+        ContextKeys.TOOL_NAME: "danger",
+        ContextKeys.TOOL_INPUT: dict(_INPUT),
+        ContextKeys.APPROVAL_GRANTED: True,
+        ContextKeys.APPROVAL_REQUIRED: False,
+        ContextKeys.DRIVER_APPROVAL: dict(_GRANT),
+        ContextKeys.OBSERVATIONS: [],
+        ContextKeys.AGENT_TRACE: [],
+    }
+
+
+def _apply(context: dict[str, Any], delta: dict[str, Any]) -> None:
+    """Merge a handler delta the way core does (a None value deletes)."""
+    for key, value in delta.items():
+        if value is None:
+            context.pop(key, None)
+        else:
+            context[key] = value
+
+
+class TestSpentGrantAtHandlerLevel:
+    """The call-local ``AgentHandlers`` remembers a grant it spent, so the same
+    grant replayed from a context the spending delta never reached is refused;
+    a fresh approval after a landed delta still runs."""
+
+    @staticmethod
+    def _handlers(harness: _Harness) -> Any:
+        from fsm_llm.agents.handlers import AgentHandlers
+
+        return AgentHandlers(harness.registry, requires_approval=lambda c, x: True)
+
+    def test_spending_delta_clears_the_grant_and_the_selection(self):
+        harness = _Harness()
+        delta = self._handlers(harness).execute_tool(_approved_context())
+        assert harness.runs == ["1"]
+        assert delta[ContextKeys.DRIVER_APPROVAL] is None
+        assert delta[ContextKeys.APPROVAL_GRANTED] is None
+        assert delta[ContextKeys.TOOL_NAME] is None
+        assert delta[ContextKeys.TOOL_INPUT] is None
+
+    def test_discarded_delta_replay_is_refused(self):
+        harness = _Harness()
+        handlers = self._handlers(harness)
+        context = _approved_context()
+        handlers.execute_tool(dict(context))  # delta discarded (timed out)
+        replay = handlers.execute_tool(dict(context))
+        assert harness.runs == ["1"], "the approved call ran twice"
+        assert replay[ContextKeys.TOOL_STATUS] == "awaiting_approval"
+        assert replay[ContextKeys.APPROVAL_REQUIRED] is True
+        assert replay[ContextKeys.DRIVER_APPROVAL] is None
+
+    def test_fresh_approval_after_refusal_runs(self):
+        harness = _Harness()
+        handlers = self._handlers(harness)
+        context = _approved_context()
+        handlers.execute_tool(dict(context))  # discarded
+        _apply(context, handlers.execute_tool(dict(context)))  # refusal lands
+        # The driver asks again and the human approves the same call.
+        context.update(
+            {
+                ContextKeys.APPROVAL_GRANTED: True,
+                ContextKeys.APPROVAL_REQUIRED: False,
+                ContextKeys.DRIVER_APPROVAL: dict(_GRANT),
+            }
+        )
+        handlers.execute_tool(dict(context))
+        assert harness.runs == ["1", "1"]
+
+    def test_same_call_approved_twice_runs_twice_when_deltas_land(self):
+        harness = _Harness()
+        handlers = self._handlers(harness)
+        context = _approved_context()
+        _apply(context, handlers.execute_tool(dict(context)))
+        # The model selects the identical call again and the human approves.
+        context.update(_approved_context())
+        context.pop(ContextKeys.OBSERVATIONS)
+        context.pop(ContextKeys.AGENT_TRACE)
+        handlers.execute_tool(dict(context))
+        assert harness.runs == ["1", "1"]
+
+
+class TestTimedOutApprovedCallRunsOnce:
+    """Real ``ReactAgent`` run with ``handler_timeout``: the approved tool
+    blocks past the timeout on its first call, so core discards the executor's
+    delta (grant and selection stay in context). The same grant must not run
+    the tool again unasked; the callback is asked again instead."""
+
+    def test_timed_out_call_is_not_replayed(self):
+        import threading
+
+        harness = _FlagHarness()
+        release = threading.Event()
+        started = threading.Event()
+        body_runs: list[str] = []
+        answers = iter([True, False])
+
+        def blocking_danger(x: str) -> str:
+            body_runs.append(x)
+            if len(body_runs) == 1:
+                started.set()
+                release.wait(10)  # outlives the handler timeout
+            return "BOOM"
+
+        harness.registry.register_function(
+            blocking_danger,
+            name="danger",
+            description="Irreversible action",
+            parameter_schema={"properties": {"x": {"type": "string"}}},
+            requires_approval=True,
+        )
+
+        def decide(request: Any) -> bool:
+            harness.asks.append(request.tool_name)
+            return next(answers, False)
+
+        agent = ReactAgent(
+            tools=harness.registry,
+            config=AgentConfig(model="mock/model", max_iterations=6),
+            hitl=HumanInTheLoop(approval_callback=decide),
+            llm_interface=_TerminateAfterEvidenceLLM(),
+            handler_timeout=0.5,
+        )
+        try:
+            agent.run("do it")
+        finally:
+            release.set()
+        assert started.is_set(), "the approved call never reached the tool"
+        assert body_runs == ["1"], f"approved call ran {len(body_runs)} times"
+        assert harness.asks == ["danger", "danger"], f"asks: {harness.asks}"
