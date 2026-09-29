@@ -213,6 +213,7 @@ class TestEntryPoints:
             [sys.executable, "-m", "fsm_llm.harness", "--help"],
             capture_output=True,
             text=True,
+            timeout=60,
         )
         assert completed.returncode == 0
         assert "fsm-llm-harness" in completed.stdout
@@ -247,6 +248,8 @@ class TestEntryPoints:
         [
             ("run", None, 1, False),
             ("run", "DEBUG", 1, True),
+            ("run", "debug", 1, True),  # case-insensitive
+            ("run", "bogus", 1, False),  # unknown level falls back, no crash
             ("main_cli", None, 0, False),
         ],
     )
@@ -267,6 +270,7 @@ class TestEntryPoints:
             [sys.executable, "-c", self._LOG_PROBE, entry],
             capture_output=True,
             text=True,
+            timeout=60,
         )
         assert completed.returncode == 0, completed.stderr
         assert completed.stderr.count("W-PROBE") == warning_lines

@@ -43,6 +43,7 @@ class TestVerboseLogging:
             [sys.executable, "-c", _PROBE, *flags],
             capture_output=True,
             text=True,
+            timeout=60,
         )
         assert completed.returncode == 0, completed.stderr
         assert completed.stderr.count("I-PROBE") == info_lines

@@ -94,7 +94,8 @@ def setup_cli_logging(default_level: str) -> int:
     Interface contract (2 call sites: the ``fsm-llm-harness`` entry wrapper
     and the reasoning CLI's ``--verbose``):
         - ``default_level``: loguru level name used when ``FSM_LLM_LOG_LEVEL``
-          is unset or blank; a non-blank env value wins.
+          is unset, blank, or not a loguru level; a valid env value wins
+          (case-insensitive). An invalid one is reported on stderr, not raised.
         - Removes loguru's pre-installed default handler (id 0: stderr, every
           level) if it is still there, then registers one stderr handler via
           ``setup_logging``. Returns that handler id, or -1 when a matching
@@ -112,7 +113,16 @@ def setup_cli_logging(default_level: str) -> int:
         logger.remove(0)
     except ValueError:
         pass
-    level = os.environ.get(ENV_LOG_LEVEL, "").strip() or default_level
+    level = os.environ.get(ENV_LOG_LEVEL, "").strip().upper() or default_level
+    try:
+        logger.level(level)
+    except ValueError:
+        print(
+            f"fsm_llm: ignoring unknown {ENV_LOG_LEVEL}={level!r}; "
+            f"using {default_level}",
+            file=sys.stderr,
+        )
+        level = default_level
     return setup_logging(level=level)
 
 
