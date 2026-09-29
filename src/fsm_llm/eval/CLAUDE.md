@@ -5,7 +5,7 @@ Purpose: Evaluation tooling: the examples evaluator (run every example script, s
 
 ## Scope
 
-Two evaluation kinds behind one CLI, sharing config, records, stats and the run-directory rule: `examples` (subprocess per example script, heuristic scoring, the historical `scripts/eval.py` output layout) and `run` (in-process conversations through `fsm_llm.API`, pass/fail per trial, Wilson intervals). Extra `eval` installs nothing beyond core `fsm_llm`. Version from `fsm_llm.__version__`. Not here: LLM-as-judge scoring, repeats/median for example runs, a stats subcommand, harness-specific bench glue (manifest gate, probes, `write_summary`, `report` stay in `scripts/harness_bench.py`, which delegates its generic helpers here, D-002 of plan 581c2634). `scripts/eval.py` is a shim that `chdir`s to the repo root and calls `run(["examples", *argv])`.
+Two evaluation kinds behind one CLI, sharing config, records, stats and the run-directory rule: `examples` (subprocess per example script, heuristic scoring, the historical `scripts/eval.py` output layout) and `run` (in-process conversations through `fsm_llm.API`, pass/fail per trial, Wilson intervals). Extra `eval` installs nothing beyond core `fsm_llm`. Version from `fsm_llm.__version__`. Not here: LLM-as-judge scoring, repeats/median for example runs, a stats subcommand, harness-specific bench glue (manifest gate, probes, `write_summary`, `report` stay in `scripts/harness_bench.py`, which keeps stdlib copies of the generic helpers so it stays offline, D-008 of plan 581c2634). `scripts/eval.py` is a shim that `chdir`s to the repo root and calls `run(["examples", *argv])`.
 
 ## Architecture
 
@@ -19,8 +19,8 @@ flowchart TD
     cs --> rec
     cs --> st[stats: pass_rate, wilson_ci]
     cs --> api[fsm_llm.API]
-    hb[scripts/harness_bench.py] -. lazy delegates .-> st
-    hb -. lazy delegates .-> rec
+    hb[scripts/harness_bench.py] -. parity-tested copies .-> st
+    hb -. parity-tested copies .-> rec
 ```
 
 Examples run: `discover_examples(config)` -> `open_run_dir` -> ThreadPool of `config.workers`, each thread drives one subprocess (`run_example`) -> score once with `classify_result` -> log written as each finishes -> `write_scorecard` (scorecard.md + results.json). Cases run: `load_cases(path)` -> ThreadPool over (case, trial) pairs, each a fresh `API` (`run_case_trial`) -> row appended and flushed to `rows.jsonl` per trial -> `write_case_report` (results.json + summary.md).
@@ -35,7 +35,7 @@ Examples run: `discover_examples(config)` -> `open_run_dir` -> ThreadPool of `co
 | `scoring.py` | `classify_result(result) -> (score, failures)` | moved verbatim from `scripts/eval.py` at 0facf56; golden parity in `test_scoring.py` |
 | `cases.py` | `Expectations`, `ConversationCase`, `TrialResult`, `CaseReport`, `load_cases`, `check_expectations`, `run_case_trial`, `run_cases`, `write_case_report` | `llm_interface_factory` injects a fake LLM |
 | `records.py` | `append_row`, `read_rows`, `write_json`, `utc_now`, `git_commit`, `git_short_hash`, `model_slug`, `make_run_dir`, `open_run_dir` | run dirs never reused |
-| `stats.py` | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate` | stdlib only, moved from `scripts/harness_bench.py` |
+| `stats.py` | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate` | stdlib only, copied from `scripts/harness_bench.py` |
 | `constants.py` | defaults, exit codes, score labels, `EXAMPLE_INPUTS`, `EXAMPLE_TIMEOUTS`, `CATEGORY_TIMEOUTS` | tables moved verbatim from `scripts/eval.py` |
 | `exceptions.py` | `EvalError` tree | |
 
@@ -69,7 +69,7 @@ Examples run: `discover_examples(config)` -> `open_run_dir` -> ThreadPool of `co
 - Timeout precedence: per-example table > category table > `--timeout` (D-003 anchor in `examples.py`); change a tabled timeout from a `--config` file, never by reordering.
 - A run never writes into an existing run: `make_run_dir` adds `_2`, `_3`, ... (`exist_ok=False`); an explicit `--output-dir` must be new or empty.
 - `setup_cli_logging` only in `run()`, never in `main_cli()` (tests call `main_cli` in-process).
-- `scripts/harness_bench.py` must stay import-inert: it imports `fsm_llm.eval` only inside function bodies (D-002). Keep the delegated names and signatures here stable.
+- `scripts/harness_bench.py` must stay stdlib-only and offline: it never imports `fsm_llm.eval` (importing `fsm_llm` pulls litellm, which opens a socket; D-008). Its seven copies of the stats and row helpers must match this package; `test_bench_parity.py` enforces it, so change both together.
 - `fsm_llm/__init__.py` never imports this subpackage; this subpackage never imports `tests`.
 - One case trial = one fresh `API`, closed in `finally`; trial exceptions are data (`error` set), never a crashed run.
 

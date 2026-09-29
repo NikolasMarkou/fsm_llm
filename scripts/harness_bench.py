@@ -23,8 +23,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -60,27 +63,39 @@ class BenchDataError(RuntimeError):
     """A bench invariant would be violated; refuse rather than degrade."""
 
 
-# DECISION plan-2026-09-29T061903-581c2634/D-002
-# The generic helpers below (wilson_ci, fisher_exact_two_sided, _utc_now,
-# _git_commit, _write_json, append_row, read_rows) are LAZY delegates to
-# fsm_llm.eval. Do NOT hoist the `from fsm_llm.eval ...` imports to module
-# scope: fsm_llm pulls litellm at import, which breaks the stdlib-only,
-# socket-free import pin in tests/test_harness_bench.py. Do NOT copy the
-# bodies back here either (one source of truth), and do NOT rename these
-# functions: tests and test_live_ollama.py call them as hb.<name>.
-# See decisions.md D-002.
+# DECISION plan-2026-09-29T061903-581c2634/D-008
+# wilson_ci, fisher_exact_two_sided, _utc_now, _git_commit, _write_json,
+# append_row and read_rows are stdlib copies of their fsm_llm.eval twins. Do NOT
+# delegate them to fsm_llm.eval, not even lazily: importing fsm_llm pulls
+# litellm, which fetches its model-cost map over HTTP, so the offline `report`
+# command would open a socket. tests/test_fsm_llm_eval/test_bench_parity.py
+# keeps the two copies equal; change both together. See decisions.md D-008.
 def wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
-    """Wilson score interval (95% default); delegates to fsm_llm.eval.stats."""
-    from fsm_llm.eval.stats import wilson_ci as _impl
-
-    return _impl(k, n, z)
+    """Wilson score interval (95% default); math-only, scipy is not in venv."""
+    if k < 0 or n < 0 or k > n:
+        raise ValueError(f"impossible count: k={k}, n={n}")
+    if n == 0:
+        return (0.0, 1.0)
+    p, zz = k / n, z * z
+    denom = 1 + zz / n
+    center = (p + zz / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + zz / (4 * n * n)) / denom
+    return (max(0.0, center - half), min(1.0, center + half))
 
 
 def fisher_exact_two_sided(k1: int, n1: int, k2: int, n2: int) -> float:
-    """Fisher exact two-sided p; delegates to fsm_llm.eval.stats."""
-    from fsm_llm.eval.stats import fisher_exact_two_sided as _impl
+    """Fisher exact p for [[k1,n1-k1],[k2,n2-k2]]: sum of pmf <= observed pmf."""
+    for k, n in ((k1, n1), (k2, n2)):
+        if n <= 0 or k < 0 or k > n:
+            raise ValueError(f"impossible arm: k={k}, n={n}")
+    r1, denom = k1 + k2, math.comb(n1 + n2, k1 + k2)
 
-    return _impl(k1, n1, k2, n2)
+    def pmf(a: int) -> float:
+        return math.comb(n1, a) * math.comb(n2, r1 - a) / denom
+
+    p_obs = pmf(k1)
+    span = range(max(0, r1 - n2), min(r1, n1) + 1)
+    return min(1.0, sum(pmf(a) for a in span if pmf(a) <= p_obs * (1 + 1e-9)))
 
 
 def _live() -> Any:
@@ -101,21 +116,17 @@ def _live() -> Any:
 
 
 def _utc_now() -> str:
-    from fsm_llm.eval.records import utc_now as _impl  # lazy: D-002
-
-    return _impl()
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _git_commit() -> str:
-    from fsm_llm.eval.records import git_commit as _impl  # lazy: D-002
-
-    return _impl(cwd=ROOT)
+    cmd = ("git", "rev-parse", "HEAD")
+    res = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, check=True)
+    return res.stdout.strip()
 
 
 def _write_json(path: Path, obj: Any) -> None:
-    from fsm_llm.eval.records import write_json as _impl  # lazy: D-002
-
-    _impl(path, obj)
+    path.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _model_digest(tag: str = MODEL_TAG) -> dict[str, str]:
@@ -199,15 +210,16 @@ def _arm_paths(bdir: Path, arm: str) -> tuple[Path, Path, Path]:
 
 def append_row(path: Path, row: dict[str, Any]) -> None:
     """Append ONE jsonl row and flush -- rows survive an aborted block."""
-    from fsm_llm.eval.records import append_row as _impl  # lazy: D-002
-
-    _impl(path, row)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
+        fh.flush()
 
 
 def read_rows(path: Path) -> list[dict[str, Any]]:
-    from fsm_llm.eval.records import read_rows as _impl  # lazy: D-002
-
-    return _impl(path)
+    if not path.is_file():
+        return []
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
 
 
 def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, int]:

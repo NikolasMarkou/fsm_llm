@@ -2,8 +2,8 @@
 Append-only result records, JSON output, and run-directory naming.
 
 ``append_row``/``read_rows`` and the bodies of ``write_json``, ``utc_now`` and
-``git_commit`` were moved from ``scripts/harness_bench.py`` (which delegates
-here); ``git_short_hash``, ``model_slug`` and the run-directory name keep the
+``git_commit`` were copied from ``scripts/harness_bench.py`` (which keeps its
+own stdlib copies to stay offline; a parity test keeps them equal); ``git_short_hash``, ``model_slug`` and the run-directory name keep the
 historical ``scripts/eval.py`` rules so new run directories sort and read
 like the old ones.
 """

@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New subpackage `fsm_llm.eval` (extra `eval`, no third-party dependencies, included in
   `all`) and console script `fsm-llm-eval` (also `python -m fsm_llm.eval`). It gathers
-  the evaluation code that lived in `scripts/eval.py` and the generic half of
-  `scripts/harness_bench.py`. Docs: `src/fsm_llm/eval/README.md`, `EVALUATE.md`,
+  the evaluation code that lived in `scripts/eval.py` and the generic statistics and
+  row helpers of `scripts/harness_bench.py`. Docs: `src/fsm_llm/eval/README.md`, `EVALUATE.md`,
   `docs/api_reference.md`.
 - `fsm-llm-eval examples`: the examples evaluator with the same flags, 0-4 scores,
   example names and output layout as `scripts/eval.py`, plus `--examples-dir`,
@@ -42,10 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `scripts/eval.py` is a thin shim that runs `fsm-llm-eval examples` from the
   repository root; every old invocation keeps working.
-- `scripts/harness_bench.py`: `wilson_ci`, `fisher_exact_two_sided`, `append_row`,
-  `read_rows`, `_write_json`, `_utc_now` and `_git_commit` delegate to `fsm_llm.eval`
-  through imports inside the function bodies, so the script stays import-inert. Names,
-  signatures and results are unchanged.
+- `scripts/harness_bench.py` is unchanged and stays stdlib-only and offline: its
+  `wilson_ci`, `fisher_exact_two_sided`, `append_row`, `read_rows`, `_write_json`,
+  `_utc_now` and `_git_commit` are copies of the `fsm_llm.eval` helpers, kept equal
+  by `tests/test_fsm_llm_eval/test_bench_parity.py`. Delegating them was tried and
+  reverted: importing `fsm_llm` pulls litellm, which opens a network socket.
 - Example scorecards: "Total wall time" is now the real elapsed time of the run; the
   old value (sum of example durations) is reported as "Total example time". Compare
   old and new scorecards on "Total example time".

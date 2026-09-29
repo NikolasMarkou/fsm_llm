@@ -55,7 +55,7 @@ Harness status in brief: gates are JsonLogic terms over values counted from disk
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (7,513 tests)
+make test           # pytest -v (7,541 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on src/fsm_llm/ (core and subpackages)
@@ -152,7 +152,7 @@ Rules: `required_context_keys` only tells Pass 1 what to extract, it never block
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (7,513 collected)
+pytest                                 # Run all tests (7,541 collected)
 pytest tests/test_fsm_llm/            # Core package tests (2,707 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (121 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (231 tests)
@@ -162,8 +162,8 @@ pytest tests/test_fsm_llm_meta/       # Meta tests (218 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,987 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (275 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-pytest tests/test_fsm_llm_eval/       # Eval tests (184 tests)
-# The 10 suites above sum to 7,428. The remaining 85 are three root-level files:
+pytest tests/test_fsm_llm_eval/       # Eval tests (212 tests)
+# The 10 suites above sum to 7,456. The remaining 85 are three root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (39)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
@@ -181,7 +181,7 @@ Counts are `pytest --collect-only -q` after the `fsm_llm.eval` addition (unrelea
 
 ## Evaluation
 
-`fsm-llm-eval examples` (or the `scripts/eval.py` shim) runs all examples in parallel and writes a scorecard, `results.json` and logs to a new `evaluation/<stamp>_<hash>_<model>[_N]/`; `fsm-llm-eval run <dataset>` runs scripted conversations N times (default 3) and reports pass rates with Wilson 95% CIs (sample: `evaluation/datasets/simple_greeting_cases.json`). Settings: defaults < dataset `config` < `--config FILE` < flags. Exit 0 ok, 1 usage/input error, 2 only below `--fail-under PCT`. Details: `src/fsm_llm/eval/CLAUDE.md`, `EVALUATE.md`. Last baseline: 95.3% health score (N=3 median, 101 examples) on `ollama_chat/qwen3.5:4b`, Run 006, commit `2df048f`. This baseline is STALE: later remediation changed prompt content in `prompts.py`, `context.py`, and `constants.py`, the 2026-09-24 agents audit and follow-up changed agent routing, and the default model is `ollama_chat/qwen3.5:4b` again (0.9.0 briefly made it 9b). Latest run (on 9b, not the default): 80.9% (N=1, 101 examples, `ollama_chat/qwen3.5:9b-q8_0`, `--workers 4`, v0.9.0); losses are almost all agent examples hitting eval timeouts tuned for 4b. Agents-only A/B at equal settings: pre-plan c6e8461 73.4% vs v0.9.0 77.1%. The fast gate mocks the LLM, so re-run before trusting any number. The heuristic overstates by about 15 points; pair it with log inspection. About 5 agent score-1s per run are non-deterministic `--workers 4` timeouts. Harness capability benches run via `scripts/harness_bench.py` (its statistics and row I/O delegate to `fsm_llm.eval`).
+`fsm-llm-eval examples` (or the `scripts/eval.py` shim) runs all examples in parallel and writes a scorecard, `results.json` and logs to a new `evaluation/<stamp>_<hash>_<model>[_N]/`; `fsm-llm-eval run <dataset>` runs scripted conversations N times (default 3) and reports pass rates with Wilson 95% CIs (sample: `evaluation/datasets/simple_greeting_cases.json`). Settings: defaults < dataset `config` < `--config FILE` < flags. Exit 0 ok, 1 usage/input error, 2 only below `--fail-under PCT`. Details: `src/fsm_llm/eval/CLAUDE.md`, `EVALUATE.md`. Last baseline: 95.3% health score (N=3 median, 101 examples) on `ollama_chat/qwen3.5:4b`, Run 006, commit `2df048f`. This baseline is STALE: later remediation changed prompt content in `prompts.py`, `context.py`, and `constants.py`, the 2026-09-24 agents audit and follow-up changed agent routing, and the default model is `ollama_chat/qwen3.5:4b` again (0.9.0 briefly made it 9b). Latest run (on 9b, not the default): 80.9% (N=1, 101 examples, `ollama_chat/qwen3.5:9b-q8_0`, `--workers 4`, v0.9.0); losses are almost all agent examples hitting eval timeouts tuned for 4b. Agents-only A/B at equal settings: pre-plan c6e8461 73.4% vs v0.9.0 77.1%. The fast gate mocks the LLM, so re-run before trusting any number. The heuristic overstates by about 15 points; pair it with log inspection. About 5 agent score-1s per run are non-deterministic `--workers 4` timeouts. Harness capability benches run via `scripts/harness_bench.py` (stdlib-only and offline; its statistics and row I/O are parity-tested copies of `fsm_llm.eval`).
 
 Examples (100 across 8 categories): basic 14, intermediate 3, advanced 17, classification 4, reasoning 1, workflows 8, agents 48, meta 5. All support OpenAI with Ollama fallback: `python examples/<category>/<name>/run.py`.
 

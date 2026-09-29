@@ -2,7 +2,9 @@
 Binomial statistics for evaluation results (stdlib only, no scipy).
 
 ``wilson_ci`` and ``fisher_exact_two_sided`` were moved verbatim from
-``scripts/harness_bench.py``; the script's own names delegate here.
+``scripts/harness_bench.py``, which keeps its own stdlib copies so it stays
+offline (D-008 of plan 581c2634); ``tests/test_fsm_llm_eval/test_bench_parity.py``
+keeps the copies equal.
 """
 
 from __future__ import annotations
