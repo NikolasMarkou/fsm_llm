@@ -203,21 +203,18 @@ def build_conclude_response_instructions() -> str:
     )
 
 
-def build_think_reasoning_instructions() -> str:
-    """Per-field instructions for a think turn's ``reasoning`` (str)."""
-    return (
-        "Give your step-by-step reasoning for the next action: what the "
-        "observations so far establish, what is still missing for the task, "
-        "and what any agent_feedback says about the last turn."
-    )
-
-
 def build_think_terminate_instructions() -> str:
-    """Per-field instructions for a think turn's ``should_terminate`` (bool)."""
+    """Per-field instructions for a think turn's ``should_terminate`` (bool).
+
+    Permissive on purpose (plan 06a5ec0a D-034/D-035): the conclude edge's
+    evidence guard (D-008 of plan c1d5bfbc) already stops a turn-1 True with
+    no tool run, so the wording must not also forbid it.
+    """
     return (
-        "true ONLY when the observations already contain what the task asks "
-        "for; false when a tool still has to run. Never true before any tool "
-        "has run."
+        "true if you have enough information to answer the task: set it to "
+        "true when the observations already answer the task or when no "
+        "further tool call is needed; false only when another tool call is "
+        "still required to answer it."
     )
 
 

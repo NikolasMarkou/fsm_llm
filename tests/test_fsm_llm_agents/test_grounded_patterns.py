@@ -321,18 +321,35 @@ class TestTypedFieldExtraction:
 
     @pytest.mark.parametrize("field_type", ["str", "float", "list", "bool"])
     def test_supported_types(self, field_type):
-        field = _typed_field_extraction("value", field_type, "x")
+        field = _typed_field_extraction("item", field_type, "x")
         assert FieldExtractionConfig.model_validate(field).field_type == field_type
 
     @pytest.mark.parametrize("field_type", ["any", "dict", "int"])
     def test_other_types_rejected(self, field_type):
         with pytest.raises(ValueError, match="unsupported"):
-            _typed_field_extraction("value", field_type, "x")  # type: ignore[arg-type]
+            _typed_field_extraction("item", field_type, "x")  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("key", [ContextKeys.AGENT_TRACE, "_max_iterations"])
     def test_trace_and_internal_context_keys_rejected(self, key):
         with pytest.raises(ValueError, match="not allowed"):
-            _typed_field_extraction("value", "str", "x", extra_context_keys=[key])
+            _typed_field_extraction("item", "str", "x", extra_context_keys=[key])
+
+    @pytest.mark.parametrize(
+        "name", ["reasoning", "confidence", "value", "field_name", "extracted_data"]
+    )
+    def test_envelope_named_field_rejected(self, name):
+        # D-034/D-035: an envelope-named field was filled with the model's own
+        # meta-commentary (the envelope's `reasoning`), so it is refused.
+        with pytest.raises(ValueError, match="envelope"):
+            _typed_field_extraction(name, "str", "x")
+
+    def test_envelope_named_field_never_reaches_the_model(self):
+        # The grounded fake would answer `reasoning` (its evidence is in the
+        # prompt); the helper refuses the config before any state is built.
+        llm = PromptGroundedLLM(facts={"reasoning": ("meta text", "TASK-7731")})
+        with pytest.raises(ValueError, match="envelope"):
+            _start_loop(llm, [_typed_field_extraction("reasoning", "str", "x")])
+        assert llm.requests == []
 
     def test_typed_only_state_makes_no_bulk_call(self):
         llm = PromptGroundedLLM(facts={"critique": ("Too few samples.", "TASK-7731")})
@@ -885,27 +902,47 @@ class TestReactLoop:
             assert '"action": "lookup(' not in request.system_prompt
         assert not llm.calls("extract_bulk_data")  # no context-free bulk call
 
-    def test_reasoning_changes_across_turns(self):
-        # LOOP-02/16: reasoning was a context-free bulk value, set once.
-        def reasoning(text: str, context: dict) -> object:
-            observations = context.get(ContextKeys.OBSERVATIONS)
-            if not isinstance(observations, list):
-                return None
-            return f"after {len(observations)} observations"
+    def test_think_turn_makes_three_field_calls_and_no_bulk_call(self):
+        # D-034/D-035: think extracts tool_name, tool_input, should_terminate
+        # (no `reasoning` call, it collided with the envelope key) and, with
+        # use_classification=False, no context-free bulk call.
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
 
         runs: list[str] = []
-        facts = {k: v for k, v in _REACT_FACTS.items() if k != "should_terminate"}
-        llm = _TurnAwareLLM({"reasoning": reasoning}, facts=facts)
-        result = self._agent(llm, runs, max_iterations=4).run(
-            "What is the capital of France?"
+        facts = dict(_REACT_FACTS)
+        facts["reasoning"] = ("meta text", "capital")
+        llm = PromptGroundedLLM(facts=facts)
+        api = API.from_definition(
+            build_react_fsm(_lookup_registry(runs)), llm_interface=llm
         )
+        conv_id, _ = api.start_conversation(
+            {
+                ContextKeys.TASK: "What is the capital of France?",
+                ContextKeys.OBSERVATIONS: [],
+            }
+        )
+        llm.requests.clear()
 
-        thoughts = [call.reasoning for call in result.trace.tool_calls]
-        assert thoughts == [
-            "after 0 observations",
-            "after 1 observations",
-            "after 2 observations",
-        ]
+        api.converse("Continue.", conv_id)
+
+        names = sorted(r.field_name for r in llm.calls("extract_field"))
+        assert names == ["should_terminate", "tool_input", "tool_name"]
+        assert llm.calls("extract_bulk_data") == []
+        assert ContextKeys.REASONING not in api.get_data(conv_id)
+
+    def test_thought_is_not_extracted_per_turn(self):
+        # LOOP-16 known open: the per-turn thought is no longer a model call,
+        # so trace steps carry an empty thought even when the model would
+        # answer one.
+        runs: list[str] = []
+        facts = dict(_REACT_FACTS)
+        facts["reasoning"] = ("meta text", "capital")
+        llm = PromptGroundedLLM(facts=facts)
+        result = self._agent(llm, runs).run("What is the capital of France?")
+
+        assert runs == ["capital of France"]
+        assert [call.reasoning for call in result.trace.tool_calls] == [""]
+        assert _field_requests(llm, "reasoning") == []
 
     def test_caller_hint_stays_in_the_think_prompt(self):
         # Narrowed prompts must still list the caller's own context keys.

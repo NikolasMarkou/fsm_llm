@@ -4130,6 +4130,33 @@ class TestStep15D6D12B8:
         )
         assert result.value == "x@y.co"
 
+    @pytest.mark.parametrize("name", ["reasoning", "confidence", "field_name"])
+    def test_envelope_named_field_never_reads_the_envelope_key(self, name):
+        # plan-2026-09-29T103145-06a5ec0a D-035: a null value for a field named
+        # after an envelope key must stay null, not become the model's
+        # explanation (or score / echoed name).
+        content = json.dumps(
+            {
+                "field_name": name,
+                "value": None,
+                "confidence": 1.0,
+                "reasoning": "meta text",
+            }
+        )
+        result = _d_llm()._parse_field_extraction_response(
+            _d_response(content), _d_field_request(name)
+        )
+        assert result.value is None
+
+    def test_envelope_named_field_still_reads_its_value(self):
+        content = json.dumps(
+            {"field_name": "reasoning", "value": "real", "reasoning": "meta"}
+        )
+        result = _d_llm()._parse_field_extraction_response(
+            _d_response(content), _d_field_request("reasoning")
+        )
+        assert result.value == "real"
+
     # -- D12 --------------------------------------------------------------
     @pytest.mark.parametrize(
         ("call_type", "stream"),

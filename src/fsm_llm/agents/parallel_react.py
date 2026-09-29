@@ -73,14 +73,13 @@ def build_parallel_react_fsm(
     """Build the think -> act(parallel) -> conclude FSM definition.
 
     ``think`` extracts only typed per-field values (``tool_calls`` list,
-    ``reasoning`` str, ``should_terminate`` bool; D-009 of plan 06a5ec0a);
+    ``should_terminate`` bool; D-009 of plan 06a5ec0a);
     their prompts list ``task``, ``observations``, ``agent_feedback`` and
     ``context_keys``, never ``agent_trace``.
     """
     from .prompts import (
         build_conclude_extraction_instructions,
         build_conclude_response_instructions,
-        build_think_reasoning_instructions,
         build_think_terminate_instructions,
     )
 
@@ -105,13 +104,6 @@ def build_parallel_react_fsm(
                 "list",
                 _build_parallel_think_instructions(registry, task_description),
                 extra_context_keys=extra,
-            ),
-            _typed_field_extraction(
-                ContextKeys.REASONING,
-                "str",
-                build_think_reasoning_instructions(),
-                extra_context_keys=extra,
-                required=False,
             ),
             _typed_field_extraction(
                 ContextKeys.SHOULD_TERMINATE,

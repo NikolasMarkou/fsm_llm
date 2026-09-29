@@ -454,6 +454,16 @@ def _bool_decision_field_extractions(
 
 TypedFieldType = Literal["str", "float", "list", "bool"]
 
+# DECISION plan-2026-09-29T103145-06a5ec0a/D-035
+# Keys of core's extraction reply envelopes (single-field
+# `{field_name, value, confidence, reasoning}`, bulk `{extracted_data, ...}`).
+# Do NOT name a typed field after one: the model answers the envelope key with
+# its own meta-commentary, which then fills the field (the step-15 `reasoning`
+# field fed that text into every later think prompt, D-034).
+_EXTRACTION_ENVELOPE_KEYS: frozenset[str] = frozenset(
+    {"reasoning", "confidence", "value", "field_name", "extracted_data"}
+)
+
 # Context every loop-field prompt sees: the task and the tool observations.
 _LOOP_FIELD_CONTEXT_KEYS: tuple[str, ...] = (
     ContextKeys.TASK,
@@ -489,18 +499,16 @@ def _think_field_extractions(
     """Every typed field a ReAct/Reflexion ``think`` turn extracts.
 
     Contract: the tool selection (:func:`_tool_selection_field_extractions`,
-    unchanged types), then ``reasoning`` (str) and ``should_terminate`` (bool),
-    both optional (a null costs no retry and gates no edge). Every prompt
+    unchanged types), then ``should_terminate`` (bool, optional: a null costs
+    no retry and gates no edge). No ``reasoning`` field: that name is an
+    extraction envelope key (D-034/D-035 of plan 06a5ec0a). Every prompt
     lists ``task``, ``observations``, ``agent_feedback`` and ``context_keys``,
     never ``agent_trace``. ``think_instructions`` is the think prompt; pair
     the result with an empty state-level ``extraction_instructions`` unless the
     classifier owns ``tool_name`` (D-019 of plan 21cd7f8e keeps the bulk fill
     there). Raises ``ValueError`` like :func:`_loop_field_context_keys`.
     """
-    from .prompts import (
-        build_think_reasoning_instructions,
-        build_think_terminate_instructions,
-    )
+    from .prompts import build_think_terminate_instructions
 
     extra = (ContextKeys.AGENT_FEEDBACK, *context_keys)
     return [
@@ -508,13 +516,6 @@ def _think_field_extractions(
             think_instructions,
             include_tool_name=include_tool_name,
             context_keys=_loop_field_context_keys(extra),
-        ),
-        _typed_field_extraction(
-            ContextKeys.REASONING,
-            "str",
-            build_think_reasoning_instructions(),
-            extra_context_keys=extra,
-            required=False,
         ),
         _typed_field_extraction(
             ContextKeys.SHOULD_TERMINATE,
@@ -545,7 +546,8 @@ def _typed_field_extraction(
     (LOOP-11). ``required`` maps to the core flag (a null required field costs
     one retry call). Raises ``ValueError`` for another ``field_type``, or for
     an extra key that is ``agent_trace`` or internal-prefixed (core reads a
-    listed key from raw context, with no internal-key filter).
+    listed key from raw context, with no internal-key filter), and for a
+    ``field_name`` in :data:`_EXTRACTION_ENVELOPE_KEYS`.
 
     Pair it with an empty state-level ``extraction_instructions`` (D-009 of
     plan 06a5ec0a): core then runs only these context-aware per-field calls and
@@ -559,6 +561,11 @@ def _typed_field_extraction(
     """
     if field_type not in get_args(TypedFieldType):
         raise ValueError(f"unsupported typed field type: {field_type!r}")
+    if field_name in _EXTRACTION_ENVELOPE_KEYS:
+        raise ValueError(
+            f"typed field name {field_name!r} is an extraction envelope key; "
+            "pick another name"
+        )
     context_keys = _loop_field_context_keys(extra_context_keys)
     return {
         "field_name": field_name,

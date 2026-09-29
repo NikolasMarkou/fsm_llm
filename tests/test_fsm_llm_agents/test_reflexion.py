@@ -207,7 +207,7 @@ class TestReflexionFSM:
         # think, evaluate and reflect extract only typed per-field values
         # (D-009 of plan 06a5ec0a) and write no Pass-2 prose.
         expected = {
-            "think": {"tool_name", "tool_input", "reasoning", "should_terminate"},
+            "think": {"tool_name", "tool_input", "should_terminate"},
             "evaluate": {
                 "evaluation_passed",
                 "evaluation_score",

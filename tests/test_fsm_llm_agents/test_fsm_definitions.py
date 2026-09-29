@@ -175,7 +175,8 @@ class TestThinkStateToolSelectionTypes:
         assert cfgs["tool_input"].field_type == "dict"
         # LOOP-10: the routing flag is typed too (was an auto-minted `any`).
         assert cfgs["should_terminate"].field_type == "bool"
-        assert cfgs["reasoning"].field_type == "str"
+        # D-035: no `reasoning` field (an extraction envelope key).
+        assert "reasoning" not in cfgs
         assert "object" in _value_types(cfgs["tool_input"])
         assert "object" not in _value_types(cfgs["tool_name"])
 
@@ -204,12 +205,23 @@ class TestThinkStateToolSelectionTypes:
             assert "hint" in keys
             assert "agent_trace" not in keys
 
+    def test_should_terminate_wording_is_permissive(self):
+        # D-034/D-035: the strict "never true before any tool has run" wording
+        # kept the 4b model looping to the limit; the conclude evidence guard
+        # (D-008 of plan c1d5bfbc) already stops a no-tool conclude.
+        cfgs = _think_configs(build_react_fsm(_make_registry("search")))
+        text = cfgs["should_terminate"].extraction_instructions
+        assert "enough information to answer the task" in text
+        assert "no further tool call is needed" in text
+        assert "Never true" not in text
+        assert "ONLY" not in text
+
     def test_classification_owned_tool_name_is_not_redeclared(self):
         # use_classification: tool_name belongs to the classifier (D-006); an
         # explicit config would make the plain extractor fill it again.
         fsm = build_react_fsm(_make_registry("search"), use_classification=True)
         names = [fc["field_name"] for fc in fsm["states"]["think"]["field_extractions"]]
-        assert names == ["tool_input", "reasoning", "should_terminate"]
+        assert names == ["tool_input", "should_terminate"]
         assert "tool_name" not in _think_configs(fsm)
         # D-019 of plan 21cd7f8e: the bulk fill stays when the classifier owns
         # tool_name (it declines below its threshold).

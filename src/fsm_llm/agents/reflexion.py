@@ -168,8 +168,9 @@ class ReflexionAgent(BaseAgent):
             )
         self._register_tool_executor(api, ReflexionStates.ACT, handlers.execute_tool)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
-        # Only `reasoning` is refreshed on think entry: the reflect bookkeeping
-        # sets should_terminate at max_reflections and think must still see it.
+        # Only `reasoning` (bulk-filled when use_classification=True) is refreshed
+        # on think entry: the reflect bookkeeping sets should_terminate at
+        # max_reflections and think must still see it.
         self._register_think_loop_handlers(api, [ContextKeys.REASONING])
 
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-031
