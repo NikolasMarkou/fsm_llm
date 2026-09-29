@@ -5,7 +5,7 @@ Purpose: FastAPI web dashboard (REST + WebSocket + vanilla-JS SPA) that launches
 
 ## Scope
 
-Python backend (`server.py`, `instance_manager.py`, `collector.py`, `bridge.py`, `otel.py`, models, constants), the browser app in `static/`, and the Jinja2 shell `templates/index.html`. Part of the `fsm-llm` distribution (version shared with `fsm_llm`, currently 0.9.0), installed via extra `monitor` (fastapi >=0.100, uvicorn >=0.20, jinja2 >=3.1); OTEL via extra `otel`. Not here: FSM runtime (`fsm_llm`), agent implementations (`fsm_llm.agents`), workflow engine (`fsm_llm.workflows`).
+Python backend (`server.py`, `instance_manager.py`, `collector.py`, `bridge.py`, `otel.py`, models, constants), the browser app in `static/`, and the Jinja2 shell `templates/index.html`. Part of the `fsm-llm` distribution (version shared with `fsm_llm`, currently 0.9.0); its deps come from extra `monitor` (fastapi >=0.100, uvicorn >=0.20, jinja2 >=3.1); OTEL via extra `otel`. Not here: FSM runtime (`fsm_llm`), agent implementations (`fsm_llm.agents`), workflow engine (`fsm_llm.workflows`).
 
 ## Architecture
 
@@ -40,7 +40,7 @@ Handler hooks are `_MonitorHandler(BaseHandler)` objects (observe-only, priority
 | `otel.py` | `OTELExporter` | Own `TracerProvider`, never set as global |
 | `definitions.py` | Pydantic models, `normalize_message_history`, `model_to_dict` | Request/config bounds live here |
 | `constants.py` | Event names, defaults, bounds, theme colors, handler name/priority | Theme colors are not used by `static/style.css` |
-| `__main__.py` | CLI `fsm-llm-monitor` | `configure(api_key, trusted_hosts)` then `uvicorn.run(app, log_level="warning")` |
+| `__main__.py` | CLI `fsm-llm-monitor` | enables `fsm_llm` library logging (D-008; embedders running `uvicorn fsm_llm.monitor.server:app` call `setup_logging()` themselves), `configure(api_key, trusted_hosts)`, then `uvicorn.run(app, log_level="warning")` |
 | `static/`, `templates/index.html` | Frontend | Element ids and `data-action` names are the frontend contract (see `static/pages/CLAUDE.md`) |
 
 ## Public interface

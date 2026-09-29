@@ -170,13 +170,16 @@ Priority ordering (lower first). Error modes: `"continue"` (log + skip) or `"rai
 
 ```
 fsm_llm (core, includes classification)
-├── fsm_llm_reasoning  — Uses API (push/pop FSM stacking) + classification
-├── fsm_llm_workflows  — Uses API (via ConversationStep); lifecycle hooks via add_hook
-├── fsm_llm_agents     — Uses API (auto-generates FSMs) + handlers for tool execution
-├── fsm_llm_monitor    — Uses API + handlers (observer callbacks at priority 9999)
-└── fsm_llm_harness    — Uses API (hand-written FSM) + handlers at state entry; dispatches
-                          fsm_llm_agents workers as protocol roles
+├── fsm_llm.reasoning  — Uses API (push/pop FSM stacking) + classification
+├── fsm_llm.workflows  — Uses API (via ConversationStep); lifecycle hooks via add_hook
+├── fsm_llm.agents     — Uses API (auto-generates FSMs) + handlers for tool execution
+├── fsm_llm.monitor    — Uses API + handlers (observer callbacks at priority 9999)
+└── fsm_llm.harness    — Uses API (hand-written FSM) + handlers at state entry; dispatches
+                          fsm_llm.agents workers as protocol roles
 ```
+
+The five extensions are subpackages of `fsm_llm`. Core never imports them at package
+import time; each one imports core (`from fsm_llm import API`).
 
 | Package | Integration | Key Mechanism |
 |---------|------------|---------------|
@@ -187,7 +190,7 @@ fsm_llm (core, includes classification)
 | Monitor | Observer handlers + loguru sink | Registers at all 8 timing points (priority 9999), never modifies state |
 | Harness | Hand-written FSM + state-entry handlers | `build_harness_fsm()` returns a 6-state definition whose gates are JsonLogic conditions; a handler per state entry dispatches one agent worker, and the gate values it writes are derived from the filesystem |
 
-## The Harness: a Protocol on Top of the 2-Pass Core (`fsm_llm_harness`)
+## The Harness: a Protocol on Top of the 2-Pass Core (`fsm_llm.harness`)
 
 The harness runs a 6-state planning protocol -- EXPLORE, PLAN, EXECUTE, REFLECT,
 PIVOT, CLOSE -- as an ordinary FSM-LLM conversation. It adds no machinery to the
@@ -218,7 +221,7 @@ DENYING approval callback was never consulted once.
 
 ```
 HarnessAgent (the DRIVER)              worker (a ROLE)
-├── owns the FSM conversation          ├── an fsm_llm_agents agent
+├── owns the FSM conversation          ├── an fsm_llm.agents agent
 ├── owns all nine gate flags           ├── receives a RoleRequest (context SNAPSHOT)
 ├── writes exactly one artifact        ├── holds only the tools its ownership
 │     (state.md), on transitions       │     entry grants it

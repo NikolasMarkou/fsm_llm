@@ -2,7 +2,7 @@
 
 > Covers FSM-LLM v0.9.0
 
-Complete API documentation for FSM-LLM and its extension packages.
+Complete API documentation for FSM-LLM and its extension subpackages.
 
 ## API Class (`fsm_llm.API`)
 
@@ -231,10 +231,10 @@ router.register("billing", handle_billing)
 response = router.route(message, classification_result)
 ```
 
-## ReasoningEngine (`fsm_llm_reasoning`)
+## ReasoningEngine (`fsm_llm.reasoning`)
 
 ```python
-from fsm_llm_reasoning import ReasoningEngine, ReasoningType
+from fsm_llm.reasoning import ReasoningEngine, ReasoningType
 
 engine = ReasoningEngine(model="gpt-4o-mini")
 solution, trace = engine.solve_problem("problem text", initial_context={})
@@ -243,10 +243,10 @@ solution, trace = engine.solve_problem("problem text", initial_context={})
 
 9 strategies: `SIMPLE_CALCULATOR`, `ANALYTICAL`, `DEDUCTIVE`, `INDUCTIVE`, `CREATIVE`, `CRITICAL`, `HYBRID`, `ABDUCTIVE`, `ANALOGICAL`.
 
-## Agents (`fsm_llm_agents`)
+## Agents (`fsm_llm.agents`)
 
 ```python
-from fsm_llm_agents import create_agent, ReactAgent, tool, ToolRegistry, HumanInTheLoop, AgentConfig
+from fsm_llm.agents import create_agent, ReactAgent, tool, ToolRegistry, HumanInTheLoop, AgentConfig
 
 # @tool decorator auto-generates JSON schema from type hints
 @tool
@@ -270,14 +270,14 @@ hitl = HumanInTheLoop(approval_policy=lambda call, ctx: call.tool_name == "searc
 agent = ReactAgent(model="gpt-4o-mini", tools=[search], hitl=hitl)
 ```
 
-13 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm` (plus `reasoning_react` when `fsm_llm_reasoning` is installed).
+13 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm` (plus `reasoning_react`, which uses `fsm_llm.reasoning`).
 
 Multi-agent coordination and integrations (constructed directly, not via the factory): `SwarmAgent`, `AgentGraph` / `AgentGraphBuilder` (DAG orchestration), `MCPToolProvider` (MCP tools), `AgentServer` / `RemoteAgentTool` (A2A), `SemanticToolRegistry` (embedding-based tool retrieval), `SOPRegistry` / `load_builtin_sops` (reusable agent templates).
 
-## WorkflowEngine (`fsm_llm_workflows`)
+## WorkflowEngine (`fsm_llm.workflows`)
 
 ```python
-from fsm_llm_workflows import WorkflowEngine, create_workflow, auto_step, condition_step
+from fsm_llm.workflows import WorkflowEngine, create_workflow, auto_step, condition_step
 
 workflow = create_workflow("my_workflow", "My Workflow")
 workflow.with_initial_step(auto_step("start", "Start", next_state="check"))
@@ -295,7 +295,7 @@ await engine.shutdown()
 
 Events and loops: `await engine.process_event(WorkflowEvent(event_type="paid", payload={...}))` wakes waiting instances (set `instance_id=` to target one; `wait_event_step(..., correlation_key=...)` matches a payload key against the instance context). Loops must pass through a `timer_step` or `wait_event_step`; purely synchronous cycles are rejected by `register_workflow`. A step failure with no error route FAILS the instance. `engine.add_hook(fn)` observes step and status changes.
 
-## Harness (`fsm_llm_harness`)
+## Harness (`fsm_llm.harness`)
 
 The iterative-planner protocol as a 6-state FSM over a plan directory. Requires
 `pip install fsm-llm[harness]`. 118 public names in one literal `__all__`; the
@@ -304,7 +304,7 @@ load-bearing ones are below.
 ### HarnessAgent -- the driver
 
 ```python
-from fsm_llm_harness import HarnessAgent, Workspace, build_default_worker_factory, ContextKeys
+from fsm_llm.harness import HarnessAgent, Workspace, build_default_worker_factory, ContextKeys
 
 workspace = Workspace("./src")                       # confined source-tree root
 agent = HarnessAgent(
@@ -342,7 +342,7 @@ Worker seam: `WorkerFactory = Callable[[RoleRequest], AgentResult]`. `RoleSpec`
 ### Plan directory, gate and audit
 
 ```python
-from fsm_llm_harness import PlanDirectory, Role, ArtifactNames, StateDoc, pre_step_gate, audit
+from fsm_llm.harness import PlanDirectory, Role, ArtifactNames, StateDoc, pre_step_gate, audit
 
 directory = PlanDirectory.create("plans", role=Role.ORCHESTRATOR)   # mints plan-<ts>-<hex8>
 directory.write_text(ArtifactNames.STATE, StateDoc(state="explore").to_markdown())  # atomic
@@ -373,7 +373,7 @@ six of its sections are required. `PlanDirectory.enforce_lessons_cap` /
 ### Confined tools
 
 ```python
-from fsm_llm_harness import Workspace, PlanMemory, build_workspace_tools, build_plan_tools, Role
+from fsm_llm.harness import Workspace, PlanMemory, build_workspace_tools, build_plan_tools, Role
 
 workspace = Workspace("./src")                          # confinement only
 memory = PlanMemory("plans/plan-...", role=Role.EXPLORER)  # confinement + ownership
@@ -421,10 +421,10 @@ reserved, argparse usage errors exit `1` rather than argparse's conventional `2`
 Model resolution: `--model` > `$LLM_MODEL` > package default. `close` is DRY-RUN
 without `--apply` and refuses to compress a directory with audit ERRORs.
 
-## Monitor (`fsm_llm_monitor`)
+## Monitor (`fsm_llm.monitor`)
 
 ```python
-from fsm_llm_monitor import MonitorBridge, configure, app
+from fsm_llm.monitor import MonitorBridge, configure, app
 
 # MonitorBridge creates and wires its own EventCollector internally
 bridge = MonitorBridge(api=api)   # or: bridge = MonitorBridge(); bridge.connect(api)
@@ -432,7 +432,8 @@ configure(bridge)                 # registers the bridge with the global web ser
 
 import uvicorn
 uvicorn.run(app, host="127.0.0.1", port=8420)
-# Or just use the CLI: fsm-llm-monitor
+# Or just use the CLI: fsm-llm-monitor (it also enables library logging;
+# when embedding, call fsm_llm.setup_logging() to fill the Logs page)
 
 # OTEL export is available via OTELExporter (requires fsm-llm[otel])
 ```

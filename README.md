@@ -152,16 +152,16 @@ Provider keys (`OPENAI_API_KEY`, ...) are read by litellm. A `.env` file is look
 
 ## Packages
 
-The repository ships six Python packages in one distribution. Only `fsm_llm` is required; the others are installed with extras.
+The distribution ships one Python package, `fsm_llm`: the core plus five subpackages. Every subpackage is installed with the core; an extra only adds the third-party dependencies a subpackage needs (see the table above). Import a subpackage as `from fsm_llm import agents` or `from fsm_llm.agents import create_agent`; `import fsm_llm` alone loads none of them.
 
 | Package | What it adds |
 |---------|--------------|
 | `fsm_llm` | The core: FSM definitions, the 2-pass pipeline, handlers, classification, LLM access, sessions, validation, visualization |
-| `fsm_llm_reasoning` | A problem solver that picks one of 9 reasoning styles and runs it as an FSM, with answer validation and retries |
-| `fsm_llm_workflows` | An async workflow engine with 11 step types (API calls, LLM steps, FSM conversations, agents, timers, events, parallel, retry, switch) |
-| `fsm_llm_agents` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan-and-execute, debate, orchestrator, ...), tools, human approval, memory, MCP and remote agents, and a meta-builder that designs FSMs, workflows, and agents by chat |
-| `fsm_llm_monitor` | A web dashboard to launch, watch, and chat with FSMs, agents, and workflows, with optional OpenTelemetry export |
-| `fsm_llm_harness` | The iterative-planner protocol (explore, plan, execute, reflect, pivot, close) as an FSM whose gates check files on disk |
+| `fsm_llm.reasoning` | A problem solver that picks one of 9 reasoning styles and runs it as an FSM, with answer validation and retries |
+| `fsm_llm.workflows` | An async workflow engine with 11 step types (API calls, LLM steps, FSM conversations, agents, timers, events, parallel, retry, switch) |
+| `fsm_llm.agents` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan-and-execute, debate, orchestrator, ...), tools, human approval, memory, MCP and remote agents, and a meta-builder that designs FSMs, workflows, and agents by chat |
+| `fsm_llm.monitor` | A web dashboard to launch, watch, and chat with FSMs, agents, and workflows, with optional OpenTelemetry export |
+| `fsm_llm.harness` | The iterative-planner protocol (explore, plan, execute, reflect, pivot, close) as an FSM whose gates check files on disk |
 
 **Classification** (core):
 
@@ -183,7 +183,7 @@ result = classifier.classify("I can't log in to my account")
 **Reasoning**:
 
 ```python
-from fsm_llm_reasoning import ReasoningEngine
+from fsm_llm.reasoning import ReasoningEngine
 engine = ReasoningEngine(model="openai/gpt-4o-mini")
 solution, trace = engine.solve_problem("What is the probability of rolling two sixes?")
 ```
@@ -192,7 +192,7 @@ solution, trace = engine.solve_problem("What is the probability of rolling two s
 
 ```python
 import asyncio
-from fsm_llm_workflows import WorkflowEngine, auto_step, condition_step, create_workflow
+from fsm_llm.workflows import WorkflowEngine, auto_step, condition_step, create_workflow
 
 wf = create_workflow("orders", "Order check")
 wf.with_initial_step(auto_step("load", "Load order", next_state="route",
@@ -214,7 +214,7 @@ asyncio.run(main())
 **Agents**:
 
 ```python
-from fsm_llm_agents import create_agent, tool
+from fsm_llm.agents import create_agent, tool
 
 @tool
 def search(query: str) -> str:
@@ -241,7 +241,7 @@ fsm-llm-harness validate plans/plan-2026-07-22T101500-1a2b3c4d
 ```
 
 ```python
-from fsm_llm_harness import ContextKeys, HarnessAgent, Workspace, build_default_worker_factory
+from fsm_llm.harness import ContextKeys, HarnessAgent, Workspace, build_default_worker_factory
 
 workspace = Workspace("./src")
 agent = HarnessAgent(worker_factory=build_default_worker_factory(workspace))
@@ -349,13 +349,13 @@ make install-dev    # Install in dev mode with all extras + pre-commit hooks
 make test           # Run full test suite (7,320 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
-make type-check     # mypy across all packages
+make type-check     # mypy on src/fsm_llm/ (core and subpackages)
 make build          # python -m build (wheel + sdist)
 make coverage       # Tests with coverage report
 make audit          # scan site-packages for suspicious .pth files
 ```
 
-Repository layout: `src/` holds the six packages, `tests/` one test folder per package plus regression and example checks, `examples/` the runnable examples, `scripts/` evaluation and benchmark tools, `docs/` longer guides.
+Repository layout: `src/fsm_llm/` holds the core and its five subpackages, `tests/` one test folder per (sub)package plus regression and example checks, `examples/` the runnable examples, `scripts/` evaluation and benchmark tools, `docs/` longer guides.
 
 ## Contributing
 

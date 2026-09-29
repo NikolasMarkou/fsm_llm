@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (BREAKING: `fsm_llm` is the single top-level package, 2026-09-29)
+
+The five extension packages now live under `fsm_llm` as subpackages. `src/` holds one
+package, `src/fsm_llm/`. There are no compatibility shims: the old top-level names
+raise `ModuleNotFoundError`, so update your imports.
+
+| Old import | New import |
+|------------|------------|
+| `import fsm_llm_agents` / `from fsm_llm_agents import X` | `from fsm_llm import agents` / `from fsm_llm.agents import X` |
+| `import fsm_llm_reasoning` / `from fsm_llm_reasoning import X` | `from fsm_llm import reasoning` / `from fsm_llm.reasoning import X` |
+| `import fsm_llm_workflows` / `from fsm_llm_workflows import X` | `from fsm_llm import workflows` / `from fsm_llm.workflows import X` |
+| `import fsm_llm_monitor` / `from fsm_llm_monitor import X` | `from fsm_llm import monitor` / `from fsm_llm.monitor import X` |
+| `import fsm_llm_harness` / `from fsm_llm_harness import X` | `from fsm_llm import harness` / `from fsm_llm.harness import X` |
+
+Submodules move the same way, for example `fsm_llm_agents.meta_cli` is now
+`fsm_llm.agents.meta_cli` and `fsm_llm_monitor.server:app` is now
+`fsm_llm.monitor.server:app`. Update `mock.patch` targets and `sys.modules` keys too.
+
+- `import fsm_llm` still loads no subpackage. `from fsm_llm import agents` works through
+  the normal submodule import; `fsm_llm.agents` is not an attribute of a bare
+  `import fsm_llm` until something imports it.
+- Console scripts keep their names and point at the new modules:
+  `fsm-llm-monitor = fsm_llm.monitor.__main__:main_cli`,
+  `fsm-llm-meta = fsm_llm.agents.meta_cli:main_cli`,
+  `fsm-llm-harness = fsm_llm.harness.__main__:main_cli`. Reinstall (`pip install -e .`)
+  to refresh editable wrappers.
+- Module entry points: `python -m fsm_llm.reasoning`, `python -m fsm_llm.agents`,
+  `python -m fsm_llm.monitor`, `python -m fsm_llm.harness`.
+- **(behavior)** Logging: the single `logger.disable("fsm_llm")` now covers every
+  subpackage, so agents, reasoning, workflows, monitor and harness logs are silent until
+  `setup_logging()` or `enable_debug_logging()` runs (agents, reasoning, harness and
+  monitor logs used to reach loguru's default stderr handler). The workflows
+  self-disable is gone and `LIBRARY_LOGGER_NAMES` is `("fsm_llm",)`. The
+  `fsm-llm-monitor` CLI enables library logging so its Logs page keeps working; if you
+  run `uvicorn fsm_llm.monitor.server:app` yourself, call `setup_logging()` first.
+  `fsm-llm-meta`, `fsm-llm-harness` and the `python -m` entry points stay silent by
+  default.
+- **(behavior)** `disable_warnings()` still filters `fsm_llm` and its submodules, which
+  now include the five subpackages, so their warnings are silenced too (before, they
+  stayed visible). A lookalike sibling such as `fsm_llm_contrib` is still not matched.
+- `has_agents()`, `has_reasoning()` and `has_workflows()` keep their names and now probe
+  `fsm_llm.agents` etc. The subpackages ship in every install, so they return `True`
+  whenever `fsm_llm` is installed. `get_agents()` and friends still raise the install
+  hint only when the subpackage itself is missing; a missing third-party dependency
+  propagates.
+- The extras keep their names (`agents`, `reasoning`, `workflows`, `monitor`,
+  `harness`) and now only add third-party dependencies; the code ships with the core.
+- Packaging: the wheel's `top_level.txt` is just `fsm_llm`. The monitor frontend's
+  `static/pages/`, `static/services/` and `static/utils/` subdirectories were missing
+  from the wheel and sdist (package-data was `static/*`); `static/**/*` now ships all
+  of them.
+- The five sub-package `py.typed` markers are removed; `fsm_llm/py.typed` covers every
+  subpackage under PEP 561.
+- mypy and coverage run on one root: `mypy src/fsm_llm/`, `--cov=fsm_llm`.
+- Test directories keep their names (`tests/test_fsm_llm_agents/` and so on).
+- Version stays 0.9.0; this change ships in the next release.
+
 ### Fixed (monitor audit, 2026-09-28)
 
 Breaking behavior changes are marked **(behavior)**.

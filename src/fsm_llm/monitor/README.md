@@ -6,7 +6,7 @@ A web dashboard for FSM-LLM. It lets you launch, watch, and talk to FSM chatbots
 
 FSM-LLM is a Python framework that builds chatbots as finite state machines (FSMs: a fixed set of named states plus rules for moving between them), with a large language model (LLM) doing the talking and the data extraction. When such a bot runs, a lot happens out of sight: which state it is in, what data it pulled from each message, why it moved to another state, what went wrong. This package makes that visible. It runs a small web server with a single-page dashboard that shows live counters, events, logs, and conversation details, and lets you start new FSMs, agents, and demo workflows with a few clicks.
 
-It is part of the `fsm-llm` distribution and is installed with the `monitor` extra.
+It is the `fsm_llm.monitor` subpackage of the `fsm-llm` distribution; the `monitor` extra installs its web dependencies.
 
 ## How it works
 
@@ -65,6 +65,8 @@ api = API.from_file("examples/basic/simple_greeting/fsm.json", model="ollama_cha
 configure(bridge=MonitorBridge(api=api))
 uvicorn.run(app, host="127.0.0.1", port=8420)
 ```
+
+Library logging is off until `setup_logging()` runs, so when you start the app yourself (instead of `fsm-llm-monitor`) call `fsm_llm.setup_logging()` first if you want the Logs page filled.
 
 Export events to OpenTelemetry (needs the `otel` extra):
 

@@ -28,12 +28,12 @@ Phase 1 delivers 4 core infrastructure features adapted from the Strands Agents 
 - `src/fsm_llm/definitions.py` -- `response_format` field on `ResponseGenerationRequest`
 - `src/fsm_llm/llm.py` -- `response_format` param on `_make_llm_call()`, applied in `generate_response()`
 - `src/fsm_llm/pipeline.py` -- Reads `_output_response_format` from context
-- `src/fsm_llm_agents/base.py` -- Sets `_output_response_format` from `output_schema`
+- `src/fsm_llm/agents/base.py` -- Sets `_output_response_format` from `output_schema`
 
 **Usage**:
 ```python
 from pydantic import BaseModel
-from fsm_llm_agents import ReactAgent, AgentConfig
+from fsm_llm.agents import ReactAgent, AgentConfig
 
 class Analysis(BaseModel):
     summary: str

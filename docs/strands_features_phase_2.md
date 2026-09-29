@@ -20,7 +20,7 @@ Phase 2 covers the remaining 8 features from the Strands adaptation report. Thes
 **What to build**: An OTEL exporter layer that wraps existing `EventCollector` events into OTEL spans and metrics using the adapter pattern (no modifications to the existing monitor).
 
 **Key implementation details**:
-- `OTELExporter` class in `fsm_llm_monitor/otel.py` wraps `EventCollector.record_event()` via the adapter pattern
+- `OTELExporter` class in `fsm_llm/monitor/otel.py` wraps `EventCollector.record_event()` via the adapter pattern
 - Conversation lifecycle events become parent spans; state transitions, processing, and errors become child spans
 - Thread-safe span management via `_spans_lock`
 - Pluggable backends: Jaeger, Datadog, Langfuse via OpenTelemetry SDK exporters
@@ -51,7 +51,7 @@ Phase 2 covers the remaining 8 features from the Strands adaptation report. Thes
 - Entry agent configurable, max handoff limit for safety
 - Add `build_swarm_fsm()` to `fsm_definitions.py`
 
-**Estimated scope**: ~400 LOC, 1-2 new files in `fsm_llm_agents/`
+**Estimated scope**: ~400 LOC, 1-2 new files in `fsm_llm/agents/`
 
 ---
 
@@ -70,7 +70,7 @@ Phase 2 covers the remaining 8 features from the Strands adaptation report. Thes
 - Support parallel branches (independent nodes execute concurrently)
 - `AgentGraph.run(task)` returns combined `AgentResult`
 
-**Estimated scope**: ~350 LOC, 1-2 new files in `fsm_llm_agents/`
+**Estimated scope**: ~350 LOC, 1-2 new files in `fsm_llm/agents/`
 
 ---
 
@@ -89,7 +89,7 @@ Phase 2 covers the remaining 8 features from the Strands adaptation report. Thes
 - The `@tool` decorator remains for custom tools -- MCP supplements, not replaces
 - New optional dependency: `mcp` SDK (in `agents` extras)
 
-**Estimated scope**: ~250 LOC, 1 new file in `fsm_llm_agents/`
+**Estimated scope**: ~250 LOC, 1 new file in `fsm_llm/agents/`
 
 ---
 
@@ -108,7 +108,7 @@ Phase 2 covers the remaining 8 features from the Strands adaptation report. Thes
 - Integrates with existing `ToolRegistry` API -- drop-in replacement
 - New optional dependency: embedding library (in `agents` extras)
 
-**Estimated scope**: ~200 LOC, 1 new file in `fsm_llm_agents/`
+**Estimated scope**: ~200 LOC, 1 new file in `fsm_llm/agents/`
 
 ---
 
@@ -127,7 +127,7 @@ Phase 2 covers the remaining 8 features from the Strands adaptation report. Thes
 - Backward-compatible -- existing workflows without dependencies behave identically
 - Existing `ParallelStep` remains for explicit grouping; dependency-based parallelism is implicit
 
-**Estimated scope**: ~200 LOC, 1 new file in `fsm_llm_workflows/`
+**Estimated scope**: ~200 LOC, 1 new file in `fsm_llm/workflows/`
 
 ---
 
@@ -146,7 +146,7 @@ Phase 2 covers the remaining 8 features from the Strands adaptation report. Thes
 - Ship 3-5 built-in SOPs for common patterns (code review, summarization, data extraction)
 - SOPs are parameterized -- template variables filled at instantiation
 
-**Estimated scope**: ~250 LOC, 1-2 new files in `fsm_llm_agents/`
+**Estimated scope**: ~250 LOC, 1-2 new files in `fsm_llm/agents/`
 
 ---
 
@@ -162,10 +162,10 @@ Phase 2 covers the remaining 8 features from the Strands adaptation report. Thes
 - `AgentServer(agent, host, port)` exposes `/invoke` (full result) and `/stream` (SSE token stream, leveraging Phase 1 streaming)
 - `RemoteAgentTool(url, name, description)` creates a `ToolDefinition` that calls the remote agent
 - Uses existing `ToolRegistry.register_function()` pattern for integration
-- Extends the existing FastAPI infrastructure from `fsm_llm_monitor`
+- Extends the existing FastAPI infrastructure from `fsm_llm.monitor`
 - New optional dependency: `httpx` (for async HTTP client in `agents` extras)
 
-**Estimated scope**: ~300 LOC, 1-2 new files in `fsm_llm_agents/`
+**Estimated scope**: ~300 LOC, 1-2 new files in `fsm_llm/agents/`
 
 ---
 

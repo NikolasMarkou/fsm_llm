@@ -18,15 +18,15 @@ make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoni
 make test           # full suite (pytest -v)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
-make type-check     # mypy across all six packages
-pytest tests/test_fsm_llm/            # one package's suite
+make type-check     # mypy on src/fsm_llm/ (core and subpackages)
+pytest tests/test_fsm_llm/            # one suite (core)
 pytest -m "not slow"                  # skip the slow tests
 ```
 
 - The default suite mocks the LLM. Live tests need a reachable Ollama and skip without one; the harness live tests also need `FSM_LLM_HARNESS_LIVE=1`.
 - Pre-commit runs ruff (lint with `--fix`, and format) and the file hygiene hooks on commit, and a quick pytest run on push.
 - A behaviour change needs a test that fails on the code before the change. Run it against the parent commit to confirm.
-- Test counts are written out as literals in `CLAUDE.md`, `README.md` and `src/fsm_llm_harness/CLAUDE.md`, and `tests/test_packaging.py` checks them against a fresh collection. When you add or remove tests, re-measure with `pytest --collect-only -q | tail -1` (and per suite) and update every literal. Never guess or adjust a count by hand.
+- Test counts are written out as literals in `CLAUDE.md`, `README.md` and `src/fsm_llm/harness/CLAUDE.md`, and `tests/test_packaging.py` checks them against a fresh collection. When you add or remove tests, re-measure with `pytest --collect-only -q | tail -1` (and per suite) and update every literal. Never guess or adjust a count by hand.
 - `tests/test_fsm_llm/test_docs_snippets.py` loads every fenced block that names `"initial_state"` in the first-touch docs. A full FSM snippet in the docs must be a valid FSM.
 
 ## Examples are frozen
