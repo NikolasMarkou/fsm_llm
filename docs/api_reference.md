@@ -124,7 +124,9 @@ Fluent API returned by `api.create_handler()`:
 | `.on_context_update(*keys)` | Shorthand: `.at(CONTEXT_UPDATE).when_keys_updated()` |
 | `.when(condition)` | Custom condition lambda |
 | `.with_priority(n)` | Execution priority (lower runs first, default 100) |
+| `.critical(value=True)` | Mark the handler critical: its failure raises `HandlerExecutionError` even in `error_mode="continue"` |
 | `.do(fn)` | Set handler function and build |
+| `.build()` | Build the handler from the current configuration (`.do(fn)` calls it) |
 
 ## HandlerTiming Enum
 
@@ -255,7 +257,7 @@ def search(query: str) -> str:
     return f"Results for: {query}"
 
 # Create agent
-agent = create_agent("react", model="gpt-4o-mini", tools=[search])
+agent = create_agent(tools=[search], model="gpt-4o-mini")  # pattern="react" is the default
 result = agent("task")  # or agent.run("task")
 # result.answer, result.success, result.trace, result.structured_output
 
@@ -270,7 +272,7 @@ hitl = HumanInTheLoop(approval_policy=lambda call, ctx: call.tool_name == "searc
 agent = ReactAgent(model="gpt-4o-mini", tools=[search], hitl=hitl)
 ```
 
-13 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm` (plus `reasoning_react`, which uses `fsm_llm.reasoning`).
+17 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm`, `parallel_react`, `native_fc`, `verified_react`, `auto_memory` (plus `reasoning_react` when `fsm_llm.reasoning` is importable). The source of truth is `_PATTERNS` in `src/fsm_llm/agents/__init__.py`; an unknown pattern raises `ValueError` listing the available names.
 
 Multi-agent coordination and integrations (constructed directly, not via the factory): `SwarmAgent`, `AgentGraph` / `AgentGraphBuilder` (DAG orchestration), `MCPToolProvider` (MCP tools), `AgentServer` / `RemoteAgentTool` (A2A), `SemanticToolRegistry` (embedding-based tool retrieval), `SOPRegistry` / `load_builtin_sops` (reusable agent templates).
 
@@ -298,8 +300,8 @@ Events and loops: `await engine.process_event(WorkflowEvent(event_type="paid", p
 ## Harness (`fsm_llm.harness`)
 
 The iterative-planner protocol as a 6-state FSM over a plan directory. Requires
-`pip install fsm-llm[harness]`. 118 public names in one literal `__all__`; the
-load-bearing ones are below.
+`pip install fsm-llm[harness]`. The public surface is one literal `__all__`; the
+load-bearing names are below.
 
 ### HarnessAgent -- the driver
 

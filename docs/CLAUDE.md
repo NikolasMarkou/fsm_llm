@@ -66,12 +66,7 @@ No runtime dependencies. The snippets import from `fsm_llm` and from `fsm_llm.ag
 
 ## Failure modes
 
-These doc claims do not match the code today:
-
-- `api_reference.md` says the harness has "118 public names". `len(fsm_llm.harness.__all__)` is 123.
-- `api_reference.md` says "13 `create_agent()` patterns". The `_PATTERNS` map in `src/fsm_llm/agents/__init__.py` has 17 (it adds `parallel_react`, `native_fc`, `verified_react`, `auto_memory`), plus `reasoning_react` when that import works.
-- `api_reference.md` calls `create_agent("react", model=..., tools=[search])`. The signature is `create_agent(system_prompt="You are a helpful assistant.", tools=None, pattern="react", **kwargs)`, so that first positional argument becomes the system prompt, not the pattern.
-- The `HandlerBuilder` table in `api_reference.md` leaves out `.critical()`. The method exists, and the table in `handlers.md` lists it.
+No known mismatches between these docs and the code. When one is found, list it here until it is fixed.
 
 ## Working here
 
