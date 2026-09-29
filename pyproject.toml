@@ -93,7 +93,7 @@ fsm-llm-visualize = "fsm_llm.visualizer:main_cli"
 fsm-llm-validate = "fsm_llm.validator:main_cli"
 fsm-llm-monitor = "fsm_llm.monitor.__main__:main_cli"
 fsm-llm-meta = "fsm_llm.agents.meta_cli:main_cli"
-fsm-llm-harness = "fsm_llm.harness.__main__:main_cli"
+fsm-llm-harness = "fsm_llm.harness.__main__:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

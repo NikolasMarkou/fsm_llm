@@ -51,7 +51,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from .plan_validator import Issue
 
-__all__ = ["main_cli"]
+__all__ = ["main_cli", "run"]
 
 #: Pass.
 EXIT_PASS = 0
@@ -630,7 +630,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main_cli(argv: Sequence[str] | None = None) -> int:
-    """Entry point for ``python -m fsm_llm.harness`` and ``fsm-llm-harness``.
+    """Parse *argv* and run one subcommand (``run()`` is the process entry).
 
     Interface contract:
         - ``argv``: arguments WITHOUT the program name; ``None`` reads
@@ -652,5 +652,25 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
     return handler(args)
 
 
+def run() -> int:
+    """Process entry for ``fsm-llm-harness`` and ``python -m fsm_llm.harness``.
+
+    Interface contract:
+        - Turns on ``fsm_llm`` log output at WARNING (``$FSM_LLM_LOG_LEVEL``
+          overrides it), then returns ``main_cli()``'s exit code.
+        - Reads ``sys.argv[1:]``; takes no arguments.
+    """
+    # DECISION plan-2026-09-29T044048-3a032517/D-016
+    # Worker failures, halts and audit errors reach the user only as loguru
+    # WARNING/ERROR records, which the library-wide disable of "fsm_llm"
+    # silences. Enable them HERE, at the process entry. Do NOT move this into
+    # main_cli: tests call main_cli in-process thousands of times and must not
+    # flip global logging for the whole test run.
+    from fsm_llm.logging import setup_cli_logging
+
+    setup_cli_logging("WARNING")
+    return main_cli()
+
+
 if __name__ == "__main__":  # pragma: no cover - process entry point
-    sys.exit(main_cli())
+    sys.exit(run())

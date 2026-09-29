@@ -25,13 +25,19 @@ Submodules move the same way, for example `fsm_llm_agents.meta_cli` is now
 `fsm_llm.agents.meta_cli` and `fsm_llm_monitor.server:app` is now
 `fsm_llm.monitor.server:app`. Update `mock.patch` targets and `sys.modules` keys too.
 
+**Existing clones:** after pulling this change, run `make clean` (or delete the old
+`src/fsm_llm_<sub>/` directories by hand), then reinstall with `pip install -e .`. Git
+leaves those directories behind because they still hold ignored `__pycache__/`, and an
+empty leftover imports as a namespace package, so `import fsm_llm_agents` would succeed
+instead of raising `ModuleNotFoundError`.
+
 - `import fsm_llm` still loads no subpackage. `from fsm_llm import agents` works through
   the normal submodule import; `fsm_llm.agents` is not an attribute of a bare
   `import fsm_llm` until something imports it.
 - Console scripts keep their names and point at the new modules:
   `fsm-llm-monitor = fsm_llm.monitor.__main__:main_cli`,
   `fsm-llm-meta = fsm_llm.agents.meta_cli:main_cli`,
-  `fsm-llm-harness = fsm_llm.harness.__main__:main_cli`. Reinstall (`pip install -e .`)
+  `fsm-llm-harness = fsm_llm.harness.__main__:run`. Reinstall (`pip install -e .`)
   to refresh editable wrappers.
 - Module entry points: `python -m fsm_llm.reasoning`, `python -m fsm_llm.agents`,
   `python -m fsm_llm.monitor`, `python -m fsm_llm.harness`.
@@ -42,8 +48,16 @@ Submodules move the same way, for example `fsm_llm_agents.meta_cli` is now
   self-disable is gone and `LIBRARY_LOGGER_NAMES` is `("fsm_llm",)`. The
   `fsm-llm-monitor` CLI enables library logging so its Logs page keeps working; if you
   run `uvicorn fsm_llm.monitor.server:app` yourself, call `setup_logging()` first.
-  `fsm-llm-meta`, `fsm-llm-harness` and the `python -m` entry points stay silent by
-  default.
+  `fsm-llm-harness` and `python -m fsm_llm.harness` (the new `run()` wrapper) show
+  library records at WARNING and above, so worker failures, halts and audit errors
+  still reach the terminal; `FSM_LLM_LOG_LEVEL` overrides the level.
+  `python -m fsm_llm.reasoning --verbose` shows them at INFO. `fsm-llm-meta` and the
+  other `python -m` entry points stay silent by default.
+- **(behavior)** Evaluation: `scripts/eval.py` classifies failures partly from each
+  example's stderr, and the examples never enable logging, so agent examples no longer
+  print extension warnings and tracebacks there. Eval scores from before and after this
+  change are not comparable, for agent examples especially; re-baseline before
+  comparing.
 - **(behavior)** `disable_warnings()` still filters `fsm_llm` and its submodules, which
   now include the five subpackages, so their warnings are silenced too (before, they
   stayed visible). A lookalike sibling such as `fsm_llm_contrib` is still not matched.

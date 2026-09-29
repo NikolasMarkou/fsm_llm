@@ -79,12 +79,41 @@ def enable_library_logging() -> None:
 
 
 def is_library_logging_enabled() -> bool:
-    """True once ``setup_logging()`` / ``enable_debug_logging()`` has run.
+    """True once ``enable_library_logging()`` has run in this process.
 
-    An extension package imported AFTER that call checks this so its
-    import-time ``logger.disable(...)`` does not undo the user's choice.
+    ``setup_logging()``, ``enable_debug_logging()`` and the CLI entry points
+    call it. The flag only reports that call; nothing reads it to decide
+    whether to log. Subpackages never disable logging themselves (D-004).
     """
     return _library_logging_enabled
+
+
+def setup_cli_logging(default_level: str) -> int:
+    """Turn on library log output at a command-line process entry point.
+
+    Interface contract (2 call sites: the ``fsm-llm-harness`` entry wrapper
+    and the reasoning CLI's ``--verbose``):
+        - ``default_level``: loguru level name used when ``FSM_LLM_LOG_LEVEL``
+          is unset or blank; a non-blank env value wins.
+        - Removes loguru's pre-installed default handler (id 0: stderr, every
+          level) if it is still there, then registers one stderr handler via
+          ``setup_logging``. Returns that handler id, or -1 when a matching
+          library handler already exists.
+        - Mutates process-global loguru state. Never raises for a missing
+          handler 0.
+    """
+    # DECISION plan-2026-09-29T044048-3a032517/D-016
+    # Call this ONLY from a process entry point (console script, `-m` guard,
+    # a CLI flag), never from library code or from a function tests call
+    # in-process such as harness `main_cli`: it enables "fsm_llm" globally.
+    # Handler 0 is removed because, once "fsm_llm" is enabled, it would print
+    # every DEBUG record and duplicate each line the new handler prints.
+    try:
+        logger.remove(0)
+    except ValueError:
+        pass
+    level = os.environ.get(ENV_LOG_LEVEL, "").strip() or default_level
+    return setup_logging(level=level)
 
 
 # --------------------------------------------------------------

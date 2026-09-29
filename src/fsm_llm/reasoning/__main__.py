@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fsm_llm.logging import logger
+from fsm_llm.logging import logger, setup_cli_logging
 from fsm_llm.utilities import redacting_json_default
 
 from .__version__ import __version__
@@ -469,6 +469,14 @@ def main() -> int:
         args = parser.parse_args()
 
         validate_arguments(args)
+
+        if args.verbose:
+            # DECISION plan-2026-09-29T044048-3a032517/D-016
+            # --verbose must show the engine's own records, which the
+            # library-wide disable of "fsm_llm" silences. Enable them only
+            # here, on the flag. Do NOT enable logging unconditionally or in
+            # solve_problem_with_engine: without --verbose the CLI stays quiet.
+            setup_cli_logging("INFO")
 
         # Handle information commands
         if args.list_types:

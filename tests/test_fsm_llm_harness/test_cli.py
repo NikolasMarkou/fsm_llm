@@ -217,10 +217,60 @@ class TestEntryPoints:
         assert completed.returncode == 0
         assert "fsm-llm-harness" in completed.stdout
 
-    def test_main_cli_is_the_console_script_symbol(self) -> None:
-        """The name ``pyproject.toml`` will point at must exist and be callable."""
+    def test_run_is_the_console_script_symbol(self) -> None:
+        """``pyproject.toml`` points at ``run``, the logging-enabling wrapper."""
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        assert 'fsm-llm-harness = "fsm_llm.harness.__main__:run"' in (
+            pyproject.read_text(encoding="utf-8")
+        )
+        assert callable(cli.run)
         assert callable(cli.main_cli)
-        assert cli.__all__ == ["main_cli"]
+        assert cli.__all__ == ["main_cli", "run"]
+
+    # A fresh interpreter per case: `run()` flips process-global loguru state,
+    # which must never leak into this test process (D-016).
+    _LOG_PROBE = (
+        "import sys\n"
+        "import fsm_llm.harness.__main__ as m\n"
+        "from fsm_llm.logging import logger\n"
+        "if sys.argv[1] == 'run':\n"
+        "    m.main_cli = lambda: 0\n"
+        "    assert m.run() == 0\n"
+        "else:\n"
+        "    assert m.main_cli(['--version']) == 0\n"
+        "probe = {'__name__': 'fsm_llm.harness.probe', 'logger': logger}\n"
+        "exec(\"logger.warning('W-PROBE'); logger.debug('D-PROBE')\", probe)\n"
+    )
+
+    @pytest.mark.parametrize(
+        ("entry", "env_level", "warning_lines", "debug_shown"),
+        [
+            ("run", None, 1, False),
+            ("run", "DEBUG", 1, True),
+            ("main_cli", None, 0, False),
+        ],
+    )
+    def test_only_the_process_entry_enables_library_logging(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        entry: str,
+        env_level: str | None,
+        warning_lines: int,
+        debug_shown: bool,
+    ) -> None:
+        """``run`` shows WARNING+ once (no duplicate line); ``main_cli`` stays silent."""
+        if env_level is None:
+            monkeypatch.delenv("FSM_LLM_LOG_LEVEL", raising=False)
+        else:
+            monkeypatch.setenv("FSM_LLM_LOG_LEVEL", env_level)
+        completed = subprocess.run(
+            [sys.executable, "-c", self._LOG_PROBE, entry],
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stderr.count("W-PROBE") == warning_lines
+        assert ("D-PROBE" in completed.stderr) is debug_shown
 
 
 # ---------------------------------------------------------------------------
