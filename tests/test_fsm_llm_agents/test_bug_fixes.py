@@ -21,8 +21,6 @@ Bug 3: ADaPTAgent subtask execution timing — DECOMPOSE->COMBINE transition
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from fsm_llm.agents.definitions import AgentConfig, EvaluationResult
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
@@ -268,14 +266,6 @@ class TestReasoningReactAgentInterception:
     standard execute_tool handler with a custom one that intercepts
     "reason" before executing and calls ReasoningEngine.solve_problem().
     """
-
-    @pytest.fixture(autouse=True)
-    def _check_reasoning_installed(self):
-        """Skip if fsm_llm.reasoning is not installed."""
-        try:
-            import fsm_llm.reasoning  # noqa: F401
-        except ImportError:
-            pytest.skip("fsm_llm.reasoning not installed")
 
     def test_reasoning_engine_invoked_for_reason_tool(self):
         """When the LLM picks tool_name='reason', ReasoningEngine.solve_problem

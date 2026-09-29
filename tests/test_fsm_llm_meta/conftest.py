@@ -4,6 +4,15 @@ import pytest
 
 from fsm_llm.agents.definitions import MetaBuilderConfig
 from fsm_llm.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from tests.conftest import block_network
+
+
+@pytest.fixture(autouse=True)
+def _offline_network(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    """Refuse IPv4/IPv6 connects (``tests.conftest.block_network``)."""
+    block_network(monkeypatch, request.node)
 
 
 def _offline_completion(*args, **kwargs):

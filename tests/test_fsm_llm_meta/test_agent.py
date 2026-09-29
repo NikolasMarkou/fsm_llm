@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Tests for MetaBuilderAgent — agentic architecture."""
 
+import socket
 from typing import ClassVar
 
 import pytest
@@ -18,6 +19,22 @@ from fsm_llm.agents.exceptions import (
     MetaValidationError,
 )
 from fsm_llm.agents.meta_builder import MetaBuilderAgent
+
+
+class TestOfflineNetworkGuard:
+    """E4: the meta conftest refuses TCP, loopback included."""
+
+    def test_connect_to_loopback_refused(self):
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            with pytest.raises(ConnectionRefusedError, match="network blocked"):
+                client.connect(server.getsockname())
+        finally:
+            client.close()
+            server.close()
 
 
 class TestSchemaEchoRejection:

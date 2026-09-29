@@ -7,6 +7,9 @@ the task or the prior turns in front of it (the RC1 loop class).
 
 from __future__ import annotations
 
+import socket
+from types import SimpleNamespace
+
 import pytest
 
 from fsm_llm.agents.constants import ContextKeys
@@ -17,7 +20,7 @@ from fsm_llm.definitions import (
     FieldExtractionRequest,
     ResponseGenerationRequest,
 )
-from tests.conftest import PromptGroundedLLM
+from tests.conftest import PromptGroundedLLM, network_exempt
 
 
 def _field_request(**overrides: object) -> FieldExtractionRequest:
@@ -221,3 +224,64 @@ class TestDebateGrounding:
         result = agent.run(task)
 
         assert result.final_context.get(ContextKeys.CRITIQUE) == self.CRITIQUE
+
+
+def _loopback_listener() -> socket.socket:
+    """A bound, listening TCP socket on 127.0.0.1 (bind is never blocked)."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    return server
+
+
+class TestOfflineNetworkGuard:
+    """E4: the autouse guard in ``conftest.py`` refuses TCP, loopback included.
+
+    Each connect targets a live local listener, so without the guard it would
+    succeed and these tests fail.
+    """
+
+    def test_connect_to_loopback_refused(self):
+        server = _loopback_listener()
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            with pytest.raises(ConnectionRefusedError, match="network blocked"):
+                client.connect(server.getsockname())
+        finally:
+            client.close()
+            server.close()
+
+    def test_connect_ex_to_loopback_refused(self):
+        server = _loopback_listener()
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            with pytest.raises(ConnectionRefusedError, match="network blocked"):
+                client.connect_ex(server.getsockname())
+        finally:
+            client.close()
+            server.close()
+
+    def test_unix_sockets_untouched(self):
+        left, right = socket.socketpair()
+        try:
+            left.sendall(b"ok")
+            assert right.recv(2) == b"ok"
+        finally:
+            left.close()
+            right.close()
+
+    @pytest.mark.parametrize(
+        ("markers", "exempt"),
+        [
+            ((), False),
+            (("slow",), False),
+            (("real_llm",), True),
+            (("integration",), True),
+        ],
+    )
+    def test_live_markers_exempt(self, markers, exempt):
+        node = SimpleNamespace(
+            get_closest_marker=lambda name: name if name in markers else None
+        )
+
+        assert network_exempt(node) is exempt

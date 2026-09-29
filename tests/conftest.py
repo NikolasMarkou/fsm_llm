@@ -4,8 +4,10 @@ Global test configuration and fixtures for the entire test suite.
 
 import json
 import re
+import socket
 import sys
 from pathlib import Path
+from typing import NoReturn
 from unittest.mock import Mock
 
 import pytest
@@ -58,6 +60,57 @@ def ollama_available(model_tag: str = OLLAMA_MODEL_TAG) -> bool:
         return any(model_tag in name for name in models)
     except Exception:
         return False
+
+
+#: Markers whose tests may open real TCP connections under ``block_network``.
+NETWORK_EXEMPT_MARKERS = ("real_llm", "integration")
+#: Address families ``block_network`` refuses (Unix sockets stay open).
+_BLOCKED_FAMILIES = (socket.AF_INET, socket.AF_INET6)
+
+
+def network_exempt(node: pytest.Item) -> bool:
+    """Whether *node* carries one of ``NETWORK_EXEMPT_MARKERS``."""
+    return any(node.get_closest_marker(name) for name in NETWORK_EXEMPT_MARKERS)
+
+
+def block_network(monkeypatch: pytest.MonkeyPatch, node: pytest.Item) -> None:
+    """Refuse every IPv4/IPv6 connect for the rest of *node*'s test.
+
+    Interface contract (2 call sites -- the autouse fixtures in
+    ``tests/test_fsm_llm_agents/conftest.py`` and
+    ``tests/test_fsm_llm_meta/conftest.py``; kept here so the two suites
+    cannot drift into different guards):
+        - Patches ``socket.socket.connect`` and ``connect_ex`` through
+          *monkeypatch*, so the patch is undone at teardown. Loopback is
+          blocked too: the default model is a local Ollama.
+        - A blocked call raises ``ConnectionRefusedError`` at once (no
+          timeout), naming the address. Unix sockets (MCP stdio, asyncio
+          self-pipes) are untouched.
+        - No-op when ``network_exempt(node)`` is true (live suites).
+    """
+    if network_exempt(node):
+        return
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+
+    def _refuse(address: object) -> NoReturn:
+        raise ConnectionRefusedError(
+            f"network blocked in offline tests: connect to {address!r} "
+            f"(mark the test real_llm or integration to allow it)"
+        )
+
+    def _connect(sock: socket.socket, address: object) -> None:
+        if sock.family in _BLOCKED_FAMILIES:
+            _refuse(address)
+        real_connect(sock, address)
+
+    def _connect_ex(sock: socket.socket, address: object) -> int:
+        if sock.family in _BLOCKED_FAMILIES:
+            _refuse(address)
+        return real_connect_ex(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", _connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", _connect_ex)
 
 
 @pytest.fixture(scope="session")
