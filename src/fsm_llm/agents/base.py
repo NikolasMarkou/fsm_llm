@@ -469,13 +469,18 @@ def _drop_skip_marker(
 def artifact_text(value: Any) -> str:
     """The text form of a generated artifact read from context.
 
-    Contract: ``None`` -> ``""``; a ``str`` as is; a ``dict``/``list`` (an
-    ``any`` artifact field the model returned as native JSON) -> indented
-    JSON text, so ``AgentResult.answer`` stays a string that
-    ``output_schema`` validation can parse; any other value -> ``str(value)``.
-    Never raises (unserialisable leaves go through ``str``).
+    Contract: ``None`` and every falsy non-``str`` value (``False``, ``0``,
+    ``0.0``, ``{}``, ``[]``) -> ``""``, i.e. no answer; a ``str`` as is; a
+    non-empty ``dict``/``list`` (an ``any`` artifact field the model returned
+    as native JSON) -> indented JSON text, so ``AgentResult.answer`` stays a
+    string that ``output_schema`` validation can parse; any other value ->
+    ``str(value)``. Never raises (unserialisable leaves go through ``str``).
+    Callers (answer extraction, the success seam, ``evaluation_fn``) rely on
+    the empty string meaning "nothing was produced": an ``any`` artifact the
+    model filled with ``[]``/``{}``/``false`` must not count as an answer
+    (D-056 of plan 06a5ec0a).
     """
-    if value is None:
+    if value is None or (not isinstance(value, str) and not value):
         return ""
     if isinstance(value, str):
         return value

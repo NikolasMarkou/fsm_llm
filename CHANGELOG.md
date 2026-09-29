@@ -175,15 +175,23 @@ work, is `docs/agents_roadmap.md`.
 ### Fixed
 
 - Core: a single-field extraction reply that opens with this field's
-  `{"field_name": ..., "value": ` envelope but does not parse (cut off by
-  `max_tokens`) now yields the envelope's `value` on the `str`/`any` rung (the decoded
-  prefix of a cut-off string), never the envelope text. Prose that merely contains
-  JSON is still kept verbatim.
+  `{"field_name": ..., "value": ` envelope but does not parse now yields the
+  envelope's `value` on the `str`/`any` rung, never the envelope text. Prose that
+  merely contains JSON is still kept verbatim. A complete value is kept whole, also
+  when it holds an escape JSON does not define (`\d` in a regex, `C:\Users`), which is
+  kept literally. A value cut off by `max_tokens` keeps its decoded prefix (never
+  ending in half a surrogate pair), is logged as a WARNING naming the field, and
+  returns at confidence 0.3 (`constants.TRUNCATED_SALVAGE_CONFIDENCE`, below the 0.5 of
+  other unstructured coercions), so a field `confidence_threshold` of 0.5 rejects it.
+  On Ollama this salvage, not the field type, is what keeps an envelope out of an agent
+  answer: the Ollama `any` grammar has no object branch.
 - Agents: EvalOpt `generated_output`, MakerChecker `draft_output` and PromptChain
-  `chain_step_result` are typed `any` again (whole artifacts), and a dict/list value
-  reaches `evaluation_fn` and `AgentResult.answer` as indented JSON text, so
-  `output_schema` validation parses it. Before, a long JSON deliverable could ship as
-  the raw cut-off extraction envelope and fail schema validation.
+  `chain_step_result` are typed `any` again, their type before this release (step 20
+  had made them `str`). On a provider without a grammar the model can return a JSON
+  deliverable as a native object; a dict/list value reaches `evaluation_fn` and
+  `AgentResult.answer` as indented JSON text, so `output_schema` validation parses
+  it. `False`, `0`, `{}` and `[]` in an answer key count as no answer (they rendered
+  as `"False"`, `"0"`, `"{}"`, `"[]"` and made an unjudged run report success).
 - Reasoning: `ReasoningTrace` now dumps `reasoning_types_used` as a sorted list, so
   `python -m fsm_llm.reasoning --output json` and `--save` JSON files list the types
   instead of writing `"<redacted:set>"`. `model_dump()` returns a list too, so the
@@ -272,6 +280,28 @@ work, is `docs/agents_roadmap.md`.
   `MAX_REFLECTIONS`, `MAX_REFINEMENTS`, `MAX_REVISIONS`, `MAX_DEPTH`.
 - Agents: `fsm_llm.agents.__all__` is one static list; `ReasoningReactAgent` is always
   exported and `create_agent("reasoning_react")` always available.
+
+### Known open
+
+From the agents audit reviews (`docs/agents_roadmap.md`, Known open items):
+
+- A long generated artifact (EvalOpt, MakerChecker, PromptChain) can still be cut off
+  by the per-field `max_tokens` budget. It ships as a truncated answer, marked only by
+  its WARNING and confidence 0.3; PromptChain has no judge, so such a run can report
+  `success=True`. Fixing it needs an output-budget change (Track B).
+- Orchestrator: subtasks dropped over `max_workers` (`skipped_subtasks`) are not shown
+  to the collect judge and do not affect `success`; the answer may be incomplete.
+- AgentGraph: a node with `success=False` (a forced pass, a Debate without agreement,
+  a budget stop) takes no outgoing edge and no edge can route on failure, so a
+  fallback branch cannot be built.
+- `fsm-llm-validate` on an exported agent FSM warns that the framework
+  `handler_only_keys` (`forced_stop_reason`, `iteration_count`, ...) protect nothing
+  and may be typos; the warning is a false alarm.
+- The `TypeError` denylist of agent constructors includes every `HumanInTheLoop`
+  constructor parameter, derived from its signature: a new HITL parameter with a
+  generic name would start rejecting a litellm passthrough kwarg of that name.
+- Core: validating `FSMDefinition`s on first use from several threads at once can race
+  (pre-existing at `c632893`; seen with concurrent Debate panels).
 
 ## [0.11.0] - 2026-09-29
 

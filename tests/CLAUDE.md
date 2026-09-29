@@ -1,7 +1,7 @@
 # tests
 
 Path: `tests`
-Purpose: The full pytest tree of FSM-LLM (8,111 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, three repo-wide root test files, and the shared `conftest.py`.
+Purpose: The full pytest tree of FSM-LLM (8,124 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, three repo-wide root test files, and the shared `conftest.py`.
 
 ## Scope
 
@@ -35,8 +35,8 @@ Suite folders (test counts from full collection) and root files at this level.
 | `test_harness_bench.py` | Offline checks of `scripts/harness_bench.py` | 34 tests |
 | `test_integration_ollama.py` | Live end-to-end on `ollama_chat/qwen3.5:9b-q8_0`, plus 4 model-free workflow checks | 12 tests |
 | `fixtures/test_fsm_definitions/minimal_fsm.json` | v3.0 one-state FSM behind the `sample_fsm_definition` fixture | Written by `conftest.py` if missing |
-| `test_fsm_llm/` | Core: `API`, `FSMManager`, `MessagePipeline`, `TransitionEvaluator`, `expressions`, classification, context, prompts, `LiteLLMInterface`, `ollama`, handlers, `WorkingMemory`, session, validator, visualizer, runner, logging | 2,724 tests. Local `conftest.py` (`minimal_fsm_dict`); `fixtures/` holds labelled secret-filter corpora for `test_context_unit.py`; seam files import `_` helpers from each other; `test_docs_snippets.py` loads FSM JSON from root docs; 14 `slow` |
-| `test_fsm_llm_agents/` | All agent patterns, `ToolRegistry`, HITL grant security, memory, MCP (real stdio fixture server), `AgentServer`, `fsm-llm-meta` and `python -m fsm_llm.agents` CLIs | 1,783 tests. Local `conftest.py` autouses `block_network`; most files define their own fake `LLMInterface`, pattern loops use `PromptGroundedLLM` (`test_grounded_patterns.py`); skips without `mcp`, `fastapi`/`httpx`, OTEL SDK |
+| `test_fsm_llm/` | Core: `API`, `FSMManager`, `MessagePipeline`, `TransitionEvaluator`, `expressions`, classification, context, prompts, `LiteLLMInterface`, `ollama`, handlers, `WorkingMemory`, session, validator, visualizer, runner, logging | 2,736 tests. Local `conftest.py` (`minimal_fsm_dict`); `fixtures/` holds labelled secret-filter corpora for `test_context_unit.py`; seam files import `_` helpers from each other; `test_docs_snippets.py` loads FSM JSON from root docs; 14 `slow` |
+| `test_fsm_llm_agents/` | All agent patterns, `ToolRegistry`, HITL grant security, memory, MCP (real stdio fixture server), `AgentServer`, `fsm-llm-meta` and `python -m fsm_llm.agents` CLIs | 1,784 tests. Local `conftest.py` autouses `block_network`; most files define their own fake `LLMInterface`, pattern loops use `PromptGroundedLLM` (`test_grounded_patterns.py`); skips without `mcp`, `fastapi`/`httpx`, OTEL SDK |
 | `test_fsm_llm_meta/` | Meta-builder in `fsm_llm.agents`: `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder`, `create_*_tools`, `meta_prompts`, `MetaBuilderAgent` | 220 tests. Autouse `block_network`; `offline_llm` fixture makes LLM calls raise so agent tests assert the keyword fallback without a network call |
 | `test_fsm_llm_reasoning/` | `fsm_llm.reasoning` constants, models, exceptions, handlers, ANALYTICAL-only fallback, CLI `--verbose` and JSON output | 126 tests. Engine built with `object.__new__`; source-string pins |
 | `test_fsm_llm_workflows/` | `fsm_llm.workflows` steps, DSL, `WorkflowEngine`, timeouts, audit fixes | 231 tests. Real short sleeps; 8 `slow` |
@@ -82,7 +82,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - Env knobs: `FSM_LLM_HARNESS_LIVE` (arms harness live tests), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
 - pytest config in `pyproject.toml`: `testpaths = ["tests"]`, `addopts = "-v --tb=short"`, `asyncio_mode = "auto"`, `asyncio_default_fixture_loop_scope = "function"`.
-- Marker counts (full collection): `slow` 135, `integration` 113, `real_llm` 113, `examples` 43; `-m "not slow"` collects 7,954.
+- Marker counts (full collection): `slow` 135, `integration` 113, `real_llm` 113, `examples` 43; `-m "not slow"` collects 7,989.
 
 ## Invariants and constraints
 

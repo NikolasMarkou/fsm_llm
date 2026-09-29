@@ -40,6 +40,27 @@ class TestCompletionGuard:
             {"judge_verdict": "B wins"}, _trace(), ["judge_verdict"]
         )
 
+    def test_falsy_artifact_values_are_not_an_answer(self):
+        # D-056 (plan 06a5ec0a, fix 20.2): an `any` artifact key the model
+        # filled with an empty container, a bool or zero is "nothing", not an
+        # answer; at the parent these rendered as "[]", "{}", "False", "0".
+        from fsm_llm.agents.base import artifact_text
+
+        for empty in (False, 0, 0.0, {}, []):
+            assert artifact_text(empty) == ""
+            assert (
+                BaseAgent._completion_is_real(
+                    {"chain_step_result": empty}, _trace(), ["chain_step_result"]
+                )
+                is False
+            )
+        # Non-empty values still count; a str "0" is the model's text.
+        assert artifact_text("0") == "0"
+        assert artifact_text(True) == "True"
+        assert BaseAgent._completion_is_real(
+            {"chain_step_result": ["a"]}, _trace(), ["chain_step_result"]
+        )
+
     def test_tool_call_alone_is_real(self):
         # Tool ran but no explicit final answer — still genuine work.
         assert BaseAgent._completion_is_real({}, _trace("search"), None)

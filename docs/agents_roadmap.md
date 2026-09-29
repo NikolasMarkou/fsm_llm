@@ -2,7 +2,7 @@
 
 Status: design record for the `fsm_llm.agents` audit, 2026-09-29.
 
-- Code range: `c632893..HEAD` (plan `plan-2026-09-29T103145-06a5ec0a`, 27 steps plus seven completion fixes: 15.1, 20.1, 13.1, 3.1, 21.1, 21.2, 24.1).
+- Code range: `c632893..HEAD` (plan `plan-2026-09-29T103145-06a5ec0a`, 27 steps plus eight completion fixes: 15.1, 20.1, 13.1, 3.1, 21.1, 21.2, 24.1, 20.2).
 - Version: unreleased changes on top of `0.11.0`. See `CHANGELOG.md` `## [Unreleased]`.
 - Scope: Track A of the audit (test infrastructure E3/E4, Phase 0 hotfixes, Phase 1 pattern correctness). Track B (Phases 2-6), the live agent bench (E1/E2), E5 and the D5 deprecations are deferred.
 - Current contracts: `src/fsm_llm/agents/README.md` (user guide), `src/fsm_llm/agents/CLAUDE.md` (maintainer contracts), `docs/api_reference.md` (Agents section).
@@ -37,13 +37,14 @@ The audit was written against `4a5af49` without running tests. Every claim was r
 | 19 | `5805c42` | Debate rounds grounded; SelfConsistency votes on the answer (PAT-03/05) |
 | 20 | `06e2dd0` | PromptChain gates stop the chain; MakerChecker/EvalOpt drafts grounded (PAT-06/11) |
 | 20.1 | `65cc68e` | Completion fix: generated artifacts keep native JSON; an extraction envelope never ships |
+| 20.2 | this commit | Completion fix: lossless envelope salvage, visible truncation, empty artifacts are no answer; D-050 rationale corrected |
 | 21 | `e6a975d` | REWOO and Orchestrator report real outcomes and propagate budget errors (PAT-09/10) |
 | 21.1 | `5cd416f` | Completion fix: Orchestrator judges only real worker results; narrowed planner prompts |
 | 21.2 | `36b0b1e` | Completion fix: the Debate judge sees the debate history |
 | 22 | `467df80` | AgentGraph topological order; Swarm keeps the task and exact handoff budget (PAT-07/08) |
 | 23 | `01d433e` | VerifiedReact fails closed; `reason` tool gets the task; dead classification override removed (REACT-03/04/05) |
 | 24 | `0146925` | `create_agent` pattern first; `AgentConfig.instructions`, `extra="forbid"`, `LLM_MODEL` (API-01/03, PAT-13) |
-| 24.1 | this commit | Completion fix: actionable prompt-size errors, narrower core envelope guard, pattern-name normalisation, docs |
+| 24.1 | `7696061` | Completion fix: actionable prompt-size errors, narrower core envelope guard, pattern-name normalisation, docs |
 | 25 | `1fc874b` | Static `__all__`, dead constants removed, valid meta-builder example (API-05/06, META-06) |
 | 26 | `a8fa500` | This record, docs sync, changelog, test counts (API-07) |
 | 27 | `5d1f423` | Core persona limit raised to 4,000 characters (D-048) |
@@ -192,8 +193,9 @@ Where verification or a consumer contradicted the proposed fix, the fix was chan
 - PAT-07 (D-044): local Kahn sort in `AgentGraph`, not `fsm_llm.workflows.DependencyResolver` (agents does not depend on workflows).
 - PAT-03, PAT-05 (D-036, D-037): the Debate answer is the conclude reply, `proposition` is only the success key; SelfConsistency votes on the last `Answer:` line.
 - Generated text fields (D-036, D-043): live `qwen3.5:4b` returned null for text fields worded as "extract"; every generated text field now opens with a sentence telling the model to compose the value.
-- Envelope-name collision (D-034, D-035): a typed field named `reasoning` was filled by core `llm._field_value` from the extraction envelope's own `reasoning`. The think `reasoning` field was removed, `_typed_field_extraction` rejects envelope names, and core `_field_value` no longer falls back to an envelope key in an envelope-shaped reply (one carrying `value` or `field_name`; fix 24.1 keeps a flat `{"confidence": 0.8}`). This, the fix 20.1 envelope salvage and the step 27 persona limit are the plan's core changes.
+- Envelope-name collision (D-034, D-035): a typed field named `reasoning` was filled by core `llm._field_value` from the extraction envelope's own `reasoning`. The think `reasoning` field was removed, `_typed_field_extraction` rejects envelope names, and core `_field_value` no longer falls back to an envelope key in an envelope-shaped reply (one carrying `value` or `field_name`; fix 24.1 keeps a flat `{"confidence": 0.8}`). This, the fix 20.1/20.2 envelope salvage (with `constants.TRUNCATED_SALVAGE_CONFIDENCE`) and the step 27 persona limit are the plan's core changes.
 - E4 (D-019): the network block covers only the agents and meta suites.
+- Generated artifacts (D-050, D-056): fixes 20.1 and 20.2. EvalOpt, MakerChecker and PromptChain artifacts are typed `any` again, which restores their baseline type (step 20 had made them `str`); on a provider without a grammar the model can then return a JSON deliverable as a native object. On Ollama the `any` grammar has no object branch, so a JSON deliverable is still an escaped string and the protection is core `llm.py`'s envelope salvage: the envelope text never lands in context, a complete value is kept whole (an undefined escape such as `\d` is kept literally), and a value cut off by `max_tokens` keeps its prefix, is logged as a WARNING and returns at confidence 0.3. ADaPT `attempt_result` stays `str` (D-057: a short answer the answer path reads only as a str). `artifact_text` treats `False`, `0`, `{}`, `[]` as no answer.
 - Debate judge (D-053, D-054): fix 21.1 narrowed the judge's `consensus_reached` prompt and dropped `debate_rounds`; fix 21.2 restored it (bounded by `num_rounds`), `agent_trace` stays out.
 - API-01 limits (fix 24.1): instructions plus a tool catalogue that overflow core's 5,000-character instruction slot raise `AgentError` naming the slot, the instructions length and the tool count (at `run()`, when the FSM loads; the limit is read from core's error, not copied).
 - D5 deprecations (D-020): not done. Debate and SelfConsistency were fixed instead, since they returned wrong answers while shipping.
@@ -226,6 +228,13 @@ Final G3: see REFLECT
 - REACT-05: reasoning-engine input is not length-capped. MEM-03/04: O(n^2) rewrite per `add` and embedding under the store lock.
 - `DecompositionError` and `ToolValidationError` are exported but never raised.
 - Examples to re-check in the final G3 (D-040): adapt, hierarchical_orchestrator, maker_checker_code.
+- Review pass 2 residue (D-056), shipped as known limits:
+  - A long generated artifact can still be cut off by the per-field `max_tokens` budget; it ships truncated, marked only by a WARNING and confidence 0.3, and an unjudged PromptChain run can report `success=True`. Needs an output-budget change (Track B).
+  - Orchestrator: subtasks dropped over `max_workers` are invisible to the collect judge and do not affect `success` (D-049 traded re-delegation for bounded calls).
+  - AgentGraph has no failure routing: a node with `success=False` takes no edge, so no fallback branch can be built.
+  - `FSMValidator` flags the framework `handler_only_keys` on agent FSMs as possible typos (false alarm in `fsm-llm-validate`).
+  - The constructor denylist is derived from `HumanInTheLoop.__init__`'s signature; a new generic HITL parameter name would reject a litellm kwarg of that name.
+  - Core: concurrent first-use `FSMDefinition` validation can race (pre-existing at `c632893`).
 - `PromptGroundedLLM` grounds on scripted evidence; it cannot show whether a real model will terminate. Every extraction change still needs a live probe.
 - The offline network block covers only the agents and meta suites.
 

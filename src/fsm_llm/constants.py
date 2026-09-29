@@ -106,6 +106,12 @@ DEFAULT_MAX_STACK_DEPTH = 10
 # FSM ID generation
 FSM_ID_HASH_LENGTH = 8
 
+# Confidence of a field value salvaged from an extraction envelope that
+# max_tokens cut off INSIDE the value (llm.py unstructured rung, D-056 of plan
+# 06a5ec0a). Below the 0.5 of every other unstructured coercion, so a field's
+# `confidence_threshold` (e.g. 0.5) can reject a cut-off artifact.
+TRUNCATED_SALVAGE_CONFIDENCE = 0.3
+
 # --------------------------------------------------------------
 # Transition Evaluation Constants
 # --------------------------------------------------------------

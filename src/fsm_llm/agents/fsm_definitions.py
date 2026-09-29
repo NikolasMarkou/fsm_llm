@@ -264,6 +264,11 @@ def build_adapt_fsm(
                 registry, task_description=task_description
             ),
             "field_extractions": [
+                # DECISION plan-2026-09-29T103145-06a5ec0a/D-057
+                # `str`, not D-050's artifact `any`: an attempt is a short
+                # direct answer that the answer path reads only as a str
+                # (ADaPTAgent._extract_answer). Do NOT widen it to `any` for
+                # symmetry: a native object would then never reach the answer.
                 _typed_field_extraction(
                     ContextKeys.ATTEMPT_RESULT,
                     "str",
@@ -500,12 +505,17 @@ def _tool_selection_field_extractions(
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-050
 # `any` is for whole generated ARTIFACTS: EvalOpt `generated_output`,
 # MakerChecker `draft_output`, PromptChain `chain_step_result`. Do NOT type
-# them `str`: a JSON deliverable then comes back as an escaped JSON string
-# inside the extraction envelope, which doubles its tokens, hits max_tokens and
-# shipped the cut-off envelope as the answer (live eval_opt_structured,
-# architecture_review). Short prose fields (feedback, critiques, reflections,
-# plan step results) stay `str`. Answer paths serialise a dict/list with
-# base.artifact_text.
+# them `str`: `any` is their baseline type (before step 20), and on a provider
+# without a grammar it lets the model return a JSON deliverable as a native
+# object. On Ollama it changes nothing for objects (the `any` grammar has no
+# object branch, ollama.py `_VALUE_TYPES_ANY`), so a JSON deliverable is still
+# an escaped string that max_tokens can cut off; the protection there is core
+# llm.py's envelope salvage (never ships the envelope; a cut-off value is
+# logged and returned at confidence 0.3, D-056), not this type. A cut-off
+# artifact can still ship as the answer (Known open: output budget, Track B).
+# Short prose fields (feedback, critiques, reflections, plan step results,
+# ADaPT `attempt_result`, D-057) stay `str`. Answer paths serialise a
+# dict/list with base.artifact_text, which treats empty values as no answer.
 TypedFieldType = Literal["str", "float", "list", "bool", "any"]
 
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-035

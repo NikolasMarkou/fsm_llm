@@ -59,7 +59,11 @@ from typing import Any
 
 from litellm import completion, get_supported_openai_params
 
-from .constants import DEFAULT_TEMPERATURE, RESERVED_LLM_CALL_KWARGS
+from .constants import (
+    DEFAULT_TEMPERATURE,
+    RESERVED_LLM_CALL_KWARGS,
+    TRUNCATED_SALVAGE_CONFIDENCE,
+)
 from .definitions import (
     BulkExtractionRequest,
     DataExtractionResponse,
@@ -160,18 +164,36 @@ _FIELD_ENVELOPE_PREFIX = re.compile(
 )
 
 
-def _decode_json_string_prefix(body: str) -> str | None:
+# One backslash escape, scanned left to right so `\\` is consumed as a pair:
+# group 1 is set for an escape JSON defines, unset for one it does not (`\d` in a
+# regex, `\U` in `C:\Users`, `\u` without four hex digits).
+_JSON_ESCAPE = re.compile(r'\\(["\\/bfnrt]|u[0-9a-fA-F]{4})?')
+
+
+def _keep_undefined_escapes(text: str) -> str:
+    """Double every backslash that starts an escape JSON does not define."""
+    return _JSON_ESCAPE.sub(lambda m: m.group(0) if m.group(1) else "\\\\", text)
+
+
+def _decode_json_string_prefix(body: str) -> tuple[str, bool]:
     """Decode the body of a JSON string literal that may be cut off.
 
     Args:
         body: the text after the opening quote.
 
     Returns:
-        The unescaped text up to the closing quote, or up to the cut when
-        there is none (a dangling ``\\`` or partial ``\\uXXXX`` is dropped);
-        ``None`` when the kept text is not a decodable JSON string body.
+        ``(text, complete)``. ``text`` is the unescaped text up to the closing
+        quote, or up to the cut when there is none (a dangling ``\\``, a
+        partial ``\\uXXXX`` and a trailing unpaired high surrogate are
+        dropped). An escape JSON does not define (``\\d``, ``\\U``) is kept
+        literally, and text that still cannot be decoded is returned raw, so
+        the model's characters are never lost. ``complete`` is True when the
+        closing quote was found.
+
+    Failure mode: none, never raises.
     """
     end = len(body)
+    complete = False
     i = 0
     while i < len(body):
         ch = body[i]
@@ -184,16 +206,27 @@ def _decode_json_string_prefix(body: str) -> str | None:
             continue
         if ch == '"':
             end = i
+            complete = True
             break
         i += 1
-    try:
-        decoded = json.JSONDecoder(strict=False).decode(f'"{body[:end]}"')
-    except json.JSONDecodeError:
-        return None
-    return decoded if isinstance(decoded, str) else None
+    kept = body[:end]
+    decoder = json.JSONDecoder(strict=False)
+    decoded: Any = None
+    for candidate in (kept, _keep_undefined_escapes(kept)):
+        try:
+            decoded = decoder.decode(f'"{candidate}"')
+            break
+        except json.JSONDecodeError:
+            continue
+    text = decoded if isinstance(decoded, str) else kept
+    if not complete and text and "\ud800" <= text[-1] <= "\udbff":
+        # The cut fell between the two halves of a surrogate pair; a lone
+        # surrogate cannot be UTF-8 encoded by any writer downstream.
+        text = text[:-1]
+    return text, complete
 
 
-def _salvage_envelope_value(raw: str, field_name: str) -> tuple[bool, Any]:
+def _salvage_envelope_value(raw: str, field_name: str) -> tuple[bool, Any, bool]:
     """Read the value out of raw text that is this field's extraction envelope.
 
     Args:
@@ -201,28 +234,36 @@ def _salvage_envelope_value(raw: str, field_name: str) -> tuple[bool, Any]:
         field_name: the field being extracted.
 
     Returns:
-        ``(False, None)`` when ``raw`` does not open with
+        ``(False, None, False)`` when ``raw`` does not open with
         ``{"field_name": "<field_name>", "value": ``. Otherwise ``(True,
-        value)``: the fully decoded value when it is complete, else the
-        decoded prefix of a cut-off string value, else the raw text of a
-        cut-off object/array/number; ``None`` when nothing usable is left.
+        value, truncated)``: the fully decoded value when it is complete
+        (a complete string with escapes JSON does not define keeps them
+        literally), else the decoded prefix of a cut-off string value, else
+        the raw text of a cut-off object/array/literal; ``None`` when nothing
+        usable is left. ``truncated`` is True when the value itself was cut
+        off (a number that runs to the end of the reply counts as cut).
 
     Failure mode: none, never raises.
     """
     match = _FIELD_ENVELOPE_PREFIX.match(raw)
-    if match is None or _decode_json_string_prefix(match.group(1)) != field_name:
-        return False, None
+    if match is None or _decode_json_string_prefix(match.group(1))[0] != field_name:
+        return False, None, False
     rest = raw[match.end() :]
+    truncated = False
     try:
-        value, _ = json.JSONDecoder(strict=False).raw_decode(rest)
+        value, end = json.JSONDecoder(strict=False).raw_decode(rest)
+        if isinstance(value, int | float) and not rest[end:].strip():
+            truncated = True
     except json.JSONDecodeError:
         if rest.startswith('"'):
-            value = _decode_json_string_prefix(rest[1:])
+            value, complete = _decode_json_string_prefix(rest[1:])
+            truncated = not complete
         else:
             value = rest.rstrip()
+            truncated = True
     if isinstance(value, str) and not value.strip():
         value = None
-    return True, value
+    return True, value, truncated
 
 
 def _safe_str(value: Any) -> str | None:
@@ -1411,6 +1452,7 @@ class LiteLLMInterface(LLMInterface):
             raw = content.strip()
             coerced_value: Any = None
             coerced_reasoning = "Unstructured response coerced to expected type"
+            coerced_confidence = 0.5
             # DECISION plan-2026-09-29T103145-06a5ec0a/D-050
             # Raw text that opens this field's own `{"field_name": ..., "value":`
             # envelope (it reaches this rung when max_tokens cut it off) yields
@@ -1418,22 +1460,45 @@ class LiteLLMInterface(LLMInterface):
             # str/any field then carried `{"field_name": "generated_output",
             # "value": "...` into the agent answer. Do NOT widen this to prose
             # that merely contains JSON (D-022 above still binds): only a reply
-            # that STARTS with the envelope prefix is unwrapped.
-            is_envelope, salvaged = False, None
+            # that STARTS with the envelope prefix is unwrapped. On Ollama the
+            # `any` grammar has no object branch, so for a JSON artifact this
+            # salvage, not the field type, is the protection (D-056).
+            # Do NOT return None for a COMPLETE value the strict decoder
+            # rejects (`\d`, `C:\Users`): its characters are kept (D-022's
+            # "key never lands" class). Do NOT pass a cut-off value off as
+            # whole: it is logged as truncated and returned at
+            # TRUNCATED_SALVAGE_CONFIDENCE, so a field threshold can drop it.
+            is_envelope, salvaged, truncated = False, None, False
             if request.field_type in ("str", "any"):
-                is_envelope, salvaged = _salvage_envelope_value(raw, request.field_name)
+                is_envelope, salvaged, truncated = _salvage_envelope_value(
+                    raw, request.field_name
+                )
             if is_envelope:
                 if request.field_type == "str" and isinstance(salvaged, dict | list):
                     salvaged = json.dumps(salvaged, ensure_ascii=False)
                 elif request.field_type == "str" and salvaged is not None:
                     salvaged = str(salvaged)
                 coerced_value = salvaged
-                coerced_reasoning = "Value salvaged from a cut-off extraction envelope"
-                logger.warning(
-                    f"Field '{request.field_name}': the reply was an unparseable "
-                    "extraction envelope (likely cut off by max_tokens); "
-                    "kept its value only"
-                )
+                if truncated and salvaged is not None:
+                    coerced_confidence = TRUNCATED_SALVAGE_CONFIDENCE
+                    coerced_reasoning = (
+                        "Value TRUNCATED: salvaged prefix of a cut-off "
+                        "extraction envelope"
+                    )
+                    logger.warning(
+                        f"Field '{request.field_name}': the value was cut off "
+                        "(likely by max_tokens); kept a truncated prefix of "
+                        f"{len(str(salvaged))} chars at confidence "
+                        f"{TRUNCATED_SALVAGE_CONFIDENCE}"
+                    )
+                else:
+                    coerced_reasoning = (
+                        "Value salvaged from an unparseable extraction envelope"
+                    )
+                    logger.warning(
+                        f"Field '{request.field_name}': the reply was an "
+                        "unparseable extraction envelope; kept its value only"
+                    )
             elif request.field_type == "str":
                 # DECISION plan-2026-07-18T162030-a02151fe/D-022 [STALE]
                 # This rung hands the raw text back as the field value even when
@@ -1486,7 +1551,7 @@ class LiteLLMInterface(LLMInterface):
                 return FieldExtractionResponse(
                     field_name=request.field_name,
                     value=coerced_value,
-                    confidence=0.5,
+                    confidence=coerced_confidence,
                     reasoning=coerced_reasoning,
                 )
 

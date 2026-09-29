@@ -944,3 +944,90 @@ class TestCutOffFieldEnvelopeIsUnwrapped:
         content = '{"field_name": "other", "value": "zzz'
 
         assert self._parse(llm, content).value == content
+
+
+class TestEnvelopeSalvageIsLosslessAndVisible:
+    """D-056 (plan 06a5ec0a, fix 20.2): the D-050 salvage never loses a
+    complete reply and never passes a cut-off value off as whole.
+
+    At the parent commit a complete envelope whose string value held an escape
+    JSON does not define (``\\d`` in a regex, ``C:\\Users``) returned ``None``
+    (the key never lands, D-022's class); a cut between the halves of a
+    surrogate pair returned a lone surrogate that no UTF-8 writer can encode;
+    and a cut-off value came back at the same confidence 0.5 as a whole one.
+    """
+
+    @staticmethod
+    def _parse(llm, content: str, field_type: str = "str"):
+        return TestCutOffFieldEnvelopeIsUnwrapped._parse(llm, content, field_type)
+
+    @pytest.mark.parametrize("field_type", ["str", "any"])
+    @pytest.mark.parametrize(
+        ("body", "expected"),
+        [
+            (r"match \d+ digits", r"match \d+ digits"),
+            (r"C:\Users\me", r"C:\Users\me"),
+            # a defined escape (`\\`) next to an undefined one (`\q`)
+            (r"a\\b \q", r"a\b \q"),
+        ],
+    )
+    def test_complete_value_with_undefined_escape_keeps_its_text(
+        self, llm, field_type, body, expected
+    ):
+        content = (
+            '{"field_name": "draft_output", "value": "' + body + '", "confidence": 0.9}'
+        )
+        result = self._parse(llm, content, field_type)
+
+        assert result.value == expected
+        assert result.is_valid is True
+        assert result.confidence == 0.5  # complete: not marked as truncated
+
+    @pytest.mark.parametrize("field_type", ["str", "any"])
+    def test_cut_inside_a_surrogate_pair_drops_the_lone_half(self, llm, field_type):
+        content = '{"field_name": "draft_output", "value": "hi \\ud83d'
+        result = self._parse(llm, content, field_type)
+
+        assert result.value == "hi "
+        result.value.encode("utf-8")  # a lone surrogate would raise here
+
+    @pytest.mark.parametrize("field_type", ["str", "any"])
+    def test_truncated_value_is_logged_and_marked(self, llm, field_type):
+        from fsm_llm.constants import TRUNCATED_SALVAGE_CONFIDENCE
+        from fsm_llm.logging import logger
+
+        content = (
+            '{"field_name": "draft_output", "value": "{\\"system_name\\": '
+            '\\"X\\", \\"compo'
+        )
+        records: list = []
+        logger.enable("fsm_llm")
+        sink_id = logger.add(lambda m: records.append(m.record), level="WARNING")
+        try:
+            result = self._parse(llm, content, field_type)
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        assert result.value == '{"system_name": "X", "compo'
+        assert TRUNCATED_SALVAGE_CONFIDENCE <= 0.3
+        assert result.confidence == TRUNCATED_SALVAGE_CONFIDENCE
+        assert "TRUNCATED" in result.reasoning
+        warnings = [str(r["message"]) for r in records if r["level"].name == "WARNING"]
+        assert any("draft_output" in m and "cut off" in m for m in warnings)
+
+    def test_complete_value_before_a_cut_confidence_is_not_marked(self, llm):
+        content = '{"field_name": "draft_output", "value": "done", "confidence": 0.'
+
+        result = self._parse(llm, content)
+
+        assert result.value == "done"
+        assert result.confidence == 0.5
+
+    def test_number_running_to_the_cut_is_marked(self, llm):
+        content = '{"field_name": "draft_output", "value": 12'
+
+        result = self._parse(llm, content, "any")
+
+        assert result.value == 12
+        assert result.confidence == 0.3

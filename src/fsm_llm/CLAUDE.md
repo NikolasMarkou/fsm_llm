@@ -140,7 +140,7 @@ Exception roots: core `FSMError`; `ReasoningEngineError`, `WorkflowError`, `Agen
 - `API` wraps unexpected exceptions as `FSMError`; `ValueError` for unknown conversation ids passes through. Invalid definitions raise `ValueError` from `process_fsm_definition`.
 - `start_conversation` failure fires END_CONVERSATION handlers and frees resources; a failing END handler wins (chained).
 - Classifier failure or low confidence degrades to "stay" or leaves the key unset (WARNING).
-- LLM reply parsing: `reasoning` is never shown to the user; an empty Pass-2 message becomes a generic apology, retried once (not on the stream path); `<think>` blocks and a leading code fence are stripped; uncoercible `confidence` becomes 0.5; `extract_json_from_text` returns a dict or None.
+- LLM reply parsing: `reasoning` is never shown to the user; an empty Pass-2 message becomes a generic apology, retried once (not on the stream path); `<think>` blocks and a leading code fence are stripped; uncoercible `confidence` becomes 0.5; an unparseable reply that opens with this field's own `{"field_name": ..., "value": ` envelope yields only its value on the `str`/`any` rung (a complete value whole, undefined escapes kept literally; a value cut off by `max_tokens` as its prefix at `TRUNCATED_SALVAGE_CONFIDENCE` 0.3 with a WARNING; D-050/D-056 of plan 06a5ec0a); `extract_json_from_text` returns a dict or None.
 
 ## Working here
 
