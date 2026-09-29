@@ -214,7 +214,11 @@ Root cause of the step-15 drop (D-034): the new typed `reasoning` field collided
 
 Accepted cost (D-040): a run that never concludes by itself now takes about twice as long before the forced stop, because `max_iterations` counts think turns.
 
-Final G3: see REFLECT
+Final G3 (`7696061`, after completion fixes; `fsm-llm-eval examples --category agents`, `ollama_chat/qwen3.5:4b`, 4 workers, N=1): 181/192 = 94.3% vs 91.1% baseline at `c632893`. Envelope leaks: 0. Structured outputs validated: 2 (= baseline). Non-PASS: orchestrator_specialist, react_hitl_combined, supply_chain_optimizer (TIMEOUT), concurrent_react (PARTIAL). The 0-4 score is a heuristic: it cannot see answer quality, so the review rounds (D-050, D-056) are the stronger evidence.
+
+Fix 20.2 (`9607e56`) changed only the envelope salvage (lossless for complete values, visible for truncated ones) and was not re-run live.
+
+Plan scale: 7 files added (tests and docs only, 0 source files); source net +3,123 lines. Both are over the plan's own budget (D-058).
 
 ## Known open items
 
