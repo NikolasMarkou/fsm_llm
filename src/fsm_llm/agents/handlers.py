@@ -12,9 +12,57 @@ from fsm_llm.logging import logger
 
 from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import AgentStep, ToolCall
+from .exceptions import AgentTimeoutError, BudgetExhaustedError
 from .hitl import ApprovalPolicy
 from .tools import ToolRegistry, normalize_tool_input, redact_secret_entries
 from .truncation import smart_truncate
+
+# Errors that end a whole run even when a sub-agent raises them inside a handler.
+RUN_ENDING_ERRORS: tuple[type[Exception], ...] = (
+    AgentTimeoutError,
+    BudgetExhaustedError,
+)
+
+
+class RunEndingErrorHolder:
+    """Carries a budget or timeout error out of an FSM handler to the driver.
+
+    Core's default handler error mode (``continue``) swallows a handler's
+    raise, so a sub-agent's ``AgentTimeoutError`` / ``BudgetExhaustedError``
+    cannot propagate from inside the handler that ran it. The handler stores it
+    here and stops starting new work; the driver re-raises it once
+    ``_run_conversation_loop`` returns.
+
+    Interface contract (ADaPT subtasks; Orchestrator workers reuse it):
+        - Create one per ``run()`` call and hand it to the handler closure.
+          Never store it on ``self`` (089d0ec7 D-014: agents are shared across
+          threads and recursive runs).
+        - ``capture(exc)``: True when ``exc`` is one of ``RUN_ENDING_ERRORS``
+          (the first one is kept, later ones only logged), False otherwise, so
+          the caller records any other exception as an ordinary failure.
+        - ``is_set``: True once an error is held; stop starting new work.
+        - ``raise_if_set()``: re-raise the held error; no-op when empty.
+    """
+
+    def __init__(self) -> None:
+        self.error: Exception | None = None
+
+    @property
+    def is_set(self) -> bool:
+        return self.error is not None
+
+    def capture(self, exc: BaseException) -> bool:
+        if not isinstance(exc, RUN_ENDING_ERRORS):
+            return False
+        if self.error is None:
+            self.error = exc
+        else:
+            logger.warning(f"Run already ending; dropping a later error: {exc}")
+        return True
+
+    def raise_if_set(self) -> None:
+        if self.error is not None:
+            raise self.error
 
 
 def approval_grant(tool_name: Any, tool_input: Any) -> dict[str, Any]:

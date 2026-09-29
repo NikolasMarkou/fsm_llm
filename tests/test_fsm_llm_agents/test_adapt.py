@@ -14,6 +14,11 @@ from fsm_llm.agents.constants import (
     HandlerNames,
 )
 from fsm_llm.agents.definitions import AgentConfig, DecompositionResult
+from fsm_llm.agents.exceptions import (
+    AgentError,
+    AgentTimeoutError,
+    BudgetExhaustedError,
+)
 from fsm_llm.agents.fsm_definitions import build_adapt_fsm
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
@@ -431,3 +436,187 @@ class TestADaPTLoopStatesNeverBlock:
         assert loop_counts, "conversation loop never completed"
         assert loop_counts[0] <= self.MAX_ITERATIONS
         assert result.answer
+
+
+# -------------------------------------------------------------------------
+# PAT-04 (plan-2026-09-29T103145-06a5ec0a step 12): budget errors propagate,
+# fan-out is capped, a failed decomposition is not a success.
+# -------------------------------------------------------------------------
+
+
+class _DecomposeScriptLLM(LLMInterface):
+    """Scripted ADaPT model: the root attempt fails and decomposes into
+    ``subtasks``; each subtask run answers from ``sub_success``.
+
+    Extraction reads ``current_depth``/``task`` from the request context, so
+    root and subtask runs (fresh FSMs of the same agent) are told apart the way
+    the real pipeline shows them. ``sub_tasks_seen`` records every subtask run
+    in order (one entry per subtask ``attempt`` extraction).
+    """
+
+    ROOT_ATTEMPT = "ROOT FAILED ATTEMPT that must never be the answer"
+
+    def __init__(
+        self,
+        subtasks: list[str],
+        operator: str = "AND",
+        sub_success: dict[str, bool] | None = None,
+        root_final: str | None = None,
+    ) -> None:
+        self.model = "mock-model"
+        self.subtasks = subtasks
+        self.operator = operator
+        self.sub_success = sub_success or {}
+        self.root_final = root_final
+        self.sub_tasks_seen: list[str] = []
+
+    def _value(self, field: str, depth: int, task: str) -> Any:
+        ok = self.sub_success.get(task, True)
+        if field == ContextKeys.ATTEMPT_RESULT:
+            if depth == 0:
+                return self.ROOT_ATTEMPT
+            self.sub_tasks_seen.append(task)
+            return f"answer for {task}" if ok else f"partial attempt for {task}"
+        if field == ContextKeys.ATTEMPT_SUCCEEDED:
+            return False if depth == 0 else ok
+        if field == ContextKeys.SUBTASKS:
+            return list(self.subtasks) if depth == 0 else None
+        if field == ContextKeys.FINAL_ANSWER:
+            if depth == 0:
+                return self.root_final
+            return f"answer for {task}" if ok else None
+        return None
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        context = request.context or {}
+        value = self._value(
+            request.field_name,
+            int(context.get(ContextKeys.CURRENT_DEPTH, 0) or 0),
+            str(context.get(ContextKeys.TASK, "")),
+        )
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=0.9 if value is not None else 0.0,
+            reasoning="script",
+            is_valid=value is not None,
+        )
+
+    def extract_bulk_data(self, request: Any) -> Any:
+        from fsm_llm.definitions import DataExtractionResponse
+
+        data = (
+            {"operator": self.operator} if '"operator"' in request.system_prompt else {}
+        )
+        return DataExtractionResponse(extracted_data=data)
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="step done", message_type="response", reasoning="script"
+        )
+
+
+def _adapt(llm: LLMInterface, max_depth: int = 1) -> ADaPTAgent:
+    return ADaPTAgent(
+        config=AgentConfig(max_iterations=10, timeout_seconds=60.0),
+        max_depth=max_depth,
+        llm_interface=llm,
+    )
+
+
+class TestADaPTBudgetErrorsPropagate:
+    """A subtask's budget/timeout error ends the whole run (D-014 holder)."""
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            BudgetExhaustedError("iterations", 1),
+            AgentTimeoutError(1.0),
+        ],
+        ids=["budget", "timeout"],
+    )
+    def test_subtask_budget_error_propagates_from_run(self, error):
+        llm = _DecomposeScriptLLM(["sub one", "sub two", "sub three"])
+        agent = _adapt(llm)
+        real_check = agent._check_budgets
+
+        def _check(start_time: float, iteration: int, max_iters: int) -> None:
+            # A subtask run exhausts its budget once its attempt was extracted.
+            if llm.sub_tasks_seen:
+                raise error
+            real_check(start_time, iteration, max_iters)
+
+        agent._check_budgets = _check  # type: ignore[method-assign]
+        with pytest.raises(type(error)):
+            agent.run("root task")
+        # No further subtask starts after the budget error.
+        assert llm.sub_tasks_seen == ["sub one"]
+
+    def test_holder_contract(self):
+        from fsm_llm.agents.handlers import RunEndingErrorHolder
+
+        holder = RunEndingErrorHolder()
+        holder.raise_if_set()  # empty: no-op
+        assert holder.capture(AgentError("ordinary")) is False
+        assert not holder.is_set
+        first = BudgetExhaustedError("iterations", 3)
+        assert holder.capture(first) is True
+        assert holder.capture(BudgetExhaustedError("time", 1)) is True
+        with pytest.raises(BudgetExhaustedError) as info:
+            holder.raise_if_set()
+        assert info.value is first
+
+
+class TestADaPTFanOutCap:
+    def test_fifty_subtasks_run_at_most_the_cap(self, caplog):
+        llm = _DecomposeScriptLLM([f"sub {i}" for i in range(50)])
+        result = _adapt(llm).run("root task")
+        assert len(llm.sub_tasks_seen) == Defaults.ADAPT_MAX_SUBTASKS
+        assert len(result.final_context[ContextKeys.SUBTASK_RESULTS]) == (
+            Defaults.ADAPT_MAX_SUBTASKS
+        )
+
+
+class TestADaPTDecomposedOutcome:
+    def test_all_subtasks_failed_is_not_success(self):
+        llm = _DecomposeScriptLLM(
+            ["sub a", "sub b"],
+            sub_success={"sub a": False, "sub b": False},
+            root_final="Combined text that papers over two failed subtasks.",
+        )
+        result = _adapt(llm).run("root task")
+        assert [e["success"] for e in result.final_context["subtask_results"]] == [
+            False,
+            False,
+        ]
+        assert result.success is False
+
+    def test_and_with_one_failed_subtask_is_not_success(self):
+        llm = _DecomposeScriptLLM(
+            ["sub a", "sub b"], operator="AND", sub_success={"sub a": False}
+        )
+        assert _adapt(llm).run("root task").success is False
+
+    def test_lowercase_or_stops_at_first_success(self):
+        llm = _DecomposeScriptLLM(
+            ["sub a", "sub b", "sub c"], operator="or", sub_success={"sub a": False}
+        )
+        result = _adapt(llm).run("root task")
+        assert llm.sub_tasks_seen == ["sub a", "sub b"]
+        assert result.success is True
+
+    def test_answer_comes_from_subtasks_not_failed_attempt(self):
+        llm = _DecomposeScriptLLM(["sub a", "sub b"])
+        result = _adapt(llm).run("root task")
+        assert result.success is True
+        assert _DecomposeScriptLLM.ROOT_ATTEMPT not in result.answer
+        assert "answer for sub a" in result.answer
+        assert "answer for sub b" in result.answer
+
+    def test_decompose_is_not_a_tool_call(self):
+        llm = _DecomposeScriptLLM(["sub a"], sub_success={"sub a": False})
+        result = _adapt(llm).run("root task")
+        assert all(c.tool_name != "decompose" for c in result.trace.tool_calls)
+        assert result.success is False

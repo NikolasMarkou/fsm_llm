@@ -393,6 +393,8 @@ class Defaults:
 
     # ADaPT
     MAX_DECOMPOSITION_DEPTH = 3
+    # Subtasks run per decomposition; extra ones are dropped with a WARNING.
+    ADAPT_MAX_SUBTASKS = 8
 
     # AgentServer: agent runs in flight at once; one more request gets 503.
     SERVER_MAX_CONCURRENT = 8

@@ -28,7 +28,7 @@ from .constants import (
 from .definitions import AgentConfig, AgentResult
 from .exceptions import AgentError
 from .fsm_definitions import build_adapt_fsm
-from .handlers import make_iteration_limiter
+from .handlers import RunEndingErrorHolder, make_iteration_limiter
 from .tools import ToolRegistry
 
 
@@ -85,8 +85,12 @@ class ADaPTAgent(BaseAgent):
         # Create API instance
         api = self._create_api(fsm_def)
 
+        # Call-local: a sub-run's budget/timeout error rides out of the
+        # subtask handler here (plan-2026-09-29T103145-06a5ec0a/D-014).
+        holder = RunEndingErrorHolder()
+
         # Register handlers (needs initial_context, depth and start_time for subtask executor)
-        self._register_handlers(api, initial_context, _depth, start_time)
+        self._register_handlers(api, initial_context, _depth, start_time, holder=holder)
 
         context = self._init_context(
             task,
@@ -102,6 +106,13 @@ class ADaPTAgent(BaseAgent):
             responses, final_context, iteration = self._run_conversation_loop(
                 api, context, start_time, "adapt"
             )
+            # DECISION plan-2026-09-29T103145-06a5ec0a/D-014
+            # Re-raise a subtask's AgentTimeoutError/BudgetExhaustedError HERE,
+            # after the loop. Do NOT re-raise inside the subtask handler: core's
+            # handler error mode "continue" swallows it (or wraps it as a
+            # non-AgentError HandlerExecutionError). Do NOT keep the holder on
+            # self: recursive and concurrent runs share this agent.
+            holder.raise_if_set()
 
             answer = self._extract_answer(final_context, responses)
             trace = self._build_trace(final_context, iteration)
@@ -117,13 +128,27 @@ class ADaPTAgent(BaseAgent):
             # attempt_result as an answer key ONLY when attempt_succeeded is true
             # (a FAILED attempt's attempt_result is partial/garbage, not a real
             # completion).
-            attempt_keys = (
-                [ContextKeys.ATTEMPT_RESULT]
-                if final_context.get(ContextKeys.ATTEMPT_SUCCEEDED)
-                else None
-            )
-            success = self._completion_is_real(final_context, trace, attempt_keys)
-            if not success:
+            subtask_results = self._subtask_entries(final_context)
+            if subtask_results:
+                # A decomposed run succeeds on its subtasks, not on the combine
+                # text: AND needs every executed subtask, OR needs one.
+                oks = [bool(entry.get("success")) for entry in subtask_results]
+                operator = self._normalize_operator(final_context.get("operator"))
+                success = any(oks) if operator == "OR" else all(oks)
+                if not success:
+                    logger.warning(
+                        f"ADaPT decomposition failed ({operator}: "
+                        f"{sum(oks)}/{len(oks)} subtasks succeeded); "
+                        "marking success=False."
+                    )
+            else:
+                attempt_keys = (
+                    [ContextKeys.ATTEMPT_RESULT]
+                    if final_context.get(ContextKeys.ATTEMPT_SUCCEEDED)
+                    else None
+                )
+                success = self._completion_is_real(final_context, trace, attempt_keys)
+            if not success and not subtask_results:
                 logger.warning(
                     "ADaPT completed with no final_answer and no tool calls — "
                     "answer is fallback-only; marking success=False."
@@ -150,8 +175,17 @@ class ADaPTAgent(BaseAgent):
         initial_context: dict[str, Any] | None = None,
         depth: int = 0,
         start_time: float | None = None,
+        holder: RunEndingErrorHolder | None = None,
     ) -> None:
-        """Register ADaPT handlers with the API."""
+        """Register ADaPT handlers with the API.
+
+        ``holder`` is the calling ``run()``'s error holder; ``run()`` re-raises
+        what the subtask executor captures in it. Optional only to keep the
+        ``BaseAgent._register_handlers(api)`` override shape: without one a
+        captured error still stops further subtasks but nothing re-raises it.
+        """
+        if holder is None:
+            holder = RunEndingErrorHolder()
         # Depth tracker: logs decomposition events
         api.register_handler(
             api.create_handler(HandlerNames.ADAPT_ASSESSOR)
@@ -167,7 +201,11 @@ class ADaPTAgent(BaseAgent):
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .at(HandlerTiming.PRE_TRANSITION)
             .on_state(ADaPTStates.DECOMPOSE)
-            .do(self._make_subtask_executor(initial_context, depth, start_time))
+            .do(
+                self._make_subtask_executor(
+                    initial_context, depth, start_time, holder=holder
+                )
+            )
         )
 
         self._register_iteration_limiter(api, self._make_iteration_limiter())
@@ -179,16 +217,30 @@ class ADaPTAgent(BaseAgent):
         depth: int,
         initial_context: dict[str, Any] | None,
         start_time: float | None = None,
+        *,
+        holder: RunEndingErrorHolder,
     ) -> list[dict[str, Any]]:
         """
         Recursively execute subtasks via self.run(). AND=all, OR=first success.
 
         Recursive self.run() creates a fresh FSM + handler set per subtask,
-        ensuring proper isolation. Depth is bounded by max_depth.
+        ensuring proper isolation. Depth is bounded by max_depth, fan-out by
+        ``Defaults.ADAPT_MAX_SUBTASKS``. A sub-run's ``AgentTimeoutError`` /
+        ``BudgetExhaustedError`` goes into ``holder`` and no further subtask
+        starts; any other exception becomes a failed entry.
         """
         results: list[dict[str, Any]] = []
+        cap = Defaults.ADAPT_MAX_SUBTASKS
+        if len(subtasks) > cap:
+            logger.warning(
+                f"ADaPT decomposition produced {len(subtasks)} subtasks at "
+                f"depth {depth}; running the first {cap}."
+            )
+            subtasks = subtasks[:cap]
 
         for i, subtask in enumerate(subtasks):
+            if holder.is_set:
+                break
             subtask_str = str(subtask)
             logger.debug(
                 f"ADaPT subtask {i + 1}/{len(subtasks)} at depth {depth}: "
@@ -212,12 +264,17 @@ class ADaPTAgent(BaseAgent):
                 )
 
                 # For OR operator, stop on first success
-                if operator == "OR" and sub_result.success:
+                if self._normalize_operator(operator) == "OR" and sub_result.success:
                     break
 
-            except (
-                Exception
-            ) as e:  # Broad catch: subtask failures must not crash parent
+            except Exception as e:
+                if holder.capture(e):
+                    logger.warning(
+                        f"ADaPT subtask hit the run budget at depth {depth}; "
+                        f"no further subtasks start: {e}"
+                    )
+                    break
+                # Any other subtask failure must not crash the parent.
                 logger.warning(
                     f"ADaPT subtask failed at depth {depth}: {e}", exc_info=True
                 )
@@ -237,6 +294,8 @@ class ADaPTAgent(BaseAgent):
         initial_context: dict[str, Any] | None,
         depth: int,
         start_time: float | None = None,
+        *,
+        holder: RunEndingErrorHolder,
     ) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create handler that executes subtasks during DECOMPOSE->COMBINE transition.
 
@@ -254,6 +313,7 @@ class ADaPTAgent(BaseAgent):
                 not subtasks_raw
                 or not isinstance(subtasks_raw, list)
                 or current_depth >= agent.max_depth
+                or holder.is_set
             ):
                 return {}
 
@@ -262,10 +322,11 @@ class ADaPTAgent(BaseAgent):
             # recursive subtask calls re-enter run() (A-ISSUE-005).
             subtask_results = agent._execute_subtasks(
                 subtasks=subtasks_raw,
-                operator=context.get("operator", "AND"),
+                operator=agent._normalize_operator(context.get("operator")),
                 depth=current_depth + 1,
                 initial_context=initial_context,
                 start_time=start_time,
+                holder=holder,
             )
 
             return {
@@ -285,9 +346,11 @@ class ADaPTAgent(BaseAgent):
         trace = context.get(ContextKeys.AGENT_TRACE, [])
         if not isinstance(trace, list):
             trace = []
+        # "event", not "action": _build_trace turns every "action" entry into a
+        # ToolCall, and a decomposition is not a tool call (no success evidence).
         trace.append(
             {
-                "action": "decompose",
+                "event": "decompose",
                 "depth": current_depth,
                 "max_depth": self.max_depth,
             }
@@ -321,10 +384,23 @@ class ADaPTAgent(BaseAgent):
         ):
             return str(answer)
 
+        # A decomposed run answers from its subtasks, never the failed attempt
+        # that caused the decomposition.
+        subtask_results = self._subtask_entries(final_context)
+        if subtask_results:
+            parts = [
+                str(entry.get("answer")).strip()
+                for entry in subtask_results
+                if entry.get("success") and str(entry.get("answer") or "").strip()
+            ]
+            if parts:
+                return "\n\n".join(parts)
+
         # Fall back to attempt_result if available
         attempt_result = final_context.get(ContextKeys.ATTEMPT_RESULT)
         if (
-            attempt_result
+            not subtask_results
+            and attempt_result
             and isinstance(attempt_result, str)
             and len(attempt_result) > Defaults.MIN_ANSWER_LENGTH
         ):
@@ -343,6 +419,23 @@ class ADaPTAgent(BaseAgent):
                 return response.strip()
 
         return "ADaPT agent could not determine an answer."
+
+    @staticmethod
+    def _subtask_entries(final_context: dict[str, Any]) -> list[dict[str, Any]]:
+        """The executed subtask entries of a decomposed run ([] if none ran)."""
+        entries = final_context.get(ContextKeys.SUBTASK_RESULTS)
+        if not isinstance(entries, list):
+            return []
+        return [entry for entry in entries if isinstance(entry, dict)]
+
+    @staticmethod
+    def _normalize_operator(value: Any) -> str:
+        """``"OR"`` for any casing/padding of "or", else ``"AND"`` (the default)."""
+        operator = str(value or "AND").strip().upper()
+        if operator not in ("AND", "OR"):
+            logger.warning(f"ADaPT operator {value!r} is not AND/OR; using AND.")
+            return "AND"
+        return operator
 
     @staticmethod
     def _is_extraction_envelope(text: str) -> bool:

@@ -421,7 +421,7 @@ class TestADaPTSubtaskExecution:
         execute_called = {"count": 0, "args": None}
 
         def mock_execute_subtasks(
-            subtasks, operator, depth, initial_context, start_time=None
+            subtasks, operator, depth, initial_context, start_time=None, *, holder
         ):
             execute_called["count"] += 1
             execute_called["args"] = {
@@ -499,7 +499,7 @@ class TestADaPTSubtaskExecution:
         execute_called = {"count": 0}
 
         def mock_execute_subtasks(
-            subtasks, operator, depth, initial_context, start_time=None
+            subtasks, operator, depth, initial_context, start_time=None, *, holder
         ):
             execute_called["count"] += 1
             return []
