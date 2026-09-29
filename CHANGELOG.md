@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (`fsm_llm.eval`, 2026-09-29)
+
+- New subpackage `fsm_llm.eval` (extra `eval`, no third-party dependencies, included in
+  `all`) and console script `fsm-llm-eval` (also `python -m fsm_llm.eval`). It gathers
+  the evaluation code that lived in `scripts/eval.py` and the generic half of
+  `scripts/harness_bench.py`. Docs: `src/fsm_llm/eval/README.md`, `EVALUATE.md`,
+  `docs/api_reference.md`.
+- `fsm-llm-eval examples`: the examples evaluator with the same flags, 0-4 scores,
+  example names and output layout as `scripts/eval.py`, plus `--examples-dir`,
+  `--python`, `--config FILE` and `--fail-under PCT`. A golden table built from the
+  old scorer at `0facf56` pins identical scores.
+- `fsm-llm-eval run DATASET`: conversation evaluations. A dataset (JSON list, JSON
+  object with `config` and `cases`, or JSONL) lists cases with an FSM (path relative to
+  the dataset, or inline), optional `initial_context`, user `turns` and `expect`
+  checks (`final_state`, `visited_states`, `context`, `context_keys`,
+  `responses_contain`, `ended`). Each case runs `trials` times (default 3) through
+  `fsm_llm.API`; the run writes `rows.jsonl` (one row per trial, flushed as it
+  finishes), `results.json` (per-case and overall pass rates with Wilson 95% intervals)
+  and `summary.md`. Sample dataset: `evaluation/datasets/simple_greeting_cases.json`.
+- `EvalConfig`: every setting has a default and can be set, in increasing precedence,
+  by a dataset's embedded `config`, a `--config` JSON file, or a flag. Unknown keys are
+  an error. The per-example stdin and timeout tables can be extended or overridden from
+  the config file.
+- Exit codes for both commands: `0` finished, `1` usage or input error, `2` only when
+  `--fail-under PCT` is given and the score is below it.
+- Python API: `run_examples`, `run_cases`, `load_cases`, `check_expectations`,
+  `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `append_row`/`read_rows`,
+  `open_run_dir` and more; `run_cases(..., llm_interface_factory=...)` runs offline
+  with a fake LLM. Exceptions `EvalError(FSMError)` -> `EvalConfigError`,
+  `EvalDatasetError`.
+
+### Changed
+
+- `scripts/eval.py` is a thin shim that runs `fsm-llm-eval examples` from the
+  repository root; every old invocation keeps working.
+- `scripts/harness_bench.py`: `wilson_ci`, `fisher_exact_two_sided`, `append_row`,
+  `read_rows`, `_write_json`, `_utc_now` and `_git_commit` delegate to `fsm_llm.eval`
+  through imports inside the function bodies, so the script stays import-inert. Names,
+  signatures and results are unchanged.
+- Example scorecards: "Total wall time" is now the real elapsed time of the run; the
+  old value (sum of example durations) is reported as "Total example time". Compare
+  old and new scorecards on "Total example time".
+- Example `results.json` gains `wall_time_s`, `workers`, `default_timeout` and
+  `evaluator`; every old key keeps its meaning.
+- Example runs use a thread pool driving one subprocess per example instead of a
+  process pool.
+
+### Fixed
+
+- The examples evaluator ran examples with a hardcoded `.venv/bin/python`; it now uses
+  the running interpreter, overridable with `--python`.
+- Two runs in the same minute on the same commit and model wrote into the same run
+  directory; a new run now gets a `_2`, `_3`, ... suffix and never overwrites one.
+- A worker that crashed (runner bug, OS error) was dropped from the scorecard; it is
+  now recorded as a score-0 result with the error text.
+- A run with no results no longer crashes the scorecard timing section.
+- The default model is read from `$LLM_MODEL` when the run starts, not at import.
+
 ## [0.10.0] - 2026-09-29
 
 ### Changed (BREAKING: `fsm_llm` is the single top-level package, 2026-09-29)

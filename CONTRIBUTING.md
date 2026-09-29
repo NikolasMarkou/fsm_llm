@@ -7,7 +7,7 @@ Work inside the project virtualenv. Every command below assumes `.venv/bin` is o
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness]" + pre-commit install
+make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness,eval]" + pre-commit install
 ```
 
 Upgrading a clone from before the 2026-09-29 restructure (extensions moved under `fsm_llm/`): run `make clean` (or delete the old `src/fsm_llm_<sub>/` directories), then reinstall with `pip install -e .`. A leftover directory imports as a namespace package and fails `tests/test_packaging.py`.
@@ -33,7 +33,7 @@ pytest -m "not slow"                  # skip the slow tests
 
 ## Examples are frozen
 
-Do not modify anything under `examples/` unless a maintainer asks for it. The examples are the evaluation baselines for `scripts/eval.py`, and every shipped FSM JSON must keep loading (`tests/test_examples`).
+Do not modify anything under `examples/` unless a maintainer asks for it. The examples are the evaluation baselines for `fsm-llm-eval examples` (also run by `scripts/eval.py`), and every shipped FSM JSON must keep loading (`tests/test_examples`).
 
 ## Plans, decisions and findings
 

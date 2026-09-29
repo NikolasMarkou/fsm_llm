@@ -1,11 +1,11 @@
 # FSM-LLM
 
 Path: repository root
-Purpose: Python framework (v0.10.0, Apache-2.0, Python 3.10-3.12) for stateful conversational AI: JSON-defined finite state machines driven by an LLM through a 2-pass pipeline, plus five extension subpackages.
+Purpose: Python framework (v0.10.0, Apache-2.0, Python 3.10-3.12) for stateful conversational AI: JSON-defined finite state machines driven by an LLM through a 2-pass pipeline, plus six extension subpackages.
 
 ## Scope
 
-One distribution (`fsm-llm`, `pyproject.toml`) with one top-level package, `src/fsm_llm/`, holding the core and five subpackages (`agents`, `reasoning`, `workflows`, `monitor`, `harness`), tests under `tests/`, 100 runnable examples under `examples/`, evaluation and bench tooling under `scripts/`, longer guides under `docs/`, release history in `CHANGELOG.md`, eval methodology in `EVALUATE.md`, planning artifacts under `plans/`. Always use the project virtualenv: `.venv/bin/python` or activate `.venv` first.
+One distribution (`fsm-llm`, `pyproject.toml`) with one top-level package, `src/fsm_llm/`, holding the core and six subpackages (`agents`, `reasoning`, `workflows`, `monitor`, `harness`, `eval`), tests under `tests/`, 100 runnable examples under `examples/`, bench tooling and the `scripts/eval.py` shim under `scripts/`, eval datasets and run outputs under `evaluation/`, longer guides under `docs/`, release history in `CHANGELOG.md`, eval methodology in `EVALUATE.md`, planning artifacts under `plans/`. Always use the project virtualenv: `.venv/bin/python` or activate `.venv` first.
 
 Core deps: loguru, litellm (>=1.82,<2.0, excluding the compromised 1.82.7 and 1.82.8), pydantic (>=2.0), python-dotenv.
 
@@ -23,6 +23,7 @@ flowchart TD
     monitor -. optional demo workflows .-> workflows
     harness[fsm_llm.harness] --> agents
     harness --> core
+    eval[fsm_llm.eval] --> core
 ```
 
 2-pass flow in `fsm_llm`:
@@ -45,8 +46,9 @@ Transitions are evaluated by JsonLogic rules in Python: one passing transition i
 | `src/fsm_llm/agents` | 18 agent patterns on generated FSMs, tools, HITL, memory, swarm/graph, MCP, A2A, SOPs, meta-builder | `create_agent`, `ReactAgent`, `ToolRegistry`, `@tool`, `MetaBuilderAgent` |
 | `src/fsm_llm/monitor` | FastAPI dashboard (REST + WebSocket + vanilla-JS SPA), OTEL exporter | `fsm-llm-monitor`, `configure`, `InstanceManager`, `OTELExporter` |
 | `src/fsm_llm/harness` | Iterative-planner protocol as a 6-state FSM with filesystem-derived gates and a 2-attempt leash | `fsm-llm-harness`, `HarnessAgent`, `pre_step_gate`, `audit` |
+| `src/fsm_llm/eval` | Examples evaluator (subprocess per example, 0-4 heuristic score) and conversation cases (scripted turns, expectations, N trials, Wilson CIs) | `fsm-llm-eval`, `EvalConfig`, `run_examples`, `load_cases`, `run_cases`, `wilson_ci` |
 
-Extras: `reasoning`, `agents`, `workflows` (no deps), `harness` (pulls `fsm-llm[agents]`), `monitor` (fastapi, uvicorn, jinja2), `mcp` (mcp>=1.0.0), `otel` (opentelemetry-api/sdk>=1.20.0), `a2a` (httpx>=0.24.0), `all`, `dev`. Every subpackage ships in every install; an extra only adds its third-party deps. Import as `from fsm_llm import agents` or `from fsm_llm.agents import create_agent`; `import fsm_llm` loads no subpackage.
+Extras: `reasoning`, `agents`, `workflows`, `eval` (no deps), `harness` (pulls `fsm-llm[agents]`), `monitor` (fastapi, uvicorn, jinja2), `mcp` (mcp>=1.0.0), `otel` (opentelemetry-api/sdk>=1.20.0), `a2a` (httpx>=0.24.0), `all`, `dev`. Every subpackage ships in every install; an extra only adds its third-party deps. Import as `from fsm_llm import agents` or `from fsm_llm.agents import create_agent`; `import fsm_llm` loads no subpackage.
 
 Harness status in brief: gates are JsonLogic terms over values counted from disk, so a model's claim cannot open one. On `ollama_chat/qwen3.5:4b`, single-state bars are MET (EXECUTE write-target selection 2/40 -> 40/40 after a structural fix; strict content-hash 4/5; findings 5/5), but the end-to-end L6 floor (reach EXECUTE, verified write, honest halt, 3/3 runs) is NOT MET across nine committed blocks; B8 had 2/3 runs clear it with zero slugless stalls. The current wall is a driver-side plumbing gap: nothing writes `verification.md` after PLAN. The harness is not production-ready. Bench blocks live under `scripts/bench_data/` (pre-registered fixed n, append-only jsonl, Wilson CI, Fisher exact, per-row seeds).
 
@@ -60,7 +62,7 @@ make type-check     # mypy on src/fsm_llm/ (core and subpackages)
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts and caches
 make coverage       # pytest with coverage report
-make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness]" + pre-commit install
+make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness,eval]" + pre-commit install
 make audit          # audit site-packages for suspicious .pth files
 
 fsm-llm --fsm <path.json>            # Run FSM interactively (needs env LLM_MODEL)
@@ -70,6 +72,8 @@ fsm-llm-monitor                      # Web dashboard at http://127.0.0.1:8420
 fsm-llm-meta                         # Interactive artifact builder (fsm_llm.agents.meta_cli)
 fsm-llm-harness <new|resume|status|validate|close>  # Iterative-planner protocol harness
 python -m fsm_llm.reasoning "problem" [--type T]    # Reasoning CLI (no console script)
+fsm-llm-eval examples [--category C] [--fail-under PCT]  # Score every example 0-4
+fsm-llm-eval run <dataset.json|.jsonl> [--trials N]     # Scripted conversation evals
 ```
 
 ## FSM Definition Format (JSON, v4.1)
@@ -135,7 +139,7 @@ Rules: `required_context_keys` only tells Pass 1 what to extract, it never block
 - One turn per conversation at a time: a concurrent or re-entrant `converse` on the same conversation raises `FSMError`.
 - Non-obvious code carries `# DECISION plan-<full-plan-id>/D-NNN` anchors stating what NOT to do; read them before editing nearby and do not undo what they forbid.
 - Agents HITL approval is a security boundary in `ReactAgent`, `ReflexionAgent` and `ReasoningReactAgent` when an approval policy is set: a gated tool runs only with the driver-only grant `_approval_granted` (`ContextKeys.DRIVER_APPROVAL`) bound to that exact call, and one approval covers one call. The public `approval_granted`/`approval_required` only route the FSM and stay model-writable; the refusal in `AgentHandlers` is the boundary. Remaining gaps: the per-tool `requires_approval` flag does nothing without a policy; ParallelReact, REWOO, native_fc and PlanExecute have no HITL; an approved call can be dropped by `await_approval->conclude` (fails closed). See the CHANGELOG agents follow-up Known open list.
-- Do NOT modify files under `examples/` unless explicitly asked: they are evaluation baselines for `scripts/eval.py`.
+- Do NOT modify files under `examples/` unless explicitly asked: they are evaluation baselines for `fsm-llm-eval examples`.
 
 ## Code Conventions
 
@@ -143,7 +147,7 @@ Rules: `required_context_keys` only tells Pass 1 what to extract, it never block
 - Pydantic v2 `BaseModel` with `model_validator` for complex validation. Logging via `from fsm_llm.logging import logger`.
 - Exports: one static `__all__` list per package and subpackage `__init__.py`; `fsm_llm/__init__.py` never imports a subpackage; no dynamic extend/append (conditional `ReasoningReactAgent` in agents is the one guarded exception).
 - Constants in each (sub)package's `constants.py`; reasoning and agents use `ContextKeys` classes of string constants.
-- Exceptions: core `FSMError` -> `ConversationBusyError`, `FSMDefinitionNotFoundError` (also a `ValueError`), `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` -> (`SchemaValidationError`, `ClassificationResponseError`); `HandlerSystemError(FSMError)` -> `HandlerExecutionError`. Reasoning `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError`. Workflows `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`. Agents `AgentError` -> `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`, `MetaBuilderError` -> (`BuilderError`, `MetaValidationError`, `OutputError`). Harness `HarnessError(FSMError)` -> `HarnessArtifactError`, `HarnessOwnershipError`, `HarnessReentrancyError`, `HarnessConfinementError`. Monitor `MonitorError(Exception)` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError`, `MonitorCapacityError` (not an `FSMError`).
+- Exceptions: core `FSMError` -> `ConversationBusyError`, `FSMDefinitionNotFoundError` (also a `ValueError`), `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` -> (`SchemaValidationError`, `ClassificationResponseError`); `HandlerSystemError(FSMError)` -> `HandlerExecutionError`. Reasoning `ReasoningEngineError` -> `ReasoningExecutionError`, `ReasoningClassificationError`. Workflows `WorkflowError` -> `WorkflowDefinitionError`, `WorkflowStepError`, `WorkflowInstanceError`, `WorkflowTimeoutError`, `WorkflowValidationError`, `WorkflowStateError`, `WorkflowEventError`, `WorkflowResourceError`. Agents `AgentError` -> `ToolExecutionError`, `ToolNotFoundError`, `ToolValidationError`, `BudgetExhaustedError`, `ApprovalDeniedError`, `AgentTimeoutError`, `EvaluationError`, `DecompositionError`, `MetaBuilderError` -> (`BuilderError`, `MetaValidationError`, `OutputError`). Harness `HarnessError(FSMError)` -> `HarnessArtifactError`, `HarnessOwnershipError`, `HarnessReentrancyError`, `HarnessConfinementError`. Eval `EvalError(FSMError)` -> `EvalConfigError`, `EvalDatasetError`. Monitor `MonitorError(Exception)` -> `MonitorInitializationError`, `MetricCollectionError`, `MonitorConnectionError`, `MonitorCapacityError` (not an `FSMError`).
 
 ## Testing
 
@@ -166,7 +170,7 @@ pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
 
-Counts are `pytest --collect-only -q` after the 2026-09-24 agents follow-up (unreleased). `tests/test_packaging.py` (slow class) re-measures the collection and pins every count literal above, the `make test` line, the README's `make test` line, and the harness package doc's count tokens; update them together when tests are added. It also derives the layout from disk and pins it: `src/*/__init__.py` must be exactly `fsm_llm` and `src/fsm_llm/*/__init__.py` exactly the six subpackages; `fsm_llm` must appear in all 8 build/CI slots (pyproject package-data and isort, Makefile, tox, CI mypy, MANIFEST.in), each subpackage must have a same-named extra requested by every install list, and the monitor package-data must cover every file under `static/` and `templates/`. `tests/test_fsm_llm/test_docs_snippets.py` loads every full FSM JSON snippet in this file, `README.md`, `docs/quickstart.md`, and `src/fsm_llm/README.md`.
+Counts are `pytest --collect-only -q` after the `fsm_llm.eval` addition (unreleased). `tests/test_packaging.py` (slow class) re-measures the collection and pins every count literal above, the `make test` line, the README's `make test` line, and the harness package doc's count tokens; update them together when tests are added. It also derives the layout from disk and pins it: `src/*/__init__.py` must be exactly `fsm_llm` and `src/fsm_llm/*/__init__.py` exactly the six subpackages; `fsm_llm` must appear in all 8 build/CI slots (pyproject package-data and isort, Makefile, tox, CI mypy, MANIFEST.in), each subpackage must have a same-named extra requested by every install list, and the monitor package-data must cover every file under `static/` and `templates/`. `tests/test_fsm_llm/test_docs_snippets.py` loads every full FSM JSON snippet in this file, `README.md`, `docs/quickstart.md`, and `src/fsm_llm/README.md`.
 
 - Suite directories keep their pre-move names (`tests/test_fsm_llm_agents/` tests `fsm_llm.agents`); bench node ids and the CI `--deselect` key on them.
 - Conventions: `test_<module>.py` and `test_<module>_elaborate.py`; classes `Test<Feature>`; helpers prefixed `_` (`_make_state()`, `_minimal_fsm_dict()`).
@@ -177,7 +181,7 @@ Counts are `pytest --collect-only -q` after the 2026-09-24 agents follow-up (unr
 
 ## Evaluation
 
-`scripts/eval.py` runs all examples in parallel and produces scorecards. Last baseline: 95.3% health score (N=3 median, 101 examples) on `ollama_chat/qwen3.5:4b`, Run 006, commit `2df048f`. This baseline is STALE: later remediation changed prompt content in `prompts.py`, `context.py`, and `constants.py`, the 2026-09-24 agents audit and follow-up changed agent routing, and the default model is `ollama_chat/qwen3.5:4b` again (0.9.0 briefly made it 9b). Latest run (on 9b, not the default): 80.9% (N=1, 101 examples, `ollama_chat/qwen3.5:9b-q8_0`, `--workers 4`, v0.9.0); losses are almost all agent examples hitting eval timeouts tuned for 4b. Agents-only A/B at equal settings: pre-plan c6e8461 73.4% vs v0.9.0 77.1%. The fast gate mocks the LLM, so re-run before trusting any number. The heuristic overstates by about 15 points; pair it with log inspection. About 5 agent score-1s per run are non-deterministic `--workers 4` timeouts. Harness capability benches run via `scripts/harness_bench.py`.
+`fsm-llm-eval examples` (or the `scripts/eval.py` shim) runs all examples in parallel and writes a scorecard, `results.json` and logs to a new `evaluation/<stamp>_<hash>_<model>[_N]/`; `fsm-llm-eval run <dataset>` runs scripted conversations N times (default 3) and reports pass rates with Wilson 95% CIs (sample: `evaluation/datasets/simple_greeting_cases.json`). Settings: defaults < dataset `config` < `--config FILE` < flags. Exit 0 ok, 1 usage/input error, 2 only below `--fail-under PCT`. Details: `src/fsm_llm/eval/CLAUDE.md`, `EVALUATE.md`. Last baseline: 95.3% health score (N=3 median, 101 examples) on `ollama_chat/qwen3.5:4b`, Run 006, commit `2df048f`. This baseline is STALE: later remediation changed prompt content in `prompts.py`, `context.py`, and `constants.py`, the 2026-09-24 agents audit and follow-up changed agent routing, and the default model is `ollama_chat/qwen3.5:4b` again (0.9.0 briefly made it 9b). Latest run (on 9b, not the default): 80.9% (N=1, 101 examples, `ollama_chat/qwen3.5:9b-q8_0`, `--workers 4`, v0.9.0); losses are almost all agent examples hitting eval timeouts tuned for 4b. Agents-only A/B at equal settings: pre-plan c6e8461 73.4% vs v0.9.0 77.1%. The fast gate mocks the LLM, so re-run before trusting any number. The heuristic overstates by about 15 points; pair it with log inspection. About 5 agent score-1s per run are non-deterministic `--workers 4` timeouts. Harness capability benches run via `scripts/harness_bench.py` (its statistics and row I/O delegate to `fsm_llm.eval`).
 
 Examples (100 across 8 categories): basic 14, intermediate 3, advanced 17, classification 4, reasoning 1, workflows 8, agents 48, meta 5. All support OpenAI with Ollama fallback: `python examples/<category>/<name>/run.py`.
 

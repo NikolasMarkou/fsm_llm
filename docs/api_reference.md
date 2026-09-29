@@ -421,6 +421,130 @@ reserved, argparse usage errors exit `1` rather than argparse's conventional `2`
 Model resolution: `--model` > `$LLM_MODEL` > package default. `close` is DRY-RUN
 without `--apply` and refuses to compress a directory with audit ERRORs.
 
+## Eval (`fsm_llm.eval`)
+
+Two evaluation kinds behind one CLI, `fsm-llm-eval` (also `python -m fsm_llm.eval`;
+`scripts/eval.py` runs `fsm-llm-eval examples` from the repository root). Extra
+`eval` has no third-party dependencies. Import names directly
+(`from fsm_llm.eval import wilson_ci`) or as `from fsm_llm import eval as fsm_eval`,
+so the builtin `eval` is not shadowed.
+
+### CLI
+
+```bash
+fsm-llm-eval examples [--model M] [--workers N] [--timeout S] [--category C] [--filter S]
+                      [--output-dir D] [--examples-dir P] [--python EXE]
+                      [--config FILE] [--fail-under PCT] [--list]
+fsm-llm-eval run DATASET [--model M] [--trials N] [--workers N] [--output-dir D]
+                         [--config FILE] [--fail-under PCT] [--list]
+```
+
+Exit codes: `0` success, also for low scores; `1` usage error, bad config or dataset,
+unwritable output, or nothing matched; `2` only when `--fail-under PCT` is given and
+the health score (`examples`) or overall pass rate (`run`) is below PCT. Usage errors
+exit `1`, not argparse's `2`, so CI can tell a regression from a typo.
+
+### Configuration (`EvalConfig`)
+
+Settings precedence: built-in defaults < a dataset's embedded `config` (`run` only) <
+`--config FILE` (one JSON object) < explicit flags. Unknown keys and bad values raise
+`EvalConfigError` (CLI exit 1).
+
+| Field | Default | Used by | Meaning |
+|-------|---------|---------|---------|
+| `model` | `None` | both | `None` = `$LLM_MODEL`, else `DEFAULT_LLM_MODEL`, read when the run starts |
+| `workers` | `4` | both | Parallel threads (>= 1) |
+| `timeout` | `120` | examples | Seconds for an example no timeout table names (>= 1) |
+| `output_root` | `"evaluation"` | both | Parent of auto-named run directories |
+| `output_dir` | `None` | both | Exact run directory; must be new or empty |
+| `fail_under` | `None` | both | Threshold in percent (0-100) for exit 2 |
+| `examples_dir` | `"examples"` | examples | Tree scanned for `<category>/<name>/run.py` and `run_manual.py` |
+| `python` | `None` | examples | Interpreter for example scripts; `None` = the running one |
+| `category` | `None` | examples | Only this category |
+| `name_filter` | `None` | examples | Only names containing this substring (`--filter`) |
+| `example_inputs` | `{}` | examples | Stdin script per example name, merged over the built-in table |
+| `example_timeouts` | `{}` | examples | Seconds per example name, merged over the built-in table |
+| `category_timeouts` | `{}` | examples | Seconds per category, merged over the built-in table |
+| `trials` | `3` | run | Trials per case (>= 1) |
+| `temperature` | `None` | run | LLM temperature (>= 0); `None` = framework default |
+
+Example timeout precedence: per-example table > category table > `timeout`.
+
+### Python API
+
+```python
+from fsm_llm.eval import (
+    EvalConfig, load_config, merge_config, resolve_model,
+    discover_examples, run_examples,
+    load_cases, run_cases, run_case_trial, check_expectations,
+    open_run_dir, wilson_ci, fisher_exact_two_sided, pass_rate,
+)
+
+config = merge_config({"workers": 2}, load_config("eval.json"))  # later layers win
+model = resolve_model(config)
+
+# Examples: subprocess per script, heuristic score 0-4 per example
+targets = discover_examples(config)
+run_dir = open_run_dir(config.output_dir, config.output_root, model)
+report = run_examples(targets, config, model, run_dir)   # ExampleReport
+report.health, report.wall_time, report.results          # results: list[ExampleResult]
+
+# Conversation cases: fresh API per trial, expectations checked per trial
+cases, embedded = load_cases("cases.json")               # embedded: config layer
+config = merge_config(embedded, {"trials": 5})
+report = run_cases(cases, config, open_run_dir(None, config.output_root, model),
+                   llm_interface_factory=None,           # or a callable returning an LLMInterface
+                   dataset="cases.json")                 # CaseReport
+report.overall   # {"k": 12, "n": 15, "rate": 0.8, "wilson_ci": [0.548, 0.930]}
+
+wilson_ci(33, 40)                      # (lo, hi), 95% by default
+fisher_exact_two_sided(2, 40, 40, 40)  # two-sided p for two k/n arms
+pass_rate(0, 0)                        # rate 0.0, wilson_ci [0.0, 1.0]
+```
+
+`run_case_trial` never raises: an exception becomes a failed trial with `error` set.
+Records helpers: `append_row`, `read_rows` (JSONL), `write_json` (indent 2, sorted
+keys), `utc_now`, `git_commit` (raises on failure), `git_short_hash` (`"unknown"` on
+failure), `model_slug`, `make_run_dir` (adds `_2`, `_3`, ... on a name collision).
+
+### Dataset schema
+
+A JSON list of cases, a JSON object `{"config": {...}, "cases": [...]}`, or a `.jsonl`
+file with one case per line (blank lines skipped).
+
+| Case key | Required | Meaning |
+|----------|----------|---------|
+| `id` | yes | Unique, non-empty |
+| `fsm` | yes | Path relative to the dataset file, or an inline FSM definition object |
+| `turns` | yes | User messages sent in order (at least one); sending stops once the conversation ends |
+| `expect` | yes | At least one check (below) |
+| `initial_context` | no | Context passed to `start_conversation` |
+| `description` | no | Shown in `--list` and the report |
+
+| `expect` key | Passes when |
+|--------------|-------------|
+| `final_state` | The state after the last turn sent equals it |
+| `visited_states` | Each listed state was current after start or after some turn (any order) |
+| `context` | Each key in `get_data` equals the given value |
+| `context_keys` | Each key is present in `get_data` and not null |
+| `responses_contain` | Each substring occurs, case-insensitively, in at least one response (greeting included) |
+| `ended` | `has_conversation_ended` equals it |
+
+### Output
+
+Each run gets `<output_root>/<YYYY-MM-DD_HH-MM>_<git-short-hash>_<model-slug>/`
+(`_2`, `_3`, ... when the name exists).
+
+- `examples`: `scorecard.md`, `results.json` (`date, git_commit, model, health_score,
+  total_examples, distribution, results[{name, category, score, failures, duration,
+  exit_code, timed_out}], wall_time_s, workers, default_timeout, evaluator`),
+  `logs/<category>/<category>_<name>.log`.
+- `run`: `rows.jsonl` (one row per trial, appended as it finishes: `case_id, trial,
+  passed, failures, error, final_state, visited_states, responses, context, ended,
+  turns_sent, duration`), `results.json` (`date, git_commit, model, dataset, evaluator,
+  config, overall, cases[{id, description, k, n, rate, wilson_ci, first_failure,
+  failure_counts}], wall_time_s`), `summary.md`.
+
 ## Monitor (`fsm_llm.monitor`)
 
 ```python
@@ -453,6 +577,7 @@ FSMError
 ├── ReasoningEngineError (-> ReasoningExecutionError, ReasoningClassificationError)
 ├── WorkflowError (-> Definition, Step, Instance, Timeout, Validation, State, Event, Resource)
 ├── HarnessError (-> HarnessArtifactError, HarnessOwnershipError, HarnessReentrancyError, HarnessConfinementError)
+├── EvalError (-> EvalConfigError, EvalDatasetError)
 └── AgentError (-> ToolExecution, ToolNotFound, ToolValidation, Budget, Approval, Timeout, Evaluation, Decomposition)
     └── MetaBuilderError (-> Builder, MetaValidation, Output)
 

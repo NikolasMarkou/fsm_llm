@@ -69,6 +69,7 @@ pip install "fsm-llm[all]"    # everything
 | `agents` | `pip install "fsm-llm[agents]"` | None |
 | `workflows` | `pip install "fsm-llm[workflows]"` | None |
 | `harness` | `pip install "fsm-llm[harness]"` | None (pulls `fsm-llm[agents]`) |
+| `eval` | `pip install "fsm-llm[eval]"` | None |
 | `monitor` | `pip install "fsm-llm[monitor]"` | fastapi, uvicorn, jinja2 |
 | `mcp` | `pip install "fsm-llm[mcp]"` | mcp (>=1.0.0) |
 | `otel` | `pip install "fsm-llm[otel]"` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
@@ -152,7 +153,7 @@ Provider keys (`OPENAI_API_KEY`, ...) are read by litellm. A `.env` file is look
 
 ## Packages
 
-The distribution ships one Python package, `fsm_llm`: the core plus five subpackages. Every subpackage is installed with the core; an extra only adds the third-party dependencies a subpackage needs (see the table above). Import a subpackage as `from fsm_llm import agents` or `from fsm_llm.agents import create_agent`; `import fsm_llm` alone loads none of them.
+The distribution ships one Python package, `fsm_llm`: the core plus six subpackages. Every subpackage is installed with the core; an extra only adds the third-party dependencies a subpackage needs (see the table above). Import a subpackage as `from fsm_llm import agents` or `from fsm_llm.agents import create_agent`; `import fsm_llm` alone loads none of them.
 
 | Package | What it adds |
 |---------|--------------|
@@ -162,6 +163,7 @@ The distribution ships one Python package, `fsm_llm`: the core plus five subpack
 | `fsm_llm.agents` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan-and-execute, debate, orchestrator, ...), tools, human approval, memory, MCP and remote agents, and a meta-builder that designs FSMs, workflows, and agents by chat |
 | `fsm_llm.monitor` | A web dashboard to launch, watch, and chat with FSMs, agents, and workflows, with optional OpenTelemetry export |
 | `fsm_llm.harness` | The iterative-planner protocol (explore, plan, execute, reflect, pivot, close) as an FSM whose gates check files on disk |
+| `fsm_llm.eval` | Evaluation: run and score the examples, or run scripted conversations against any FSM several times and report pass rates with confidence intervals |
 
 **Classification** (core):
 
@@ -263,6 +265,7 @@ The harness gates are JSON rules over values counted from the plan directory, so
 | `fsm-llm-monitor` | Launch the web dashboard |
 | `fsm-llm-meta` | Build FSMs, workflows, or agents by chatting |
 | `fsm-llm-harness <new\|resume\|status\|validate\|close>` | Drive or audit an iterative-planner plan directory |
+| `fsm-llm-eval <examples\|run>` | Score the examples, or run a conversation dataset and report pass rates |
 
 ## Behaviour details
 
@@ -340,7 +343,7 @@ Transition conditions use JsonLogic, evaluated in Python by `fsm_llm.expressions
 | Agents | 48 | react_search, plan_execute, reflexion, debate, orchestrator, adapt |
 | Meta | 5 | build_fsm, build_workflow, build_agent, meta_review_loop, meta_from_spec |
 
-`scripts/eval.py` runs all examples in parallel and scores them.
+`fsm-llm-eval examples` runs all examples in parallel and scores them (`scripts/eval.py` still works and does the same). To test your own FSM, write a small dataset of conversations with expected outcomes and run `fsm-llm-eval run cases.json`; see `src/fsm_llm/eval/README.md` and `EVALUATE.md`.
 
 ## Development
 
@@ -355,7 +358,7 @@ make coverage       # Tests with coverage report
 make audit          # scan site-packages for suspicious .pth files
 ```
 
-Repository layout: `src/fsm_llm/` holds the core and its five subpackages, `tests/` one test folder per (sub)package plus regression and example checks, `examples/` the runnable examples, `scripts/` evaluation and benchmark tools, `docs/` longer guides.
+Repository layout: `src/fsm_llm/` holds the core and its six subpackages, `tests/` one test folder per (sub)package plus regression and example checks, `examples/` the runnable examples, `scripts/` benchmark tools and the `scripts/eval.py` shim, `evaluation/` eval datasets and run outputs, `docs/` longer guides.
 
 ## Contributing
 

@@ -174,11 +174,13 @@ fsm_llm (core, includes classification)
 ├── fsm_llm.workflows  — Uses API (via ConversationStep); lifecycle hooks via add_hook
 ├── fsm_llm.agents     — Uses API (auto-generates FSMs) + handlers for tool execution
 ├── fsm_llm.monitor    — Uses API + handlers (observer callbacks at priority 9999)
-└── fsm_llm.harness    — Uses API (hand-written FSM) + handlers at state entry; dispatches
-                          fsm_llm.agents workers as protocol roles
+├── fsm_llm.harness    — Uses API (hand-written FSM) + handlers at state entry; dispatches
+│                         fsm_llm.agents workers as protocol roles
+└── fsm_llm.eval       — Runs example scripts as subprocesses; drives scripted conversations
+                          through API (one instance per trial) and checks the outcome
 ```
 
-The five extensions are subpackages of `fsm_llm`. Core never imports them at package
+The six extensions are subpackages of `fsm_llm`. Core never imports them at package
 import time; each one imports core (`from fsm_llm import API`).
 
 | Package | Integration | Key Mechanism |
@@ -189,6 +191,7 @@ import time; each one imports core (`from fsm_llm import API`).
 | Agents | Auto-generated FSMs + handlers | `build_react_fsm()` generates FSM; handlers execute tools at POST_TRANSITION. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
 | Monitor | Observer handlers + loguru sink | Registers at all 8 timing points (priority 9999), never modifies state |
 | Harness | Hand-written FSM + state-entry handlers | `build_harness_fsm()` returns a 6-state definition whose gates are JsonLogic conditions; a handler per state entry dispatches one agent worker, and the gate values it writes are derived from the filesystem |
+| Eval | Subprocesses + public API only | `fsm-llm-eval examples` scores example output with a 0-4 heuristic; `fsm-llm-eval run` sends each case's turns through a fresh `API`, reads `get_current_state`/`get_data`/`has_conversation_ended`, and checks declared expectations over N trials. No handlers, no core changes |
 
 ## The Harness: a Protocol on Top of the 2-Pass Core (`fsm_llm.harness`)
 

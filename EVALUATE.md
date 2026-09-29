@@ -8,22 +8,32 @@ This document defines the evaluation methodology for testing FSM-LLM examples ag
 
 ```bash
 # Automated parallel evaluation (recommended)
-.venv/bin/python scripts/eval.py --model ollama_chat/qwen3.5:4b --workers 4
+fsm-llm-eval examples --model ollama_chat/qwen3.5:4b --workers 4
 
 # With more parallelism for higher GPU utilization
-.venv/bin/python scripts/eval.py --workers 8
+fsm-llm-eval examples --workers 8
 
 # Only a specific category
-.venv/bin/python scripts/eval.py --category agents
+fsm-llm-eval examples --category agents
 
 # Filter by name
-.venv/bin/python scripts/eval.py --filter react
+fsm-llm-eval examples --filter react
 
 # List discovered examples without running
-.venv/bin/python scripts/eval.py --list
+fsm-llm-eval examples --list
+
+# Fail a CI job (exit 2) when the health score is below 80%
+fsm-llm-eval examples --fail-under 80
+
+# Scripted conversation evaluation of any FSM (see "Conversation evaluations")
+fsm-llm-eval run evaluation/datasets/simple_greeting_cases.json --trials 3
 ```
 
-Output goes to `evaluation/<timestamp>_<hash>_<model>/` containing:
+`fsm-llm-eval` is installed with the package (`fsm_llm.eval`, extra `eval`). The old
+entry point still works and takes the same flags: `.venv/bin/python scripts/eval.py
+<flags>` runs `fsm-llm-eval examples <flags>` from the repository root.
+
+Output goes to a new `evaluation/<timestamp>_<hash>_<model>/` (`_2`, `_3`, ... appended if that name exists) containing:
 - `scorecard.md` -- human-readable results with scores, timing, and category breakdown
 - `results.json` -- machine-readable results for scripting and diff
 - `logs/<category>/<name>.log` -- full stdout+stderr per example
@@ -63,29 +73,37 @@ The count will grow over time. The scoring system is ratio-based (percentages), 
 
 ### Automated (recommended)
 
-Use `scripts/eval.py` to run all examples in parallel:
+Use `fsm-llm-eval examples` to run all examples in parallel:
 
 ```bash
-.venv/bin/python scripts/eval.py [options]
+fsm-llm-eval examples [options]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--model` | `$LLM_MODEL` or `ollama_chat/qwen3.5:4b` | LLM model identifier |
-| `--workers` | 4 | Parallel worker processes (increase for GPU utilization) |
+| `--workers` | 4 | Parallel workers, one example subprocess each (increase for GPU utilization) |
 | `--timeout` | 120 | Default timeout per example (seconds) |
 | `--category` | all | Filter by category (basic, agents, etc.) |
 | `--filter` | all | Substring match on example name |
-| `--output-dir` | auto-generated | Override output directory |
-| `--list` | — | List examples and exit (dry run) |
+| `--output-dir` | auto-generated | Exact output directory; must be new or empty |
+| `--examples-dir` | `examples` | Examples tree to scan |
+| `--python` | the running interpreter | Interpreter for the example scripts |
+| `--config` | none | JSON file of settings (flags override it) |
+| `--fail-under` | none | Exit 2 when the health score is below this percentage |
+| `--list` | -- | List examples and exit (dry run) |
 
-The script auto-discovers examples, classifies them as interactive or automated, pipes pre-configured stdin for interactive ones, applies per-category and per-example timeout overrides, and runs them in parallel via `ProcessPoolExecutor`.
+The runner auto-discovers examples, classifies them as interactive or automated, pipes pre-configured stdin for interactive ones, applies per-category and per-example timeout overrides, and runs them in parallel on a thread pool, one subprocess per example.
 
-**Timeout overrides** (built into the script):
+**Timeout overrides** (built-in tables in `fsm_llm/eval/constants.py`):
 - basic/intermediate: 120s (default)
 - agents/workflows/advanced: 180s
 - reasoning: 300s
 - Known slow examples (e_commerce, reflexion, orchestrator, etc.): 240-300s
+
+A per-example value wins over the category value, which wins over `--timeout`, so `--timeout` cannot shorten a tabled example. To change a tabled value, pass a config file, for example `{"example_timeouts": {"agents/debate": 400}, "category_timeouts": {"agents": 240}}`; table entries in the file are merged over the built-in ones. Settings precedence is built-in defaults < `--config FILE` < flags; unknown keys are an error.
+
+**Exit codes**: `0` the run finished (also with a low score), `1` usage error, bad config, unwritable output, or no example matched, `2` only when `--fail-under PCT` is given and the health score is below it.
 
 ### Prerequisites
 
@@ -120,6 +138,18 @@ For each example, evaluate these dimensions:
 5. **Tool Use** -- (agents only) Are tools called and do they execute?
 6. **Completion** -- Does it finish without crashing or infinite loops?
 7. **Output Quality** -- Is the LLM output coherent and on-topic?
+
+### Conversation evaluations (`fsm-llm-eval run`)
+
+The example scores above come from a heuristic over stdout. To test a specific FSM's behaviour, write a dataset of scripted conversations with expected outcomes and run it several times:
+
+```bash
+fsm-llm-eval run DATASET [--model M] [--trials N] [--workers N] [--output-dir D] [--config FILE] [--fail-under PCT] [--list]
+```
+
+A dataset is a JSON list of cases, a JSON object `{"config": {...}, "cases": [...]}`, or a `.jsonl` file with one case per line. Each case has an `id`, an `fsm` (path relative to the dataset file, or an inline definition), optional `initial_context`, the user `turns`, and `expect` with at least one of `final_state`, `visited_states`, `context` (exact values), `context_keys` (present and not null), `responses_contain` (case-insensitive substrings) and `ended`. A trial passes when every declared check holds; a trial that raises (model down, bad FSM) is a failed trial with the error recorded. The sample `evaluation/datasets/simple_greeting_cases.json` covers `examples/basic/simple_greeting`.
+
+Each case runs `trials` times (default 3), in-process through `fsm_llm.API`, one fresh `API` per trial. Settings precedence: defaults < the dataset's `config` < `--config FILE` < flags. The run directory (same naming as example runs) holds `rows.jsonl` (one row per trial, written as each finishes), `results.json` (per-case and overall `k`, `n`, `rate` and Wilson 95% `wilson_ci`, plus the config used) and `summary.md`. Report a pass rate with its interval: with 3 trials, 3/3 still has a Wilson lower bound of about 44%. `--fail-under PCT` compares the overall pass rate. Exit codes are the same as for `examples`.
 
 ---
 
@@ -255,7 +285,7 @@ Track results across models to understand minimum viable model size:
 
 ## 8. Storing Results
 
-All evaluation results live in the `evaluation/` directory. `scripts/eval.py` generates output automatically.
+All evaluation results live in the `evaluation/` directory. `fsm-llm-eval` generates output automatically.
 
 ### Output Structure
 
@@ -263,7 +293,7 @@ Each run creates a timestamped directory:
 
 ```
 evaluation/
-├── 2026-03-29_14-38_0aec60a_qwen3.5-4b/      # Auto-generated by scripts/eval.py
+├── 2026-03-29_14-38_0aec60a_qwen3.5-4b/      # Auto-generated by fsm-llm-eval
 │   ├── scorecard.md                            # Human-readable results
 │   ├── results.json                            # Machine-readable results
 │   └── logs/                                   # Per-example logs
@@ -280,18 +310,20 @@ evaluation/
 
 ### What Gets Generated
 
-`scripts/eval.py` produces three outputs per run:
+`fsm-llm-eval examples` produces three outputs per run:
 
-1. **`scorecard.md`** -- date, git commit, model, scores table (per-example with score/duration/failures), summary (health score, distribution, category breakdown, top failure codes), timing stats
-2. **`results.json`** -- same data in machine-readable format for scripting, diffing, and trend analysis
+1. **`scorecard.md`** -- date, git commit, model, scores table (per-example with score/duration/failures), summary (health score, distribution, category breakdown, top failure codes), timing stats. "Total wall time" is the real elapsed time of the run; "Total example time" is the sum of the example durations (sequential equivalent). Scorecards written by `scripts/eval.py` before the `fsm_llm.eval` move labelled that sum "Total wall time", so compare old and new runs on "Total example time"
+2. **`results.json`** -- same data in machine-readable format for scripting, diffing, and trend analysis. The keys of the old format are unchanged; newer runs add `wall_time_s`, `workers`, `default_timeout` and `evaluator`
 3. **`logs/<category>/<name>.log`** -- full stdout+stderr capture per example, with metadata header (exit code, duration, timeout status)
 
 ### Custom Output Directory
 
 ```bash
-# Override the auto-generated path
-.venv/bin/python scripts/eval.py --output-dir evaluation/my_run
+# Override the auto-generated path (must be new or empty)
+fsm-llm-eval examples --output-dir evaluation/my_run
 ```
+
+A run never overwrites another: when the auto-generated name already exists (two runs in the same minute on the same commit and model), `_2`, `_3`, ... is appended. Before the `fsm_llm.eval` move, such a rerun overwrote the first run's files.
 
 ### Comparing Runs
 
