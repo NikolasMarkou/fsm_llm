@@ -88,6 +88,94 @@ def normalize_tool_input(raw: Any) -> dict[str, Any]:
     return {"input": str(raw)}
 
 
+def _is_dict_annotation(ann: Any) -> bool:
+    """True for ``dict``, a ``dict[...]`` generic, or a string annotation
+    (``from __future__``) spelling one of those. Never raises."""
+    return (
+        ann is dict
+        or typing.get_origin(ann) is dict
+        or (isinstance(ann, str) and _DICT_ANNOTATION_RE.fullmatch(ann) is not None)
+    )
+
+
+def _unwrap_nested_tool_input(
+    parameters: dict[str, Any], schema_props: dict[str, Any]
+) -> dict[str, Any]:
+    """Flatten ``{"tool_input": {...}, <siblings>}`` into one argument dict.
+
+    Models sometimes echo the envelope ``{"tool_name": "x", "tool_input":
+    {"a": 1}, "b": 2}``. Returns the nested dict merged with the siblings
+    (``tool_name`` dropped). Precedence: the NESTED value wins on a key clash;
+    a sibling fills only keys the nested dict lacks (TOOL-02: siblings used to
+    be dropped). Returns ``parameters`` unchanged when there is no dict
+    ``tool_input`` or the schema declares a real ``tool_input`` parameter.
+    Never raises.
+    """
+    nested = parameters.get(ContextKeys.TOOL_INPUT)
+    if not isinstance(nested, dict) or ContextKeys.TOOL_INPUT in schema_props:
+        return parameters
+    skip = {ContextKeys.TOOL_INPUT, ContextKeys.TOOL_NAME}
+    merged = {k: v for k, v in parameters.items() if k not in skip}
+    merged.update(nested)
+    logger.debug(f"Unwrapped nested tool_input: {merged}")
+    return merged
+
+
+def _fallback_arguments(
+    sig: inspect.Signature,
+    params: dict[str, Any],
+    schema_props: dict[str, Any],
+    bind_error: TypeError,
+) -> dict[str, Any]:
+    """Recover keyword arguments after ``sig.bind(**params)`` failed.
+
+    Only runs on a bind failure, so the tool has not been called yet; the
+    caller calls it once with the result. A value is remapped only from a key
+    that names no parameter of the function (a misnamed key): a named optional
+    such as ``limit`` is never fed to a missing required such as ``query``
+    (TOOL-02). Raises ``TypeError`` with a model-readable message when nothing
+    can be recovered.
+    """
+    names = list(sig.parameters)
+    required = [
+        k for k, p in sig.parameters.items() if p.default is inspect.Parameter.empty
+    ]
+    stray = [v for k, v in params.items() if k not in sig.parameters]
+    if len(names) == 1 and stray:
+        # Single-param function: pass the first misnamed value
+        mapped = {names[0]: _as_param_value(stray[0], schema_props.get(names[0]))}
+        logger.debug(f"Tool kwarg mismatch, retrying: {mapped}")
+        return mapped
+    if params and schema_props:
+        # Only positional-map a single required param from a single misnamed
+        # value; for >=2 params the LLM's value order is untrusted and would
+        # silently swap args.
+        if len(required) == 1 and len(params) == 1 and len(stray) == 1:
+            mapped = {
+                required[0]: _as_param_value(stray[0], schema_props.get(required[0]))
+            }
+            logger.debug(
+                f"Tool kwarg mismatch, retrying with positional mapping: {mapped}"
+            )
+            return mapped
+        raise TypeError(
+            f"Tool requires parameters: {required}. "
+            f"Model sent keys {list(params.keys())} which do not match. "
+            f"Provide values keyed by the expected parameter names."
+        ) from None
+    if not params and schema_props:
+        required_params = list(schema_props.keys())
+        example_params = {
+            k: f"<{v.get('type', 'value')}>" for k, v in schema_props.items()
+        }
+        raise TypeError(
+            f"Tool requires parameters: {required_params}. "
+            f"Model sent empty parameters. "
+            f"Expected format: {example_params}"
+        ) from None
+    raise bind_error
+
+
 class ToolRegistry:
     """
     Registry for managing tools available to agents.
@@ -143,10 +231,23 @@ class ToolRegistry:
         tool_name = name or fn.__name__
         tool_desc = description or fn.__doc__ or f"Tool: {tool_name}"
 
+        if parameter_schema is None:
+            # TOOL-03: infer like ``@tool`` so a one-param annotated function is
+            # called by keyword, not handed the whole dict. A single unannotated
+            # or dict-annotated param keeps ``{}`` (legacy dict call). A function
+            # taking ``**kwargs`` keeps ``{}`` so every key still reaches it.
+            sig_params = list(inspect.signature(fn).parameters.values())
+            keep_legacy = any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in sig_params
+            ) or (
+                len(sig_params) == 1 and _is_dict_annotation(sig_params[0].annotation)
+            )
+            parameter_schema = {} if keep_legacy else _infer_schema_from_hints(fn)
+
         tool = ToolDefinition(
             name=tool_name,
             description=tool_desc.strip(),
-            parameter_schema=parameter_schema or {},
+            parameter_schema=parameter_schema,
             requires_approval=requires_approval,
             execute_fn=fn,
         )
@@ -273,80 +374,28 @@ class ToolRegistry:
         # A dict[...] generic or a string annotation (__future__) is the legacy
         # form only when the schema does not name the parameter; do NOT widen
         # the bare-`dict` rule, a schema-named dict param is called by keyword.
-        dict_like = typing.get_origin(ann) is dict or (
-            isinstance(ann, str) and _DICT_ANNOTATION_RE.fullmatch(ann) is not None
-        )
         if param_count == 1 and (
-            ann is dict or (dict_like and first_param.name not in schema_props)
+            ann is dict
+            or (_is_dict_annotation(ann) and first_param.name not in schema_props)
         ):
             # Legacy function expects a single dict; pass parameters directly
             return fn(parameters)
         # Multi-param or schema-aware: pass as **kwargs
-        params = parameters
-        # Unwrap nested tool_input: model sometimes sends
-        # {"tool_name": "x", "tool_input": {"a": 1, "b": 2}}
-        if (
-            isinstance(params, dict)
-            and "tool_input" in params
-            and isinstance(params["tool_input"], dict)
-            and "tool_input" not in (schema_props or {})
-        ):
-            params = params["tool_input"]
-            logger.debug(f"Unwrapped nested tool_input: {params}")
-        if schema_props and isinstance(params, dict):
-            params = {k: v for k, v in params.items() if k in schema_props}
+        sent = _unwrap_nested_tool_input(parameters, schema_props)
+        params = sent
+        if schema_props:
+            params = {k: v for k, v in sent.items() if k in schema_props}
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-023: bind BEFORE calling.
+        # When the arguments bind, the tool runs exactly once and a TypeError
+        # from its body is a failed call. Do NOT go back to ``try: fn(**params)
+        # except TypeError: <retry>``: that re-ran a tool whose body raised
+        # TypeError after a side effect (TOOL-01). The fallback sees the keys the
+        # model sent (``sent``), before the schema filter, like the old one did.
         try:
-            return fn(**params)
-        except TypeError:
-            # Fallback: model sent wrong/empty keys. Try to recover.
-            if param_count == 1 and parameters:
-                # Single-param function — pass the first available value
-                param_name = next(iter(sig.parameters))
-                first_value = _as_param_value(
-                    next(iter(parameters.values())), schema_props.get(param_name)
-                )
-                logger.debug(
-                    f"Tool kwarg mismatch, retrying: {param_name}={first_value!r}"
-                )
-                return fn(**{param_name: first_value})
-            if parameters and schema_props:
-                # Multi-param: map model values to schema params by position
-                # when value count matches required param count
-                required = [
-                    k
-                    for k, p in sig.parameters.items()
-                    if p.default is inspect.Parameter.empty
-                ]
-                vals = list(parameters.values())
-                # Only positional-map a single required param; for >=2 params the
-                # LLM's value order is untrusted and would silently swap args.
-                if len(required) == 1 and len(vals) == len(required):
-                    mapped = {
-                        required[0]: _as_param_value(
-                            vals[0], schema_props.get(required[0])
-                        )
-                    }
-                    logger.debug(
-                        f"Tool kwarg mismatch, retrying with positional mapping: {mapped}"
-                    )
-                    return fn(**mapped)
-                if len(required) >= 2:
-                    raise TypeError(
-                        f"Tool requires parameters: {required}. "
-                        f"Model sent keys {list(parameters.keys())} which do not match. "
-                        f"Provide values keyed by the expected parameter names."
-                    ) from None
-            if not parameters and schema_props:
-                required_params = list(schema_props.keys())
-                example_params = {
-                    k: f"<{v.get('type', 'value')}>" for k, v in schema_props.items()
-                }
-                raise TypeError(
-                    f"Tool requires parameters: {required_params}. "
-                    f"Model sent empty parameters. "
-                    f"Expected format: {example_params}"
-                ) from None
-            raise
+            bound = sig.bind(**params)
+        except TypeError as bind_error:
+            return fn(**_fallback_arguments(sig, sent, schema_props, bind_error))
+        return fn(*bound.args, **bound.kwargs)
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
         """Execute a tool call and return the result."""

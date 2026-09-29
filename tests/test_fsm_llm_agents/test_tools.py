@@ -1141,3 +1141,198 @@ class TestKwargsOnlyTool:
         )
         assert result.success, result.error
         assert seen == [{"input": "x"}]
+
+
+class TestToolArgumentBinding:
+    """TOOL-01/02/03 (plan-2026-09-29T103145-06a5ec0a step 7): arguments are
+    bound against the signature before the call, a tool runs at most once per
+    ``execute``, and a fallback never feeds a named optional to a missing
+    required parameter."""
+
+    @staticmethod
+    def _query_limit_registry(got: list, schema: bool = True) -> ToolRegistry:
+        def f(query: str, limit: int = 5) -> str:
+            got.append((query, limit))
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register_function(
+            f,
+            name="f",
+            description="d",
+            parameter_schema=(
+                {
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                }
+                if schema
+                else {}
+            ),
+        )
+        return registry
+
+    def test_body_type_error_runs_tool_once_and_fails(self):
+        calls: list[str] = []
+
+        def writer(path: str) -> str:
+            calls.append(path)
+            raise TypeError("body bug after side effect")
+
+        registry = ToolRegistry()
+        registry.register_function(
+            writer,
+            name="writer",
+            description="d",
+            parameter_schema={
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        )
+        result = registry.execute(
+            ToolCall(tool_name="writer", parameters={"path": "a"})
+        )
+        assert calls == ["a"]
+        assert not result.success
+        assert "body bug after side effect" in (result.error or "")
+
+    def test_body_type_error_after_fallback_mapping_runs_once(self):
+        calls: list[str] = []
+
+        def writer(path: str) -> str:
+            calls.append(path)
+            raise TypeError("body bug")
+
+        registry = ToolRegistry()
+        registry.register_function(
+            writer,
+            name="writer",
+            description="d",
+            parameter_schema={"properties": {"path": {"type": "string"}}},
+        )
+        result = registry.execute(ToolCall(tool_name="writer", parameters={"p": "a"}))
+        assert calls == ["a"]
+        assert not result.success
+
+    def test_async_body_type_error_runs_once(self):
+        calls: list[str] = []
+
+        async def writer(path: str, mode: str = "w") -> str:
+            calls.append(path)
+            raise TypeError("async body bug")
+
+        registry = ToolRegistry()
+        registry.register_function(
+            writer,
+            name="writer",
+            description="d",
+            parameter_schema={"properties": {"path": {"type": "string"}}},
+        )
+        result = registry.execute(
+            ToolCall(tool_name="writer", parameters={"path": "a"})
+        )
+        assert calls == ["a"]
+        assert not result.success
+
+    def test_named_optional_is_never_mapped_to_missing_required(self):
+        got: list = []
+        registry = self._query_limit_registry(got)
+        result = registry.execute(ToolCall(tool_name="f", parameters={"limit": 3}))
+        assert got == []
+        assert not result.success
+        assert "query" in (result.error or "")
+
+    def test_misnamed_single_value_still_maps_to_the_lone_required(self):
+        got: list = []
+        registry = self._query_limit_registry(got)
+        result = registry.execute(ToolCall(tool_name="f", parameters={"q": "hello"}))
+        assert result.success, result.error
+        assert got == [("hello", 5)]
+
+    def test_nested_tool_input_keeps_siblings(self):
+        got: list = []
+        registry = self._query_limit_registry(got)
+        result = registry.execute(
+            ToolCall(
+                tool_name="f", parameters={"tool_input": {"query": "x"}, "limit": 9}
+            )
+        )
+        assert result.success, result.error
+        assert got == [("x", 9)]
+
+    def test_nested_tool_input_wins_over_a_conflicting_sibling(self):
+        got: list = []
+        registry = self._query_limit_registry(got)
+        result = registry.execute(
+            ToolCall(
+                tool_name="f",
+                parameters={"tool_input": {"query": "x", "limit": 1}, "limit": 9},
+            )
+        )
+        assert result.success, result.error
+        assert got == [("x", 1)]
+
+    def test_nested_tool_input_drops_tool_name_sibling_without_schema(self):
+        got: list = []
+        registry = self._query_limit_registry(got, schema=False)
+        result = registry.execute(
+            ToolCall(
+                tool_name="f",
+                parameters={"tool_name": "f", "tool_input": {"query": "x"}},
+            )
+        )
+        assert result.success, result.error
+        assert got == [("x", 5)]
+
+    def test_register_function_infers_schema_for_annotated_param(self):
+        seen: list = []
+
+        def g(query: str) -> str:
+            seen.append(query)
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register_function(g, name="g")
+        assert registry.get("g").parameter_schema == {
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        }
+        result = registry.execute(ToolCall(tool_name="g", parameters={"query": "hi"}))
+        assert result.success, result.error
+        assert seen == ["hi"]
+
+    @pytest.mark.parametrize("annotation", [None, dict, dict[str, Any]])
+    def test_register_function_keeps_legacy_single_dict_param(self, annotation):
+        seen: list = []
+
+        def legacy(params):
+            seen.append(params)
+            return "ok"
+
+        if annotation is not None:
+            legacy.__annotations__ = {"params": annotation}
+        registry = ToolRegistry()
+        registry.register_function(legacy, name="legacy", description="d")
+        assert registry.get("legacy").parameter_schema == {}
+        result = registry.execute(
+            ToolCall(tool_name="legacy", parameters={"input": "x"})
+        )
+        assert result.success, result.error
+        assert seen == [{"input": "x"}]
+
+    def test_register_function_var_keyword_passes_every_key(self):
+        seen: list = []
+
+        def fn(query: str, **extra: Any) -> str:
+            seen.append((query, extra))
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register_function(fn, name="fn", description="d")
+        result = registry.execute(
+            ToolCall(tool_name="fn", parameters={"query": "a", "k": 1})
+        )
+        assert result.success, result.error
+        assert seen == [("a", {"k": 1})]
