@@ -221,33 +221,47 @@ class TestPlanExecuteFSM:
         fsm = build_plan_execute_fsm(registry)
         assert fsm["states"]["synthesize"]["transitions"] == []
 
-    def test_states_have_extraction_instructions(self):
-        """States that extract data should have extraction_instructions."""
+    def test_states_extract_typed_fields_only(self):
+        """Intermediate states extract typed per-field values and no bulk
+        (step 18, PAT-02); check_result extracts nothing (the checker decides
+        step_failed from the tool status, D-032)."""
         registry = _make_registry()
         fsm = build_plan_execute_fsm(registry)
-        for state_name in (
-            "plan",
-            "execute_step",
-            "check_result",
-            "replan",
-            "synthesize",
-        ):
-            state = fsm["states"][state_name]
-            assert "extraction_instructions" in state, (
-                f"State '{state_name}' is missing extraction_instructions"
-            )
-            assert len(state["extraction_instructions"]) > 0
+        states = fsm["states"]
 
-    def test_states_have_response_instructions(self):
-        """All states should have response_instructions."""
+        def fields(state: str) -> dict[str, str]:
+            return {
+                f["field_name"]: f["field_type"]
+                for f in states[state].get("field_extractions", [])
+            }
+
+        for name in ("plan", "execute_step", "check_result", "replan"):
+            assert states[name]["extraction_instructions"] == ""
+        assert fields("plan") == {"plan_steps": "list"}
+        assert fields("replan") == {"plan_steps": "list"}
+        assert fields("execute_step") == {
+            "tool_name": "str",
+            "tool_input": "dict",
+            "step_result": "str",
+        }
+        assert fields("check_result") == {}
+        assert states["synthesize"]["extraction_instructions"]
+
+    def test_tool_less_step_requires_its_result(self):
+        fsm = build_plan_execute_fsm()
+        (step,) = fsm["states"]["execute_step"]["field_extractions"]
+        assert (step["field_name"], step["required"]) == ("step_result", True)
+
+    def test_only_synthesize_has_response_instructions(self):
+        """Intermediate states skip Pass 2; only the final state speaks."""
         registry = _make_registry()
         fsm = build_plan_execute_fsm(registry)
-        for state_name in fsm["states"]:
-            state = fsm["states"][state_name]
-            assert "response_instructions" in state, (
-                f"State '{state_name}' is missing response_instructions"
-            )
-            assert len(state["response_instructions"]) > 0
+        speaking = {
+            name
+            for name, state in fsm["states"].items()
+            if state["response_instructions"]
+        }
+        assert speaking == {"synthesize"}
 
     def test_custom_task_description(self):
         registry = _make_registry()
@@ -475,3 +489,93 @@ class TestUnplannableTaskEndsAsAFailedResult:
         )
         result = agent.run("Find the capital of France")
         assert result.final_context["plan_steps"] == _PlanScriptedLLM.PLAN
+
+
+# ---------------------------------------------------------------------------
+# Step 18 (PAT-01/02): handler units
+# ---------------------------------------------------------------------------
+
+
+class TestPlanHandlers:
+    def _checker(self, **kwargs):
+        return PlanExecuteAgent(**kwargs)._make_result_checker()
+
+    def test_string_plan_is_one_step_for_the_checker(self):
+        updates = self._checker()(
+            {ContextKeys.PLAN_STEPS: "look it up", ContextKeys.CURRENT_STEP_INDEX: 0}
+        )
+        assert updates[ContextKeys.CURRENT_STEP_INDEX] == 1
+        assert updates[ContextKeys.ALL_STEPS_COMPLETE] is True
+
+    def test_tracker_turns_a_string_plan_into_one_step(self):
+        track = PlanExecuteAgent()._make_step_tracker()
+        updates = track({ContextKeys.PLAN_STEPS: "look it up"})
+        assert updates[ContextKeys.PLAN_STEPS] == ["look it up"]
+        assert updates[ContextKeys.CURRENT_STEP_DESCRIPTION] == "Step 1/1: look it up"
+
+    def test_tracker_drops_a_non_list_plan(self):
+        track = PlanExecuteAgent()._make_step_tracker()
+        assert track({ContextKeys.PLAN_STEPS: {"a": 1}}) == {ContextKeys.PLAN_STEPS: []}
+
+    def test_tracker_caps_the_plan_with_a_warning(self):
+        from unittest.mock import patch
+
+        track = PlanExecuteAgent()._make_step_tracker()
+        plan = [f"step {i}" for i in range(Defaults.MAX_PLAN_STEPS + 5)]
+        with patch("fsm_llm.agents.plan_execute.logger") as log:
+            updates = track({ContextKeys.PLAN_STEPS: plan})
+        assert updates[ContextKeys.PLAN_STEPS] == plan[: Defaults.MAX_PLAN_STEPS]
+        assert any("capped" in str(c) for c in log.warning.call_args_list)
+
+    def test_failed_tool_sets_step_failed_and_keeps_the_index(self):
+        updates = self._checker()(
+            {
+                ContextKeys.PLAN_STEPS: ["a", "b"],
+                ContextKeys.CURRENT_STEP_INDEX: 0,
+                ContextKeys.TOOL_STATUS: "failed",
+                ContextKeys.TOOL_RESULT: "[TOOL FAILED] Error: offline",
+            }
+        )
+        assert updates[ContextKeys.STEP_FAILED] is True
+        assert ContextKeys.CURRENT_STEP_INDEX not in updates
+        assert ContextKeys.ALL_STEPS_COMPLETE not in updates
+        assert updates[ContextKeys.STEP_RESULTS] == [
+            {
+                "step_index": 0,
+                "result": "[TOOL FAILED] Error: offline",
+                "success": False,
+            }
+        ]
+
+    def test_failure_past_the_replan_cap_synthesizes(self):
+        updates = self._checker(max_replans=1)(
+            {
+                ContextKeys.PLAN_STEPS: ["a", "b"],
+                ContextKeys.TOOL_STATUS: "failed",
+                "_replan_count": 1,
+            }
+        )
+        assert updates[ContextKeys.ALL_STEPS_COMPLETE] is True
+
+    def test_zero_max_replans_never_replans(self):
+        updates = self._checker(max_replans=0)(
+            {ContextKeys.PLAN_STEPS: ["a"], ContextKeys.TOOL_STATUS: "failed"}
+        )
+        assert updates[ContextKeys.ALL_STEPS_COMPLETE] is True
+
+    def test_replan_reopens_the_plan_and_stashes_the_old_one(self):
+        handle = PlanExecuteAgent()._make_replan_handler()
+        updates = handle(
+            {
+                ContextKeys.PLAN_STEPS: ["a", "b"],
+                ContextKeys.CURRENT_STEP_INDEX: 1,
+                "_replan_count": 0,
+            }
+        )
+        assert updates == {
+            "_replan_count": 1,
+            ContextKeys.PREVIOUS_PLAN_STEPS: ["a", "b"],
+            ContextKeys.PLAN_STEPS: [],
+            ContextKeys.CURRENT_STEP_INDEX: 0,
+            ContextKeys.STEP_FAILED: False,
+        }

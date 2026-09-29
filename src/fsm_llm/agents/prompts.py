@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from .constants import Defaults
 from .tools import ToolRegistry
 
 if TYPE_CHECKING:
@@ -285,104 +286,56 @@ def build_reflect_field_instructions() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def build_plan_extraction_instructions(
+def _tool_section(registry: ToolRegistry | None, task_description: str | None) -> str:
+    """The registry's tool list as a prompt section, or "" with no tools."""
+    if registry is None or len(registry) == 0:
+        return ""
+    tool_text, _ = _get_tool_list(registry, task_description)
+    return "\n\n" + tool_text
+
+
+def build_plan_steps_instructions(
     registry: ToolRegistry | None = None,
     task_description: str | None = None,
+    *,
+    replan: bool = False,
 ) -> str:
-    """Build extraction instructions for the plan state."""
-    tool_section = ""
-    if registry is not None and len(registry) > 0:
-        tool_text, _ = _get_tool_list(registry, task_description)
-        tool_section = (
-            "\n\n" + tool_text + "\n\nYou may reference these tools in your plan steps."
+    """Per-field instructions for the typed ``plan_steps`` list.
+
+    Used by the ``plan`` state and, with ``replan=True``, by ``replan``,
+    whose prompt also shows ``step_results`` and ``previous_plan_steps``.
+    """
+    limit = Defaults.MAX_PLAN_STEPS
+    if replan:
+        ask = (
+            "A step of the previous plan (previous_plan_steps) failed; its "
+            "tool result is in step_results. Write a revised list of the "
+            "remaining step descriptions that avoids that failure"
         )
-
-    return "\n".join(
-        [
-            "Break the task down into a sequence of concrete, actionable steps. "
-            "Each step should be self-contained and produce a clear result.",
-            tool_section,
-            "",
-            "Extract the following as JSON:",
-            '- "plan_steps": a JSON list of step description strings '
-            "(ordered, max 10 steps)",
-            '- "reasoning": your reasoning for this plan decomposition',
-        ]
-    )
-
-
-def build_execute_step_extraction_instructions(
-    registry: ToolRegistry | None = None,
-    task_description: str | None = None,
-) -> str:
-    """Build extraction instructions for the execute_step state."""
-    tool_section = ""
-    if registry is not None and len(registry) > 0:
-        tool_text, _ = _get_tool_list(registry, task_description)
-        tool_section = "\n\n" + tool_text
-
-    return "\n".join(
-        [
-            "Execute the current plan step. Use the available tools or your own "
-            "knowledge to produce a result for this step.",
-            tool_section,
-            "",
-            "The current step description is provided in the context.",
-            "",
-            "Extract the following as JSON:",
-            '- "step_result": the result or output of executing this step',
-            '- "tool_name": name of the tool used (or "none" if no tool was needed)',
-            '- "tool_input": parameters passed to the tool (or empty object)',
-        ]
-    )
-
-
-def build_check_result_extraction_instructions() -> str:
-    """Build extraction instructions for the check_result state."""
-    return "\n".join(
-        [
-            "Evaluate the result of the step that was just executed.",
-            "",
-            "Consider:",
-            "- Did the step produce a useful result?",
-            "- Is the result correct and relevant to the plan?",
-            "- Can we proceed to the next step?",
-            "",
-            "Extract the following as JSON:",
-            '- "step_failed": true if the step result is inadequate, false otherwise',
-            '- "evaluation_feedback": brief explanation of step quality',
-        ]
-    )
-
-
-def build_check_result_response_instructions() -> str:
-    """Build response instructions for the check_result state."""
+    else:
+        ask = "Break the task into a list of concrete, actionable step descriptions"
     return (
-        "Summarize whether the step succeeded and what was produced. "
-        "If it failed, explain why."
+        f"{ask}: a JSON list of strings, in order, at most {limit} steps. Each "
+        "step is self-contained and produces a clear result."
+        f"{_tool_section(registry, task_description)}"
     )
 
 
-def build_replan_extraction_instructions(
+def build_execute_step_instructions(
     registry: ToolRegistry | None = None,
     task_description: str | None = None,
 ) -> str:
-    """Build extraction instructions for the replan state."""
-    tool_section = ""
-    if registry is not None and len(registry) > 0:
-        tool_text, _ = _get_tool_list(registry, task_description)
-        tool_section = "\n\n" + tool_text
+    """Per-field instructions for the ``execute_step`` state's fields.
 
-    return "\n".join(
-        [
-            "The previous plan step failed. Revise the remaining plan "
-            "incorporating what you learned from the failure.",
-            tool_section,
-            "",
-            "Extract the following as JSON:",
-            '- "plan_steps": a revised JSON list of remaining step description strings',
-            '- "reasoning": your reasoning for the revised plan',
-        ]
+    Shared by ``step_result`` and the typed tool selection (``tool_name``
+    names a listed tool or "none"; ``tool_input`` is its parameter object).
+    """
+    return (
+        "Carry out the current plan step (current_step_description), using "
+        "the results of earlier steps (step_results). With a tool, "
+        'tool_name is the tool to call (or "none" if no tool is needed) and '
+        "tool_input its parameters; step_result is what the step produces."
+        f"{_tool_section(registry, task_description)}"
     )
 
 

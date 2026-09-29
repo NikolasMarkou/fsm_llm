@@ -196,6 +196,10 @@ class ContextKeys:
     STEP_RESULTS = "step_results"
     ALL_STEPS_COMPLETE = "all_steps_complete"
     STEP_FAILED = "step_failed"
+    STEP_RESULT = "step_result"
+    CURRENT_STEP_DESCRIPTION = "current_step_description"
+    # The plan a replan revises (stash, see RESULT_DROPPED_CONTEXT_KEYS).
+    PREVIOUS_PLAN_STEPS = "previous_plan_steps"
 
     # REWOO
     EVIDENCE = "evidence"
@@ -288,7 +292,11 @@ class StopReason:
 # filtered out of prompts, which hides the previous draft from the checker and
 # refiner that need it. Add any new ``previous_*`` stash key here.
 RESULT_DROPPED_CONTEXT_KEYS: frozenset[str] = frozenset(
-    {ContextKeys.PREVIOUS_DRAFT, ContextKeys.PREVIOUS_OUTPUT}
+    {
+        ContextKeys.PREVIOUS_DRAFT,
+        ContextKeys.PREVIOUS_OUTPUT,
+        ContextKeys.PREVIOUS_PLAN_STEPS,
+    }
 )
 
 
@@ -375,6 +383,8 @@ class HandlerNames:
     REFLEXION_FRESH_KEYS = "ReflexionFreshKeys"
     PLAN_STEP_EXECUTOR = "PlanStepExecutor"
     PLAN_STEP_CHECKER = "PlanStepChecker"
+    PLAN_STEP_FRESH_KEYS = "PlanStepFreshKeys"
+    PLAN_REPLANNER = "PlanReplanCounter"
     REWOO_EXECUTOR = "REWOOExecutor"
     EVAL_OPT_EVALUATOR = "EvalOptEvaluator"
     EVAL_OPT_REFINE_ENTRY = "EvalOptRefineEntry"

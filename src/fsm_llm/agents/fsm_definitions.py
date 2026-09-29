@@ -973,11 +973,8 @@ def build_plan_execute_fsm(
                                           -> execute_step (next step)
     """
     from .prompts import (
-        build_check_result_extraction_instructions,
-        build_check_result_response_instructions,
-        build_execute_step_extraction_instructions,
-        build_plan_extraction_instructions,
-        build_replan_extraction_instructions,
+        build_execute_step_instructions,
+        build_plan_steps_instructions,
         build_synthesize_extraction_instructions,
         build_synthesize_response_instructions,
     )
@@ -989,19 +986,53 @@ def build_plan_execute_fsm(
         "When all steps are complete, you synthesize results into a final answer."
     )
 
+    # Typed per-field values only and no Pass-2 prose on the intermediate
+    # states (D-009 of plan 06a5ec0a, PAT-01/02). `plan_steps` is a typed
+    # list: an `any` config took a string, whose characters were then
+    # counted as steps. check_result extracts nothing: the step checker
+    # decides `step_failed` from the tool status on entry.
+    step_context = (ContextKeys.CURRENT_STEP_DESCRIPTION, ContextKeys.STEP_RESULTS)
+    replan_context = (ContextKeys.STEP_RESULTS, ContextKeys.PREVIOUS_PLAN_STEPS)
+    step_instructions = build_execute_step_instructions(
+        registry, task_description=task_description
+    )
+    has_tools = registry is not None and len(registry) > 0
+    step_fields: list[dict[str, Any]] = [
+        _typed_field_extraction(
+            ContextKeys.STEP_RESULT,
+            "str",
+            step_instructions,
+            extra_context_keys=step_context,
+            # With tools the step's result is the tool observation.
+            required=not has_tools,
+        )
+    ]
+    if has_tools:
+        step_fields = [
+            *_tool_selection_field_extractions(
+                step_instructions,
+                context_keys=_loop_field_context_keys(step_context),
+            ),
+            *step_fields,
+        ]
+
     states: dict[str, Any] = {
         "plan": {
             "id": "plan",
             "description": "Decompose the task into a sequence of steps",
             "purpose": "Create an actionable plan to solve the task",
             "required_context_keys": [ContextKeys.PLAN_STEPS],
-            "extraction_instructions": build_plan_extraction_instructions(
-                registry, task_description=task_description
-            ),
-            "response_instructions": (
-                "Present your plan as a numbered list of steps. "
-                "Explain why this decomposition makes sense."
-            ),
+            "extraction_instructions": "",
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.PLAN_STEPS,
+                    "list",
+                    build_plan_steps_instructions(
+                        registry, task_description=task_description
+                    ),
+                )
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "execute_step",
@@ -1020,12 +1051,9 @@ def build_plan_execute_fsm(
             "id": "execute_step",
             "description": "Execute the current plan step",
             "purpose": "Produce a result for the current step using tools or LLM",
-            "extraction_instructions": build_execute_step_extraction_instructions(
-                registry, task_description=task_description
-            ),
-            "response_instructions": (
-                "Describe what you did for this step and what result was produced."
-            ),
+            "extraction_instructions": "",
+            "field_extractions": step_fields,
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "check_result",
@@ -1038,8 +1066,8 @@ def build_plan_execute_fsm(
             "id": "check_result",
             "description": "Assess the step result and decide next action",
             "purpose": "Determine if step succeeded and whether to continue, replan, or synthesize",
-            "extraction_instructions": build_check_result_extraction_instructions(),
-            "response_instructions": build_check_result_response_instructions(),
+            "extraction_instructions": "",
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "synthesize",
@@ -1076,12 +1104,18 @@ def build_plan_execute_fsm(
             "id": "replan",
             "description": "Revise the remaining plan after a step failure",
             "purpose": "Incorporate lessons from the failure into a revised plan",
-            "extraction_instructions": build_replan_extraction_instructions(
-                registry, task_description=task_description
-            ),
-            "response_instructions": (
-                "Explain what went wrong and present the revised plan."
-            ),
+            "extraction_instructions": "",
+            "field_extractions": [
+                _typed_field_extraction(
+                    ContextKeys.PLAN_STEPS,
+                    "list",
+                    build_plan_steps_instructions(
+                        registry, task_description=task_description, replan=True
+                    ),
+                    extra_context_keys=replan_context,
+                )
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "execute_step",

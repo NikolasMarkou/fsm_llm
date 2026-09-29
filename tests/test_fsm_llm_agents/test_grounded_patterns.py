@@ -1178,3 +1178,150 @@ class TestReflexionLoop:
         assert evaluate and all(
             ContextKeys.OBSERVATIONS in (r.context or {}) for r in evaluate
         )
+
+
+# The replan prompt's stash of the plan it revises (a literal, so the tests
+# also run on the parent commit, which lacks the constant).
+_PREVIOUS_PLAN = "previous_plan_steps"
+
+
+def _step_description(context: dict) -> str:
+    return str(context.get("current_step_description") or "")
+
+
+def _plan_derived(first_plan: list[str], new_plan: list[str]) -> dict[str, object]:
+    """PlanExecute fields grounded on what each prompt shows.
+
+    ``plan_steps`` is ``first_plan`` when the prompt shows the task and no
+    earlier plan, ``new_plan`` only when it shows the earlier plan and a failed
+    step result. The tool selection follows the current step description.
+    """
+
+    def plan_steps(text: str, context: dict) -> object:
+        if _PREVIOUS_PLAN in context:
+            failed = "[TOOL FAILED]" in json.dumps(
+                context.get(ContextKeys.STEP_RESULTS)
+            )
+            return list(new_plan) if failed else None
+        return list(first_plan) if "capital" in json.dumps(context) else None
+
+    def tool_name(text: str, context: dict) -> object:
+        return "lookup" if "source" in _step_description(context) else None
+
+    def tool_input(text: str, context: dict) -> object:
+        desc = _step_description(context)
+        if "source" not in desc:
+            return None
+        return {"query": "bad" if "bad source" in desc else "good"}
+
+    return {"plan_steps": plan_steps, "tool_name": tool_name, "tool_input": tool_input}
+
+
+def _source_registry(runs: list[str], *, always_fail: bool = False) -> object:
+    from fsm_llm.agents import ToolRegistry
+
+    registry = ToolRegistry()
+
+    def lookup(query: str) -> str:
+        runs.append(query)
+        if always_fail or query == "bad":
+            raise RuntimeError("source offline")
+        return "The capital of France is Paris."
+
+    registry.register_function(lookup, name="lookup", description="Look up a fact")
+    return registry
+
+
+def _replan_requests(llm: PromptGroundedLLM) -> list:
+    return [
+        r
+        for r in _field_requests(llm, ContextKeys.PLAN_STEPS)
+        if _PREVIOUS_PLAN in (r.context or {})
+    ]
+
+
+class TestPlanExecuteLoop:
+    """Step 18 (PAT-01/02): a failed tool step routes to ``replan``, whose new
+    typed plan replaces the old one; ``max_replans`` allows exactly N replans;
+    a non-list plan never iterates per character; the intermediate states are
+    silent and typed."""
+
+    def _agent(self, llm, registry, **kwargs):
+        from fsm_llm.agents import AgentConfig, PlanExecuteAgent
+
+        return PlanExecuteAgent(
+            tools=registry,
+            config=AgentConfig(max_iterations=20),
+            llm_interface=llm,
+            **kwargs,
+        )
+
+    def test_failed_step_replans_and_the_new_plan_replaces_the_old(self):
+        # PAT-01: the checker reset step_failed on check_result entry and the
+        # seeded False was never re-extracted, so replan was unreachable.
+        runs: list[str] = []
+        llm = _TurnAwareLLM(_plan_derived(["use bad source"], ["use good source"]))
+        result = self._agent(llm, _source_registry(runs)).run(
+            "What is the capital of France?"
+        )
+
+        assert runs == ["bad", "good"]
+        assert len(_replan_requests(llm)) == 1
+        final = result.final_context
+        assert final[ContextKeys.PLAN_STEPS] == ["use good source"]
+        assert _PREVIOUS_PLAN not in final
+        entries = final[ContextKeys.STEP_RESULTS]
+        # Each entry records the tool observation, not the pre-tool guess.
+        assert [e["success"] for e in entries] == [False, True]
+        assert "[TOOL FAILED]" in entries[0]["result"]
+        assert "is Paris" in entries[1]["result"]
+        assert result.success is True
+
+    @pytest.mark.parametrize("max_replans", [1, 2])
+    def test_max_replans_allows_exactly_n_replans(self, max_replans):
+        # PAT-01: `replan_count >= max_replans` on replan entry gave N - 1.
+        runs: list[str] = []
+        llm = _TurnAwareLLM(_plan_derived(["use bad source"], ["use bad source again"]))
+        result = self._agent(
+            llm, _source_registry(runs, always_fail=True), max_replans=max_replans
+        ).run("What is the capital of France?")
+
+        assert len(_replan_requests(llm)) == max_replans
+        assert len(runs) == max_replans + 1
+        assert result.success is False
+
+    def test_string_plan_never_iterates_per_character(self):
+        # PAT-02: an `any` plan_steps took a string and check_result counted
+        # its characters as steps.
+        runs: list[str] = []
+        llm = PromptGroundedLLM(
+            facts={"plan_steps": ("Look up the capital of France", "capital")}
+        )
+        result = self._agent(llm, _source_registry(runs)).run(
+            "What is the capital of France?"
+        )
+
+        assert result.final_context.get(ContextKeys.CURRENT_STEP_INDEX, 0) <= 1
+        assert len(result.final_context.get(ContextKeys.STEP_RESULTS) or []) <= 1
+
+    def test_intermediate_states_are_silent_and_typed(self):
+        runs: list[str] = []
+        llm = _TurnAwareLLM(_plan_derived(["use bad source"], ["use good source"]))
+        self._agent(llm, _source_registry(runs)).run("What is the capital of France?")
+
+        states = {
+            m.group(1)
+            for r in llm.calls("generate_response")
+            if (m := _CURRENT_STATE_TAG.search(r.system_prompt))
+        }
+        assert states <= {"synthesize"}
+        for request in llm.calls("extract_field"):
+            assert ContextKeys.AGENT_TRACE not in (request.context or {})
+        step_fields = _field_requests(llm, "tool_name")
+        assert step_fields and all(
+            "current_step_description" in (r.context or {}) for r in step_fields
+        )
+        assert _field_requests(llm, "step_result")
+        for request in llm.calls("extract_bulk_data"):
+            assert "plan_steps" not in request.system_prompt
+            assert "step_failed" not in request.system_prompt

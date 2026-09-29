@@ -20,7 +20,6 @@ from fsm_llm.agents.definitions import AgentConfig, AgentTrace
 from fsm_llm.agents.plan_execute import PlanExecuteAgent
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FieldExtractionResponse,
     ResponseGenerationResponse,
 )
@@ -137,32 +136,23 @@ class TestPlanExecuteEvidenceGuard:
 
 class _StepToolLLM(LLMInterface):
     """Plan of ``n`` steps; on each execute_step turn the model selects the
-    working ``add`` tool with this step's own input (``a`` = step number)."""
+    working ``add`` tool with this step's own input (``a`` = step number, read
+    from the ``current_step_description`` its typed field prompt shows)."""
 
     def __init__(self, n_steps: int) -> None:
         self.model = "mock-model"
         self.n_steps = n_steps
-        self.step_turns = 0
-
-    def extract_bulk_data(self, request):
-        if "Execute the current plan step" not in request.system_prompt:
-            return DataExtractionResponse(extracted_data={})
-        self.step_turns += 1
-        k = self.step_turns
-        return DataExtractionResponse(
-            extracted_data={
-                "step_result": f"sum {k}",
-                ContextKeys.TOOL_NAME: "add",
-                ContextKeys.TOOL_INPUT: {"a": k, "b": 10},
-            }
-        )
 
     def extract_field(self, request):
-        value = (
-            [f"Add step {i + 1}" for i in range(self.n_steps)]
-            if request.field_name == ContextKeys.PLAN_STEPS
-            else None
-        )
+        desc = str((request.context or {}).get("current_step_description", ""))
+        k = int(desc.split("/")[0].removeprefix("Step ")) if desc else 0
+        values = {
+            ContextKeys.PLAN_STEPS: [f"Add step {i + 1}" for i in range(self.n_steps)],
+            "step_result": f"sum {k}" if k else None,
+            ContextKeys.TOOL_NAME: "add" if k else None,
+            ContextKeys.TOOL_INPUT: {"a": k, "b": 10} if k else None,
+        }
+        value = values.get(request.field_name)
         return FieldExtractionResponse(
             field_name=request.field_name,
             value=value,

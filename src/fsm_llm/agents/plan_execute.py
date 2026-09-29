@@ -26,8 +26,37 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_plan_execute_fsm
-from .handlers import AgentHandlers, make_iteration_limiter
+from .handlers import AgentHandlers, make_fresh_keys_handler, make_iteration_limiter
 from .tools import ToolRegistry
+
+# Tool statuses that mean a tool really ran for the step (AgentHandlers).
+_TOOL_RAN = frozenset({"success", "failed"})
+
+
+def _bounded_plan(value: Any) -> list[Any]:
+    """``plan_steps`` as a list of at most ``Defaults.MAX_PLAN_STEPS`` steps.
+
+    Contract: a list is kept (truncated to the cap, with a WARNING); a
+    non-blank string is ONE step, never a sequence of characters; any other
+    value (None included) is an empty plan, with a WARNING unless None. Shared
+    by the step tracker, the step checker and the replan stash. Never raises.
+    """
+    if isinstance(value, list):
+        plan = value
+    elif isinstance(value, str):
+        plan = [value.strip()] if value.strip() else []
+        logger.warning("plan_steps is a string, not a list: treated as one step")
+    else:
+        if value is not None:
+            logger.warning(
+                f"plan_steps is a {type(value).__name__}, not a list: ignored"
+            )
+        plan = []
+    limit = Defaults.MAX_PLAN_STEPS
+    if len(plan) > limit:
+        logger.warning(f"Plan of {len(plan)} steps capped at {limit} steps")
+        plan = plan[:limit]
+    return plan
 
 
 class PlanExecuteAgent(BaseAgent):
@@ -169,8 +198,24 @@ class PlanExecuteAgent(BaseAgent):
             .on_state_entry(PlanExecuteStates.EXECUTE_STEP)
             .do(self._make_step_tracker())
         )
+        # execute_step produces step_result: clear it on entry so each step
+        # extracts its own (core extracts a key only while it is unset).
+        api.register_handler(
+            api.create_handler(HandlerNames.PLAN_STEP_FRESH_KEYS)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_entry(PlanExecuteStates.EXECUTE_STEP)
+            .do(make_fresh_keys_handler([ContextKeys.STEP_RESULT]))
+        )
 
-        # Step result checker
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-032
+        # step_failed is decided on check_result ENTRY, from the status of the
+        # tool that just ran (the executor above, D-024 order), and routes the
+        # check_result turn that follows. Do NOT move it to PRE_TRANSITION on
+        # check_result (core picks the edge before PRE_TRANSITION runs, D-031)
+        # and do NOT let the model extract step_failed (a False seed is never
+        # re-extracted, and a guessed verdict is not a tool outcome). The
+        # max_replans check lives here too, so a failure past the cap routes to
+        # synthesize instead of entering replan. See decisions.md D-032.
         api.register_handler(
             api.create_handler(HandlerNames.PLAN_STEP_CHECKER)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR + 1)
@@ -178,9 +223,9 @@ class PlanExecuteAgent(BaseAgent):
             .do(self._make_result_checker())
         )
 
-        # Replan counter
+        # Replan: count it and reopen the plan for re-extraction
         api.register_handler(
-            api.create_handler("PlanReplanCounter")
+            api.create_handler(HandlerNames.PLAN_REPLANNER)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(PlanExecuteStates.REPLAN)
             .do(self._make_replan_handler())
@@ -198,13 +243,16 @@ class PlanExecuteAgent(BaseAgent):
         )
 
     def _make_step_tracker(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the plan step tracking handler."""
+        """Create the execute_step entry handler that bounds the plan and
+        describes the current step."""
 
         def track_step(context: dict[str, Any]) -> dict[str, Any]:
-            plan_steps = context.get(ContextKeys.PLAN_STEPS, [])
+            raw = context.get(ContextKeys.PLAN_STEPS, [])
+            plan_steps = _bounded_plan(raw)
+            updates: dict[str, Any] = {}
+            if plan_steps != raw:
+                updates[ContextKeys.PLAN_STEPS] = plan_steps
             current_index = context.get(ContextKeys.CURRENT_STEP_INDEX, 0)
-            if not isinstance(plan_steps, list) or not plan_steps:
-                return {}
             if current_index < len(plan_steps):
                 step_desc = plan_steps[current_index]
                 total = len(plan_steps)
@@ -215,48 +263,58 @@ class PlanExecuteAgent(BaseAgent):
                         description=str(step_desc)[:80],
                     )
                 )
-                return {
-                    "current_step_description": f"Step {current_index + 1}/{total}: {step_desc}"
-                }
-            return {}
+                updates[ContextKeys.CURRENT_STEP_DESCRIPTION] = (
+                    f"Step {current_index + 1}/{total}: {step_desc}"
+                )
+            return updates
 
         return track_step
 
     def _make_result_checker(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the step result checking handler."""
+        """Create the check_result entry handler: record the step and decide
+        ``step_failed`` from the tool status (D-032)."""
+        max_replans = self.max_replans
 
         def check_result(context: dict[str, Any]) -> dict[str, Any]:
-            plan_steps = context.get(ContextKeys.PLAN_STEPS, [])
+            plan_steps = _bounded_plan(context.get(ContextKeys.PLAN_STEPS, []))
             current_index = context.get(ContextKeys.CURRENT_STEP_INDEX, 0)
-            step_results = list(context.get(ContextKeys.STEP_RESULTS, []))
-            step_failed = context.get(ContextKeys.STEP_FAILED, False)
+            step_results = list(context.get(ContextKeys.STEP_RESULTS) or [])
 
-            step_result = context.get("step_result", "")
+            # DECISION plan_2026-05-31_f08da86d/D-001 [STALE]: tie the per-entry
+            # `success` flag to a REAL tool execution for this step. A weak
+            # model that NARRATES a step (zero tool calls) must not produce a
+            # success=True entry that passes _has_execution_evidence. The
+            # execute_tool handler runs just before this one on CHECK_RESULT
+            # entry (D-024) and writes TOOL_STATUS "success"/"failed" ONLY when
+            # a tool genuinely ran (else "skipped"/"rejected"). Do NOT edit
+            # _has_execution_evidence instead (see decisions.md D-001).
+            status = context.get(ContextKeys.TOOL_STATUS)
+            tool_ran = status in _TOOL_RAN
+            step_failed = status == "failed"
+            # A tool step records the tool observation, not the pre-tool note.
+            observation = context.get(ContextKeys.TOOL_RESULT) if tool_ran else None
+            step_result = observation or context.get(ContextKeys.STEP_RESULT)
             if step_result:
-                # DECISION plan_2026-05-31_f08da86d/D-001 [STALE]: tie the per-entry
-                # `success` flag to a REAL tool execution for this step, not to
-                # `not step_failed` alone. `step_failed` defaults False, so a
-                # weak model that NARRATES a step (zero tool calls) would set
-                # success=True on filler and pass _has_execution_evidence
-                # (base.py:364, "list of dicts all carrying success"). The
-                # execute_tool handler runs just before this one on CHECK_RESULT
-                # entry (D-024) and writes TOOL_STATUS=="success" ONLY when a
-                # tool genuinely ran (else "skipped"/"rejected"/"failed"). Do NOT edit _has_execution_evidence instead —
-                # the hole is plan_execute-specific (see decisions.md D-001).
-                tool_ran = context.get(ContextKeys.TOOL_STATUS) == "success"
                 step_results.append(
                     {
                         "step_index": current_index,
                         "result": str(step_result),
-                        "success": (not step_failed) and tool_ran,
+                        "success": tool_ran and not step_failed,
                     }
                 )
 
             updates: dict[str, Any] = {
                 ContextKeys.STEP_RESULTS: step_results,
-                ContextKeys.STEP_FAILED: False,
+                ContextKeys.STEP_FAILED: step_failed,
             }
-            if not step_failed:
+            if step_failed:
+                if context.get("_replan_count", 0) >= max_replans:
+                    logger.warning(
+                        f"Step {current_index + 1} failed with {max_replans} "
+                        "replans used: synthesizing the results so far"
+                    )
+                    updates[ContextKeys.ALL_STEPS_COMPLETE] = True
+            else:
                 next_index = current_index + 1
                 updates[ContextKeys.CURRENT_STEP_INDEX] = next_index
                 if next_index >= len(plan_steps):
@@ -266,24 +324,23 @@ class PlanExecuteAgent(BaseAgent):
         return check_result
 
     def _make_replan_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the replan counter handler."""
-        max_replans = self.max_replans
+        """Create the replan entry handler.
+
+        It counts the replan (the cap is enforced by the checker, so the Nth
+        replan still runs) and reopens ``plan_steps``: the ``[]`` reads as
+        unset for an agent FSM (D-046), so replan extracts a new plan, which
+        restarts at step 1. The old plan is stashed for the replan prompt.
+        """
 
         def handle_replan(context: dict[str, Any]) -> dict[str, Any]:
-            replan_count = context.get("_replan_count", 0) + 1
-            updates: dict[str, Any] = {
-                "_replan_count": replan_count,
+            return {
+                "_replan_count": context.get("_replan_count", 0) + 1,
+                ContextKeys.PREVIOUS_PLAN_STEPS: _bounded_plan(
+                    context.get(ContextKeys.PLAN_STEPS, [])
+                ),
+                ContextKeys.PLAN_STEPS: [],
+                ContextKeys.CURRENT_STEP_INDEX: 0,
                 ContextKeys.STEP_FAILED: False,
             }
-            if replan_count >= max_replans:
-                # Exhausted replans: route to synthesize with whatever results
-                # exist. Do NOT reset the step index here -- resetting to 0 while
-                # forcing all_steps_complete makes synthesize run before the
-                # revised plan executes (AC-NEW-005).
-                updates[ContextKeys.ALL_STEPS_COMPLETE] = True
-            else:
-                # Restart the revised plan from the first step.
-                updates[ContextKeys.CURRENT_STEP_INDEX] = 0
-            return updates
 
         return handle_replan
