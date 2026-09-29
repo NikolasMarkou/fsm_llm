@@ -25,7 +25,7 @@ from .definitions import AgentConfig, AgentResult
 from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers
-from .hitl import HumanInTheLoop, make_hitl_checker
+from .hitl import HumanInTheLoop
 from .tools import ToolRegistry
 
 
@@ -63,6 +63,7 @@ class ReactAgent(BaseAgent):
         self.tools = tools
         self.hitl = hitl
         self.use_classification = use_classification
+        self._warn_ungated_flagged_tools()
         # DECISION plan-2026-09-12T065608-089d0ec7/D-014
         # No `self._handlers` here (and none is ever assigned anywhere in this
         # class) — a per-instance AgentHandlers shared across concurrent
@@ -198,6 +199,4 @@ class ReactAgent(BaseAgent):
                 .do(handlers.classification_tool_override)
             )
 
-        if self._hitl_active:
-            assert self.hitl is not None  # narrowed by _hitl_active
-            self._register_hitl_gate(api, make_hitl_checker(self.hitl))
+        self._register_approval_gate(api)

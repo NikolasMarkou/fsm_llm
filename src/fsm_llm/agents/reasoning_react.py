@@ -26,7 +26,7 @@ from .definitions import AgentConfig, AgentResult, AgentStep
 from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers
-from .hitl import HumanInTheLoop, make_hitl_checker
+from .hitl import HumanInTheLoop
 from .tools import ToolRegistry
 
 # Optional import — reasoning package may not be installed
@@ -113,6 +113,7 @@ class ReasoningReactAgent(BaseAgent):
 
         if len(self.tools) == 0:
             raise AgentError("Cannot create agent with empty tool registry")
+        self._warn_ungated_flagged_tools()
 
         # Create reasoning engine
         reasoning_model_name = reasoning_model or self.config.model
@@ -320,9 +321,7 @@ class ReasoningReactAgent(BaseAgent):
 
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
 
-        if self._hitl_active:
-            assert self.hitl is not None  # narrowed by _hitl_active
-            self._register_hitl_gate(api, make_hitl_checker(self.hitl))
+        self._register_approval_gate(api)
 
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
         """Ask the HITL callback before each converse() (same driver as React)."""

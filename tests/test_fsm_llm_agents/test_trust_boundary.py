@@ -62,15 +62,16 @@ class _SelectOnceLLM(LLMInterface):
     exactly how the forged grant bypassed the ask.
     """
 
-    def __init__(self, select_tool: bool = True) -> None:
+    def __init__(self, select_tool: bool = True, tool: str = "danger") -> None:
         self.model = "mock-model"
         self._pending = select_tool
+        self._tool = tool
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         name = request.field_name
         value: Any
         if name == ContextKeys.TOOL_NAME:
-            value = "danger" if self._pending else ContextKeys.NO_TOOL
+            value = self._tool if self._pending else ContextKeys.NO_TOOL
             self._pending = False
         elif name == ContextKeys.TOOL_INPUT:
             value = dict(_INPUT)
@@ -468,3 +469,223 @@ class TestConstructorKwargRejection:
         assert not accepts_tools(PromptChainAgent)
         assert not accepts_tools(SwarmAgent)
         assert not accepts_tools(MetaBuilderAgent)
+
+
+# ---------------------------------------------------------------------------
+# SEC-03 / REACT-08 (D-004): requires_approval=True is the default policy when
+# HITL has a callback and no policy. A policy, when set, still decides alone.
+# ---------------------------------------------------------------------------
+
+
+class _TerminateAfterEvidenceLLM(_SelectOnceLLM):
+    """Like ``_SelectOnceLLM`` but asks to terminate only once a tool result
+    (``BOOM``/``fine``) is in the prompt, so an approved call is not dropped by
+    the ``await_approval -> conclude`` edge before it runs."""
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        response = super().extract_field(request)
+        if request.field_name == ContextKeys.SHOULD_TERMINATE:
+            prompt = request.system_prompt + request.user_message
+            response.value = "BOOM" in prompt or "fine" in prompt
+        return response
+
+
+class _FlagHarness(_Harness):
+    """``_Harness`` plus an unflagged ``safe(x: str)`` tool and an approve mode."""
+
+    def __init__(self, approve: bool = False) -> None:
+        super().__init__()
+        self.safe_runs: list[str] = []
+        self.approve = approve
+
+        def safe(x: str) -> str:
+            self.safe_runs.append(x)
+            return "fine"
+
+        self.registry.register_function(
+            safe,
+            name="safe",
+            description="Harmless action",
+            parameter_schema={"properties": {"x": {"type": "string"}}},
+        )
+
+    def decide(self, request: Any) -> bool:
+        self.asks.append(request.tool_name)
+        return self.approve
+
+    def agent(self, cls: Any, tool: str = "danger", **hitl_kwargs: Any) -> Any:
+        hitl_kwargs.setdefault("approval_callback", self.decide)
+        return cls(
+            tools=self.registry,
+            config=AgentConfig(model="mock/model", max_iterations=6),
+            hitl=HumanInTheLoop(**hitl_kwargs),
+            llm_interface=_TerminateAfterEvidenceLLM(tool=tool),
+        )
+
+
+def _reasoning_react(**kwargs: Any) -> Any:
+    from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+
+    return ReasoningReactAgent(**kwargs)
+
+
+def _reflexion(**kwargs: Any) -> Any:
+    from fsm_llm.agents.reflexion import ReflexionAgent
+
+    return ReflexionAgent(**kwargs)
+
+
+_HITL_AGENTS = [ReactAgent, _reflexion, _reasoning_react]
+_HITL_IDS = ["react", "reflexion", "reasoning_react"]
+
+
+class TestFlagDerivedApproval:
+    """Callback-only HITL asks for exactly the ``requires_approval`` tools."""
+
+    @pytest.mark.parametrize("cls", _HITL_AGENTS, ids=_HITL_IDS)
+    def test_flagged_tool_denied_is_asked_and_never_runs(self, cls):
+        harness = _FlagHarness(approve=False)
+        agent = harness.agent(cls)
+        assert agent._hitl_active is True
+        agent.run("do it")
+        assert harness.asks == ["danger"], f"callback asks: {harness.asks}"
+        assert harness.runs == [], "a denied requires_approval tool ran"
+
+    @pytest.mark.parametrize("cls", _HITL_AGENTS, ids=_HITL_IDS)
+    def test_flagged_tool_approved_runs_once_after_ask(self, cls):
+        harness = _FlagHarness(approve=True)
+        harness.agent(cls).run("do it")
+        assert harness.asks == ["danger"]
+        assert harness.runs == ["1"]
+
+    @pytest.mark.parametrize("cls", _HITL_AGENTS, ids=_HITL_IDS)
+    def test_unflagged_tool_is_not_asked(self, cls):
+        harness = _FlagHarness(approve=False)
+        harness.agent(cls, tool="safe").run("do it")
+        assert harness.asks == []
+        assert harness.safe_runs == ["1"]
+
+    def test_callback_only_without_flagged_tool_stays_inactive(self):
+        registry = ToolRegistry()
+        registry.register_function(
+            lambda x: x,
+            name="safe",
+            description="Harmless",
+            parameter_schema={"properties": {"x": {"type": "string"}}},
+        )
+        agent = ReactAgent(
+            tools=registry,
+            config=AgentConfig(model="mock/model"),
+            hitl=HumanInTheLoop(approval_callback=lambda r: True),
+        )
+        assert agent._hitl_active is False
+        assert agent._approval_predicate is None
+
+    def test_flag_registered_after_construction_is_gated(self):
+        harness = _FlagHarness(approve=False)
+        harness.registry = ToolRegistry()  # start with no flagged tool
+        harness.registry.register_function(
+            lambda x: x, name="safe", description="Harmless"
+        )
+        agent = ReactAgent(
+            tools=harness.registry,
+            config=AgentConfig(model="mock/model", max_iterations=6),
+            hitl=HumanInTheLoop(approval_callback=harness.decide),
+            llm_interface=_SelectOnceLLM(),
+        )
+        assert agent._hitl_active is False
+
+        def danger(x: str) -> str:
+            harness.runs.append(x)
+            return "BOOM"
+
+        harness.registry.register_function(
+            danger,
+            name="danger",
+            description="Irreversible action",
+            parameter_schema={"properties": {"x": {"type": "string"}}},
+            requires_approval=True,
+        )
+        agent.run("do it")
+        assert harness.asks == ["danger"]
+        assert harness.runs == []
+
+
+class TestPolicyStillDecidesAlone:
+    """With a policy, behaviour is unchanged: the flag is never ANDed or ORed in
+    (c1d5bfbc D-005)."""
+
+    def test_policy_is_the_predicate(self):
+        hitl = HumanInTheLoop(
+            approval_policy=lambda call, ctx: False, approval_callback=lambda r: True
+        )
+        agent = ReactAgent(
+            tools=_FlagHarness().registry, config=AgentConfig(model="m/m"), hitl=hitl
+        )
+        assert agent._approval_predicate == hitl.requires_approval
+
+    def test_policy_false_lets_flagged_tool_run_unasked(self):
+        harness = _FlagHarness(approve=False)
+        harness.agent(ReactAgent, approval_policy=lambda call, ctx: False).run("do it")
+        assert harness.asks == []
+        assert harness.runs == ["1"]
+
+    def test_policy_gates_unflagged_tool(self):
+        harness = _FlagHarness(approve=False)
+        harness.agent(
+            ReactAgent, tool="safe", approval_policy=lambda call, ctx: True
+        ).run("do it")
+        assert harness.asks == ["safe"]
+        assert harness.safe_runs == []
+
+
+class TestUngatedFlaggedToolWarning:
+    """REACT-08: construction warns when a flagged tool has nobody to approve it."""
+
+    @staticmethod
+    def _warnings(build: Any) -> list[str]:
+        from fsm_llm.logging import logger
+
+        captured: list[str] = []
+        logger.enable("fsm_llm")
+        sink_id = logger.add(lambda m: captured.append(str(m)), level="WARNING")
+        try:
+            build()
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+        return [m for m in captured if "requires_approval" in m]
+
+    @pytest.mark.parametrize("cls", _HITL_AGENTS, ids=_HITL_IDS)
+    def test_no_hitl_warns(self, cls):
+        registry = _Harness().registry
+        warned = self._warnings(
+            lambda: cls(tools=registry, config=AgentConfig(model="m/m"))
+        )
+        assert len(warned) == 1 and "danger" in warned[0]
+
+    def test_policy_without_callback_warns(self):
+        registry = _Harness().registry
+        hitl = HumanInTheLoop(approval_policy=lambda call, ctx: True)
+        warned = self._warnings(
+            lambda: ReactAgent(
+                tools=registry, config=AgentConfig(model="m/m"), hitl=hitl
+            )
+        )
+        assert len(warned) == 1 and "ApprovalDeniedError" in warned[0]
+
+    def test_callback_does_not_warn(self):
+        registry = _Harness().registry
+        hitl = HumanInTheLoop(approval_callback=lambda r: False)
+        assert not self._warnings(
+            lambda: ReactAgent(
+                tools=registry, config=AgentConfig(model="m/m"), hitl=hitl
+            )
+        )
+
+    def test_no_flagged_tool_does_not_warn(self):
+        registry = ToolRegistry()
+        registry.register_function(lambda x: x, name="safe", description="Harmless")
+        assert not self._warnings(
+            lambda: ReactAgent(tools=registry, config=AgentConfig(model="m/m"))
+        )

@@ -33,7 +33,7 @@ from .definitions import (
 from .exceptions import AgentError
 from .fsm_definitions import build_reflexion_fsm
 from .handlers import AgentHandlers
-from .hitl import HumanInTheLoop, make_hitl_checker
+from .hitl import HumanInTheLoop
 from .tools import ToolRegistry
 
 
@@ -80,6 +80,7 @@ class ReflexionAgent(BaseAgent):
         self.evaluation_fn = evaluation_fn
         self.max_reflections = max_reflections
         self.hitl = hitl
+        self._warn_ungated_flagged_tools()
         # DECISION plan-2026-09-12T135914-45a654de/D-012
         # No `self._handlers` here (matches react.py's D-014 pattern) — a
         # per-instance AgentHandlers shared across concurrent run() calls is
@@ -179,9 +180,7 @@ class ReflexionAgent(BaseAgent):
             )
 
         # HITL: flag tools needing approval (same predicate as the FSM state)
-        if self._hitl_active:
-            assert self.hitl is not None  # narrowed by _hitl_active
-            self._register_hitl_gate(api, make_hitl_checker(self.hitl))
+        self._register_approval_gate(api)
 
     def _make_evaluation_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create handler that runs external evaluation_fn after LLM extraction."""

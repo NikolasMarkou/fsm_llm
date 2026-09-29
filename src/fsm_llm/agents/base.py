@@ -35,7 +35,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
-from .hitl import ApprovalPolicy, HumanInTheLoop
+from .hitl import ApprovalPolicy, HumanInTheLoop, make_hitl_checker
 
 
 def _output_response_format(schema: Any) -> dict[str, Any] | None:
@@ -171,6 +171,38 @@ def accepts_tools(agent_cls: type) -> bool:
         if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
             return False
     return False
+
+
+def flagged_tool_names(tools: Any) -> list[str]:
+    """Names of the tools in *tools* registered with ``requires_approval=True``.
+
+    Interface contract (callers: ``BaseAgent._hitl_active``, the construction
+    warning, and the tool-less-HITL refusal of step 6):
+
+    Args:
+        tools: a ``ToolRegistry``, or ``None``/any object without
+            ``list_tools`` (an agent with no registry).
+
+    Returns:
+        The flagged names in registration order (a snapshot; ``[]`` when there
+        is no registry or nothing is flagged). Never raises.
+    """
+    list_tools = getattr(tools, "list_tools", None)
+    if list_tools is None:
+        return []
+    return [t.name for t in list_tools() if getattr(t, "requires_approval", False)]
+
+
+def _flagged_tool_policy(tools: Any) -> ApprovalPolicy:
+    """Default approval policy: the selected call names a flagged registered tool.
+
+    Read at call time, so a tool registered after construction is covered.
+    """
+
+    def policy(call: ToolCall, context: dict[str, Any]) -> bool:
+        return call.tool_name in flagged_tool_names(tools)
+
+    return policy
 
 
 def _reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> None:
@@ -414,7 +446,6 @@ class BaseAgent(ABC):
 
     @property
     def _hitl_active(self) -> bool:
-        # DECISION plan_2026-05-29_1d66f861/D-001 [STALE]
         # Single source of truth for "this run needs HITL approval gating".
         # INVARIANT: the await_approval FSM state (include_approval_state)
         # MUST be built under exactly this predicate, because it is also the
@@ -422,28 +453,65 @@ class BaseAgent(ABC):
         # diverge, the gate can set approval_required=True with no
         # await_approval state to intercept it, and the tool executes
         # un-gated (THINK -> act runs execute_tool before the loop's
-        # _handle_hitl_approval hook). Approval is policy-driven
-        # (hitl.approval_policy); the per-tool requires_approval attribute
-        # does NOT drive runtime approval, so it must NOT gate this predicate.
+        # _handle_hitl_approval hook).
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-005
         # Moved here from ReactAgent so React, Reflexion and ReasoningReact
         # share ONE predicate for the FSM state, the gate and the
         # AgentHandlers refusal. Do NOT re-add a per-agent copy, and do NOT
         # AND it with "some tool is flagged": a policy may gate any tool.
-        hitl = getattr(self, "hitl", None)
-        return hitl is not None and hitl.has_approval_policy
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-004
+        # With a policy, the policy alone decides (unchanged). With a callback
+        # and NO policy, requires_approval=True tools are the default policy:
+        # active iff some registered tool is flagged. Do NOT go back to
+        # "no policy means no gating" (the flag was a no-op, SEC-03), and do
+        # NOT gate a policy-less run with no flagged tool (the harness runs
+        # callback-only HITL with no flagged tools). See decisions.md D-004.
+        hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
+        if hitl is None:
+            return False
+        if hitl.has_approval_policy:
+            return True
+        return hitl.has_approval_callback and bool(
+            flagged_tool_names(getattr(self, "tools", None))
+        )
 
     @property
     def _approval_predicate(self) -> ApprovalPolicy | None:
-        """The ``AgentHandlers(requires_approval=...)`` value, or None.
+        """The approval policy for the refusal, the gate and the driver, or None.
 
         Set only under :attr:`_hitl_active` (plan-2026-09-24T091842-c1d5bfbc
-        D-004/D-005), so the refusal never gates a run without the state.
+        D-004/D-005), so the refusal never gates a run without the state. The
+        HITL policy when one is set, else the flagged-tool default (D-004).
         """
         hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
         if hitl is None or not self._hitl_active:
             return None
-        return hitl.requires_approval
+        if hitl.has_approval_policy:
+            return hitl.requires_approval
+        return _flagged_tool_policy(getattr(self, "tools", None))
+
+    def _register_approval_gate(self, api: API) -> None:
+        """Register the HITL gate under :attr:`_hitl_active` with the shared predicate."""
+        hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
+        predicate = self._approval_predicate
+        if hitl is None or predicate is None:
+            return
+        self._register_hitl_gate(api, make_hitl_checker(hitl, policy=predicate))
+
+    def _warn_ungated_flagged_tools(self) -> None:
+        """WARN at construction when flagged tools exist but nobody can approve them."""
+        flagged = flagged_tool_names(getattr(self, "tools", None))
+        hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
+        if flagged and (hitl is None or not hitl.has_approval_callback):
+            logger.warning(
+                f"{type(self).__name__}: tools {flagged} have requires_approval="
+                f"True but no HumanInTheLoop approval_callback is configured"
+                + (
+                    "; they run without approval"
+                    if hitl is None or not hitl.has_approval_policy
+                    else "; a gated call will raise ApprovalDeniedError"
+                )
+            )
 
     def _handle_hitl_approval(self, api: API, conv_id: str) -> None:
         """Check and process HITL approval for the current context.

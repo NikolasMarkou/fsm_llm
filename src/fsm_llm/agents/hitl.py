@@ -192,13 +192,17 @@ class HumanInTheLoop:
 
 def make_hitl_checker(
     hitl: HumanInTheLoop,
+    policy: ApprovalPolicy | None = None,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Create a reusable HITL approval checker handler.
 
     Returns a handler function that checks whether the current tool call
-    requires human approval based on the HITL policy.  Intended to be
-    registered as a ``CONTEXT_UPDATE`` handler on the ``TOOL_NAME`` key.
+    requires human approval based on *policy* (default: the HITL policy,
+    ``hitl.requires_approval``).  Agents pass their shared approval predicate
+    so the gate, the ``await_approval`` state and the refusal agree.  Intended
+    to be registered as a ``CONTEXT_UPDATE`` handler on the ``TOOL_NAME`` key.
     """
+    decide: ApprovalPolicy = policy if policy is not None else hitl.requires_approval
 
     def check_approval(context: dict[str, Any]) -> dict[str, Any]:
         tool_name = context.get(ContextKeys.TOOL_NAME)
@@ -214,7 +218,7 @@ def make_hitl_checker(
             reasoning=reasoning,
         )
 
-        if hitl.requires_approval(tool_call, context):
+        if decide(tool_call, context):
             return {ContextKeys.APPROVAL_REQUIRED: True}
 
         return {ContextKeys.APPROVAL_REQUIRED: False}
