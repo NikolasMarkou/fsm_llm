@@ -53,7 +53,7 @@ Harness status in brief: gates are JsonLogic terms over values counted from disk
 ## Quick Commands
 
 ```bash
-make test           # pytest -v (7,327 tests)
+make test           # pytest -v (7,369 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on src/fsm_llm/ (core and subpackages)
@@ -148,7 +148,7 @@ Rules: `required_context_keys` only tells Pass 1 what to extract, it never block
 ## Testing
 
 ```bash
-pytest                                 # Run all tests (7,327 collected)
+pytest                                 # Run all tests (7,369 collected)
 pytest tests/test_fsm_llm/            # Core package tests (2,707 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (121 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (231 tests)
@@ -158,14 +158,15 @@ pytest tests/test_fsm_llm_meta/       # Meta tests (218 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (1,987 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (275 tests)
 pytest tests/test_examples/           # Example validation tests (43 tests)
-# The 9 suites above sum to 7,244. The remaining 83 are three root-level files:
-#   tests/test_integration_ollama.py (12), tests/test_packaging.py (37)
+pytest tests/test_fsm_llm_eval/       # Eval tests (40 tests)
+# The 10 suites above sum to 7,284. The remaining 85 are three root-level files:
+#   tests/test_integration_ollama.py (12), tests/test_packaging.py (39)
 #   and tests/test_harness_bench.py (34)
 pytest -m "not slow"                  # Skip slow tests
 pytest -m integration                 # Integration tests only
 ```
 
-Counts are `pytest --collect-only -q` after the 2026-09-24 agents follow-up (unreleased). `tests/test_packaging.py` (slow class) re-measures the collection and pins every count literal above, the `make test` line, the README's `make test` line, and the harness package doc's count tokens; update them together when tests are added. It also derives the layout from disk and pins it: `src/*/__init__.py` must be exactly `fsm_llm` and `src/fsm_llm/*/__init__.py` exactly the five subpackages; `fsm_llm` must appear in all 8 build/CI slots (pyproject package-data and isort, Makefile, tox, CI mypy, MANIFEST.in), each subpackage must have a same-named extra requested by every install list, and the monitor package-data must cover every file under `static/` and `templates/`. `tests/test_fsm_llm/test_docs_snippets.py` loads every full FSM JSON snippet in this file, `README.md`, `docs/quickstart.md`, and `src/fsm_llm/README.md`.
+Counts are `pytest --collect-only -q` after the 2026-09-24 agents follow-up (unreleased). `tests/test_packaging.py` (slow class) re-measures the collection and pins every count literal above, the `make test` line, the README's `make test` line, and the harness package doc's count tokens; update them together when tests are added. It also derives the layout from disk and pins it: `src/*/__init__.py` must be exactly `fsm_llm` and `src/fsm_llm/*/__init__.py` exactly the six subpackages; `fsm_llm` must appear in all 8 build/CI slots (pyproject package-data and isort, Makefile, tox, CI mypy, MANIFEST.in), each subpackage must have a same-named extra requested by every install list, and the monitor package-data must cover every file under `static/` and `templates/`. `tests/test_fsm_llm/test_docs_snippets.py` loads every full FSM JSON snippet in this file, `README.md`, `docs/quickstart.md`, and `src/fsm_llm/README.md`.
 
 - Suite directories keep their pre-move names (`tests/test_fsm_llm_agents/` tests `fsm_llm.agents`); bench node ids and the CI `--deselect` key on them.
 - Conventions: `test_<module>.py` and `test_<module>_elaborate.py`; classes `Test<Feature>`; helpers prefixed `_` (`_make_state()`, `_minimal_fsm_dict()`).

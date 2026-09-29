@@ -62,6 +62,9 @@ a2a = ["httpx>=0.24.0"]
 # appears in the `all` set and in the dev/CI install lists. It imports
 # `fsm_llm.agents`, which is why that extra is named here rather than `[]`.
 harness = ["fsm-llm[agents]"]
+# Evaluation tooling (fsm_llm.eval) is stdlib plus core deps only; listed as an
+# extra so it appears in the `all` set and in the dev/CI install lists.
+eval = []
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -77,6 +80,7 @@ all = [
     "fsm-llm[agents]",
     "fsm-llm[monitor]",
     "fsm-llm[harness]",
+    "fsm-llm[eval]",
     "fsm-llm[mcp]",
     "fsm-llm[otel]",
     "fsm-llm[a2a]",

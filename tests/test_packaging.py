@@ -8,7 +8,7 @@ in coverage, or stops shipping in the sdist. Nothing errors.
 This file is that missing check. The package list is derived from the
 filesystem (`src/*/__init__.py`), never hardcoded, so it cannot go stale. Since
 plan-2026-09-29T044048-3a032517 the layout is ONE top-level package, `fsm_llm`,
-with five subpackages (`src/fsm_llm/*/__init__.py`); both sets are derived and
+with six subpackages (`src/fsm_llm/*/__init__.py`); both sets are derived and
 pinned exactly, so a stray second top-level package fails here.
 """
 
@@ -46,9 +46,10 @@ SRC_PACKAGES: frozenset[str] = _packages_under(_REPO_ROOT / "src")
 #: Every subpackage of `fsm_llm`, derived from disk.
 SUBPACKAGES: frozenset[str] = _packages_under(_REPO_ROOT / "src" / "fsm_llm")
 
-#: The five former sibling packages that now live under `fsm_llm`.
+#: The five former sibling packages that now live under `fsm_llm`, plus `eval`
+#: (added in plan-2026-09-29T061903-581c2634).
 _EXPECTED_SUBPACKAGES = frozenset(
-    {"agents", "reasoning", "workflows", "monitor", "harness"}
+    {"agents", "reasoning", "workflows", "monitor", "harness", "eval"}
 )
 
 #: Matches a package name wherever one is spelled out in a build file.
@@ -148,7 +149,7 @@ class TestEveryPackageIsWired:
         # undo the single-package layout.
         assert SRC_PACKAGES == {"fsm_llm"}, SRC_PACKAGES
 
-    def test_subpackage_list_is_exactly_the_five(self):
+    def test_subpackage_list_is_exactly_the_six(self):
         assert SUBPACKAGES == _EXPECTED_SUBPACKAGES, SUBPACKAGES
 
     @pytest.mark.parametrize("slot_id", sorted(_SLOTS))
