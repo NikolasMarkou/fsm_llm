@@ -1,9 +1,13 @@
 """
 Regression tests for iter-2 fixes (2026-03-20).
 
-Tests cover all 6 findings from the second epistemic deconstruction analysis:
-F-001: Workflow timer/event waiting broken by _ prefix filter
-F-002: solve_problem() mutates caller's dict
+Findings from the second epistemic deconstruction analysis (F-001 and F-002
+are tested in other files, named below):
+F-001: Workflow timer/event waiting broken by _ prefix filter (covered by
+       test_fsm_llm_workflows/test_workflows.py::TestStepDataInternalKeyFilter)
+F-002: solve_problem() mutates caller's dict (covered by
+       test_engine_integration.py::TestReasoningEngineIntegration::
+       test_solve_problem_does_not_mutate_initial_context)
 F-003: Forbidden context pattern misses api_key
 F-004: WaitForEventStep states not validated at definition time
 F-005: FSM cache claims LRU but was FIFO
@@ -14,98 +18,6 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from unittest.mock import MagicMock
-
-# ══════════════════════════════════════════════════════════════
-# F-001: Workflow _ prefix filter whitelist
-# ══════════════════════════════════════════════════════════════
-
-
-class TestWorkflowPrefixFilterWhitelist:
-    """F-001: _waiting_info and _timer_info must survive the filter."""
-
-    def test_waiting_info_passes_through_filter(self):
-        """The _ prefix filter in engine must whitelist _waiting_info."""
-        # Simulate the filter logic from engine.py:_execute_workflow_step
-        _STEP_INTERNAL_WHITELIST = {"_waiting_info", "_timer_info"}
-        result_data = {
-            "_waiting_info": {"waiting_for_event": True, "event_type": "payment"},
-            "_workflow_info": {"id": "should_be_filtered"},
-            "user_data": "should_pass",
-        }
-        filtered = {
-            k: v
-            for k, v in result_data.items()
-            if not k.startswith("_") or k in _STEP_INTERNAL_WHITELIST
-        }
-        assert "_waiting_info" in filtered
-        assert "_workflow_info" not in filtered
-        assert "user_data" in filtered
-
-    def test_timer_info_passes_through_filter(self):
-        """The _ prefix filter in engine must whitelist _timer_info."""
-        _STEP_INTERNAL_WHITELIST = {"_waiting_info", "_timer_info"}
-        result_data = {
-            "_timer_info": {"waiting_for_timer": True, "delay_seconds": 30},
-            "_internal_state": "should_be_filtered",
-        }
-        filtered = {
-            k: v
-            for k, v in result_data.items()
-            if not k.startswith("_") or k in _STEP_INTERNAL_WHITELIST
-        }
-        assert "_timer_info" in filtered
-        assert "_internal_state" not in filtered
-
-    def test_regular_underscore_keys_still_filtered(self):
-        """Non-whitelisted _ keys must still be filtered."""
-        _STEP_INTERNAL_WHITELIST = {"_waiting_info", "_timer_info"}
-        result_data = {
-            "_workflow_info": {"id": "w1"},
-            "_step_metadata": {"step": "s1"},
-            "public_key": "visible",
-        }
-        filtered = {
-            k: v
-            for k, v in result_data.items()
-            if not k.startswith("_") or k in _STEP_INTERNAL_WHITELIST
-        }
-        assert len(filtered) == 1
-        assert "public_key" in filtered
-
-
-# ══════════════════════════════════════════════════════════════
-# F-002: solve_problem() must not mutate caller's dict
-# ══════════════════════════════════════════════════════════════
-
-
-class TestSolveProblemContextIsolation:
-    """F-002: initial_context must be copied, not mutated."""
-
-    def test_initial_context_not_mutated(self):
-        """solve_problem should not modify the caller's initial_context dict."""
-        from fsm_llm.reasoning.constants import ContextKeys
-
-        # Verify the fix: dict() creates a copy
-        initial_context = {"domain": "math", "difficulty": "easy"}
-        original_keys = set(initial_context.keys())
-
-        # Simulate the fixed code path
-        context = dict(initial_context) if initial_context else {}
-        context[ContextKeys.PROBLEM_STATEMENT] = "test"
-        context[ContextKeys.REASONING_TRACE] = []
-        context[ContextKeys.RETRY_COUNT] = 0
-
-        # Caller's dict should be unchanged
-        assert set(initial_context.keys()) == original_keys
-        assert ContextKeys.PROBLEM_STATEMENT not in initial_context
-
-    def test_none_initial_context_creates_empty(self):
-        """None initial_context should create a fresh empty dict."""
-        initial_context = None
-        context = dict(initial_context) if initial_context else {}
-        assert context == {}
-        assert context is not initial_context
-
 
 # ══════════════════════════════════════════════════════════════
 # F-003: Forbidden context pattern must catch api_key

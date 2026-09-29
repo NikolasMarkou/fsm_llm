@@ -3,7 +3,6 @@ Global test configuration and fixtures for the entire test suite.
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 from unittest.mock import Mock
@@ -56,36 +55,6 @@ def ollama_available(model_tag: str = OLLAMA_MODEL_TAG) -> bool:
         return False
 
 
-@pytest.fixture
-def has_workflows():
-    """Check if workflows extension is available."""
-    try:
-        import fsm_llm.workflows  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
-# Skip workflows tests if not installed
-def pytest_collection_modifyitems(config, items):
-    """Skip workflows tests if extension not installed."""
-    try:
-        import fsm_llm.workflows  # noqa: F401
-    except ImportError:
-        skip_workflows = pytest.mark.skip(reason="workflows extension not installed")
-        for item in items:
-            if "test_workflows" in str(item.fspath):
-                item.add_marker(skip_workflows)
-
-
-# Example testing fixtures
-@pytest.fixture(scope="session")
-def examples_root():
-    """Get the examples directory path."""
-    return Path(__file__).parent.parent / "examples"
-
-
 @pytest.fixture(scope="session")
 def test_fixtures_root():
     """Get the test fixtures directory path."""
@@ -93,46 +62,6 @@ def test_fixtures_root():
     # Create fixtures directory if it doesn't exist
     fixtures_path.mkdir(exist_ok=True)
     return fixtures_path
-
-
-@pytest.fixture(scope="session")
-def all_example_paths(examples_root):
-    """Get all FSM definition paths from examples."""
-    fsm_paths = []
-    if not examples_root.exists():
-        return fsm_paths
-
-    for fsm_file in examples_root.rglob("fsm.json"):
-        fsm_paths.append(fsm_file)
-    return fsm_paths
-
-
-@pytest.fixture(scope="session")
-def example_categories(examples_root):
-    """Categorize examples by type."""
-    categories = {
-        "basic": [],
-        "intermediate": [],
-        "advanced": [],
-        "classification": [],
-        "reasoning": [],
-        "workflows": [],
-        "agents": [],
-    }
-
-    if not examples_root.exists():
-        return categories
-
-    for fsm_file in examples_root.rglob("fsm.json"):
-        relative_path = fsm_file.relative_to(examples_root)
-        category = relative_path.parts[0]
-
-        if category in categories:
-            categories[category].append(fsm_file)
-        else:
-            categories.setdefault("other", []).append(fsm_file)
-
-    return categories
 
 
 class MockLLM2Interface(LLMInterface):
@@ -313,19 +242,6 @@ def sample_fsm_definition_v2():
     return FSMDefinition.model_validate(fsm_data)
 
 
-# Optional: Environment variable based configuration
-@pytest.fixture(scope="session")
-def test_config():
-    """Test configuration from environment variables."""
-    return {
-        "skip_slow_tests": os.getenv("SKIP_SLOW_TESTS", "false").lower() == "true",
-        "test_real_llm": os.getenv("TEST_REAL_LLM", "false").lower() == "true",
-        "llm_model": os.getenv("TEST_LLM_MODEL", "gpt-3.5-turbo"),
-        "api_key": os.getenv("OPENAI_API_KEY"),
-    }
-
-
-# Optional: Skip real LLM tests if no API key
 def pytest_configure(config):
     """Configure pytest with custom markers."""
     config.addinivalue_line("markers", "slow: mark test as slow running")

@@ -23,7 +23,7 @@ flowchart LR
 
 ## Files
 
-- `conftest.py` - fixtures: empty `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder`, a 3-state `populated_fsm_builder` ("GreetingBot"), and a `meta_config`.
+- `conftest.py` - fixtures: empty `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder`, a 3-state `populated_fsm_builder` ("GreetingBot"), and a `meta_config`, and `offline_llm`, which makes every LLM call fail at once.
 - `test_agent.py` - `MetaBuilderAgent`: config, start/send lifecycle, type detection, build triggers, result building, output helpers, schema-echo rejection, provider-failure handling, workflow `step_type` enum (44 tests).
 - `test_builders.py` - core behavior of the three builders: add, remove, update, transitions, `to_dict`, validation, summaries at three detail levels (71 tests).
 - `test_builders_elaborate.py` - builder edge cases, config type checks, `VALID_STEP_TYPES`, exception attributes and hierarchy, `MetaBuilderConfig` range checks, summary content (44 tests).
@@ -44,6 +44,6 @@ flowchart LR
 ## Things to know
 
 - Run from the repo root with the project virtualenv.
-- No test needs a live model or API key. A few `test_agent.py` tests (`TestTypeDetection`, `TestStartSendFlow`) do not mock the LLM: the agent tries its default model, and with no reachable provider the call fails and the agent uses its keyword or canned-text fallback, which is what the assertions expect. These take a few seconds each. If a provider is reachable, the answers come from the model instead.
+- No test needs a live model or API key. `TestTypeDetection` and `TestStartSendFlow` in `test_agent.py` use the `offline_llm` fixture: every LLM call raises at once, so the agent uses its keyword or canned-text fallback, which is what the assertions expect, and no network call is made.
 - `test_enum_reaches_response_format_and_ollama_format` imports `OllamaChatConfig` from `litellm.llms.ollama.chat.transformation`, so it depends on that litellm internal path.
 - `test_save_artifact*` write only under pytest's `tmp_path`.

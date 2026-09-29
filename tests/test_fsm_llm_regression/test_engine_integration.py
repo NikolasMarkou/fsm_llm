@@ -80,6 +80,16 @@ class TestReasoningEngineIntegration:
         # Should complete well under the 50-iteration limit
         assert mock_llm.call_count < 100
 
+    def test_solve_problem_does_not_mutate_initial_context(self):
+        """F-002 (iter-2): solve_problem() copies the caller's initial_context."""
+        from fsm_llm.reasoning import ReasoningEngine
+
+        engine = ReasoningEngine(model="mock", llm_interface=ReasoningMockLLM())
+        initial_context = {"domain": "math", "difficulty": "easy"}
+        engine.solve_problem("What is 2 + 2?", initial_context)
+
+        assert initial_context == {"domain": "math", "difficulty": "easy"}
+
     def test_classification_guard_prevents_reclassification(self):
         """Classification should skip if already classified."""
         from fsm_llm.reasoning import ReasoningEngine

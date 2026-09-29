@@ -5,7 +5,6 @@ Each test class corresponds to a VB# from verified-bugs.md.
 """
 
 import json
-import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -368,14 +367,13 @@ class TestVB11MergeTriggersAllKeys:
             "conv1", {"new_key": "new_value"}, ContextMergeStrategy.UPDATE
         )
 
-        # Check what was passed to update_conversation_context
+        # new_key is new, so a write happens, and it carries ONLY the changed key.
         call_args = mock_manager.update_conversation_context.call_args
-        if call_args:
-            passed_context = call_args[0][1]
-            # Should NOT contain unchanged keys
-            assert (
-                "stable" not in passed_context or passed_context.get("stable") != "same"
-            ), f"Unchanged key 'stable' should not be in the update: {passed_context}"
+        assert call_args is not None, "UPDATE with a new key must write the diff"
+        passed_context = call_args[0][1]
+        assert passed_context == {"new_key": "new_value"}, (
+            f"Unchanged keys must not be in the update: {passed_context}"
+        )
 
 
 # ── VB12: Visualizer duplicates terminal states ─────────────────
@@ -439,10 +437,11 @@ class TestVB13VisualizerDepthsWrongInitial:
             "middle": {"depth": 0, "inbound": 1},
         }
 
-        # Without explicit initial_state, all have inbound > 0, so no root found
+        # Without explicit initial_state, all have inbound > 0, so no root is
+        # found and calculate_depths returns early: both depths stay at 0.
         calculate_depths(graph, state_metrics)
-        # Both should still be at depth 0 since no root was found
-        # This test documents the current broken behavior
+        assert state_metrics["start"]["depth"] == 0
+        assert state_metrics["middle"]["depth"] == 0
 
 
 # ── VB14: error_mode="skip" identical to "continue" ────────────
@@ -661,33 +660,6 @@ class TestVB16DebugLoggingBreaksFileLogging:
             )
         finally:
             log_module._file_handler_initialized = original_flag
-
-
-# ── VB21: disable_warnings filters wrong category ──────────────
-
-
-class TestVB21DisableWarningsWrongCategory:
-    """VB21: disable_warnings should filter RuntimeWarning, not just UserWarning."""
-
-    def test_runtime_warning_filtered(self):
-        from fsm_llm import disable_warnings
-
-        disable_warnings()
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            # Re-apply the filter
-            disable_warnings()
-
-            warnings.warn("test warning", RuntimeWarning, stacklevel=2)
-            _ = [
-                x
-                for x in w
-                if issubclass(x.category, RuntimeWarning)
-                and "fsm_llm" in str(x.filename)
-            ]
-            # If from our module, should be filtered
-            # This is a weak test since the warning source matters
 
 
 # ── VB25: `!` operator crashes on 0 args ───────────────────────

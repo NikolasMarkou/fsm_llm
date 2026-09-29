@@ -4,8 +4,6 @@ Regression tests for Plan 12 fixes.
 Tests verify that the issues found in pass 12 remain fixed.
 """
 
-import re
-
 
 class TestV1MessageTruncation:
     """V1: Message truncation must not exceed max_message_length."""
@@ -74,35 +72,6 @@ class TestV4OperatorNames:
 
         assert "context_length" in ALLOWED_JSONLOGIC_OPERATIONS
         assert "context_count" not in ALLOWED_JSONLOGIC_OPERATIONS
-
-
-class TestV11WordBoundaryMatching:
-    """V11: Transition matching must use word boundaries."""
-
-    def test_substring_does_not_match(self):
-        """State name 'order' should NOT match in text 'disorder'."""
-        # Test the regex pattern used in llm.py
-        target = "order"
-        text = "The system is in disorder right now"
-        assert not re.search(rf"\b{re.escape(target)}\b", text, re.IGNORECASE)
-
-    def test_exact_word_matches(self):
-        """State name 'order' should match in text containing 'order' as a word."""
-        target = "order"
-        text = "I think we should go to the order state"
-        assert re.search(rf"\b{re.escape(target)}\b", text, re.IGNORECASE)
-
-    def test_underscore_state_name_matches(self):
-        """State names with underscores should match as whole words."""
-        target = "collect_name"
-        text = "The next step is collect_name for the user"
-        assert re.search(rf"\b{re.escape(target)}\b", text, re.IGNORECASE)
-
-    def test_case_insensitive_matching(self):
-        """Matching should be case-insensitive."""
-        target = "greeting"
-        text = "We should move to GREETING"
-        assert re.search(rf"\b{re.escape(target)}\b", text, re.IGNORECASE)
 
 
 class TestV14NoEmojiInValidator:

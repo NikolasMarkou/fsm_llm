@@ -1,6 +1,6 @@
 # tests
 
-The whole pytest test tree of the FSM-LLM repository, at `tests/`. It holds 7,599 collected tests: ten suite folders, one per part of the `fsm_llm` package, plus three test files at this level and the shared `conftest.py`.
+The whole pytest test tree of the FSM-LLM repository, at `tests/`. It holds 7,588 collected tests: ten suite folders, one per part of the `fsm_llm` package, plus three test files at this level and the shared `conftest.py`.
 
 ## What it is for
 
@@ -48,12 +48,12 @@ flowchart TD
 | `test_fsm_llm_monitor/` | 387 | FastAPI dashboard: routes, security checks, instance manager, event collector, bridge, OpenTelemetry exporter |
 | `test_fsm_llm_harness/` | 1,988 | Iterative-planner harness: disk-derived gates, the 6-state FSM, artifacts, roles and tools, storage, CLI; 17 live tests off by default |
 | `test_fsm_llm_eval/` | 261 | `fsm_llm.eval` and the `fsm-llm-eval` CLI: example scoring, case datasets, config, statistics, result files |
-| `test_fsm_llm_regression/` | 275 | One class per fixed bug across core, reasoning, workflows, CLI and packaging text |
+| `test_fsm_llm_regression/` | 264 | One class per fixed bug across core, reasoning, workflows, CLI and packaging text |
 | `test_examples/` | 43 | Every JSON file under `examples/` loads, parses as an `FSMDefinition` and passes `FSMValidator` (3 tests per file, plus one check that at least 5 exist) |
 
 ## Files at this level
 
-- `conftest.py` - shared fixtures, fake LLMs, the `ollama_available()` probe, marker registration, and a hook that skips `test_workflows.py` when `fsm_llm.workflows` cannot be imported.
+- `conftest.py` - shared fixtures, fake LLMs, the `ollama_available()` probe and marker registration.
 - `__init__.py` - empty; makes `tests` a package so files can import `tests.conftest`.
 - `test_packaging.py` - 39 tests: the single `fsm_llm` package and its six subpackages are named in every build and CI file, the monitor's static files ship, every subpackage has an install extra, module docstrings are real, and every test count written in the root `CLAUDE.md`, `README.md` and `src/fsm_llm/harness/CLAUDE.md` matches a fresh collection.
 - `test_harness_bench.py` - 34 offline tests for `scripts/harness_bench.py`: no socket at import, Wilson interval, Fisher exact test, manifest checks, row files, report recount, run-once refusal, CLI.
@@ -81,7 +81,7 @@ FSM_LLM_HARNESS_LIVE=1 .venv/bin/python -m pytest tests/test_fsm_llm_harness/tes
 ## Things to know
 
 - Always run from the repository root. Many files import `tests.conftest` or each other as `tests.<folder>.<file>`.
-- Markers: `slow` (139 tests), `integration` and `real_llm` (113 each), `examples` (43). `-m "not slow"` runs 7,460 tests.
+- Markers: `slow` (139 tests), `integration` and `real_llm` (113 each), `examples` (43). `-m "not slow"` runs 7,449 tests.
 - `pyproject.toml` sets `asyncio_mode = "auto"`, so async tests need no decorator, and `addopts = "-v --tb=short"`.
 - Library logging is off by default. Tests that check a log line enable `fsm_llm` logging with a temporary loguru sink; pytest's `caplog` cannot see loguru output.
 - Some tests skip when an optional package is missing: `mcp`, `fastapi`/`httpx`, the OpenTelemetry SDK, or a subpackage that fails to import.

@@ -106,6 +106,7 @@ class TestMetaAgentLifecycle:
             agent.send("hello")
 
 
+@pytest.mark.usefixtures("offline_llm")
 class TestTypeDetection:
     """Test artifact type detection from user text."""
 
@@ -292,6 +293,7 @@ class TestBuildResult:
         assert agent._result.is_valid is False
 
 
+@pytest.mark.usefixtures("offline_llm")
 class TestStartSendFlow:
     """Test the turn-by-turn conversation flow."""
 

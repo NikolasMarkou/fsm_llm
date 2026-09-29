@@ -18,11 +18,12 @@ the other two. Do not merge it into either of them.
 
 DERIVATION
 ================================================================================
-Every entry below is derived from
-`plans/plan-2026-07-20T144233-47e8c662/findings/shape-census-blind.md` -- a 50-shape
-(S01..S50) census of realistic `*_key`/`*_token` VALUE shapes that was itself
-authored without reading the filter, from RFC/spec knowledge plus a grep of the
-repo OUTSIDE the protected paths.
+Every entry below is derived from the blind shape census `shape-census-blind.md`
+-- a 50-shape (S01..S50) census of realistic `*_key`/`*_token` VALUE shapes that
+was itself authored without reading the filter, from RFC/spec knowledge plus a
+grep of the repo OUTSIDE the protected paths. The census was written in plan
+2026-07-20T144233-47e8c662; that plan directory was never committed and is gone,
+so the census document is not in the repo and this corpus is its surviving record.
 
 Ground-truth calls came from exactly two sources:
   1. the census's own KEEP / STRIP verdict column, and

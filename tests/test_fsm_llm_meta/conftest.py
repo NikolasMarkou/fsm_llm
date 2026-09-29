@@ -6,6 +6,23 @@ from fsm_llm.agents.definitions import MetaBuilderConfig
 from fsm_llm.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
 
 
+def _offline_completion(*args, **kwargs):
+    raise RuntimeError("offline")
+
+
+@pytest.fixture
+def offline_llm(monkeypatch):
+    """Make every LLM call from MetaBuilderAgent fail at once, with no network.
+
+    ``_llm_call`` looks up ``litellm.completion`` at call time, but the type
+    classifier calls ``fsm_llm.classification.completion``, a name bound at
+    import, so both are patched. The agent then takes its keyword fallback
+    (``_detect_type_fallback``) and canned collect replies.
+    """
+    monkeypatch.setattr("litellm.completion", _offline_completion)
+    monkeypatch.setattr("fsm_llm.classification.completion", _offline_completion)
+
+
 @pytest.fixture
 def fsm_builder() -> FSMBuilder:
     """Fresh FSM builder."""

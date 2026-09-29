@@ -2,7 +2,7 @@
 Tests for classification-aware transition resolution.
 
 Tests that when a State has ``transition_classification`` enabled, the
-MessagePipeline uses Classifier (from fsm_llm_classification) to resolve
+MessagePipeline uses Classifier (from fsm_llm.classification) to resolve
 AMBIGUOUS transitions instead of the raw LLM prompt.
 """
 

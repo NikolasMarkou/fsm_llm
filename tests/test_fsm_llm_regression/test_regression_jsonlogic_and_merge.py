@@ -204,10 +204,11 @@ class TestUpdateMergeReturnContext:
             ContextMergeStrategy.UPDATE,
         )
 
-        # custom_result should be included (it's in context_to_merge, explicitly passed)
-        if api.fsm_manager.update_conversation_context.called:
-            merged = api.fsm_manager.update_conversation_context.call_args[0][1]
-            assert "shared_key" in merged, "shared_key should be in merged context"
+        # Both keys are new to the current context, so the diff is non-empty and
+        # UPDATE must write it through.
+        api.fsm_manager.update_conversation_context.assert_called_once()
+        merged = api.fsm_manager.update_conversation_context.call_args[0][1]
+        assert merged == {"custom_result": "value", "shared_key": "shared_val"}
 
 
 # ── VB5: end_conversation tears down stack wrong order ────
@@ -216,46 +217,36 @@ class TestUpdateMergeReturnContext:
 class TestEndConversationStackOrder:
     """VB5: end_conversation should tear down stack in reverse (LIFO) order."""
 
-    def test_teardown_is_lifo(self):
-        """Stack should be torn down top-to-bottom (reversed), not bottom-to-top."""
-        from fsm_llm.api import API, FSMStackFrame
+    def test_teardown_is_lifo(self, sample_fsm_definition_v2, mock_llm2_interface):
+        """Real API: frames are ended top-to-bottom, the root frame last."""
+        from fsm_llm.api import API
 
-        api = MagicMock(spec=API)
-        teardown_order = []
-
-        def track_end(conv_id):
-            teardown_order.append(conv_id)
-
-        api.fsm_manager = MagicMock()
-        api.fsm_manager.end_conversation.side_effect = track_end
-        api.conversation_stacks = {
-            "root": [
-                FSMStackFrame(
-                    fsm_definition=_frame_definition("fsm1"), conversation_id="bottom"
-                ),
-                FSMStackFrame(
-                    fsm_definition=_frame_definition("fsm2"), conversation_id="middle"
-                ),
-                FSMStackFrame(
-                    fsm_definition=_frame_definition("fsm3"), conversation_id="top"
-                ),
-            ]
-        }
-        api.active_conversations = {"root": True}
-
-        # Call the real method (unwrap decorator)
-        # Since end_conversation is decorated, call inner logic directly
-        conv_id = "root"
-        if conv_id in api.conversation_stacks:
-            for frame in reversed(api.conversation_stacks[conv_id]):
-                try:
-                    api.fsm_manager.end_conversation(frame.conversation_id)
-                except Exception:
-                    pass
-
-        assert teardown_order == ["top", "middle", "bottom"], (
-            f"Expected LIFO teardown order, got {teardown_order}"
+        api = API(
+            fsm_definition=sample_fsm_definition_v2, llm_interface=mock_llm2_interface
         )
+        try:
+            root, _ = api.start_conversation()
+            api.push_fsm(root, sample_fsm_definition_v2)
+            api.push_fsm(root, sample_fsm_definition_v2)
+            with api._stack_lock:
+                frame_ids = [f.conversation_id for f in api.conversation_stacks[root]]
+            assert len(frame_ids) == 3
+
+            teardown_order: list[str] = []
+            original_end = api.fsm_manager.end_conversation
+
+            def recording_end(conv_id, *args, **kwargs):
+                teardown_order.append(conv_id)
+                return original_end(conv_id, *args, **kwargs)
+
+            api.fsm_manager.end_conversation = recording_end
+            api.end_conversation(root)
+
+            assert teardown_order == list(reversed(frame_ids)), (
+                f"Expected LIFO teardown order, got {teardown_order}"
+            )
+        finally:
+            api.close()
 
 
 # ── VB6: Exception chaining lost — missing `from e` ────
@@ -355,22 +346,6 @@ class TestMissingSomeStringArg:
         assert result == ["abc"], f"Expected ['abc'], got {result}"
 
 
-# ── VB10: enable_debug_logging destroys all handlers ────
-
-
-class TestEnableDebugLogging:
-    """VB10: enable_debug_logging should not destroy user-added loguru handlers."""
-
-    def test_does_not_remove_all_handlers(self):
-        """enable_debug_logging should track and only remove library handlers."""
-        # We test that the function exists and works without crashing
-        # The actual handler tracking is implementation-dependent
-        from fsm_llm import enable_debug_logging
-
-        # Should not raise
-        enable_debug_logging()
-
-
 # ── VB11: Comparison functions crash on None ────
 
 
@@ -417,14 +392,23 @@ class TestJsonOverheadFactorRemoved:
 
 
 class TestHistoryRoleHandling:
-    """VB13: History formatting should explicitly handle 'system' role."""
+    """VB13: History formatting maps roles to user/system; unknown roles become system."""
 
-    def test_system_role_handled_explicitly(self):
-        """The 'system' role should be handled explicitly, not via catch-all else."""
-        builder = BasePromptBuilder()
-        # Test that sanitization works for system role content
-        result = builder._sanitize_text_for_prompt("Hello from system")
-        assert isinstance(result, str)
+    def test_roles_are_normalised_in_history_section(self):
+        """user stays user, any-case system stays system, an unknown role is system."""
+        import json
+
+        from fsm_llm.definitions import FSMInstance
+
+        instance = FSMInstance(fsm_id="f", current_state="s")
+        instance.context.conversation.exchanges = [
+            {"user": "u0"},
+            {"System": "s1"},
+            {"assistant": "a2"},
+        ]
+        lines = BasePromptBuilder()._build_enhanced_history_section(instance)
+        body = lines[lines.index("<conversation_history><![CDATA[") + 1]
+        assert json.loads(body) == [{"user": "u0"}, {"system": "s1"}, {"system": "a2"}]
 
 
 # ── VB15: has_keys/get_missing_keys dead code ────

@@ -96,7 +96,7 @@ Behaviour pinned by `test_audit_2026_09_27.py` (2026-09-27 audit findings in the
 ## Dependencies
 
 - `pytest`, `pytest-asyncio` (auto mode), `unittest.mock`, `loguru` (subprocess logging test), stdlib `asyncio`, `threading`, `concurrent.futures`, `subprocess`.
-- Repo `tests/conftest.py` has a `pytest_collection_modifyitems` hook that skips items whose path contains `test_workflows` if `fsm_llm.workflows` fails to import; it only matches `test_workflows.py`. The other files import at module top, so they would error at collection instead.
+- `fsm_llm.workflows` has no extra dependencies, so nothing skips it; the files import it at module top.
 
 ## Failure modes
 

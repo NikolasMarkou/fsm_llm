@@ -47,20 +47,13 @@ class TestToClassificationSchema:
 
     def test_schema_accepted_by_classification_schema(self):
         """Generated dict should be accepted by ClassificationSchema."""
-        classification = pytest.importorskip("fsm_llm_classification")
+        from fsm_llm import ClassificationSchema
 
         registry = ToolRegistry()
         registry.register_function(_noop, name="search", description="Search")
         registry.register_function(_noop, name="calculate", description="Calculate")
 
-        schema_dict = registry.to_classification_schema()
-        schema = classification.ClassificationSchema(
-            intents=[
-                classification.IntentDefinition(**i) for i in schema_dict["intents"]
-            ],
-            fallback_intent=schema_dict["fallback_intent"],
-            confidence_threshold=schema_dict["confidence_threshold"],
-        )
+        schema = ClassificationSchema(**registry.to_classification_schema())
 
         assert len(schema.intents) >= 3
         assert schema.fallback_intent == "none"
