@@ -6,7 +6,7 @@ Evaluation tools for FSM-LLM. It runs the repository examples and scores them, a
 
 LLM behaviour varies from run to run, so "it worked once" is not a measurement. This package gives two ways to measure:
 
-- **Examples evaluation** (`fsm-llm-eval examples`): runs every `examples/<category>/<name>/run.py` in its own process, feeds interactive ones a fixed script of user input, scores each 0 (crash) to 4 (pass) from its output, and writes a scorecard. This is the evaluation described in `EVALUATE.md`; `scripts/eval.py` still works and runs the same thing.
+- **Examples evaluation** (`fsm-llm-eval examples`): runs every `examples/<category>/<name>/run.py` in its own process, feeds interactive ones a fixed script of user input, scores each 0 (crash) to 4 (pass) from its output, and writes a scorecard. This is the evaluation described in `EVALUATE.md`; run it from the repository root or pass `--examples-dir`.
 - **Conversation evaluation** (`fsm-llm-eval run`): you write a small dataset of conversations: which FSM, what the user says, and what should be true at the end (final state, states visited, extracted values, words in the replies, whether it ended). Each conversation runs several times, and the report gives the pass rate per case with a 95% Wilson confidence interval.
 
 ## How it works

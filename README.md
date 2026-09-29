@@ -343,7 +343,7 @@ Transition conditions use JsonLogic, evaluated in Python by `fsm_llm.expressions
 | Agents | 48 | react_search, plan_execute, reflexion, debate, orchestrator, adapt |
 | Meta | 5 | build_fsm, build_workflow, build_agent, meta_review_loop, meta_from_spec |
 
-`fsm-llm-eval examples` runs all examples in parallel and scores them (`scripts/eval.py` still works and does the same). To test your own FSM, write a small dataset of conversations with expected outcomes and run `fsm-llm-eval run cases.json`; see `src/fsm_llm/eval/README.md` and `EVALUATE.md`.
+`fsm-llm-eval examples` runs all examples in parallel and scores them (also `python -m fsm_llm.eval examples`; run from the repository root or pass `--examples-dir`). To test your own FSM, write a small dataset of conversations with expected outcomes and run `fsm-llm-eval run cases.json`; see `src/fsm_llm/eval/README.md` and `EVALUATE.md`.
 
 ## Development
 
@@ -358,7 +358,7 @@ make coverage       # Tests with coverage report
 make audit          # scan site-packages for suspicious .pth files
 ```
 
-Repository layout: `src/fsm_llm/` holds the core and its six subpackages, `tests/` one test folder per (sub)package plus regression and example checks, `examples/` the runnable examples, `scripts/` benchmark tools and the `scripts/eval.py` shim, `evaluation/` eval datasets and run outputs, `docs/` longer guides.
+Repository layout: `src/fsm_llm/` holds the core and its six subpackages, `tests/` one test folder per (sub)package plus regression and example checks, `examples/` the runnable examples, `scripts/` `audit_pth.py` (supply-chain audit) plus `harness_bench.py` and `bench_data/` (harness benches), `evaluation/` eval datasets and run outputs, `docs/` longer guides.
 
 ## Contributing
 

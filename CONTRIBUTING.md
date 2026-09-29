@@ -33,7 +33,7 @@ pytest -m "not slow"                  # skip the slow tests
 
 ## Examples are frozen
 
-Do not modify anything under `examples/` unless a maintainer asks for it. The examples are the evaluation baselines for `fsm-llm-eval examples` (also run by `scripts/eval.py`), and every shipped FSM JSON must keep loading (`tests/test_examples`).
+Do not modify anything under `examples/` unless a maintainer asks for it. The examples are the evaluation baselines for `fsm-llm-eval examples`, and every shipped FSM JSON must keep loading (`tests/test_examples`).
 
 ## Plans, decisions and findings
 

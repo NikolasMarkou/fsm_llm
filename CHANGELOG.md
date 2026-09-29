@@ -53,11 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `scripts/eval.py` is a thin shim that runs `fsm-llm-eval examples` from the
-  repository root and takes the same flags, with two behaviour changes: an
-  `--output-dir` that already holds files is now refused (exit 1) instead of reused,
-  and a usage error (unknown flag, bad value) exits 1 instead of argparse's 2, because
-  2 now means "below `--fail-under`".
+- `fsm-llm-eval examples` takes the same flags as the removed `scripts/eval.py`, with
+  two behaviour changes: an `--output-dir` that already holds files is now refused
+  (exit 1) instead of reused, and a usage error (unknown flag, bad value) exits 1
+  instead of argparse's 2, because 2 now means "below `--fail-under`".
 - `scripts/harness_bench.py` is unchanged and stays stdlib-only and offline: its
   `wilson_ci`, `fisher_exact_two_sided`, `append_row`, `read_rows`, `_write_json`,
   `_utc_now` and `_git_commit` are copies of the `fsm_llm.eval` helpers, kept equal
@@ -81,6 +80,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now recorded as a score-0 result with the error text.
 - A run with no results no longer crashes the scorecard timing section.
 - The default model is read from `$LLM_MODEL` when the run starts, not at import.
+
+### Removed
+
+- `scripts/eval.py`: use `fsm-llm-eval examples` or `python -m fsm_llm.eval examples`
+  (same flags) from the repository root, or pass `--examples-dir`.
+- `scripts/agent_chat_harness.py`, a one-off multi-turn agent diagnostic.
+- `evaluation/datasets/oolong_synth_real_subset.jsonl`, which nothing read.
 
 ## [0.10.0] - 2026-09-29
 

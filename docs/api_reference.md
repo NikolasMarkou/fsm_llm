@@ -424,7 +424,7 @@ without `--apply` and refuses to compress a directory with audit ERRORs.
 ## Eval (`fsm_llm.eval`)
 
 Two evaluation kinds behind one CLI, `fsm-llm-eval` (also `python -m fsm_llm.eval`;
-`scripts/eval.py` runs `fsm-llm-eval examples` from the repository root). Extra
+run `examples` from the repository root or pass `--examples-dir`). Extra
 `eval` has no third-party dependencies. Import names directly
 (`from fsm_llm.eval import wilson_ci`) or as `from fsm_llm import eval as fsm_eval`,
 so the builtin `eval` is not shadowed.

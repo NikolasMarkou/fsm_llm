@@ -355,7 +355,7 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
 
 
 def run(argv: Sequence[str] | None = None) -> int:
-    """Process entry for ``fsm-llm-eval``, ``python -m fsm_llm.eval`` and ``scripts/eval.py``.
+    """Process entry for ``fsm-llm-eval`` and ``python -m fsm_llm.eval``.
 
     Turns on ``fsm_llm`` log output at WARNING (``$FSM_LLM_LOG_LEVEL``
     overrides it), then returns ``main_cli(argv)``.

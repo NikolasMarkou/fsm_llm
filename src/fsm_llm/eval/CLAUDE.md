@@ -5,7 +5,7 @@ Purpose: Evaluation tooling: the examples evaluator (run every example script, s
 
 ## Scope
 
-Two evaluation kinds behind one CLI, sharing config, records, stats and the run-directory rule: `examples` (subprocess per example script, heuristic scoring, the historical `scripts/eval.py` output layout) and `run` (in-process conversations through `fsm_llm.API`, pass/fail per trial, Wilson intervals). Extra `eval` installs nothing beyond core `fsm_llm`. Version from `fsm_llm.__version__`. Not here: LLM-as-judge scoring, repeats/median for example runs, a stats subcommand, harness-specific bench glue (manifest gate, probes, `write_summary`, `report` stay in `scripts/harness_bench.py`, which keeps stdlib copies of the generic helpers so it stays offline, D-008 of plan 581c2634). `scripts/eval.py` is a shim that `chdir`s to the repo root and calls `run(["examples", *argv])`.
+Two evaluation kinds behind one CLI, sharing config, records, stats and the run-directory rule: `examples` (subprocess per example script, heuristic scoring, the historical `scripts/eval.py` output layout) and `run` (in-process conversations through `fsm_llm.API`, pass/fail per trial, Wilson intervals). Extra `eval` installs nothing beyond core `fsm_llm`. Version from `fsm_llm.__version__`. Not here: LLM-as-judge scoring, repeats/median for example runs, a stats subcommand, harness-specific bench glue (manifest gate, probes, `write_summary`, `report` stay in `scripts/harness_bench.py`, which keeps stdlib copies of the generic helpers so it stays offline, D-008 of plan 581c2634).
 
 ## Architecture
 
@@ -42,7 +42,7 @@ Examples run: `discover_examples(config)` -> `open_run_dir` -> ThreadPool of `co
 
 ## Public interface
 
-- CLI (`fsm-llm-eval`, `python -m fsm_llm.eval`, `scripts/eval.py` = `examples`):
+- CLI (`fsm-llm-eval`, `python -m fsm_llm.eval`):
   - `examples [--model M] [--workers N] [--timeout S] [--category C] [--filter S] [--output-dir D] [--examples-dir P] [--python EXE] [--config FILE] [--fail-under PCT] [--list]`.
   - `run DATASET [--model M] [--trials N] [--temperature T] [--max-tokens N] [--workers N] [--output-dir D] [--config FILE] [--fail-under PCT] [--list]`.
   - Top level: `--version`; no subcommand prints help and exits 1.

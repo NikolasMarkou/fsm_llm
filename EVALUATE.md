@@ -29,11 +29,13 @@ fsm-llm-eval examples --fail-under 80
 fsm-llm-eval run evaluation/datasets/simple_greeting_cases.json --trials 3
 ```
 
-`fsm-llm-eval` is installed with the package (`fsm_llm.eval`, extra `eval`). The old
-entry point takes the same flags: `.venv/bin/python scripts/eval.py <flags>` runs
-`fsm-llm-eval examples <flags>` from the repository root. Two behaviours changed: an
-`--output-dir` that already holds files is refused (exit 1) instead of reused, and
-usage errors exit 1 instead of argparse's 2 (exit 2 now means below `--fail-under`).
+`fsm-llm-eval` is installed with the package (`fsm_llm.eval`, extra `eval`);
+`python -m fsm_llm.eval` is the same program. These are the only entry points. Run
+`examples` from the repository root, or pass `--examples-dir`, since `examples/` is
+resolved from the current directory. Two behaviours differ from the removed
+`scripts/eval.py`: an `--output-dir` that already holds files is refused (exit 1)
+instead of reused, and usage errors exit 1 instead of argparse's 2 (exit 2 now means
+below `--fail-under`).
 
 Output goes to a new `evaluation/<timestamp>_<hash>_<model>/` (`_2`, `_3`, ... appended if that name exists) containing:
 - `scorecard.md` -- human-readable results with scores, timing, and category breakdown
