@@ -141,7 +141,17 @@ class TestLLMSettings:
         assert config.llm_kwargs == {"api_base": "http://b", "max_history_size": 3}
 
     @pytest.mark.parametrize(
-        "key", ["model", "temperature", "max_tokens", "llm_interface"]
+        "key",
+        [
+            "model",
+            "temperature",
+            "max_tokens",
+            "llm_interface",
+            "path",
+            "handlers",
+            "transition_config",
+            "session_store",
+        ],
     )
     def test_reserved_llm_kwargs_rejected(self, key):
         with pytest.raises(EvalConfigError, match="llm_kwargs may not set"):

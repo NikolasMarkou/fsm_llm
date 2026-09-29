@@ -473,7 +473,7 @@ Settings precedence: built-in defaults < a dataset's embedded `config` (`run` on
 | `trials` | `3` | run | Trials per case (>= 1) |
 | `temperature` | `None` | run | LLM temperature (>= 0); `None` = framework default |
 | `max_tokens` | `None` | run | LLM max tokens per call (>= 1); `None` = framework default |
-| `llm_kwargs` | `{}` | run | Extra `API(...)` keyword arguments (e.g. `api_base`, `api_key`, `max_history_size`), merged key by key; may not set `model`, `temperature`, `max_tokens`, `llm_interface`, `fsm_definition`; values are not written to `results.json` |
+| `llm_kwargs` | `{}` | run | Extra `API(...)` keyword arguments (e.g. `api_base`, `api_key`, `max_history_size`), merged key by key; may not set `model`, `temperature`, `max_tokens`, `llm_interface`, `fsm_definition`, `definition`, `path`, or the non-JSON `handlers`, `transition_config`, `session_store`; values are not written to `results.json` |
 
 The model is the first set of `--model`, `--config` file, dataset `config`,
 `$LLM_MODEL`, `DEFAULT_LLM_MODEL`, so a dataset that pins `model` beats an exported

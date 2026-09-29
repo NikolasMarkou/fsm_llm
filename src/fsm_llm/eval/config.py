@@ -45,15 +45,21 @@ _TABLE_FIELDS = (
     "llm_kwargs",
 )
 
-#: ``API`` arguments that ``llm_kwargs`` may not set: the evaluation owns them.
+#: ``API`` arguments that ``llm_kwargs`` may not set: the evaluation owns them
+#: (the first six), or they take Python objects a JSON config cannot express
+#: (``handlers``, ``transition_config``, ``session_store``).
 _RESERVED_LLM_KWARGS = frozenset(
     {
         "fsm_definition",
         "definition",
+        "path",
         "llm_interface",
         "model",
         "temperature",
         "max_tokens",
+        "handlers",
+        "transition_config",
+        "session_store",
     }
 )
 
