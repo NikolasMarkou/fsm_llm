@@ -58,7 +58,7 @@ Loop (RC1, the conversational pipeline used as an agent engine):
 | LOOP-09 | PARTIAL | Fixed, steps 15, 17-21: intermediate states have empty `response_instructions`. PromptChain step replies stay user-owned |
 | LOOP-10 | PARTIAL | Fixed, steps 15, 17, 18, 20: routing fields typed `bool`/`float`/`list` |
 | LOOP-11 | PARTIAL | Fixed, steps 14-21: per-field wording points to the task and observations; generated text fields open with a "compose it yourself" sentence |
-| LOOP-12 | TRUE | Fixed, step 3: run-output keys stripped from caller context; `observation_count` seeded 0 |
+| LOOP-12 | TRUE | Fixed, step 3: run-output keys stripped from caller context; `observation_count` seeded 0. Fix 3.1 (D-052): each pattern's own drafts, verdicts and answers (`_run_output_keys`) are stripped too, also on AgentGraph edges and Swarm hand-offs |
 | LOOP-13 | PARTIAL | Fixed, step 16 |
 | LOOP-14 | PARTIAL (needs `handler_timeout`) | Fixed, step 11 |
 | LOOP-15 | NOT VERIFIED | Deferred to Track B |
@@ -70,7 +70,7 @@ Security:
 | Id | At `c632893` | Outcome |
 | --- | --- | --- |
 | SEC-01 | TRUE (bypass reproduced; public `approval_granted` alone PARTIAL) | Fixed, step 3, also through `AgentServer`, SelfConsistency, Swarm and AgentGraph |
-| SEC-02 | TRUE | Fixed, step 4 (denylist, not a whitelist) |
+| SEC-02 | TRUE | Fixed, step 4 (denylist, not a whitelist); fix 3.1 adds every `HumanInTheLoop` constructor name |
 | SEC-03 | TRUE | Fixed, step 5 |
 | SEC-04 | TRUE | Mitigated, step 6: the four patterns refuse gated tools. Real HITL there is Track B |
 | SEC-05 | TRUE | Fixed, step 9 |
@@ -88,7 +88,7 @@ Tools:
 | --- | --- | --- |
 | TOOL-01 | TRUE (reproduced) | Fixed, step 7 |
 | TOOL-02 | TRUE (reproduced) | Fixed, step 7 |
-| TOOL-03 | TRUE (reproduced) | Fixed, step 7 |
+| TOOL-03 | TRUE (reproduced) | Fixed, step 7; fix 3.1: partials, callable objects, async callables and positional-only parameters |
 | TOOL-04 to TOOL-13 | NOT VERIFIED | Deferred to Track B (ToolSpec) |
 | TOOL-14 | TRUE | Fixed, step 8 |
 
@@ -103,7 +103,7 @@ ReAct family:
 | REACT-05 | TRUE | Fixed, step 23 (task text, no shadowing, registry subclasses kept). Engine input not length-capped (open) |
 | REACT-06 | NOT VERIFIED | Deferred to Track B |
 | REACT-07 | NOT VERIFIED | Deferred to Track B |
-| REACT-08 | TRUE | Fixed, step 5 (construction warning) |
+| REACT-08 | TRUE | Fixed, step 5 (construction warning); fix 3.1 (D-052): a flagged tool nobody can approve raises `AgentError` at construction and `run()` |
 | REACT-09 | NOT VERIFIED | Deferred to Track B |
 | REACT-10 | NOT VERIFIED | Deferred to Track B |
 | REACT-11 | TRUE (thinking blocks not verified) | Malformed arguments fixed, step 8. Ignored `initial_context`/`api_kwargs` and `response_format` for a custom `complete_fn` are open |
@@ -165,7 +165,7 @@ Where verification or a consumer contradicted the proposed fix, the fix was chan
 
 - SEC-01 (D-002): `_init_context` strips only the driver grant `_approval_granted` and `RUN_OUTPUT_KEYS`, not every internal-prefix key. `_sensitive` policy inputs and harness roots are legitimate. `AgentServer` is the trust boundary and drops every internal-prefix key, logged, not rejected with 400.
 - SEC-02 (D-003): no kwargs whitelist. A denylist (`hitl`, `tools`, `evaluation_fn`, `approval_callback`, plus config-owned `model`, `temperature`, `max_tokens`) raises `TypeError`; litellm and `API` passthrough (`seed`, `timeout`, `handlers`, `llm_interface`, ...) stays open. The monitor passes `tools=` only to classes that take it.
-- SEC-03 (D-004): the flag is a default policy only for a callback-only HITL; with a policy, the policy alone decides and is never ANDed with the flag.
+- SEC-03 (D-004): the flag is a default policy only for a callback-only HITL; with a policy, the policy alone decides and is never ANDed with the flag. Fix 3.1 (D-052): with neither a callback nor a policy, a flagged tool fails closed on the ReAct family like SEC-04; `RetryingToolRegistry` never retries a flagged tool (one approval, one execution); ReasoningReact's registry is a live view of the caller's, so a flag added later is seen.
 - SEC-04 (D-005): refusal at construction and at `run()` instead of new HITL paths.
 - SEC-11, roadmap D7 (D-006): D-030 empty-input recovery kept; no half-designed `read_only` flag ahead of ToolSpec.
 - LOOP-04 (D-007, D-028): counting changed only in `AgentHandlers.check_iteration_limit`; the shared `make_iteration_limiter` is untouched. For N >= 2, `max_iterations=N` gives N think turns and N - 1 tool turns (N = 1 behaves like N = 2; Reflexion closes a cycle on the act exit, so its counts differ), plus a forced stop a few transitions before the loop ceiling. Fix 13.1 (D-051): the model is still asked on the last think turn and its own evidence-backed conclusion there reports success.
@@ -210,7 +210,7 @@ Final G3: see REFLECT
 - LOOP-16: the per-turn thought is not extracted, so `AgentStep.thought`, `ToolCall.reasoning` and `ApprovalRequest.reasoning` are empty unless `use_classification=True`.
 - Typed per-field extraction costs one LLM call per field per turn, plus one retry per null required field.
 - The ReAct-family success rule counts a failed tool call as success evidence. ParallelReact's empty batch loops until the limiter.
-- HITL: the policy sees the call before empty-input recovery and a shallow context; a forced stop reached in `await_approval` skips the approved call (fails closed). REWOO, PlanExecute, ParallelReact and native_fc refuse gated tools instead of asking.
+- HITL: the policy sees the call before empty-input recovery and a shallow context; a forced stop reached in `await_approval` skips the approved call (fails closed). REWOO, PlanExecute, ParallelReact and native_fc refuse gated tools instead of asking. With a policy set, a flagged tool the policy does not gate runs unasked (the policy owns the decision). `RetryingToolRegistry` still retries a tool that only a policy gates.
 - native_fc ignores `initial_context` and `api_kwargs`, and a custom `complete_fn` never gets `response_format`.
 - Swarm never hands off by itself: nothing shipped writes `next_agent`.
 - SEC-11: D-030 recovery can pass the task text to a side-effecting single-parameter tool.

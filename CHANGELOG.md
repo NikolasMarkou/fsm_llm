@@ -79,14 +79,21 @@ work, is `docs/agents_roadmap.md`.
   by a tool result, reports `success=True`.
 - Agents: `@tool(requires_approval=True)` now gates the tool when `HumanInTheLoop` has
   an approval callback and no policy (the flag is the default policy). With a policy,
-  the policy alone decides, as before. Construction warns when flagged tools exist and
-  no callback can approve them.
+  the policy alone decides, as before. `ReactAgent`, `ReflexionAgent` and
+  `ReasoningReactAgent` raise `AgentError` when a flagged tool exists and nobody can
+  decide on it (`hitl=None`, or a `HumanInTheLoop` with neither a callback nor a
+  policy), at construction and again at the start of `run()`/`run_stream()`; before,
+  the tool ran unasked after a warning. A policy without a callback still constructs
+  (with a warning): the policy decides, and a call it gates raises
+  `ApprovalDeniedError`.
 - Agents: `REWOOAgent`, `PlanExecuteAgent`, `ParallelReactAgent` and
   `NativeFunctionCallingReactAgent` have no approval step, so they now raise
   `AgentError` when their registry holds a `requires_approval` tool (at construction
   and again at the start of `run()`).
 - Agents: constructors raise `TypeError` for `hitl=`, `tools=`, `evaluation_fn=` or
-  `approval_callback=` on a pattern that does not take them, and for `model=`,
+  any `HumanInTheLoop` argument (`approval_policy=`, `approval_callback=`,
+  `on_escalation=`, `confidence_threshold=`, `approval_timeout=`) on a pattern that
+  does not take them, and for `model=`,
   `temperature=`, `max_tokens=` (set them on `AgentConfig`). They used to be forwarded
   to `litellm.completion`, so HITL was silently ignored. Other keyword arguments
   (`seed`, `timeout`, `handlers`, `llm_interface`, ...) still pass through.
@@ -97,6 +104,12 @@ work, is `docs/agents_roadmap.md`.
   or the driver grant `_approval_granted`; they are dropped with a WARNING and
   `observation_count` is seeded 0. `AgentServer` also drops every internal-prefix key
   from the request context. Swarm hand-offs and AgentGraph edges strip the same keys.
+  Each pattern also drops its own run outputs (drafts, verdicts, answers and progress
+  keys, e.g. MakerChecker `draft_output`/`checker_passed`, EvalOpt
+  `generated_output`, Debate `proposition`/`consensus_reached`, PlanExecute
+  `plan_steps`) from `initial_context`, and an AgentGraph node or Swarm hand-off
+  target never receives its own run outputs from a predecessor: a forged or inherited
+  draft used to ship as a successful answer with no work done.
 - Agents: loop values (tool selection, thoughts that route, drafts, critiques,
   verdicts, plans, reflections, step results) are extracted as typed per-field values
   with the task and results in the prompt, cleared before each round, instead of from
@@ -125,7 +138,13 @@ work, is `docs/agents_roadmap.md`.
 - Agents: tool calls bind their arguments against the function signature first. A
   `TypeError` raised inside a tool is a failed call, never a retry, and a named
   optional argument is never moved into a missing required one. `register_function`
-  infers the parameter schema from type hints like `@tool`.
+  infers the parameter schema from type hints like `@tool`, also for
+  `functools.partial` objects, callable instances and async callables. A
+  positional-only parameter is bound by position from its named value.
+- Agents: `RetryingToolRegistry` never retries a `requires_approval` tool: one approval
+  covers one execution. A tool gated only by an approval policy is still retried.
+- Agents: `ReasoningReactAgent`'s tool view follows the caller's registry live, so a
+  tool re-registered there with `requires_approval=True` after construction is gated.
 - Core: `llm._field_value` no longer reads `data[field_name]` for a field named
   `reasoning`, `confidence` or `field_name`; those names are the extraction envelope's
   own keys, so the fallback returned the model's explanation instead of the value.
@@ -205,6 +224,10 @@ work, is `docs/agents_roadmap.md`.
   `should_terminate` no longer drops an approved call.
 - Agents (META-06): the meta-builder's FSM few-shot example targeted an undeclared
   `end` state.
+- Agents: `ToolRegistry.register_function` raised `AttributeError` for a
+  `functools.partial` or a callable object (a regression from schema inference in
+  this release). The two argument-fallback DEBUG log lines printed raw tool input;
+  they are redacted like the other tool-input log lines.
 - Docs: `docs/api_reference.md` agent snippets passed `model=` to constructors, which
   crashed at run time.
 

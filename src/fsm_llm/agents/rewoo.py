@@ -66,6 +66,15 @@ class REWOOAgent(BaseAgent):
         result = agent.run("What is the population of France times 2?")
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.PLAN_BLUEPRINT,
+            ContextKeys.EVIDENCE,
+            ContextKeys.EVIDENCE_STATUS,
+        }
+    )
+
     def __init__(
         self,
         tools: ToolRegistry,

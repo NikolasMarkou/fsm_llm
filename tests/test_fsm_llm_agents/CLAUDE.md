@@ -5,10 +5,10 @@ Purpose: Pytest suite for the FSM-LLM agents package (`src/fsm_llm/agents`, impo
 
 ## Scope
 
-- In: 56 `test_*.py` files, `mcp_fixture_server.py` (a real stdio MCP server, not a test), empty `__init__.py`, and `conftest.py`, whose autouse fixture calls `tests.conftest.block_network`: every IPv4/IPv6 connect (loopback included) raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`. Global fixtures and `PromptGroundedLLM` come from `tests/conftest.py` (adds `src` to `sys.path`); most older files build their own mocks.
+- In: 57 `test_*.py` files, `mcp_fixture_server.py` (a real stdio MCP server, not a test), empty `__init__.py`, and `conftest.py`, whose autouse fixture calls `tests.conftest.block_network`: every IPv4/IPv6 connect (loopback included) raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`. Global fixtures and `PromptGroundedLLM` come from `tests/conftest.py` (adds `src` to `sys.path`); most older files build their own mocks.
 - Also in (historical placement, not agents code): `test_review_fixes.py` covers core `API.converse_stream` auto-save, `FileSessionStore._path` validation, `FSMManager.seed_restored_conversation`, and `fsm_llm.monitor.otel.OTELExporter` thread safety; `test_strands_phase2.py` covers `fsm_llm.workflows.dependency_resolver.DependencyResolver` and `OTELExporter`.
 - Out: live-LLM agent tests (none here; no test calls a real provider, and the network block enforces it), meta-builder internals beyond the CLI.
-- Current size: 1,695 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
+- Current size: 1,763 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
 
 ## Architecture
 
@@ -54,6 +54,7 @@ Observation hooks used by loop tests:
 | --- | --- | --- |
 | `test_grounded_patterns.py` | Phase-1 pattern loops on `PromptGroundedLLM` | Classes per pattern (`TestReactLoop`, `TestReflexionLoop`, `TestPlanExecuteLoop`, `TestDebateLoop`, `TestSelfConsistencyVote`, `TestPromptChainLoop`, `TestMakerCheckerLoop`, `TestEvaluatorOptimizerLoop`, `TestREWOOOutcome`, `TestOrchestratorWorkers`, `TestAgentGraphOrder`, `TestSwarmHandoff`) plus the fake's self-tests, `TestOfflineNetworkGuard`, `TestSuccessContract`, `TestSuccessReflectsWhoConcluded` (fix 13.1), `TestTypedFieldExtraction`, `TestGeneratedFieldsAreComposed`, `TestAgentInstructions`; written to fail on the parent commit of each fix |
 | `test_trust_boundary.py` | Caller context and constructor boundary | Forged `_approval_granted`/run-output keys via `initial_context`, `AgentServer` `/invoke` and `/stream`, SelfConsistency, AgentGraph; misplaced constructor kwargs; gated-tool refusal in REWOO/PlanExecute/ParallelReact/native_fc; callback-only HITL with flagged tools |
+| `test_security_review_fixes.py` | Security review fix 3.1 (D-052 of plan 06a5ec0a) | Pattern run outputs unforgeable via `initial_context`, `AgentServer`, AgentGraph, Swarm; flagged tools with no approver raise on the ReAct family; HITL kwargs denylist; `register_function` shapes; redacted fallback DEBUG lines; `RetryingToolRegistry` never retries a flagged tool |
 | `test_public_api.py` | `create_agent`, `AgentConfig`, `__all__` | Pattern-first factory and legacy prompt shim, `extra="forbid"`, `LLM_MODEL`, `instructions` reach field prompts, static `__all__` |
 | `test_secret_hygiene.py` | Secret redaction | Memory tools skip hidden buffers; secret-shaped tool args absent from observations, trace, logs, `context_summary` |
 | `test_hitl_security.py` | Gated tool needs call-bound driver grant | Forged `approval_granted`/`_approval_granted`, swapped call, empty-then-filled input, non-bool approval, forged `approval_required`, internal-key policy; parametrized over React, Reflexion, ReasoningReact |

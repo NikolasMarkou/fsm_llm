@@ -15,7 +15,7 @@ from typing import Any
 
 from fsm_llm.logging import logger
 
-from .base import BaseAgent, strip_caller_context
+from .base import BaseAgent, pattern_run_output_keys, strip_caller_context
 from .constants import StopReason
 from .definitions import AgentConfig, AgentResult, AgentTrace
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
@@ -141,7 +141,8 @@ class AgentGraph:
         None or returns True against that predecessor's ``final_context``).
         Its ``initial_context`` merges those predecessors' contexts in
         topological order (a later one wins a shared key), each minus
-        ``RUN_OUTPUT_KEYS``, so a node starts its own run fresh. A failed
+        ``RUN_OUTPUT_KEYS``, and the merge minus the node's own pattern run
+        outputs (``_run_output_keys``), so a node starts its own run fresh. A failed
         node (it raised, or returned ``success=False``) takes no outgoing
         edge, and the graph reports ``success=False`` with its reason. The answer is the last executed node's,
         which the order makes a sink of the executed subgraph.
@@ -168,9 +169,20 @@ class AgentGraph:
             if node_name == self._entry:
                 node_context = context
             elif activated_by.get(node_name):
-                node_context = {}
+                merged: dict[str, Any] = {}
                 for source in activated_by[node_name]:
-                    node_context.update(outgoing[source])
+                    merged.update(outgoing[source])
+                # DECISION plan-2026-09-29T103145-06a5ec0a/D-052: a predecessor's
+                # context may not seed THIS node's own run outputs. Do NOT rely
+                # on RUN_OUTPUT_KEYS alone: a MakerChecker node after another
+                # MakerChecker shipped the first node's `draft_output` as its
+                # own passed answer with no work done.
+                node_context = strip_caller_context(
+                    merged,
+                    source=f"AgentGraph input of node '{node_name}'",
+                    warn=False,
+                    run_keys=pattern_run_output_keys(self._nodes[node_name]),
+                )
                 node_context["task"] = task
             else:
                 continue

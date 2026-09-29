@@ -23,7 +23,14 @@ from .constants import (
     LogMessages,
     ReasoningIntegrationKeys,
 )
-from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall, ToolResult
+from .definitions import (
+    AgentConfig,
+    AgentResult,
+    AgentStep,
+    ToolCall,
+    ToolDefinition,
+    ToolResult,
+)
 from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers, forced_stop_skip, next_step_number
@@ -61,19 +68,46 @@ def _problem_text(tool_input: Any, task: Any = "") -> str:
 class _ReasonToolRegistry(ToolRegistry):
     """The caller's tools plus the ``reason`` pseudo-tool, without mutating them.
 
-    Interface contract: built from the caller's registry ``base``; holds a
-    snapshot of ``base``'s tools (later registrations on ``base`` are not
-    seen). ``execute`` of a tool ``base`` holds goes to ``base.execute``, so a
+    Interface contract: built from the caller's registry ``base``; a LIVE view
+    of ``base`` (a tool registered on ``base`` later is listed, flagged and
+    executed with its current definition) plus the tools registered on this
+    object (the ``reason`` pseudo-tool). A name ``base`` holds always resolves
+    to ``base``. ``execute`` of such a name goes to ``base.execute``, so a
     ``CachingToolRegistry``/``RetryingToolRegistry`` keeps its behaviour
     (REACT-05: a plain copy dropped it); any other name runs here. Semantic
     prompt filtering (``SemanticToolRegistry.retrieve``) is not carried over.
     """
 
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-052: a live view, not a
+    # snapshot. The snapshot kept a tool's construction-time flag while
+    # `execute` ran the caller's current definition, so a tool re-registered
+    # on the caller's registry with requires_approval=True ran unasked, and
+    # the run() refusal could not see a flag added after construction. Do NOT
+    # copy `base`'s tools into this registry again.
     def __init__(self, base: ToolRegistry) -> None:
         super().__init__()
         self._base = base
-        for tool_def in base.list_tools():
-            self.register(tool_def)
+
+    def _own_tools(self) -> list[ToolDefinition]:
+        return [t for t in super().list_tools() if t.name not in self._base]
+
+    def list_tools(self) -> list[ToolDefinition]:
+        return self._base.list_tools() + self._own_tools()
+
+    def get(self, name: str) -> ToolDefinition:
+        if name in self._base:
+            return self._base.get(name)
+        return super().get(name)
+
+    @property
+    def tool_names(self) -> list[str]:
+        return [t.name for t in self.list_tools()]
+
+    def __len__(self) -> int:
+        return len(self.list_tools())
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._base or super().__contains__(name)
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
         if tool_call.tool_name in self._base:
@@ -166,7 +200,7 @@ class ReasoningReactAgent(BaseAgent):
 
         if len(self.tools) == 0:
             raise AgentError("Cannot create agent with empty tool registry")
-        self._warn_ungated_flagged_tools()
+        self._refuse_unapprovable_flagged_tools()
 
         # Create reasoning engine
         reasoning_model_name = reasoning_model or self.config.model
@@ -222,6 +256,8 @@ class ReasoningReactAgent(BaseAgent):
         # state with "some tool has requires_approval": the policy may gate an
         # unflagged tool (or `reason`), and a gate without the state makes every
         # gated call a refused act turn instead of an ask.
+        # D-052: a registry can gain a flagged tool after construction.
+        self._refuse_unapprovable_flagged_tools()
         handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
 
         fsm_def = build_react_fsm(

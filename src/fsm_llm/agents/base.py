@@ -11,8 +11,8 @@ import inspect
 import json
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Any, cast
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Set
+from typing import Any, ClassVar, cast
 
 from pydantic import BaseModel
 
@@ -134,6 +134,7 @@ def strip_caller_context(
     source: str,
     drop_internal: bool = False,
     warn: bool = True,
+    run_keys: Set[str] = frozenset(),
 ) -> dict[str, Any]:
     """Copy caller-supplied context without the keys a run owns.
 
@@ -149,11 +150,15 @@ def strip_caller_context(
             internal policy inputs such as ``_sensitive``.
         warn: Log dropped keys at WARNING (default) or DEBUG. DEBUG is for
             in-process propagation where dropping is expected (AgentGraph edges).
+        run_keys: The receiving pattern's own run outputs (answer, verdict,
+            draft and progress keys; ``pattern_run_output_keys``), dropped in
+            addition to ``RUN_OUTPUT_KEYS``.
 
     Returns:
         A new dict (the input is never mutated) without ``RUN_OUTPUT_KEYS``
-        (which include ``ContextKeys.DRIVER_APPROVAL``), and without internal
-        keys when ``drop_internal``. Never raises for a mapping input.
+        (which include ``ContextKeys.DRIVER_APPROVAL``), without *run_keys*,
+        and without internal keys when ``drop_internal``. Never raises for a
+        mapping input.
     """
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-002: caller context may not
     # carry the driver-only approval grant or any run output. A forged
@@ -168,8 +173,10 @@ def strip_caller_context(
     kept: dict[str, Any] = {}
     dropped: list[str] = []
     for key, value in (context or {}).items():
-        if key in RUN_OUTPUT_KEYS or (
-            drop_internal and isinstance(key, str) and has_internal_prefix(key)
+        if (
+            key in RUN_OUTPUT_KEYS
+            or key in run_keys
+            or (drop_internal and isinstance(key, str) and has_internal_prefix(key))
         ):
             dropped.append(str(key))
         else:
@@ -184,6 +191,27 @@ def strip_caller_context(
         else:
             logger.debug(message)
     return kept
+
+
+def pattern_run_output_keys(agent: Any) -> frozenset[str]:
+    """The run outputs *agent*'s pattern writes for itself, beyond ``RUN_OUTPUT_KEYS``.
+
+    Interface contract (callers: ``BaseAgent._init_context``,
+    ``SelfConsistencyAgent.run``, ``AgentGraph.run`` and ``SwarmAgent.run``
+    for the node or agent they hand context to):
+
+    Args:
+        agent: An agent instance or class; anything without a
+            ``_run_output_keys`` attribute counts as having none.
+
+    Returns:
+        The pattern's ``_run_output_keys`` class attribute as a frozenset
+        (empty for the ReAct family and for non-agents). Never raises.
+    """
+    keys = getattr(agent, "_run_output_keys", None)
+    if not isinstance(keys, (set, frozenset)):
+        return frozenset()
+    return frozenset(k for k in keys if isinstance(k, str))
 
 
 def caller_prompt_keys(context: Mapping[str, Any] | None) -> tuple[str, ...]:
@@ -274,6 +302,19 @@ def _flagged_tool_policy(tools: Any) -> ApprovalPolicy:
     return policy
 
 
+# Every HumanInTheLoop constructor name (approval_policy, on_escalation, ...):
+# given to an agent they mean "HITL wanted" and must never reach litellm with
+# the gate silently absent (D-003, review item 4). Derived from the signature
+# so a new HumanInTheLoop parameter is covered without a hand-kept list.
+_HITL_CTOR_KWARGS: frozenset[str] = frozenset(
+    name
+    for name, param in inspect.signature(HumanInTheLoop.__init__).parameters.items()
+    if name != "self"
+    and param.kind
+    not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+)
+
+
 def _reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> None:
     """Raise ``TypeError`` when *api_kwargs* holds a name that only lands there by mistake.
 
@@ -286,7 +327,9 @@ def _reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> Non
     # later with "multiple values" (API-02). Do NOT reject unknown kwargs in
     # general: `seed`, `timeout`, `caching`, `handlers`, `llm_interface`, ... are
     # legitimate API/litellm passthrough. See decisions.md D-003.
-    misplaced = sorted(k for k in api_kwargs if k in MISPLACED_AGENT_KWARGS)
+    misplaced = sorted(
+        k for k in api_kwargs if k in MISPLACED_AGENT_KWARGS or k in _HITL_CTOR_KWARGS
+    )
     if misplaced:
         raise TypeError(
             f"{pattern} does not accept {misplaced}; this pattern cannot use "
@@ -394,6 +437,16 @@ class BaseAgent(ABC):
 
         result = agent("What is 2+2?")
     """
+
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-052: each pattern lists the
+    # context keys its run writes for itself (answer, draft, verdict, success
+    # and progress keys). Caller context and graph/swarm hand-offs never seed
+    # them: core skip-if-set never re-extracts a set key, so a forged
+    # `draft_output` or `generated_output` shipped as a successful answer with
+    # no work done. Do NOT fold these into the global RUN_OUTPUT_KEYS: a
+    # pattern's run output can be a legitimate input of another pattern.
+    # Do NOT list a key a caller legitimately supplies (task, domain hints).
+    _run_output_keys: ClassVar[frozenset[str]] = frozenset()
 
     def __init__(
         self,
@@ -503,11 +556,16 @@ class BaseAgent(ABC):
         Sets ``TASK``, ``AGENT_TRACE``, ``ITERATION_COUNT`` and
         ``MAX_ITERATIONS_REACHED`` (False; so a run's ``final_context`` carries it).
         Seeds ``OBSERVATION_COUNT`` to 0. Caller keys in ``RUN_OUTPUT_KEYS``
-        (including the driver-only approval grant) are dropped with a WARNING
-        by ``strip_caller_context``; other internal-prefix keys pass through.
+        (including the driver-only approval grant) and in the pattern's own
+        ``_run_output_keys`` are dropped with a WARNING by
+        ``strip_caller_context``; other internal-prefix keys pass through.
         Warns if *initial_context* already contains reserved keys.
         """
-        context = strip_caller_context(initial_context, source="initial_context")
+        context = strip_caller_context(
+            initial_context,
+            source="initial_context",
+            run_keys=pattern_run_output_keys(self),
+        )
         reserved = {
             ContextKeys.TASK,
             ContextKeys.AGENT_TRACE,
@@ -697,19 +755,41 @@ class BaseAgent(ABC):
             return
         self._register_hitl_gate(api, make_hitl_checker(hitl, policy=predicate))
 
-    def _warn_ungated_flagged_tools(self) -> None:
-        """WARN at construction when flagged tools exist but nobody can approve them."""
+    def _refuse_unapprovable_flagged_tools(self) -> None:
+        """Raise ``AgentError`` when flagged tools exist and nobody can decide on them.
+
+        For the HITL patterns (ReAct, Reflexion, ReasoningReact). Call it in
+        ``__init__`` after ``self.tools`` and ``self.hitl`` are set and at the
+        start of ``run()``/``run_stream()`` (a registry can gain a flagged tool
+        after construction). Raises when ``self.tools`` holds a
+        ``requires_approval`` tool and ``self.hitl`` is ``None`` or has neither
+        an approval callback nor a policy. With a policy and no callback it
+        only WARNS: the policy owns the decision, and a call it gates raises
+        ``ApprovalDeniedError``. No-op without a flagged tool.
+        """
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-052: fail closed, as D-005
+        # does for the patterns without HITL. With `hitl=None` or an empty
+        # HumanInTheLoop() a requires_approval tool ran unasked (a construction
+        # WARNING only). Do NOT downgrade this back to a warning, and do NOT
+        # raise when a policy is set: an explicit policy owns its decision
+        # (D-004 never ANDs it with the flag).
         flagged = flagged_tool_names(getattr(self, "tools", None))
+        if not flagged:
+            return
         hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
-        if flagged and (hitl is None or not hitl.has_approval_callback):
+        if hitl is None or not (hitl.has_approval_callback or hitl.has_approval_policy):
+            raise AgentError(
+                f"{type(self).__name__}: tools {flagged} have requires_approval="
+                f"True but nobody can approve them. Pass "
+                f"hitl=HumanInTheLoop(approval_callback=...), or register these "
+                f"tools without requires_approval."
+            )
+        if not hitl.has_approval_callback:
             logger.warning(
                 f"{type(self).__name__}: tools {flagged} have requires_approval="
-                f"True but no HumanInTheLoop approval_callback is configured"
-                + (
-                    "; they run without approval"
-                    if hitl is None or not hitl.has_approval_policy
-                    else "; a gated call will raise ApprovalDeniedError"
-                )
+                f"True and no HumanInTheLoop approval_callback is configured; "
+                f"the approval policy decides, and a call it gates raises "
+                f"ApprovalDeniedError"
             )
 
     def _refuse_flagged_tools(self) -> None:

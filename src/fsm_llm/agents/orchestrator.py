@@ -49,6 +49,16 @@ class OrchestratorAgent(BaseAgent):
         print(result.answer)
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.SUBTASKS,
+            ContextKeys.WORKER_RESULTS,
+            ContextKeys.DELEGATION_PLAN,
+            ContextKeys.ALL_COLLECTED,
+        }
+    )
+
     def __init__(
         self,
         worker_factory: Callable[[str], AgentResult] | None = None,

@@ -107,6 +107,11 @@ class RetryingToolRegistry(ToolRegistry):
             ``max_retries + 1``).
         backoff_seconds: Base sleep between attempts; attempt *n* sleeps
             ``backoff_seconds * n`` (linear). ``0`` disables sleeping.
+
+    A tool registered with ``requires_approval=True`` is never retried: one
+    human approval covers exactly one execution. A tool that only an approval
+    *policy* gates is not known to the registry and is still retried; do not
+    wrap such tools in this registry.
     """
 
     def __init__(self, max_retries: int = 2, backoff_seconds: float = 0.0) -> None:
@@ -120,6 +125,15 @@ class RetryingToolRegistry(ToolRegistry):
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
         result = super().execute(tool_call)
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-052: one approval = one
+        # call (D-015). The approval gate and grant spend run once per executor
+        # turn, so a retry here would re-run an approved side effect with no
+        # second approval. Do NOT retry a requires_approval tool.
+        if not result.success:
+            with self._tools_lock:
+                tool = self._tools.get(tool_call.tool_name)
+            if tool is not None and tool.requires_approval:
+                return result
         attempt = 0
         while not result.success and attempt < self._max_retries:
             attempt += 1

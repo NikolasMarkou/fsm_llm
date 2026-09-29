@@ -44,6 +44,17 @@ class ADaPTAgent(BaseAgent):
         print(result.answer)
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.ATTEMPT_RESULT,
+            ContextKeys.ATTEMPT_SUCCEEDED,
+            ContextKeys.SUBTASKS,
+            ContextKeys.SUBTASK_RESULTS,
+            ContextKeys.CURRENT_DEPTH,
+        }
+    )
+
     def __init__(
         self,
         tools: ToolRegistry | None = None,

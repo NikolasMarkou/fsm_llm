@@ -15,7 +15,7 @@ from typing import Any
 from fsm_llm.logging import logger
 from fsm_llm.memory import WorkingMemory
 
-from .base import BaseAgent, strip_caller_context
+from .base import BaseAgent, pattern_run_output_keys, strip_caller_context
 from .constants import StopReason
 from .definitions import AgentConfig, AgentResult, AgentTrace
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
@@ -214,7 +214,9 @@ class SwarmAgent(BaseAgent):
                 context.update(
                     _without_routing_keys(
                         strip_caller_context(
-                            handoff_context, source="SwarmAgent handoff_context"
+                            handoff_context,
+                            source="SwarmAgent handoff_context",
+                            run_keys=pattern_run_output_keys(self._agents[next_agent]),
                         )
                     )
                 )

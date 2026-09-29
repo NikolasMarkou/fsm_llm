@@ -79,6 +79,19 @@ class DebateAgent(BaseAgent):
         print(result.answer)
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.PROPOSITION,
+            ContextKeys.CRITIQUE,
+            ContextKeys.COUNTER_ARGUMENT,
+            ContextKeys.JUDGE_VERDICT,
+            ContextKeys.CONSENSUS_REACHED,
+            ContextKeys.DEBATE_ROUNDS,
+            ContextKeys.CURRENT_ROUND,
+        }
+    )
+
     def __init__(
         self,
         config: AgentConfig | None = None,

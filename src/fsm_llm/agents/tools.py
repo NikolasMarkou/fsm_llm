@@ -4,6 +4,7 @@ Tool registry for agent tool management.
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import re
@@ -153,6 +154,50 @@ def _unwrap_nested_tool_input(
     return merged
 
 
+def _callable_name(fn: Any) -> str:
+    """A display name for any callable: ``__name__``, else its type's name.
+
+    ``functools.partial`` objects and callable instances have no ``__name__``
+    (review item 3: ``register_function`` raised AttributeError for them).
+    """
+    return getattr(fn, "__name__", None) or type(fn).__name__
+
+
+def _introspection_target(fn: Any) -> Any:
+    """The function whose hints and coroutine flag describe *fn*.
+
+    Unwraps ``functools.partial`` (nested too) to its ``func``; a callable
+    instance maps to its class's ``__call__``. Functions, methods and builtins
+    are returned as is. Never raises.
+    """
+    while isinstance(fn, functools.partial):
+        fn = fn.func
+    if inspect.isroutine(fn):
+        return fn
+    return type(fn).__call__ if callable(fn) else fn
+
+
+def _bind_by_name(
+    sig: inspect.Signature, params: dict[str, Any]
+) -> inspect.BoundArguments:
+    """``sig.bind`` for keyword input, placing positional-only parameters by position.
+
+    A model can only send named values, so a positional-only parameter named
+    in *params* is passed positionally (in order, up to the first one
+    missing). Raises ``TypeError`` exactly like ``Signature.bind``.
+    """
+    positional: list[Any] = []
+    rest = dict(params)
+    for param in sig.parameters.values():
+        if (
+            param.kind is not inspect.Parameter.POSITIONAL_ONLY
+            or param.name not in rest
+        ):
+            break
+        positional.append(rest.pop(param.name))
+    return sig.bind(*positional, **rest)
+
+
 def _fallback_arguments(
     sig: inspect.Signature,
     params: dict[str, Any],
@@ -176,7 +221,7 @@ def _fallback_arguments(
     if len(names) == 1 and stray:
         # Single-param function: pass the first misnamed value
         mapped = {names[0]: _as_param_value(stray[0], schema_props.get(names[0]))}
-        logger.debug(f"Tool kwarg mismatch, retrying: {mapped}")
+        logger.debug(f"Tool kwarg mismatch, retrying: {redact_secret_entries(mapped)}")
         return mapped
     if params and schema_props:
         # Only positional-map a single required param from a single misnamed
@@ -187,7 +232,8 @@ def _fallback_arguments(
                 required[0]: _as_param_value(stray[0], schema_props.get(required[0]))
             }
             logger.debug(
-                f"Tool kwarg mismatch, retrying with positional mapping: {mapped}"
+                "Tool kwarg mismatch, retrying with positional mapping: "
+                f"{redact_secret_entries(mapped)}"
             )
             return mapped
         raise TypeError(
@@ -260,7 +306,7 @@ class ToolRegistry:
         requires_approval: bool = False,
     ) -> ToolRegistry:
         """Register a function as a tool. Returns self for chaining."""
-        tool_name = name or fn.__name__
+        tool_name = name or _callable_name(fn)
         tool_desc = description or fn.__doc__ or f"Tool: {tool_name}"
 
         if parameter_schema is None:
@@ -368,7 +414,11 @@ class ToolRegistry:
         # inside the worker lambda so it belongs to the worker thread's event loop
         # (A-ISSUE-001, A-ISSUE-002).
         original_fn = fn
-        is_async = inspect.iscoroutinefunction(fn)
+        # A partial of a coroutine function, or an instance with an async
+        # __call__, is async too (review item 3).
+        is_async = inspect.iscoroutinefunction(fn) or inspect.iscoroutinefunction(
+            _introspection_target(fn)
+        )
         if is_async:
             import asyncio
 
@@ -423,10 +473,15 @@ class ToolRegistry:
         # except TypeError: <retry>``: that re-ran a tool whose body raised
         # TypeError after a side effect (TOOL-01). The fallback sees the keys the
         # model sent (``sent``), before the schema filter, like the old one did.
+        # Positional-only parameters bind by position from their named keys
+        # (`_bind_by_name`); the fallback's arguments are bound the same way,
+        # so a bind error never reaches the tool body.
         try:
-            bound = sig.bind(**params)
+            bound = _bind_by_name(sig, params)
         except TypeError as bind_error:
-            return fn(**_fallback_arguments(sig, sent, schema_props, bind_error))
+            bound = _bind_by_name(
+                sig, _fallback_arguments(sig, sent, schema_props, bind_error)
+            )
         return fn(*bound.args, **bound.kwargs)
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
@@ -638,10 +693,12 @@ def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     Returns an empty dict for legacy single-dict-param functions (``params: dict``)
     and for zero-parameter functions.
     """
+    # A partial or a callable instance carries no annotations of its own: read
+    # them from the wrapped function / the class's __call__ (review item 3).
     try:
-        hints = get_type_hints(fn, include_extras=True)
+        hints = get_type_hints(_introspection_target(fn), include_extras=True)
     except Exception as exc:
-        logger.debug(f"Could not resolve type hints for {fn.__name__}: {exc}")
+        logger.debug(f"Could not resolve type hints for {_callable_name(fn)}: {exc}")
         return {}
 
     sig = inspect.signature(fn)
@@ -738,7 +795,7 @@ def tool(
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        tool_name = name or fn.__name__
+        tool_name = name or _callable_name(fn)
         raw_doc = fn.__doc__ or ""
         tool_desc = (
             description or raw_doc.strip().split("\n")[0] or f"Tool: {tool_name}"

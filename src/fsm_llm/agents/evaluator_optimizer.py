@@ -54,6 +54,20 @@ class EvaluatorOptimizerAgent(BaseAgent):
         print(result.answer)
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.GENERATED_OUTPUT,
+            ContextKeys.EVALUATION_PASSED,
+            ContextKeys.EVALUATION_RESULT,
+            ContextKeys.EVALUATION_SCORE,
+            ContextKeys.EVALUATION_FEEDBACK,
+            ContextKeys.REFINEMENT_FEEDBACK,
+            ContextKeys.REFINEMENT_COUNT,
+            ContextKeys.PREVIOUS_OUTPUT,
+        }
+    )
+
     def __init__(
         self,
         evaluation_fn: Callable[[str, dict[str, Any]], EvaluationResult],

@@ -413,9 +413,11 @@ class TestConstructorKwargRejection:
             ReactAgent(_Harness().registry, **kwarg)
 
     def test_passthrough_kwargs_still_construct_and_run(self):
+        harness = _Harness()
         agent = ReactAgent(
-            _Harness().registry,
+            harness.registry,
             config=AgentConfig(model="mock/model", max_iterations=3),
+            hitl=HumanInTheLoop(approval_callback=harness.deny),
             seed=7,
             timeout=5,
             llm_interface=_SelectOnceLLM(select_tool=False),
@@ -425,9 +427,11 @@ class TestConstructorKwargRejection:
         assert agent._api_kwargs["seed"] == 7
 
     def test_litellm_passthrough_reaches_the_llm_interface(self):
+        harness = _Harness()
         agent = ReactAgent(
-            _Harness().registry,
+            harness.registry,
             config=AgentConfig(model="mock/model"),
+            hitl=HumanInTheLoop(approval_callback=harness.deny),
             seed=7,
             caching=True,
             api_base="http://127.0.0.1:9",
@@ -641,7 +645,8 @@ class TestPolicyStillDecidesAlone:
 
 
 class TestUngatedFlaggedToolWarning:
-    """REACT-08: construction warns when a flagged tool has nobody to approve it."""
+    """REACT-08 / D-052: a flagged tool nobody can approve fails closed; a
+    policy without a callback warns."""
 
     @staticmethod
     def _warnings(build: Any) -> list[str]:
@@ -658,12 +663,12 @@ class TestUngatedFlaggedToolWarning:
         return [m for m in captured if "requires_approval" in m]
 
     @pytest.mark.parametrize("cls", _HITL_AGENTS, ids=_HITL_IDS)
-    def test_no_hitl_warns(self, cls):
+    def test_no_hitl_raises(self, cls):
+        from fsm_llm.agents.exceptions import AgentError
+
         registry = _Harness().registry
-        warned = self._warnings(
-            lambda: cls(tools=registry, config=AgentConfig(model="m/m"))
-        )
-        assert len(warned) == 1 and "danger" in warned[0]
+        with pytest.raises(AgentError, match="danger"):
+            cls(tools=registry, config=AgentConfig(model="m/m"))
 
     def test_policy_without_callback_warns(self):
         registry = _Harness().registry

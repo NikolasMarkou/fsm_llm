@@ -74,6 +74,20 @@ class PlanExecuteAgent(BaseAgent):
         print(result.answer)
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.PLAN_STEPS,
+            ContextKeys.CURRENT_STEP_INDEX,
+            ContextKeys.STEP_RESULTS,
+            ContextKeys.STEP_RESULT,
+            ContextKeys.ALL_STEPS_COMPLETE,
+            ContextKeys.STEP_FAILED,
+            ContextKeys.CURRENT_STEP_DESCRIPTION,
+            ContextKeys.PREVIOUS_PLAN_STEPS,
+        }
+    )
+
     def __init__(
         self,
         tools: ToolRegistry | None = None,

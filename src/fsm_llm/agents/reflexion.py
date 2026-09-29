@@ -59,6 +59,19 @@ class ReflexionAgent(BaseAgent):
         print(result.answer)
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.EVALUATION_PASSED,
+            ContextKeys.EVALUATION_SCORE,
+            ContextKeys.EVALUATION_FEEDBACK,
+            ContextKeys.REFLECTION,
+            ContextKeys.LESSONS,
+            ContextKeys.EPISODIC_MEMORY,
+            ContextKeys.REFLECTION_COUNT,
+        }
+    )
+
     def __init__(
         self,
         tools: ToolRegistry,
@@ -87,7 +100,7 @@ class ReflexionAgent(BaseAgent):
         self.evaluation_fn = evaluation_fn
         self.max_reflections = max_reflections
         self.hitl = hitl
-        self._warn_ungated_flagged_tools()
+        self._refuse_unapprovable_flagged_tools()
         # DECISION plan-2026-09-12T135914-45a654de/D-012
         # No `self._handlers` here (matches react.py's D-014 pattern) — a
         # per-instance AgentHandlers shared across concurrent run() calls is
@@ -123,6 +136,8 @@ class ReflexionAgent(BaseAgent):
         # gate in _register_handlers and the D-004 refusal share ONE predicate
         # (BaseAgent._hitl_active), so a gated call is asked in await_approval
         # before `act` runs it; the refusal stays as the backstop.
+        # D-052: a registry can gain a flagged tool after construction.
+        self._refuse_unapprovable_flagged_tools()
         handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
 
         fsm_def = build_reflexion_fsm(

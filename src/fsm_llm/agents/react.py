@@ -63,7 +63,7 @@ class ReactAgent(BaseAgent):
         self.tools = tools
         self.hitl = hitl
         self.use_classification = use_classification
-        self._warn_ungated_flagged_tools()
+        self._refuse_unapprovable_flagged_tools()
         # DECISION plan-2026-09-12T065608-089d0ec7/D-014
         # No `self._handlers` here (and none is ever assigned anywhere in this
         # class) — a per-instance AgentHandlers shared across concurrent
@@ -96,6 +96,8 @@ class ReactAgent(BaseAgent):
         # `run()` call can ever overwrite the reference this call is about
         # to use. Do NOT reintroduce `self._handlers = AgentHandlers(...)`
         # in this method — see decisions.md D-014.
+        # D-052: a registry can gain a flagged tool after construction.
+        self._refuse_unapprovable_flagged_tools()
         handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
 
         # The await_approval state must be built under the SAME predicate that
@@ -140,6 +142,8 @@ class ReactAgent(BaseAgent):
         # See D-014 note in run() above — call-local handlers, threaded
         # explicitly through `_standard_run_stream`'s `handlers=` parameter,
         # never assigned to `self._handlers`.
+        # D-052: a registry can gain a flagged tool after construction.
+        self._refuse_unapprovable_flagged_tools()
         handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
         fsm_def = build_react_fsm(
             self.tools,

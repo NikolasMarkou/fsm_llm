@@ -15,7 +15,12 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.logging import logger
 
-from .base import BaseAgent, strip_caller_context, with_instructions
+from .base import (
+    BaseAgent,
+    pattern_run_output_keys,
+    strip_caller_context,
+    with_instructions,
+)
 from .constants import (
     ContextKeys,
     Defaults,
@@ -88,6 +93,14 @@ class SelfConsistencyAgent(BaseAgent):
         )
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.SAMPLES,
+            ContextKeys.AGGREGATED_ANSWER,
+        }
+    )
+
     def __init__(
         self,
         config: AgentConfig | None = None,
@@ -142,7 +155,9 @@ class SelfConsistencyAgent(BaseAgent):
         # run-owned keys once here: a forged `final_answer` would otherwise
         # become every sample's answer (D-002 of plan 06a5ec0a).
         initial_context = strip_caller_context(
-            initial_context, source="SelfConsistencyAgent initial_context"
+            initial_context,
+            source="SelfConsistencyAgent initial_context",
+            run_keys=pattern_run_output_keys(self),
         )
 
         # Build simple single-state FSM

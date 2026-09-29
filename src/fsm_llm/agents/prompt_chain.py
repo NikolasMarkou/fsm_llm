@@ -61,6 +61,16 @@ class PromptChainAgent(BaseAgent):
         print(result.answer)
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.CHAIN_STEP_INDEX,
+            ContextKeys.CHAIN_STEP_RESULT,
+            ContextKeys.CHAIN_RESULTS,
+            ContextKeys.GATE_PASSED,
+        }
+    )
+
     def __init__(
         self,
         chain: list[ChainStep],

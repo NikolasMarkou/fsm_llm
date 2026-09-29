@@ -57,6 +57,18 @@ class MakerCheckerAgent(BaseAgent):
         print(result.answer)
     """
 
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
+    _run_output_keys = frozenset(
+        {
+            ContextKeys.DRAFT_OUTPUT,
+            ContextKeys.CHECKER_FEEDBACK,
+            ContextKeys.CHECKER_PASSED,
+            "quality_score",
+            ContextKeys.REVISION_COUNT,
+            ContextKeys.PREVIOUS_DRAFT,
+        }
+    )
+
     def __init__(
         self,
         maker_instructions: str,
