@@ -1676,14 +1676,23 @@ def build_debate_fsm(
                 # The verdict is recorded, never routed on: a null costs no
                 # retry call.
                 _debate_field(ContextKeys.JUDGE_VERDICT, round_values, required=False),
-                # Narrowed to this round's values and its number (fix 21.1):
-                # the old bool helper showed the whole context, agent_trace
-                # included.
+                # Narrowed to this round's values, its number and the debate
+                # history (fix 21.1): the old bool helper showed the whole
+                # context, agent_trace included.
+                # DECISION plan-2026-09-29T103145-06a5ec0a/D-054
+                # Do NOT drop debate_rounds from this list: without the
+                # earlier rounds the live judge declined consensus every
+                # round (forced_pass). It is bounded by num_rounds, unlike
+                # agent_trace, which must stay out.
                 _typed_field_extraction(
                     ContextKeys.CONSENSUS_REACHED,
                     "bool",
                     fields[ContextKeys.CONSENSUS_REACHED],
-                    extra_context_keys=(*round_values, ContextKeys.CURRENT_ROUND),
+                    extra_context_keys=(
+                        *round_values,
+                        ContextKeys.CURRENT_ROUND,
+                        ContextKeys.DEBATE_ROUNDS,
+                    ),
                 ),
             ],
             "response_instructions": "",

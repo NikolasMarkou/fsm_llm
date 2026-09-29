@@ -947,7 +947,9 @@ def build_debate_field_instructions(
             "true when the proposition, as defended in the counter-argument, "
             "is a satisfactory answer to the task; false only when another "
             f"round (at most {max_rounds} in total; current_round is this "
-            "round's number) would clearly improve it."
+            "round's number) would clearly improve it. debate_rounds holds "
+            "the earlier rounds: true also when this round no longer changes "
+            "the position materially."
             f"{_persona_line(judge_persona)}"
         ),
     }

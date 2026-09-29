@@ -1408,6 +1408,21 @@ class TestDebateLoop:
         result = DebateAgent(num_rounds=num_rounds, llm_interface=llm).run(_DEBATE_TASK)
         return llm, result
 
+    def test_judge_consensus_prompt_shows_prior_rounds(self):
+        # Fix 21.2: the 21.1 narrowing dropped debate_rounds from the judge's
+        # consensus prompt; live, the judge then declined consensus every
+        # round. Round 2's judge must see round 1, never agent_trace.
+        llm, _ = self._run()
+
+        requests = _field_requests(llm, ContextKeys.CONSENSUS_REACHED)
+        assert len(requests) == 2
+        first, second = requests
+        assert not first.context.get(ContextKeys.DEBATE_ROUNDS)
+        prior = second.context[ContextKeys.DEBATE_ROUNDS]
+        assert [r["proposition"] for r in prior] == [_P1]
+        assert _C1 in second.system_prompt
+        assert ContextKeys.AGENT_TRACE not in second.context
+
     def test_round_two_builds_on_round_one(self):
         # Skip-if-set froze every round value after round 1, and the bulk
         # prompt showed none of them.
@@ -2753,7 +2768,7 @@ class TestSuccessReflectsWhoConcluded:
 
     def test_debate_judge_consensus_on_the_last_round_is_success(self):
         derived = _debate_derived()
-        # The judge prompt shows current_round, not debate_rounds (fix 21.1).
+        # The judge decides on current_round (its prompt also shows debate_rounds).
         derived[ContextKeys.CONSENSUS_REACHED] = lambda _t, ctx: (
             ctx.get(ContextKeys.CURRENT_ROUND, 1) > 1
         )
@@ -2768,7 +2783,7 @@ class TestSuccessReflectsWhoConcluded:
         derived[ContextKeys.PROPOSITION] = lambda text, ctx: (
             None if ctx.get(ContextKeys.DEBATE_ROUNDS) else _P1
         )
-        # The judge prompt shows current_round, not debate_rounds (fix 21.1).
+        # The judge decides on current_round (its prompt also shows debate_rounds).
         derived[ContextKeys.CONSENSUS_REACHED] = lambda _t, ctx: (
             ctx.get(ContextKeys.CURRENT_ROUND, 1) > 1
         )
