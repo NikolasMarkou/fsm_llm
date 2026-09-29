@@ -14,9 +14,12 @@ import pytest
 
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.debate import DebateAgent
+from fsm_llm.agents.fsm_definitions import _typed_field_extraction
+from fsm_llm.agents.handlers import make_fresh_keys_handler
 from fsm_llm.api import API
 from fsm_llm.definitions import (
     BulkExtractionRequest,
+    FieldExtractionConfig,
     FieldExtractionRequest,
     ResponseGenerationRequest,
 )
@@ -224,6 +227,188 @@ class TestDebateGrounding:
         result = agent.run(task)
 
         assert result.final_context.get(ContextKeys.CRITIQUE) == self.CRITIQUE
+
+
+_TASK = "Assess the claim that TASK-7731 cut latency."
+_TRACE_MARKER = "TRACE-MARKER-9f2"
+
+
+def _loop_fsm(field_extractions: list[dict]) -> dict:
+    """``produce -> check -> produce`` loop; only ``produce`` extracts."""
+    return {
+        "name": "TypedLoop",
+        "description": "Typed per-field loop probe",
+        "initial_state": "produce",
+        "persona": "An analyst",
+        "states": {
+            "produce": {
+                "id": "produce",
+                "description": "Produce the critique",
+                "purpose": "Write a critique of the claim",
+                "extraction_instructions": "",
+                "response_instructions": "",
+                "field_extractions": field_extractions,
+                "transitions": [
+                    {"target_state": "check", "description": "Next", "priority": 900}
+                ],
+            },
+            "check": {
+                "id": "check",
+                "description": "Check the critique",
+                "purpose": "Decide whether to stop",
+                "response_instructions": "",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "Stop",
+                        "priority": 10,
+                        "conditions": [
+                            {
+                                "description": "stop set",
+                                "logic": {"==": [{"var": "stop"}, True]},
+                            }
+                        ],
+                    },
+                    {"target_state": "produce", "description": "Redo", "priority": 900},
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "Terminal",
+                "purpose": "Report",
+                "response_instructions": "Report the critique",
+            },
+        },
+    }
+
+
+def _start_loop(llm: PromptGroundedLLM, field_extractions: list[dict]):
+    api = API.from_definition(_loop_fsm(field_extractions), llm_interface=llm)
+    conv_id, _ = api.start_conversation(
+        {
+            ContextKeys.TASK: _TASK,
+            ContextKeys.OBSERVATIONS: ["[Step 1] Tool: probe | Result: p99 fell"],
+            ContextKeys.AGENT_TRACE: [{"note": _TRACE_MARKER}],
+        }
+    )
+    return api, conv_id
+
+
+class TestTypedFieldExtraction:
+    """Step 14 helpers, and Pre-Mortem check 2: typed fields ride the per-field path."""
+
+    def test_helper_shape_is_a_valid_core_config(self):
+        field = _typed_field_extraction(
+            "critique",
+            "str",
+            "Name the weakest point.",
+            extra_context_keys=[ContextKeys.PROPOSITION, ContextKeys.TASK],
+            required=False,
+        )
+        config = FieldExtractionConfig.model_validate(field)
+
+        assert (config.field_type, config.required) == ("str", False)
+        assert config.context_keys == [
+            ContextKeys.TASK,
+            ContextKeys.OBSERVATIONS,
+            ContextKeys.PROPOSITION,
+        ]
+        assert ContextKeys.AGENT_TRACE not in config.context_keys
+        assert "from the task" in config.extraction_instructions
+        assert "Name the weakest point." in config.extraction_instructions
+
+    @pytest.mark.parametrize("field_type", ["str", "float", "list", "bool"])
+    def test_supported_types(self, field_type):
+        field = _typed_field_extraction("value", field_type, "x")
+        assert FieldExtractionConfig.model_validate(field).field_type == field_type
+
+    @pytest.mark.parametrize("field_type", ["any", "dict", "int"])
+    def test_other_types_rejected(self, field_type):
+        with pytest.raises(ValueError, match="unsupported"):
+            _typed_field_extraction("value", field_type, "x")  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("key", [ContextKeys.AGENT_TRACE, "_max_iterations"])
+    def test_trace_and_internal_context_keys_rejected(self, key):
+        with pytest.raises(ValueError, match="not allowed"):
+            _typed_field_extraction("value", "str", "x", extra_context_keys=[key])
+
+    def test_typed_only_state_makes_no_bulk_call(self):
+        llm = PromptGroundedLLM(facts={"critique": ("Too few samples.", "TASK-7731")})
+        api, conv_id = _start_loop(
+            llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
+        )
+
+        api.converse("Continue.", conv_id)
+
+        assert llm.calls("extract_bulk_data") == []
+        assert api.get_data(conv_id)["critique"] == "Too few samples."
+
+    def test_per_field_request_carries_the_task(self):
+        llm = PromptGroundedLLM(facts={"critique": ("Too few samples.", "TASK-7731")})
+        api, conv_id = _start_loop(
+            llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
+        )
+
+        api.converse("Continue.", conv_id)
+
+        (request,) = llm.calls("extract_field")
+        assert _TASK in request.system_prompt
+        assert request.context[ContextKeys.TASK] == _TASK
+        assert "p99 fell" in request.system_prompt
+
+    def test_agent_trace_absent_from_narrowed_prompt(self):
+        llm = PromptGroundedLLM(facts={"critique": ("Too few samples.", "TASK-7731")})
+        api, conv_id = _start_loop(
+            llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
+        )
+
+        api.converse("Continue.", conv_id)
+
+        (request,) = llm.calls("extract_field")
+        assert ContextKeys.AGENT_TRACE not in request.context
+        assert _TRACE_MARKER not in request.system_prompt
+        assert ContextKeys.AGENT_TRACE not in request.system_prompt
+
+    def test_unnarrowed_config_leaks_agent_trace(self):
+        """Control: without ``context_keys`` core dumps the trace (LOOP-08)."""
+        llm = PromptGroundedLLM(facts={"critique": ("Too few samples.", "TASK-7731")})
+        api, conv_id = _start_loop(
+            llm,
+            [
+                {
+                    "field_name": "critique",
+                    "field_type": "str",
+                    "extraction_instructions": "Name the flaw.",
+                }
+            ],
+        )
+
+        api.converse("Continue.", conv_id)
+
+        (request,) = llm.calls("extract_field")
+        assert _TRACE_MARKER in request.system_prompt
+
+    @pytest.mark.parametrize("refresh", [True, False])
+    def test_fresh_keys_handler_reopens_the_loop_value(self, refresh):
+        llm = PromptGroundedLLM(facts={"critique": ("Round one.", "TASK-7731")})
+        api, conv_id = _start_loop(
+            llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
+        )
+        if refresh:
+            api.register_handler(
+                api.create_handler("fresh_critique")
+                .on_state_entry("produce")
+                .do(make_fresh_keys_handler(["critique"]))
+            )
+
+        api.converse("Continue.", conv_id)  # produce -> check
+        llm.facts["critique"] = ("Round two.", "TASK-7731")
+        api.converse("Continue.", conv_id)  # check -> produce
+        api.converse("Continue.", conv_id)  # produce -> check
+
+        expected = "Round two." if refresh else "Round one."
+        assert api.get_data(conv_id)["critique"] == expected
+        assert len(llm.calls("extract_field")) == (2 if refresh else 1)
 
 
 def _loopback_listener() -> socket.socket:

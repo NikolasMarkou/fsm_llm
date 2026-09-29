@@ -5,12 +5,18 @@ observation tracking, and HITL gating.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from fsm_llm.logging import logger
 
-from .constants import ContextKeys, Defaults, LogMessages, StopReason
+from .constants import (
+    RESULT_DROPPED_CONTEXT_KEYS,
+    ContextKeys,
+    Defaults,
+    LogMessages,
+    StopReason,
+)
 from .definitions import AgentStep, ToolCall
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 from .hitl import ApprovalPolicy
@@ -592,3 +598,83 @@ def make_redraft_handlers(
         return delta
 
     return on_entry, on_exit
+
+
+def is_forced_verdict(value: Any, context: dict[str, Any]) -> bool:
+    """True when ``value`` is a verdict a framework handler forced to True.
+
+    "Forced" is read only from framework-written flags, never from the
+    verdict key itself: ``value is True`` AND either ``max_iterations_reached
+    is True`` (limiters, stall detector; seeded False by ``_init_context``) or
+    ``forced_stop_reason`` holds a ``StopReason.FORCED`` value (forcing
+    handlers). Both flags are in ``RUN_OUTPUT_KEYS``, so caller context cannot
+    seed them. Never raises.
+    """
+    if value is not True:
+        return False
+    if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
+        return True
+    reason = context.get(ContextKeys.FORCED_STOP_REASON)
+    return isinstance(reason, str) and reason in StopReason.FORCED
+
+
+# DECISION plan-2026-09-29T103145-06a5ec0a/D-008: loop freshness is ONE rule,
+# built here. Register the handler on entry to the PRODUCING (redo) state,
+# never on entry to the judging state: PRE_TRANSITION runs before entry, so
+# that would erase the limiter's forced verdict (3e4eb3e5 D-013). Do NOT
+# clear a forced True (see is_forced_verdict): the forced edge must still
+# route. Do NOT stash under an internal-prefixed or unlisted key: the stash
+# must stay prompt-visible and out of results (c1d5bfbc D-012).
+def make_fresh_keys_handler(
+    keys: Iterable[str],
+    *,
+    stash: Mapping[str, str] | None = None,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Build an entry handler that makes a producing state re-extract ``keys``.
+
+    Core extracts a key only while it is unset (skip-if-set, typed
+    ``field_extractions`` included), so a loop value left in context freezes
+    after round 1. Clearing it on entry to the state that produces it lets
+    that state's extraction run again.
+
+    Interface contract (ReAct think, Reflexion, PlanExecute, Debate,
+    PromptChain; register with ``on_state_entry(<producing state>)``):
+        - ``keys``: non-empty; the context keys the producing state writes.
+        - ``stash``: optional ``{key: stash_key}`` for keys whose previous
+          value the producing prompt must still see. Every ``key`` must be in
+          ``keys`` and every ``stash_key`` in ``RESULT_DROPPED_CONTEXT_KEYS``
+          (visible to prompts, dropped from results).
+        - Returns a handler whose delta sets each listed key that holds a
+          value to ``None`` (core deletes it); a stashed key's value is also
+          copied to its stash key. Unset keys are left out of the delta, so an
+          older stash survives a round that produced nothing. A key holding a
+          forced ``True`` (:func:`is_forced_verdict`) is left untouched. The
+          handler never raises.
+        - Raises ``ValueError`` at build time for empty ``keys`` or an invalid
+          ``stash`` mapping.
+    """
+    fresh = tuple(dict.fromkeys(keys))
+    if not fresh:
+        raise ValueError("make_fresh_keys_handler needs at least one key")
+    stash_map = dict(stash or {})
+    unknown = sorted(set(stash_map) - set(fresh))
+    if unknown:
+        raise ValueError(f"stash names keys that are not refreshed: {unknown}")
+    unlisted = sorted(set(stash_map.values()) - RESULT_DROPPED_CONTEXT_KEYS)
+    if unlisted:
+        raise ValueError(
+            f"stash keys must be in RESULT_DROPPED_CONTEXT_KEYS: {unlisted}"
+        )
+
+    def refresh_keys(context: dict[str, Any]) -> dict[str, Any]:
+        delta: dict[str, Any] = {}
+        for key in fresh:
+            value = context.get(key)
+            if value is None or is_forced_verdict(value, context):
+                continue
+            delta[key] = None
+            if key in stash_map:
+                delta[stash_map[key]] = value
+        return delta
+
+    return refresh_keys

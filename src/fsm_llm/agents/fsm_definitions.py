@@ -4,7 +4,10 @@ Pre-built FSM definitions for agent patterns.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Literal, get_args
+
+from fsm_llm.constants import has_internal_prefix
 
 from .constants import ContextKeys, Defaults
 from .definitions import ChainStep
@@ -440,6 +443,70 @@ def _bool_decision_field_extractions(
             ),
         }
     ]
+
+
+TypedFieldType = Literal["str", "float", "list", "bool"]
+
+# Context every loop-field prompt sees: the task and the tool observations.
+_LOOP_FIELD_CONTEXT_KEYS: tuple[str, ...] = (
+    ContextKeys.TASK,
+    ContextKeys.OBSERVATIONS,
+)
+
+
+def _typed_field_extraction(
+    field_name: str,
+    field_type: TypedFieldType,
+    instructions: str,
+    *,
+    extra_context_keys: Sequence[str] = (),
+    required: bool = True,
+) -> dict[str, Any]:
+    """One typed ``field_extraction`` for a loop value an agent state produces.
+
+    Contract: returns a raw dict for ``State(field_extractions=[...])``
+    declaring ``field_name`` as ``field_type`` (``str``, ``float``, ``list`` or
+    ``bool``; core coerces and rejects mismatches). The prompt context is
+    narrowed to ``task``, ``observations`` and ``extra_context_keys`` (in that
+    order, duplicates dropped), and the instructions tell the model to read the
+    value from the task and those keys, not from the "Continue." loop message
+    (LOOP-11). ``required`` maps to the core flag (a null required field costs
+    one retry call). Raises ``ValueError`` for another ``field_type``, or for
+    an extra key that is ``agent_trace`` or internal-prefixed (core reads a
+    listed key from raw context, with no internal-key filter).
+
+    Pair it with an empty state-level ``extraction_instructions`` (D-009 of
+    plan 06a5ec0a): core then runs only these context-aware per-field calls and
+    skips the context-free bulk call.
+
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-017
+    Do NOT drop ``context_keys`` here (``None`` dumps all visible context,
+    including the unbounded ``agent_trace``, into every per-field prompt), and
+    do NOT cap or rename ``agent_trace`` instead: it feeds
+    ``AgentResult.trace`` and marks the FSM as agent-managed for core.
+    """
+    if field_type not in get_args(TypedFieldType):
+        raise ValueError(f"unsupported typed field type: {field_type!r}")
+    bad = [
+        key
+        for key in extra_context_keys
+        if key == ContextKeys.AGENT_TRACE or has_internal_prefix(key)
+    ]
+    if bad:
+        raise ValueError(f"context keys not allowed in a field prompt: {bad}")
+    context_keys = list(dict.fromkeys((*_LOOP_FIELD_CONTEXT_KEYS, *extra_context_keys)))
+    return {
+        "field_name": field_name,
+        "field_type": field_type,
+        "extraction_instructions": (
+            f"Extract the '{field_name}' field ({field_type}) from the task and "
+            f"the {', '.join(repr(k) for k in context_keys)} values in the "
+            "'Already extracted:' context. The user message is only a loop "
+            f"signal and holds no data. {instructions}"
+        ),
+        "context_keys": context_keys,
+        "required": required,
+    }
 
 
 def _conclude_on_evidence_logic(

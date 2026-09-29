@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from fsm_llm.agents.constants import ContextKeys, Defaults
-from fsm_llm.agents.handlers import AgentHandlers, make_iteration_limiter
+import pytest
+
+from fsm_llm.agents.constants import ContextKeys, Defaults, StopReason
+from fsm_llm.agents.handlers import (
+    AgentHandlers,
+    is_forced_verdict,
+    make_fresh_keys_handler,
+    make_iteration_limiter,
+)
 from fsm_llm.agents.tools import ToolRegistry, tool
 
 
@@ -373,3 +380,119 @@ class TestEmptyInputListParamRecovery:
         assert received == []
         assert result[ContextKeys.TOOL_STATUS] == "failed"
         assert "'count'" in result[ContextKeys.TOOL_RESULT]
+
+
+class TestMakeFreshKeysHandler:
+    """Producing-state entry handler that re-opens loop keys (D-008)."""
+
+    def test_set_keys_are_deleted(self):
+        refresh = make_fresh_keys_handler(
+            [ContextKeys.PROPOSITION, ContextKeys.CRITIQUE]
+        )
+        delta = refresh(
+            {ContextKeys.PROPOSITION: "p1", ContextKeys.CRITIQUE: "c1", "task": "t"}
+        )
+        assert delta == {ContextKeys.PROPOSITION: None, ContextKeys.CRITIQUE: None}
+
+    def test_unset_keys_are_left_out(self):
+        refresh = make_fresh_keys_handler([ContextKeys.REASONING])
+        assert refresh({}) == {}
+        assert refresh({ContextKeys.REASONING: None}) == {}
+
+    def test_falsy_values_are_still_cleared(self):
+        refresh = make_fresh_keys_handler(
+            [ContextKeys.CONSENSUS_REACHED, ContextKeys.PLAN_STEPS]
+        )
+        delta = refresh(
+            {ContextKeys.CONSENSUS_REACHED: False, ContextKeys.PLAN_STEPS: []}
+        )
+        assert delta == {
+            ContextKeys.CONSENSUS_REACHED: None,
+            ContextKeys.PLAN_STEPS: None,
+        }
+
+    def test_stash_moves_the_previous_value(self):
+        refresh = make_fresh_keys_handler(
+            [ContextKeys.DRAFT_OUTPUT, ContextKeys.CHECKER_FEEDBACK],
+            stash={ContextKeys.DRAFT_OUTPUT: ContextKeys.PREVIOUS_DRAFT},
+        )
+        delta = refresh(
+            {ContextKeys.DRAFT_OUTPUT: "v1", ContextKeys.CHECKER_FEEDBACK: "fix x"}
+        )
+        assert delta == {
+            ContextKeys.DRAFT_OUTPUT: None,
+            ContextKeys.PREVIOUS_DRAFT: "v1",
+            ContextKeys.CHECKER_FEEDBACK: None,
+        }
+
+    def test_unset_stashed_key_keeps_the_older_stash(self):
+        refresh = make_fresh_keys_handler(
+            [ContextKeys.DRAFT_OUTPUT],
+            stash={ContextKeys.DRAFT_OUTPUT: ContextKeys.PREVIOUS_DRAFT},
+        )
+        assert refresh({ContextKeys.PREVIOUS_DRAFT: "v0"}) == {}
+
+    @pytest.mark.parametrize(
+        "flags",
+        [
+            {ContextKeys.MAX_ITERATIONS_REACHED: True},
+            {ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS},
+            {ContextKeys.FORCED_STOP_REASON: StopReason.STALLED},
+        ],
+    )
+    def test_forced_true_verdict_is_kept(self, flags):
+        refresh = make_fresh_keys_handler(
+            [ContextKeys.CHECKER_PASSED, ContextKeys.DRAFT_OUTPUT]
+        )
+        delta = refresh(
+            {ContextKeys.CHECKER_PASSED: True, ContextKeys.DRAFT_OUTPUT: "v2", **flags}
+        )
+        assert delta == {ContextKeys.DRAFT_OUTPUT: None}
+
+    @pytest.mark.parametrize(
+        "flags",
+        [
+            {},
+            {ContextKeys.MAX_ITERATIONS_REACHED: False},
+            {ContextKeys.MAX_ITERATIONS_REACHED: "true"},
+            {ContextKeys.FORCED_STOP_REASON: StopReason.ANSWERED},
+            {ContextKeys.FORCED_STOP_REASON: "forced_pass!"},
+        ],
+    )
+    def test_unforced_true_is_cleared(self, flags):
+        refresh = make_fresh_keys_handler([ContextKeys.CHECKER_PASSED])
+        assert refresh({ContextKeys.CHECKER_PASSED: True, **flags}) == {
+            ContextKeys.CHECKER_PASSED: None
+        }
+
+    def test_forced_flags_do_not_protect_non_true_values(self):
+        refresh = make_fresh_keys_handler([ContextKeys.CHECKER_PASSED])
+        context = {
+            ContextKeys.CHECKER_PASSED: "true",
+            ContextKeys.MAX_ITERATIONS_REACHED: True,
+        }
+        assert refresh(context) == {ContextKeys.CHECKER_PASSED: None}
+
+    def test_empty_keys_rejected(self):
+        with pytest.raises(ValueError, match="at least one key"):
+            make_fresh_keys_handler([])
+
+    def test_stash_for_unlisted_key_rejected(self):
+        with pytest.raises(ValueError, match="not refreshed"):
+            make_fresh_keys_handler(
+                [ContextKeys.CRITIQUE],
+                stash={ContextKeys.DRAFT_OUTPUT: ContextKeys.PREVIOUS_DRAFT},
+            )
+
+    @pytest.mark.parametrize("target", ["previous_critique", "_previous_draft"])
+    def test_stash_target_outside_dropped_keys_rejected(self, target):
+        with pytest.raises(ValueError, match="RESULT_DROPPED_CONTEXT_KEYS"):
+            make_fresh_keys_handler(
+                [ContextKeys.CRITIQUE], stash={ContextKeys.CRITIQUE: target}
+            )
+
+    def test_is_forced_verdict_needs_strict_true(self):
+        forced = {ContextKeys.MAX_ITERATIONS_REACHED: True}
+        assert is_forced_verdict(True, forced) is True
+        assert is_forced_verdict(1, forced) is False
+        assert is_forced_verdict(True, {}) is False
