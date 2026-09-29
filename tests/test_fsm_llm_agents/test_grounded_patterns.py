@@ -210,12 +210,7 @@ class TestDebateGrounding:
     PROPOSITION = "Remote work raises output for focused engineering tasks."
     CRITIQUE = "It ignores the cost to team cohesion."
 
-    # Step 19 moves debate to typed per-field extraction and removes the xfail.
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="RC1 at HEAD: debate's bulk prompt is context-free ('Continue.')",
-    )
+    # Step 19 moved debate to typed per-field extraction (was xfail-strict).
     def test_critique_grounded_in_proposition(self):
         task = "Does remote work raise engineering output?"
         llm = PromptGroundedLLM(
@@ -1362,3 +1357,176 @@ class TestPlanExecuteLoop:
         for request in llm.calls("extract_bulk_data"):
             assert "plan_steps" not in request.system_prompt
             assert "step_failed" not in request.system_prompt
+
+
+_P1 = "P1: remote work raises output"
+_C1 = "C1: it ignores cohesion"
+_P2 = "P2: remote work raises output with weekly on-site days"
+_C2 = "C2: on-site days cost commute time"
+_DEBATE_TASK = "Does remote work raise engineering output?"
+_CONCLUDE_TEXT = "Final: yes, with weekly on-site days."
+
+
+def _debate_derived(consensus: bool = False) -> dict:
+    """Round values computed from the prompt: round 2 builds on round 1."""
+
+    def proposition(text, _ctx):
+        if _C1 in text:  # round 1's critique, via debate_rounds
+            return _P2
+        return _P1 if _DEBATE_TASK in text else None
+
+    def critique(_text, ctx):
+        return {_P1: _C1, _P2: _C2}.get(ctx.get(ContextKeys.PROPOSITION))
+
+    def counter(_text, ctx):
+        crit = ctx.get(ContextKeys.CRITIQUE)
+        return f"K answers {crit}" if crit else None
+
+    def verdict(_text, ctx):
+        prop = ctx.get(ContextKeys.PROPOSITION)
+        return f"V on {prop}" if prop else None
+
+    return {
+        ContextKeys.PROPOSITION: proposition,
+        ContextKeys.CRITIQUE: critique,
+        ContextKeys.COUNTER_ARGUMENT: counter,
+        ContextKeys.JUDGE_VERDICT: verdict,
+        ContextKeys.CONSENSUS_REACHED: lambda _t, _c: consensus,
+    }
+
+
+class TestDebateLoop:
+    """Step 19 (PAT-03): each round extracts fresh grounded values, the answer
+    is the conclude reply, and only conclude speaks."""
+
+    def _run(self, num_rounds=2, **derived_kw):
+        llm = _TurnAwareLLM(
+            _debate_derived(**derived_kw),
+            responses={"conclude": _CONCLUDE_TEXT},
+        )
+        result = DebateAgent(num_rounds=num_rounds, llm_interface=llm).run(_DEBATE_TASK)
+        return llm, result
+
+    def test_round_two_builds_on_round_one(self):
+        # Skip-if-set froze every round value after round 1, and the bulk
+        # prompt showed none of them.
+        _, result = self._run()
+
+        rounds = result.final_context[ContextKeys.DEBATE_ROUNDS]
+        assert [r["proposition"] for r in rounds] == [_P1, _P2]
+        assert [r["critique"] for r in rounds] == [_C1, _C2]
+        assert rounds[1]["counter_argument"] == f"K answers {_C2}"
+        assert rounds[1]["judge_verdict"] == f"V on {_P2}"
+
+    def test_critique_prompt_shows_this_rounds_proposition(self):
+        llm, _ = self._run()
+
+        critiques = _field_requests(llm, ContextKeys.CRITIQUE)
+        assert [r.context.get(ContextKeys.PROPOSITION) for r in critiques] == [
+            _P1,
+            _P2,
+        ]
+
+    def test_answer_is_the_conclude_reply(self):
+        # PAT-03: the answer was the judge's frozen round-1 verdict.
+        _, result = self._run()
+
+        assert result.answer == _CONCLUDE_TEXT
+        assert result.success is True
+        assert result.stop_reason == "answered"
+
+    def test_consensus_concludes_after_one_round(self):
+        _, result = self._run(num_rounds=3, consensus=True)
+
+        assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == 1
+        assert result.answer == _CONCLUDE_TEXT
+
+    def test_no_proposition_is_no_result(self):
+        llm = PromptGroundedLLM(responses={"conclude": _CONCLUDE_TEXT})
+        result = DebateAgent(num_rounds=1, llm_interface=llm).run(_DEBATE_TASK)
+
+        assert result.answer == _CONCLUDE_TEXT
+        assert result.success is False
+        assert result.stop_reason == "no_result"
+
+    def test_only_conclude_speaks_and_no_bulk_call_runs(self):
+        llm, _ = self._run()
+
+        states = {
+            m.group(1)
+            for r in llm.calls("generate_response")
+            if (m := _CURRENT_STATE_TAG.search(r.system_prompt))
+        }
+        assert states == {"conclude"}
+        assert not llm.calls("extract_bulk_data")
+        for name in (
+            ContextKeys.PROPOSITION,
+            ContextKeys.CRITIQUE,
+            ContextKeys.COUNTER_ARGUMENT,
+            ContextKeys.JUDGE_VERDICT,
+        ):
+            for request in _field_requests(llm, name):
+                assert ContextKeys.AGENT_TRACE not in (request.context or {})
+
+
+class _SequenceLLM(PromptGroundedLLM):
+    """Replies with ``replies`` in call order (one per sample)."""
+
+    def __init__(self, replies: list[str]) -> None:
+        super().__init__()
+        self.replies = list(replies)
+
+    def generate_response(self, request: ResponseGenerationRequest):
+        super().generate_response(request)
+        from fsm_llm.definitions import ResponseGenerationResponse
+
+        return ResponseGenerationResponse(
+            message=self.replies.pop(0), message_type="response", reasoning="seq"
+        )
+
+
+class TestSelfConsistencyVote:
+    """Step 19 (PAT-05): the vote counts the final ``Answer:`` line, and
+    ``confidence`` is the winning share."""
+
+    REPLIES = (
+        "Adding them gives 41.\nAnswer: 41",
+        "Six times seven is 42.\nAnswer: 42",
+        "The product is forty-two.\n**Answer:** 42.",
+        "Computing 6*7 we get the value below.\nanswer:  42",
+    )
+
+    def _run(self, replies):
+        from fsm_llm.agents import AgentConfig, SelfConsistencyAgent
+
+        agent = SelfConsistencyAgent(
+            config=AgentConfig(model="mock/model"),
+            num_samples=len(replies),
+            llm_interface=_SequenceLLM(replies),
+        )
+        return agent.run("What is 6 times 7?")
+
+    def test_agreeing_answers_in_different_prose_win(self):
+        result = self._run(self.REPLIES)
+
+        assert result.answer == self.REPLIES[1]
+        assert result.final_context[ContextKeys.CONFIDENCE] == 0.75
+        assert result.success is True
+        assert result.stop_reason == "answered"
+
+    def test_text_without_answer_line_votes_casefolded(self):
+        from fsm_llm.agents.self_consistency import _majority_vote
+
+        assert _majority_vote(["Paris", " paris ", "London"]) == "Paris"
+
+    def test_sample_prompt_asks_for_an_answer_line(self):
+        llm = _SequenceLLM(["Answer: 42"])
+        from fsm_llm.agents import AgentConfig, SelfConsistencyAgent
+
+        SelfConsistencyAgent(
+            config=AgentConfig(model="mock/model"), num_samples=1, llm_interface=llm
+        ).run("What is 6 times 7?")
+
+        (request,) = llm.calls("generate_response")
+        assert "Answer:" in request.system_prompt
+        assert not llm.calls("extract_bulk_data")

@@ -100,8 +100,8 @@ class EvaluatorOptimizerAgent(BaseAgent):
             },
         )
 
-        # D-036: `generated_output` is this pattern's answer key (precedents
-        # debate.py JUDGE_VERDICT, maker_checker.py DRAFT_OUTPUT); without it a
+        # D-036: `generated_output` is this pattern's answer key (precedent
+        # maker_checker.py DRAFT_OUTPUT); without it a
         # correct evaluator-passed run reads as prose-fallback, success=False.
         return self._standard_run(
             task,

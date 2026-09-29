@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from .constants import Defaults
+from .constants import ContextKeys, Defaults
 from .tools import ToolRegistry
 
 if TYPE_CHECKING:
@@ -846,26 +846,16 @@ def build_chain_output_response_instructions() -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_generate_extraction_instructions() -> str:
-    """Build extraction instructions for the self-consistency generate state."""
-    return "\n".join(
-        [
-            "Answer the given task directly and completely.",
-            "",
-            "Think through the problem step by step, then provide your answer.",
-            "",
-            "Extract the following as JSON:",
-            '- "final_answer": your complete answer to the task',
-            '- "confidence": your confidence in the answer (0.0 to 1.0)',
-        ]
-    )
-
-
 def build_generate_response_instructions() -> str:
-    """Build response instructions for the self-consistency generate state."""
+    """Build response instructions for the self-consistency generate state.
+
+    The closing ``Answer:`` line is what ``self_consistency._majority_vote``
+    counts, so samples that agree in different prose still agree.
+    """
     return (
-        "Present your answer clearly and concisely. "
-        "Show your reasoning before giving the final answer."
+        "Reply in two parts: first your reasoning in one or two sentences, "
+        "then a last line that is exactly 'Answer: <your answer>', stating "
+        "only the answer. Always include that last line."
     )
 
 
@@ -875,132 +865,71 @@ def build_generate_response_instructions() -> str:
 
 
 def _persona_line(persona: str) -> str:
-    """Return the ``Role:`` line for a debate persona, or ``""`` when unset."""
-    return f"\nRole: {persona}\n" if persona else ""
+    """Return the ``Role:`` sentence for a debate persona, or ``""`` when unset."""
+    return f" Role: {persona}" if persona else ""
 
 
-def build_propose_extraction_instructions(proposer_persona: str = "") -> str:
-    """Build extraction instructions for the debate propose state."""
-    return "\n".join(
-        [
-            "Generate a well-reasoned proposition or answer for the task.",
-            _persona_line(proposer_persona),
-            "If previous debate rounds are available in context, improve upon "
-            "the previous proposition by incorporating insights from the critique "
-            "and counter-argument.",
-            "",
-            "Extract the following as JSON:",
-            '- "proposition": your proposition or answer with supporting arguments',
-            '- "reasoning": your reasoning process',
-        ]
-    )
+# Debate values are written, not found: the field prompt frames every value
+# as an extraction, and a model then returns null for text no message holds.
+_COMPOSE = (
+    "This value does not exist yet: do not look for it in the messages or the "
+    "context, compose it yourself now and never return null. "
+)
 
 
-def build_propose_response_instructions() -> str:
-    """Build response instructions for the debate propose state."""
-    return (
-        "Present your proposition clearly with supporting arguments. "
-        "If this is a subsequent round, explain how you improved it."
-    )
-
-
-def build_critique_extraction_instructions(critic_persona: str = "") -> str:
-    """Build extraction instructions for the debate critique state."""
-    return "\n".join(
-        [
-            "Critically analyze the current proposition.",
-            _persona_line(critic_persona),
-            "Identify weaknesses, logical gaps, missing evidence, "
-            "and potential counterexamples.",
-            "",
-            "Extract the following as JSON:",
-            '- "critique": your detailed critique of the proposition',
-            '- "reasoning": the reasoning behind your critique',
-        ]
-    )
-
-
-def build_critique_response_instructions() -> str:
-    """Build response instructions for the debate critique state."""
-    return (
-        "Present your critique of the proposition. Be specific about "
-        "weaknesses and suggest areas for improvement."
-    )
-
-
-def build_counter_extraction_instructions(proposer_persona: str = "") -> str:
-    """Build extraction instructions for the debate counter state."""
-    return "\n".join(
-        [
-            "Address the critique with counter-arguments to strengthen "
-            "the original proposition.",
-            _persona_line(proposer_persona),
-            "Respond to each point raised in the critique. Concede valid points "
-            "and refute invalid ones with evidence.",
-            "",
-            "Extract the following as JSON:",
-            '- "counter_argument": your counter-arguments addressing the critique',
-            '- "reasoning": your reasoning process',
-        ]
-    )
-
-
-def build_counter_response_instructions() -> str:
-    """Build response instructions for the debate counter state."""
-    return (
-        "Present your counter-arguments. Address each point from the critique "
-        "and strengthen the proposition where possible."
-    )
-
-
-def build_judge_extraction_instructions(
+def build_debate_field_instructions(
+    proposer_persona: str = "",
+    critic_persona: str = "",
     judge_persona: str = "",
     max_rounds: int = 3,
-) -> str:
-    """Build extraction instructions for the debate judge state."""
-    return "\n".join(
-        [
-            "Evaluate the full debate exchange: proposition, critique, "
-            "and counter-argument.",
-            _persona_line(judge_persona),
-            "Determine whether a strong consensus answer has been reached "
-            f"or if another round of debate (max {max_rounds}) is needed.",
-            "",
-            "Extract the following as JSON:",
-            '- "judge_verdict": your assessment of the debate exchange',
-            '- "consensus_reached": true if a satisfactory answer has emerged, '
-            "false if another round would improve quality",
-            '- "final_answer": the best answer so far (required if consensus_reached is true)',
-            '- "reasoning": your reasoning for the verdict',
-        ]
-    )
+) -> dict[str, str]:
+    """Per-field instructions for the debate states' typed fields.
 
-
-def build_judge_response_instructions() -> str:
-    """Build response instructions for the debate judge state."""
-    return (
-        "Summarize the debate exchange and explain your verdict. "
-        "If consensus is reached, present the agreed-upon answer."
-    )
-
-
-def build_debate_conclude_extraction_instructions() -> str:
-    """Build extraction instructions for the debate conclude state."""
-    return "\n".join(
-        [
-            "The debate is complete. Produce the final, definitive answer "
-            "incorporating the strongest arguments from all rounds.",
-            "",
-            "Extract the following as JSON:",
-            '- "final_answer": your complete final answer to the original task',
-            '- "confidence": your confidence in the answer (0.0 to 1.0)',
-        ]
-    )
+    Returns ``{field_name: instructions}`` for ``proposition`` (propose),
+    ``critique`` (critique), ``counter_argument`` (counter), ``judge_verdict``
+    and ``consensus_reached`` (judge). Each names the context values its
+    prompt shows, so a round is argued against this round's text, not the
+    "Continue." loop message. The ``consensus_reached`` wording is permissive
+    (plan 06a5ec0a D-035): the judge handler still caps the rounds. The four
+    text fields open with :data:`_COMPOSE`: live, qwen3.5:4b answered them
+    null ("not in the user message") when asked only to extract.
+    """
+    return {
+        ContextKeys.PROPOSITION: (
+            f"{_COMPOSE}Your proposition: a clear position on the task with its "
+            "supporting arguments. If debate_rounds holds earlier rounds, "
+            "improve the latest proposition using its critique and "
+            f"counter-argument.{_persona_line(proposer_persona)}"
+        ),
+        ContextKeys.CRITIQUE: (
+            f"{_COMPOSE}Your critique of the proposition value: its weaknesses, logical "
+            "gaps, missing evidence and counterexamples."
+            f"{_persona_line(critic_persona)}"
+        ),
+        ContextKeys.COUNTER_ARGUMENT: (
+            f"{_COMPOSE}Your counter-arguments to the critique value: answer each of its "
+            "points, concede the valid ones and strengthen the proposition."
+            f"{_persona_line(proposer_persona)}"
+        ),
+        ContextKeys.JUDGE_VERDICT: (
+            f"{_COMPOSE}Your verdict on this round: weigh the proposition, critique and "
+            "counter_argument values and name the strongest points of each."
+            f"{_persona_line(judge_persona)}"
+        ),
+        ContextKeys.CONSENSUS_REACHED: (
+            "Weigh the proposition, critique and counter_argument values. "
+            "true when the proposition, as defended in the counter-argument, "
+            "is a satisfactory answer to the task; false only when another "
+            f"round (at most {max_rounds} in total) would clearly improve it."
+            f"{_persona_line(judge_persona)}"
+        ),
+    }
 
 
 def build_debate_conclude_response_instructions() -> str:
     """Build response instructions for the debate conclude state."""
     return (
-        "Present the final answer from the debate. Reference the key arguments "
-        "and how the debate refined the answer."
+        "Give the final, definitive answer to the task from the debate: state "
+        "the answer first, then the key arguments from debate_rounds that "
+        "shaped it."
     )

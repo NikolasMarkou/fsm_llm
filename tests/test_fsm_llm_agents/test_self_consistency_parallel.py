@@ -26,7 +26,7 @@ def _patch_generate(agent, monkeypatch):
     """Make _generate_single deterministic: answer encodes the temperature."""
 
     def fake(fsm_def, task, temperature, initial_context):
-        return (f"t{temperature:.4f}", 0.9)
+        return f"t{temperature:.4f}"
 
     monkeypatch.setattr(agent, "_generate_single", fake)
 
@@ -76,7 +76,7 @@ class TestParallelSelfConsistency:
                 pass
             with lock:
                 active["now"] -= 1
-            return ("ans", 0.5)
+            return "ans"
 
         monkeypatch.setattr(agent, "_generate_single", fake)
         agent.run("q")
@@ -88,7 +88,7 @@ class TestParallelSelfConsistency:
         def fake(fsm_def, task, temperature, initial_context):
             if temperature < 0.5:
                 raise RuntimeError("boom")
-            return ("ok", 0.7)
+            return "ok"
 
         monkeypatch.setattr(agent, "_generate_single", fake)
         result = agent.run("q")

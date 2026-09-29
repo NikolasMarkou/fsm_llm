@@ -787,7 +787,7 @@ class BaseAgent(ABC):
         """Extract answer with a fallback chain.
 
         1. Try ``ContextKeys.FINAL_ANSWER``
-        2. Try each key in *extra_keys* (e.g. ``JUDGE_VERDICT``)
+        2. Try each key in *extra_keys* (e.g. ``DRAFT_OUTPUT``)
         3. Try responses in reverse order
         4. Return default message
         """

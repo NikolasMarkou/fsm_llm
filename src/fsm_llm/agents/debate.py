@@ -25,7 +25,16 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, DebateRound
 from .fsm_definitions import build_debate_fsm
-from .handlers import make_iteration_limiter
+from .handlers import make_fresh_keys_handler, make_iteration_limiter
+
+# Every key a debate round writes, cleared on propose entry.
+_ROUND_KEYS: tuple[str, ...] = (
+    ContextKeys.CONSENSUS_REACHED,
+    ContextKeys.PROPOSITION,
+    ContextKeys.CRITIQUE,
+    ContextKeys.COUNTER_ARGUMENT,
+    ContextKeys.JUDGE_VERDICT,
+)
 
 _DEFAULT_PROPOSER_PERSONA = (
     "You are a constructive advocate who builds strong, well-reasoned arguments. "
@@ -132,8 +141,25 @@ class DebateAgent(BaseAgent):
             context,
             "debate",
             max_iterations=self._fsm_budget(),
-            extra_answer_keys=[ContextKeys.JUDGE_VERDICT],
+            # Success key only; the answer is the conclude reply (see
+            # _extract_answer, D-036 of plan 06a5ec0a).
+            extra_answer_keys=[ContextKeys.PROPOSITION],
         )
+
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-036
+    # The answer is the terminal conclude reply, NOT a context key: do NOT
+    # pass the round keys (or judge_verdict, PAT-03) to the base lookup, which
+    # prefers any extra key over the reply. ``proposition`` is passed to
+    # _standard_run only so a debate that produced no proposition reports
+    # success=False (a reply argued from nothing is no result).
+    def _extract_answer(
+        self,
+        final_context: dict[str, Any],
+        responses: list[str],
+        extra_keys: list[str] | None = None,
+    ) -> str:
+        """The conclude reply (``final_answer`` first, never set by this FSM)."""
+        return super()._extract_answer(final_context, responses, None)
 
     def _register_handlers(self, api: API) -> None:
         """Register debate-specific handlers with the API."""
@@ -155,12 +181,14 @@ class DebateAgent(BaseAgent):
         # judge could never extract a later True. Clear it on entry to
         # propose (the redo state), NOT on entry to judge: that would erase
         # the limiter's forced True (PRE_TRANSITION runs before entry;
-        # plan-2026-09-24T045559-3e4eb3e5/D-013).
+        # plan-2026-09-24T045559-3e4eb3e5/D-013). The round values are
+        # cleared there too (skip-if-set froze them after round 1, PAT-03);
+        # the judge handler already recorded them in debate_rounds.
         api.register_handler(
             api.create_handler(HandlerNames.DEBATE_CONSENSUS_RESET)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(DebateStates.PROPOSE)
-            .do(lambda _context: {ContextKeys.CONSENSUS_REACHED: None})
+            .do(make_fresh_keys_handler(_ROUND_KEYS))
         )
 
         # Iteration limiter

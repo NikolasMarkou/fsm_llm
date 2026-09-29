@@ -1425,15 +1425,14 @@ def build_self_consistency_fsm(
 
     Each invocation generates one answer. The SelfConsistencyAgent runs
     this FSM multiple times with different temperatures and aggregates.
+    ``generate`` is a terminal initial state, so core never extracts there:
+    it has no extraction instructions, and the sample is the reply, which ends
+    with an ``Answer:`` line for the vote.
     """
-    from .prompts import (
-        build_generate_extraction_instructions,
-        build_generate_response_instructions,
-    )
+    from .prompts import build_generate_response_instructions
 
     persona = (
-        "You are a precise AI assistant. Answer the given task directly and "
-        "concisely. Provide your best answer and your confidence level."
+        "You are a precise AI assistant. Answer the given task directly and concisely."
     )
 
     states: dict[str, Any] = {
@@ -1441,7 +1440,7 @@ def build_self_consistency_fsm(
             "id": "generate",
             "description": "Generate an answer to the task",
             "purpose": "Produce a direct, complete answer to the task",
-            "extraction_instructions": build_generate_extraction_instructions(),
+            "extraction_instructions": "",
             "response_instructions": build_generate_response_instructions(),
             "transitions": [],
         },
@@ -1475,18 +1474,15 @@ def build_debate_fsm(
     Implements a multi-round debate loop:
     propose -> critique -> counter -> judge -> propose (loop)
                                              -> conclude (consensus or max rounds)
+
+    Each debate state extracts one typed field (judge: the verdict and the
+    ``consensus_reached`` decision) whose prompt shows the task and this
+    round's earlier values; state-level extraction and response instructions
+    are empty, so no context-free bulk call runs and only ``conclude`` speaks.
     """
     from .prompts import (
-        build_counter_extraction_instructions,
-        build_counter_response_instructions,
-        build_critique_extraction_instructions,
-        build_critique_response_instructions,
-        build_debate_conclude_extraction_instructions,
         build_debate_conclude_response_instructions,
-        build_judge_extraction_instructions,
-        build_judge_response_instructions,
-        build_propose_extraction_instructions,
-        build_propose_response_instructions,
+        build_debate_field_instructions,
     )
 
     # Use proposer persona as the top-level FSM persona since it starts
@@ -1494,17 +1490,36 @@ def build_debate_fsm(
         "You are a thoughtful AI that explores questions through structured debate. "
         "Multiple perspectives are considered to arrive at the best answer."
     )
-    judge_instructions = build_judge_extraction_instructions(judge_persona, max_rounds)
+    fields = build_debate_field_instructions(
+        proposer_persona, critic_persona, judge_persona, max_rounds
+    )
+    round_values = (
+        ContextKeys.PROPOSITION,
+        ContextKeys.CRITIQUE,
+        ContextKeys.COUNTER_ARGUMENT,
+    )
+
+    def _debate_field(
+        name: str, context_keys: tuple[str, ...], *, required: bool = True
+    ) -> dict[str, Any]:
+        return _typed_field_extraction(
+            name,
+            "str",
+            fields[name],
+            extra_context_keys=context_keys,
+            required=required,
+        )
 
     states: dict[str, Any] = {
         "propose": {
             "id": "propose",
             "description": "Generate or refine a proposition for the task",
             "purpose": "Present a well-reasoned argument or answer",
-            "extraction_instructions": build_propose_extraction_instructions(
-                proposer_persona
-            ),
-            "response_instructions": build_propose_response_instructions(),
+            "extraction_instructions": "",
+            "field_extractions": [
+                _debate_field(ContextKeys.PROPOSITION, (ContextKeys.DEBATE_ROUNDS,))
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "critique",
@@ -1517,10 +1532,11 @@ def build_debate_fsm(
             "id": "critique",
             "description": "Critically analyze the current proposition",
             "purpose": "Identify weaknesses, gaps, and counterpoints",
-            "extraction_instructions": build_critique_extraction_instructions(
-                critic_persona
-            ),
-            "response_instructions": build_critique_response_instructions(),
+            "extraction_instructions": "",
+            "field_extractions": [
+                _debate_field(ContextKeys.CRITIQUE, round_values[:1])
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "counter",
@@ -1533,10 +1549,11 @@ def build_debate_fsm(
             "id": "counter",
             "description": "Address the critique with counter-arguments",
             "purpose": "Strengthen the proposition by addressing criticisms",
-            "extraction_instructions": build_counter_extraction_instructions(
-                proposer_persona
-            ),
-            "response_instructions": build_counter_response_instructions(),
+            "extraction_instructions": "",
+            "field_extractions": [
+                _debate_field(ContextKeys.COUNTER_ARGUMENT, round_values[:2])
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "judge",
@@ -1549,11 +1566,17 @@ def build_debate_fsm(
             "id": "judge",
             "description": "Evaluate the debate exchange and decide next action",
             "purpose": "Determine whether consensus has been reached",
-            "extraction_instructions": judge_instructions,
-            "field_extractions": _bool_decision_field_extractions(
-                ContextKeys.CONSENSUS_REACHED, judge_instructions
-            ),
-            "response_instructions": build_judge_response_instructions(),
+            "extraction_instructions": "",
+            "field_extractions": [
+                # The verdict is recorded, never routed on: a null costs no
+                # retry call.
+                _debate_field(ContextKeys.JUDGE_VERDICT, round_values, required=False),
+                *_bool_decision_field_extractions(
+                    ContextKeys.CONSENSUS_REACHED,
+                    fields[ContextKeys.CONSENSUS_REACHED],
+                ),
+            ],
+            "response_instructions": "",
             "transitions": [
                 {
                     "target_state": "conclude",
@@ -1599,7 +1622,8 @@ def build_debate_fsm(
             "id": "conclude",
             "description": "Produce the final answer from the debate",
             "purpose": "Synthesize the debate into a definitive answer",
-            "extraction_instructions": build_debate_conclude_extraction_instructions(),
+            # Terminal: core never extracts here; the reply is the answer.
+            "extraction_instructions": "",
             "response_instructions": build_debate_conclude_response_instructions(),
             "transitions": [],
         },

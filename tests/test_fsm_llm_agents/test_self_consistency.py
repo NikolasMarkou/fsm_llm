@@ -95,11 +95,13 @@ class TestSelfConsistencyFSM:
         fsm = build_self_consistency_fsm()
         assert "precise" in fsm["persona"].lower()
 
-    def test_generate_state_has_extraction_instructions(self):
+    def test_generate_state_asks_for_an_answer_line_and_extracts_nothing(self):
+        # PAT-05: a terminal initial state never extracts, so its bulk
+        # instructions were dead; the reply's Answer: line is what is voted on.
         fsm = build_self_consistency_fsm()
         generate = fsm["states"]["generate"]
-        assert "extraction_instructions" in generate
-        assert len(generate["extraction_instructions"]) > 0
+        assert generate["extraction_instructions"] == ""
+        assert "Answer:" in generate["response_instructions"]
 
 
 class TestSelfConsistencyConstants:

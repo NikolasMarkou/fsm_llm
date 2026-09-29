@@ -8,8 +8,7 @@ aggregation function).
 
 from __future__ import annotations
 
-import math
-from collections import Counter
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -28,17 +27,42 @@ from .definitions import AgentConfig, AgentResult, AgentTrace
 from .exceptions import AgentError
 from .fsm_definitions import build_self_consistency_fsm
 
+_ANSWER_LINE = re.compile(
+    r"^[ \t*_#>-]*(?:final[ \t]+)?answer[ \t*_]*:(.*)$", re.IGNORECASE | re.MULTILINE
+)
 
+
+def _vote_key(sample: str) -> str:
+    """The comparable form of a sample: its last ``Answer:`` line value (the
+    whole text when it has none), casefolded, whitespace-collapsed, with
+    surrounding markdown emphasis and trailing sentence punctuation dropped.
+    Never raises; a blank sample gives ``""``."""
+    lines = [m.strip() for m in _ANSWER_LINE.findall(sample or "") if m.strip()]
+    text = lines[-1] if lines else (sample or "")
+    return " ".join(text.casefold().split()).strip(" *_.!")
+
+
+# DECISION plan-2026-09-29T103145-06a5ec0a/D-037
+# Vote on the normalized final answer, but RETURN a full sample (the first of
+# the winning group). Do NOT return the bare vote key: callers and the
+# examples show the answer as prose, and a one-word key ("canberra") loses
+# the case and the reasoning. Do NOT vote on whole-text equality (PAT-05):
+# samples that agree in different prose then never agree.
 def _majority_vote(samples: list[str]) -> str:
-    """Default aggregation: return the most common answer."""
-    if not samples:
+    """Default aggregation: the first sample of the most common final answer.
+
+    Contract: samples are compared by :func:`_vote_key`; blank samples never
+    vote; ties go to the answer seen first. Returns that group's first sample
+    stripped, or ``""`` when no sample has text. Never raises.
+    """
+    groups: dict[str, list[str]] = {}
+    for sample in samples:
+        key = _vote_key(sample)
+        if key:
+            groups.setdefault(key, []).append(sample.strip())
+    if not groups:
         return ""
-    # Normalize whitespace for comparison
-    normalized = [s.strip() for s in samples if s and s.strip()]
-    if not normalized:
-        return ""
-    counter = Counter(normalized)
-    return counter.most_common(1)[0][0]
+    return max(groups.values(), key=len)[0]
 
 
 class SelfConsistencyAgent(BaseAgent):
@@ -138,11 +162,11 @@ class SelfConsistencyAgent(BaseAgent):
 
         # Collect samples (serial by default; parallel when max_workers > 1).
         if self.max_workers > 1 and self.num_samples > 1:
-            samples, confidences = self._collect_parallel(
+            samples = self._collect_parallel(
                 fsm_def, task, temperatures, initial_context, start_time
             )
         else:
-            samples, confidences = self._collect_serial(
+            samples = self._collect_serial(
                 fsm_def, task, temperatures, initial_context, start_time
             )
 
@@ -164,8 +188,13 @@ class SelfConsistencyAgent(BaseAgent):
 
         structured = self._try_parse_structured_output(aggregated)
 
-        # An empty aggregate is no result, not a success (D-011).
-        answered = bool(str(aggregated or "").strip())
+        # No sample text, or an empty aggregate, is no result (D-011).
+        answered = any(s.strip() for s in samples) and bool(
+            str(aggregated or "").strip()
+        )
+        # Share of samples whose final answer matches the aggregate's.
+        winner = _vote_key(str(aggregated or ""))
+        votes = sum(1 for s in samples if winner and _vote_key(s) == winner)
         return AgentResult(
             answer=aggregated,
             success=answered,
@@ -174,9 +203,7 @@ class SelfConsistencyAgent(BaseAgent):
             final_context={
                 ContextKeys.SAMPLES: samples,
                 ContextKeys.AGGREGATED_ANSWER: aggregated,
-                ContextKeys.CONFIDENCE: (
-                    sum(confidences) / len(confidences) if confidences else 0.0
-                ),
+                ContextKeys.CONFIDENCE: votes / len(samples),
                 ContextKeys.TASK: task,
             },
             structured_output=structured,
@@ -189,10 +216,9 @@ class SelfConsistencyAgent(BaseAgent):
         temperatures: list[float],
         initial_context: dict[str, Any] | None,
         start_time: float,
-    ) -> tuple[list[str], list[float]]:
+    ) -> list[str]:
         """Original serial sampling loop (max_workers == 1)."""
         samples: list[str] = []
-        confidences: list[float] = []
 
         for sample_idx in range(self.num_samples):
             # Check time/iteration budget. Cap iterations at num_samples so a
@@ -206,11 +232,9 @@ class SelfConsistencyAgent(BaseAgent):
             )
 
             try:
-                answer, confidence = self._generate_single(
-                    fsm_def, task, temp, initial_context
+                samples.append(
+                    self._generate_single(fsm_def, task, temp, initial_context)
                 )
-                samples.append(answer)
-                confidences.append(confidence)
             except Exception as e:
                 # Per-sample exception handling is intentional: unlike other
                 # agents, SelfConsistency benefits from partial results.
@@ -218,7 +242,7 @@ class SelfConsistencyAgent(BaseAgent):
                 logger.warning(f"Sample {sample_idx + 1} failed: {e!s}", exc_info=True)
                 continue
 
-        return samples, confidences
+        return samples
 
     def _collect_parallel(
         self,
@@ -227,7 +251,7 @@ class SelfConsistencyAgent(BaseAgent):
         temperatures: list[float],
         initial_context: dict[str, Any] | None,
         start_time: float,
-    ) -> tuple[list[str], list[float]]:
+    ) -> list[str]:
         """Concurrent sampling (max_workers > 1).
 
         Results are placed by sample index and then read back in order, so the
@@ -240,7 +264,7 @@ class SelfConsistencyAgent(BaseAgent):
         # One up-front time/budget check before dispatching the batch.
         self._check_budgets(start_time, 0, max_iterations=self.num_samples)
 
-        results: list[tuple[str, float] | None] = [None] * self.num_samples
+        results: list[str | None] = [None] * self.num_samples
         workers = min(self.max_workers, self.num_samples)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_idx = {
@@ -261,13 +285,8 @@ class SelfConsistencyAgent(BaseAgent):
                     logger.warning(f"Sample {idx + 1} failed: {e!s}", exc_info=True)
                     results[idx] = None
 
-        samples: list[str] = []
-        confidences: list[float] = []
-        for r in results:  # sample-index order → deterministic aggregation
-            if r is not None:
-                samples.append(r[0])
-                confidences.append(r[1])
-        return samples, confidences
+        # sample-index order → deterministic aggregation
+        return [r for r in results if r is not None]
 
     def _register_handlers(self, api: API) -> None:
         """No handlers needed for self-consistency (single-state FSM)."""
@@ -278,15 +297,17 @@ class SelfConsistencyAgent(BaseAgent):
         task: str,
         temperature: float,
         initial_context: dict[str, Any] | None,
-    ) -> tuple[str, float]:
+    ) -> str:
         """
-        Run a single generation and return (answer, confidence).
+        Run a single generation and return the sample text.
 
         :param fsm_def: The FSM definition dict
         :param task: The task string
         :param temperature: Temperature for this sample
         :param initial_context: Optional initial context
-        :return: Tuple of (answer_string, confidence_float)
+        :return: The last non-blank reply, stripped (``""`` if none). The
+            terminal ``generate`` state never extracts, so the reply is the
+            sample; its ``Answer:`` line is what the vote compares.
         """
         api = API.from_definition(
             fsm_def,
@@ -313,26 +334,7 @@ class SelfConsistencyAgent(BaseAgent):
                 response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
                 responses.append(response)
 
-            final_context = api.get_data(conv_id)
-
-            # Extract answer
-            answer = final_context.get(ContextKeys.FINAL_ANSWER, "")
-            if not answer or not isinstance(answer, str) or len(answer.strip()) < 3:
-                # Fall back to last response
-                for resp in reversed(responses):
-                    if resp and len(resp.strip()) > 3:
-                        answer = resp.strip()
-                        break
-
-            confidence = final_context.get(ContextKeys.CONFIDENCE, 0.5)
-            if (
-                not isinstance(confidence, int | float)
-                or math.isnan(confidence)
-                or math.isinf(confidence)
-            ):
-                confidence = 0.5
-
-            return str(answer), float(confidence)
+            return next((r.strip() for r in reversed(responses) if r and r.strip()), "")
 
         finally:
             api.end_conversation(conv_id)
