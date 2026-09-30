@@ -381,13 +381,6 @@ class TestResponseStreaming:
         llm = LiteLLMInterface(model="test", api_key="test")
         assert hasattr(llm, "generate_response_stream")
 
-    def test_litellm_stream_sentinel_prompt(self):
-        """Streaming with sentinel prompt '.' yields empty string immediately."""
-        llm = LiteLLMInterface(model="test", api_key="test")
-        req = ResponseGenerationRequest(system_prompt=".", user_message="test")
-        chunks = list(llm.generate_response_stream(req))
-        assert chunks == [""]
-
 
 # ================================================================
 # Feature #9: Session Persistence

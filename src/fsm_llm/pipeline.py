@@ -276,6 +276,15 @@ def _json_native_values(data: dict[str, Any], keys: list[str]) -> dict[str, Any]
     return filter_context_tree(out, MAX_CONTEXT_FILTER_DEPTH, _drop_forbidden_entry)
 
 
+def _is_silent(state: State) -> bool:
+    """True when ``state`` says nothing: ``response_instructions`` is ``""``.
+
+    ``None`` (the field left out) is not silent: that state gets a default
+    reply prompt. Read by the three Pass-2 entries (sync, stream, greeting).
+    """
+    return state.response_instructions is not None and not state.response_instructions
+
+
 class _BulkFailed(dict):
     """Empty marker returned by ``_bulk_extract_from_instructions`` when the
     bulk call raised. It compares equal to ``{}`` and is falsy, so every caller
@@ -297,8 +306,8 @@ class _TurnRecord:
     Contract: created by ``_run_turn`` with ``state_before`` set and filled as
     the turn runs; returned only when the turn succeeded. ``transition_outcome``
     is ``None`` when no evaluation ran (terminal state). ``response`` is the
-    Pass-2 text, or ``None`` when a turn without a user message ended on a
-    silent state. A failed turn raises and returns no record.
+    Pass-2 text, or ``None`` when the turn ended on a silent state. A failed
+    turn raises and returns no record.
     """
 
     state_before: str
@@ -515,12 +524,11 @@ class MessagePipeline:
             conversation_id: Conversation identifier.
 
         Returns:
-            Generated response message.
+            Generated response message; the empty string when the turn ended
+            on a silent state (empty ``response_instructions``).
         """
         turn = self._run_turn(instance, message, conversation_id)
-        if turn.response is None:
-            raise FSMError("A turn with a user message produced no response")
-        return turn.response
+        return turn.response or ""
 
     def advance(self, instance: FSMInstance, conversation_id: str) -> AdvanceResult:
         """Run one turn of the current state with no user message.
@@ -913,27 +921,18 @@ class MessagePipeline:
     ) -> Iterator[str]:
         """Stream Pass 2: yield response tokens as they arrive.
 
-        Yields nothing for a turn without a user message
-        (``user_message is None``) that ended on a silent state.
+        Yields nothing, and makes no LLM call, for a turn that ended on a
+        silent state.
         """
         log = logger.bind(conversation_id=conversation_id)
 
         current_state = self.get_state(instance, conversation_id)
 
-        # Fast-path for empty response_instructions
-        if (
-            current_state.response_instructions is not None
-            and not current_state.response_instructions
-        ):
-            if user_message is None:
-                # Stream mirror of the D-024 branch in
-                # `_execute_response_generation_pass`: a silent state on a
-                # message-free step yields no chunk and leaves no marker.
-                log.debug("Silent state on a message-free step: no response")
-                return
-            synthetic = f"[{current_state.id}]"
-            instance.context.conversation.add_system_message(synthetic)
-            yield synthetic
+        if _is_silent(current_state):
+            # Stream mirror of the D-037 branch in
+            # `_execute_response_generation_pass`: no chunk, no call, nothing
+            # appended to the history.
+            log.debug("Silent state: no response")
             return
 
         fsm_def = self.fsm_resolver(instance.fsm_id)
@@ -1059,50 +1058,23 @@ class MessagePipeline:
     def generate_initial_response(
         self, instance: FSMInstance, conversation_id: str
     ) -> str:
-        """Generate initial response for conversation start (no extraction/transition)."""
+        """Generate initial response for conversation start (no extraction/transition).
+
+        Returns the empty string, with no LLM call and nothing appended to the
+        history, when the initial state is silent.
+        """
         log = logger.bind(conversation_id=conversation_id)
 
         current_state = self.get_state(instance, conversation_id)
 
-        # DECISION plan-2026-09-20T165703-0d9c218e/D-006
-        # Fast-path for an initial state with empty response_instructions (a
-        # ReAct-style `think` state is the initial state of every agent FSM).
-        # Without this skip the greeting runs a full Pass 2 and the model's
-        # completion prose lands in history BEFORE any tool runs, poisoning
-        # every later `tool_name` extraction (F-LIVE-01). This block is an
-        # EXACT mirror of the sync-turn site in
-        # `_execute_response_generation_pass`:
-        # the `"."` system_prompt is the sentinel `LiteLLMInterface` uses to
-        # return a synthetic response WITHOUT calling litellm, so the call
-        # below IS the skip mechanism. Do NOT drop the `generate_response`
-        # call (a custom interface must see the same call count at the
-        # greeting as on every turn), do NOT set
-        # `instance.last_response_generation` (the sibling sites do not), and
-        # do NOT fold the three copies into a shared helper (D-006).
-        if (
-            current_state.response_instructions is not None
-            and not current_state.response_instructions
-        ):
-            request = ResponseGenerationRequest(
-                system_prompt=".",
-                user_message="",
-                transition_occurred=False,
-                skip_generation=True,
-            )
-            self.llm_interface.generate_response(request)
-            # DECISION plan-2026-09-30T062855-07ad3f8c/D-028
-            # The `[<state>]` marker of a silent initial state is a return
-            # value only. Do NOT append it to conversation history here: no
-            # one said it, and it showed up in every later field prompt as
-            # "Assistant: [think]" and was the last synthetic entry in the
-            # history of a message-free run. Do NOT drop the marker a
-            # `converse` turn on a silent state appends (2-pass contract),
-            # and do NOT change the return value or the skip request above
-            # (0d9c218e/D-006). See decisions.md D-028.
-            log.debug(
-                "Skipped initial response generation (empty response_instructions)"
-            )
-            return f"[{current_state.id}]"
+        if _is_silent(current_state):
+            # D-037 (see `_execute_response_generation_pass`): a silent initial
+            # state makes no LLM call, appends nothing and returns no text. A
+            # ReAct-style `think` state is the initial state of every agent
+            # FSM; a Pass 2 here put completion prose in history before any
+            # tool ran (F-LIVE-01).
+            log.debug("Silent initial state: no response")
+            return ""
 
         fsm_def = self.fsm_resolver(instance.fsm_id)
 
@@ -2909,49 +2881,26 @@ class MessagePipeline:
     ) -> str | None:
         """Execute Pass 2: Response Generation based on final state.
 
-        Returns the reply text. ``None`` only for a turn without a user
-        message (``user_message is None``) that ended on a silent state.
+        Returns the reply text, or ``None`` when the turn ended on a silent
+        state (no LLM call is made and nothing is appended to the history).
         """
         log = logger.bind(conversation_id=conversation_id)
         log.debug("Executing response generation pass")
 
         current_state = self.get_state(instance, conversation_id)
 
-        # Fast-path for states with empty response_instructions (e.g. agent
-        # intermediate states).  We build a minimal prompt and let the LLM
-        # interface decide whether to skip the API call (LiteLLMInterface
-        # returns a synthetic response without calling litellm).
-        if (
-            current_state.response_instructions is not None
-            and not current_state.response_instructions
-        ):
-            if user_message is None:
-                # DECISION plan-2026-09-30T062855-07ad3f8c/D-024
-                # A silent state on a message-free step has nothing to say:
-                # no request, no `[state]` marker in the history, response
-                # None. Do NOT route it through the skip request below (a
-                # provider-less call whose only product is a synthetic marker
-                # that every later prompt then renders as assistant text), and
-                # do NOT apply this branch to a message turn: `converse` keeps
-                # both skip signals and its marker (D-034, D-006).
-                log.debug("Silent state on a message-free step: no response")
-                return None
-            # DECISION plan-2026-09-22T080837-8b258a25/D-034: send BOTH skip
-            # signals, here and at the greeting. Do NOT drop `system_prompt="."`
-            # before 1.0 (custom interfaces may test only the sentinel) and do
-            # NOT fold the sites into a helper (D-006). The stream site makes no
-            # call, so it has no request to mark.
-            request = ResponseGenerationRequest(
-                system_prompt=".",
-                user_message=user_message,
-                transition_occurred=transition_occurred,
-                skip_generation=True,
-            )
-            response = self.llm_interface.generate_response(request)
-            synthetic = f"[{current_state.id}]"
-            instance.context.conversation.add_system_message(synthetic)
-            log.debug("Skipped response generation (empty response_instructions)")
-            return synthetic
+        if _is_silent(current_state):
+            # DECISION plan-2026-09-30T062855-07ad3f8c/D-037
+            # A silent state (empty `response_instructions`) says nothing on
+            # every entry: no LLM interface call, no text, nothing appended to
+            # the history. Do NOT bring back a skip request (`system_prompt="."`
+            # or a `skip_generation` flag: a provider-less call with no
+            # product), and do NOT return or record a `[state]` placeholder:
+            # every later prompt rendered it as assistant text. Supersedes
+            # 0d9c218e/D-006 and 8b258a25/D-034. The same rule holds at the
+            # stream site and the greeting. See decisions.md D-037, D-029.
+            log.debug("Silent state: no response")
+            return None
 
         fsm_def = self.fsm_resolver(instance.fsm_id)
 

@@ -536,7 +536,6 @@ def test_response_generation_request_response_models():
 
     assert request.system_prompt == "Generate a friendly greeting using the user's name"
     assert request.user_message == "Hello"
-    assert request.skip_generation is False
 
     # Create a response generation response
     response = ResponseGenerationResponse(

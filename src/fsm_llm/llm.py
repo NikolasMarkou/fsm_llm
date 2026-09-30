@@ -342,10 +342,8 @@ class LLMInterface(abc.ABC):
 
         Args:
             request: Response generation request with final state context.
-                When ``request.skip_generation`` is True (the state has empty
-                ``response_instructions``), the pipeline discards the reply:
-                return any cheap response and do not call a model. The same
-                requests also carry ``system_prompt="."`` until 1.0.
+                Never sent for a silent state (empty
+                ``response_instructions``): the pipeline makes no call there.
 
         Returns:
             Response generation response with user-facing message
@@ -548,22 +546,7 @@ class LiteLLMInterface(LLMInterface):
 
         This method creates prompts that generate appropriate user-facing responses
         based on the final state context and all extracted information.
-
-        When ``request.skip_generation`` is set (or the system prompt is the
-        older ``"."`` sentinel), returns a synthetic response without making
-        an LLM call. This supports the fast-path for intermediate agent
-        states that skip response generation.
         """
-        # DECISION plan-2026-09-22T080837-8b258a25/D-034: honour EITHER skip
-        # signal. Do NOT test only skip_generation before 1.0: a caller built
-        # on the sentinel alone would then pay a real completion.
-        if request.skip_generation or request.system_prompt == ".":
-            return ResponseGenerationResponse(
-                message="",
-                message_type="response",
-                reasoning="skipped",
-            )
-
         try:
             start_time = time.time()
 
@@ -634,11 +617,6 @@ class LiteLLMInterface(LLMInterface):
         for transition evaluation.  This method only streams Pass 2
         (user-facing response generation).
         """
-        # Fast-path: skipped Pass 2 (flag or "." sentinel, D-034) — no stream
-        if request.skip_generation or request.system_prompt == ".":
-            yield ""
-            return
-
         try:
             messages = [
                 {"role": "system", "content": request.system_prompt},

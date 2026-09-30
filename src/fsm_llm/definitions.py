@@ -153,11 +153,8 @@ class ResponseGenerationRequest(BaseModel):
     This request generates the actual message shown to users after
     data extraction and transition evaluation are complete.
 
-    ``skip_generation`` is True when the state has empty
-    ``response_instructions``: the caller discards the reply, so an
-    interface should return any cheap response without calling a model.
-    For one release the same requests also carry ``system_prompt="."``
-    (the older sentinel); honour either signal.
+    Never built for a silent state (empty ``response_instructions``): the
+    pipeline makes no LLM call there.
     """
 
     system_prompt: str = Field(
@@ -176,14 +173,6 @@ class ResponseGenerationRequest(BaseModel):
 
     transition_occurred: bool = Field(
         default=False, description="Whether a state transition occurred"
-    )
-
-    skip_generation: bool = Field(
-        default=False,
-        description=(
-            "True when Pass 2 is skipped (empty response_instructions); the "
-            "reply is discarded, so no model call is needed"
-        ),
     )
 
     response_format: dict[str, Any] | None = Field(

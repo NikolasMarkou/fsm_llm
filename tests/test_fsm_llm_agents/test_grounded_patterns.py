@@ -2537,8 +2537,8 @@ _POLICY_FACTS: dict[str, tuple[object, str]] = {
 
 
 def _spoken_replies(llm: PromptGroundedLLM) -> list:
-    """Pass-2 requests that reach the model (core skips silent states)."""
-    return [r for r in llm.calls("generate_response") if not r.skip_generation]
+    """Pass-2 requests (core makes none for a silent state)."""
+    return llm.calls("generate_response")
 
 
 class TestAgentInstructions:

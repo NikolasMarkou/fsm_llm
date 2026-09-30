@@ -1555,12 +1555,13 @@ class TestStep10ConfigDeprecation:
 
 
 # ---------------------------------------------------------------------------
-# Step 11: skip_generation flag and the write-only request fields (D-034)
+# Step 11, rewritten by plan 07ad3f8c step 16 (D-037): a silent state makes no
+# LLM interface call; the skip flag and the "." sentinel are gone
 # ---------------------------------------------------------------------------
 
 
-class _SkipRecordingLLM(LLMInterface):
-    """A custom interface that decides the skip from ``skip_generation`` only."""
+class _RecordingLLM(LLMInterface):
+    """A custom interface that records every Pass-2 request it is sent."""
 
     def __init__(self) -> None:
         self.requests: list[Any] = []
@@ -1570,8 +1571,7 @@ class _SkipRecordingLLM(LLMInterface):
         from fsm_llm.definitions import ResponseGenerationResponse
 
         self.requests.append(request)
-        skipped = getattr(request, "skip_generation", False)
-        return ResponseGenerationResponse(message="" if skipped else "real reply")
+        return ResponseGenerationResponse(message="real reply")
 
     def generate_response_stream(self, request):
         self.stream_requests.append(request)
@@ -1599,7 +1599,7 @@ def _step11_fsm(initial_instructions: str) -> FSMDefinition:
     }
     return FSMDefinition(
         name="step11",
-        description="Pass-2 skip sites",
+        description="Silent-state sites",
         initial_state="start",
         states=states,
     )
@@ -1613,62 +1613,77 @@ def _step11_request(**overrides: Any) -> Any:
     return ResponseGenerationRequest(**fields)
 
 
-class TestStep11SkipGeneration:
-    def test_greeting_skip_site_sets_flag(self):
-        llm = _SkipRecordingLLM()
+class TestSilentStateMakesNoInterfaceCall:
+    def test_silent_greeting_makes_no_call_and_returns_no_text(self):
+        llm = _RecordingLLM()
         api = API.from_definition(_step11_fsm(""), llm_interface=llm)
-        _, greeting = api.start_conversation()
-        assert greeting == "[start]"
-        assert len(llm.requests) == 1
-        assert llm.requests[0].skip_generation is True
-        assert llm.requests[0].system_prompt == "."
+        conv_id, greeting = api.start_conversation()
+        assert greeting == ""
+        assert llm.requests == []
+        assert api.get_conversation_history(conv_id) == []
 
-    def test_sync_skip_site_sets_flag(self):
-        llm = _SkipRecordingLLM()
+    def test_silent_sync_turn_makes_no_call_and_returns_no_text(self):
+        llm = _RecordingLLM()
         api = API.from_definition(_step11_fsm("Greet"), llm_interface=llm)
         conv_id, greeting = api.start_conversation()
         assert greeting == "real reply"
-        assert llm.requests[0].skip_generation is False
-        assert api.converse("go", conv_id) == "[think]"
-        assert len(llm.requests) == 2
-        assert llm.requests[1].skip_generation is True
-        assert llm.requests[1].system_prompt == "."
+        assert api.converse("go", conv_id) == ""
+        assert api.get_current_state(conv_id) == "think"
+        assert len(llm.requests) == 1
+        assert api.get_conversation_history(conv_id) == [
+            {"system": "real reply"},
+            {"user": "go"},
+        ]
 
-    def test_stream_skip_site_makes_no_call(self):
-        """The stream skip site builds no request (D-034): nothing to mark."""
-        llm = _SkipRecordingLLM()
+    def test_silent_stream_turn_makes_no_call_and_yields_nothing(self):
+        llm = _RecordingLLM()
         api = API.from_definition(_step11_fsm("Greet"), llm_interface=llm)
         conv_id, _ = api.start_conversation()
-        assert list(api.converse_stream("go", conv_id)) == ["[think]"]
+        assert list(api.converse_stream("go", conv_id)) == []
+        assert api.get_current_state(conv_id) == "think"
         assert len(llm.requests) == 1
         assert llm.stream_requests == []
+        assert api.get_conversation_history(conv_id) == [
+            {"system": "real reply"},
+            {"user": "go"},
+        ]
 
-    def test_normal_pass2_request_is_not_marked(self):
-        llm = _SkipRecordingLLM()
-        api = API.from_definition(_step11_fsm("Greet"), llm_interface=llm)
-        api.start_conversation()
-        assert llm.requests[0].skip_generation is False
-        assert llm.requests[0].system_prompt != "."
+    def test_request_has_no_skip_field(self):
+        from fsm_llm.definitions import ResponseGenerationRequest
 
-    @pytest.mark.parametrize(
-        "overrides",
-        [
-            {"skip_generation": True},
-            {"system_prompt": "."},
-            {"system_prompt": ".", "skip_generation": True},
-        ],
-    )
-    def test_litellm_skips_on_either_signal(self, overrides):
+        assert "skip_generation" not in ResponseGenerationRequest.model_fields
+        # The model ignores unknown keywords (no ``extra="forbid"``), so an
+        # old caller's flag is dropped, not stored.
+        request = _step11_request(skip_generation=True)
+        assert not hasattr(request, "skip_generation")
+
+    def test_dot_system_prompt_is_an_ordinary_prompt(self):
         from fsm_llm.llm import LiteLLMInterface
 
+        reply = MagicMock()
+        reply.choices = [MagicMock()]
+        reply.choices[0].message.content = '{"message": "Hello", "reasoning": ""}'
+        chunk = MagicMock()
+        chunk.choices = [MagicMock()]
+        chunk.choices[0].delta.content = "Hi"
+        chunk.choices[0].delta.reasoning_content = None
         llm = LiteLLMInterface(model="gpt-4o-mini")
-        request = _step11_request(**overrides)
-        with patch("fsm_llm.llm.completion") as completion:
+        request = _step11_request(system_prompt=".")
+        with (
+            patch("fsm_llm.llm.completion", return_value=reply) as completion,
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        ):
             response = llm.generate_response(request)
-            chunks = list(llm.generate_response_stream(request))
-        completion.assert_not_called()
-        assert response.message == ""
-        assert chunks == [""]
+        assert completion.call_count == 1
+        sent = completion.call_args.kwargs["messages"]
+        assert sent[0] == {"role": "system", "content": "."}
+        assert response.message == "Hello"
+        with (
+            patch("fsm_llm.llm.completion", return_value=iter([chunk])) as completion,
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        ):
+            assert list(llm.generate_response_stream(request)) == ["Hi"]
+        assert completion.call_count == 1
 
     def test_write_only_fields_are_gone_and_old_kwargs_are_ignored(self):
         request = _step11_request(
@@ -1676,7 +1691,6 @@ class TestStep11SkipGeneration:
         )
         for name in ("extracted_data", "context", "previous_state"):
             assert not hasattr(request, name)
-        assert request.skip_generation is False
 
 
 # ---------------------------------------------------------------------------

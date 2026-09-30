@@ -552,7 +552,9 @@ class API:
                 API; default False preserves normal start behavior.
 
         Returns:
-            Tuple of (conversation_id, initial_response)
+            Tuple of (conversation_id, initial_response). The response is
+            the empty string when the initial state is silent (empty
+            ``response_instructions``): no LLM call, nothing in the history.
         """
         try:
             # Start conversation using enhanced FSM manager
@@ -591,7 +593,9 @@ class API:
             conversation_id: Existing conversation ID
 
         Returns:
-            System response
+            System response; the empty string when the turn ended on a silent
+            state (empty ``response_instructions``), which makes no Pass-2
+            call and records the user message only.
         """
         with _turn_errors("processing", "process"):
             # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
@@ -612,7 +616,7 @@ class API:
         resolved on the top of the FSM stack. Differences from ``converse``:
         nothing is appended to the history for a user, prompts carry no user
         message, and a silent state (empty ``response_instructions``) makes no
-        Pass-2 LLM call and leaves no ``[state]`` marker in the history.
+        Pass-2 LLM call and appends nothing to the history.
 
         Args:
             conversation_id: Existing conversation ID.
@@ -651,7 +655,8 @@ class API:
             conversation_id: Existing conversation ID.
 
         Yields:
-            String chunks of the response as they arrive.
+            String chunks of the response as they arrive; nothing when the
+            turn ended on a silent state.
         """
         with _turn_errors("streaming", "stream"):
             # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
@@ -687,7 +692,7 @@ class API:
         The stream form of ``advance``: the same turn, resolved on the top of
         the FSM stack at CALL time, run lazily. Only reply text is yielded; a
         silent state (empty ``response_instructions``) yields no chunk, makes
-        no Pass-2 LLM call and leaves no ``[state]`` marker in the history.
+        no Pass-2 LLM call and appends nothing to the history.
         Read the outcome of the step after the stream is exhausted with
         ``get_current_state`` and ``has_conversation_ended``. The conversation
         is claimed at the first ``next()`` and released when the stream

@@ -61,8 +61,6 @@ class _ScriptedLLM(LLMInterface):
         self, request: ResponseGenerationRequest
     ) -> ResponseGenerationResponse:
         self.response_requests.append(request)
-        if request.skip_generation:
-            return ResponseGenerationResponse(message="")
         if self.fail_response:
             raise LLMResponseError("provider down")
         return ResponseGenerationResponse(message=_REPLY)
@@ -350,7 +348,6 @@ class TestAdvanceHistory:
         assert api.get_conversation_history(conv_id)[-1] == {"system": _REPLY}
         (request,) = llm.response_requests
         assert request.user_message == ""
-        assert request.skip_generation is False
         assert "<user_message>" not in request.system_prompt
 
 
@@ -670,21 +667,23 @@ class TestAdvanceSession:
         assert store.load(conv_id) is None
 
 
-class TestConverseUnchanged:
-    def test_converse_keeps_user_exchange_marker_and_skip_request(self):
+class TestConverseOnASilentState:
+    """Plan 07ad3f8c step 16 (D-029, D-037): a ``converse`` turn that ends on
+    a silent state keeps the user exchange, makes no Pass-2 call, returns the
+    empty string and records no ``[state]`` marker."""
+
+    def test_converse_returns_no_text_makes_no_call_and_keeps_the_user_turn(self):
         llm = _ScriptedLLM({"city": "Paris"})
         api, conv_id = _start(_trip_fsm(), llm)
         before = api.get_conversation_history(conv_id)
 
         reply = api.converse("I want to go to Paris", conv_id)
 
-        assert reply == "[plan]"
+        assert api.get_current_state(conv_id) == "plan"
+        assert reply == ""
         added = api.get_conversation_history(conv_id)[len(before) :]
-        assert added == [{"user": "I want to go to Paris"}, {"system": "[plan]"}]
-        (request,) = llm.response_requests
-        assert request.skip_generation is True
-        assert request.system_prompt == "."
-        assert request.user_message == "I want to go to Paris"
+        assert added == [{"user": "I want to go to Paris"}]
+        assert llm.response_requests == []
 
     def test_converse_and_advance_interleave(self):
         llm = _ScriptedLLM({"city": "Paris"})
@@ -693,7 +692,7 @@ class TestConverseUnchanged:
         result = api.advance(conv_id)
         assert (result.state_before, result.state_after) == ("plan", "done")
         assert api.get_conversation_history(conv_id)[-2:] == [
-            {"system": "[plan]"},
+            {"user": "Paris please"},
             {"system": _REPLY},
         ]
 
@@ -1069,17 +1068,17 @@ class TestAdvanceStream:
         assert api.get_conversation_history(conv_id) == before
         assert len(llm.field_requests) == 1
 
-    def test_converse_stream_keeps_its_marker_and_user_exchange(self):
+    def test_converse_stream_on_a_silent_state_yields_nothing(self):
         llm = _StreamingLLM({"city": "Paris"})
         api, conv_id = _start(_trip_fsm(), llm)
         before = api.get_conversation_history(conv_id)
 
         chunks = list(api.converse_stream("Paris please", conv_id))
 
-        assert chunks == ["[plan]"]
+        assert api.get_current_state(conv_id) == "plan"
+        assert chunks == []
         assert api.get_conversation_history(conv_id)[len(before) :] == [
             {"user": "Paris please"},
-            {"system": "[plan]"},
         ]
         assert llm.stream_requests == []
         assert llm.response_requests == []
@@ -1143,7 +1142,6 @@ class TestAdvanceStream:
 
         (request,) = llm.stream_requests
         assert request.user_message == ""
-        assert request.skip_generation is False
         assert "Continue" not in request.system_prompt
         (field_request,) = llm.field_requests
         assert "User message" not in field_request.system_prompt

@@ -506,8 +506,9 @@ def _think_initial_fsm_dict(response_instructions) -> dict:
 
 class TestSilentGreetingLeavesHistoryEmpty:
     """plan-2026-09-30T062855-07ad3f8c/D-028: the greeting of a silent initial
-    state appends nothing to history; a spoken greeting and a ``converse``
-    turn on a silent state are recorded as before."""
+    state appends nothing to history and a spoken greeting is recorded. D-029
+    and D-037 (step 16): a ``converse`` turn on a silent state records the
+    user exchange only, returns no text and makes no Pass-2 call."""
 
     def test_silent_initial_state_appends_nothing(self):
         from fsm_llm.api import API
@@ -532,30 +533,27 @@ class TestSilentGreetingLeavesHistoryEmpty:
 
         assert api.get_conversation_history(conv_id) == [{"system": greeting}]
 
-    def test_converse_on_a_silent_state_still_appends_its_marker(self):
+    def test_converse_on_a_silent_state_appends_the_user_exchange_only(self):
         from fsm_llm.api import API
 
-        api = API(
-            fsm_definition=_think_initial_fsm_dict(""), llm_interface=_make_mock_llm()
-        )
+        llm = _make_mock_llm()
+        api = API(fsm_definition=_think_initial_fsm_dict(""), llm_interface=llm)
         conv_id, _ = api.start_conversation()
 
-        assert api.converse("go", conv_id) == "[think]"
+        assert api.converse("go", conv_id) == ""
 
-        assert api.get_conversation_history(conv_id) == [
-            {"user": "go"},
-            {"system": "[think]"},
-        ]
+        assert api.get_conversation_history(conv_id) == [{"user": "go"}]
+        llm.generate_response.assert_not_called()
 
 
 class TestGenerateInitialResponseSkipsEmptyInstructions:
-    """F-LIVE-01 (plan-2026-09-20-0d9c218e iter-2 step 1): the greeting must
-    honour the empty-``response_instructions`` fast path exactly as the sync
-    and streaming Pass-2 sites do. Without it, an agent whose initial state is
-    a ``think`` state gets one unsuppressed completion whose prose lands in
-    history before any tool runs."""
+    """F-LIVE-01 (plan-2026-09-20-0d9c218e iter-2 step 1): the greeting of a
+    silent initial state must say nothing, as the sync and streaming Pass-2
+    sites do. Without it, an agent whose initial state is a ``think`` state
+    gets one unsuppressed completion whose prose lands in history before any
+    tool runs. Plan 07ad3f8c step 16 (D-037): no LLM interface call at all."""
 
-    def test_empty_instructions_returns_state_marker_via_sentinel_request(self):
+    def test_empty_instructions_make_no_call_and_return_no_text(self):
         from fsm_llm.api import API
 
         llm = _make_mock_llm()
@@ -563,15 +561,8 @@ class TestGenerateInitialResponseSkipsEmptyInstructions:
 
         conv_id, greeting = api.start_conversation()
 
-        assert greeting == "[think]"
-        llm.generate_response.assert_called_once()
-        request = llm.generate_response.call_args.args[0]
-        assert request.system_prompt == "."
-        assert "Decide which tool to call" not in request.system_prompt
-        assert request.user_message == ""
-        assert request.skip_generation is True
-        assert request.transition_occurred is False
-        # The marker is a return value only (07ad3f8c/D-028).
+        assert greeting == ""
+        llm.generate_response.assert_not_called()
         assert api.get_conversation_history(conv_id) == []
 
     def test_none_instructions_still_builds_full_prompt(self):

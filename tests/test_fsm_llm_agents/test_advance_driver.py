@@ -214,17 +214,16 @@ class TestNoSyntheticTurns:
         assert "".join(probe.agent.run_stream(_TASK)) == _ANSWER
         assert converse_calls == []
 
-    def test_a_tool_iteration_makes_no_skipped_response_call(self):
+    def test_silent_states_make_no_response_call(self):
         probe = _Probe()
 
         probe.agent.run(_TASK)
 
-        responses = probe.llm.calls("generate_response")
-        skipped = [r for r in responses if r.skip_generation]
-        # One skip request is the greeting of the silent `think` state (kept,
-        # D-028); think, act and the second think make none. One real reply.
-        assert len(skipped) == 1
-        assert len(responses) == 2
+        # The greeting of the silent `think` state, think, act and the second
+        # think make no reply request (07ad3f8c/D-037); conclude makes the one.
+        (reply,) = probe.llm.calls("generate_response")
+        assert "<current_state>conclude</current_state>" in reply.system_prompt
+        assert probe.llm.requests[0][0] == "extract_field"
         assert [r.field_name for r in probe.llm.calls("extract_field")] == [
             "tool_name",
             "tool_input",
@@ -248,12 +247,7 @@ class TestNoSyntheticTurns:
         # history entry, no <original_input>, no instruction text (step 10).
         assert not [text for text in probe.prompts() if "Continue" in text]
         # A step sends no user message at all.
-        turn_requests = [
-            request
-            for kind, request in probe.llm.requests
-            if kind == "extract_field" or not request.skip_generation
-        ]
-        assert {request.user_message for request in turn_requests} == {""}
+        assert {request.user_message for _, request in probe.llm.requests} == {""}
 
     def test_loop_returns_only_the_replies_of_speaking_states(self):
         probe = _Probe()
@@ -1866,10 +1860,11 @@ class TestPlannerPatternsMakeNoSyntheticTurns:
         kinds = [kind for kind, _ in run.llm.requests]
         first_field = kinds.index("extract_field")
         stepped = run.llm.requests[first_field:]
-        # The only skip request is the greeting of the silent initial state
-        # (D-028), sent before any step; the steps make one real reply call.
+        # The greeting of the silent initial state makes no request
+        # (07ad3f8c/D-037); the steps make one reply call.
+        assert first_field == 0
         replies = [r for kind, r in stepped if kind == "generate_response"]
-        assert [r.skip_generation for r in replies] == [False]
+        assert len(replies) == 1
         assert run.llm.calls("extract_bulk_data") == []
         assert {request.user_message for _, request in stepped} == {""}
         texts = [
@@ -1890,12 +1885,11 @@ _NUMBER = re.compile(r"(\d+)")
 
 
 def _spoken(llm: PromptGroundedLLM) -> list[str]:
-    """The state of every real (not skipped) reply request, in call order."""
+    """The state of every reply request, in call order."""
     return [
         match.group(1)
         for request in llm.calls("generate_response")
-        if not request.skip_generation
-        and (match := _STATE_TAG.search(request.system_prompt))
+        if (match := _STATE_TAG.search(request.system_prompt))
     ]
 
 
@@ -2470,9 +2464,10 @@ class TestReplySpeakingPatternsMakeNoSyntheticTurns:
 
         kinds = [kind for kind, _ in run.llm.requests]
         stepped = run.llm.requests[kinds.index("extract_field") :]
-        # A silent initial state's greeting is the only skip request (D-028).
         replies = [r for kind, r in stepped if kind == "generate_response"]
-        assert replies and not [r for r in replies if r.skip_generation]
+        assert replies
+        # No request carries the removed "." sentinel (07ad3f8c/D-037).
+        assert not [r for _, r in run.llm.requests if r.system_prompt == "."]
         assert run.llm.calls("extract_bulk_data") == []
         assert {request.user_message for _, request in stepped} == {""}
         texts = [

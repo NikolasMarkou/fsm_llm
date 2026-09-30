@@ -229,9 +229,6 @@ class TestSampleIsOneTurn:
 
         assert probe.calls == ["start_conversation"] * 3
         assert [kind for kind, _ in probe.llm.requests] == ["generate_response"] * 3
-        assert not [
-            r for r in probe.llm.calls("generate_response") if r.skip_generation
-        ]
         assert result.final_context[ContextKeys.SAMPLES] == [_SampleProbe.REPLY] * 3
         assert result.trace.total_iterations == 3
         assert (result.success, result.stop_reason) == (True, "answered")

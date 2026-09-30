@@ -519,7 +519,7 @@ class BaseAgent(ABC):
         # a silent state returns no text. If a pattern needs a budget or loop
         # behaviour core cannot express, extend core's loop with a core test.
         # See decisions.md D-030.
-        conv_id, greeting = self._start_conversation(api, context)
+        conv_id, greeting = api.start_conversation(context)
         log = logger.bind(
             conversation_id=conv_id,
             package="fsm_llm.agents",
@@ -538,29 +538,13 @@ class BaseAgent(ABC):
             except RunBudgetExceededError as exc:
                 raise self._budget_error(exc, max_iterations) from exc
 
-            replies = [greeting, *(step.response for step in steps)]
+            replies = [greeting or None, *(step.response for step in steps)]
             final_context = api.get_data(conv_id)
             log.info(LogMessages.AGENT_COMPLETE.format(iterations=len(steps)))
             return [r for r in replies if r is not None], final_context, len(steps)
 
         finally:
             api.end_conversation(conv_id)
-
-    @staticmethod
-    def _start_conversation(
-        api: API, context: dict[str, Any]
-    ) -> tuple[str, str | None]:
-        """Start the run's conversation; return ``(conv_id, greeting)``.
-
-        Shared by ``_run_conversation_loop`` and ``_standard_run_stream``.
-        ``greeting`` is the initial state's reply, or ``None`` when that state
-        is silent. Whether it spoke is asked of core (a greeting is recorded
-        in history only when the state spoke, 07ad3f8c/D-028), never read off
-        the returned text.
-        """
-        conv_id, greeting = api.start_conversation(context)
-        spoke = bool(api.get_conversation_history(conv_id))
-        return conv_id, greeting if spoke else None
 
     def _on_loop_iteration(  # noqa: B027
         self,
@@ -1379,7 +1363,7 @@ class BaseAgent(ABC):
         self._register_lifecycle_handlers(api, agent_type)
 
         try:
-            conv_id, greeting = self._start_conversation(api, context)
+            conv_id, greeting = api.start_conversation(context)
             try:
                 if greeting:
                     yield greeting
