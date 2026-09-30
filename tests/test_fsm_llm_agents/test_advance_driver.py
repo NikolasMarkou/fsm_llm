@@ -10,7 +10,8 @@ Step 11: the HITL approval driver, VerifiedReact's reflection note and
 AutoMemory's recall and persistence run through the same core loop
 (``before_step`` -> ``_on_loop_iteration`` -> ``_handle_hitl_approval``). The
 HITL tests use gated tools with typed signatures and assert the order of
-steps, asks, grant spends and tool runs.
+steps, asks, grant spends and tool runs. ``await_approval`` gives the model
+no channel (step 12.1, D-033).
 
 Step 12: PlanExecute, REWOO and ParallelReact are pinned on the same loop
 with exact outcomes: which tool ran with which arguments inside which step,
@@ -47,8 +48,18 @@ from fsm_llm.agents.exceptions import (
     AgentTimeoutError,
     BudgetExhaustedError,
 )
+from fsm_llm.agents.fsm_definitions import (
+    _await_approval_state,
+    build_react_fsm,
+    build_reflexion_fsm,
+)
 from fsm_llm.agents.handlers import AgentHandlers, approval_grant
 from fsm_llm.agents.verified_react import _REFLECTION_NOTE
+from fsm_llm.definitions import (
+    BulkExtractionRequest,
+    DataExtractionResponse,
+    FSMDefinition,
+)
 from tests.conftest import PromptGroundedLLM
 
 _TASK = "What is the capital of France?"
@@ -496,7 +507,9 @@ class _HitlProbe:
     refuses a gated call, ``("transfer", account, amount)`` and
     ``("balance", account)`` when a tool ran. ``hooks`` holds, per
     ``_on_loop_iteration`` call, ``(step number, state, driver grant before
-    the hook, driver grant after it)``.
+    the hook, driver grant after it)``. ``steps`` holds, per ``advance`` step,
+    ``(state, kinds of the LLM requests made inside the step, full context
+    before the step, full context after it)``.
 
     ``gate``: ``"flag"`` registers ``transfer`` with ``requires_approval=True``
     under a callback-only ``HumanInTheLoop``; ``"policy"`` registers it
@@ -511,15 +524,17 @@ class _HitlProbe:
         gate: str = "flag",
         decide: Any = lambda request: True,
         after_hook: Any = None,
+        llm: PromptGroundedLLM | None = None,
         **config: Any,
     ) -> None:
         self.events: list[tuple[Any, ...]] = []
+        self.steps: list[tuple[str, list[str], dict[str, Any], dict[str, Any]]] = []
         self.requests: list[ApprovalRequest] = []
         self.hooks: list[tuple[int, str, Any, Any]] = []
         self.started_with: list[dict[str, Any]] = []
         self.final: list[dict[str, Any]] = []
         self.histories: list[list[dict[str, str]]] = []
-        self.llm = _HitlLLM(default_response="Done.")
+        self.llm = llm or _HitlLLM(default_response="Done.")
         events = self.events
 
         def transfer(account: str, amount: int) -> str:
@@ -566,8 +581,15 @@ class _HitlProbe:
         approval_refusal = AgentHandlers.approval_refusal
 
         def _advance(api: API, conv_id: str) -> Any:
-            events.append(("step", api.get_current_state(conv_id)))
-            return advance(api, conv_id)
+            state = api.get_current_state(conv_id)
+            events.append(("step", state))
+            before = _full_context(api, conv_id)
+            sent = len(self.llm.requests)
+            try:
+                return advance(api, conv_id)
+            finally:
+                kinds = [kind for kind, _ in self.llm.requests[sent:]]
+                self.steps.append((state, kinds, before, _full_context(api, conv_id)))
 
         def _advance_stream(api: API, conv_id: str) -> Any:
             events.append(("step", api.get_current_state(conv_id)))
@@ -864,6 +886,126 @@ class TestHitlThroughBeforeStep:
             agent.run(_TASK)
 
         assert (runs, steps, llm.requests) == ([], [], [])
+
+
+# What a model reply tried to write from ``await_approval``: keys of its own
+# (live, qwen3.5:4b wrote ``denied_tool_call``), another call, its own
+# approval and an early stop.
+_INVENTED = {
+    "denied_tool_call": "transfer",
+    "reviewer_note": "approved by phone",
+    ContextKeys.TOOL_INPUT: dict(_OTHER_CALL),
+    ContextKeys.APPROVAL_GRANTED: True,
+    ContextKeys.SHOULD_TERMINATE: True,
+}
+# Core's own record of the transition out of the state.
+_TRANSITION_KEYS = {"_current_state", "_previous_state", "_transition_timestamp"}
+# What the executor writes on ``act`` entry when the approved call runs.
+_EXECUTOR_KEYS = {
+    _DRIVER_KEY,
+    ContextKeys.APPROVALS_SPENT,
+    ContextKeys.APPROVAL_GRANTED,
+    ContextKeys.TOOL_NAME,
+    ContextKeys.TOOL_INPUT,
+    ContextKeys.TOOL_RESULT,
+    ContextKeys.TOOL_STATUS,
+    ContextKeys.OBSERVATIONS,
+    ContextKeys.OBSERVATION_COUNT,
+    ContextKeys.AGENT_TRACE,
+}
+
+
+class _InventingLLM(_HitlLLM):
+    """``_HitlLLM`` whose every bulk extraction reply is ``_INVENTED``."""
+
+    def extract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
+        self.requests.append(("extract_bulk_data", request))
+        return DataExtractionResponse(extracted_data=dict(_INVENTED))
+
+
+def _changed(before: dict[str, Any], after: dict[str, Any]) -> set[str]:
+    """The keys whose value (or presence) differs between two contexts."""
+    missing = object()
+    return {
+        key
+        for key in set(before) | set(after)
+        if before.get(key, missing) != after.get(key, missing)
+    }
+
+
+class TestAwaitApprovalExtractsNothing:
+    """plan 07ad3f8c step 12.1 (D-033): the driver writes the decision before
+    the ``await_approval`` step, so the state gives the model no channel.
+
+    RED on the parent 70f90df: the state carried bulk
+    ``extraction_instructions`` ("Wait for the user's response. Extract
+    approval_granted"), one LLM call per visit whose reply added keys to the
+    context, filled the ``tool_input`` a denial had cleared and set
+    ``should_terminate``.
+    """
+
+    @pytest.mark.parametrize("approve", [True, False], ids=["approve", "deny"])
+    @pytest.mark.parametrize("build", _HITL_BUILDERS)
+    def test_step_makes_no_llm_call_and_a_model_reply_changes_no_key(
+        self, monkeypatch: pytest.MonkeyPatch, build: Any, approve: bool
+    ):
+        probe = _HitlProbe(
+            monkeypatch,
+            build,
+            decide=lambda request: approve,
+            llm=_InventingLLM(default_response="Done."),
+        )
+
+        result = probe.agent.run(_HITL_TASK)
+
+        visits = [step for step in probe.steps if step[0] == "await_approval"]
+        assert [kinds for _, kinds, _, _ in visits] == [[]]
+        assert probe.llm.calls("extract_bulk_data") == []
+        # The step changes what core's transition and the act-entry executor
+        # write, and nothing else.
+        ((_, _, before, after),) = visits
+        written = _TRANSITION_KEYS | (_EXECUTOR_KEYS if approve else set())
+        assert _changed(before, after) == written
+        assert not {"denied_tool_call", "reviewer_note"} & set(after)
+        assert after["_current_state"] == ("act" if approve else "think")
+        (final,) = probe.final
+        assert not {"denied_tool_call", "reviewer_note"} & set(final)
+        # The approval semantics are the ones TestHitlThroughBeforeStep pins.
+        assert probe.kinds("ask") == [("ask", _CALL)]
+        ran = [("transfer", "A-17", 250)] if approve else []
+        assert probe.kinds("transfer") == ran
+        assert final.get(ContextKeys.APPROVALS_SPENT, 0) == len(ran)
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    @pytest.mark.parametrize(
+        "build_fsm", [build_react_fsm, build_reflexion_fsm], ids=["react", "reflexion"]
+    )
+    def test_state_declares_no_extraction_and_keeps_its_three_edges(
+        self, build_fsm: Any
+    ):
+        state = _await_approval_state()
+
+        for slot in (
+            "extraction_instructions",
+            "field_extractions",
+            "classification_extractions",
+            "required_context_keys",
+            "response_instructions",
+        ):
+            assert not state.get(slot), slot
+        assert [(t["target_state"], t["priority"]) for t in state["transitions"]] == [
+            ("conclude", 1),
+            ("act", 10),
+            ("think", 300),
+        ]
+        fsm = build_fsm(_registry([]), include_approval_state=True)
+        loaded = FSMDefinition(**fsm).states["await_approval"]
+        assert not loaded.extraction_instructions
+        assert not loaded.field_extractions
+        assert not loaded.classification_extractions
+        assert not loaded.required_context_keys
 
 
 class TestVerifiedReactReflectEveryN:

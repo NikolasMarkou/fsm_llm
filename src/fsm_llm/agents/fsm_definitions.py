@@ -715,15 +715,21 @@ def _await_approval_state() -> dict[str, Any]:
     termination), ``act`` (``approval_granted`` True) and ``think``
     (``approval_granted`` False); the builder must define those three states.
     The agent's loop driver (``BaseAgent._handle_hitl_approval``) writes the
-    decision between turns. Never raises.
+    decision before the state's step, so the state makes no LLM call. Never
+    raises.
     """
-    from .prompts import build_approval_extraction_instructions
-
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-033: this state extracts
+    # nothing. Do NOT give it `extraction_instructions`, `required_context_keys`
+    # or a field for `approval_granted`: the driver's callback asks the
+    # approver and writes the decision before this step, the model has no
+    # human reply to read, and any extraction here is a model write channel
+    # inside the state that guards the approval (the old bulk pass cost one
+    # LLM call per visit and let the reply fill an empty `tool_input` after
+    # the ask and add keys of its own, live: `denied_tool_call`).
     return {
         "id": "await_approval",
         "description": "Waiting for human approval before executing action",
-        "purpose": "Present the planned action and wait for user approval",
-        "extraction_instructions": build_approval_extraction_instructions(),
+        "purpose": "Hold the selected action until the approval decision is set",
         # LOOP-09: an intermediate state; the driver asks the approver, so no
         # Pass-2 prose (core skips Pass 2 on empty instructions).
         "response_instructions": "",

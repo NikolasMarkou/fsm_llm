@@ -449,16 +449,21 @@ class AgentHandlers:
         if context.get(ContextKeys.DRIVER_APPROVAL) == call and not stale:
             return None
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-004
-        # The security boundary is HERE, not the FSM route: a model can extract
-        # the public approval_granted from any state and route
-        # await_approval -> act. Do NOT trust approval_granted or
-        # approval_required here; call the predicate and require the driver-only
-        # grant for this exact call. Do NOT record an observation (a refused
-        # call is not conclude evidence) and do NOT clear the selection (the
-        # driver asks for it next iteration). A grant for another call is void.
-        # Do NOT reduce the grant to a bare True: the model can fill an empty
-        # tool_input on the await_approval turn after the human approved the
+        # The security boundary is HERE, not the FSM route: the public
+        # approval_granted is a plain key, which a state with a bulk pass lets
+        # the model write (`think` under use_classification=True), and a True
+        # there skips the ask and routes await_approval -> act. Do NOT trust
+        # approval_granted or approval_required here; call the predicate and
+        # require the driver-only grant for this exact call. Do NOT record an
+        # observation (a refused call is not conclude evidence) and do NOT
+        # clear the selection (the driver asks for it next iteration). A grant
+        # for another call is void.
+        # Do NOT reduce the grant to a bare True: after such a refusal the
+        # driver asks before the next step, and the `think` step that follows
+        # can still fill an empty tool_input after the human approved the
         # empty call (D-023, pinned by TestEmptyThenFilledCall).
+        # `await_approval` itself extracts nothing
+        # (plan-2026-09-30T062855-07ad3f8c/D-033).
         reason = "its approval was already spent" if stale else "no approval"
         logger.warning(f"Refused gated tool '{tool_name}': {reason} for this call")
         refusal = {

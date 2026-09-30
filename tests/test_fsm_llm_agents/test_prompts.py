@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.agents.prompts import (
-    build_approval_extraction_instructions,
     build_conclude_extraction_instructions,
     build_conclude_response_instructions,
     build_debate_conclude_response_instructions,
@@ -88,8 +87,3 @@ class TestPromptBuilders:
         instructions = build().lower()
         for word in ("continue", "signal", "proceed", "prompt", "user"):
             assert word not in instructions, word
-
-    def test_approval_extraction_instructions(self):
-        instructions = build_approval_extraction_instructions()
-        assert "approval" in instructions.lower()
-        assert "approval_granted" in instructions

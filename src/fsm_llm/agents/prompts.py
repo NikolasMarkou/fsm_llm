@@ -236,16 +236,6 @@ def build_think_terminate_instructions() -> str:
     )
 
 
-def build_approval_extraction_instructions() -> str:
-    """Build extraction instructions for the approval-waiting state."""
-    return (
-        "The previous action requires human approval before execution.\n"
-        "Wait for the user's response.\n"
-        "Extract:\n"
-        '- "approval_granted": true if the user approves, false if denied\n'
-    )
-
-
 # ---------------------------------------------------------------------------
 # Reflexion prompts
 # ---------------------------------------------------------------------------
