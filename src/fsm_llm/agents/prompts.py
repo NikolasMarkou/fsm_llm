@@ -150,54 +150,6 @@ def build_think_extraction_instructions(
     return "\n".join(parts)
 
 
-def build_conclude_extraction_instructions(
-    output_schema: type | None = None,
-) -> str:
-    """Build extraction instructions for the conclude state."""
-    # DECISION plan_2026-05-30_5598b755/D-005 [STALE]
-    # Answer from the TASK/CONTEXT as well as tool observations. Recalled
-    # long-term memory and other given facts are injected into the task, NOT
-    # into `observations`; anchoring only on observations made conversational/
-    # recall turns (no tool run) extract "I don't have enough information"
-    # filler while the answer sat in the task. If the answer is already known
-    # from the task or recalled memory, answer it directly.
-    parts = [
-        "Formulate your final answer to the original task. Use BOTH the "
-        "observations gathered from tools AND any information already provided "
-        "in the task or recalled from your memory. If you already know the "
-        "answer from the task context or your memory, answer it directly and "
-        "completely — do not say you lack information when the answer is present.",
-        "Extract:",
-        '- "final_answer": your complete, well-structured answer to the original task',
-        '- "confidence": your confidence in the answer (0.0 to 1.0)',
-    ]
-
-    if output_schema is not None and hasattr(output_schema, "model_fields"):
-        parts.append("")
-        parts.append(
-            f"IMPORTANT: Also extract these fields for {output_schema.__name__}:"
-        )
-        for field_name, field_info in output_schema.model_fields.items():
-            desc = field_info.description or field_name
-            parts.append(f'- "{field_name}": {desc}')
-
-    parts.append("")
-    parts.append("Example:")
-    if output_schema is not None and hasattr(output_schema, "model_fields"):
-        # Build example that includes schema fields so the model follows the format
-        example_fields = ['"final_answer": "The answer based on my research is ..."']
-        example_fields.append('"confidence": 0.9')
-        for field_name in output_schema.model_fields:
-            example_fields.append(f'"{field_name}": "<value>"')
-        parts.append("{" + ", ".join(example_fields) + "}")
-    else:
-        parts.append(
-            '{"final_answer": "The answer based on my research is ...", "confidence": 0.9}'
-        )
-
-    return "\n".join(parts)
-
-
 # Appended to the conclude instructions of approval-gated FSMs (D-034 of plan
 # 07ad3f8c). It names no prompt, signal or request to go on (D-031).
 _REFUSED_ACTIONS_SENTENCE = (
@@ -368,20 +320,6 @@ def build_execute_step_instructions(
     )
 
 
-def build_synthesize_extraction_instructions() -> str:
-    """Build extraction instructions for the synthesize state."""
-    return "\n".join(
-        [
-            "All plan steps have been completed. Synthesize the results from "
-            "every step into a single, comprehensive final answer.",
-            "",
-            "Extract the following as JSON:",
-            '- "final_answer": your complete, well-structured answer to the original task',
-            '- "confidence": your confidence in the answer (0.0 to 1.0)',
-        ]
-    )
-
-
 def build_synthesize_response_instructions() -> str:
     """Build response instructions for the synthesize state."""
     return (
@@ -447,22 +385,6 @@ def build_rewoo_plan_field_instructions(
     )
 
 
-def build_rewoo_solve_extraction_instructions() -> str:
-    """Build extraction instructions for the REWOO solve state."""
-    return "\n".join(
-        [
-            "You have the original task, the plan you created, and the evidence "
-            "gathered from executing all tool calls. Synthesize a final answer.",
-            "",
-            "Review all evidence carefully and produce a complete answer.",
-            "",
-            "Extract the following as JSON:",
-            '- "final_answer": your complete, well-structured answer to the task',
-            '- "confidence": your confidence in the answer (0.0 to 1.0)',
-        ]
-    )
-
-
 def build_rewoo_solve_response_instructions() -> str:
     """Build response instructions for the REWOO solve state."""
     return (
@@ -495,20 +417,6 @@ def build_evalopt_field_instructions() -> dict[str, str]:
             "changes, with no commentary before or after it."
         ),
     }
-
-
-def build_evalopt_output_extraction_instructions() -> str:
-    """Build extraction instructions for the EvalOpt output state."""
-    return "\n".join(
-        [
-            "The output has passed evaluation (or maximum refinements reached).",
-            "Present the final version of your output.",
-            "",
-            "Extract the following as JSON:",
-            '- "final_answer": the final output',
-            '- "confidence": your confidence in the final output (0.0 to 1.0)',
-        ]
-    )
 
 
 def build_evalopt_output_response_instructions() -> str:
@@ -558,20 +466,6 @@ def build_maker_checker_field_instructions(
             "needs revision. " + criteria
         ),
     }
-
-
-def build_maker_checker_output_extraction_instructions() -> str:
-    """Build extraction instructions for the Maker-Checker output state."""
-    return "\n".join(
-        [
-            "The draft has passed the checker's review (or maximum revisions reached).",
-            "Present the final version.",
-            "",
-            "Extract the following as JSON:",
-            '- "final_answer": the final output',
-            '- "confidence": your confidence in the final output (0.0 to 1.0)',
-        ]
-    )
 
 
 def build_maker_checker_output_response_instructions() -> str:
@@ -632,20 +526,6 @@ def build_orchestrator_field_instructions() -> dict[str, str]:
             "task has no result at all."
         ),
     }
-
-
-def build_orchestrator_synthesize_extraction_instructions() -> str:
-    """Build extraction instructions for the orchestrator synthesize state."""
-    return "\n".join(
-        [
-            "All worker results have been collected. Synthesize them into "
-            "a single, comprehensive final answer.",
-            "",
-            "Extract the following as JSON:",
-            '- "final_answer": your complete, well-structured answer to the original task',
-            '- "confidence": your confidence in the answer (0.0 to 1.0)',
-        ]
-    )
 
 
 def build_orchestrator_synthesize_response_instructions() -> str:
@@ -729,20 +609,6 @@ def build_adapt_field_instructions(
     }
 
 
-def build_combine_extraction_instructions() -> str:
-    """Build extraction instructions for the ADaPT combine state."""
-    return "\n".join(
-        [
-            "Combine all results (from direct attempts and subtask results) "
-            "into a single final answer.",
-            "",
-            "Extract the following as JSON:",
-            '- "final_answer": your complete, well-structured answer to the original task',
-            '- "confidence": your confidence in the answer (0.0 to 1.0)',
-        ]
-    )
-
-
 def build_combine_response_instructions() -> str:
     """Build response instructions for the ADaPT combine state."""
     return (
@@ -774,20 +640,6 @@ def build_chain_step_field_instructions(
         f"('{name}') as plain text (not a JSON object), building on the "
         f"earlier steps' outputs in chain_results. Step: {response_instructions} "
         f"The output must cover: {extraction_instructions}"
-    )
-
-
-def build_chain_output_extraction_instructions() -> str:
-    """Build extraction instructions for the chain output (terminal) state."""
-    return "\n".join(
-        [
-            "All pipeline steps have been completed. Review the accumulated results "
-            "and produce a final answer that synthesizes the outputs from every step.",
-            "",
-            "Extract the following as JSON:",
-            '- "final_answer": your complete, well-structured answer to the original task',
-            '- "confidence": your confidence in the answer (0.0 to 1.0)',
-        ]
     )
 
 

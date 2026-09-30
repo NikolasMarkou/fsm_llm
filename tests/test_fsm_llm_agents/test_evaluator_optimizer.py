@@ -176,7 +176,7 @@ class TestBuildEvalOptFsm:
 
     def test_states_have_extraction_instructions(self):
         fsm = build_evalopt_fsm()
-        for state_id in ("generate", "refine", "output"):
+        for state_id in ("generate", "refine"):
             assert "extraction_instructions" in fsm["states"][state_id], (
                 f"State '{state_id}' missing extraction_instructions"
             )
@@ -236,10 +236,8 @@ class TestEvalOptConstants:
     """Tests for EvalOpt-specific constants."""
 
     def test_evalopt_states(self):
-        assert EvalOptStates.GENERATE == "generate"
         assert EvalOptStates.EVALUATE == "evaluate"
         assert EvalOptStates.REFINE == "refine"
-        assert EvalOptStates.OUTPUT == "output"
 
     def test_context_keys_generated_output(self):
         assert hasattr(ContextKeys, "GENERATED_OUTPUT")

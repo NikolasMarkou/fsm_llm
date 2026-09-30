@@ -32,14 +32,6 @@ class ToolNotFoundError(AgentError):
         self.tool_name = tool_name
 
 
-class ToolValidationError(AgentError):
-    """Tool parameter validation failed."""
-
-    def __init__(self, tool_name: str, reason: str):
-        super().__init__(f"Validation failed for tool '{tool_name}': {reason}")
-        self.tool_name = tool_name
-
-
 class BudgetExhaustedError(AgentError):
     """Agent exceeded its iteration/token/time budget."""
 
@@ -74,14 +66,6 @@ class EvaluationError(AgentError):
     def __init__(self, message: str, evaluator: str | None = None, **kwargs: Any):
         super().__init__(message, **kwargs)
         self.evaluator = evaluator
-
-
-class DecompositionError(AgentError):
-    """Error during task decomposition (ADaPT, Plan-and-Execute)."""
-
-    def __init__(self, message: str, depth: int = 0, **kwargs: Any):
-        super().__init__(message, **kwargs)
-        self.depth = depth
 
 
 # ---------------------------------------------------------------------------

@@ -2574,13 +2574,6 @@ class TestAgentInstructions:
         assert runs == []
         assert not any("POLICY-7" in r.system_prompt for _, r in llm.requests)
 
-    def test_legacy_positional_prompt_reaches_the_prompt(self):
-        with pytest.warns(DeprecationWarning, match="first argument"):
-            runs, llm, _ = self._react(_POLICY)
-
-        assert runs == ["capital of France"]
-        assert any(_POLICY in r.system_prompt for r in llm.calls("extract_field"))
-
     def test_debate_instructions_reach_every_prompt_and_keep_silence(self):
         from fsm_llm.agents import create_agent
 

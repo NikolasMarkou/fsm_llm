@@ -312,15 +312,15 @@ class ToolRegistry:
         if parameter_schema is None:
             # TOOL-03: infer like ``@tool`` so a one-param annotated function is
             # called by keyword, not handed the whole dict. A single unannotated
-            # or dict-annotated param keeps ``{}`` (legacy dict call). A function
+            # or dict-annotated param keeps ``{}`` (dict-style call). A function
             # taking ``**kwargs`` keeps ``{}`` so every key still reaches it.
             sig_params = list(inspect.signature(fn).parameters.values())
-            keep_legacy = any(
+            dict_style = any(
                 p.kind is inspect.Parameter.VAR_KEYWORD for p in sig_params
             ) or (
                 len(sig_params) == 1 and _is_dict_annotation(sig_params[0].annotation)
             )
-            parameter_schema = {} if keep_legacy else _infer_schema_from_hints(fn)
+            parameter_schema = {} if dict_style else _infer_schema_from_hints(fn)
 
         tool = ToolDefinition(
             name=tool_name,
@@ -448,9 +448,9 @@ class ToolRegistry:
         # every zero-argument MCP tool and monitor stub tool failed that way.
         var_kw = first_param.kind is inspect.Parameter.VAR_KEYWORD
         if param_count == 1 and not schema_props and not var_kw:
-            # Legacy pattern: single param with no schema -> pass dict
+            # Dict-style tool: single param with no schema -> pass dict
             return fn(parameters)
-        # Detect legacy dict-param pattern: fn(params: dict) with schema
+        # Detect the dict-style pattern: fn(params: dict) with schema
         ann = first_param.annotation
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-024
         # A dict[...] generic or a string annotation (__future__) is the legacy
@@ -460,7 +460,7 @@ class ToolRegistry:
             ann is dict
             or (_is_dict_annotation(ann) and first_param.name not in schema_props)
         ):
-            # Legacy function expects a single dict; pass parameters directly
+            # A dict-style function expects a single dict; pass parameters directly
             return fn(parameters)
         # Multi-param or schema-aware: pass as **kwargs
         sent = _unwrap_nested_tool_input(parameters, schema_props)
@@ -690,7 +690,7 @@ def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     Supports standard Python types (str, int, float, bool, list, dict) and
     ``typing.Annotated[T, "description"]`` for per-parameter descriptions.
 
-    Returns an empty dict for legacy single-dict-param functions (``params: dict``)
+    Returns an empty dict for dict-style single-param functions (``params: dict``)
     and for zero-parameter functions.
     """
     # A partial or a callable instance carries no annotations of its own: read
@@ -707,7 +707,7 @@ def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     if not params:
         return {}
 
-    # Legacy pattern: single dict parameter → skip inference
+    # Dict-style tool: single dict parameter → skip inference
     if len(params) == 1:
         raw_hint = hints.get(params[0].name)
         if raw_hint is dict or raw_hint is None:

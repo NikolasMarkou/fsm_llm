@@ -252,7 +252,7 @@ class TestBuildMakerCheckerFsm:
         fsm = build_maker_checker_fsm(
             maker_instructions="Write", checker_instructions="Check"
         )
-        for state_id in ("make", "check", "revise", "output"):
+        for state_id in ("make", "check", "revise"):
             assert "extraction_instructions" in fsm["states"][state_id], (
                 f"State '{state_id}' missing extraction_instructions"
             )
@@ -289,10 +289,8 @@ class TestMakerCheckerConstants:
     """Tests for MakerChecker-specific constants."""
 
     def test_maker_checker_states(self):
-        assert MakerCheckerStates.MAKE == "make"
         assert MakerCheckerStates.CHECK == "check"
         assert MakerCheckerStates.REVISE == "revise"
-        assert MakerCheckerStates.OUTPUT == "output"
 
     def test_context_keys_draft_output(self):
         assert hasattr(ContextKeys, "DRAFT_OUTPUT")

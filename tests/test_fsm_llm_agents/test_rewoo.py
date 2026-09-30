@@ -188,12 +188,12 @@ class TestREWOOFSM:
         assert "search" in plan_field["extraction_instructions"]
         assert "calculate" in plan_field["extraction_instructions"]
 
-    def test_solve_has_extraction_instructions(self):
+    def test_solve_speaks_and_extracts_nothing(self):
         registry = _make_registry()
         fsm = build_rewoo_fsm(registry)
         state = fsm["states"]["solve"]
-        assert "extraction_instructions" in state
-        assert len(state["extraction_instructions"]) > 0
+        assert "extraction_instructions" not in state
+        assert state["response_instructions"]
 
     def test_only_solve_has_response_instructions(self):
         """Intermediate states are silent (empty response_instructions)."""

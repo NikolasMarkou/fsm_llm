@@ -117,9 +117,6 @@ class TestSelfConsistencyConstants:
     def test_self_consistency_states_generate(self):
         assert SelfConsistencyStates.GENERATE == "generate"
 
-    def test_self_consistency_states_aggregate(self):
-        assert SelfConsistencyStates.AGGREGATE == "aggregate"
-
     def test_context_keys_samples(self):
         assert ContextKeys.SAMPLES == "samples"
 

@@ -163,7 +163,7 @@ class ReflexionAgent(BaseAgent):
         )
 
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
-        """Handle HITL approval gates before each converse()."""
+        """Handle HITL approval gates before each step of the run."""
         self._handle_hitl_approval(api, conv_id)
 
     # DECISION plan-2026-09-12T135914-45a654de/D-012

@@ -287,12 +287,12 @@ class TestBuildPromptChainFsm:
         state = fsm["states"]["step_0"]
         assert "Generate outline" in state["description"]
 
-    def test_output_state_has_instructions(self):
+    def test_output_state_speaks_and_extracts_nothing(self):
         chain = _make_chain(1)
         fsm = build_prompt_chain_fsm(chain)
         output = fsm["states"]["output"]
-        assert "extraction_instructions" in output
-        assert "response_instructions" in output
+        assert "extraction_instructions" not in output
+        assert output["response_instructions"]
 
 
 # -------------------------------------------------------------------------
@@ -308,9 +308,6 @@ class TestPromptChainConstants:
 
     def test_prompt_chain_states_step_prefix(self):
         assert PromptChainStates.STEP_PREFIX == "step_"
-
-    def test_prompt_chain_states_gate_prefix(self):
-        assert PromptChainStates.GATE_PREFIX == "gate_"
 
     def test_context_keys_chain_step_index(self):
         assert hasattr(ContextKeys, "CHAIN_STEP_INDEX")

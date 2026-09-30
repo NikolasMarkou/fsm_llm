@@ -232,12 +232,6 @@ class TestDecompositionResultModel:
 class TestADaPTConstants:
     """Tests for ADaPT-related constants."""
 
-    def test_adapt_states_attempt(self):
-        assert ADaPTStates.ATTEMPT == "attempt"
-
-    def test_adapt_states_assess(self):
-        assert ADaPTStates.ASSESS == "assess"
-
     def test_adapt_states_decompose(self):
         assert ADaPTStates.DECOMPOSE == "decompose"
 

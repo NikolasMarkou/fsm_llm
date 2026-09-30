@@ -11,7 +11,6 @@ from fsm_llm.agents.exceptions import (
     BudgetExhaustedError,
     ToolExecutionError,
     ToolNotFoundError,
-    ToolValidationError,
 )
 from fsm_llm.definitions import FSMError
 
@@ -33,12 +32,6 @@ class TestExceptionHierarchy:
         assert isinstance(e, AgentError)
         assert e.tool_name == "search"
         assert "search" in str(e)
-
-    def test_tool_validation_error(self):
-        e = ToolValidationError("search", "missing param")
-        assert isinstance(e, AgentError)
-        assert e.tool_name == "search"
-        assert "missing param" in str(e)
 
     def test_budget_exhausted_error(self):
         e = BudgetExhaustedError("iterations", 10)
@@ -65,7 +58,6 @@ class TestExceptionHierarchy:
         exceptions = [
             ToolExecutionError("x"),
             ToolNotFoundError("x"),
-            ToolValidationError("x", "y"),
             BudgetExhaustedError("x", 1),
             ApprovalDeniedError("x"),
             AgentTimeoutError(1.0),

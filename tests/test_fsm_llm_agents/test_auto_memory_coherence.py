@@ -3,8 +3,8 @@ from __future__ import annotations
 """Tests for AutoMemory conversational coherence (plan_2026-05-30_5598b755 / D-005).
 
 Two fixes for the recall/chat-turn filler:
-- Part A: the conclude extraction prompt answers from task/context + recalled
-  memory, not only tool observations.
+- Part A: the conclude prompt answers from the task (recalled memory is
+  injected into it) as well as from tool observations.
 - Part B: AutoMemoryReactAgent auto-registers a first-class ``respond`` action so
   conversational/recall turns have a valid act and conclude cleanly (no flailing).
 """
@@ -13,7 +13,7 @@ Two fixes for the recall/chat-turn filler:
 from fsm_llm.agents.auto_memory import AutoMemoryReactAgent
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import AgentConfig, ToolCall
-from fsm_llm.agents.prompts import build_conclude_extraction_instructions
+from fsm_llm.agents.prompts import build_conclude_response_instructions
 from fsm_llm.agents.semantic_memory import SemanticMemoryStore
 from fsm_llm.agents.tools import ToolRegistry, tool
 from fsm_llm.definitions import (
@@ -38,17 +38,17 @@ def _registry() -> ToolRegistry:
 
 
 # --------------------------------------------------------------------------- #
-# Part A — conclude extraction prompt                                          #
+# Part A — conclude prompt                                                     #
 # --------------------------------------------------------------------------- #
 
 
-def test_conclude_extraction_uses_task_and_memory_not_only_observations():
-    text = build_conclude_extraction_instructions()
-    low = text.lower()
-    assert "observations" in low
-    # The fix: also draw on the task/context and recalled memory.
-    assert "task" in low and "memory" in low
-    assert "answer it directly" in low
+def test_conclude_prompt_uses_task_facts_not_only_observations():
+    # The conclude state is terminal: core never extracts there, so the rule
+    # lives in the response instructions (the only conclude text a model sees).
+    low = build_conclude_response_instructions().lower()
+    assert "tool observations" in low
+    # The fix: also draw on the task, where recalled memory is injected.
+    assert "facts given in the task" in low
 
 
 # --------------------------------------------------------------------------- #

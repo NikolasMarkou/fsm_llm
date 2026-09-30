@@ -27,8 +27,6 @@ With HITL:
 
 from __future__ import annotations
 
-import warnings
-
 from .__version__ import __version__
 from .adapt import ADaPTAgent
 from .agent_graph import AgentGraph, AgentGraphBuilder
@@ -69,14 +67,12 @@ from .exceptions import (
     ApprovalDeniedError,
     BudgetExhaustedError,
     BuilderError,
-    DecompositionError,
     EvaluationError,
     MetaBuilderError,
     MetaValidationError,
     OutputError,
     ToolExecutionError,
     ToolNotFoundError,
-    ToolValidationError,
 )
 from .hitl import (
     ApprovalCallback,
@@ -159,17 +155,6 @@ _PATTERNS: dict[str, type] = {
 # the task to member agents, and MetaBuilderAgent is not an FSM agent.
 _NO_INSTRUCTIONS_PATTERNS = frozenset({"swarm", "meta_builder"})
 
-# A legacy first positional (the old system_prompt) is told apart from a
-# mistyped pattern name by shape: pattern names are short single words.
-_LEGACY_PROMPT_MIN_LENGTH = 33
-
-
-def _is_legacy_system_prompt(value: object) -> bool:
-    """Whether a first positional that names no pattern is a legacy prompt."""
-    return isinstance(value, str) and (
-        any(ch.isspace() for ch in value) or len(value) >= _LEGACY_PROMPT_MIN_LENGTH
-    )
-
 
 def create_agent(
     pattern: str = "react",
@@ -194,22 +179,12 @@ def create_agent(
             ...) raises ``TypeError``; set the model on ``AgentConfig``.
 
     Raises:
-        ValueError: Unknown pattern (the message lists the valid ones);
+        ValueError: Unknown pattern (the message lists the valid ones; names
+            are matched after ``strip().lower()``, so ``"Debate "`` is the
+            debate pattern);
             ``system_prompt`` for ``swarm``/``meta_builder``; or a
             ``system_prompt`` that conflicts with ``config.instructions``.
         TypeError: ``tools`` given to a pattern whose constructor takes none.
-
-    Deprecated:
-        The legacy call ``create_agent("You are ...", tools)`` still works:
-        a first argument that names no pattern and contains whitespace or is
-        longer than 32 characters is taken as ``system_prompt`` with a
-        ``DeprecationWarning``, and the pattern is "react". A short unknown
-        name raises ``ValueError``. Pattern names are matched after
-        ``strip().lower()``, so ``"Debate "`` is the debate pattern. The
-        legacy prompt now reaches the model (it used to be ignored), so it
-        counts against the prompt limits: at most 2,000 characters, and an
-        FSM instruction slot that overflows core's limit raises ``AgentError``
-        at ``run()``.
 
     Returns:
         A configured agent instance with ``__call__`` support.
@@ -226,28 +201,14 @@ def create_agent(
         agent = create_agent("react", [search], system_prompt="Cite sources.")
         result = agent("What is the capital of France?")
     """
-    # DECISION plan-2026-09-29T103145-06a5ec0a/D-012: the pattern comes first.
-    # Do NOT treat every unknown first argument as a legacy prompt (a typo like
-    # "debat" must raise), and do NOT drop the shim: before this a positional
-    # prompt was silently ignored, so old callers must keep running, warned.
-    # Normalise first (fix 24.1): "debate " or " React" name a pattern, not a
-    # legacy prompt.
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-041 [supersedes
+    # plan-2026-09-29T103145-06a5ec0a/D-012]: the first argument is a pattern
+    # name and nothing else. Do NOT guess that a long or spaced first argument
+    # is a system prompt (the removed shim): it raises below, and the caller
+    # passes ``system_prompt=``. Keep the normalisation: "debate " and " React"
+    # name a pattern. See decisions.md D-041.
     if isinstance(pattern, str) and pattern.strip().lower() in _PATTERNS:
         pattern = pattern.strip().lower()
-    if pattern not in _PATTERNS and _is_legacy_system_prompt(pattern):
-        warnings.warn(
-            "create_agent(system_prompt, tools) is deprecated: the first "
-            "argument is now the pattern. Use create_agent(pattern, tools, "
-            "system_prompt=...).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if system_prompt is not None:
-            raise ValueError(
-                "create_agent got a legacy positional system prompt and "
-                "system_prompt=; pass it once"
-            )
-        system_prompt, pattern = pattern, "react"
 
     cls = _PATTERNS.get(pattern)
     if cls is None:
@@ -394,11 +355,9 @@ __all__ = [
     "OutputError",
     "ToolExecutionError",
     "ToolNotFoundError",
-    "ToolValidationError",
     "BudgetExhaustedError",
     "ApprovalDeniedError",
     "AgentTimeoutError",
-    "DecompositionError",
     "EvaluationError",
     # Version
     "__version__",

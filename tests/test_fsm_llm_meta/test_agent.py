@@ -411,18 +411,6 @@ class TestFewShotFSMExample:
         ]
 
 
-class TestLegacyFSMDefinition:
-    """Test that the legacy FSM definition still loads."""
-
-    def test_builds_fsm_dict(self):
-        from fsm_llm.agents.meta_fsm import build_meta_builder_fsm
-
-        fsm = build_meta_builder_fsm()
-        assert isinstance(fsm, dict)
-        assert "name" in fsm
-        assert "states" in fsm
-
-
 class TestLlmCallProviderFailure:
     """F-03 / SC-10 — `_llm_call` used to convert ANY provider failure into
     ``""`` via `except Exception: return ""`, making a total outage

@@ -202,17 +202,8 @@ class TestDebateConstants:
     def test_debate_states_propose(self):
         assert DebateStates.PROPOSE == "propose"
 
-    def test_debate_states_critique(self):
-        assert DebateStates.CRITIQUE == "critique"
-
-    def test_debate_states_counter(self):
-        assert DebateStates.COUNTER == "counter"
-
     def test_debate_states_judge(self):
         assert DebateStates.JUDGE == "judge"
-
-    def test_debate_states_conclude(self):
-        assert DebateStates.CONCLUDE == "conclude"
 
     def test_context_keys_proposition(self):
         assert ContextKeys.PROPOSITION == "proposition"

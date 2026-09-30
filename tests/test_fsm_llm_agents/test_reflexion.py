@@ -200,10 +200,10 @@ class TestReflexionFSM:
         assert fsm["states"]["conclude"]["transitions"] == []
 
     def test_states_have_extraction_instructions(self):
-        """States that extract data should have extraction_instructions."""
+        """States that extract data carry typed fields; conclude extracts nothing."""
         registry = _make_registry()
         fsm = build_reflexion_fsm(registry)
-        assert len(fsm["states"]["conclude"]["extraction_instructions"]) > 0
+        assert "extraction_instructions" not in fsm["states"]["conclude"]
         # think, evaluate and reflect extract only typed per-field values
         # (D-009 of plan 06a5ec0a) and write no Pass-2 prose.
         expected = {
@@ -384,7 +384,6 @@ class TestReflexionConstants:
 
     def test_reflexion_defaults(self):
         assert Defaults.MAX_REFLECTIONS == 3
-        assert Defaults.EVALUATION_THRESHOLD == 0.7
 
     def test_reflexion_handler_names(self):
         assert HandlerNames.REFLEXION_EVALUATOR == "ReflexionEvaluator"

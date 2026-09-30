@@ -245,7 +245,7 @@ class TestPlanExecuteFSM:
             "step_result": "str",
         }
         assert fields("check_result") == {}
-        assert states["synthesize"]["extraction_instructions"]
+        assert "extraction_instructions" not in states["synthesize"]
 
     def test_tool_less_step_requires_its_result(self):
         fsm = build_plan_execute_fsm()

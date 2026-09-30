@@ -174,9 +174,6 @@ class TestOrchestratorConstants:
     def test_orchestrator_states_collect(self):
         assert OrchestratorStates.COLLECT == "collect"
 
-    def test_orchestrator_states_synthesize(self):
-        assert OrchestratorStates.SYNTHESIZE == "synthesize"
-
     def test_context_keys_subtasks(self):
         assert ContextKeys.SUBTASKS == "subtasks"
 

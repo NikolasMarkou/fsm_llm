@@ -422,5 +422,5 @@ class ReasoningReactAgent(BaseAgent):
         self._register_approval_gate(api)
 
     def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
-        """Ask the HITL callback before each converse() (same driver as React)."""
+        """Ask the HITL callback before each step (same driver as React)."""
         self._handle_hitl_approval(api, conv_id)

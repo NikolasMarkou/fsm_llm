@@ -16,7 +16,6 @@ class AgentStates:
 
     THINK = "think"
     ACT = "act"
-    CONCLUDE = "conclude"
     AWAIT_APPROVAL = "await_approval"
 
 
@@ -56,19 +55,15 @@ class REWOOStates:
 class EvalOptStates:
     """States in the Evaluator-Optimizer agent FSM."""
 
-    GENERATE = "generate"
     EVALUATE = "evaluate"
     REFINE = "refine"
-    OUTPUT = "output"
 
 
 class MakerCheckerStates:
     """States in the Maker-Checker agent FSM."""
 
-    MAKE = "make"
     CHECK = "check"
     REVISE = "revise"
-    OUTPUT = "output"
 
 
 class PromptChainStates:
@@ -76,14 +71,12 @@ class PromptChainStates:
 
     OUTPUT = "output"
     STEP_PREFIX = "step_"
-    GATE_PREFIX = "gate_"
 
 
 class SelfConsistencyStates:
     """States in the Self-Consistency agent FSM."""
 
     GENERATE = "generate"
-    AGGREGATE = "aggregate"
 
 
 class OrchestratorStates:
@@ -92,24 +85,18 @@ class OrchestratorStates:
     ORCHESTRATE = "orchestrate"
     DELEGATE = "delegate"
     COLLECT = "collect"
-    SYNTHESIZE = "synthesize"
 
 
 class DebateStates:
     """States in the Debate agent FSM."""
 
     PROPOSE = "propose"
-    CRITIQUE = "critique"
-    COUNTER = "counter"
     JUDGE = "judge"
-    CONCLUDE = "conclude"
 
 
 class ADaPTStates:
     """States in the ADaPT agent FSM."""
 
-    ATTEMPT = "attempt"
-    ASSESS = "assess"
     DECOMPOSE = "decompose"
     COMBINE = "combine"
 
@@ -480,7 +467,6 @@ class Defaults:
 
     # Reflexion
     MAX_REFLECTIONS = 3
-    EVALUATION_THRESHOLD = 0.7
 
     # Plan-and-Execute
     MAX_PLAN_STEPS = 10
@@ -580,7 +566,6 @@ class MetaErrorMessages:
 class ErrorMessages:
     """Standard error messages."""
 
-    BUDGET_EXHAUSTED = "Agent exceeded maximum iterations ({limit})"
     TOOL_NOT_FOUND = "Tool '{name}' not found in registry"
     TOOL_EXECUTION_FAILED = "Tool '{name}' execution failed: {error}"
     EMPTY_CHAIN = "Cannot create prompt chain agent with empty chain"

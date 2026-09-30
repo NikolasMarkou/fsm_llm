@@ -53,27 +53,12 @@ class TestCreateAgentPatternFirst:
         assert isinstance(agent, ReactAgent)
         assert agent.tools.list_tools()[0].name == "_search"
 
-    def test_legacy_positional_prompt_warns_and_builds_react(self):
-        with pytest.warns(DeprecationWarning, match="first argument is now"):
-            agent = create_agent("You are X.", [_search])
-
-        assert isinstance(agent, ReactAgent)
-        assert agent.config.instructions == "You are X."
-
-    def test_long_single_word_prompt_is_legacy(self):
-        word = "x" * 33
-        with pytest.warns(DeprecationWarning):
-            agent = create_agent(word, [_search])
-
-        assert agent.config.instructions == word
-
     @pytest.mark.parametrize(
         ("name", "cls"),
         [("debate ", DebateAgent), (" React", ReactAgent), ("DEBATE", DebateAgent)],
     )
     def test_pattern_names_are_stripped_and_lowercased(self, name, cls):
-        # Fix 24.1 (review api #4): "debate " was a legacy prompt that built a
-        # ReactAgent without tools; " react" silently became instructions.
+        # Fix 24.1 (review api #4): "debate " and " React" name a pattern.
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             agent = (
@@ -112,10 +97,6 @@ class TestCreateAgentPatternFirst:
                 config=AgentConfig(instructions="A"),
                 system_prompt="B",
             )
-
-    def test_legacy_prompt_plus_system_prompt_raises(self):
-        with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="once"):
-            create_agent("You are X.", [_search], system_prompt="You are Y.")
 
     @pytest.mark.parametrize("pattern", ["swarm", "meta_builder"])
     def test_system_prompt_on_pattern_without_prompts_raises(self, pattern):

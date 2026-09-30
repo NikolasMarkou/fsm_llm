@@ -465,7 +465,7 @@ class MetaBuilderConfig(AgentConfig):
 class MetaBuilderResult(AgentResult):
     """Result of a meta-builder session."""
 
-    # Override AgentResult defaults for backward compat
+    # Defaults for the two fields AgentResult requires
     answer: str = ""
     success: bool = True
 

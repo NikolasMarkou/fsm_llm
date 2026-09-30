@@ -71,7 +71,6 @@ def build_orchestrator_fsm(
         build_delegate_response_instructions,
         build_orchestrate_response_instructions,
         build_orchestrator_field_instructions,
-        build_orchestrator_synthesize_extraction_instructions,
         build_orchestrator_synthesize_response_instructions,
     )
 
@@ -193,7 +192,6 @@ def build_orchestrator_fsm(
             "id": "synthesize",
             "description": "Synthesize all worker results into a final answer",
             "purpose": "Produce a comprehensive answer from all worker results",
-            "extraction_instructions": build_orchestrator_synthesize_extraction_instructions(),
             "response_instructions": build_orchestrator_synthesize_response_instructions(),
             "transitions": [],
         },
@@ -239,7 +237,6 @@ def build_adapt_fsm(
         build_adapt_field_instructions,
         build_assess_response_instructions,
         build_attempt_response_instructions,
-        build_combine_extraction_instructions,
         build_combine_response_instructions,
         build_decompose_response_instructions,
     )
@@ -465,7 +462,6 @@ def build_adapt_fsm(
             "description": "Combine all results into the final answer",
             "purpose": "Synthesize attempt results and subtask results",
             "required_context_keys": [ContextKeys.FINAL_ANSWER],
-            "extraction_instructions": build_combine_extraction_instructions(),
             "response_instructions": build_combine_response_instructions(),
             "transitions": [],
         },
@@ -807,7 +803,6 @@ def build_reflexion_fsm(
     :func:`build_react_fsm`.
     """
     from .prompts import (
-        build_conclude_extraction_instructions,
         build_conclude_response_instructions,
         build_evaluate_field_instructions,
         build_reflect_field_instructions,
@@ -1037,7 +1032,6 @@ def build_reflexion_fsm(
             "description": "Formulate and present the final answer",
             "purpose": "Synthesize all observations into a complete answer",
             "required_context_keys": [ContextKeys.FINAL_ANSWER],
-            "extraction_instructions": build_conclude_extraction_instructions(),
             "response_instructions": build_conclude_response_instructions(
                 refused_actions=include_approval_state
             ),
@@ -1077,7 +1071,6 @@ def build_plan_execute_fsm(
     from .prompts import (
         build_execute_step_instructions,
         build_plan_steps_instructions,
-        build_synthesize_extraction_instructions,
         build_synthesize_response_instructions,
     )
 
@@ -1232,7 +1225,6 @@ def build_plan_execute_fsm(
             "id": "synthesize",
             "description": "Combine all step results into a final answer",
             "purpose": "Produce a comprehensive answer from all step results",
-            "extraction_instructions": build_synthesize_extraction_instructions(),
             "response_instructions": build_synthesize_response_instructions(),
             "transitions": [],
         },
@@ -1276,7 +1268,6 @@ def build_react_fsm(
     those prompts (``caller_prompt_keys``).
     """
     from .prompts import (
-        build_conclude_extraction_instructions,
         build_conclude_response_instructions,
         build_think_extraction_instructions,
     )
@@ -1420,9 +1411,6 @@ def build_react_fsm(
                     else []
                 )
             ),
-            "extraction_instructions": build_conclude_extraction_instructions(
-                output_schema
-            ),
             "response_instructions": build_conclude_response_instructions(
                 refused_actions=include_approval_state
             ),
@@ -1463,7 +1451,6 @@ def build_prompt_chain_fsm(
     has an edge to ``output`` taken when that gate failed.
     """
     from .prompts import (
-        build_chain_output_extraction_instructions,
         build_chain_output_response_instructions,
         build_chain_step_field_instructions,
     )
@@ -1537,7 +1524,6 @@ def build_prompt_chain_fsm(
         "id": "output",
         "description": "Produce the final output from the chain",
         "purpose": "Synthesize all step results into a final answer",
-        "extraction_instructions": build_chain_output_extraction_instructions(),
         "response_instructions": build_chain_output_response_instructions(),
         "transitions": [],
     }
@@ -1815,7 +1801,6 @@ def build_rewoo_fsm(
     """
     from .prompts import (
         build_rewoo_plan_field_instructions,
-        build_rewoo_solve_extraction_instructions,
         build_rewoo_solve_response_instructions,
     )
 
@@ -1870,7 +1855,6 @@ def build_rewoo_fsm(
             "id": "solve",
             "description": "Synthesize the final answer from all evidence",
             "purpose": "Combine the task, plan, and all tool results into a final answer",
-            "extraction_instructions": build_rewoo_solve_extraction_instructions(),
             "response_instructions": build_rewoo_solve_response_instructions(),
             "transitions": [],
         },
@@ -1909,7 +1893,6 @@ def build_evalopt_fsm(
     """
     from .prompts import (
         build_evalopt_field_instructions,
-        build_evalopt_output_extraction_instructions,
         build_evalopt_output_response_instructions,
     )
 
@@ -2026,7 +2009,6 @@ def build_evalopt_fsm(
             "id": "output",
             "description": "Present the final evaluated output",
             "purpose": "Extract and present the final answer",
-            "extraction_instructions": build_evalopt_output_extraction_instructions(),
             "response_instructions": build_evalopt_output_response_instructions(),
             "transitions": [],
         },
@@ -2063,7 +2045,6 @@ def build_maker_checker_fsm(
     """
     from .prompts import (
         build_maker_checker_field_instructions,
-        build_maker_checker_output_extraction_instructions,
         build_maker_checker_output_response_instructions,
     )
 
@@ -2214,7 +2195,6 @@ def build_maker_checker_fsm(
             "id": "output",
             "description": "Present the final reviewed output",
             "purpose": "Extract and present the final answer",
-            "extraction_instructions": build_maker_checker_output_extraction_instructions(),
             "response_instructions": build_maker_checker_output_response_instructions(),
             "transitions": [],
         },

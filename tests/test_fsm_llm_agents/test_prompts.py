@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.agents.prompts import (
-    build_conclude_extraction_instructions,
     build_conclude_response_instructions,
     build_debate_conclude_response_instructions,
     build_think_extraction_instructions,
@@ -61,11 +60,6 @@ class TestPromptBuilders:
             registry, include_observations=False
         )
         assert "previous observations" not in instructions.lower()
-
-    def test_conclude_extraction_instructions(self):
-        instructions = build_conclude_extraction_instructions()
-        assert "final_answer" in instructions
-        assert "confidence" in instructions
 
     def test_conclude_response_instructions(self):
         instructions = build_conclude_response_instructions()

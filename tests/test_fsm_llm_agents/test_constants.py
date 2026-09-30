@@ -18,16 +18,15 @@ class TestAgentStates:
     def test_states_are_strings(self):
         assert isinstance(AgentStates.THINK, str)
         assert isinstance(AgentStates.ACT, str)
-        assert isinstance(AgentStates.CONCLUDE, str)
+        assert isinstance(AgentStates.AWAIT_APPROVAL, str)
 
     def test_states_are_unique(self):
         states = {
             AgentStates.THINK,
             AgentStates.ACT,
-            AgentStates.CONCLUDE,
             AgentStates.AWAIT_APPROVAL,
         }
-        assert len(states) == 4
+        assert len(states) == 3
 
 
 class TestContextKeys:
@@ -76,9 +75,6 @@ class TestErrorMessages:
     """Tests for ErrorMessages templates."""
 
     def test_format_strings_work(self):
-        msg = ErrorMessages.BUDGET_EXHAUSTED.format(limit=10)
-        assert "10" in msg
-
         msg = ErrorMessages.TOOL_NOT_FOUND.format(name="search")
         assert "search" in msg
 

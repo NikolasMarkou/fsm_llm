@@ -83,7 +83,6 @@ def build_parallel_react_fsm(
     ``context_keys``, never ``agent_trace``.
     """
     from .prompts import (
-        build_conclude_extraction_instructions,
         build_conclude_response_instructions,
         build_think_terminate_instructions,
     )
@@ -191,9 +190,6 @@ def build_parallel_react_fsm(
                     if output_schema and hasattr(output_schema, "model_fields")
                     else []
                 )
-            ),
-            "extraction_instructions": build_conclude_extraction_instructions(
-                output_schema
             ),
             "response_instructions": build_conclude_response_instructions(),
             "transitions": [],
