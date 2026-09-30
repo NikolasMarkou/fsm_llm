@@ -281,6 +281,138 @@ class TestAgentStep:
         assert result.success is False
 
 
+class TestStepsOverTheRealCore:
+    """plan-2026-09-30T062855-07ad3f8c step 14: ``AgentStep`` runs a real
+    ``ReactAgent`` (driven by core's bounded run, no user turn), and
+    ``ConversationStep.auto_messages`` stays a scripted conversation on
+    ``converse``."""
+
+    @pytest.fixture
+    def converse_calls(self, monkeypatch):
+        from fsm_llm import API
+
+        calls: list[str] = []
+        real = API.converse
+
+        def _converse(api, user_message, conversation_id):
+            calls.append(user_message)
+            return real(api, user_message, conversation_id)
+
+        monkeypatch.setattr(API, "converse", _converse)
+        return calls
+
+    async def test_agent_step_runs_a_react_agent_to_success(self, converse_calls):
+        pytest.importorskip("fsm_llm.agents")
+        from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry
+        from tests.conftest import PromptGroundedLLM
+
+        answer = "The capital of France is Paris."
+        queries: list[str] = []
+
+        def lookup(query: str) -> str:
+            queries.append(query)
+            return answer
+
+        registry = ToolRegistry()
+        registry.register_function(lookup, name="lookup", description="Look up a fact")
+        llm = PromptGroundedLLM(
+            facts={
+                "tool_name": ("lookup", "capital"),
+                "tool_input": ({"query": "capital of France"}, "capital"),
+                "should_terminate": (True, "is Paris"),
+            },
+            default_response=answer,
+        )
+        step = AgentStep(
+            step_id="research",
+            name="Research",
+            agent=ReactAgent(
+                tools=registry,
+                config=AgentConfig(max_iterations=6),
+                llm_interface=llm,
+            ),
+            task_template="What is the capital of {country}?",
+            success_state="report",
+            context_mapping={"finding": "answer", "calls": "observation_count"},
+        )
+
+        result = await step.execute({"country": "France"})
+
+        assert (result.success, result.next_state) == (True, "report")
+        assert queries == ["capital of France"]
+        assert result.data["agent_answer"] == answer
+        assert result.data["agent_research_success"] is True
+        assert result.data["finding"] == answer
+        assert result.data["calls"] == 1
+        assert converse_calls == []
+        assert {request.user_message for _, request in llm.requests} == {""}
+
+    async def test_conversation_step_sends_its_auto_messages_as_user_turns(
+        self, converse_calls, monkeypatch
+    ):
+        from fsm_llm import API
+        from fsm_llm.workflows.steps import ConversationStep
+        from tests.conftest import MockLLM2Interface
+
+        llm = MockLLM2Interface(extraction_data={"name": "Alice"}, response_text="Hi!")
+        real_from_definition = API.from_definition
+        monkeypatch.setattr(
+            API,
+            "from_definition",
+            lambda definition, **kwargs: real_from_definition(
+                definition, llm_interface=llm
+            ),
+        )
+        name_gate = {
+            "description": "name was given",
+            "requires_context_keys": ["name"],
+            "logic": {"!!": [{"var": "name"}]},
+        }
+        step = ConversationStep(
+            step_id="intake",
+            name="Intake",
+            fsm_definition={
+                "name": "NameCapture",
+                "description": "Ask for a name, then greet",
+                "initial_state": "ask",
+                "states": {
+                    "ask": {
+                        "id": "ask",
+                        "description": "Ask for the name",
+                        "purpose": "Learn the user's name",
+                        "response_instructions": "Ask for the user's name",
+                        "required_context_keys": ["name"],
+                        "transitions": [
+                            {
+                                "target_state": "greet",
+                                "description": "The name is known",
+                                "conditions": [name_gate],
+                            }
+                        ],
+                    },
+                    "greet": {
+                        "id": "greet",
+                        "description": "Greet by name",
+                        "purpose": "Greet the user",
+                        "response_instructions": "Greet the user by name",
+                    },
+                },
+            },
+            success_state="done",
+            auto_messages=["My name is Alice", "never sent: the FSM has ended"],
+            context_mapping={"user_name": "name"},
+            require_completion=True,
+        )
+
+        result = await step.execute({})
+
+        assert (result.success, result.next_state) == (True, "done")
+        assert converse_calls == ["My name is Alice"]
+        assert result.data["user_name"] == "Alice"
+        assert result.data["conversation_intake_ended"] is True
+        assert "My name is Alice" in {req.user_message for _, req in llm.call_history}
+
+
 # ---------------------------------------------------------------
 # DSL functions
 # ---------------------------------------------------------------

@@ -41,8 +41,17 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.agents.definitions import AgentResult
-from fsm_llm.agents.exceptions import AgentError
+from fsm_llm import API
+from fsm_llm.agents.constants import Defaults as AgentDefaults
+from fsm_llm.agents.constants import StopReason
+from fsm_llm.agents.definitions import AgentConfig, AgentResult
+from fsm_llm.agents.exceptions import AgentError, BudgetExhaustedError
+from fsm_llm.constants import has_internal_prefix
+from fsm_llm.definitions import (
+    AdvanceResult,
+    RunBudgetExceededError,
+    TransitionEvaluationResult,
+)
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.harness import harness as harness_module
 from fsm_llm.harness import storage as storage_module
@@ -5589,3 +5598,250 @@ class TestTheC1FailOpenIsStillShut:
         doc = StateDoc.from_markdown((plan_dir / ArtifactNames.STATE).read_text())
         assert doc.iteration == 0
         assert doc.current_step.startswith("0 of 1")
+
+
+# ---------------------------------------------------------------------------
+# The driver runs on core's bounded run loop
+# (plan-2026-09-30T062855-07ad3f8c step 14, D-014 / D-030)
+# ---------------------------------------------------------------------------
+
+
+class _CoreLoopSpy:
+    """What one ``HarnessAgent.run`` did to the core ``API``.
+
+    Interface contract (every test of ``TestRunsOnTheCoreLoop``):
+        - ``converse``: every message sent through ``API.converse``.
+        - ``runs``: one ``(api, kwargs)`` per ``API.run_until_terminal`` call.
+        - ``steps``: the ``AdvanceResult`` of every ``API.advance``, in order.
+        - ``hooks``: ``(number, state, dispatches_so_far)`` per
+          ``_on_loop_iteration`` call, read BEFORE the hook body runs.
+        - ``ended``: conversation ids passed to ``API.end_conversation``.
+    """
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, harness: Any) -> None:
+        self.converse: list[str] = []
+        self.runs: list[tuple[API, dict[str, Any]]] = []
+        self.steps: list[AdvanceResult] = []
+        self.hooks: list[tuple[int, str, int]] = []
+        self.ended: list[str] = []
+        real_converse = API.converse
+        real_run = API.run_until_terminal
+        real_advance = API.advance
+        real_end = API.end_conversation
+        real_hook = harness.agent._on_loop_iteration
+        worker = harness.worker
+
+        def _converse(api: API, message: str, conv_id: str) -> str:
+            self.converse.append(message)
+            return real_converse(api, message, conv_id)
+
+        def _run(api: API, conv_id: str, **kwargs: Any) -> Any:
+            self.runs.append((api, kwargs))
+            return real_run(api, conv_id, **kwargs)
+
+        def _advance(api: API, conv_id: str) -> AdvanceResult:
+            result = real_advance(api, conv_id)
+            self.steps.append(result)
+            return result
+
+        def _end(api: API, conv_id: str) -> None:
+            self.ended.append(conv_id)
+            real_end(api, conv_id)
+
+        def _hook(api: API, conv_id: str, number: int) -> None:
+            dispatched = len(worker.requests) if worker is not None else 0
+            self.hooks.append((number, api.get_current_state(conv_id), dispatched))
+            real_hook(api, conv_id, number)
+
+        monkeypatch.setattr(API, "converse", _converse)
+        monkeypatch.setattr(API, "run_until_terminal", _run)
+        monkeypatch.setattr(API, "advance", _advance)
+        monkeypatch.setattr(API, "end_conversation", _end)
+        monkeypatch.setattr(harness.agent, "_on_loop_iteration", _hook)
+
+    @property
+    def path(self) -> list[tuple[str, str, TransitionEvaluationResult]]:
+        """``(state_before, state_after, outcome)`` per step."""
+        return [
+            (step.state_before, step.state_after, step.transition_outcome)
+            for step in self.steps
+        ]
+
+
+_BLOCKED = TransitionEvaluationResult.BLOCKED
+_MOVED = TransitionEvaluationResult.DETERMINISTIC
+
+
+class TestRunsOnTheCoreLoop:
+    """``HarnessAgent`` is driven by ``API.run_until_terminal``, not by turns.
+
+    The driver's hooks (``_register_handlers``, ``_on_loop_iteration`` as the
+    core ``before_step``, ``_init_context``, ``_filter_context``, the answer and
+    evidence keys of ``_standard_run``) and its halts are pinned here on a run
+    that goes through the real ``API`` with a three-step plan, so EXECUTE is
+    both entered and held.
+    """
+
+    def test_no_turn_text_is_left_in_the_constants(self) -> None:
+        """The driver sends no message, so ``Defaults`` holds no text for one."""
+        texts = {value for value in vars(Defaults).values() if isinstance(value, str)}
+        assert "Continue." not in texts
+
+    def test_a_traverse_is_one_bounded_run_with_no_user_turn(
+        self, make_harness, monkeypatch
+    ) -> None:
+        harness = make_harness(_traverse_script(total_steps=3))
+        spy = _CoreLoopSpy(monkeypatch, harness)
+        result = harness.run()
+
+        assert spy.converse == []
+        assert len(spy.runs) == 1
+        api, budgets = spy.runs[0]
+        assert budgets["max_steps"] == (
+            Defaults.MAX_TURNS * AgentDefaults.FSM_BUDGET_MULTIPLIER
+        )
+        assert 0 < budgets["max_seconds"] <= Defaults.TIMEOUT_SECONDS
+        assert callable(budgets["before_step"])
+        # One Pass-2 call for the greeting and one per step, none with a
+        # message, and no Pass-1 call at all (D-041).
+        kinds = [kind for kind, _ in harness.llm.call_history]
+        assert kinds == ["generate_response"] * (1 + len(spy.steps))
+        assert {req.user_message for _, req in harness.llm.call_history} == {""}
+        assert result.success is True
+        assert len(spy.ended) == 1
+        assert api.has_conversation_ended(spy.ended[0])
+
+    def test_the_handlers_are_on_the_api_the_core_loop_runs(
+        self, make_harness, monkeypatch
+    ) -> None:
+        harness = make_harness(_traverse_script(total_steps=3))
+        spy = _CoreLoopSpy(monkeypatch, harness)
+        harness.run()
+
+        api = spy.runs[0][0]
+        assert harness.agent.api is api
+        names = {handler.name for handler in api.handler_system.handlers}
+        assert {
+            HandlerNames.EXTRACTION_GUARD,
+            HandlerNames.START_DISPATCH,
+            *HandlerNames.BY_STATE.values(),
+        } <= names
+
+    def test_a_blocked_step_holds_the_state_and_the_hook_dispatches_for_it(
+        self, make_harness, monkeypatch
+    ) -> None:
+        """Step 3 of the run is BLOCKED in EXECUTE; the next hook dispatches."""
+        harness = make_harness(_traverse_script(total_steps=3))
+        spy = _CoreLoopSpy(monkeypatch, harness)
+        harness.run()
+
+        assert spy.path == [
+            (HarnessStates.EXPLORE, HarnessStates.PLAN, _MOVED),
+            (HarnessStates.PLAN, HarnessStates.EXECUTE, _MOVED),
+            (HarnessStates.EXECUTE, HarnessStates.EXECUTE, _BLOCKED),
+            (HarnessStates.EXECUTE, HarnessStates.REFLECT, _MOVED),
+            (HarnessStates.REFLECT, HarnessStates.CLOSE, _MOVED),
+        ]
+        assert all(step.response is not None for step in spy.steps)
+        # The hook is called once before each step, numbered from 1, with the
+        # state the step starts in. Dispatches seen by then: explore and plan
+        # and execute step 1 came from handlers; execute steps 2 and 3 are
+        # dispatched by the hook itself, one per held step.
+        assert spy.hooks == [
+            (1, HarnessStates.EXPLORE, 1),
+            (2, HarnessStates.PLAN, 2),
+            (3, HarnessStates.EXECUTE, 3),
+            (4, HarnessStates.EXECUTE, 4),
+            (5, HarnessStates.REFLECT, 6),
+        ]
+        assert harness.worker.calls_for(HarnessStates.EXECUTE) == [
+            (HarnessStates.EXECUTE, 1, 1, 0),
+            (HarnessStates.EXECUTE, 1, 2, 0),
+            (HarnessStates.EXECUTE, 1, 3, 0),
+        ]
+
+    def test_a_finished_run_answers_with_the_close_reply(
+        self, make_harness, monkeypatch
+    ) -> None:
+        """No halt reason: the answer is the last state's reply, on evidence."""
+        harness = make_harness(_traverse_script(total_steps=3))
+        harness.llm.response_text = "closing summary"
+        result = harness.run("ship the seam", initial_context={"caller_key": "kept"})
+
+        assert result.answer == "closing summary"
+        assert (result.success, result.stop_reason) == (True, StopReason.EVIDENCE)
+        context = result.final_context
+        assert context[ContextKeys.GOAL] == "ship the seam"
+        assert context["caller_key"] == "kept"
+        assert len(context[ContextKeys.ROLE_RESULTS]) == 7
+        assert not [key for key in context if has_internal_prefix(key)]
+
+    def test_a_permanently_blocked_gate_ends_in_the_stall_halt(
+        self, make_harness, monkeypatch
+    ) -> None:
+        """With no worker nothing opens EXPLORE's gate: the documented halt.
+
+        The run returns a result (``success=False``, the reason as answer, no
+        slug); it does not raise, and it stops long before the step budget.
+        """
+        harness = make_harness(worker=None)
+        spy = _CoreLoopSpy(monkeypatch, harness)
+        result = harness.run()
+
+        assert (
+            spy.path == [(HarnessStates.EXPLORE, HarnessStates.EXPLORE, _BLOCKED)] * 3
+        )
+        assert [number for number, _, _ in spy.hooks] == [1, 2, 3, 4]
+        assert result.answer == (
+            "Stalled in EXPLORE for 3 turns with no progress. Gate: "
+            f"{get_rules(HarnessStates.EXPLORE).gate_summary}"
+        )
+        assert (result.success, result.stop_reason) == (False, StopReason.STALLED)
+        assert result.final_context[ContextKeys.HALT_REASON] == result.answer
+        assert ContextKeys.LAST_GATE_SLUG not in result.final_context
+        assert spy.converse == []
+        assert len(spy.ended) == 1
+
+    def test_without_the_stall_detector_the_core_step_budget_ends_the_run(
+        self, make_harness, monkeypatch
+    ) -> None:
+        """The backstop is core's budget, surfaced as ``BudgetExhaustedError``."""
+        harness = make_harness(
+            worker=None,
+            max_stall_turns=10**6,
+            config=AgentConfig(max_iterations=4, timeout_seconds=60.0),
+        )
+        spy = _CoreLoopSpy(monkeypatch, harness)
+        ceiling = 4 * AgentDefaults.FSM_BUDGET_MULTIPLIER
+
+        with pytest.raises(BudgetExhaustedError) as caught:
+            harness.run()
+
+        assert (caught.value.budget_type, caught.value.limit) == ("iterations", ceiling)
+        cause = caught.value.__cause__
+        assert isinstance(cause, RunBudgetExceededError)
+        assert (cause.budget, cause.steps_done) == ("steps", ceiling)
+        assert spy.path == (
+            [(HarnessStates.EXPLORE, HarnessStates.EXPLORE, _BLOCKED)] * ceiling
+        )
+        assert [number for number, _, _ in spy.hooks] == list(range(1, ceiling + 1))
+        assert spy.converse == []
+        assert len(spy.ended) == 1
+
+    def test_the_leash_halt_needs_no_user_turn(self, make_harness, monkeypatch) -> None:
+        """Two failed attempts, then REFLECT is held until the stall halt."""
+        harness = make_harness(
+            _failing_execute_script(),
+            approvals=ApprovalRecorder({APPROVAL_LEASH: False}),
+        )
+        spy = _CoreLoopSpy(monkeypatch, harness)
+        result = harness.run()
+
+        assert harness.worker.count_for(HarnessStates.EXECUTE) == 2
+        assert result.final_context[ContextKeys.LAST_GATE_SLUG] == GateSlug.LEASH_CAP
+        assert (result.success, result.stop_reason) == (False, StopReason.STALLED)
+        assert "Stalled in REFLECT for 3 turns" in result.answer
+        assert spy.path[-3:] == (
+            [(HarnessStates.REFLECT, HarnessStates.REFLECT, _BLOCKED)] * 3
+        )
+        assert spy.converse == []

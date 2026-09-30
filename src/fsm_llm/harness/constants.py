@@ -501,8 +501,6 @@ class Defaults:
     TIMEOUT_SECONDS = 1800.0
     #: Per-LLM-call budget inside a role dispatch.
     LLM_TIMEOUT_SECONDS = 120.0
-    #: Message sent to advance the FSM conversation loop.
-    CONTINUE_MESSAGE = "Continue."
 
     # --- Harness-level retry (LiteLLMInterface(retries=) is a no-op for
     #     ollama_chat/*, so retry lives here instead) ----------------------

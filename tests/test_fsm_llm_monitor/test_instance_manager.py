@@ -894,3 +894,203 @@ class TestLaunchConstructsEveryAgentClass:
             )
         for name, event in constructed.items():
             assert event.wait(5), f"{name} did not construct: {launched[name].error}"
+
+
+# should_terminate is grounded only by the tool observation, so the scripted
+# run is: think (pick the tool), act (run it), think (conclude), conclude.
+_REACT_FACTS: dict = {
+    "tool_name": ("lookup", "capital"),
+    "tool_input": ({"query": "capital of France"}, "capital"),
+    "should_terminate": (True, "is Paris"),
+}
+_REACT_TASK = "What is the capital of France?"
+_REACT_ANSWER = "The capital of France is Paris."
+
+_CHAT_FSM: dict = {
+    "name": "NameCapture",
+    "description": "Ask for a name, then greet",
+    "initial_state": "ask",
+    "persona": "A friendly assistant",
+    "states": {
+        "ask": {
+            "id": "ask",
+            "description": "Ask for the name",
+            "purpose": "Learn the user's name",
+            "response_instructions": "Ask for the user's name",
+            "required_context_keys": ["name"],
+            "transitions": [
+                {
+                    "target_state": "greet",
+                    "description": "The name is known",
+                    "conditions": [
+                        {
+                            "description": "name was given",
+                            "requires_context_keys": ["name"],
+                            "logic": {"!!": [{"var": "name"}]},
+                        }
+                    ],
+                }
+            ],
+        },
+        "greet": {
+            "id": "greet",
+            "description": "Greet by name",
+            "purpose": "Greet the user",
+            "response_instructions": "Greet the user by name",
+        },
+    },
+}
+
+
+def _event_path(collector) -> list[str]:
+    """Event kinds oldest first; a transition as ``kind:source>target``."""
+    return [
+        f"{e.event_type}:{e.source_state}>{e.target_state}"
+        if e.event_type == "state_transition"
+        else e.event_type
+        for e in reversed(collector.get_events(limit=0))
+    ]
+
+
+class TestAgentRunEventsOnTheCoreLoop:
+    """plan-2026-09-30T062855-07ad3f8c step 14: a launched agent runs on
+    core's bounded run (no user turns); the priority-9999 observers injected
+    through ``handlers=`` still see one event per timing per step. The pinned
+    sequence is the one the same scripted run produced at d4b1626, where the
+    agent sent a "Continue." turn per step. The FSM chat path stays on
+    ``converse``."""
+
+    def _launch(self, monkeypatch):
+        import pytest
+
+        pytest.importorskip("fsm_llm.agents")
+        from fsm_llm.monitor import instance_manager as im
+        from fsm_llm.monitor.definitions import StubToolConfig
+        from tests.conftest import PromptGroundedLLM
+
+        llm = PromptGroundedLLM(facts=_REACT_FACTS, default_response=_REACT_ANSWER)
+        real_cls = im._AGENT_CLASSES["ReactAgent"]
+
+        def _init(self, **kwargs):
+            real_cls.__init__(self, llm_interface=llm, **kwargs)
+
+        monkeypatch.setitem(
+            im._AGENT_CLASSES,
+            "ReactAgent",
+            type("ReactAgent", (real_cls,), {"__init__": _init}),
+        )
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+        managed = mgr.launch_agent(
+            agent_type="ReactAgent",
+            task=_REACT_TASK,
+            tools_config=[
+                StubToolConfig(
+                    name="lookup",
+                    description="Look up a fact",
+                    stub_response=_REACT_ANSWER,
+                )
+            ],
+        )
+        managed.thread.join(10)
+        assert not managed.thread.is_alive(), "agent thread did not finish"
+        return mgr, managed, llm
+
+    def test_observers_see_each_step_of_a_scripted_react_run(self, monkeypatch):
+        mgr, managed, llm = self._launch(monkeypatch)
+
+        assert (managed.status, managed.error) == ("completed", None)
+        assert managed.result.answer == _REACT_ANSWER
+        path = [
+            "conversation_start",
+            "pre_processing",
+            "context_update",
+            "state_transition:think>act",
+            "post_processing",
+            "pre_processing",
+            "state_transition:act>think",
+            "post_processing",
+            "pre_processing",
+            "context_update",
+            "state_transition:think>conclude",
+            "post_processing",
+            "conversation_end",
+        ]
+        assert _event_path(mgr._collectors[managed.instance_id]) == path
+        # The global collector has the same handler events between its own
+        # launch and result events.
+        assert _event_path(mgr.global_collector) == [
+            "instance_launched",
+            "agent_started",
+            *path,
+            "agent_iteration",
+            "agent_iteration",
+            "agent_tool_call",
+            "agent_completed",
+        ]
+        # No step carried a user message.
+        assert {request.user_message for _, request in llm.requests} == {""}
+
+    def test_status_and_conversation_log_need_no_turn_text(self, monkeypatch):
+        import json
+
+        mgr, managed, _ = self._launch(monkeypatch)
+
+        status = mgr.get_agent_status(managed.instance_id)
+        assert status["answer"] == _REACT_ANSWER
+        assert status["success"] is True
+        assert [tool["tool_name"] for tool in status["tools_used"]] == ["lookup"]
+        log = status["conversation_log"]
+        assert [entry["type"] for entry in log] == [
+            "start",
+            "context",
+            "transition",
+            "context",
+            "transition",
+            "context",
+            "context",
+            "transition",
+            "context",
+            "end",
+        ]
+        rendered = json.dumps(log, default=str)
+        assert "Continue." not in rendered
+        assert not any(f"[{state}]" in rendered for state in ("think", "act"))
+        assert _REACT_ANSWER in rendered
+
+    def test_fsm_chat_path_sends_the_user_message_through_converse(self, monkeypatch):
+        from fsm_llm import API
+        from fsm_llm.monitor import instance_manager as im
+        from tests.conftest import MockLLM2Interface
+
+        llm = MockLLM2Interface(
+            extraction_data={"name": "Alice"}, response_text="Hello Alice!"
+        )
+        real_from_definition = API.from_definition
+
+        def _from_definition(definition, **kwargs):
+            return real_from_definition(definition, llm_interface=llm)
+
+        monkeypatch.setattr(im.API, "from_definition", _from_definition)
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+        inst = mgr.launch_fsm(fsm_json=_CHAT_FSM)
+        conv_id, greeting = mgr.start_conversation(inst.instance_id)
+        assert greeting == "Hello Alice!"
+
+        reply = mgr.send_message(inst.instance_id, conv_id, "My name is Alice")
+
+        assert reply["response"] == "Hello Alice!"
+        assert reply["current_state"] == "greet"
+        assert "My name is Alice" in {
+            request.user_message for _, request in llm.call_history
+        }
+        assert _event_path(mgr._collectors[inst.instance_id]) == [
+            "conversation_start",
+            "pre_processing",
+            "context_update",
+            "state_transition:ask>greet",
+            "post_processing",
+            "conversation_end",
+        ]
+        assert inst.status == "completed"
