@@ -92,6 +92,7 @@ import os
 import threading
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
 from typing import Any, cast
@@ -182,6 +183,50 @@ class ContextMergeStrategy(str, Enum):
 # --------------------------------------------------------------
 # Main API Class
 # --------------------------------------------------------------
+
+
+# DECISION plan-2026-09-30T062855-07ad3f8c/D-021
+# The two helpers below are what every turn entry of ``API`` shares (sync and
+# stream). They are MODULE-LEVEL functions on purpose: do NOT turn them into
+# ``API`` methods called through ``self``. Under the ``Mock(spec=API)``
+# unbound-self tests a ``self._helper()`` call resolves to a Mock, so the error
+# mapping and the auto-save would silently not run (the same trap the
+# plan-2026-07-21T082818-4c63deac/D-002 anchor in ``converse_stream`` records).
+# Do NOT merge them into one wrapper either: the sync turn saves only after a
+# successful turn, the stream saves in a ``finally`` (also when abandoned).
+
+
+@contextmanager
+def _turn_errors(doing: str, do: str) -> Iterator[None]:
+    """Map what escapes a turn entry of ``API`` to the public error contract.
+
+    Contract: ``doing`` / ``do`` name the entry in the log line and the error
+    message (``"processing"`` / ``"process"``, ``"streaming"`` / ``"stream"``).
+    ``ValueError`` and ``FSMError`` pass through unchanged; any other
+    ``Exception`` is logged and re-raised as ``FSMError`` chained from it.
+    ``BaseException`` (``GeneratorExit``, ``KeyboardInterrupt``) is untouched.
+    """
+    try:
+        yield
+    except (ValueError, FSMError):
+        raise
+    except Exception as e:
+        logger.error(f"Error {doing} message: {e!s}")
+        raise FSMError(f"Failed to {do} message: {e!s}") from e
+
+
+def _auto_save_session(api: API, conversation_id: str) -> None:
+    """Save the session after a turn when ``api`` has a session store.
+
+    Contract: no-op without a store. Never raises for an ``Exception``: a
+    failed save is logged at WARNING and the turn's result stands.
+    """
+    if api._session_store is None:
+        return
+    try:
+        api.save_session(conversation_id)
+    except Exception as e:
+        logger.warning(f"Auto-save session failed: {e!s}")
 
 
 class API:
@@ -486,24 +531,15 @@ class API:
         Returns:
             System response
         """
-        try:
+        with _turn_errors("processing", "process"):
             # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             response: str = self.fsm_manager.process_message(
                 current_fsm_id, user_message
             )
             # Auto-save session if store is configured
-            if self._session_store is not None:
-                try:
-                    self.save_session(conversation_id)
-                except Exception as e:
-                    logger.warning(f"Auto-save session failed: {e!s}")
+            _auto_save_session(self, conversation_id)
             return response
-        except (ValueError, FSMError):
-            raise
-        except Exception as e:
-            logger.error(f"Error processing message: {e!s}")
-            raise FSMError(f"Failed to process message: {e!s}") from e
 
     def converse_stream(self, user_message: str, conversation_id: str) -> Iterator[str]:
         """Process message, streaming the response tokens.
@@ -525,15 +561,10 @@ class API:
         Yields:
             String chunks of the response as they arrive.
         """
-        try:
+        with _turn_errors("streaming", "stream"):
             # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
             # Runs at CALL time (this is a plain function, not a generator).
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-        except (ValueError, FSMError):
-            raise
-        except Exception as e:
-            logger.error(f"Error streaming message: {e!s}")
-            raise FSMError(f"Failed to stream message: {e!s}") from e
 
         # DECISION plan-2026-07-21T082818-4c63deac/D-002
         # conv_lock acquisition stays LAZY inside this nested-closure generator
@@ -546,23 +577,14 @@ class API:
         # auto-save suite (D-003/CF1).  Do NOT hoist conv_lock into the eager
         # prologue and do NOT reintroduce a ``self.``-attribute inner generator.
         def _stream() -> Iterator[str]:
-            try:
+            with _turn_errors("streaming", "stream"):
                 try:
                     yield from self.fsm_manager.process_message_stream(
                         current_fsm_id, user_message
                     )
                 finally:
                     # Auto-save session after stream completes or is abandoned
-                    if self._session_store is not None:
-                        try:
-                            self.save_session(conversation_id)
-                        except Exception as save_err:
-                            logger.warning(f"Auto-save session failed: {save_err!s}")
-            except (ValueError, FSMError):
-                raise
-            except Exception as e:
-                logger.error(f"Error streaming message: {e!s}")
-                raise FSMError(f"Failed to stream message: {e!s}") from e
+                    _auto_save_session(self, conversation_id)
 
         return _stream()
 

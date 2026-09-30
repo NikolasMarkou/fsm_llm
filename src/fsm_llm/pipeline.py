@@ -52,6 +52,7 @@ from .definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     FSMDefinition,
+    FSMError,
     FSMInstance,
     IntentDefinition,
     InvalidTransitionError,
@@ -288,6 +289,22 @@ class _BulkFailed(dict):
     """
 
 
+@dataclasses.dataclass(slots=True)
+class _TurnRecord:
+    """What one turn of ``MessagePipeline._run_turn`` did (internal, not exported).
+
+    Contract: created by ``_run_turn`` with ``state_before`` set and filled as
+    the turn runs; returned only when the turn succeeded. ``transition_outcome``
+    is ``None`` when no evaluation ran (terminal state). ``response`` is the
+    Pass-2 text. A failed turn raises and returns no record.
+    """
+
+    state_before: str
+    state_after: str
+    transition_outcome: TransitionEvaluationResult | None = None
+    response: str | None = None
+
+
 class MessagePipeline:
     """2-pass message processing pipeline.
 
@@ -498,6 +515,30 @@ class MessagePipeline:
         Returns:
             Generated response message.
         """
+        turn = self._run_turn(instance, message, conversation_id)
+        if turn.response is None:
+            raise FSMError("A turn with a user message produced no response")
+        return turn.response
+
+    def _run_turn(
+        self, instance: FSMInstance, user_message: str | None, conversation_id: str
+    ) -> _TurnRecord:
+        """Run one turn of the current state: the single sync turn body.
+
+        Contract: ``user_message`` is the user's text, or ``None`` for a turn
+        with no user message. ``process`` is the entry for a message. Returns
+        the ``_TurnRecord`` of a successful turn; on failure the pre-turn
+        snapshot is restored as described below and the exception propagates.
+        The ``None`` case has no defined behaviour yet and raises ``FSMError``
+        before anything is touched.
+        """
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-007
+        # One turn body for a message turn and a message-free step. Do NOT add
+        # a second method that repeats this snapshot / PRE_PROCESSING / Pass 1 /
+        # POST_PROCESSING / Pass 2 / restore sequence for the no-message case:
+        # every anchor below would then have to hold in two places.
+        if user_message is None:
+            raise FSMError("A turn without a user message is not supported")
         # Contextualize propagates conversation_id to all downstream logger
         # calls on this thread (llm.py, transition_evaluator.py, etc.)
         with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
@@ -527,6 +568,7 @@ class MessagePipeline:
             pre_turn_data = copy.deepcopy(instance.context.data)
             pre_turn_wm = copy.deepcopy(instance.context.working_memory)
             pre_turn_metadata = copy.deepcopy(instance.context.metadata)
+            turn = _TurnRecord(state_before=pre_turn_state, state_after=pre_turn_state)
 
             # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): a transition
             # classification record belongs to the turn that produced it. Clear
@@ -605,7 +647,7 @@ class MessagePipeline:
             # Pass 1: Data extraction + transition evaluation + execution
             extraction_response, transition_occurred, previous_state = (
                 self._execute_extraction_and_transition_pass(
-                    instance, message, conversation_id
+                    instance, user_message, conversation_id, turn=turn
                 )
             )
 
@@ -626,14 +668,16 @@ class MessagePipeline:
                 )
 
                 # Pass 2: Response generation based on final state
-                return self._execute_response_generation_pass(
+                turn.response = self._execute_response_generation_pass(
                     instance,
-                    message,
+                    user_message,
                     extraction_response,
                     transition_occurred,
                     previous_state,
                     conversation_id,
                 )
+                turn.state_after = instance.current_state
+                return turn
             except Exception:
                 # Restore the pre-turn in-memory state so the turn is atomic.
                 # Covers all handler-mutable fields, not just state+data (D-012).
@@ -995,9 +1039,17 @@ class MessagePipeline:
     # ----------------------------------------------------------
 
     def _execute_extraction_and_transition_pass(
-        self, instance: FSMInstance, user_message: str, conversation_id: str
+        self,
+        instance: FSMInstance,
+        user_message: str,
+        conversation_id: str,
+        *,
+        turn: _TurnRecord | None = None,
     ) -> tuple[DataExtractionResponse, bool, str | None]:
-        """Execute Pass 1: Data Extraction + Transition Evaluation + Execution."""
+        """Execute Pass 1: Data Extraction + Transition Evaluation + Execution.
+
+        ``turn``, when given, receives the transition evaluation outcome.
+        """
         log = logger.bind(conversation_id=conversation_id)
         log.debug("Executing data extraction and transition pass")
 
@@ -1079,7 +1131,7 @@ class MessagePipeline:
         # Step 3: Transition Evaluation and Execution
         transition_occurred, previous_state = (
             self._execute_transition_evaluation_and_execution(
-                instance, user_message, extraction_response, conversation_id
+                instance, user_message, extraction_response, conversation_id, turn=turn
             )
         )
 
@@ -2044,8 +2096,13 @@ class MessagePipeline:
         user_message: str,
         extraction_response: DataExtractionResponse,
         conversation_id: str,
+        *,
+        turn: _TurnRecord | None = None,
     ) -> tuple[bool, str | None]:
-        """Evaluate transitions and execute if one is selected."""
+        """Evaluate transitions and execute if one is selected.
+
+        ``turn``, when given, receives ``evaluation.result_type``.
+        """
         log = logger.bind(conversation_id=conversation_id)
         log.debug("Executing transition evaluation and execution")
 
@@ -2060,6 +2117,14 @@ class MessagePipeline:
         evaluation = self.transition_evaluator.evaluate_transitions(
             current_state, instance.context, extraction_response.extracted_data
         )
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-020
+        # The outcome travels on the per-turn record. Do NOT widen this
+        # method's or the Pass-1 method's return tuple to carry it: regression
+        # tests replace and unpack both with the (bool, previous_state) and
+        # 3-tuple shapes. Do NOT store it on ``FSMInstance`` or the pipeline
+        # (a public model field, or state shared between conversations).
+        if turn is not None:
+            turn.transition_outcome = evaluation.result_type
 
         target_state = None
 
