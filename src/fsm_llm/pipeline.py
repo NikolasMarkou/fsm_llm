@@ -739,6 +739,54 @@ class MessagePipeline:
         Yields:
             String chunks of the response as they arrive.
         """
+        yield from self._stream_turn(instance, message, conversation_id)
+
+    def advance_stream(
+        self, instance: FSMInstance, conversation_id: str
+    ) -> Iterator[str]:
+        """Run one turn of the current state with no user message, streaming Pass 2.
+
+        The same stream turn body as ``process_stream``. Differences: the
+        prompts carry no user message, and a silent state (empty
+        ``response_instructions``) yields no chunk, makes no Pass-2 LLM call
+        and appends nothing to the history.
+
+        Args:
+            instance: The FSM instance.
+            conversation_id: Conversation identifier.
+
+        Yields:
+            String chunks of the reply as they arrive; nothing for a silent
+            state.
+
+        Raises:
+            FSMError: at the first ``next()`` when the current state is
+                terminal, or anything the turn body raises, after its rollback.
+        """
+        if not self.get_state(instance, conversation_id).transitions:
+            raise FSMError(
+                f"Cannot advance from terminal state '{instance.current_state}'"
+            )
+        yield from self._stream_turn(instance, None, conversation_id)
+
+    def _stream_turn(
+        self, instance: FSMInstance, user_message: str | None, conversation_id: str
+    ) -> Iterator[str]:
+        """Run one turn of the current state, streaming Pass 2: the single
+        stream turn body.
+
+        Contract: ``user_message`` is the user's text, or ``None`` for a turn
+        with no user message. ``process_stream`` is the entry for a message,
+        ``advance_stream`` the entry for ``None``. Yields the reply chunks. On
+        an ``Exception`` the pre-turn snapshot is restored as described below
+        and the exception propagates; ``GeneratorExit`` restores nothing.
+        """
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-025
+        # One STREAM turn body for a message turn and a message-free step,
+        # the stream counterpart of `_run_turn` (D-007). Do NOT add a second
+        # generator that repeats this sequence for the no-message case, and do
+        # NOT fold this body into `_run_turn`: e3131cc2/D-004 below keeps the
+        # sync and the stream guards as two separate bodies.
         with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
             # DECISION plan-2026-07-21T072826-e3131cc2/D-004
             # Turn-level atomicity snapshot for the STREAMING path — the exact
@@ -816,7 +864,7 @@ class MessagePipeline:
             # Pass 1: Data extraction + transition (runs fully)
             extraction_response, transition_occurred, previous_state = (
                 self._execute_extraction_and_transition_pass(
-                    instance, message, conversation_id
+                    instance, user_message, conversation_id
                 )
             )
 
@@ -836,7 +884,7 @@ class MessagePipeline:
                 # Pass 2: Stream response generation
                 yield from self._stream_response_generation_pass(
                     instance,
-                    message,
+                    user_message,
                     extraction_response,
                     transition_occurred,
                     previous_state,
@@ -857,13 +905,17 @@ class MessagePipeline:
     def _stream_response_generation_pass(
         self,
         instance: FSMInstance,
-        user_message: str,
+        user_message: str | None,
         extraction_response: DataExtractionResponse,
         transition_occurred: bool,
         previous_state: str | None,
         conversation_id: str,
     ) -> Iterator[str]:
-        """Stream Pass 2: yield response tokens as they arrive."""
+        """Stream Pass 2: yield response tokens as they arrive.
+
+        Yields nothing for a turn without a user message
+        (``user_message is None``) that ended on a silent state.
+        """
         log = logger.bind(conversation_id=conversation_id)
 
         current_state = self.get_state(instance, conversation_id)
@@ -873,6 +925,12 @@ class MessagePipeline:
             current_state.response_instructions is not None
             and not current_state.response_instructions
         ):
+            if user_message is None:
+                # Stream mirror of the D-024 branch in
+                # `_execute_response_generation_pass`: a silent state on a
+                # message-free step yields no chunk and leaves no marker.
+                log.debug("Silent state on a message-free step: no response")
+                return
             synthetic = f"[{current_state.id}]"
             instance.context.conversation.add_system_message(synthetic)
             yield synthetic
@@ -901,7 +959,7 @@ class MessagePipeline:
             extracted_data=extraction_response.extracted_data,
             transition_occurred=transition_occurred,
             previous_state=previous_state,
-            user_message=user_message,
+            user_message=user_message or "",
             plain_text_response=output_response_format is None,
             context=self._apply_context_scope(
                 instance.context.get_merged_data(), current_state, conversation_id
@@ -918,7 +976,7 @@ class MessagePipeline:
 
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
-            user_message=user_message,
+            user_message=user_message or "",
             transition_occurred=transition_occurred,
             response_format=output_response_format,
         )

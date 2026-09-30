@@ -623,6 +623,47 @@ class API:
 
         return _stream()
 
+    def advance_stream(self, conversation_id: str) -> Iterator[str]:
+        """Run one step of the current state with no user message, streaming
+        the reply.
+
+        The stream form of ``advance``: the same turn, resolved on the top of
+        the FSM stack at CALL time, run lazily. Only reply text is yielded; a
+        silent state (empty ``response_instructions``) yields no chunk, makes
+        no Pass-2 LLM call and leaves no ``[state]`` marker in the history.
+        Read the outcome of the step after the stream is exhausted with
+        ``get_current_state`` and ``has_conversation_ended``. The conversation
+        is claimed at the first ``next()`` and released when the stream
+        finishes, fails or is closed; a stream closed early keeps the partial
+        reply in the history and keeps the step (as ``converse_stream`` does).
+
+        Args:
+            conversation_id: Existing conversation ID.
+
+        Yields:
+            String chunks of the reply as they arrive.
+
+        Raises:
+            ValueError: unknown conversation ID (at call time).
+            FSMError: at the first ``next()``, when the conversation has ended
+                (terminal state) or a turn is already running for it; or when
+                the step failed, after its rollback.
+        """
+        with _turn_errors("streaming a step without a", "stream a step without a"):
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+
+        # Lazy nested closure, as in ``converse_stream`` (anchor
+        # plan-2026-07-21T082818-4c63deac/D-002 there): no lock is taken here
+        # and the generator is not a ``self.`` attribute.
+        def _stream() -> Iterator[str]:
+            with _turn_errors("streaming a step without a", "stream a step without a"):
+                try:
+                    yield from self.fsm_manager.advance_stream(current_fsm_id)
+                finally:
+                    _auto_save_session(self, conversation_id)
+
+        return _stream()
+
     # ==========================================
     # FSM STACKING METHODS (Enhanced)
     # ==========================================

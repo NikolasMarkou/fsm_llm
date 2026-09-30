@@ -7,6 +7,8 @@ Pass-2 LLM call for a silent state, and prompts without a user message.
 
 from __future__ import annotations
 
+import copy
+import gc
 import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -702,3 +704,551 @@ class TestConverseUnchanged:
         with pytest.raises(LLMResponseError):
             api.converse("Paris", conv_id)
         assert api.get_conversation_history(conv_id) == before
+
+
+# ---------------------------------------------------------------------------
+# advance_stream
+# ---------------------------------------------------------------------------
+
+_CHUNKS = ["Here is ", "the plan ", "for your trip."]
+
+
+class _StreamingLLM(_ScriptedLLM):
+    """``_ScriptedLLM`` whose Pass-2 stream yields ``_CHUNKS`` one by one.
+
+    ``fail_after`` raises ``LLMResponseError`` after that many chunks.
+    """
+
+    def __init__(
+        self,
+        fields: dict[str, Any] | None = None,
+        *,
+        fail_after: int | None = None,
+    ) -> None:
+        super().__init__(fields)
+        self.fail_after = fail_after
+        self.stream_requests: list[ResponseGenerationRequest] = []
+
+    def generate_response_stream(self, request: ResponseGenerationRequest):
+        self.stream_requests.append(request)
+        for index, chunk in enumerate(_CHUNKS):
+            if self.fail_after is not None and index == self.fail_after:
+                raise LLMResponseError("stream broke")
+            yield chunk
+
+
+def _full_snapshot(api: API, conv_id: str) -> dict[str, Any]:
+    instance = _instance(api, conv_id)
+    return {
+        "state": instance.current_state,
+        "data": copy.deepcopy(instance.context.data),
+        "metadata": copy.deepcopy(instance.context.metadata),
+        "memory": instance.context.working_memory.to_dict(),
+        "history": list(instance.context.conversation.exchanges),
+    }
+
+
+def _prepared_stream(llm: _StreamingLLM, **api_kwargs: Any) -> tuple[API, str]:
+    """Trip FSM with a speaking ``plan`` state, working memory, and a
+    POST_TRANSITION handler that writes data, metadata and working memory."""
+    api, conv_id = _start(_trip_fsm(plan_speaks=True), llm, **api_kwargs)
+    instance = _instance(api, conv_id)
+    instance.context.working_memory = WorkingMemory()
+    instance.context.working_memory.set("core", "seen", "before")
+
+    def _touch_everything(context: dict[str, Any]) -> dict[str, Any]:
+        instance.context.working_memory.set("core", "seen", "during")
+        instance.context.metadata["touched"] = True
+        return {"entered_plan": True}
+
+    api.register_handler(
+        create_handler("touch").at(HandlerTiming.POST_TRANSITION).do(_touch_everything)
+    )
+    return api, conv_id
+
+
+class TestAdvanceStream:
+    # -- lazy lock ---------------------------------------------------------
+
+    def test_no_lock_and_no_work_before_the_first_next(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+        manager = api.fsm_manager
+
+        stream = api.advance_stream(conv_id)
+
+        assert conv_id not in manager._active_turns
+        assert llm.field_requests == []
+        assert api.get_current_state(conv_id) == "collect"
+        # Another thread can take the conversation lock: nobody holds it.
+        acquired: list[bool] = []
+        lock = manager._conversation_locks[conv_id]
+        worker = threading.Thread(
+            target=lambda: (
+                acquired.append(lock.acquire(blocking=False))
+                or (acquired[-1] and lock.release())
+            )
+        )
+        worker.start()
+        worker.join(timeout=10)
+        assert acquired == [True]
+        # A never-iterated stream does not block a later step.
+        assert api.advance(conv_id).state_after == "plan"
+        stream.close()
+
+    def test_manager_stream_takes_no_lock_before_the_first_next(self):
+        # `API.advance_stream` defers the manager call to its own closure, so
+        # the manager's laziness is pinned on the manager entry itself.
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+        manager = api.fsm_manager
+
+        stream = manager.advance_stream(conv_id)
+
+        assert conv_id not in manager._active_turns
+        assert llm.field_requests == []
+        assert api.advance(conv_id).state_after == "plan"
+        del stream
+        gc.collect()
+        assert api.advance(conv_id).state_after == "done"
+
+    def test_open_stream_refuses_every_other_turn(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+        stream = api.advance_stream(conv_id)
+
+        assert next(stream) == _CHUNKS[0]
+
+        assert conv_id in api.fsm_manager._active_turns
+        with pytest.raises(FSMError, match="already being processed"):
+            api.advance(conv_id)
+        with pytest.raises(FSMError, match="already being processed"):
+            api.converse("hello", conv_id)
+        with pytest.raises(FSMError, match="already being processed"):
+            next(api.advance_stream(conv_id))
+        with pytest.raises(FSMError, match="already being processed"):
+            next(api.converse_stream("hello", conv_id))
+
+        assert list(stream) == _CHUNKS[1:]
+        assert conv_id not in api.fsm_manager._active_turns
+        assert api.advance(conv_id).state_after == "done"
+
+    def test_concurrent_thread_is_refused_during_an_open_stream(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+        stream = api.advance_stream(conv_id)
+        next(stream)
+        errors: list[BaseException] = []
+
+        def _other_thread() -> None:
+            try:
+                api.advance(conv_id)
+            except FSMError as e:
+                errors.append(e)
+
+        worker = threading.Thread(target=_other_thread)
+        worker.start()
+        worker.join(timeout=10)
+        assert len(errors) == 1
+        assert "already being processed" in str(errors[0])
+        stream.close()
+
+    # -- abandonment -------------------------------------------------------
+
+    def test_closed_stream_releases_the_lock_and_keeps_the_partial_reply(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+        before = api.get_conversation_history(conv_id)
+        stream = api.advance_stream(conv_id)
+        assert next(stream) == _CHUNKS[0]
+
+        stream.close()
+
+        assert conv_id not in api.fsm_manager._active_turns
+        assert api.get_current_state(conv_id) == "plan"
+        assert api.get_conversation_history(conv_id) == [
+            *before,
+            {"system": _CHUNKS[0]},
+        ]
+        result = api.advance(conv_id)
+        assert (result.state_before, result.state_after) == ("plan", "done")
+
+    def test_garbage_collected_stream_releases_the_lock(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+        stream = api.advance_stream(conv_id)
+        next(stream)
+        assert conv_id in api.fsm_manager._active_turns
+
+        del stream
+        gc.collect()
+
+        assert conv_id not in api.fsm_manager._active_turns
+        assert api.advance(conv_id).state_after == "done"
+
+    # -- atomicity ---------------------------------------------------------
+
+    def test_mid_stream_failure_restores_the_whole_step(self):
+        llm = _StreamingLLM({"city": "Paris"}, fail_after=1)
+        api, conv_id = _prepared_stream(llm)
+        before = _full_snapshot(api, conv_id)
+        assert before["state"] == "collect"
+        seen: list[str] = []
+        stream = api.advance_stream(conv_id)
+
+        with pytest.raises(LLMResponseError, match="stream broke"):
+            for chunk in stream:
+                seen.append(chunk)
+
+        assert seen == _CHUNKS[:1]
+        assert _full_snapshot(api, conv_id) == before
+        assert conv_id not in api.fsm_manager._active_turns
+
+        llm.fail_after = None
+        assert list(api.advance_stream(conv_id)) == _CHUNKS
+        assert api.get_current_state(conv_id) == "plan"
+        after = _full_snapshot(api, conv_id)
+        assert after["data"]["entered_plan"] is True
+        assert after["metadata"]["touched"] is True
+        assert after["memory"] != before["memory"]
+
+    def test_post_processing_failure_restores_the_whole_step(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+
+        def _boom(context: dict[str, Any]) -> dict[str, Any]:
+            raise RuntimeError("post-processing exploded")
+
+        api.register_handler(
+            create_handler("boom")
+            .at(HandlerTiming.POST_PROCESSING)
+            .critical()
+            .do(_boom)
+        )
+        before = _full_snapshot(api, conv_id)
+
+        with pytest.raises(FSMError, match="post-processing exploded"):
+            list(api.advance_stream(conv_id))
+
+        assert _full_snapshot(api, conv_id) == before
+        assert llm.stream_requests == []
+
+    def test_failed_stream_pops_no_unrelated_history_entry(self):
+        llm = _StreamingLLM({"city": "Paris"}, fail_after=0)
+        api, conv_id = _prepared_stream(llm)
+        _instance(api, conv_id).context.conversation.add_user_message("earlier")
+        before = _full_snapshot(api, conv_id)
+        assert before["history"][-1] == {"user": "earlier"}
+
+        with pytest.raises(LLMResponseError):
+            list(api.advance_stream(conv_id))
+
+        assert _full_snapshot(api, conv_id)["history"] == before["history"]
+
+    def test_closed_stream_pops_no_unrelated_history_entry(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        _instance(api, conv_id).context.conversation.add_user_message("earlier")
+        calls: list[str] = []
+        original = api.fsm_manager._pipeline.advance_stream
+
+        def _yield_then_run(instance: Any, conversation_id: str):
+            calls.append(conversation_id)
+            yield "early"
+            yield from original(instance, conversation_id)
+
+        with patch.object(api.fsm_manager._pipeline, "advance_stream", _yield_then_run):
+            stream = api.advance_stream(conv_id)
+            assert next(stream) == "early"
+            stream.close()
+
+        assert len(calls) == 1
+        assert api.get_conversation_history(conv_id)[-1] == {"user": "earlier"}
+
+    def test_failed_stream_fires_error_handlers(self):
+        llm = _StreamingLLM({"city": "Paris"}, fail_after=1)
+        api, conv_id = _prepared_stream(llm)
+        errors: list[str] = []
+        api.register_handler(
+            create_handler("on_error")
+            .at(HandlerTiming.ERROR)
+            .do(lambda context: errors.append(context["_error"]) or {})
+        )
+
+        with pytest.raises(LLMResponseError):
+            list(api.advance_stream(conv_id))
+
+        assert errors == ["stream broke"]
+
+    def test_closed_stream_fires_no_error_handler(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+        errors: list[str] = []
+        api.register_handler(
+            create_handler("on_error")
+            .at(HandlerTiming.ERROR)
+            .do(lambda context: errors.append(context["_error"]) or {})
+        )
+        stream = api.advance_stream(conv_id)
+        next(stream)
+        stream.close()
+        assert errors == []
+
+    def test_unexpected_error_is_wrapped_as_fsm_error(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        with patch.object(
+            api.fsm_manager._pipeline,
+            "advance_stream",
+            side_effect=RuntimeError("bug"),
+        ):
+            with pytest.raises(FSMError, match="Failed to advance conversation: bug"):
+                list(api.advance_stream(conv_id))
+        assert list(api.advance_stream(conv_id)) == []
+        assert api.get_current_state(conv_id) == "plan"
+
+    # -- silent state ------------------------------------------------------
+
+    def test_silent_state_yields_nothing_and_calls_no_llm(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        before = api.get_conversation_history(conv_id)
+
+        chunks = list(api.advance_stream(conv_id))
+
+        assert chunks == []
+        assert api.get_current_state(conv_id) == "plan"
+        assert api.has_conversation_ended(conv_id) is False
+        assert llm.stream_requests == []
+        assert llm.response_requests == []
+        assert api.get_conversation_history(conv_id) == before
+        assert len(llm.field_requests) == 1
+
+    def test_converse_stream_keeps_its_marker_and_user_exchange(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        before = api.get_conversation_history(conv_id)
+
+        chunks = list(api.converse_stream("Paris please", conv_id))
+
+        assert chunks == ["[plan]"]
+        assert api.get_conversation_history(conv_id)[len(before) :] == [
+            {"user": "Paris please"},
+            {"system": "[plan]"},
+        ]
+        assert llm.stream_requests == []
+        assert llm.response_requests == []
+
+    # -- handler parity ----------------------------------------------------
+
+    def _events(self, *, step: bool) -> tuple[list[str], str, list[str]]:
+        llm = _StreamingLLM({"city": "Paris"})
+        api = API.from_definition(_trip_fsm(plan_speaks=True), llm_interface=llm)
+        events = _record_all_timings(api)
+        conv_id, _ = api.start_conversation()
+        events.clear()
+        if step:
+            chunks = list(api.advance_stream(conv_id))
+        else:
+            chunks = list(api.converse_stream("go on", conv_id))
+        return events, api.get_current_state(conv_id), chunks
+
+    def test_handler_sequence_equals_converse_stream(self):
+        step, step_state, step_chunks = self._events(step=True)
+        turn, turn_state, turn_chunks = self._events(step=False)
+        assert step == turn
+        assert step_state == turn_state == "plan"
+        assert step_chunks == turn_chunks == _CHUNKS
+        assert step == [
+            "PRE_PROCESSING",
+            "CONTEXT_UPDATE",
+            "PRE_TRANSITION",
+            "POST_TRANSITION",
+            "POST_PROCESSING",
+        ]
+
+    def test_handler_sequence_equals_advance(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api = API.from_definition(_trip_fsm(plan_speaks=True), llm_interface=llm)
+        events = _record_all_timings(api)
+        conv_id, _ = api.start_conversation()
+        events.clear()
+        api.advance(conv_id)
+        assert events == self._events(step=True)[0]
+
+    # -- history and prompts -----------------------------------------------
+
+    def test_speaking_step_stores_the_full_reply_as_one_system_message(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+        before = api.get_conversation_history(conv_id)
+
+        chunks = list(api.advance_stream(conv_id))
+
+        assert chunks == _CHUNKS
+        history = api.get_conversation_history(conv_id)
+        assert history == [*before, {"system": "".join(_CHUNKS)}]
+        assert not any("user" in exchange for exchange in history)
+
+    def test_stream_request_carries_no_user_message(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+
+        list(api.advance_stream(conv_id))
+
+        (request,) = llm.stream_requests
+        assert request.user_message == ""
+        assert request.skip_generation is False
+        assert "Continue" not in request.system_prompt
+        (field_request,) = llm.field_requests
+        assert "User message" not in field_request.system_prompt
+
+    def test_whole_run_by_streamed_steps(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        before = api.get_conversation_history(conv_id)
+
+        assert list(api.advance_stream(conv_id)) == []
+        assert api.has_conversation_ended(conv_id) is False
+        assert list(api.advance_stream(conv_id)) == _CHUNKS
+        assert api.has_conversation_ended(conv_id) is True
+
+        assert api.get_conversation_history(conv_id) == [
+            *before,
+            {"system": "".join(_CHUNKS)},
+        ]
+
+    # -- guards ------------------------------------------------------------
+
+    def test_unknown_conversation_raises_at_call_time(self):
+        api, _ = _start(_trip_fsm(), _StreamingLLM())
+        with pytest.raises(ValueError, match="Unknown conversation ID"):
+            api.advance_stream("nope")
+
+    def test_manager_unknown_conversation_raises_at_call_time(self):
+        api, _ = _start(_trip_fsm(), _StreamingLLM())
+        with pytest.raises(FSMError, match="not found"):
+            api.fsm_manager.advance_stream("nope")
+
+    def test_terminal_state_raises_at_first_next(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        list(api.advance_stream(conv_id))
+        list(api.advance_stream(conv_id))
+        assert api.has_conversation_ended(conv_id) is True
+        history = api.get_conversation_history(conv_id)
+
+        stream = api.advance_stream(conv_id)
+        with pytest.raises(FSMError, match="Conversation has ended"):
+            next(stream)
+
+        assert api.get_conversation_history(conv_id) == history
+        assert conv_id not in api.fsm_manager._active_turns
+
+    def test_pipeline_entry_refuses_a_terminal_state(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        api.advance(conv_id)
+        api.advance(conv_id)
+        llm.reset()
+        pipeline = api.fsm_manager._pipeline
+        with pytest.raises(FSMError, match="Cannot advance from terminal state"):
+            list(pipeline.advance_stream(_instance(api, conv_id), conv_id))
+        assert llm.field_requests == []
+
+    def test_reentrant_stream_from_a_handler_raises(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+        caught: list[BaseException] = []
+
+        def _reenter(context: dict[str, Any]) -> dict[str, Any]:
+            try:
+                list(api.advance_stream(conv_id))
+            except FSMError as e:
+                caught.append(e)
+            return {}
+
+        api.register_handler(
+            create_handler("reenter").at(HandlerTiming.PRE_PROCESSING).do(_reenter)
+        )
+
+        assert list(api.advance_stream(conv_id)) == _CHUNKS
+
+        assert len(caught) == 1
+        assert "already being processed" in str(caught[0])
+        assert len(llm.field_requests) == 1
+        assert len(llm.stream_requests) == 1
+
+    # -- stack and session -------------------------------------------------
+
+    def test_stream_runs_the_pushed_sub_fsm(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        api.advance(conv_id)
+        api.push_fsm(conv_id, _ambiguous_fsm())
+
+        with patch("fsm_llm.pipeline.Classifier") as classifier_cls:
+            classifier_cls.return_value = _classifier_choosing("support")
+            chunks = list(api.advance_stream(conv_id))
+
+        assert chunks == _CHUNKS
+        sub_id = api.get_sub_conversation_id(conv_id)
+        assert api.fsm_manager.get_conversation_state(sub_id) == "support"
+        api.pop_fsm(conv_id)
+        assert api.get_current_state(conv_id) == "plan"
+
+    def test_top_of_stack_is_resolved_at_call_time(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        stream = api.advance_stream(conv_id)
+        api.push_fsm(conv_id, _ambiguous_fsm())
+
+        assert list(stream) == []
+
+        assert api.fsm_manager.get_conversation_state(conv_id) == "plan"
+        sub_id = api.get_sub_conversation_id(conv_id)
+        assert api.fsm_manager.get_conversation_state(sub_id) == "route"
+
+    def test_auto_save_after_a_streamed_step(self, tmp_path):
+        store = FileSessionStore(tmp_path)
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm, session_store=store)
+        stream = api.advance_stream(conv_id)
+        assert store.load(conv_id) is None
+
+        assert list(stream) == _CHUNKS
+
+        saved = store.load(conv_id)
+        assert saved is not None
+        assert saved.current_state == "plan"
+        assert saved.conversation_history[-1] == {"system": "".join(_CHUNKS)}
+
+    def test_auto_save_when_the_stream_is_abandoned(self, tmp_path):
+        store = FileSessionStore(tmp_path)
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm, session_store=store)
+        stream = api.advance_stream(conv_id)
+        next(stream)
+        assert store.load(conv_id) is None
+
+        stream.close()
+
+        saved = store.load(conv_id)
+        assert saved is not None
+        assert saved.current_state == "plan"
+        assert saved.conversation_history[-1] == {"system": _CHUNKS[0]}
+
+    def test_auto_save_after_a_failed_stream_holds_the_rolled_back_state(
+        self, tmp_path
+    ):
+        store = FileSessionStore(tmp_path)
+        llm = _StreamingLLM({"city": "Paris"}, fail_after=1)
+        api, conv_id = _prepared_stream(llm, session_store=store)
+
+        with pytest.raises(LLMResponseError):
+            list(api.advance_stream(conv_id))
+
+        saved = store.load(conv_id)
+        assert saved is not None
+        assert saved.current_state == "collect"
+        assert "city" not in saved.context_data

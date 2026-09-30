@@ -574,6 +574,69 @@ class FSMManager:
         ``yield`` in its body), ``@with_conversation_context`` runs the prologue
         eagerly, which is exactly what call-time validation requires.
         """
+        return self._open_locked_stream(
+            conversation_id,
+            message,
+            log,
+            lambda instance: self._pipeline.process_stream(
+                instance, message, conversation_id
+            ),
+        )
+
+    @with_conversation_context
+    def advance_stream(self, conversation_id: str, log: Any = None) -> Iterator[str]:
+        """Run one turn of the current state with no user message, streaming
+        the Pass 2 reply.
+
+        The same locked stream turn as ``process_message_stream`` (eager
+        existence check, lazy turn guard, terminal check, ERROR handlers,
+        error mapping). No user exchange is appended to the history, so a
+        failed or abandoned step pops none. A silent state yields no chunk.
+
+        Args:
+            conversation_id: The conversation to advance.
+
+        Returns:
+            A lazy iterator over the reply chunks.
+
+        Raises:
+            FSMError: at call time for an unknown conversation; at the first
+                ``next()`` for a turn already in flight (re-entrant or
+                concurrent), a terminal current state ("Conversation has
+                ended ..."), or a failed step.
+        """
+        return self._open_locked_stream(
+            conversation_id,
+            None,
+            log,
+            lambda instance: self._pipeline.advance_stream(instance, conversation_id),
+        )
+
+    def _open_locked_stream(
+        self,
+        conversation_id: str,
+        message: str | None,
+        log: Any,
+        run: Callable[[FSMInstance], Iterator[str]],
+    ) -> Iterator[str]:
+        """Validate the conversation now, return the lazy locked stream turn.
+
+        Contract: ``message`` is the user's text, or ``None`` for a turn with
+        no user message; ``run`` is the pipeline stream entry for that turn.
+        Raises ``FSMError`` at CALL time for an unknown conversation. The
+        returned generator claims the turn guard and ``conv_lock`` at its
+        first ``next()`` and releases both when it finishes, fails or is
+        closed; it raises ``FSMError`` for a turn already in flight, a
+        terminal state, or a failed turn. A never-iterated generator holds
+        nothing.
+        """
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-025
+        # ONE locked stream turn for a message turn and a message-free step,
+        # the stream counterpart of `_run_locked_turn` (D-024). Do NOT copy
+        # the closure below for the no-message case. This method is a plain
+        # function called by both entries; what 4c63deac/D-002 forbids (a lock
+        # acquire outside the closure, a `self.`-attribute generator) still
+        # holds inside it.
         with self._lock:
             if conversation_id not in self.instances:
                 raise FSMError(f"Conversation {conversation_id} not found")
@@ -609,11 +672,10 @@ class FSMManager:
                     raise FSMError(
                         f"Conversation has ended - current state '{instance.current_state}' is terminal"
                     )
-                instance.context.conversation.add_user_message(message)
+                if message is not None:
+                    instance.context.conversation.add_user_message(message)
                 try:
-                    yield from self._pipeline.process_stream(
-                        instance, message, conversation_id
-                    )
+                    yield from run(instance)
                 except FSMError as e:
                     self._rollback_user_message(instance, message, log)
                     # DECISION plan-2026-09-19T175721-21cd7f8e/D-009
@@ -640,7 +702,10 @@ class FSMManager:
                 except Exception as e:
                     self._rollback_user_message(instance, message, log)
                     self._fire_error_handlers(instance, conversation_id, e, log)
-                    raise FSMError(f"Failed to process message: {e!s}") from e
+                    what = (
+                        "advance conversation" if message is None else "process message"
+                    )
+                    raise FSMError(f"Failed to {what}: {e!s}") from e
             finally:
                 self._active_turns.discard(conversation_id)
                 conv_lock.release()
