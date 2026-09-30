@@ -2907,6 +2907,10 @@ class TestSuccessReflectsWhoConcluded:
         # could write the forced flag or reason and flip a real run to failed.
         # (REWOO's plan_all, the first subject of this test, has no bulk call
         # since plan 07ad3f8c step 10.)
+        # Mutation-checked (plan 07ad3f8c step 11): with FRAMEWORK_ONLY_KEYS
+        # emptied the reason case fails as (False, "stalled"). The flag has a
+        # second guard, the False seed of c1d5bfbc/D-007 (bulk fills unset
+        # keys only); with both removed it fails as (False, "max_iterations").
         from fsm_llm.agents import ADaPTAgent, AgentConfig
 
         llm = _PlantingLLM(
@@ -2923,5 +2927,5 @@ class TestSuccessReflectsWhoConcluded:
         assert llm.calls("extract_bulk_data"), "no bulk channel was exercised"
         assert result.final_context[ContextKeys.MAX_ITERATIONS_REACHED] is False
         assert ContextKeys.FORCED_STOP_REASON not in result.final_context
-        assert result.success is True
-        assert result.stop_reason not in ("max_iterations", "stalled")
+        assert (result.success, result.stop_reason) == (True, "answered")
+        assert result.answer == "A direct answer to the plan"
