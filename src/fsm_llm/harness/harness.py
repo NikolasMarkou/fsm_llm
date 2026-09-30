@@ -163,7 +163,7 @@ _AGENT_TYPE = "harness"
 
 #: Consecutive turns the protocol may make no progress at all -- no dispatch,
 #: no state change, no counter change -- before the driver halts.  Without it a
-#: permanently BLOCKED gate spins until ``BaseAgent._check_budgets`` raises,
+#: permanently BLOCKED gate spins until the run's step budget is spent,
 #: which on a live model is minutes of LLM calls that cannot change anything.
 #: Since D-045 this is also the NORMAL termination of a ``worker_factory=None``
 #: run: no worker means no evidence, every gate stays shut, and the run reports

@@ -10,7 +10,6 @@ from __future__ import annotations
 import itertools
 import json
 import socket
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -32,7 +31,7 @@ from tests.conftest import _CURRENT_STATE_TAG, PromptGroundedLLM, network_exempt
 def _field_request(**overrides: object) -> FieldExtractionRequest:
     fields: dict[str, object] = {
         "system_prompt": "Extract the city.",
-        "user_message": "Continue.",
+        "user_message": "",
         "field_name": "city",
     }
     fields.update(overrides)
@@ -80,7 +79,7 @@ class TestPromptGroundedLLM:
         )
 
     def test_unknown_field_is_null(self):
-        llm = PromptGroundedLLM(facts={"city": ("Paris", "Continue.")})
+        llm = PromptGroundedLLM(facts={"city": ("Paris", "capital of France")})
 
         response = llm.extract_field(_field_request(field_name="country"))
 
@@ -109,7 +108,7 @@ class TestPromptGroundedLLM:
             system_prompt=(
                 'Task: the capital of France.\n- "city": the city\n- "river": the river'
             ),
-            user_message="Continue.",
+            user_message="",
         )
 
         response = llm.extract_bulk_data(request)
@@ -121,7 +120,7 @@ class TestPromptGroundedLLM:
         llm = PromptGroundedLLM(facts={"city": ("Paris", "capital of France")})
         request = BulkExtractionRequest(
             system_prompt='Extract the following as JSON:\n- "city": the city',
-            user_message="Continue.",
+            user_message="",
         )
 
         assert llm.extract_bulk_data(request).extracted_data == {}
@@ -353,7 +352,7 @@ class TestTypedFieldExtraction:
             llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
         )
 
-        api.converse("Continue.", conv_id)
+        api.advance(conv_id)
 
         assert llm.calls("extract_bulk_data") == []
         assert api.get_data(conv_id)["critique"] == "Too few samples."
@@ -364,7 +363,7 @@ class TestTypedFieldExtraction:
             llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
         )
 
-        api.converse("Continue.", conv_id)
+        api.advance(conv_id)
 
         (request,) = llm.calls("extract_field")
         assert _TASK in request.system_prompt
@@ -377,7 +376,7 @@ class TestTypedFieldExtraction:
             llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
         )
 
-        api.converse("Continue.", conv_id)
+        api.advance(conv_id)
 
         (request,) = llm.calls("extract_field")
         assert ContextKeys.AGENT_TRACE not in request.context
@@ -398,7 +397,7 @@ class TestTypedFieldExtraction:
             ],
         )
 
-        api.converse("Continue.", conv_id)
+        api.advance(conv_id)
 
         (request,) = llm.calls("extract_field")
         assert _TRACE_MARKER in request.system_prompt
@@ -416,10 +415,10 @@ class TestTypedFieldExtraction:
                 .do(make_fresh_keys_handler(["critique"]))
             )
 
-        api.converse("Continue.", conv_id)  # produce -> check
+        api.advance(conv_id)  # produce -> check
         llm.facts["critique"] = ("Round two.", "TASK-7731")
-        api.converse("Continue.", conv_id)  # check -> produce
-        api.converse("Continue.", conv_id)  # produce -> check
+        api.advance(conv_id)  # check -> produce
+        api.advance(conv_id)  # produce -> check
 
         expected = "Round two." if refresh else "Round one."
         assert api.get_data(conv_id)["critique"] == expected
@@ -919,7 +918,7 @@ class TestReactLoop:
         )
         llm.requests.clear()
 
-        api.converse("Continue.", conv_id)
+        api.advance(conv_id)
 
         names = sorted(r.field_name for r in llm.calls("extract_field"))
         assert names == ["should_terminate", "tool_input", "tool_name"]
@@ -1037,10 +1036,12 @@ class TestReactLoop:
             config=AgentConfig(max_iterations=2),
             llm_interface=PromptGroundedLLM(),
         )
-        with pytest.raises(BudgetExhaustedError) as info:
-            agent._check_budgets(time.monotonic(), 7)
-        assert info.value.limit == 6
-        assert "max_iterations 2 x FSM_BUDGET_MULTIPLIER 3" in str(info.value)
+        from fsm_llm import RunBudgetExceededError
+
+        error = agent._budget_error(RunBudgetExceededError("steps", 6, 6))
+        assert isinstance(error, BudgetExhaustedError)
+        assert error.limit == 6
+        assert "max_iterations 2 x FSM_BUDGET_MULTIPLIER 3" in str(error)
 
     def test_parallel_react_counts_think_turns_and_narrows_prompts(self):
         # Sibling: ParallelReact shares the limiter and the typed think fields.

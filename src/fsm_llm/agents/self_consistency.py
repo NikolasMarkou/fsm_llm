@@ -237,10 +237,8 @@ class SelfConsistencyAgent(BaseAgent):
         samples: list[str] = []
 
         for sample_idx in range(self.num_samples):
-            # Check time/iteration budget. Cap iterations at num_samples so a
-            # large num_samples does not trip the FSM max_iterations*3 ceiling
-            # (sampling is independent of FSM iterations).
-            self._check_budgets(start_time, sample_idx, max_iterations=self.num_samples)
+            # Wall clock only: sampling is independent of FSM steps.
+            self._check_budgets(start_time)
 
             temp = temperatures[sample_idx]
             logger.debug(
@@ -277,8 +275,8 @@ class SelfConsistencyAgent(BaseAgent):
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # One up-front time/budget check before dispatching the batch.
-        self._check_budgets(start_time, 0, max_iterations=self.num_samples)
+        # One up-front wall-clock check before dispatching the batch.
+        self._check_budgets(start_time)
 
         results: list[str | None] = [None] * self.num_samples
         workers = min(self.max_workers, self.num_samples)
@@ -321,8 +319,8 @@ class SelfConsistencyAgent(BaseAgent):
         :param task: The task string
         :param temperature: Temperature for this sample
         :param initial_context: Optional initial context
-        :return: The last non-blank reply, stripped (``""`` if none). The
-            terminal ``generate`` state never extracts, so the reply is the
+        :return: The reply, stripped (``""`` if blank). The terminal
+            ``generate`` state never extracts, so its greeting reply is the
             sample; its ``Answer:`` line is what the vote compares.
         """
         try:
@@ -342,21 +340,7 @@ class SelfConsistencyAgent(BaseAgent):
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
         context[ContextKeys.TASK] = task
 
-        conv_id, initial_response = api.start_conversation(context)
-
-        try:
-            # The FSM is a single terminal state, so it should end immediately
-            # after start_conversation. If not, do a few iterations.
-            responses = [initial_response]
-            max_iters = 5
-            iteration = 0
-
-            while not api.has_conversation_ended(conv_id) and iteration < max_iters:
-                iteration += 1
-                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
-                responses.append(response)
-
-            return next((r.strip() for r in reversed(responses) if r and r.strip()), "")
-
-        finally:
-            api.end_conversation(conv_id)
+        # The FSM is one terminal state that speaks: the greeting is the sample.
+        conv_id, sample = api.start_conversation(context)
+        api.end_conversation(conv_id)
+        return (sample or "").strip()

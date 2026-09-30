@@ -454,9 +454,6 @@ class Defaults:
     # long instructions plus a large registry can still fail the FSM load.
     MAX_INSTRUCTIONS_LENGTH = 2000
 
-    # Message sent to advance the FSM conversation loop
-    CONTINUE_MESSAGE = "Continue."
-
     # Multiplier for computing hard iteration ceiling from max_iterations.
     # Each agent cycle uses multiple FSM transitions; this factor provides
     # headroom so the FSM can finish its current cycle before the budget

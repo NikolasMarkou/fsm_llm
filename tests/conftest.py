@@ -206,8 +206,8 @@ class PromptGroundedLLM(LLMInterface):
           absent evidence.
         - ``extract_bulk_data``: returns only facts whose name the prompt asks
           for (``"name"`` quoted in ``system_prompt``) and whose evidence is in
-          ``system_prompt`` or ``user_message``. A context-free "Continue."
-          prompt therefore yields ``{}``.
+          ``system_prompt`` or ``user_message``. A context-free prompt
+          therefore yields ``{}``.
         - ``generate_response``: ``responses[state]`` for the state named by
           the prompt's ``<current_state>`` tag, else ``default_response``.
         - ``requests``: every call as ``(kind, request)`` in call order, kind

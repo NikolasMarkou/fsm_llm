@@ -504,6 +504,50 @@ def _think_initial_fsm_dict(response_instructions) -> dict:
     }
 
 
+class TestSilentGreetingLeavesHistoryEmpty:
+    """plan-2026-09-30T062855-07ad3f8c/D-028: the greeting of a silent initial
+    state appends nothing to history; a spoken greeting and a ``converse``
+    turn on a silent state are recorded as before."""
+
+    def test_silent_initial_state_appends_nothing(self):
+        from fsm_llm.api import API
+
+        api = API(
+            fsm_definition=_think_initial_fsm_dict(""), llm_interface=_make_mock_llm()
+        )
+
+        conv_id, _ = api.start_conversation({"task": "sum 2 and 3"})
+
+        assert api.get_conversation_history(conv_id) == []
+
+    def test_speaking_initial_state_still_records_its_greeting(self):
+        from fsm_llm.api import API
+
+        api = API(
+            fsm_definition=_think_initial_fsm_dict("Greet the user"),
+            llm_interface=_make_mock_llm(),
+        )
+
+        conv_id, greeting = api.start_conversation()
+
+        assert api.get_conversation_history(conv_id) == [{"system": greeting}]
+
+    def test_converse_on_a_silent_state_still_appends_its_marker(self):
+        from fsm_llm.api import API
+
+        api = API(
+            fsm_definition=_think_initial_fsm_dict(""), llm_interface=_make_mock_llm()
+        )
+        conv_id, _ = api.start_conversation()
+
+        assert api.converse("go", conv_id) == "[think]"
+
+        assert api.get_conversation_history(conv_id) == [
+            {"user": "go"},
+            {"system": "[think]"},
+        ]
+
+
 class TestGenerateInitialResponseSkipsEmptyInstructions:
     """F-LIVE-01 (plan-2026-09-20-0d9c218e iter-2 step 1): the greeting must
     honour the empty-``response_instructions`` fast path exactly as the sync
@@ -527,8 +571,8 @@ class TestGenerateInitialResponseSkipsEmptyInstructions:
         assert request.user_message == ""
         assert request.skip_generation is True
         assert request.transition_occurred is False
-        history = api.get_conversation_history(conv_id)
-        assert history[0] == {"system": "[think]"}
+        # The marker is a return value only (07ad3f8c/D-028).
+        assert api.get_conversation_history(conv_id) == []
 
     def test_none_instructions_still_builds_full_prompt(self):
         from fsm_llm.api import API

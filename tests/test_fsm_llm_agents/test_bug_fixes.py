@@ -63,21 +63,22 @@ class SequenceMockLLM(LLMInterface):
         self._extractions = list(extraction_sequence)
         self._call_index = 0
         self._response_text = response_text
-        self._extracted_this_cycle = False
+        self._asked_this_cycle: set[str] = set()
         self.model = "mock-model"
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         """Per-field extraction using the current extraction sequence entry.
 
-        The pipeline calls extract_field once per required_context_key.
+        The pipeline calls extract_field once per typed field of a state.
         We look up the requested field_name in the current extraction dict.
-        The index advances once per converse cycle: on the first
-        extract_field call after a generate_response call.
+        The index advances once per extracting step: when a field already
+        asked in the current cycle is asked again (a silent step makes no
+        ``generate_response`` call to key on).
         """
-        if not self._extracted_this_cycle:
-            # First extraction call of a new cycle — don't advance on the
-            # very first cycle (index 0), but advance for subsequent ones.
-            self._extracted_this_cycle = True
+        if request.field_name in self._asked_this_cycle:
+            self._call_index += 1
+            self._asked_this_cycle = set()
+        self._asked_this_cycle.add(request.field_name)
 
         if self._call_index < len(self._extractions):
             data = self._extractions[self._call_index]
@@ -96,11 +97,6 @@ class SequenceMockLLM(LLMInterface):
     def generate_response(
         self, request: ResponseGenerationRequest
     ) -> ResponseGenerationResponse:
-        # Advance the extraction sequence index once per converse cycle.
-        # Only advance if extraction actually happened this cycle.
-        if self._extracted_this_cycle:
-            self._call_index += 1
-            self._extracted_this_cycle = False
         return ResponseGenerationResponse(
             message=self._response_text,
             message_type="response",

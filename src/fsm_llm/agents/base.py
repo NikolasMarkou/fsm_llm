@@ -14,12 +14,12 @@ from abc import ABC, abstractmethod
 from collections.abc import (
     Callable,
     Collection,
-    Iterable,
     Iterator,
     Mapping,
     Sequence,
     Set,
 )
+from functools import partial
 from typing import Any, ClassVar, cast
 
 from pydantic import BaseModel, ValidationError
@@ -27,6 +27,7 @@ from pydantic import BaseModel, ValidationError
 from fsm_llm import API
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
 from fsm_llm.context import ContextCompactor
+from fsm_llm.definitions import RunBudgetExceededError
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
@@ -405,67 +406,6 @@ def _reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> Non
         )
 
 
-def _skip_marker_states(fsm_def: Mapping[str, Any]) -> dict[str, str]:
-    """Map each core skip marker of *fsm_def* to the state that emits it.
-
-    Core's Pass 2 answers a state whose ``response_instructions`` is the empty
-    string with the synthetic chunk ``f"[{state.id}]"`` instead of calling the
-    model (``pipeline.py`` fast path). Returns ``{"[think]": "think", ...}``
-    for exactly those states; states that speak are absent. Never raises on a
-    malformed definition (non-mapping entries are skipped).
-    """
-    markers: dict[str, str] = {}
-    states = fsm_def.get("states")
-    if not isinstance(states, Mapping):
-        return markers
-    for key, state in states.items():
-        if isinstance(state, Mapping) and state.get("response_instructions") == "":
-            state_id = str(state.get("id", key))
-            markers[f"[{state_id}]"] = state_id
-    return markers
-
-
-def _drop_skip_marker(
-    chunks: Iterable[str],
-    markers: Mapping[str, str],
-    api: API,
-    conv_id: str,
-) -> Iterator[str]:
-    """Yield one turn's *chunks* minus core's skip marker.
-
-    A chunk is dropped only when it is the turn's sole chunk, equals a marker
-    in *markers* (from ``_skip_marker_states``), and the conversation sits in
-    that marker's state once the turn is over: core yields the marker alone
-    and only for a state that never calls the model, so model text that
-    happens to read ``[think]`` in a speaking state is kept. A marker-shaped
-    first chunk is held back until the next chunk or the end of the turn.
-    """
-    # DECISION plan-2026-09-29T103145-06a5ec0a/D-030
-    # Do NOT drop every chunk that merely equals a known marker, and do NOT
-    # query the state mid-turn (the turn holds the conversation lock). The
-    # marker is dropped only as the turn's sole chunk with the post-turn state
-    # matching it, so a speaking state's "[think]" text still ships.
-    held: str | None = None
-    count = 0
-    for chunk in chunks:
-        count += 1
-        if held is not None:
-            yield held
-            held = None
-        if count == 1 and chunk in markers:
-            held = chunk
-        else:
-            yield chunk
-    if held is None:
-        return
-    try:
-        state = api.get_current_state(conv_id)
-    except Exception:
-        state = None
-    if state != markers[held]:
-        yield held
-
-
 def artifact_text(value: Any) -> str:
     """The text form of a generated artifact read from context.
 
@@ -559,14 +499,27 @@ class BaseAgent(ABC):
         agent_type: str,
         max_iterations: int | None = None,
     ) -> tuple[list[str], dict[str, Any], int]:
-        """Run the standard FSM conversation loop.
+        """Run the agent's FSM to its terminal state on core's bounded run.
 
         Returns:
-            Tuple of (responses, final_context, iteration_count).
-        """
-        max_iters = max_iterations or self.config.max_iterations
+            Tuple of (responses, final_context, step_count). ``responses``
+            holds the reply of every state that spoke, in order (a silent
+            state contributes nothing).
 
-        conv_id, initial_response = api.start_conversation(context)
+        Raises:
+            AgentTimeoutError, BudgetExhaustedError: a run budget was spent
+                (``_run_budgets``, ``_budget_error``).
+        """
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-030
+        # The run loop, the step cap and the wall-clock budget are core's
+        # (`API.run_until_terminal`). Do NOT bring back a `while` loop, a step
+        # counter or a `converse("Continue.")` turn here or in
+        # `_standard_run_stream`, and do NOT filter `[state]` markers in this
+        # package (supersedes 06a5ec0a/D-030): a step has no user message and
+        # a silent state returns no text. If a pattern needs a budget or loop
+        # behaviour core cannot express, extend core's loop with a core test.
+        # See decisions.md D-030.
+        conv_id, greeting = self._start_conversation(api, context)
         log = logger.bind(
             conversation_id=conv_id,
             package="fsm_llm.agents",
@@ -574,26 +527,40 @@ class BaseAgent(ABC):
         )
 
         try:
-            responses = [initial_response]
-            iteration = 0
+            max_steps, max_seconds = self._run_budgets(start_time, max_iterations)
+            try:
+                steps = api.run_until_terminal(
+                    conv_id,
+                    max_steps=max_steps,
+                    max_seconds=max_seconds,
+                    before_step=partial(self._on_loop_iteration, api, conv_id),
+                )
+            except RunBudgetExceededError as exc:
+                raise self._budget_error(exc, max_iterations) from exc
 
-            while not api.has_conversation_ended(conv_id):
-                iteration += 1
-
-                self._check_budgets(start_time, iteration, max_iters)
-
-                # Hook for mid-loop processing (e.g. HITL approval)
-                self._on_loop_iteration(api, conv_id, iteration)
-
-                response = api.converse(Defaults.CONTINUE_MESSAGE, conv_id)
-                responses.append(response)
-
+            replies = [greeting, *(step.response for step in steps)]
             final_context = api.get_data(conv_id)
-            log.info(LogMessages.AGENT_COMPLETE.format(iterations=iteration))
-            return responses, final_context, iteration
+            log.info(LogMessages.AGENT_COMPLETE.format(iterations=len(steps)))
+            return [r for r in replies if r is not None], final_context, len(steps)
 
         finally:
             api.end_conversation(conv_id)
+
+    @staticmethod
+    def _start_conversation(
+        api: API, context: dict[str, Any]
+    ) -> tuple[str, str | None]:
+        """Start the run's conversation; return ``(conv_id, greeting)``.
+
+        Shared by ``_run_conversation_loop`` and ``_standard_run_stream``.
+        ``greeting`` is the initial state's reply, or ``None`` when that state
+        is silent. Whether it spoke is asked of core (a greeting is recorded
+        in history only when the state spoke, 07ad3f8c/D-028), never read off
+        the returned text.
+        """
+        conv_id, greeting = api.start_conversation(context)
+        spoke = bool(api.get_conversation_history(conv_id))
+        return conv_id, greeting if spoke else None
 
     def _on_loop_iteration(  # noqa: B027
         self,
@@ -601,10 +568,10 @@ class BaseAgent(ABC):
         conv_id: str,
         iteration: int,
     ) -> None:
-        """Hook called each loop iteration before converse().
+        """Hook called before each step of the run (core's ``before_step``).
 
-        Override for HITL approval gates or other mid-loop logic.
-        Default is a no-op.
+        ``iteration`` is the step number, from 1. Override for HITL approval
+        gates or other between-step logic. Default is a no-op.
         """
 
     # ------------------------------------------------------------------
@@ -970,28 +937,57 @@ class BaseAgent(ABC):
     # Budget enforcement
     # ------------------------------------------------------------------
 
-    def _check_budgets(
-        self,
-        start_time: float,
-        iteration: int,
-        max_iterations: int | None = None,
-    ) -> None:
-        """Raise if time or iteration budget exceeded."""
+    def _check_budgets(self, start_time: float) -> None:
+        """Raise ``AgentTimeoutError`` when the wall clock of a run is spent.
+
+        For callers that are not inside a core bounded run (SelfConsistency
+        samples, ``native_fc``). FSM runs pass their budgets to core instead
+        (``_run_budgets``).
+        """
         if time.monotonic() - start_time > self.config.timeout_seconds:
             raise AgentTimeoutError(self.config.timeout_seconds)
 
+    def _run_budgets(
+        self, start_time: float, max_iterations: int | None = None
+    ) -> tuple[int, float]:
+        """The ``(max_steps, max_seconds)`` of a core bounded run.
+
+        Interface contract (callers: ``_run_conversation_loop``,
+        ``_standard_run_stream``): ``max_steps`` is ``max_iterations`` (default
+        ``config.max_iterations``) times ``FSM_BUDGET_MULTIPLIER``;
+        ``max_seconds`` is what is left of ``config.timeout_seconds`` since
+        ``start_time`` (always above 0). Raises ``AgentTimeoutError`` when
+        nothing is left: core refuses a non-positive time budget.
+        """
+        remaining = self.config.timeout_seconds - (time.monotonic() - start_time)
+        if remaining <= 0:
+            raise AgentTimeoutError(self.config.timeout_seconds)
+        max_iters = max_iterations or self.config.max_iterations
+        return max_iters * Defaults.FSM_BUDGET_MULTIPLIER, remaining
+
+    def _budget_error(
+        self, exc: RunBudgetExceededError, max_iterations: int | None = None
+    ) -> AgentError:
+        """The public agent error for a spent core run budget.
+
+        Interface contract (same callers as ``_run_budgets``): the seconds
+        budget maps to ``AgentTimeoutError(config.timeout_seconds)``, the
+        steps budget to ``BudgetExhaustedError`` citing the step ceiling.
+        Returns the error; the caller raises it ``from exc``.
+        """
+        if exc.budget == "seconds":
+            return AgentTimeoutError(self.config.timeout_seconds)
         max_iters = max_iterations or self.config.max_iterations
         ceiling = max_iters * Defaults.FSM_BUDGET_MULTIPLIER
-        if iteration > ceiling:
-            # LOOP-17: cite the loop-turn ceiling that was hit, not max_iterations.
-            raise BudgetExhaustedError(
-                "iterations",
-                ceiling,
-                detail=(
-                    f"{ceiling} loop turns = max_iterations {max_iters} x "
-                    f"FSM_BUDGET_MULTIPLIER {Defaults.FSM_BUDGET_MULTIPLIER}"
-                ),
-            )
+        # LOOP-17: cite the loop-turn ceiling that was hit, not max_iterations.
+        return BudgetExhaustedError(
+            "iterations",
+            ceiling,
+            detail=(
+                f"{ceiling} loop turns = max_iterations {max_iters} x "
+                f"FSM_BUDGET_MULTIPLIER {Defaults.FSM_BUDGET_MULTIPLIER}"
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Answer extraction
@@ -1341,12 +1337,10 @@ class BaseAgent(ABC):
     ) -> Iterator[str]:
         """Streaming variant of ``_standard_run``.
 
-        Drives the same FSM loop but streams each turn's Pass-2 output token by
-        token via ``API.converse_stream``. Intermediate states with empty
-        ``response_instructions`` (think/act) yield nothing: core's
-        ``[<state_id>]`` skip marker for them is dropped (see
-        ``_skip_marker_states``); the final answer state (conclude) streams its
-        output. Yields raw text only — callers needing the structured
+        Runs the same FSM on ``API.run_until_terminal_stream`` and streams
+        each speaking state's reply token by token. States with empty
+        ``response_instructions`` (think/act) yield nothing; the final answer
+        state (conclude) streams its output. Yields raw text only — callers needing the structured
         ``AgentResult``/trace should use ``run()``. Errors are wrapped exactly
         like ``_standard_run``: budget and timeout errors propagate, anything
         else is raised as ``AgentError``.
@@ -1374,29 +1368,22 @@ class BaseAgent(ABC):
             self._register_handlers(api)
         self._register_lifecycle_handlers(api, agent_type)
 
-        max_iters = max_iterations or self.config.max_iterations
-        silent = _skip_marker_states(fsm_def)
         try:
-            conv_id, initial_response = api.start_conversation(context)
+            conv_id, greeting = self._start_conversation(api, context)
             try:
-                if initial_response:
-                    yield from _drop_skip_marker(
-                        [initial_response], silent, api, conv_id
-                    )
-
-                iteration = 0
-                while not api.has_conversation_ended(conv_id):
-                    iteration += 1
-                    self._check_budgets(start_time, iteration, max_iters)
-                    self._on_loop_iteration(api, conv_id, iteration)
-                    yield from _drop_skip_marker(
-                        api.converse_stream(Defaults.CONTINUE_MESSAGE, conv_id),
-                        silent,
-                        api,
-                        conv_id,
-                    )
+                if greeting:
+                    yield greeting
+                max_steps, max_seconds = self._run_budgets(start_time, max_iterations)
+                yield from api.run_until_terminal_stream(
+                    conv_id,
+                    max_steps=max_steps,
+                    max_seconds=max_seconds,
+                    before_step=partial(self._on_loop_iteration, api, conv_id),
+                )
             finally:
                 api.end_conversation(conv_id)
+        except RunBudgetExceededError as exc:
+            raise self._budget_error(exc, max_iterations) from exc
         except (AgentTimeoutError, BudgetExhaustedError):
             raise
         except Exception as e:

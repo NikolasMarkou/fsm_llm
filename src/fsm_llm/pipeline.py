@@ -1087,12 +1087,19 @@ class MessagePipeline:
                 skip_generation=True,
             )
             self.llm_interface.generate_response(request)
-            synthetic = f"[{current_state.id}]"
-            instance.context.conversation.add_system_message(synthetic)
+            # DECISION plan-2026-09-30T062855-07ad3f8c/D-028
+            # The `[<state>]` marker of a silent initial state is a return
+            # value only. Do NOT append it to conversation history here: no
+            # one said it, and it showed up in every later field prompt as
+            # "Assistant: [think]" and was the last synthetic entry in the
+            # history of a message-free run. Do NOT drop the marker a
+            # `converse` turn on a silent state appends (2-pass contract),
+            # and do NOT change the return value or the skip request above
+            # (0d9c218e/D-006). See decisions.md D-028.
             log.debug(
                 "Skipped initial response generation (empty response_instructions)"
             )
-            return synthetic
+            return f"[{current_state.id}]"
 
         fsm_def = self.fsm_resolver(instance.fsm_id)
 

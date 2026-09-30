@@ -411,7 +411,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
 
         try:
             for iteration in range(1, max_iters + 1):
-                self._check_budgets(start_time, iteration, max_iters)
+                self._check_budgets(start_time)
                 # DECISION plan-2026-07-21T191807-bf7ffe24/D-016
                 # A garbled tool-call turn ends the LOOP, not the dispatch. The
                 # `break` is deliberate and is not a silent retry: everything

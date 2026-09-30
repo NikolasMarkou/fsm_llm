@@ -62,17 +62,35 @@ class TestBaseAgentBudgets:
         agent = ConcreteAgent(config=AgentConfig(timeout_seconds=0.001))
         time.sleep(0.01)
         with pytest.raises(AgentTimeoutError):
-            agent._check_budgets(time.monotonic() - 1.0, 1)
-
-    def test_check_budgets_iteration_limit(self):
-        agent = ConcreteAgent(config=AgentConfig(max_iterations=5))
-        with pytest.raises(BudgetExhaustedError):
-            agent._check_budgets(time.monotonic(), 16)  # 5 * 3 = 15, 16 > 15
+            agent._check_budgets(time.monotonic() - 1.0)
 
     def test_check_budgets_ok(self):
         agent = ConcreteAgent(config=AgentConfig(max_iterations=10))
         # Should not raise
-        agent._check_budgets(time.monotonic(), 5)
+        agent._check_budgets(time.monotonic())
+
+    def test_run_budgets_are_the_step_ceiling_and_the_remaining_time(self):
+        agent = ConcreteAgent(config=AgentConfig(max_iterations=5, timeout_seconds=60))
+        max_steps, max_seconds = agent._run_budgets(time.monotonic() - 20.0)
+        assert max_steps == 15  # 5 * FSM_BUDGET_MULTIPLIER
+        assert 39.0 < max_seconds <= 40.0
+        assert agent._run_budgets(time.monotonic(), 2)[0] == 6
+
+    def test_run_budgets_raise_timeout_when_the_clock_is_spent(self):
+        agent = ConcreteAgent(config=AgentConfig(timeout_seconds=1.0))
+        with pytest.raises(AgentTimeoutError):
+            agent._run_budgets(time.monotonic() - 2.0)
+
+    def test_budget_error_maps_the_core_budgets(self):
+        from fsm_llm import RunBudgetExceededError
+
+        agent = ConcreteAgent(config=AgentConfig(max_iterations=5, timeout_seconds=7))
+        steps = agent._budget_error(RunBudgetExceededError("steps", 15, 15))
+        assert isinstance(steps, BudgetExhaustedError)
+        assert steps.limit == 15  # 5 * 3
+        seconds = agent._budget_error(RunBudgetExceededError("seconds", 3.2, 4))
+        assert isinstance(seconds, AgentTimeoutError)
+        assert seconds.timeout_seconds == 7
 
 
 class TestBaseAgentAnswerExtraction:

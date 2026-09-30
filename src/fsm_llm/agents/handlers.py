@@ -608,8 +608,8 @@ def make_iteration_limiter(
     (``>= max - 1``) and the forced transition fires on the next iteration
     rather than overshooting by 1. The forced keys only change routing where
     a transition reads them. PRE_TRANSITION handlers do not run on a BLOCKED
-    turn, so the loop's hard ceiling (``BaseAgent._check_budgets``) is the
-    backstop bound.
+    turn, so the run's step ceiling (core ``max_steps``, set by
+    ``BaseAgent._run_budgets``) is the backstop bound.
     """
     forced_updates = dict(forced)
 

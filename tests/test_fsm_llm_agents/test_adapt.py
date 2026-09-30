@@ -538,15 +538,13 @@ class TestADaPTBudgetErrorsPropagate:
     def test_subtask_budget_error_propagates_from_run(self, error):
         llm = _DecomposeScriptLLM(["sub one", "sub two", "sub three"])
         agent = _adapt(llm)
-        real_check = agent._check_budgets
 
-        def _check(start_time: float, iteration: int, max_iters: int) -> None:
+        def _before_step(api: object, conv_id: str, iteration: int) -> None:
             # A subtask run exhausts its budget once its attempt was extracted.
             if llm.sub_tasks_seen:
                 raise error
-            real_check(start_time, iteration, max_iters)
 
-        agent._check_budgets = _check  # type: ignore[method-assign]
+        agent._on_loop_iteration = _before_step  # type: ignore[method-assign]
         with pytest.raises(type(error)):
             agent.run("root task")
         # No further subtask starts after the budget error.
