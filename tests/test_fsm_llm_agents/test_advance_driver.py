@@ -11,10 +11,16 @@ AutoMemory's recall and persistence run through the same core loop
 (``before_step`` -> ``_on_loop_iteration`` -> ``_handle_hitl_approval``). The
 HITL tests use gated tools with typed signatures and assert the order of
 steps, asks, grant spends and tool runs.
+
+Step 12: PlanExecute, REWOO and ParallelReact are pinned on the same loop
+with exact outcomes: which tool ran with which arguments inside which step,
+``success`` and ``stop_reason``.
 """
 
 from __future__ import annotations
 
+import re
+import threading
 import time
 from typing import Any
 
@@ -25,8 +31,11 @@ from fsm_llm.agents import (
     AgentConfig,
     AutoMemoryReactAgent,
     HumanInTheLoop,
+    ParallelReactAgent,
+    PlanExecuteAgent,
     ReactAgent,
     ReflexionAgent,
+    REWOOAgent,
     ToolRegistry,
     VerifiedReactAgent,
 )
@@ -1000,3 +1009,460 @@ class TestAutoMemory:
         # Step 1 ran (a started step is never cut short); step 2 never began.
         assert steps == [1]
         assert memory.texts == [_MEMORY_TASK]
+
+
+# ---------------------------------------------------------------------------
+# Step 12: PlanExecute, REWOO and ParallelReact through the core run loop
+# ---------------------------------------------------------------------------
+
+_FRANCE_TASK = "What are the capital and the population of France?"
+_FRANCE_ANSWER = "Paris is the capital; 68 million people live in France."
+_FRANCE_FACTS = {
+    "capital of France": "The capital of France is Paris.",
+    "population of France": "France has 68 million inhabitants.",
+}
+_STEP = re.compile(r'"current_step_description": "Step (\d+)/(\d+): ([^"]*)"')
+
+
+class _Run:
+    """What one ``run()`` did to the ``API`` it built.
+
+    ``events`` holds, in order, ``("step", state)`` for every core step (the
+    state it started in) and whatever the test's tools append. ``started`` is
+    the context the conversation was started with, ``final`` the full context
+    (internal keys included) and ``history`` the conversation history, both
+    read just before the run ends its conversation.
+    """
+
+    def __init__(self, agent: BaseAgent, llm: PromptGroundedLLM, events: list) -> None:
+        self.agent = agent
+        self.llm = llm
+        self.events = events
+        self.started: dict[str, Any] = {}
+        self.final: dict[str, Any] = {}
+        self.history: list[dict[str, str]] = []
+        create_api = agent._create_api
+        hook = agent._on_loop_iteration
+
+        def _create(fsm_def: dict[str, Any]) -> API:
+            api = create_api(fsm_def)
+            start, end = api.start_conversation, api.end_conversation
+
+            def _start(context: dict[str, Any] | None = None) -> Any:
+                self.started.update(context or {})
+                return start(context)
+
+            def _end(conv_id: str) -> None:
+                self.final.update(_full_context(api, conv_id))
+                self.history.extend(api.get_conversation_history(conv_id))
+                end(conv_id)
+
+            api.start_conversation = _start  # type: ignore[method-assign]
+            api.end_conversation = _end  # type: ignore[method-assign]
+            return api
+
+        def _hook(api: API, conv_id: str, iteration: int) -> None:
+            events.append(("step", api.get_current_state(conv_id)))
+            hook(api, conv_id, iteration)
+
+        agent._create_api = _create  # type: ignore[method-assign]
+        agent._on_loop_iteration = _hook  # type: ignore[method-assign]
+
+    def steps(self) -> list[str]:
+        """The state each core step started in, in order."""
+        return [event[1] for event in self.events if event[0] == "step"]
+
+    def fields(self) -> list[str]:
+        """The field name of every per-field extraction call, in order."""
+        return [request.field_name for request in self.llm.calls("extract_field")]
+
+
+def _fact_registry(events: list, *, fail: tuple[str, ...] = ()) -> ToolRegistry:
+    """A ``lookup(query: str)`` tool over ``_FRANCE_FACTS``; a query in
+    ``fail`` (or an unknown one) raises. Every call is recorded first."""
+    registry = ToolRegistry()
+
+    def lookup(query: str) -> str:
+        events.append(("lookup", query))
+        if query in fail:
+            raise RuntimeError("source offline")
+        return _FRANCE_FACTS[query]
+
+    registry.register_function(lookup, name="lookup", description="Look up a fact")
+    return registry
+
+
+class _PlanLLM(PromptGroundedLLM):
+    """Plans from the task, replans only on a failed step it can read, and
+    selects ``lookup`` with the query the current step names."""
+
+    def __init__(self, plan: list[str], new_plan: list[str] | None = None) -> None:
+        super().__init__(default_response=_FRANCE_ANSWER)
+        self.plan = plan
+        self.new_plan = new_plan
+
+    def _grounded(self, name: str, text: str) -> object | None:
+        step = _STEP.search(text)
+        if name == "plan_steps":
+            if "previous_plan_steps" in text:
+                return self.new_plan if "[TOOL FAILED]" in text else None
+            return list(self.plan) if _FRANCE_TASK in text else None
+        if name == "tool_name":
+            return "lookup" if step else None
+        if name == "tool_input":
+            return (
+                {"query": step.group(3).removeprefix("look up the ")} if step else None
+            )
+        return None
+
+
+def _plan_run(llm: _PlanLLM, *, fail: tuple[str, ...] = (), **kwargs: Any) -> tuple:
+    events: list[tuple[Any, ...]] = []
+    agent = PlanExecuteAgent(
+        tools=_fact_registry(events, fail=fail),
+        config=AgentConfig(max_iterations=20),
+        llm_interface=llm,
+        **kwargs,
+    )
+    run = _Run(agent, llm, events)
+    return agent.run(_FRANCE_TASK), run
+
+
+_PLAN = ["look up the capital of France", "look up the population of France"]
+
+
+class TestPlanExecuteOnTheCoreLoop:
+    """The plan is extracted over the ``[]`` seed, each step's tool runs inside
+    the ``execute_step`` step (on ``check_result`` entry) with the input that
+    step selected, and the replan count is exact."""
+
+    def test_each_step_runs_its_tool_with_its_own_input(self):
+        result, run = _plan_run(_PlanLLM(_PLAN))
+
+        assert run.events == [
+            ("step", "plan"),
+            ("step", "execute_step"),
+            ("lookup", "capital of France"),
+            ("step", "check_result"),
+            ("step", "execute_step"),
+            ("lookup", "population of France"),
+            ("step", "check_result"),
+        ]
+        assert (result.success, result.stop_reason) == (True, "evidence")
+        assert result.answer == _FRANCE_ANSWER
+        assert [(c.tool_name, c.parameters) for c in result.trace.tool_calls] == [
+            ("lookup", {"query": "capital of France"}),
+            ("lookup", {"query": "population of France"}),
+        ]
+        # The seed is the `plan` state's only exit (D-046); the plan replaces it.
+        assert run.started[ContextKeys.PLAN_STEPS] == []
+        assert run.final[ContextKeys.PLAN_STEPS] == _PLAN
+        assert run.final["_replan_count"] == 0
+        # One plan call, then the tool selection and the step note per step.
+        per_step = ["tool_name", "tool_input", "step_result"]
+        assert run.fields() == ["plan_steps", *per_step, *per_step]
+        assert run.final[ContextKeys.STEP_RESULTS] == [
+            {
+                "step_index": 0,
+                "result": _FRANCE_FACTS["capital of France"],
+                "success": True,
+            },
+            {
+                "step_index": 1,
+                "result": _FRANCE_FACTS["population of France"],
+                "success": True,
+            },
+        ]
+
+    def test_failed_step_replans_once_and_restarts_at_the_new_plan(self):
+        new_plan = ["look up the population of France"]
+        result, run = _plan_run(
+            _PlanLLM(["look up the capital of France"], new_plan),
+            fail=("capital of France",),
+        )
+
+        assert run.events == [
+            ("step", "plan"),
+            ("step", "execute_step"),
+            ("lookup", "capital of France"),
+            ("step", "check_result"),
+            ("step", "replan"),
+            ("step", "execute_step"),
+            ("lookup", "population of France"),
+            ("step", "check_result"),
+        ]
+        assert run.final["_replan_count"] == 1
+        assert run.final[ContextKeys.PLAN_STEPS] == new_plan
+        assert [e["success"] for e in run.final[ContextKeys.STEP_RESULTS]] == [
+            False,
+            True,
+        ]
+        assert (result.success, result.stop_reason) == (True, "evidence")
+
+    @pytest.mark.parametrize("max_replans", [0, 1, 2])
+    def test_replan_count_stops_at_max_replans(self, max_replans: int):
+        failing = ("capital of France",)
+        result, run = _plan_run(
+            _PlanLLM(
+                ["look up the capital of France"], ["look up the capital of France"]
+            ),
+            fail=failing,
+            max_replans=max_replans,
+        )
+
+        assert run.final["_replan_count"] == max_replans
+        assert run.steps().count("replan") == max_replans
+        assert run.events.count(("lookup", "capital of France")) == max_replans + 1
+        # No step succeeded: the synthesis still ships, as a failed result.
+        assert (result.success, result.stop_reason) == (False, "no_result")
+        assert result.answer == _FRANCE_ANSWER
+
+
+def _blueprint_step(plan_id: int, query: str) -> dict[str, Any]:
+    return {
+        "plan_id": plan_id,
+        "description": f"look up {query}",
+        "tool_name": "lookup",
+        "tool_input": {"query": query},
+    }
+
+
+_BLUEPRINT = [
+    _blueprint_step(1, "capital of France"),
+    _blueprint_step(2, "population of France"),
+]
+
+
+def _rewoo_run(blueprint: object, *, fail: tuple[str, ...] = ()) -> tuple:
+    events: list[tuple[Any, ...]] = []
+    llm = PromptGroundedLLM(
+        facts={"plan_blueprint": (blueprint, _FRANCE_TASK)},
+        default_response=_FRANCE_ANSWER,
+    )
+    agent = REWOOAgent(tools=_fact_registry(events, fail=fail), llm_interface=llm)
+    run = _Run(agent, llm, events)
+    return agent.run(_FRANCE_TASK), run
+
+
+class TestRewooOnTheCoreLoop:
+    """Two steps: ``plan_all`` extracts the blueprint, every tool runs inside
+    it (on ``execute_plans`` entry), and one successful tool is the evidence."""
+
+    def test_blueprint_tools_run_in_order_and_one_success_is_evidence(self):
+        result, run = _rewoo_run(_BLUEPRINT)
+
+        assert run.events == [
+            ("step", "plan_all"),
+            ("lookup", "capital of France"),
+            ("lookup", "population of France"),
+            ("step", "execute_plans"),
+        ]
+        assert run.fields() == ["plan_blueprint"]
+        assert run.final[ContextKeys.EVIDENCE] == {
+            "E1": _FRANCE_FACTS["capital of France"],
+            "E2": _FRANCE_FACTS["population of France"],
+        }
+        assert run.final[ContextKeys.EVIDENCE_STATUS] == [
+            {"id": "E1", "tool_name": "lookup", "success": True},
+            {"id": "E2", "tool_name": "lookup", "success": True},
+        ]
+        assert [(c.tool_name, c.parameters) for c in result.trace.tool_calls] == [
+            ("lookup", {"query": "capital of France"}),
+            ("lookup", {"query": "population of France"}),
+        ]
+        assert (result.success, result.stop_reason) == (True, "evidence")
+        assert result.answer == _FRANCE_ANSWER
+
+    @pytest.mark.parametrize(
+        ("fail", "flags", "outcome"),
+        [
+            (("capital of France",), [False, True], (True, "evidence")),
+            (tuple(_FRANCE_FACTS), [False, False], (False, "no_result")),
+        ],
+        ids=["one_tool_succeeds", "no_tool_succeeds"],
+    )
+    def test_success_needs_one_successful_tool(self, fail, flags, outcome):
+        result, run = _rewoo_run(_BLUEPRINT, fail=fail)
+
+        status = run.final[ContextKeys.EVIDENCE_STATUS]
+        assert [entry["success"] for entry in status] == flags
+        assert len([e for e in run.events if e[0] == "lookup"]) == 2
+        assert (result.success, result.stop_reason) == outcome
+        assert result.answer == _FRANCE_ANSWER
+
+    @pytest.mark.parametrize(
+        ("blueprint", "asks"),
+        [(None, 2), ("lookup the capital", 2), ([], 1)],
+        ids=["null", "string", "empty"],
+    )
+    def test_no_usable_blueprint_ends_as_a_failed_result_in_two_steps(
+        self, blueprint, asks
+    ):
+        # Step 10 (D-031) removed the state-level bulk call, so a null
+        # blueprint has no second chance: the unconditional edge still leaves
+        # `plan_all`, no tool runs and the run is an honest failure.
+        result, run = _rewoo_run(blueprint)
+
+        assert run.events == [("step", "plan_all"), ("step", "execute_plans")]
+        assert run.final[ContextKeys.EVIDENCE] == {}
+        assert run.final[ContextKeys.EVIDENCE_STATUS] == []
+        assert result.trace.tool_calls == []
+        assert (result.success, result.stop_reason) == (False, "no_result")
+        assert result.answer == _FRANCE_ANSWER
+        # Core asks once more for a null or non-list value, then moves on.
+        assert run.fields() == ["plan_blueprint"] * asks
+
+
+_BATCH = [
+    {"tool_name": "lookup", "tool_input": {"query": "capital of France"}},
+    {"tool_name": "lookup", "tool_input": {"query": "population of France"}},
+]
+_NO_TOOLS = "No tools were selected."
+
+
+class _BatchLLM(PromptGroundedLLM):
+    """Selects the two-call batch until a prompt shows a tool result.
+
+    ``eager``: answers ``should_terminate`` True on every think turn and picks
+    the batch only after it reads the executor's "no tools" feedback.
+    """
+
+    def __init__(self, *, eager: bool = False) -> None:
+        super().__init__(default_response=_FRANCE_ANSWER)
+        self.eager = eager
+
+    def _grounded(self, name: str, text: str) -> object | None:
+        observed = "68 million" in text
+        if name == "tool_calls":
+            if observed or (self.eager and _NO_TOOLS not in text):
+                return []
+            return [dict(call) for call in _BATCH]
+        if name == "should_terminate":
+            return True if observed or self.eager else None
+        return None
+
+
+def _parallel_run(llm: _BatchLLM) -> tuple:
+    """Run ParallelReact on a ``lookup`` whose FIRST submitted call (the
+    capital) returns only after the second one (the population) finished."""
+    events: list[tuple[Any, ...]] = []
+    population_done = threading.Event()
+    registry = ToolRegistry()
+
+    def lookup(query: str) -> str:
+        if query == "capital of France" and not population_done.wait(timeout=5):
+            raise TimeoutError("the batch did not run concurrently")
+        events.append(("lookup", query))
+        if query == "population of France":
+            population_done.set()
+        return _FRANCE_FACTS[query]
+
+    registry.register_function(lookup, name="lookup", description="Look up a fact")
+    agent = ParallelReactAgent(
+        tools=registry, config=AgentConfig(max_iterations=6), llm_interface=llm
+    )
+    run = _Run(agent, llm, events)
+    return agent.run(_FRANCE_TASK), run
+
+
+def _observed_queries(observations: list[str]) -> list[str]:
+    return [
+        query
+        for entry in observations
+        for query in _FRANCE_FACTS
+        if f"Result: {_FRANCE_FACTS[query]}" in entry
+    ]
+
+
+class TestParallelReactOnTheCoreLoop:
+    """The batch runs inside the ``think`` step (on ``act`` entry), its results
+    are recorded in submission order whatever order the tools finish in, and a
+    terminate verdict with no observation never concludes."""
+
+    def test_batch_is_recorded_in_submission_order(self):
+        result, run = _parallel_run(_BatchLLM())
+
+        # The tools finished in the opposite order to their submission.
+        assert run.events == [
+            ("step", "think"),
+            ("lookup", "population of France"),
+            ("lookup", "capital of France"),
+            ("step", "act"),
+            ("step", "think"),
+        ]
+        submitted = ["capital of France", "population of France"]
+        assert _observed_queries(run.final[ContextKeys.OBSERVATIONS]) == submitted
+        assert [entry[:8] for entry in run.final[ContextKeys.OBSERVATIONS]] == [
+            "[Step 1]",
+            "[Step 2]",
+        ]
+        assert [(c.tool_name, c.parameters) for c in result.trace.tool_calls] == [
+            ("lookup", {"query": query}) for query in submitted
+        ]
+        assert run.final[ContextKeys.OBSERVATION_COUNT] == 2
+        assert (result.success, result.stop_reason) == (True, "answered")
+        assert result.answer == _FRANCE_ANSWER
+        assert run.fields() == ["tool_calls", "should_terminate"] * 2
+
+    def test_terminate_without_an_observation_does_not_conclude(self):
+        result, run = _parallel_run(_BatchLLM(eager=True))
+
+        # Think 1 says "done" with an empty batch: no evidence, so `act` runs
+        # (and reports the empty batch). Think 2 says "done" again and picks
+        # the batch: still no evidence, so the batch runs. Think 3 concludes.
+        assert run.events == [
+            ("step", "think"),
+            ("step", "act"),
+            ("step", "think"),
+            ("lookup", "population of France"),
+            ("lookup", "capital of France"),
+            ("step", "act"),
+            ("step", "think"),
+        ]
+        assert run.final[ContextKeys.OBSERVATION_COUNT] == 2
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+
+_PLANNER_RUNS = [
+    pytest.param(lambda: _plan_run(_PlanLLM(_PLAN)), id="plan_execute"),
+    pytest.param(lambda: _rewoo_run(_BLUEPRINT), id="rewoo"),
+    pytest.param(lambda: _parallel_run(_BatchLLM()), id="parallel_react"),
+]
+
+
+@pytest.mark.parametrize("start", _PLANNER_RUNS)
+class TestPlannerPatternsMakeNoSyntheticTurns:
+    """PlanExecute, REWOO and ParallelReact on the core loop: no ``converse``
+    turn, no user entry or state marker in history, no skipped reply call."""
+
+    def test_run_never_calls_converse(self, start: Any, converse_calls: list[str]):
+        result, _ = start()
+
+        assert result.success is True
+        assert converse_calls == []
+
+    def test_history_holds_only_the_final_reply(self, start: Any):
+        _, run = start()
+
+        assert run.history == [{"system": _FRANCE_ANSWER}]
+
+    def test_steps_send_no_skip_request_no_bulk_call_and_no_user_message(
+        self, start: Any
+    ):
+        _, run = start()
+
+        kinds = [kind for kind, _ in run.llm.requests]
+        first_field = kinds.index("extract_field")
+        stepped = run.llm.requests[first_field:]
+        # The only skip request is the greeting of the silent initial state
+        # (D-028), sent before any step; the steps make one real reply call.
+        replies = [r for kind, r in stepped if kind == "generate_response"]
+        assert [r.skip_generation for r in replies] == [False]
+        assert run.llm.calls("extract_bulk_data") == []
+        assert {request.user_message for _, request in stepped} == {""}
+        texts = [
+            text
+            for _, request in run.llm.requests
+            for text in (request.system_prompt, request.user_message)
+        ]
+        assert not [text for text in texts if "Continue" in text]
