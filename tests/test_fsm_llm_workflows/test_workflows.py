@@ -347,7 +347,7 @@ class TestWorkflowDSL:
 
 class TestStepDataInternalKeyFilter:
     """The step-result filter must use the canonical prefix predicate AND keep
-    the `_STEP_INTERNAL_WHITELIST` override layered on top of it.
+    the `STEP_INTERNAL_WHITELIST` override layered on top of it.
 
     Pins step 3 of plan-2026-07-20T040150-876e7164 (F-13). Asserts BOTH
     directions, because a fix that only tightened the predicate would break the

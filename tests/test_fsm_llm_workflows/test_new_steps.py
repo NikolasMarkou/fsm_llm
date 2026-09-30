@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from fsm_llm.workflows.engine import WorkflowEngine
 from fsm_llm.workflows.models import WorkflowStepResult
 from fsm_llm.workflows.steps import (
     AgentStep,
@@ -411,6 +412,165 @@ class TestStepsOverTheRealCore:
         assert result.data["user_name"] == "Alice"
         assert result.data["conversation_intake_ended"] is True
         assert "My name is Alice" in {req.user_message for _, req in llm.call_history}
+
+
+def _name_capture_fsm(*, ask_speaks: bool) -> dict:
+    """Two-state FSM whose terminal ``record`` state is silent (empty
+    ``response_instructions``); ``ask`` speaks only when ``ask_speaks``."""
+    ask: dict = {
+        "id": "ask",
+        "description": "Ask for the name",
+        "purpose": "Learn the user's name",
+        "response_instructions": "Ask for the user's name" if ask_speaks else "",
+        "required_context_keys": ["name"],
+        "transitions": [
+            {
+                "target_state": "record",
+                "description": "The name is known",
+                "conditions": [
+                    {
+                        "description": "name was given",
+                        "requires_context_keys": ["name"],
+                        "logic": {"!!": [{"var": "name"}]},
+                    }
+                ],
+            }
+        ],
+    }
+    return {
+        "name": "SilentEnd",
+        "description": "Ask for a name, then record it without a reply",
+        "initial_state": "ask",
+        "states": {
+            "ask": ask,
+            "record": {
+                "id": "record",
+                "description": "Record the name",
+                "purpose": "Store the name; nothing is said",
+                "response_instructions": "",
+            },
+        },
+    }
+
+
+class TestConversationStepLastSpokenReply:
+    """``last_response`` / ``final_answer`` hold the last SPOKEN reply: a turn
+    that ends on a silent state returns ``""`` and must not overwrite it."""
+
+    @pytest.fixture
+    def llm(self, monkeypatch):
+        from fsm_llm import API
+        from tests.conftest import MockLLM2Interface
+
+        llm = MockLLM2Interface(
+            extraction_data={"name": "Alice"}, response_text="What is your name?"
+        )
+        real_from_definition = API.from_definition
+        monkeypatch.setattr(
+            API,
+            "from_definition",
+            lambda definition, **kwargs: real_from_definition(
+                definition, llm_interface=llm
+            ),
+        )
+        return llm
+
+    def _step(self, *, ask_speaks: bool):
+        from fsm_llm.workflows.steps import ConversationStep
+
+        return ConversationStep(
+            step_id="intake",
+            name="Intake",
+            fsm_definition=_name_capture_fsm(ask_speaks=ask_speaks),
+            success_state="done",
+            auto_messages=["My name is Alice"],
+            context_mapping={"user_name": "name", "answer": "final_answer"},
+            require_completion=True,
+        )
+
+    async def test_silent_last_turn_keeps_the_last_spoken_reply(self, llm):
+        result = await self._step(ask_speaks=True).execute({})
+
+        assert (result.success, result.next_state) == (True, "done")
+        collected = result.data["conversation_intake_data"]
+        assert collected["name"] == "Alice"
+        assert collected["final_answer"] == "What is your name?"
+        assert collected["last_response"] == "What is your name?"
+        assert result.data["answer"] == "What is your name?"
+        # Only the opening reply was generated; the silent turn made no reply call.
+        assert [kind for kind, _ in llm.call_history].count("generate_response") == 1
+
+    async def test_conversation_that_never_spoke_adds_no_reply_keys(self, llm):
+        result = await self._step(ask_speaks=False).execute({})
+
+        assert (result.success, result.next_state) == (True, "done")
+        collected = result.data["conversation_intake_data"]
+        assert collected["name"] == "Alice"
+        assert "final_answer" not in collected
+        assert "last_response" not in collected
+        assert "answer" not in result.data
+
+
+class TestRemovedWorkflowLegacy:
+    """Absence pins: each name existed on the commit before its removal."""
+
+    def test_engine_rejects_handler_system(self):
+        with pytest.raises(TypeError, match="handler_system"):
+            WorkflowEngine(handler_system=object())
+        assert not hasattr(WorkflowEngine(), "handler_system")
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            "fsm_llm.workflows",
+            "fsm_llm.workflows.constants",
+            "fsm_llm.workflows.engine",
+        ],
+    )
+    def test_max_step_depth_is_gone(self, module):
+        import importlib
+
+        mod = importlib.import_module(module)
+        assert not hasattr(mod, "MAX_STEP_DEPTH")
+        assert "MAX_STEP_DEPTH" not in getattr(mod, "__all__", ())
+        assert mod.MAX_STEPS_PER_RUN == 1000
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "_KEY_WAITING_INFO",
+            "_KEY_TIMER_INFO",
+            "_KEY_WORKFLOW_INFO",
+            "_KEY_TIMEOUT",
+            "_KEY_TIMER_EXPIRED",
+            "_KEY_LAST_EVENT",
+            "_KEY_USER_INPUT",
+            "_KEY_CANCELLATION_REASON",
+            "_STEP_INTERNAL_WHITELIST",
+        ],
+    )
+    def test_engine_private_alias_is_gone(self, name):
+        from fsm_llm.workflows import constants, engine
+
+        assert not hasattr(engine, name)
+        assert hasattr(constants, name.lstrip("_"))
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "_execute_workflow_step",
+            "_handle_successful_step",
+            "_handle_failed_step",
+            "_transition_to_state",
+        ],
+    )
+    def test_engine_methods_take_no_depth(self, method):
+        import inspect
+
+        assert (
+            "_depth"
+            not in inspect.signature(getattr(WorkflowEngine, method)).parameters
+        )
 
 
 # ---------------------------------------------------------------

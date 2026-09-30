@@ -131,13 +131,8 @@ class TestDefaults:
         assert Defaults.TEMPERATURE == 0.7
         assert Defaults.MAX_TOKENS == 2000
         assert Defaults.MAX_RETRIES == 3
-        assert Defaults.MAX_CONTEXT_SIZE == 10000
         assert Defaults.MAX_TRACE_STEPS == 50
         assert Defaults.CONTEXT_PRUNE_THRESHOLD == 8000
-
-    def test_prune_threshold_below_max(self):
-        """Prune threshold should be below max context size."""
-        assert Defaults.CONTEXT_PRUNE_THRESHOLD < Defaults.MAX_CONTEXT_SIZE
 
 
 class TestErrorMessages:
@@ -146,12 +141,25 @@ class TestErrorMessages:
     def test_format_strings(self):
         assert "{type}" in ErrorMessages.INVALID_REASONING_TYPE
         assert "{name}" in ErrorMessages.FSM_NOT_FOUND
-        assert "{error}" in ErrorMessages.CALCULATION_ERROR
-        assert "{reason}" in ErrorMessages.VALIDATION_FAILED
 
     def test_plain_messages(self):
         assert ErrorMessages.MAX_RETRIES_EXCEEDED
-        assert ErrorMessages.CONTEXT_TOO_LARGE
+
+
+class TestRemovedLegacyConstants:
+    """Absence pins: each name existed (unread) on the commit before its removal."""
+
+    @pytest.mark.parametrize("name", ["MAX_CONTEXT_SIZE"])
+    def test_defaults_name_is_gone(self, name):
+        assert not hasattr(Defaults, name)
+        # The threshold the context pruner reads stays.
+        assert Defaults.CONTEXT_PRUNE_THRESHOLD == 8000
+
+    @pytest.mark.parametrize(
+        "name", ["CONTEXT_TOO_LARGE", "VALIDATION_FAILED", "CALCULATION_ERROR"]
+    )
+    def test_error_message_name_is_gone(self, name):
+        assert not hasattr(ErrorMessages, name)
 
 
 class TestLogMessages:

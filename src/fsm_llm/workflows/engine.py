@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fsm_llm.constants import has_internal_prefix
-from fsm_llm.handlers import HandlerSystem
 from fsm_llm.logging import logger
 
 # --------------------------------------------------------------
@@ -31,7 +30,6 @@ from .constants import (
     KEY_WAITING_INFO,
     KEY_WORKFLOW_INFO,
     MAX_BUFFERED_EVENTS_PER_INSTANCE,
-    MAX_STEP_DEPTH,
     MAX_STEPS_PER_RUN,
     STEP_INTERNAL_WHITELIST,
 )
@@ -54,18 +52,7 @@ from .models import (
 )
 from .steps import _STEP_EXECUTOR
 
-# Backwards-compatible module-level names (the constants live in constants.py).
-_KEY_WAITING_INFO = KEY_WAITING_INFO
-_KEY_TIMER_INFO = KEY_TIMER_INFO
-_KEY_WORKFLOW_INFO = KEY_WORKFLOW_INFO
-_KEY_TIMEOUT = KEY_TIMEOUT
-_KEY_TIMER_EXPIRED = KEY_TIMER_EXPIRED
-_KEY_LAST_EVENT = KEY_LAST_EVENT
-_KEY_USER_INPUT = KEY_USER_INPUT
-_KEY_CANCELLATION_REASON = KEY_CANCELLATION_REASON
-_STEP_INTERNAL_WHITELIST = STEP_INTERNAL_WHITELIST
-
-__all__ = ["MAX_STEP_DEPTH", "MAX_STEPS_PER_RUN", "Timer", "WorkflowEngine"]
+__all__ = ["MAX_STEPS_PER_RUN", "Timer", "WorkflowEngine"]
 
 #: Signature of a lifecycle hook: ``hook(event_name, instance, data)``.
 LifecycleHook = Callable[[str, WorkflowInstance, dict[str, Any]], Any]
@@ -112,9 +99,6 @@ class WorkflowEngine:
     fails. Everything is in memory.
 
     Args:
-        handler_system: Accepted for backwards compatibility and stored as
-            ``self.handler_system``; the engine does not call it. Use
-            ``add_hook`` to observe instances.
         max_concurrent_workflows: Maximum number of active (RUNNING/WAITING)
             instances.
         max_completed_instances: Maximum number of terminal instances kept in
@@ -128,7 +112,6 @@ class WorkflowEngine:
 
     def __init__(
         self,
-        handler_system: HandlerSystem | None = None,
         max_concurrent_workflows: int = 100,
         max_completed_instances: int | None = DEFAULT_MAX_COMPLETED_INSTANCES,
         max_steps_per_run: int = MAX_STEPS_PER_RUN,
@@ -137,7 +120,6 @@ class WorkflowEngine:
         """Initialize the workflow engine."""
         if max_steps_per_run < 1:
             raise ValueError("max_steps_per_run must be >= 1")
-        self.handler_system = handler_system or HandlerSystem()
 
         # Configuration
         self.max_concurrent_workflows = max_concurrent_workflows
@@ -474,9 +456,7 @@ class WorkflowEngine:
     # Step driver
     # ------------------------------------------------------------------
 
-    async def _execute_workflow_step(
-        self, instance: WorkflowInstance, _depth: int = 0
-    ) -> None:
+    async def _execute_workflow_step(self, instance: WorkflowInstance) -> None:
         """Run ``instance`` from its current step until it pauses, ends or fails.
 
         # DECISION plan-2026-09-27T120000-5d1e7a3b/D-002
@@ -488,10 +468,9 @@ class WorkflowEngine:
 
         Step exceptions FAIL the instance and are not raised, except
         ``WorkflowTimeoutError`` (workflow deadline), which is re-raised after
-        the instance is FAILED. ``_depth`` is accepted for backwards
-        compatibility and counts toward the step budget.
+        the instance is FAILED.
         """
-        steps_run = max(0, int(_depth))
+        steps_run = 0
         while True:
             if steps_run >= self.max_steps_per_run:
                 error = WorkflowStateError(
@@ -596,7 +575,7 @@ class WorkflowEngine:
             #   1. `has_internal_prefix` is the canonical predicate. Do NOT
             #      re-inline `k.startswith("_")` -- it is case-sensitive and
             #      blind to `system_`/`internal_`/`__`, which is the F-13 leak.
-            #   2. `_STEP_INTERNAL_WHITELIST` is a DELIBERATE override on top of
+            #   2. `STEP_INTERNAL_WHITELIST` is a DELIBERATE override on top of
             #      layer 1. Do NOT drop it while "simplifying" the predicate:
             #      _waiting_info and _timer_info must reach the context or
             #      _handle_step_without_transition can no longer detect
@@ -605,7 +584,7 @@ class WorkflowEngine:
                 filtered_data = {
                     k: v
                     for k, v in result.data.items()
-                    if not has_internal_prefix(k) or k in _STEP_INTERNAL_WHITELIST
+                    if not has_internal_prefix(k) or k in STEP_INTERNAL_WHITELIST
                 }
                 instance.context.update(filtered_data)
 
@@ -656,7 +635,7 @@ class WorkflowEngine:
         return workflow_def.steps[step_id]
 
     async def _handle_successful_step(
-        self, instance: WorkflowInstance, result: WorkflowStepResult, _depth: int = 0
+        self, instance: WorkflowInstance, result: WorkflowStepResult
     ) -> str | None:
         """Handle a successful step execution; return the next state or None."""
         if result.next_state:
@@ -692,7 +671,7 @@ class WorkflowEngine:
         )
 
     def _handle_failed_step(
-        self, instance: WorkflowInstance, result: WorkflowStepResult, _depth: int = 0
+        self, instance: WorkflowInstance, result: WorkflowStepResult
     ) -> str | None:
         """Handle a failed step result: follow its route or FAIL the instance."""
         logger.warning(f"Step failed: {instance.current_step_id} - {result.message}")
@@ -750,7 +729,7 @@ class WorkflowEngine:
         self._set_status(instance, WorkflowStatus.RUNNING)
 
     async def _transition_to_state(
-        self, instance: WorkflowInstance, next_state: str, _depth: int = 0
+        self, instance: WorkflowInstance, next_state: str
     ) -> None:
         """Transition to ``next_state`` and run from there.
 

@@ -246,9 +246,8 @@ class Defaults:
     TEMPERATURE = 0.7
     MAX_TOKENS = 2000
     MAX_RETRIES = 3
-    MAX_CONTEXT_SIZE = 10000  # characters
     MAX_TRACE_STEPS = 50
-    CONTEXT_PRUNE_THRESHOLD = 8000  # Start pruning at 80% of max
+    CONTEXT_PRUNE_THRESHOLD = 8000  # characters; prune the context above this
     MIN_SOLUTION_LENGTH = 20  # Minimum chars for a substantive solution
     PRUNE_LIST_MAX_LENGTH = 10  # Keep last N items when pruning lists
     PRUNE_STRING_MAX_LENGTH = 1000  # Truncate strings beyond this length
@@ -263,9 +262,6 @@ class ErrorMessages:
     MAX_RETRIES_EXCEEDED = "Maximum retry attempts exceeded"
     INVALID_REASONING_TYPE = "Invalid reasoning type: {type}"
     FSM_NOT_FOUND = "FSM definition not found: {name}"
-    CONTEXT_TOO_LARGE = "Context size exceeds maximum allowed"
-    CALCULATION_ERROR = "Calculation error: {error}"
-    VALIDATION_FAILED = "Solution validation failed: {reason}"
 
 
 class LogMessages:

@@ -45,9 +45,6 @@ STEP_INTERNAL_WHITELIST = frozenset({KEY_WAITING_INFO, KEY_TIMER_INFO})
 #: very long chains. Configurable per engine (``max_steps_per_run``).
 MAX_STEPS_PER_RUN = 1000
 
-#: Backwards-compatible alias of ``MAX_STEPS_PER_RUN``.
-MAX_STEP_DEPTH = MAX_STEPS_PER_RUN
-
 #: Default cap on terminal (completed/failed/cancelled) instances kept in
 #: memory; the oldest are purged first. ``None`` disables the cap.
 DEFAULT_MAX_COMPLETED_INSTANCES = 1000

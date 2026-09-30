@@ -607,6 +607,12 @@ class ConversationStep(WorkflowStep):
             f"ConversationStep [{self.step_id}] started conversation: "
             f"{str(response or '')[:100]}"
         )
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-039
+        # `last_response` / `final_answer` hold the last SPOKEN reply. Do NOT
+        # store the last turn's return value as is: a turn that ends on a
+        # silent state (no `response_instructions`) returns "", and that
+        # would overwrite the reply a workflow maps out of the conversation.
+        last_spoken = response or None
 
         try:
             # Drive the conversation with the messages
@@ -615,6 +621,8 @@ class ConversationStep(WorkflowStep):
                 if fsm.has_conversation_ended(conv_id) or turn >= self.max_turns:
                     break
                 response = fsm.converse(user_message=message, conversation_id=conv_id)
+                if response:
+                    last_spoken = response
                 logger.debug(
                     f"ConversationStep [{self.step_id}] turn {turn}: "
                     f"{str(response or '')[:100]}"
@@ -624,10 +632,11 @@ class ConversationStep(WorkflowStep):
             ended = bool(fsm.has_conversation_ended(conv_id))
             # Collect results
             collected_data = fsm.get_data(conv_id)
-            # Inject last response so context_mapping can always reference it
-            if response is not None:
-                collected_data.setdefault("last_response", response)
-                collected_data.setdefault("final_answer", response)
+            # Inject the last spoken reply so context_mapping can reference
+            # it; a conversation that never spoke adds neither key.
+            if last_spoken is not None:
+                collected_data.setdefault("last_response", last_spoken)
+                collected_data.setdefault("final_answer", last_spoken)
         finally:
             fsm.end_conversation(conv_id)
 
