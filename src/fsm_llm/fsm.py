@@ -13,7 +13,6 @@ import threading
 import time
 import traceback
 import uuid
-import warnings
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from datetime import datetime
@@ -1359,16 +1358,6 @@ class FSMManager:
         if stale_ids:
             logger.info(f"Cleaned up {len(stale_ids)} stale conversation locks")
         return stale_ids
-
-    def cleanup_stale_conversations(self) -> list[str]:
-        """Deprecated alias of :meth:`prune_orphaned_locks`; removed in 1.0."""
-        warnings.warn(
-            "FSMManager.cleanup_stale_conversations is deprecated; use "
-            "prune_orphaned_locks (removed in 1.0)",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.prune_orphaned_locks()
 
     @with_conversation_context
     def get_complete_conversation(

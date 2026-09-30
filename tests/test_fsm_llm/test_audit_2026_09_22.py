@@ -488,9 +488,9 @@ class TestStep3RestoreLockOrder:
             {"user": "hi"},
             {"system": "hello"},
         ]
-        from fsm_llm.pipeline import _PROVENANCE_KEY
+        from fsm_llm.constants import PROVENANCE_METADATA_KEY
 
-        assert inst.context.metadata[_PROVENANCE_KEY] == {"name": {"turn": 1}}
+        assert inst.context.metadata[PROVENANCE_METADATA_KEY] == {"name": {"turn": 1}}
         assert inst.context.working_memory.get("core", "k") == "v"
 
     def test_p0_3_api_has_no_manager_lock_reach_in(self):
@@ -854,12 +854,12 @@ class TestStep5NamedConstants:
 
         assert CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT == "_output_response_format"
 
-    def test_provenance_constant_and_pipeline_alias(self):
+    def test_provenance_constant_is_shared(self):
         from fsm_llm import fsm, pipeline
         from fsm_llm.constants import PROVENANCE_METADATA_KEY
 
         assert PROVENANCE_METADATA_KEY == "_pipeline_extracted"
-        assert pipeline._PROVENANCE_KEY is PROVENANCE_METADATA_KEY
+        assert pipeline.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
         assert fsm.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
 
 
@@ -1502,58 +1502,6 @@ class TestStep10ConfidenceRemoved:
         assert blocked.blocked_reason == "c0"
 
 
-class TestStep10ConfigDeprecation:
-    def test_defaults_are_silent(self):
-        import warnings
-
-        from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            TransitionEvaluatorConfig()
-            TransitionEvaluatorConfig(
-                ambiguity_threshold=0.1,
-                minimum_confidence=0.5,
-                evidence_conditions_normalizer=5.0,
-                strict_condition_matching=False,
-                detailed_logging=True,
-            )
-
-    @pytest.mark.parametrize(
-        ("field", "value"),
-        [
-            ("minimum_confidence", 0.9),
-            ("ambiguity_threshold", 0.5),
-            ("evidence_conditions_normalizer", 2.0),
-        ],
-    )
-    def test_non_default_deprecated_field_warns_at_caller(self, field, value):
-        from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
-
-        with pytest.warns(DeprecationWarning, match="no effect") as record:
-            TransitionEvaluatorConfig(**{field: value})
-        assert len(record) == 1
-        assert field in str(record[0].message)
-        assert "1.0" in str(record[0].message)
-        assert record[0].filename == __file__
-
-    def test_deprecated_fields_do_not_change_outcomes(self):
-        from fsm_llm.definitions import TransitionEvaluationResult as R
-        from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
-
-        with pytest.warns(DeprecationWarning):
-            config = TransitionEvaluatorConfig(
-                ambiguity_threshold=0.9,
-                minimum_confidence=0.99,
-                evidence_conditions_normalizer=1.0,
-            )
-        state = _step10_state([100, 101], [True, True])
-        ev = _step10_evaluate(state, config)
-        assert ev.result_type == R.DETERMINISTIC
-        assert ev.deterministic_transition == "t0"
-        assert ev == _step10_evaluate(state)
-
-
 # ---------------------------------------------------------------------------
 # Step 11, rewritten by plan 07ad3f8c step 16 (D-037): a silent state makes no
 # LLM interface call; the skip flag and the "." sentinel are gone
@@ -1720,13 +1668,6 @@ class TestStep12Renames:
         assert manager.prune_orphaned_locks() == ["orphan"]
         assert set(manager._conversation_locks) == {"active"}
 
-    def test_old_manager_name_warns_at_caller_and_still_prunes(self):
-        manager = _step12_manager()
-        with pytest.warns(DeprecationWarning, match="prune_orphaned_locks") as rec:
-            assert manager.cleanup_stale_conversations() == ["orphan"]
-        assert rec[0].filename == __file__
-        assert set(manager._conversation_locks) == {"active"}
-
     def test_api_cleanup_stale_conversations_is_not_deprecated(self):
         import warnings
 
@@ -1746,16 +1687,6 @@ class TestStep12Renames:
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
             assert result.is_below_default_threshold is expected
-
-    def test_old_result_property_warns_at_caller_and_matches(self):
-        for confidence in (0.1, 0.9):
-            result = _step12_result(confidence)
-            with pytest.warns(
-                DeprecationWarning, match="is_below_default_threshold"
-            ) as rec:
-                old = result.is_low_confidence
-            assert rec[0].filename == __file__
-            assert old is result.is_below_default_threshold
 
     def test_classifier_method_keeps_its_name_without_warning(self):
         import warnings

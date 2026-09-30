@@ -39,9 +39,9 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 from fsm_llm.api import API
 from fsm_llm.constants import (
-    CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     MAX_CLASSIFIER_CACHE_SIZE,
+    METADATA_KEY_TRANSITION_CLASSIFICATION,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
 )
 from fsm_llm.definitions import (
@@ -190,7 +190,6 @@ def _mock_classifier_result(intent: str, confidence: float = 0.9):
     result.confidence = confidence
     result.reasoning = f"Selected {intent}"
     result.entities = {}
-    result.is_low_confidence = confidence < DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE
     return result
 
 
@@ -527,8 +526,7 @@ class TestClassificationContextStorage:
             )
 
         assert result == "billing"
-        assert CONTEXT_KEY_CLASSIFICATION_RESULT in instance.context.data
-        stored = instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        stored = instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION]
         assert stored["intent"] == "billing"
         assert stored["confidence"] == 0.95
         assert stored["reasoning"] == "Selected billing"
@@ -547,9 +545,6 @@ class TestClassificationTransitionConstants:
 
     def test_fallback_intent_is_internal(self):
         assert TRANSITION_CLASSIFICATION_FALLBACK_INTENT.startswith("_")
-
-    def test_context_key_is_internal(self):
-        assert CONTEXT_KEY_CLASSIFICATION_RESULT.startswith("_")
 
 
 # ---------------------------------------------------------------------------
@@ -611,9 +606,8 @@ class TestAmbiguousTransitionExceptionDiscipline:
         assert mock_cls.return_value.classify.called
         assert isinstance(response, str)
         assert api.get_current_state(conv_id) == "start"
-        # get_data() strips internal keys; read the raw instance context.
         instance = api.fsm_manager.instances[conv_id]
-        stored = instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        stored = instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION]
         assert stored["fallback"] is True
         assert str(exc) in stored["error"]
 
@@ -639,7 +633,7 @@ class TestAmbiguousTransitionExceptionDiscipline:
         assert api.get_current_state(conv_id) == "start"
         instance = api.fsm_manager.instances[conv_id]
         # No fallback marker: the failure was not degraded to a stay.
-        assert CONTEXT_KEY_CLASSIFICATION_RESULT not in instance.context.data
+        assert METADATA_KEY_TRANSITION_CLASSIFICATION not in instance.context.metadata
 
     def test_construction_failure_degrades_to_stay(self):
         """A ``Classifier(...)`` CONSTRUCTION failure at the transition site is
@@ -657,7 +651,7 @@ class TestAmbiguousTransitionExceptionDiscipline:
         assert isinstance(response, str)
         assert api.get_current_state(conv_id) == "start"
         instance = api.fsm_manager.instances[conv_id]
-        stored = instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        stored = instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION]
         assert stored["fallback"] is True
         assert str(exc) in stored["error"]
 

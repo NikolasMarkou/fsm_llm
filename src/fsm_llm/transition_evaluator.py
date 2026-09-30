@@ -42,15 +42,12 @@ The evaluator produces three distinct outcomes:
    - Context lacks necessary data for any path
    - May trigger error handling or user clarification prompts
 
-No confidence score is computed. ``TransitionEvaluatorConfig.minimum_confidence``,
-``ambiguity_threshold`` and ``evidence_conditions_normalizer`` have no effect;
-setting one to a non-default value emits a ``DeprecationWarning`` (removal in 1.0).
+No confidence score is computed.
 """
 
 from __future__ import annotations
 
-import warnings
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any
 
 from .definitions import (
@@ -79,14 +76,13 @@ from .logging import logger
 class TransitionEvaluatorConfig:
     """Configuration for transition evaluation behavior."""
 
-    # DECISION plan-2026-09-21T203800-8a03483a/D-003: both thresholds are
-    # deprecated no-ops. Ranking is by ``priority`` alone (unique lowest wins,
-    # a tie at the lowest is AMBIGUOUS). Do NOT re-wire them into the outcome
-    # and do NOT delete them: existing ``TransitionEvaluatorConfig(...)``
-    # callers pass them. Supersedes the earlier D-003/D-004 note that kept
-    # ``minimum_confidence`` as the multi-candidate gate.
-    ambiguity_threshold: float = 0.1  # Deprecated: no effect on the outcome
-    minimum_confidence: float = 0.5  # Deprecated: no effect on the outcome
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-038: the no-op fields
+    # ``ambiguity_threshold``, ``minimum_confidence`` and
+    # ``evidence_conditions_normalizer`` are removed (passing one is a
+    # TypeError). Ranking is by ``priority`` alone. Do NOT add them back as
+    # accepted-and-ignored fields or behind a warning. Supersedes the "do NOT
+    # delete" notes of plan-2026-09-21T203800-8a03483a/D-003 and
+    # plan-2026-09-22T080837-8b258a25/D-013.
 
     # DECISION plan-2026-09-21T203800-8a03483a/D-018 (B13): diagnostics only.
     # A transition passes only if ALL its conditions pass, whatever this flag
@@ -96,33 +92,8 @@ class TransitionEvaluatorConfig:
     # conditions may fail) and do NOT delete the field: callers pass it.
     strict_condition_matching: bool = True
 
-    evidence_conditions_normalizer: float = 5.0  # Deprecated: no effect
-
     # Debugging
     detailed_logging: bool = False  # Enable detailed evaluation logging
-
-    def __post_init__(self) -> None:
-        # DECISION plan-2026-09-22T080837-8b258a25/D-013: warn, do NOT delete
-        # the three no-op fields before 1.0 (callers would get a TypeError),
-        # and do NOT warn when a value equals its declared default. stacklevel
-        # 3 points past the generated __init__ at the caller.
-        changed = [
-            f.name
-            for f in fields(self)
-            if f.name in _DEPRECATED_NOOP_FIELDS and getattr(self, f.name) != f.default
-        ]
-        if changed:
-            warnings.warn(
-                f"TransitionEvaluatorConfig {', '.join(changed)}: no effect "
-                "(transitions are ranked by priority alone); removed in 1.0",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-
-_DEPRECATED_NOOP_FIELDS = frozenset(
-    {"ambiguity_threshold", "minimum_confidence", "evidence_conditions_normalizer"}
-)
 
 
 # --------------------------------------------------------------
@@ -409,8 +380,8 @@ class TransitionEvaluator:
             return self._create_blocked_result(transition_scores, current_state)
 
         # DECISION plan-2026-09-21T203800-8a03483a/D-003: priority is decisive.
-        # Do NOT rank by confidence, compare confidence gaps against
-        # ``ambiguity_threshold``, or offer higher-priority-value transitions
+        # Do NOT rank by confidence, compare confidence gaps against a
+        # threshold, or offer higher-priority-value transitions
         # to the classifier: condition count and priority gaps once inverted
         # or blurred the documented "lower priority wins" rule (audit A2).
         lowest = min(score["transition"].priority for score in passing_transitions)

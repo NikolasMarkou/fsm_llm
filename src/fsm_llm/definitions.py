@@ -14,7 +14,6 @@ Key Changes:
 from __future__ import annotations
 
 import re
-import warnings
 from collections import deque
 from collections.abc import Iterator
 from enum import Enum
@@ -1664,18 +1663,6 @@ class ClassificationResult(BaseModel):
         """
         return self.confidence < self.DEFAULT_CONFIDENCE_THRESHOLD
 
-    @property
-    def is_low_confidence(self) -> bool:
-        """Deprecated alias of :attr:`is_below_default_threshold`; removed in 1.0."""
-        warnings.warn(
-            "ClassificationResult.is_low_confidence is deprecated; use "
-            "is_below_default_threshold, or Classifier.is_low_confidence(result) "
-            "for the schema-aware check (removed in 1.0)",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.is_below_default_threshold
-
 
 class MultiClassificationResult(BaseModel):
     """Result of a multi-intent classification (compound queries)."""
@@ -1839,12 +1826,6 @@ class TransitionEvaluationError(FSMError):
 
 class ClassificationError(FSMError):
     """Base exception for classification operations."""
-
-    pass
-
-
-class SchemaValidationError(ClassificationError):
-    """Raised when a classification schema is invalid."""
 
     pass
 

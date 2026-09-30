@@ -24,7 +24,6 @@ from .definitions import (
     ClassificationSchema,
     HierarchicalResult,
     HierarchicalSchema,
-    IntentDefinition,  # noqa: F401 — re-exported for external consumers
     IntentScore,
     MultiClassificationResult,
 )

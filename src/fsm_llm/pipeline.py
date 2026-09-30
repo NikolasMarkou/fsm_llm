@@ -26,7 +26,6 @@ from .classification import Classifier
 from .constants import (
     CLASSIFIER_HISTORY_EXCHANGES,
     CONTEXT_KEY_AGENT_TRACE,
-    CONTEXT_KEY_CLASSIFICATION_RESULT,
     CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     MAX_CLASSIFIER_CACHE_SIZE,
@@ -166,11 +165,6 @@ _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
 # of these names must never be spread into `Classifier(...)`.
 _CLASSIFIER_BOUND_NAMES = frozenset({"schema", "model", "config"})
 
-# `context.metadata` key holding {context key: _value_digest(value)} for every
-# value the pipeline itself extracted (never the values). D-015. Alias kept for
-# existing importers; the constant lives in `constants`.
-_PROVENANCE_KEY = PROVENANCE_METADATA_KEY
-
 # DECISION plan-2026-09-20T165703-0d9c218e/D-001
 # The ONE exception tuple both classifier call sites degrade on (D-004 of
 # plan-2026-07-19T191147-4b664252 chose it for
@@ -211,7 +205,7 @@ def _value_digest(value: Any) -> str:
 
 def _record_provenance(instance: FSMInstance, committed: dict[str, Any]) -> None:
     """Record that the pipeline itself extracted ``committed`` (digests only)."""
-    prov = instance.context.metadata.setdefault(_PROVENANCE_KEY, {})
+    prov = instance.context.metadata.setdefault(PROVENANCE_METADATA_KEY, {})
     for key, value in committed.items():
         prov[key] = _value_digest(value)
 
@@ -239,14 +233,15 @@ def _record_classification_result(
 def _record_transition_classification(
     instance: FSMInstance, record: dict[str, Any]
 ) -> None:
-    """Store the turn's transition-classification record in the back-compat
-    ``context.data`` key and its ``context.metadata`` mirror
-    (plan-2026-09-21T203800-8a03483a/D-005); the mirror is a separate copy so
-    neither aliases the other."""
-    instance.context.data[CONTEXT_KEY_CLASSIFICATION_RESULT] = record
-    instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION] = copy.deepcopy(
-        record
-    )
+    """Store the turn's transition-classification record under
+    ``metadata[METADATA_KEY_TRANSITION_CLASSIFICATION]``."""
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-038: metadata is the ONLY
+    # home of this record. Do NOT also write it to a ``context.data`` key
+    # (the removed ``_transition_classification_result`` copy): two stores of
+    # one record drift, and an internal-prefixed data key is dropped by
+    # ``clean_context_keys`` anyway. Supersedes the data-key half of
+    # plan-2026-09-21T203800-8a03483a/D-005.
+    instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION] = record
 
 
 def _drop_forbidden_entry(key: Any, value: Any, _full_key: str) -> str | None:
@@ -453,7 +448,7 @@ class MessagePipeline:
                     continue
                 if value is None:
                     instance.context.data.pop(key, None)
-                    prov = instance.context.metadata.get(_PROVENANCE_KEY)
+                    prov = instance.context.metadata.get(PROVENANCE_METADATA_KEY)
                     if prov is not None:
                         prov.pop(key, None)
                 else:
@@ -612,10 +607,8 @@ class MessagePipeline:
             # classification record belongs to the turn that produced it. Clear
             # it AFTER the snapshot so a rolled-back turn restores the prior
             # record; do NOT move this before the snapshot, and do NOT drop it
-            # from process_stream() (same clear there). The metadata mirror
-            # (A4, plan-2026-09-21T203800-8a03483a/D-005) is part of the same
-            # record and is cleared with it.
-            instance.context.data.pop(CONTEXT_KEY_CLASSIFICATION_RESULT, None)
+            # from process_stream() (same clear there). The record lives in
+            # metadata only (A4, plan-2026-09-21T203800-8a03483a/D-005).
             instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
 
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
@@ -830,7 +823,6 @@ class MessagePipeline:
 
             # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): streaming
             # mirror of the per-turn clear in process(); after the snapshot.
-            instance.context.data.pop(CONTEXT_KEY_CLASSIFICATION_RESULT, None)
             instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
 
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
@@ -1248,7 +1240,7 @@ class MessagePipeline:
             # and cost +1 call on every chatty turn). The re-run replaces the
             # missing-key ask below (it already covers those keys), so no
             # per-field call is duplicated.
-            prov_now = instance.context.metadata.get(_PROVENANCE_KEY, {})
+            prov_now = instance.context.metadata.get(PROVENANCE_METADATA_KEY, {})
             revisit = (
                 previous_state != instance.current_state
                 and bool(new_state.extraction_instructions)
@@ -1796,7 +1788,7 @@ class MessagePipeline:
             if bulk_data:
                 existing = instance.context.data
                 agent_managed = CONTEXT_KEY_AGENT_TRACE in existing
-                prov = instance.context.metadata.get(_PROVENANCE_KEY, {})
+                prov = instance.context.metadata.get(PROVENANCE_METADATA_KEY, {})
                 # DECISION plan-2026-09-19T175721-21cd7f8e/D-019: a
                 # classification-owned key absent because the classifier was
                 # below threshold must stay absent (ra02: bulk "buy" bypassed
@@ -2286,8 +2278,8 @@ class MessagePipeline:
         logged.
         """
         # DECISION plan-2026-09-19T175721-21cd7f8e/D-008: guarded getattr, NOT
-        # passing the interface to Classifier (it calls litellm.completion
-        # directly) and NOT unconditional attribute access (the pipeline is
+        # passing the interface to Classifier (it builds its own
+        # LiteLLMInterface) and NOT unconditional attribute access (the pipeline is
         # LLM-interface-agnostic; a bare interface must yield {}). Do NOT
         # inherit for a config `model` that differs from the interface's: that
         # would send the interface's api_key/api_base to a different provider.
@@ -2655,7 +2647,7 @@ class MessagePipeline:
         # through an exception: the soft-fail tuple above stays closed.
         low_confidence = result.confidence < schema.confidence_threshold
 
-        # Store the classification record: data key + metadata mirror
+        # Store the classification record in metadata
         # (plan-2026-09-21T203800-8a03483a/D-005).
         record: dict[str, Any] = {
             "intent": result.intent,
@@ -2826,7 +2818,7 @@ class MessagePipeline:
         # one pre-captured deepcopy pair). Before D-018, `merge_delta` never
         # touched `metadata`, so a data-only snapshot here was safe -- D-018
         # made `merge_delta` ALSO pop a deleted key's provenance digest out of
-        # `context.metadata[_PROVENANCE_KEY]` on a None-delta deletion. So a
+        # `context.metadata[PROVENANCE_METADATA_KEY]` on a None-delta deletion. So a
         # POST_TRANSITION handler chain where an earlier handler deletes a
         # provenanced key (clearing its digest) and a LATER handler at the
         # same timing raises left the plaintext key restored on rollback but

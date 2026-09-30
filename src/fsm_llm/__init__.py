@@ -72,7 +72,6 @@ from .definitions import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
     RunBudgetExceededError,
-    SchemaValidationError,
     # Core FSM models
     State,
     StateNotFoundError,
@@ -290,7 +289,6 @@ __all__ = [
     "LLMResponseError",
     "TransitionEvaluationError",
     "ClassificationError",
-    "SchemaValidationError",
     "ClassificationResponseError",
     "HandlerSystemError",
     "HandlerExecutionError",

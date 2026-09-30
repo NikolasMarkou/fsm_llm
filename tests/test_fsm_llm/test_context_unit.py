@@ -8,13 +8,9 @@ import re
 
 import pytest
 
-from fsm_llm.constants import (
-    _looks_like_credential_value,
-    _token_value_is_credential,
-    has_internal_prefix,
-    is_forbidden_context_entry,
-)
+from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.context import ContextCompactor, clean_context_keys
+from fsm_llm.security import _looks_like_credential_value, _token_value_is_credential
 from tests.test_fsm_llm.fixtures.context_key_corpus import (
     CARVE_OUT_CREDENTIAL_ENTRIES,
     CARVE_OUT_KNOWN_FAIL_OPEN,
@@ -1164,7 +1160,7 @@ def _shipped_vocabulary_union() -> set[str]:
     Returns: a set of lowercased vocabulary words, drawn from all SEVEN shipped
     lists. Never raises; never mutates `constants`.
     """
-    from fsm_llm import constants as c
+    from fsm_llm import security as c
 
     words: set[str] = set()
     for blob in (
@@ -1285,7 +1281,7 @@ class TestCryptoKeyAndTokenTriggers:
         future edit from inverting a polarity unnoticed -- the exact defect
         D-015 exists to correct.
         """
-        from fsm_llm import constants as c
+        from fsm_llm import security as c
 
         return {
             "key/crypto-denylist": (c._CRYPTO_KEY_QUALIFIERS, "deny"),
@@ -1313,7 +1309,7 @@ class TestCryptoKeyAndTokenTriggers:
         neutralising it has the OPPOSITE effect of neutralising a shipped
         pattern: it removes a referral, not a strip.
         """
-        from fsm_llm.constants import (
+        from fsm_llm.security import (
             _TOKEN_VALUE_SCAN_NAME_RE,
             FORBIDDEN_CONTEXT_PATTERNS,
         )
@@ -1343,7 +1339,7 @@ class TestCryptoKeyAndTokenTriggers:
         """
         import re
 
-        from fsm_llm.constants import _token_value_is_credential
+        from fsm_llm.security import _token_value_is_credential
 
         *strip_sources, referral_source = sources
         strip = [re.compile(p, re.IGNORECASE) for p in strip_sources]
@@ -1414,7 +1410,7 @@ class TestCryptoKeyAndTokenTriggers:
         three consecutive times on this exact seam."""
         import pathlib
 
-        from fsm_llm import constants as c
+        from fsm_llm import security as c
         from tests.test_fsm_llm.fixtures import context_key_corpus
 
         source = pathlib.Path(context_key_corpus.__file__).read_text()
@@ -2180,7 +2176,7 @@ class TestCryptoKeyAndTokenTriggers:
         gap makes the `key` pattern QUADRATIC on inputs like `"ssh_"*n` -- a
         denial of service on the prompt path, where this runs with the
         per-conversation lock held."""
-        from fsm_llm import constants as c
+        from fsm_llm import security as c
 
         assert "{0,192}?" in c._CRYPTO_GAP, (
             "the crypto gap lost its bound; an unbounded lazy gap is quadratic "
@@ -2468,7 +2464,7 @@ class TestValueShapeLayer:
         token -- so these survive only because their qualifier is allowlisted.
         The assertion pairs each cursor with a bearer credential carrying a
         value of the SAME shape, to show the name is doing all the work."""
-        from fsm_llm.constants import _looks_like_credential_value
+        from fsm_llm.security import _looks_like_credential_value
 
         cursor = "DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAB1ZaW5kZXgtMjAyNC0wNy0xOQ=="
         assert _looks_like_credential_value(cursor), (
@@ -2709,7 +2705,7 @@ class TestValueShapeLayer:
         credential is 13 characters and any floor reaching it puts holdout
         over-strip at 18-22%, past the 15% bound. The safe side below is what
         that would have destroyed."""
-        from fsm_llm.constants import _MIN_CREDENTIAL_VALUE_LENGTH
+        from fsm_llm.security import _MIN_CREDENTIAL_VALUE_LENGTH
 
         assert _MIN_CREDENTIAL_VALUE_LENGTH == 24, (
             "the length floor moved. Re-run the two-axis floor sweep before "
@@ -2773,7 +2769,7 @@ class TestValueShapeLayer:
         import inspect
         import re as _re
 
-        from fsm_llm import constants as c
+        from fsm_llm import security as c
 
         for function in (
             c._looks_like_credential_value,

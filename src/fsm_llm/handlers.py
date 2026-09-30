@@ -581,10 +581,6 @@ class HandlerSystem:
             raise outcome["error"]
         return outcome.get("result")
 
-    def close(self) -> None:
-        """Release handler-system resources. A safe no-op, kept for API
-        compatibility: timed handlers run in per-call daemon threads."""
-
 
 # --------------------------------------------------------------
 # Base Handler Implementation

@@ -520,18 +520,10 @@ class API:
     @classmethod
     def from_definition(
         cls,
-        fsm_definition: FSMDefinition | dict[str, Any] | None = None,
-        **kwargs,
+        fsm_definition: FSMDefinition | dict[str, Any],
+        **kwargs: Any,
     ) -> API:
-        """Create API instance from FSM definition object or dictionary.
-
-        Accepts ``fsm_definition`` positionally or as keyword.  The alias
-        ``definition`` is also accepted for convenience.
-        """
-        if fsm_definition is None:
-            fsm_definition = kwargs.pop("definition", None)
-        if fsm_definition is None:
-            raise TypeError("from_definition() requires an fsm_definition argument")
+        """Create API instance from FSM definition object or dictionary."""
         return cls(fsm_definition=fsm_definition, **kwargs)
 
     def start_conversation(
@@ -614,9 +606,8 @@ class API:
         rollback on failure, every handler timing, extraction, transition
         evaluation, Pass 2 from the post-transition state, session auto-save),
         resolved on the top of the FSM stack. Differences from ``converse``:
-        nothing is appended to the history for a user, prompts carry no user
-        message, and a silent state (empty ``response_instructions``) makes no
-        Pass-2 LLM call and appends nothing to the history.
+        nothing is appended to the history for a user and prompts carry no
+        user message.
 
         Args:
             conversation_id: Existing conversation ID.
@@ -1844,7 +1835,6 @@ class API:
 
     def close(self) -> None:
         """Clean up all active conversations and release resources."""
-        self.handler_system.close()
         for conversation_id in list(self.active_conversations.keys()):
             try:
                 self.end_conversation(conversation_id)

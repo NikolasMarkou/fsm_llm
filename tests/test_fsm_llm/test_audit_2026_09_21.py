@@ -19,7 +19,6 @@ from fsm_llm.api import API
 from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import (
     ALLOWED_JSONLOGIC_OPERATIONS,
-    CONTEXT_KEY_CLASSIFICATION_RESULT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
 )
 from fsm_llm.definitions import (
@@ -132,6 +131,15 @@ def _api(fsm_def: FSMDefinition) -> tuple[API, str, MagicMock]:
     return api, conv_id, llm
 
 
+_A4_RESULTS_KEY = "classification_results"
+_A4_TRANSITION_KEY = "transition_classification"
+
+
+def _raw_metadata(api: API, conv_id: str) -> dict[str, Any]:
+    """The live instance metadata (no copy)."""
+    return api.fsm_manager.instances[conv_id].context.metadata
+
+
 def _raw_data(api: API, conv_id: str) -> dict[str, Any]:
     """The unfiltered instance context (``get_data`` strips internal keys)."""
     return api.fsm_manager.instances[conv_id].context.data
@@ -145,7 +153,7 @@ def _raw_data(api: API, conv_id: str) -> dict[str, Any]:
 class TestStep01A1A8:
     """A1: a transition classification below ``schema.confidence_threshold``
     means "stay" (no transition, no transition handlers). A8: the
-    ``_transition_classification_result`` record of an earlier turn is cleared
+    ``metadata["transition_classification"]`` record of an earlier turn is cleared
     at turn start, inside the turn snapshot, on both the sync and stream paths.
     """
 
@@ -168,7 +176,7 @@ class TestStep01A1A8:
         assert isinstance(response, str)
         assert api.get_current_state(conv_id) == "start"
         assert pre_transition_calls == []
-        record = _raw_data(api, conv_id)[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        record = _raw_metadata(api, conv_id)[_A4_TRANSITION_KEY]
         assert record["intent"] == "a"
         assert record["confidence"] == pytest.approx(0.05)
         assert record["low_confidence"] is True
@@ -183,7 +191,7 @@ class TestStep01A1A8:
 
         # The comparison is strict: confidence == threshold is confident.
         assert api.get_current_state(conv_id) == "a"
-        record = _raw_data(api, conv_id)[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        record = _raw_metadata(api, conv_id)[_A4_TRANSITION_KEY]
         assert record.get("low_confidence") is not True
 
     def test_a1_default_threshold_applies_without_config(self):
@@ -194,7 +202,7 @@ class TestStep01A1A8:
             api.converse("maybe a?", conv_id)
 
         assert api.get_current_state(conv_id) == "start"
-        record = _raw_data(api, conv_id)[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        record = _raw_metadata(api, conv_id)[_A4_TRANSITION_KEY]
         assert record["low_confidence"] is True
 
     def test_a8_stale_result_absent_after_deterministic_turn(self):
@@ -203,7 +211,7 @@ class TestStep01A1A8:
             mock_cls.return_value.classify.return_value = _classification("a", 0.95)
             api.converse("a please", conv_id)
         assert api.get_current_state(conv_id) == "a"
-        assert CONTEXT_KEY_CLASSIFICATION_RESULT in _raw_data(api, conv_id)
+        assert _A4_TRANSITION_KEY in _raw_metadata(api, conv_id)
 
         # Turn 2 in "a" is BLOCKED: no classifier runs, so no record may remain.
         with patch("fsm_llm.pipeline.Classifier") as mock_cls:
@@ -211,21 +219,24 @@ class TestStep01A1A8:
             assert not mock_cls.return_value.classify.called
 
         assert api.get_current_state(conv_id) == "a"
-        assert CONTEXT_KEY_CLASSIFICATION_RESULT not in _raw_data(api, conv_id)
+        assert _A4_TRANSITION_KEY not in _raw_metadata(api, conv_id)
 
     def test_a8_rollback_restores_prior_result(self):
         api, conv_id, llm = _api(_ambiguous_then_blocked_fsm())
         with patch("fsm_llm.pipeline.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _classification("a", 0.95)
             api.converse("a please", conv_id)
-        prior = dict(_raw_data(api, conv_id)[CONTEXT_KEY_CLASSIFICATION_RESULT])
+        prior = dict(_raw_metadata(api, conv_id)[_A4_TRANSITION_KEY])
 
         seen_during_turn: list[bool] = []
         api.create_handler(
             "observe_record",
             HandlerTiming.POST_PROCESSING,
             lambda ctx: (
-                seen_during_turn.append(CONTEXT_KEY_CLASSIFICATION_RESULT in ctx) or {}
+                seen_during_turn.append(
+                    _A4_TRANSITION_KEY in _raw_metadata(api, conv_id)
+                )
+                or {}
             ),
         )
         llm.generate_response.side_effect = RuntimeError("pass 2 down")
@@ -235,7 +246,7 @@ class TestStep01A1A8:
 
         # Cleared during the turn, restored by the turn rollback.
         assert seen_during_turn == [False]
-        assert _raw_data(api, conv_id)[CONTEXT_KEY_CLASSIFICATION_RESULT] == prior
+        assert _raw_metadata(api, conv_id)[_A4_TRANSITION_KEY] == prior
 
     def test_a8_stream_path_clears_too(self):
         api, conv_id, _ = _api(_ambiguous_then_blocked_fsm())
@@ -243,13 +254,13 @@ class TestStep01A1A8:
             mock_cls.return_value.classify.return_value = _classification("a", 0.95)
             "".join(api.converse_stream("a please", conv_id))
         assert api.get_current_state(conv_id) == "a"
-        assert CONTEXT_KEY_CLASSIFICATION_RESULT in _raw_data(api, conv_id)
+        assert _A4_TRANSITION_KEY in _raw_metadata(api, conv_id)
 
         reply = "".join(api.converse_stream("still here", conv_id))
 
         assert reply == "ok"
         assert api.get_current_state(conv_id) == "a"
-        assert CONTEXT_KEY_CLASSIFICATION_RESULT not in _raw_data(api, conv_id)
+        assert _A4_TRANSITION_KEY not in _raw_metadata(api, conv_id)
 
 
 # ---------------------------------------------------------------------------
@@ -347,33 +358,24 @@ class TestStep02A2:
         assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
         assert [o.target_state for o in result.available_options] == ["a", "b"]
 
-    def test_a2_thresholds_are_noops(self):
-        transitions = [
+    def test_a2_priority_rule_has_no_threshold_config(self):
+        # The former no-op thresholds are gone (plan 07ad3f8c D-038).
+        with pytest.raises(TypeError):
+            TransitionEvaluatorConfig(ambiguity_threshold=0.9)
+        with pytest.raises(TypeError):
+            TransitionEvaluatorConfig(minimum_confidence=0.99)
+        close = [
             Transition(target_state="a", description="a", priority=100),
             Transition(target_state="b", description="b", priority=110),
         ]
-        # Non-default values warn (plan 8b258a25 D-013) and change nothing.
-        with pytest.warns(DeprecationWarning, match="no effect"):
-            configs = (
-                TransitionEvaluatorConfig(ambiguity_threshold=0.9),
-                TransitionEvaluatorConfig(minimum_confidence=0.99),
-                TransitionEvaluatorConfig(
-                    ambiguity_threshold=0.0, minimum_confidence=0.0
-                ),
-            )
-        for config in configs:
-            result = _a2_evaluate(transitions, config=config)
-            assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
-            assert result.deterministic_transition == "a"
+        result = _a2_evaluate(close, config=TransitionEvaluatorConfig())
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "a"
         tied = [
             Transition(target_state="a", description="a", priority=100),
             Transition(target_state="b", description="b", priority=100),
         ]
-        with pytest.warns(DeprecationWarning, match="no effect"):
-            config = TransitionEvaluatorConfig(
-                ambiguity_threshold=0.0, minimum_confidence=0.0
-            )
-        result = _a2_evaluate(tied, config=config)
+        result = _a2_evaluate(tied, config=TransitionEvaluatorConfig())
         assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
 
 
@@ -658,12 +660,9 @@ class TestStep03_1:
 # Step 4: A4 (full classification result persisted in context.metadata)
 # ---------------------------------------------------------------------------
 
+
 # The documented metadata keys are pinned as literals: they are the public
 # contract a monitor or debugger reads through get_complete_conversation.
-_A4_RESULTS_KEY = "classification_results"
-_A4_TRANSITION_KEY = "transition_classification"
-
-
 def _a4_metadata(api: API, conv_id: str) -> dict[str, Any]:
     return api.fsm_manager.get_complete_conversation(conv_id)["metadata"]
 
@@ -773,7 +772,7 @@ class TestStep04A4:
 
         assert api.get_current_state(conv_id) == "a"
         mirrored = _a4_metadata(api, conv_id)[_A4_TRANSITION_KEY]
-        assert mirrored == _raw_data(api, conv_id)[CONTEXT_KEY_CLASSIFICATION_RESULT]
+        assert "_transition_classification_result" not in _raw_data(api, conv_id)
         assert mirrored["intent"] == "a"
         assert mirrored["confidence"] == pytest.approx(0.95)
         json.dumps(mirrored)
@@ -3029,7 +3028,6 @@ class TestStep12C1C3:
         )
         assert wrote.wait(5.0)
         assert result == {"saw_leak": False}
-        system.close()
 
     def test_c2_timeout_thread_is_daemon(self):
         seen: list[tuple[bool, bool]] = []
@@ -3049,8 +3047,6 @@ class TestStep12C1C3:
         )
         assert result == {"ran": True}
         assert seen == [(True, True)]
-        system.close()
-        system.close()  # stays a safe no-op
 
     def test_c2_uncopyable_context_falls_back_to_shallow_copy(self):
         _C2CopyOnce.copies = 0
@@ -3116,7 +3112,7 @@ class TestStep12C1C3:
     def test_c3_reserved_set_is_internal_and_closed(self):
         from fsm_llm.constants import RESERVED_CONTEXT_KEYS, has_internal_prefix
 
-        assert CONTEXT_KEY_CLASSIFICATION_RESULT in RESERVED_CONTEXT_KEYS
+        assert "_transition_classification_result" not in RESERVED_CONTEXT_KEYS
         assert all(has_internal_prefix(key) for key in RESERVED_CONTEXT_KEYS)
         assert "_replan_count" not in RESERVED_CONTEXT_KEYS
         assert isinstance(RESERVED_CONTEXT_KEYS, frozenset)

@@ -4,35 +4,12 @@ Constants and configuration values for the FSM-LLM framework.
 
 from __future__ import annotations
 
-# The context-key security filters live in `security.py`; this block keeps
-# every existing `fsm_llm.constants` import of them working.
+# The context-key security filters live in `security.py`. Only its public names
+# are importable from here; private helpers are imported from `security`.
 from .security import (  # noqa: F401
-    _AUTH_SCHEME_WORDS,
-    _BEARER_TOKEN_QUALIFIERS,
-    _CREDENTIAL_NAME_RE,
-    _CREDENTIAL_VALUE_CHARSET_RE,
-    _CREDENTIAL_VALUE_PREFIXES,
-    _CRYPTO_GAP,
-    _CRYPTO_KEY_QUALIFIERS,
-    _IDENTIFIER_NOUN_VOCABULARY,
-    _KEY_MATERIAL_HEADS,
-    _MIN_CREDENTIAL_VALUE_LENGTH,
-    _PASSWORD_POLICY_SUFFIXES,
-    _PATH_VALUE_RE,
-    _SAFE_TOKEN_QUALIFIERS,
-    _SEP_RUN,
-    _TOKEN_MATERIAL_HEADS,
-    _TOKEN_VALUE_SCAN_NAME_RE,
-    _VALUE_SCAN_LIMIT,
     COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
     FORBIDDEN_CONTEXT_PATTERNS,
     INTERNAL_KEY_PREFIXES,
-    _colon_composite_tail,
-    _generic_shape_is_credential,
-    _looks_like_credential_value,
-    _normalise_credential_value,
-    _shannon_entropy,
-    _token_value_is_credential,
     has_internal_prefix,
     is_forbidden_context_entry,
 )
@@ -129,7 +106,6 @@ DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE = 0.6
 # every other key names a target state (validated in definitions.State).
 TRANSITION_CLASSIFICATION_THRESHOLD_KEY = "confidence_threshold"
 TRANSITION_CLASSIFICATION_FALLBACK_INTENT = "_stay_in_state"
-CONTEXT_KEY_CLASSIFICATION_RESULT = "_transition_classification_result"
 CONTEXT_KEY_AGENT_TRACE = "agent_trace"
 
 # Framework-seeded context keys a handler delta may neither set nor delete
@@ -148,13 +124,12 @@ RESERVED_CONTEXT_KEYS: frozenset[str] = frozenset(
         "_traceback",
         "_inherited_history",
         "_sub_conversation_summary",
-        CONTEXT_KEY_CLASSIFICATION_RESULT,
     }
 )
 
 # `context.metadata` keys for full classification records (A4, D-005): the
 # latest result per classification-extraction field, and the current turn's
-# transition-classification record (mirror of CONTEXT_KEY_CLASSIFICATION_RESULT).
+# transition-classification record.
 METADATA_KEY_CLASSIFICATION_RESULTS = "classification_results"
 METADATA_KEY_TRANSITION_CLASSIFICATION = "transition_classification"
 

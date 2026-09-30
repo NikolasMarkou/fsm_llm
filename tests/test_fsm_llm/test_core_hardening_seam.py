@@ -18,11 +18,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.api import API
+from fsm_llm.constants import PROVENANCE_METADATA_KEY
 from fsm_llm.context import ContextCompactor
 from fsm_llm.definitions import FieldExtractionConfig, FSMError, LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
-from fsm_llm.pipeline import _PROVENANCE_KEY
 from fsm_llm.prompts import (
     FieldExtractionPromptBuilder,
     FieldExtractionPromptConfig,
@@ -1221,7 +1221,7 @@ def _old_shape_snapshot_reads(fsm_manager, conversation_id: str) -> dict:
         instance = fsm_manager.instances.get(conversation_id)
         wm_obj = instance.context.working_memory if instance is not None else None
         provenance = (
-            dict(instance.context.metadata.get(_PROVENANCE_KEY) or {})
+            dict(instance.context.metadata.get(PROVENANCE_METADATA_KEY) or {})
             if instance is not None
             else {}
         )
@@ -1606,7 +1606,7 @@ class TestContextCompactorPruneClearsProvenance:
 
     ``ContextCompactor.prune`` (and ``.compact``) delete a plaintext context
     key via the same None-delta convention every handler uses, but the
-    matching provenance digest in ``context.metadata[_PROVENANCE_KEY]`` used
+    matching provenance digest in ``context.metadata[PROVENANCE_METADATA_KEY]`` used
     to survive -- a pruned low-entropy value's digest could outlive its
     plaintext in a persisted session file, trivially reversible via a small
     lookup table (the whole point of hashing it in the first place).
@@ -1640,7 +1640,7 @@ class TestContextCompactorPruneClearsProvenance:
             assert data.get("advance") == "yes"
 
             instance = api.fsm_manager.instances[conv_id]
-            prov = instance.context.metadata.get(_PROVENANCE_KEY) or {}
+            prov = instance.context.metadata.get(PROVENANCE_METADATA_KEY) or {}
             assert "email" not in prov, (
                 "provenance digest for a pruned key outlived its plaintext "
                 f"in live instance metadata: {prov!r}"
@@ -1694,7 +1694,9 @@ class TestContextCompactorPruneClearsProvenance:
             api.converse("please advance", conv_id)
             assert api.get_current_state(conv_id) == "middle"
             instance = api.fsm_manager.instances[conv_id]
-            assert "email" in (instance.context.metadata.get(_PROVENANCE_KEY) or {})
+            assert "email" in (
+                instance.context.metadata.get(PROVENANCE_METADATA_KEY) or {}
+            )
 
             # Turn 2 (still "middle", no field configs there to re-extract
             # "email"): compact() fires at PRE_PROCESSING and clears the
@@ -1703,7 +1705,7 @@ class TestContextCompactorPruneClearsProvenance:
             api.converse("anything", conv_id)
 
             assert "email" not in api.get_data(conv_id)
-            prov = instance.context.metadata.get(_PROVENANCE_KEY) or {}
+            prov = instance.context.metadata.get(PROVENANCE_METADATA_KEY) or {}
             assert "email" not in prov, (
                 f"compact()'s deletion left a stale provenance digest: {prov!r}"
             )
@@ -1715,7 +1717,7 @@ class TestPostTransitionRollbackRestoresMetadata:
     """D-024 (iter-3 completion-fix) / verifier's own live-repro finding.
 
     D-018 made ``merge_delta`` ALSO pop a deleted key's provenance digest out
-    of ``context.metadata[_PROVENANCE_KEY]`` on a None-delta deletion (the
+    of ``context.metadata[PROVENANCE_METADATA_KEY]`` on a None-delta deletion (the
     fix in ``TestContextCompactorPruneClearsProvenance`` above). But
     ``_execute_state_transition``'s POST_TRANSITION rollback
     (``pipeline.py``) snapshotted and restored ONLY ``context.data``, never
@@ -1773,7 +1775,7 @@ class TestPostTransitionRollbackRestoresMetadata:
 
             instance = api.fsm_manager.instances[conv_id]
             data = instance.context.data
-            prov = instance.context.metadata.get(_PROVENANCE_KEY) or {}
+            prov = instance.context.metadata.get(PROVENANCE_METADATA_KEY) or {}
 
             # 2. The deleter's None-delta deletion of "email" is fully undone
             #    by the rollback: plaintext AND digest are BOTH back. Before

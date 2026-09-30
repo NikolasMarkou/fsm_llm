@@ -70,22 +70,14 @@ class TestTransitionEvaluatorConfig:
 
     def test_default_config(self):
         config = TransitionEvaluatorConfig()
-        assert config.ambiguity_threshold == 0.1
-        assert config.minimum_confidence == 0.5
         assert config.strict_condition_matching is True
         assert config.detailed_logging is False
 
     def test_custom_config(self):
-        # The two thresholds are deprecated no-ops (warn when non-default).
-        with pytest.warns(DeprecationWarning, match="no effect"):
-            config = TransitionEvaluatorConfig(
-                ambiguity_threshold=0.2,
-                minimum_confidence=0.7,
-                strict_condition_matching=False,
-                detailed_logging=True,
-            )
-        assert config.ambiguity_threshold == 0.2
-        assert config.minimum_confidence == 0.7
+        config = TransitionEvaluatorConfig(
+            strict_condition_matching=False,
+            detailed_logging=True,
+        )
         assert config.strict_condition_matching is False
         assert config.detailed_logging is True
 
@@ -156,18 +148,12 @@ class TestAmbiguousTransitions:
         targets = {opt.target_state for opt in result.available_options}
         assert targets == {"a", "b"}
 
-    def test_close_priorities_are_deterministic_despite_threshold(self):
-        """A2 (D-003): close but different priorities never go AMBIGUOUS.
-
-        Was ``test_ambiguous_close_confidence`` (100 vs 110 with
-        ``ambiguity_threshold=0.5`` -> AMBIGUOUS); the threshold is now a no-op
-        and the unique lowest priority wins.
-        """
+    def test_close_priorities_are_deterministic(self):
+        """A2 (D-003): close but different priorities never go AMBIGUOUS; the
+        unique lowest priority wins."""
         t1 = _make_transition("a", priority=100)
         t2 = _make_transition("b", priority=110)
-        with pytest.warns(DeprecationWarning, match="ambiguity_threshold"):
-            config = TransitionEvaluatorConfig(ambiguity_threshold=0.5)
-        evaluator = TransitionEvaluator(config)
+        evaluator = TransitionEvaluator(TransitionEvaluatorConfig())
         state = _make_state("start", [t1, t2])
         result = evaluator.evaluate_transitions(state, _make_context())
 
@@ -401,15 +387,9 @@ class TestEdgeCases:
 
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
 
-    def test_minimum_confidence_threshold_is_noop(self):
-        """A2 (D-003): ``minimum_confidence`` no longer affects the outcome.
-
-        Was ``test_minimum_confidence_threshold`` (0.99 -> AMBIGUOUS for 100 vs
-        150); the unique lowest priority now wins regardless.
-        """
-        with pytest.warns(DeprecationWarning, match="minimum_confidence"):
-            config = TransitionEvaluatorConfig(minimum_confidence=0.99)
-        evaluator = TransitionEvaluator(config)
+    def test_wide_priority_gap_is_deterministic(self):
+        """A2 (D-003): the unique lowest priority wins, whatever the gap."""
+        evaluator = TransitionEvaluator(TransitionEvaluatorConfig())
         t1 = _make_transition("a", priority=100)
         t2 = _make_transition("b", priority=150)
         state = _make_state("start", [t1, t2])
