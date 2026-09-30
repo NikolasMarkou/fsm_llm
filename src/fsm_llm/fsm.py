@@ -29,6 +29,7 @@ from .constants import (
     has_internal_prefix,
 )
 from .definitions import (
+    AdvanceResult,
     ConversationBusyError,
     FSMContext,
     FSMDefinition,
@@ -111,6 +112,8 @@ def _strip_internal_mapping(source: dict[Any, Any]) -> dict[Any, Any]:
 
 # Return type of a read snapshot (see FSMManager._read_under_lock).
 _SnapshotT = TypeVar("_SnapshotT")
+# Return type of one sync turn: ``str`` for a message, ``AdvanceResult`` for a step.
+_TurnT = TypeVar("_TurnT")
 
 
 # --------------------------------------------------------------
@@ -489,13 +492,68 @@ class FSMManager:
         Pass 1: Data extraction + transition evaluation + transition execution
         Pass 2: Response generation based on final state
         """
+        return self._run_locked_turn(
+            conversation_id,
+            message,
+            log,
+            lambda instance: self._pipeline.process(instance, message, conversation_id),
+        )
+
+    @with_conversation_context
+    def advance(self, conversation_id: str, log: Any = None) -> AdvanceResult:
+        """Run one turn of the current state with no user message.
+
+        The same locked turn as ``process_message`` (turn guard, terminal
+        check, ERROR handlers, error mapping). No user exchange is appended to
+        the history, so a failed step pops none.
+
+        Args:
+            conversation_id: The conversation to advance.
+
+        Returns:
+            The ``AdvanceResult`` of the step.
+
+        Raises:
+            FSMError: unknown conversation, a turn already in flight for it
+                (re-entrant or concurrent), a terminal current state
+                ("Conversation has ended ..."), or a failed step.
+        """
+        return self._run_locked_turn(
+            conversation_id,
+            None,
+            log,
+            lambda instance: self._pipeline.advance(instance, conversation_id),
+        )
+
+    def _run_locked_turn(
+        self,
+        conversation_id: str,
+        message: str | None,
+        log: Any,
+        run: Callable[[FSMInstance], _TurnT],
+    ) -> _TurnT:
+        """Claim the conversation, run one sync turn, release it.
+
+        Contract: ``message`` is the user's text, or ``None`` for a turn with
+        no user message; ``run`` is the pipeline entry for that turn and its
+        return value is returned. Raises ``FSMError`` for an unknown
+        conversation, a turn already in flight, a terminal state, or a failed
+        turn (see ``_process_message_locked``). The turn guard and
+        ``conv_lock`` are always released.
+        """
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-024
+        # ONE locked sync turn for a message turn and a message-free step; the
+        # pipeline entry is the only thing the two callers pass in. Do NOT copy
+        # this block or `_process_message_locked` for the no-message case: the
+        # turn guard (21cd7f8e/D-018) and the error-clause order (21cd7f8e/D-009,
+        # a02151fe/D-014) would then have to hold in two places.
         with self._lock:
             if conversation_id not in self.instances:
                 raise FSMError(f"Conversation {conversation_id} not found")
             conv_lock = self._conversation_locks[conversation_id]
             self._enter_turn(conversation_id, conv_lock)
         try:
-            return self._process_message_locked(conversation_id, message, log)
+            return self._process_message_locked(conversation_id, message, log, run)
         finally:
             self._active_turns.discard(conversation_id)
             conv_lock.release()
@@ -590,11 +648,19 @@ class FSMManager:
         return _stream()
 
     def _process_message_locked(
-        self, conversation_id: str, message: str, log: Any
-    ) -> str:
-        """Process message while holding the per-conversation lock."""
+        self,
+        conversation_id: str,
+        message: str | None,
+        log: Any,
+        run: Callable[[FSMInstance], _TurnT],
+    ) -> _TurnT:
+        """Run one turn while holding the per-conversation lock.
+
+        ``message`` of ``None`` is a turn with no user message: no user
+        exchange is appended, so none is popped when the turn fails.
+        """
         instance = self.instances[conversation_id]
-        log.info(f"Processing message in state: {instance.current_state}")
+        log.info(f"Processing turn in state: {instance.current_state}")
 
         current_state = self.resolve_state_definition(instance, conversation_id)
         if not current_state.transitions:
@@ -602,10 +668,11 @@ class FSMManager:
                 f"Conversation has ended - current state '{instance.current_state}' is terminal"
             )
 
-        instance.context.conversation.add_user_message(message)
+        if message is not None:
+            instance.context.conversation.add_user_message(message)
 
         try:
-            return self._pipeline.process(instance, message, conversation_id)
+            return run(instance)
 
         except FSMError as e:
             self._rollback_user_message(instance, message, log)
@@ -632,10 +699,11 @@ class FSMManager:
             self._rollback_user_message(instance, message, log)
             raise
         except Exception as e:
-            log.error(f"Error processing message: {e!s}\n{traceback.format_exc()}")
+            what = "advance conversation" if message is None else "process message"
+            log.error(f"Failed to {what}: {e!s}\n{traceback.format_exc()}")
             self._rollback_user_message(instance, message, log)
             self._fire_error_handlers(instance, conversation_id, e, log)
-            raise FSMError(f"Failed to process message: {e!s}") from e
+            raise FSMError(f"Failed to {what}: {e!s}") from e
 
     def _fire_error_handlers(
         self,
@@ -696,13 +764,19 @@ class FSMManager:
             raise handler_err from exc
 
     @staticmethod
-    def _rollback_user_message(instance: FSMInstance, message: str, log: Any) -> None:
+    def _rollback_user_message(
+        instance: FSMInstance, message: str | None, log: Any
+    ) -> None:
         """Remove last user message from history to avoid duplicates on retry.
 
         Called immediately after ``add_user_message`` in error paths, so the
         last exchange is always the one just added.  We verify it is a user
-        message (not a system reply) before popping.
+        message (not a system reply) before popping. ``message`` of ``None``
+        (a turn that appended no user exchange) pops nothing: the last entry,
+        whatever it is, belongs to an earlier turn.
         """
+        if message is None:
+            return
         try:
             exchanges = instance.context.conversation.exchanges
             if exchanges and "user" in exchanges[-1]:

@@ -1501,6 +1501,38 @@ class TransitionEvaluation(BaseModel):
         return self
 
 
+class AdvanceResult(BaseModel):
+    """What one message-free step (``API.advance``) of a conversation did.
+
+    Fields:
+      - ``state_before`` / ``state_after``: the state id the step started in
+        and the one it ended in; equal when the step stayed.
+      - ``transition_outcome``: the transition evaluator's result for
+        ``state_before``. Always set: a step never runs on a terminal state
+        (``advance`` raises ``FSMError`` there), so an evaluation always ran.
+        ``AMBIGUOUS`` with ``state_before == state_after`` means the classifier
+        chose to stay; ``BLOCKED`` always stays.
+      - ``response``: the Pass-2 reply of ``state_after``, or ``None`` when that
+        state is silent (empty ``response_instructions``): no LLM call is made
+        and nothing is appended to the history for it.
+      - ``ended``: ``True`` when ``state_after`` is terminal.
+
+    Frozen: a result is a record of a finished step.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    state_before: str = Field(..., description="State the step started in")
+    state_after: str = Field(..., description="State the step ended in")
+    transition_outcome: TransitionEvaluationResult = Field(
+        ..., description="Transition evaluation result for state_before"
+    )
+    response: str | None = Field(
+        None, description="Pass-2 reply, or None for a silent state"
+    )
+    ended: bool = Field(..., description="True when state_after is terminal")
+
+
 # --------------------------------------------------------------
 # Classification Models
 # --------------------------------------------------------------

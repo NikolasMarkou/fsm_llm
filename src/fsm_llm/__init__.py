@@ -38,6 +38,8 @@ from .context import ContextCompactor
 # Core Definitions and Models
 # --------------------------------------------------------------
 from .definitions import (
+    # Message-free step result
+    AdvanceResult,
     # Classification models
     ClassificationError,
     ClassificationExtractionConfig,
@@ -193,6 +195,7 @@ __all__ = [
     "TransitionOption",
     "TransitionEvaluation",
     "TransitionEvaluationResult",
+    "AdvanceResult",
     # Field extraction
     "FieldExtractionConfig",
     "FieldExtractionRequest",

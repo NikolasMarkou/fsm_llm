@@ -42,6 +42,7 @@ from .constants import (
 )
 from .context import clean_context_keys
 from .definitions import (
+    AdvanceResult,
     BulkExtractionRequest,
     ClassificationError,
     ClassificationExtractionConfig,
@@ -296,7 +297,8 @@ class _TurnRecord:
     Contract: created by ``_run_turn`` with ``state_before`` set and filled as
     the turn runs; returned only when the turn succeeded. ``transition_outcome``
     is ``None`` when no evaluation ran (terminal state). ``response`` is the
-    Pass-2 text. A failed turn raises and returns no record.
+    Pass-2 text, or ``None`` when a turn without a user message ended on a
+    silent state. A failed turn raises and returns no record.
     """
 
     state_before: str
@@ -520,25 +522,53 @@ class MessagePipeline:
             raise FSMError("A turn with a user message produced no response")
         return turn.response
 
+    def advance(self, instance: FSMInstance, conversation_id: str) -> AdvanceResult:
+        """Run one turn of the current state with no user message.
+
+        The same turn body as ``process`` (snapshot and rollback, handler
+        timings, extraction, transition evaluation, Pass 2). Differences: the
+        prompts carry no user message, and a silent state (empty
+        ``response_instructions``) makes no Pass-2 LLM call and appends nothing
+        to the history.
+
+        Args:
+            instance: The FSM instance (already validated as non-terminal).
+            conversation_id: Conversation identifier.
+
+        Returns:
+            The ``AdvanceResult`` of the step.
+
+        Raises:
+            FSMError: the current state is terminal (no transition evaluation
+                can run), or anything the turn body raises, after its rollback.
+        """
+        turn = self._run_turn(instance, None, conversation_id)
+        if turn.transition_outcome is None:
+            raise FSMError(f"Cannot advance from terminal state '{turn.state_before}'")
+        return AdvanceResult(
+            state_before=turn.state_before,
+            state_after=turn.state_after,
+            transition_outcome=turn.transition_outcome,
+            response=turn.response,
+            ended=not self.get_state(instance, conversation_id).transitions,
+        )
+
     def _run_turn(
         self, instance: FSMInstance, user_message: str | None, conversation_id: str
     ) -> _TurnRecord:
         """Run one turn of the current state: the single sync turn body.
 
         Contract: ``user_message`` is the user's text, or ``None`` for a turn
-        with no user message. ``process`` is the entry for a message. Returns
-        the ``_TurnRecord`` of a successful turn; on failure the pre-turn
-        snapshot is restored as described below and the exception propagates.
-        The ``None`` case has no defined behaviour yet and raises ``FSMError``
-        before anything is touched.
+        with no user message. ``process`` is the entry for a message,
+        ``advance`` the entry for ``None``. Returns the ``_TurnRecord`` of a
+        successful turn; on failure the pre-turn snapshot is restored as
+        described below and the exception propagates.
         """
         # DECISION plan-2026-09-30T062855-07ad3f8c/D-007
         # One turn body for a message turn and a message-free step. Do NOT add
         # a second method that repeats this snapshot / PRE_PROCESSING / Pass 1 /
         # POST_PROCESSING / Pass 2 / restore sequence for the no-message case:
         # every anchor below would then have to hold in two places.
-        if user_message is None:
-            raise FSMError("A turn without a user message is not supported")
         # Contextualize propagates conversation_id to all downstream logger
         # calls on this thread (llm.py, transition_evaluator.py, etc.)
         with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
@@ -2803,13 +2833,17 @@ class MessagePipeline:
     def _execute_response_generation_pass(
         self,
         instance: FSMInstance,
-        user_message: str,
+        user_message: str | None,
         extraction_response: DataExtractionResponse,
         transition_occurred: bool,
         previous_state: str | None,
         conversation_id: str,
-    ) -> str:
-        """Execute Pass 2: Response Generation based on final state."""
+    ) -> str | None:
+        """Execute Pass 2: Response Generation based on final state.
+
+        Returns the reply text. ``None`` only for a turn without a user
+        message (``user_message is None``) that ended on a silent state.
+        """
         log = logger.bind(conversation_id=conversation_id)
         log.debug("Executing response generation pass")
 
@@ -2823,6 +2857,17 @@ class MessagePipeline:
             current_state.response_instructions is not None
             and not current_state.response_instructions
         ):
+            if user_message is None:
+                # DECISION plan-2026-09-30T062855-07ad3f8c/D-024
+                # A silent state on a message-free step has nothing to say:
+                # no request, no `[state]` marker in the history, response
+                # None. Do NOT route it through the skip request below (a
+                # provider-less call whose only product is a synthetic marker
+                # that every later prompt then renders as assistant text), and
+                # do NOT apply this branch to a message turn: `converse` keeps
+                # both skip signals and its marker (D-034, D-006).
+                log.debug("Silent state on a message-free step: no response")
+                return None
             # DECISION plan-2026-09-22T080837-8b258a25/D-034: send BOTH skip
             # signals, here and at the greeting. Do NOT drop `system_prompt="."`
             # before 1.0 (custom interfaces may test only the sentinel) and do
@@ -2849,7 +2894,7 @@ class MessagePipeline:
             extracted_data=extraction_response.extracted_data,
             transition_occurred=transition_occurred,
             previous_state=previous_state,
-            user_message=user_message,
+            user_message=user_message or "",
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-005: scope the
             # PROMPT, the only context channel (request.context is gone). Do NOT
             # revert to full instance.context.data: read_keys would then
@@ -2880,7 +2925,7 @@ class MessagePipeline:
 
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
-            user_message=user_message,
+            user_message=user_message or "",
             transition_occurred=transition_occurred,
             response_format=output_response_format,
         )

@@ -106,7 +106,12 @@ from .constants import (
     DEFAULT_TEMPERATURE,
     FSM_ID_HASH_LENGTH,
 )
-from .definitions import ConversationBusyError, FSMDefinition, FSMError
+from .definitions import (
+    AdvanceResult,
+    ConversationBusyError,
+    FSMDefinition,
+    FSMError,
+)
 
 # --------------------------------------------------------------
 # local imports
@@ -540,6 +545,36 @@ class API:
             # Auto-save session if store is configured
             _auto_save_session(self, conversation_id)
             return response
+
+    def advance(self, conversation_id: str) -> AdvanceResult:
+        """Run one step of the current state with no user message.
+
+        The same turn as ``converse`` (one turn at a time per conversation,
+        rollback on failure, every handler timing, extraction, transition
+        evaluation, Pass 2 from the post-transition state, session auto-save),
+        resolved on the top of the FSM stack. Differences from ``converse``:
+        nothing is appended to the history for a user, prompts carry no user
+        message, and a silent state (empty ``response_instructions``) makes no
+        Pass-2 LLM call and leaves no ``[state]`` marker in the history.
+
+        Args:
+            conversation_id: Existing conversation ID.
+
+        Returns:
+            ``AdvanceResult`` with the state before and after, the transition
+            outcome, the reply (``None`` for a silent state) and ``ended``.
+
+        Raises:
+            ValueError: unknown conversation ID.
+            FSMError: the conversation has ended (terminal state), a turn is
+                already running for it (a handler calling back, or another
+                thread), or the step failed; a failed step is rolled back.
+        """
+        with _turn_errors("advancing without a", "advance without a"):
+            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+            result: AdvanceResult = self.fsm_manager.advance(current_fsm_id)
+            _auto_save_session(self, conversation_id)
+            return result
 
     def converse_stream(self, user_message: str, conversation_id: str) -> Iterator[str]:
         """Process message, streaming the response tokens.
