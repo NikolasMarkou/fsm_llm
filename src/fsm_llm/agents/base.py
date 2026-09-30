@@ -513,7 +513,7 @@ class BaseAgent(ABC):
         # DECISION plan-2026-09-30T062855-07ad3f8c/D-030
         # The run loop, the step cap and the wall-clock budget are core's
         # (`API.run_until_terminal`). Do NOT bring back a `while` loop, a step
-        # counter or a `converse("Continue.")` turn here or in
+        # counter or a synthetic `converse` turn here or in
         # `_standard_run_stream`, and do NOT filter `[state]` markers in this
         # package (supersedes 06a5ec0a/D-030): a step has no user message and
         # a silent state returns no text. If a pattern needs a budget or loop

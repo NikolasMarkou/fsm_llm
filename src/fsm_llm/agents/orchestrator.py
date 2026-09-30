@@ -55,7 +55,6 @@ class OrchestratorAgent(BaseAgent):
             ContextKeys.SUBTASKS,
             ContextKeys.WORKER_RESULTS,
             ContextKeys.SKIPPED_SUBTASKS,
-            ContextKeys.DELEGATION_PLAN,
             ContextKeys.ALL_COLLECTED,
         }
     )

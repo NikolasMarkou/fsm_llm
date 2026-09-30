@@ -12,7 +12,7 @@ An agent is an LLM that works on a task over several steps, often calling tools 
 flowchart TD
     T[agent.run task] --> B[Build an FSM for this pattern]
     B --> A[Create an FSM-LLM API and register handlers]
-    A --> L{Loop: send 'Continue.'}
+    A --> L{Loop: advance one step}
     L --> TH[think: LLM picks a tool and its input]
     TH --> AC[act: handler runs the tool, stores the observation]
     AC --> L
@@ -20,7 +20,7 @@ flowchart TD
     C --> R[AgentResult: answer, success, trace, final_context]
 ```
 
-- The agent sends the FSM the message `Continue.` again and again until it reaches a final state.
+- The agent advances the FSM one step at a time, with no user message, until it reaches a final state (`API.run_until_terminal`).
 - Tools run inside handlers (hooks that FSM-LLM calls at fixed points), not inside the LLM. A tool failure is shown to the model as an observation marked `[TOOL FAILED]` instead of crashing the run.
 - Limits stop runaway loops: `max_iterations` (default 10) and `timeout_seconds` (default 300, raises `AgentTimeoutError`). In the ReAct family `max_iterations=N` counts think turns: for N >= 2 a run that never concludes gets N think turns and N - 1 tool calls (N = 1 behaves like N = 2); when it is reached the run is forced to conclude and no further tool runs. The model is still asked on the last think turn, and its own conclusion there, backed by a tool result, counts as success. The hard ceiling is three times `max_iterations` in FSM turns, which raises `BudgetExhaustedError`.
 - Each loop value the model produces (the tool and its input, a draft, a critique, a verdict, a plan) is asked for in its own prompt that shows the task and the results so far, and is cleared before the next round, so later rounds do not reuse the first round's text. Intermediate states write no reply; only the final state speaks.

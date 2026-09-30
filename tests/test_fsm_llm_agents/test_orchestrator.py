@@ -183,9 +183,6 @@ class TestOrchestratorConstants:
     def test_context_keys_worker_results(self):
         assert ContextKeys.WORKER_RESULTS == "worker_results"
 
-    def test_context_keys_delegation_plan(self):
-        assert ContextKeys.DELEGATION_PLAN == "delegation_plan"
-
     def test_context_keys_all_collected(self):
         assert ContextKeys.ALL_COLLECTED == "all_collected"
 

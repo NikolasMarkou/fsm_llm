@@ -19,7 +19,6 @@ from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry
 from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.definitions import AgentResult
 from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
-from fsm_llm.agents.prompts import build_conclude_response_instructions
 from tests.conftest import PromptGroundedLLM
 
 _TASK = "What is the capital of France?"
@@ -187,12 +186,9 @@ class TestNoSyntheticTurns:
             probe.agent.run(_TASK)
 
         assert probe.llm.calls("extract_field") and probe.llm.calls("generate_response")
-        # The conclude instructions still carry their own "ignore 'Continue.'"
-        # sentence until plan step 10 rewords them; nothing else may name it
-        # (no user message line, no history entry, no <original_input>).
-        own_wording = build_conclude_response_instructions()
-        texts = [text.replace(own_wording, "") for text in probe.prompts()]
-        assert not [text for text in texts if "Continue." in text]
+        # Nothing names the old synthetic turn: no user message line, no
+        # history entry, no <original_input>, no instruction text (step 10).
+        assert not [text for text in probe.prompts() if "Continue" in text]
         # A step sends no user message at all.
         turn_requests = [
             request

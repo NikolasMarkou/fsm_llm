@@ -25,10 +25,10 @@ sequenceDiagram
     A->>B: _standard_run(task, fsm_def, ctx, agent_type, ...)
     B->>API: _create_api(fsm_def) (model, temperature, max_tokens from AgentConfig)
     B->>API: _register_handlers + _register_lifecycle_handlers
-    loop until has_conversation_ended
-        B->>B: _check_budgets (timeout; iteration > max * 3)
-        B->>B: _on_loop_iteration (HITL driver in React/Reflexion/ReasoningReact)
-        B->>API: converse("Continue.")
+    B->>API: run_until_terminal(max_steps = max * 3, max_seconds = time left, before_step)
+    loop inside core until the conversation ends
+        API->>B: before_step: _on_loop_iteration (HITL driver in React/Reflexion/ReasoningReact)
+        API->>API: advance (one step, no user message)
     end
     B->>API: get_data; end_conversation (finally)
     B-->>U: AgentResult(answer, success, trace, final_context, structured_output, stop_reason)

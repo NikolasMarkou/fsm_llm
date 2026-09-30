@@ -21,8 +21,7 @@ if TYPE_CHECKING:
 # Generated loop values (debate rounds, drafts, chain step outputs,
 # reflections, plan step results) are
 # written, not found: the field prompt frames every value as an extraction,
-# and live qwen3.5:4b returned null ("not in the user message") for text no
-# message holds. Every generated text field opens with this sentence.
+# and live qwen3.5:4b returned null for text nothing in the prompt holds. Every generated text field opens with this sentence.
 _COMPOSE = (
     "This value does not exist yet: do not look for it in the messages or the "
     "context, compose it yourself now and never return null. "
@@ -202,15 +201,23 @@ def build_conclude_extraction_instructions(
 def build_conclude_response_instructions() -> str:
     """Build response instructions for the conclude state."""
     # DECISION plan_2026-05-30_5598b755/D-003 [STALE]
-    # Re-anchor the original task: the internal loop sends "Continue." as the
-    # user message each iteration, which small models otherwise mistake for a
-    # vague new prompt and answer with "I don't have the previous context"
-    # filler. The real task is available in the context as `task`.
+    # Re-anchor the original task: the reply is written with no user message,
+    # and small models otherwise answer the turn instead of the task. The real
+    # task is available in the context as `task`.
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-031
+    # Do NOT name the turn mechanics here (a prompt, a message to ignore, a
+    # request to go on): live, qwen3.5:4b answered that wording instead of
+    # the task on a forced stop. Say what the reply is (the run's last
+    # output, from the observations) and what to do when the evidence is
+    # thin. See decisions.md D-031.
     return (
-        "Present your final answer to the ORIGINAL task clearly and completely. "
-        "Reference the evidence from your tool observations to support your answer. "
-        "Ignore any literal 'Continue.' prompt — it is just a signal to proceed, "
-        "not a new question; always answer the original task."
+        "Write the final answer to the ORIGINAL task (the 'task' value in the "
+        "context) clearly and completely. Base it on the tool observations and "
+        "on facts given in the task, and cite the observations that support it. "
+        "This reply is the last output of the run: no further tool will run, "
+        "so do not describe work in progress or planned next steps. If the "
+        "observations do not hold enough evidence, say plainly what could not "
+        "be determined and give the best answer the evidence supports."
     )
 
 
@@ -568,25 +575,6 @@ def build_maker_checker_output_response_instructions() -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_orchestrate_extraction_instructions() -> str:
-    """Build extraction instructions for the orchestrate state."""
-    return "\n".join(
-        [
-            "Decompose the task into independent subtasks that can be delegated "
-            "to worker agents. Each subtask should be self-contained and produce "
-            "a clear result.",
-            "",
-            "If worker results from previous rounds are available in context, "
-            "review them and determine if additional subtasks are needed.",
-            "",
-            "Extract the following as JSON:",
-            '- "subtasks": a JSON list of subtask description strings '
-            "(each subtask should be specific and actionable)",
-            '- "delegation_plan": a brief description of your delegation strategy',
-        ]
-    )
-
-
 def build_orchestrate_response_instructions() -> str:
     """Build response instructions for the orchestrate state."""
     return (
@@ -600,23 +588,6 @@ def build_delegate_response_instructions() -> str:
     return (
         "Summarize which subtasks were delegated and report the status "
         "of each worker execution."
-    )
-
-
-def build_collect_extraction_instructions() -> str:
-    """Build extraction instructions for the collect state."""
-    return "\n".join(
-        [
-            "Review all worker results collected so far.",
-            "",
-            "Determine if all necessary information has been gathered "
-            "or if additional subtasks are needed.",
-            "",
-            "Extract the following as JSON:",
-            '- "all_collected": true if all results are sufficient to '
-            "produce a final answer, false if more work is needed",
-            '- "reasoning": explanation of your assessment',
-        ]
     )
 
 
@@ -914,11 +885,10 @@ def build_debate_field_instructions(
     Returns ``{field_name: instructions}`` for ``proposition`` (propose),
     ``critique`` (critique), ``counter_argument`` (counter), ``judge_verdict``
     and ``consensus_reached`` (judge). Each names the context values its
-    prompt shows, so a round is argued against this round's text, not the
-    "Continue." loop message. The ``consensus_reached`` wording is permissive
+    prompt shows, so a round is argued against this round's text. The ``consensus_reached`` wording is permissive
     (plan 06a5ec0a D-035): the judge handler still caps the rounds. The four
     text fields open with :data:`_COMPOSE`: live, qwen3.5:4b answered them
-    null ("not in the user message") when asked only to extract.
+    null when asked only to extract.
     """
     return {
         ContextKeys.PROPOSITION: (

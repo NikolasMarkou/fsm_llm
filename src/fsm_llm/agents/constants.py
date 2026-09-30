@@ -238,7 +238,6 @@ class ContextKeys:
     # Subtasks over max_workers that never ran; kept out of worker_results
     # (D-049 of plan 06a5ec0a).
     SKIPPED_SUBTASKS = "skipped_subtasks"
-    DELEGATION_PLAN = "delegation_plan"
     ALL_COLLECTED = "all_collected"
 
     # Debate

@@ -170,19 +170,23 @@ class TestREWOOFSM:
             fsm["states"]["execute_plans"]["transitions"][0]["target_state"] == "solve"
         )
 
-    def test_plan_all_has_extraction_instructions(self):
+    def test_plan_all_has_no_state_level_bulk_instructions(self):
+        # plan 07ad3f8c step 10: the typed plan_blueprint field is the only
+        # extraction of plan_all (one LLM call less per run).
         registry = _make_registry()
         fsm = build_rewoo_fsm(registry)
         state = fsm["states"]["plan_all"]
-        assert "extraction_instructions" in state
-        assert len(state["extraction_instructions"]) > 0
+        assert state["extraction_instructions"] == ""
+        assert [f["field_name"] for f in state["field_extractions"]] == [
+            "plan_blueprint"
+        ]
 
     def test_plan_all_has_tool_info(self):
         registry = _make_registry()
         fsm = build_rewoo_fsm(registry)
-        plan_state = fsm["states"]["plan_all"]
-        assert "search" in plan_state["extraction_instructions"]
-        assert "calculate" in plan_state["extraction_instructions"]
+        (plan_field,) = fsm["states"]["plan_all"]["field_extractions"]
+        assert "search" in plan_field["extraction_instructions"]
+        assert "calculate" in plan_field["extraction_instructions"]
 
     def test_solve_has_extraction_instructions(self):
         registry = _make_registry()

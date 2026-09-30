@@ -2110,6 +2110,38 @@ _NARROWED_FIELDS: dict[str, list[str]] = {
 }
 
 
+class TestCoveredStatesMakeNoBulkCall:
+    """plan 07ad3f8c step 10 (D-031): REWOO ``plan_all`` and the orchestrator's
+    ``orchestrate`` / ``collect`` extract through their typed fields only."""
+
+    @pytest.mark.parametrize("pattern", ["rewoo", "orchestrator"])
+    def test_run_makes_no_bulk_extraction_call(self, pattern):
+        llm, _ = _no_trace_run_requests(pattern)
+
+        assert _field_requests(llm, _NARROWED_FIELDS[pattern][0])
+        assert llm.calls("extract_bulk_data") == []
+
+    def test_orchestrator_states_carry_no_bulk_instructions(self):
+        from fsm_llm.agents.fsm_definitions import build_orchestrator_fsm
+
+        states = build_orchestrator_fsm("t")["states"]
+
+        for name, field in (("orchestrate", "subtasks"), ("collect", "all_collected")):
+            assert states[name]["extraction_instructions"] == ""
+            assert [f["field_name"] for f in states[name]["field_extractions"]] == [
+                field
+            ]
+
+    def test_typed_field_prompt_names_no_user_message(self):
+        text = _typed_field_extraction("draft", "str", "Write it.")[
+            "extraction_instructions"
+        ]
+
+        assert text.endswith("'Already extracted:' context. Write it.")
+        for word in ("user message", "signal", "loop"):
+            assert word not in text
+
+
 class TestNarrowedPlannerFields:
     """Fix 21.1 (review loops #7): the fields core used to auto-mint with the
     whole context (``agent_trace`` included) are explicit typed configs whose
@@ -2871,24 +2903,25 @@ class TestSuccessReflectsWhoConcluded:
         ],
     )
     def test_model_cannot_plant_framework_keys_through_bulk_extraction(self, planted):
-        # REWOO's plan_all state runs a bulk call; before D-051 its reply
+        # ADaPT's attempt state runs a bulk call; before D-051 such a reply
         # could write the forced flag or reason and flip a real run to failed.
-        from fsm_llm.agents import REWOOAgent
+        # (REWOO's plan_all, the first subject of this test, has no bulk call
+        # since plan 07ad3f8c step 10.)
+        from fsm_llm.agents import ADaPTAgent, AgentConfig
 
-        calls: list[str] = []
         llm = _PlantingLLM(
             planted,
             facts={
-                "plan_blueprint": ([_lookup_step(1, "capital")], "capital of France"),
-                "final_answer": ("Paris", "capital of France"),
+                "attempt_result": ("A direct answer to the plan", "Plan the trip"),
+                "attempt_succeeded": (True, "A direct answer"),
             },
         )
-        result = REWOOAgent(tools=_rewoo_registry(calls), llm_interface=llm).run(
-            _REWOO_TASK
-        )
+        result = ADaPTAgent(
+            config=AgentConfig(max_iterations=10), max_depth=1, llm_interface=llm
+        ).run("Plan the trip")
 
         assert llm.calls("extract_bulk_data"), "no bulk channel was exercised"
-        assert calls == ["capital"]
         assert result.final_context[ContextKeys.MAX_ITERATIONS_REACHED] is False
         assert ContextKeys.FORCED_STOP_REASON not in result.final_context
-        assert (result.success, result.stop_reason) == (True, "evidence")
+        assert result.success is True
+        assert result.stop_reason not in ("max_iterations", "stalled")

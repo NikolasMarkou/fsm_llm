@@ -67,10 +67,8 @@ def build_orchestrator_fsm(
     like :func:`_typed_field_extraction` for a disallowed context key.
     """
     from .prompts import (
-        build_collect_extraction_instructions,
         build_collect_response_instructions,
         build_delegate_response_instructions,
-        build_orchestrate_extraction_instructions,
         build_orchestrate_response_instructions,
         build_orchestrator_field_instructions,
         build_orchestrator_synthesize_extraction_instructions,
@@ -87,6 +85,12 @@ def build_orchestrator_fsm(
     # configs replace core's auto-minted ones (whole context, agent_trace
     # included). `subtasks` stays `any`: the delegator also takes a lone
     # string as one subtask. Do NOT add `skipped_subtasks` here (D-049).
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-031: `orchestrate` and
+    # `collect` make no state-level bulk call. Their typed fields cover every
+    # key the run reads (`subtasks`, `all_collected`); the bulk call only
+    # added `delegation_plan` and `reasoning`, which nothing read. Do NOT add
+    # bulk instructions back as a second chance for a null field: a null
+    # takes the priority-900 edge to `synthesize`.
     judged = (ContextKeys.WORKER_RESULTS, *context_keys)
 
     states: dict[str, Any] = {
@@ -95,7 +99,7 @@ def build_orchestrator_fsm(
             "description": "Decompose the task into subtasks for delegation",
             "purpose": "Analyze the task and create a delegation plan",
             "required_context_keys": [ContextKeys.SUBTASKS],
-            "extraction_instructions": build_orchestrate_extraction_instructions(),
+            "extraction_instructions": "",
             "field_extractions": [
                 _typed_field_extraction(
                     ContextKeys.SUBTASKS,
@@ -142,7 +146,7 @@ def build_orchestrator_fsm(
             "id": "collect",
             "description": "Review worker results and decide if more work is needed",
             "purpose": "Assess completeness of gathered results",
-            "extraction_instructions": build_collect_extraction_instructions(),
+            "extraction_instructions": "",
             "field_extractions": [
                 _typed_field_extraction(
                     ContextKeys.ALL_COLLECTED,
@@ -607,16 +611,15 @@ def _typed_field_extraction(
     rejects mismatches). The prompt context is
     narrowed to ``task``, ``observations`` and ``extra_context_keys`` (in that
     order, duplicates dropped), and the instructions tell the model to read the
-    value from the task and those keys, not from the "Continue." loop message
-    (LOOP-11). ``required`` maps to the core flag (a null required field costs
+    value from the task and those keys (LOOP-11). ``required`` maps to the core flag (a null required field costs
     one retry call). Raises ``ValueError`` for another ``field_type``, or for
     an extra key that is ``agent_trace`` or internal-prefixed (core reads a
     listed key from raw context, with no internal-key filter), and for a
     ``field_name`` in :data:`_EXTRACTION_ENVELOPE_KEYS`.
 
     Pair it with an empty state-level ``extraction_instructions`` (D-009 of
-    plan 06a5ec0a): core then runs only these context-aware per-field calls and
-    skips the context-free bulk call.
+    plan 06a5ec0a): core then runs only these per-field calls, each on its own
+    narrowed context, and makes no bulk call for the state.
 
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-017
     Do NOT drop ``context_keys`` here (``None`` dumps all visible context,
@@ -638,8 +641,7 @@ def _typed_field_extraction(
         "extraction_instructions": (
             f"Extract the '{field_name}' field ({field_type}) from the task and "
             f"the {', '.join(repr(k) for k in context_keys)} values in the "
-            "'Already extracted:' context. The user message is only a loop "
-            f"signal and holds no data. {instructions}"
+            f"'Already extracted:' context. {instructions}"
         ),
         "context_keys": context_keys,
         "required": required,
@@ -1324,8 +1326,8 @@ def build_react_fsm(
             ContextKeys.SHOULD_TERMINATE,
         ],
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-009: no state-level bulk
-        # call (its prompt is instructions plus "Continue.", no context). Do NOT
-        # empty it under use_classification: tool_name is classification-owned
+        # call (one more LLM call per turn for keys the typed fields already
+        # fill from their own narrowed context). Do NOT empty it under use_classification: tool_name is classification-owned
         # there and relies on the bulk fill when the classifier declines
         # (21cd7f8e D-019).
         "extraction_instructions": think_instructions if use_classification else "",
@@ -1789,7 +1791,6 @@ def build_rewoo_fsm(
     :func:`_typed_field_extraction`.
     """
     from .prompts import (
-        build_rewoo_plan_extraction_instructions,
         build_rewoo_plan_field_instructions,
         build_rewoo_solve_extraction_instructions,
         build_rewoo_solve_response_instructions,
@@ -1807,9 +1808,9 @@ def build_rewoo_fsm(
             "description": "Create a complete plan of all tool calls needed",
             "purpose": "Generate a full plan with tool calls and variable references",
             "required_context_keys": [ContextKeys.PLAN_BLUEPRINT],
-            "extraction_instructions": build_rewoo_plan_extraction_instructions(
-                registry, task_description=task_description
-            ),
+            # No state-level bulk call (D-031 of plan 07ad3f8c, anchored in
+            # build_orchestrator_fsm): `plan_blueprint` is the one key read.
+            "extraction_instructions": "",
             "field_extractions": [
                 _typed_field_extraction(
                     ContextKeys.PLAN_BLUEPRINT,
