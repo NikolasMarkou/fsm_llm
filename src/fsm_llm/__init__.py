@@ -71,6 +71,7 @@ from .definitions import (
     MultiClassificationResult,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
+    RunBudgetExceededError,
     SchemaValidationError,
     # Core FSM models
     State,
@@ -268,6 +269,7 @@ __all__ = [
     "FSMError",
     "FSMDefinitionNotFoundError",
     "ConversationBusyError",
+    "RunBudgetExceededError",
     "StateNotFoundError",
     "InvalidTransitionError",
     "LLMResponseError",

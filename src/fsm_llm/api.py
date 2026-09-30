@@ -91,7 +91,7 @@ import json
 import os
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
@@ -111,6 +111,7 @@ from .definitions import (
     ConversationBusyError,
     FSMDefinition,
     FSMError,
+    RunBudgetExceededError,
 )
 
 # --------------------------------------------------------------
@@ -232,6 +233,62 @@ def _auto_save_session(api: API, conversation_id: str) -> None:
         api.save_session(conversation_id)
     except Exception as e:
         logger.warning(f"Auto-save session failed: {e!s}")
+
+
+def _check_run_budgets(max_steps: int, max_seconds: float | None) -> None:
+    """Validate the budgets of a bounded run; raise ``ValueError`` if invalid.
+
+    Contract: ``max_steps`` must be an ``int`` (not a ``bool``) of at least 1;
+    ``max_seconds`` must be ``None`` or a number above 0 (NaN is refused).
+    """
+    if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
+        raise ValueError(f"max_steps must be an integer >= 1, got {max_steps!r}")
+    if max_seconds is not None and not max_seconds > 0:
+        raise ValueError(f"max_seconds must be > 0 or None, got {max_seconds!r}")
+
+
+# DECISION plan-2026-09-30T062855-07ad3f8c/D-027
+# The ONE bounded-run sequence, shared by ``API.run_until_terminal`` and
+# ``API.run_until_terminal_stream``: "has it ended", both budgets, the hook,
+# then the caller runs exactly one step (``advance`` / ``advance_stream``) per
+# yielded number. Do NOT write this sequence a second time in either method or
+# in a subpackage (agents, reasoning and the harness pass their limits and
+# their hook in). Do NOT move a budget check after the step: a spent budget
+# must never start a step. Do NOT decide "ended" from ``AdvanceResult.ended``:
+# the stream step has no result (D-025), and a handler may push or pop an FSM
+# during a step, so the top of the stack is asked again every round. Do NOT
+# hold a lock or an open turn across the ``yield``: every step takes and
+# releases the conversation itself. See decisions.md D-027.
+def _run_rounds(
+    api: API,
+    conversation_id: str,
+    max_steps: int,
+    max_seconds: float | None,
+    before_step: Callable[[int], None] | None,
+) -> Iterator[int]:
+    """Yield 1, 2, ... once for each step a bounded run is allowed to take.
+
+    Contract: the caller runs exactly one step of ``conversation_id`` per
+    yielded number and then asks for the next. Each round, in order: stop
+    (normal return) when the top of the FSM stack has ended; raise
+    ``RunBudgetExceededError`` when ``max_seconds`` have passed since the first
+    round began, or when ``max_steps`` steps were already taken (the seconds
+    budget is reported when both are spent); call ``before_step(n)``; yield
+    ``n``. Whatever ``before_step`` raises propagates unchanged and no step
+    runs. Budgets must already be valid (``_check_run_budgets``). A step that
+    raises in the caller ends the run: the generator is simply not resumed.
+    """
+    started = time.monotonic()
+    steps_done = 0
+    while not api.has_conversation_ended(conversation_id):
+        if max_seconds is not None and time.monotonic() - started >= max_seconds:
+            raise RunBudgetExceededError("seconds", max_seconds, steps_done)
+        if steps_done >= max_steps:
+            raise RunBudgetExceededError("steps", max_steps, steps_done)
+        if before_step is not None:
+            before_step(steps_done + 1)
+        yield steps_done + 1
+        steps_done += 1
 
 
 class API:
@@ -661,6 +718,103 @@ class API:
                     yield from self.fsm_manager.advance_stream(current_fsm_id)
                 finally:
                     _auto_save_session(self, conversation_id)
+
+        return _stream()
+
+    def run_until_terminal(
+        self,
+        conversation_id: str,
+        *,
+        max_steps: int,
+        max_seconds: float | None = None,
+        before_step: Callable[[int], None] | None = None,
+    ) -> tuple[AdvanceResult, ...]:
+        """Run message-free steps (``advance``) until the conversation ends.
+
+        Each round asks the top of the FSM stack whether it has ended (so an
+        FSM pushed or popped during the run is followed), checks both budgets,
+        calls ``before_step`` and then runs one ``advance``. Budgets are
+        checked only between steps: a step that has started is never cut short.
+
+        Args:
+            conversation_id: Existing conversation ID.
+            max_steps: Most steps the run may take (at least 1).
+            max_seconds: Wall-clock budget for the whole run, measured from
+                this call; ``None`` for no time budget.
+            before_step: Called once before each step with its number
+                (1, 2, ...), after the budget checks. It may write context
+                (``update_context``); that step sees it. What it raises
+                propagates unchanged and the step does not run.
+
+        Returns:
+            The ``AdvanceResult`` of every step, in order; ``()`` when the
+            conversation had already ended.
+
+        Raises:
+            ValueError: ``max_steps < 1``, ``max_seconds <= 0``, or an unknown
+                conversation ID.
+            RunBudgetExceededError: a budget was spent before the conversation
+                ended. The steps already run are kept.
+            FSMError: a step failed (that step is rolled back, earlier steps
+                are kept), or a turn is already running for the conversation.
+        """
+        _check_run_budgets(max_steps, max_seconds)
+        rounds = _run_rounds(self, conversation_id, max_steps, max_seconds, before_step)
+        return tuple(self.advance(conversation_id) for _ in rounds)
+
+    def run_until_terminal_stream(
+        self,
+        conversation_id: str,
+        *,
+        max_steps: int,
+        max_seconds: float | None = None,
+        before_step: Callable[[int], None] | None = None,
+    ) -> Iterator[str]:
+        """Run message-free steps until the conversation ends, streaming the
+        replies.
+
+        The stream form of ``run_until_terminal``: the same rounds, budgets
+        and ``before_step`` hook, with each step run by ``advance_stream``.
+        Only reply text is yielded, so silent states contribute nothing.
+        Arguments and the conversation ID are checked at CALL time; nothing
+        else runs before the first ``next()``, and the wall-clock budget is
+        measured from it. No lock is held between steps. Closing the stream
+        early releases the conversation and keeps the steps already run and
+        the partial reply (as ``advance_stream`` does).
+
+        Args:
+            conversation_id: Existing conversation ID.
+            max_steps: Most steps the run may take (at least 1).
+            max_seconds: Wall-clock budget for the whole run; ``None`` for no
+                time budget.
+            before_step: Called once before each step with its number
+                (1, 2, ...), after the budget checks.
+
+        Yields:
+            String chunks of each speaking state's reply as they arrive.
+
+        Raises:
+            ValueError: at call time, for ``max_steps < 1``,
+                ``max_seconds <= 0`` or an unknown conversation ID.
+            RunBudgetExceededError: while iterating, when a budget was spent
+                before the conversation ended.
+            FSMError: while iterating, when a step failed (after its
+                rollback) or a turn is already running for the conversation.
+        """
+        _check_run_budgets(max_steps, max_seconds)
+        # Existence check at call time, holding no lock afterwards. An ended
+        # conversation (terminal, or already closed and remembered) is valid
+        # and streams nothing; an unknown ID raises ``ValueError`` here.
+        if not self.has_conversation_ended(conversation_id):
+            self._get_current_fsm_conversation_id(conversation_id)
+
+        # Lazy nested closure, as in ``converse_stream`` (anchor
+        # plan-2026-07-21T082818-4c63deac/D-002 there).
+        def _stream() -> Iterator[str]:
+            for _ in _run_rounds(
+                self, conversation_id, max_steps, max_seconds, before_step
+            ):
+                yield from self.advance_stream(conversation_id)
 
         return _stream()
 

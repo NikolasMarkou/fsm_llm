@@ -1496,10 +1496,12 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             instance: Current FSM instance (for conversation history).
             field_config: Configuration for the field to extract.
             user_message: The user input to extract from, or ``None`` when
-                the turn has no user message. With ``None`` the prompt names
-                the context and the recent conversation as the source and
-                carries no "User message:" line; a string, the empty one
-                included, gives the message prompt.
+                the turn has no user message. With ``None`` the prompt asks
+                for the value the field's instructions describe, worked out
+                from the context and the recent conversation and composed by
+                the model when the instructions ask for something written,
+                decided or chosen; it carries no "User message:" line. A
+                string, the empty one included, gives the message prompt.
             dynamic_context: Subset of context keys relevant to this field.
 
         Returns:
@@ -1516,13 +1518,26 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         # so we focus on WHAT to extract rather than HOW to format.
         from datetime import date as _date
 
-        source = (
-            "the context and recent conversation below"
-            if user_message is None
-            else "the user's message"
-        )
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-026
+        # With no user message the prompt must NOT say "Extract ... from the
+        # context" with "null if the information is completely absent": a
+        # small model then answers null for every field whose value has to be
+        # written (a summary, a plan, a decision), because that text is not
+        # literally in the context (measured live, 2 of 10 runs). The
+        # no-message wording says the value comes from following the field's
+        # instructions and is composed when they ask for that. Do NOT fold
+        # the two wordings into one: the message path is pinned byte for
+        # byte. See decisions.md D-026.
+        no_message = user_message is None
         sections: list[str] = [
-            f"Extract the field '{field_name}' ({field_type}) from {source}.",
+            (
+                f"Determine the value of the field '{field_name}' ({field_type}). "
+                "There is no user message: follow the instructions below, "
+                "using the context and recent conversation given."
+                if no_message
+                else f"Extract the field '{field_name}' ({field_type}) "
+                "from the user's message."
+            ),
             f"Today's date: {_date.today().isoformat()}",
             "",
             f"Instructions: {instructions}",
@@ -1646,22 +1661,31 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             )
 
         # Response format — concise since JSON schema is enforced
+        examples = (
+            "(e.g., 'next Saturday' for a date, 'around 7pm' for a time, "
+            "'a few' for a number). "
+        )
+        value_hint = field_type if no_message else f"extracted {field_type}"
         sections.extend(
             [
                 "",
                 "Respond with JSON:",
-                f'{{"field_name": "{field_name}", "value": <extracted {field_type} or null>, "confidence": <0.0-1.0>, "reasoning": "..."}}',
+                f'{{"field_name": "{field_name}", "value": <{value_hint} or null>, "confidence": <0.0-1.0>, "reasoning": "..."}}',
                 "",
-                "IMPORTANT: Extract the value even if partial or relative "
-                "(e.g., 'next Saturday' for a date, 'around 7pm' for a time, "
-                "'a few' for a number). "
-                + (
-                    ""
-                    if user_message is None
-                    else "If the value is not in the current "
+                (
+                    "IMPORTANT: If the instructions ask you to write, decide "
+                    "or choose something, compose the value yourself from "
+                    "what is given above. A partial or relative value is fine "
+                    + examples
+                    + "Only set null if the instructions cannot be followed "
+                    "from what is given."
+                    if no_message
+                    else "IMPORTANT: Extract the value even if partial or relative "
+                    + examples
+                    + "If the value is not in the current "
                     "message, check the recent conversation above. "
-                )
-                + "Only set null if the information is completely absent.",
+                    "Only set null if the information is completely absent."
+                ),
             ]
         )
 

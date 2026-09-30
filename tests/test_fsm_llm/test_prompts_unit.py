@@ -987,16 +987,47 @@ class TestFieldExtractionPromptWithoutUserMessage:
     def test_no_current_message_tail(self):
         prompt = _plan_field_prompt(None)
         assert "not in the current message" not in prompt
-        assert "Only set null if the information is completely absent." in prompt
+        assert prompt.endswith(
+            "Only set null if the instructions cannot be followed from what is given."
+        )
 
     def test_names_context_and_conversation_as_the_source(self):
         prompt = _plan_field_prompt(None)
         first_line = prompt.splitlines()[0]
         assert first_line == (
-            "Extract the field 'plan_steps' (any) from the context and "
-            "recent conversation below."
+            "Determine the value of the field 'plan_steps' (any). There is no "
+            "user message: follow the instructions below, using the context "
+            "and recent conversation given."
         )
         assert "compute the sum of 2 and 3" in prompt
+
+    def test_tells_the_model_to_compose_a_value_the_instructions_ask_for(self):
+        # Plan 07ad3f8c D-026: "Extract ... null if absent" made a small model
+        # answer null for a field it has to write (a summary, a plan).
+        prompt = _plan_field_prompt(None)
+        assert (
+            "If the instructions ask you to write, decide or choose something, "
+            "compose the value yourself from what is given above."
+        ) in prompt
+
+    def test_absence_is_not_the_null_rule(self):
+        prompt = _plan_field_prompt(None)
+        assert "completely absent" not in prompt
+        assert "Extract the field" not in prompt
+        assert '"value": <any or null>' in prompt
+        assert "<extracted " not in prompt
+
+    def test_keeps_the_partial_value_examples(self):
+        prompt = _plan_field_prompt(None)
+        assert (
+            "A partial or relative value is fine (e.g., 'next Saturday' for a "
+            "date, 'around 7pm' for a time, 'a few' for a number). "
+        ) in prompt
+
+    def test_names_no_agent_concept(self):
+        prompt = _plan_field_prompt(None).lower()
+        for word in ("continue", "agent", "tool", "loop"):
+            assert word not in prompt
 
     def test_history_is_still_rendered(self):
         prompt = _plan_field_prompt(
@@ -1024,6 +1055,8 @@ class TestFieldExtractionPromptWithoutUserMessage:
             "if the information is completely absent."
         )
         assert "\nUser message: three steps please\n" in prompt
+        assert '"value": <extracted any or null>' in prompt
+        assert "compose the value yourself" not in prompt
 
 
 class TestExtractionSourceSections:

@@ -1757,6 +1757,38 @@ class ConversationBusyError(FSMError):
         self.conversation_id = conversation_id
 
 
+class RunBudgetExceededError(FSMError):
+    """A bounded run (``API.run_until_terminal`` or its stream form) spent a
+    budget before the conversation ended.
+
+    Raised before the step that would exceed the budget, so every step already
+    run is kept (nothing is rolled back) and the conversation stays usable.
+    A state that stays BLOCKED on every step ends here too.
+
+    Attributes:
+        budget: ``"steps"`` (``max_steps``) or ``"seconds"`` (``max_seconds``).
+        limit: the value of the budget that was spent.
+        steps_done: steps the run completed before it stopped.
+    """
+
+    def __init__(
+        self, budget: Literal["steps", "seconds"], limit: float, steps_done: int
+    ):
+        super().__init__(
+            f"Run stopped before the conversation ended: {budget} budget of "
+            f"{limit} spent after {steps_done} step(s)",
+            details={"budget": budget, "limit": limit, "steps_done": steps_done},
+        )
+        self.budget = budget
+        self.limit = limit
+        self.steps_done = steps_done
+
+    def __reduce__(self):
+        # Pickling replays ``cls(*self.args)``; ``args`` holds the formatted
+        # message, not the three arguments. Rebuild from the real ones.
+        return (self.__class__, (self.budget, self.limit, self.steps_done))
+
+
 class FSMDefinitionNotFoundError(FSMError, ValueError):
     """No FSM definition is resolvable for a non-path id.
 
