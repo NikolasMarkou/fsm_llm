@@ -32,7 +32,6 @@ clean: ## Remove build artifacts and caches
 	rm -rf src/logs*
 	rm -rf src/fsm_llm*egg-info
 	rm -rf src/fsm_llm/__pycache__
-	rm -rf src/fsm_llm_agents src/fsm_llm_reasoning src/fsm_llm_workflows src/fsm_llm_monitor src/fsm_llm_harness
 	rm -rf htmlcov/ .coverage
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true

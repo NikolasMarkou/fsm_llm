@@ -28,9 +28,9 @@ __all__ = ["atomic_write_text"]
 def atomic_write_text(target: Path, content: str, *, artifact: str) -> Path:
     """Write *content* to *target* atomically, or raise and change nothing.
 
-    Interface contract (call sites: :func:`storage._atomic_write_text`,
-    re-exported for ``PlanDirectory.write_text``/``append_text``, and
-    :class:`tools.PlanMemory`'s own ``write_text``/``append_text``):
+    Interface contract (call sites: ``storage.PlanDirectory``'s
+    ``write_text``/``append_text`` and :class:`tools.PlanMemory`'s own
+    ``write_text``/``append_text``):
         - ``target`` must already be an AUTHORISED absolute path -- this
           function performs no confinement or ownership check of its own.
         - On success the file's content is exactly ``content``. On failure the

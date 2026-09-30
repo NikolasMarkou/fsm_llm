@@ -704,7 +704,7 @@ class TestStatus:
         writes: list[str] = []
         monkeypatch.setattr(
             storage,
-            "_atomic_write_text",
+            "atomic_write_text",
             lambda target, content, *, artifact: writes.append(artifact),
         )
         before = {
@@ -911,7 +911,7 @@ class TestClose:
         writes: list[str] = []
         monkeypatch.setattr(
             storage,
-            "_atomic_write_text",
+            "atomic_write_text",
             lambda target, content, *, artifact: writes.append(artifact),
         )
         _seed_cross_plan(plans_root, lessons_lines=Defaults.LESSONS_LINE_CAP + 50)

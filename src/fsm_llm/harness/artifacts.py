@@ -60,6 +60,7 @@ __all__ = [
     "ARTIFACT_MODELS",
     "DECISION_ENTRY_SCHEMAS",
     "MANDATORY_ADDITIONAL_CHECKS",
+    "PLAN_ID_RE",
     "PRESENTATION_CONTRACTS",
     "REJECTED_EVIDENCE",
     "VERDICT_BULLETS",
@@ -1286,7 +1287,16 @@ class SummaryDoc(SectionedArtifact):
 # Cross-plan tier
 # ---------------------------------------------------------------------------
 
-_PLAN_ID_RE = re.compile(r"^plan[-_]\d{4}-\d{2}-\d{2}(?:T\d{6})?[-_][0-9a-f]{8}$")
+# DECISION plan-2026-09-30T062855-07ad3f8c/D-042
+# One plan-id shape, defined here only. Do NOT accept the retired
+# `plan_YYYY-MM-DD_hex8` directory name or the date-only commit-tag form again,
+# and do NOT add a second full-id pattern in `storage` (it imports nothing from
+# here for minting; its ids are pinned against this pattern by tests): a reader
+# that tolerates more than the writer emits is a legacy path. See decisions.md
+# D-042.
+#: What ``storage.mint_plan_id`` emits and the only section name the
+#: cross-plan readers count as a plan.
+PLAN_ID_RE = re.compile(r"^plan-\d{4}-\d{2}-\d{2}T\d{6}-[0-9a-f]{8}$")
 _IMPORTANCE_RE = re.compile(r"\[I:([1-5])\]")
 
 
@@ -1310,7 +1320,7 @@ class ConsolidatedDoc(SectionedArtifact):
         return [
             section.name
             for section in self.sections
-            if _PLAN_ID_RE.match(section.name) is not None
+            if PLAN_ID_RE.match(section.name) is not None
         ]
 
     def marker_issues(self) -> list[str]:

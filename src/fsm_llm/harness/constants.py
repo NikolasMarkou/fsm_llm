@@ -494,8 +494,9 @@ class Defaults:
     MODEL = DEFAULT_LLM_MODEL
     TEMPERATURE = 0.3
     MAX_TOKENS = 2000
-    #: Hard bound on driver turns; passed as ``BaseAgent(max_iterations=...)``.
-    #: Sized for 6 protocol states x the 6-iteration cap plus slack.
+    #: Passed as ``AgentConfig(max_iterations=...)``.  The run is refused at
+    #: ``MAX_TURNS`` x the agents ``FSM_BUDGET_MULTIPLIER`` (3) = 180 core
+    #: steps.  Sized for 6 protocol states x the 6-iteration cap plus slack.
     MAX_TURNS = 60
     #: Whole-run budget for the driver.
     TIMEOUT_SECONDS = 1800.0
@@ -655,8 +656,6 @@ class Defaults:
     # --- Line caps and compression thresholds ------------------------------
     LESSONS_LINE_CAP = 200
     SYSTEM_LINE_CAP = 300
-    DECISIONS_COMPRESS_LINES = 300
-    CHANGELOG_COMPRESS_LINES = 200
     CONSOLIDATED_COMPRESS_LINES = 500
     #: Number of most-recent plans kept in the cross-plan sliding window.
     SLIDING_WINDOW_PLANS = 4
@@ -664,8 +663,6 @@ class Defaults:
     COMPRESSED_SUMMARY_MARKER = "<!-- COMPRESSED-SUMMARY -->"
 
     # --- LESSONS.md importance tags (`[I:N]`) -------------------------------
-    LESSONS_IMPORTANCE_MIN = 1
-    LESSONS_IMPORTANCE_MAX = 5
     #: Lines at this importance are never evicted, even over the line cap.
     LESSONS_PROTECTED_IMPORTANCE = 5
 

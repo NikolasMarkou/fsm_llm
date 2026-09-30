@@ -33,7 +33,9 @@ from pathlib import Path
 
 import pytest
 
+from fsm_llm.harness._atomic import atomic_write_text
 from fsm_llm.harness.artifacts import (
+    PLAN_ID_RE,
     ConsolidatedDoc,
     LessonsDoc,
     Section,
@@ -52,11 +54,9 @@ from fsm_llm.harness.storage import (
     COMPRESSED_SUMMARY_CLOSE,
     COMPRESSED_SUMMARY_OPEN,
     COMPRESSED_SUMMARY_SECTION,
-    PLAN_ID_RE,
     CapReport,
     PlanDirectory,
     RunState,
-    _atomic_write_text,
     apply_sliding_window,
     check_system_cap,
     evict_lessons,
@@ -290,22 +290,22 @@ class TestMintPlanId:
 class TestAtomicWriteText:
     def test_writes_the_exact_content(self, tmp_path: Path):
         target = tmp_path / "state.md"
-        _atomic_write_text(target, STATE_MD, artifact="state.md")
+        atomic_write_text(target, STATE_MD, artifact="state.md")
         assert target.read_text(encoding="utf-8") == STATE_MD
 
     def test_creates_missing_parent_directories(self, tmp_path: Path):
         target = tmp_path / "findings" / "topic.md"
-        _atomic_write_text(target, "# Topic\n", artifact="findings")
+        atomic_write_text(target, "# Topic\n", artifact="findings")
         assert target.read_text(encoding="utf-8") == "# Topic\n"
 
     def test_replaces_existing_content_wholesale(self, tmp_path: Path):
         target = tmp_path / "state.md"
         target.write_text("a much longer previous body\n" * 20, encoding="utf-8")
-        _atomic_write_text(target, "short\n", artifact="state.md")
+        atomic_write_text(target, "short\n", artifact="state.md")
         assert target.read_text(encoding="utf-8") == "short\n"
 
     def test_leaves_no_temp_file_on_success(self, tmp_path: Path):
-        _atomic_write_text(tmp_path / "state.md", STATE_MD, artifact="state.md")
+        atomic_write_text(tmp_path / "state.md", STATE_MD, artifact="state.md")
         assert _tmp_files(tmp_path) == []
 
     def test_crash_between_write_and_replace_leaves_the_old_content(
@@ -320,7 +320,7 @@ class TestAtomicWriteText:
 
         monkeypatch.setattr(os, "replace", crash)
         with pytest.raises(HarnessArtifactError):
-            _atomic_write_text(target, "TRUNCATED", artifact="LESSONS.md")
+            atomic_write_text(target, "TRUNCATED", artifact="LESSONS.md")
         assert target.read_text(encoding="utf-8") == LESSONS_MD
 
     def test_crash_between_write_and_replace_leaves_no_temp_file(
@@ -332,7 +332,7 @@ class TestAtomicWriteText:
             os, "replace", lambda src, dst: (_ for _ in ()).throw(OSError("boom"))
         )
         with pytest.raises(HarnessArtifactError):
-            _atomic_write_text(target, "TRUNCATED", artifact="LESSONS.md")
+            atomic_write_text(target, "TRUNCATED", artifact="LESSONS.md")
         assert _tmp_files(tmp_path) == []
 
     def test_crash_leaves_no_file_at_all_when_the_target_did_not_exist(
@@ -343,7 +343,7 @@ class TestAtomicWriteText:
             os, "replace", lambda src, dst: (_ for _ in ()).throw(OSError("boom"))
         )
         with pytest.raises(HarnessArtifactError):
-            _atomic_write_text(target, "half", artifact="LESSONS.md")
+            atomic_write_text(target, "half", artifact="LESSONS.md")
         assert not target.exists()
         assert _tmp_files(tmp_path) == []
 
@@ -360,7 +360,7 @@ class TestAtomicWriteText:
 
         monkeypatch.setattr(tempfile, "mkstemp", spy)
         target = tmp_path / "findings" / "topic.md"
-        _atomic_write_text(target, "# Topic\n", artifact="findings")
+        atomic_write_text(target, "# Topic\n", artifact="findings")
         assert seen == [str(target.parent)]
         assert seen[0] != tempfile.gettempdir()
 
@@ -371,7 +371,7 @@ class TestAtomicWriteText:
             os, "replace", lambda src, dst: (_ for _ in ()).throw(OSError("boom"))
         )
         with pytest.raises(HarnessArtifactError) as excinfo:
-            _atomic_write_text(tmp_path / "x.md", "body", artifact="decisions.md")
+            atomic_write_text(tmp_path / "x.md", "body", artifact="decisions.md")
         assert excinfo.value.artifact == "decisions.md"
         assert isinstance(excinfo.value.cause, OSError)
 
@@ -384,7 +384,7 @@ class TestAtomicWriteText:
             lambda **kwargs: (_ for _ in ()).throw(OSError("read-only")),
         )
         with pytest.raises(HarnessArtifactError) as excinfo:
-            _atomic_write_text(tmp_path / "x.md", "body", artifact="plan.md")
+            atomic_write_text(tmp_path / "x.md", "body", artifact="plan.md")
         assert "temp file" in str(excinfo.value)
 
 

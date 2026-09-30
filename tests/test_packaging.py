@@ -17,7 +17,6 @@ from __future__ import annotations
 import ast
 import collections
 import importlib
-import importlib.util
 import os
 import pathlib
 import re
@@ -185,7 +184,7 @@ class TestEveryPackageIsWired:
 
 
 class TestSubpackagesImport:
-    """`from fsm_llm import <sub>` works; the old top-level names are gone."""
+    """`from fsm_llm import <sub>` works."""
 
     @pytest.mark.parametrize("sub", sorted(_EXPECTED_SUBPACKAGES))
     def test_subpackages_importable_from_fsm_llm(self, sub: str):
@@ -194,10 +193,6 @@ class TestSubpackagesImport:
         module = importlib.import_module("fsm_llm")
         importlib.import_module(f"fsm_llm.{sub}")
         assert getattr(module, sub).__name__ == f"fsm_llm.{sub}"
-
-    @pytest.mark.parametrize("sub", sorted(_EXPECTED_SUBPACKAGES))
-    def test_old_top_level_name_is_gone(self, sub: str):
-        assert importlib.util.find_spec(f"fsm_llm_{sub}") is None
 
 
 def _monitor_package_data_globs() -> list[str]:

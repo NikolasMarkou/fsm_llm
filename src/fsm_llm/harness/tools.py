@@ -335,7 +335,7 @@ _REPEAT_PHRASE: Mapping[str, str] = MappingProxyType(
 )
 
 #: A leading path component that is a plan directory's own id.
-_PLAN_ID_RE = re.compile(r"^plan[-_]\d{4}-\d{2}-\d{2}")
+_PLAN_ID_RE = re.compile(r"^plan-\d{4}-\d{2}-\d{2}")
 
 
 def _truncate(text: str, limit: int, unit: str = "characters") -> str:

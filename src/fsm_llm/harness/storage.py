@@ -19,7 +19,7 @@ Three rules shape everything here.
 2. **A write is atomic or it did not happen.**  ``Workspace.write_text`` is a
    plain ``Path.write_text``: a crash mid-write leaves a truncated artifact,
    and a truncated artifact is worse than a missing one because a gate will
-   happily parse it.  :func:`_atomic_write_text` writes a temp file beside the
+   happily parse it.  :func:`~._atomic.atomic_write_text` writes a temp file beside the
    target and ``os.replace``\\ s it into position, so a reader sees the old
    content or the new content and never a blend.
 
@@ -43,7 +43,7 @@ from pydantic import BaseModel, ConfigDict
 
 from fsm_llm.logging import logger
 
-from ._atomic import atomic_write_text as _atomic_write_text
+from ._atomic import atomic_write_text
 from .artifacts import (
     ARTIFACT_MODELS,
     Artifact,
@@ -65,7 +65,6 @@ __all__ = [
     "COMPRESSED_SUMMARY_OPEN",
     "COMPRESSED_SUMMARY_SECTION",
     "DRIVER_READ_MAX_BYTES",
-    "PLAN_ID_RE",
     "CapReport",
     "PlanDirectory",
     "RunState",
@@ -75,12 +74,6 @@ __all__ = [
     "evict_lessons",
     "mint_plan_id",
 ]
-
-#: The id shape this module MINTS.  It is deliberately narrower than
-#: ``artifacts``' recogniser, which also accepts the protocol's legacy
-#: ``plan_YYYY-MM-DD_hex8`` directories: a reader must tolerate what history
-#: left on disk, a writer must emit exactly one form.
-PLAN_ID_RE = re.compile(r"^plan-\d{4}-\d{2}-\d{2}T\d{6}-[0-9a-f]{8}$")
 
 _MINT_STAMP = "%Y-%m-%dT%H%M%S"
 _MINT_ENTROPY_BYTES = 4
@@ -129,25 +122,12 @@ def mint_plan_id(*, now: datetime | None = None) -> str:
         - ``now``: the timestamp to stamp; defaults to UTC now.  A naive
           datetime is stamped verbatim, so a caller controlling the clock in a
           test gets exactly the id it asked for.
-        - Returns a string matching :data:`PLAN_ID_RE`.  Uniqueness comes from
+        - Returns a string matching :data:`~.artifacts.PLAN_ID_RE`.  Uniqueness comes from
           32 bits of :mod:`secrets` entropy, NOT from the timestamp: two plans
           minted in the same second must not collide.
     """
     stamp = (now or datetime.now(timezone.utc)).strftime(_MINT_STAMP)
     return f"plan-{stamp}-{secrets.token_hex(_MINT_ENTROPY_BYTES)}"
-
-
-# ---------------------------------------------------------------------------
-# Atomic write
-# ---------------------------------------------------------------------------
-
-# `_atomic_write_text` now lives in `._atomic` (imported above, aliased back
-# to this name) so that `tools.PlanMemory` can use the same primitive without
-# creating an import cycle (`storage` imports `PlanMemory` from `tools`).
-# Kept as a module-level name here -- do not delete this alias -- because
-# `tests/test_fsm_llm_harness/test_storage.py` imports it from this module by
-# name (`from fsm_llm.harness.storage import _atomic_write_text`).
-# See decisions.md D-009.
 
 
 # ---------------------------------------------------------------------------
@@ -673,7 +653,7 @@ class PlanDirectory:
         # (UPDATED plan-2026-09-12T135914-45a654de/D-009: `PlanMemory.write_text`
         # is now ALSO atomic, via the same `atomic_write_text` primitive -- see
         # tools.py. This call is kept split into `authorise` (no write) +
-        # `_atomic_write_text` anyway, rather than calling `PlanMemory.write_text`
+        # `atomic_write_text` anyway, rather than calling `PlanMemory.write_text`
         # directly, purely to keep this method's own return convention
         # (`self._memory.locate(path)`, the memory-root-relative STRING form)
         # rather than `PlanMemory.write_text`'s resolved-`Path`-relative form --
@@ -683,7 +663,7 @@ class PlanDirectory:
         # user's source tree where a temp file appearing beside every edited
         # file is a visible side effect. See decisions.md D-019, D-009.
         target = self._memory.authorise(path)
-        _atomic_write_text(target, content, artifact=path)
+        atomic_write_text(target, content, artifact=path)
         return self._memory.locate(path)
 
     def append_text(self, path: str, content: str) -> str:

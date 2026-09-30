@@ -663,14 +663,15 @@ def _dispatch_in_progress(role: str) -> Iterator[None]:
 class _HarnessHalt(Exception):
     """Internal signal: stop the run now and report why.
 
-    ``BaseAgent._run_conversation_loop`` exits only when the FSM reaches a
-    terminal state, so a permanently BLOCKED gate has no other way out than
-    burning the whole iteration budget.  Raising this from
-    ``_on_loop_iteration`` unwinds the loop through its own
-    ``finally: api.end_conversation(...)``; ``_standard_run`` re-raises it
-    wrapped in an ``AgentError``, and :meth:`HarnessAgent.run` converts it back
-    into a normal ``AgentResult``.  Private on purpose -- it is control flow,
-    not an error a caller should ever see.
+    The run is core's ``API.run_until_terminal``, which returns only when the
+    FSM reaches a terminal state or a run budget is spent, so a permanently
+    BLOCKED gate has no other way out than burning the whole step budget.
+    ``_on_loop_iteration`` is that run's ``before_step`` hook: raising this
+    from it ends the run, ``BaseAgent._run_conversation_loop`` closes the
+    conversation in its ``finally``, ``_standard_run`` re-raises it wrapped in
+    an ``AgentError``, and :meth:`HarnessAgent.run` converts it back into a
+    normal ``AgentResult``.  Private on purpose -- it is control flow, not an
+    error a caller should ever see.
     """
 
     def __init__(self, reason: str, slug: str | None, context: dict[str, Any]) -> None:
