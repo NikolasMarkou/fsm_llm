@@ -1025,7 +1025,9 @@ def build_reflexion_fsm(
             "purpose": "Synthesize all observations into a complete answer",
             "required_context_keys": [ContextKeys.FINAL_ANSWER],
             "extraction_instructions": build_conclude_extraction_instructions(),
-            "response_instructions": build_conclude_response_instructions(),
+            "response_instructions": build_conclude_response_instructions(
+                refused_actions=include_approval_state
+            ),
             "transitions": [],
         },
     }
@@ -1408,7 +1410,9 @@ def build_react_fsm(
             "extraction_instructions": build_conclude_extraction_instructions(
                 output_schema
             ),
-            "response_instructions": build_conclude_response_instructions(),
+            "response_instructions": build_conclude_response_instructions(
+                refused_actions=include_approval_state
+            ),
             "transitions": [],
         },
     }

@@ -164,6 +164,16 @@ class ContextKeys:
     # for the next think turn's prompt. Not a transient key: the compactor
     # would delete it before think reads it (LOOP-06, D-021 of plan 06a5ec0a).
     AGENT_FEEDBACK = "agent_feedback"
+    # Gated calls a human approver refused in this run: a list of sentences
+    # (tool, redacted parameters, "NOT performed"), written only by the HITL
+    # driver. Kept to the end of the run and read by the conclude prompt.
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-034: do NOT report a denial to conclude through
+    # `agent_feedback` (cleared on think exit, so the answer then claimed the
+    # refused action happened) and do NOT record it as an observation (it
+    # would count as tool evidence, LOOP-06). Each entry states a final fact;
+    # do NOT word it as a skipped or pending item, the model reads those as
+    # work to retry (06a5ec0a/D-049). See decisions.md D-034.
+    REFUSED_ACTIONS = "refused_actions"
     # The state a transition leaves, written by core on every transition
     # (absent before the first one). Read by the ReAct-family limiter.
     CURRENT_STATE = "_current_state"
@@ -344,6 +354,7 @@ RUN_OUTPUT_KEYS: frozenset[str] = frozenset(
         ContextKeys.APPROVALS_SPENT,
         ContextKeys.FORCED_STOP_REASON,
         ContextKeys.AGENT_FEEDBACK,
+        ContextKeys.REFUSED_ACTIONS,
     }
 )
 
@@ -362,6 +373,7 @@ FRAMEWORK_ONLY_KEYS: tuple[str, ...] = (
     ContextKeys.FORCED_STOP_REASON,
     ContextKeys.ITERATION_COUNT,
     ContextKeys.OBSERVATION_COUNT,
+    ContextKeys.REFUSED_ACTIONS,
 )
 
 

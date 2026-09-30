@@ -921,6 +921,15 @@ class BaseAgent(ABC):
             # bump observation_count and satisfy the D-008 conclude guard with
             # no tool result. The input shown is the redacted copy (D-016).
             shown = redact_secret_entries(tool_input)
+            # D-034 (plan 07ad3f8c): the feedback is gone after the next think
+            # turn, so the refusal is also kept as a final fact for conclude.
+            record = (
+                f"{tool_name}({shown}): NOT performed. The human approver "
+                "refused this action; the refusal is final for this run."
+            )
+            refused = list(full.get(ContextKeys.REFUSED_ACTIONS) or [])
+            if record not in refused:
+                refused.append(record)
             api.update_context(
                 conv_id,
                 {
@@ -930,6 +939,7 @@ class BaseAgent(ABC):
                         f"The human reviewer denied the call {tool_name}({shown}). "
                         "Do not repeat it; choose another tool or approach."
                     ),
+                    ContextKeys.REFUSED_ACTIONS: refused,
                 },
             )
 

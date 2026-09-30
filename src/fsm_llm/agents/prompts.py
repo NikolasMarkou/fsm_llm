@@ -198,8 +198,24 @@ def build_conclude_extraction_instructions(
     return "\n".join(parts)
 
 
-def build_conclude_response_instructions() -> str:
-    """Build response instructions for the conclude state."""
+# Appended to the conclude instructions of approval-gated FSMs (D-034 of plan
+# 07ad3f8c). It names no prompt, signal or request to go on (D-031).
+_REFUSED_ACTIONS_SENTENCE = (
+    f" If the context has a '{ContextKeys.REFUSED_ACTIONS}' list, every action "
+    "in it was refused by a human approver and was NOT performed: state in "
+    "the answer that it was not performed because approval was refused, and "
+    "never say or imply that a refused action was done or will be done."
+)
+
+
+def build_conclude_response_instructions(*, refused_actions: bool = False) -> str:
+    """Build response instructions for the conclude state.
+
+    ``refused_actions`` (approval-gated FSMs only) adds one sentence: actions
+    listed under the ``refused_actions`` context key were not performed and
+    the answer must say so (D-034 of plan 07ad3f8c). Without it the text is
+    unchanged.
+    """
     # DECISION plan_2026-05-30_5598b755/D-003 [STALE]
     # Re-anchor the original task: the reply is written with no user message,
     # and small models otherwise answer the turn instead of the task. The real
@@ -210,7 +226,7 @@ def build_conclude_response_instructions() -> str:
     # the task on a forced stop. Say what the reply is (the run's last
     # output, from the observations) and what to do when the evidence is
     # thin. See decisions.md D-031.
-    return (
+    text = (
         "Write the final answer to the ORIGINAL task (the 'task' value in the "
         "context) clearly and completely. Base it on the tool observations and "
         "on facts given in the task, and cite the observations that support it. "
@@ -219,6 +235,9 @@ def build_conclude_response_instructions() -> str:
         "observations do not hold enough evidence, say plainly what could not "
         "be determined and give the best answer the evidence supports."
     )
+    if refused_actions:
+        text += _REFUSED_ACTIONS_SENTENCE
+    return text
 
 
 def build_think_terminate_instructions() -> str:
