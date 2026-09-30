@@ -9,15 +9,14 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from fsm_llm.monitor.bridge import MonitorBridge
 from fsm_llm.monitor.constants import LOG_LEVELS, MAX_AGENT_ITERATIONS
 from fsm_llm.monitor.instance_manager import InstanceManager
-from fsm_llm.monitor.server import app, configure
+from fsm_llm.monitor.server import _fsm_dict_to_snapshot, app, configure
 
 
 class TestWebServer:
     def setup_method(self):
-        configure(MonitorBridge())
+        configure()
         self.client = TestClient(app)
 
     def test_index_page(self):
@@ -250,12 +249,9 @@ class TestMonitorImports:
     """Verify all public exports import correctly."""
 
     def test_core_imports(self):
-        from fsm_llm.monitor import (
-            EventCollector,
-            MonitorBridge,
-        )
+        from fsm_llm.monitor import EventCollector, InstanceManager
 
-        assert MonitorBridge is not None
+        assert InstanceManager is not None
         assert EventCollector is not None
 
     def test_definition_imports(self):
@@ -280,14 +276,8 @@ class TestMonitorImports:
         assert issubclass(MonitorConnectionError, MonitorError)
 
     def test_constant_imports(self):
-        from fsm_llm.monitor import (
-            COLOR_PRIMARY,
-            DEFAULT_REFRESH_INTERVAL,
-            THEME_NAME,
-        )
+        from fsm_llm.monitor import DEFAULT_REFRESH_INTERVAL
 
-        assert COLOR_PRIMARY == "#3274d9"
-        assert THEME_NAME == "grafana_dark"
         assert DEFAULT_REFRESH_INTERVAL == 1.0
 
     def test_version(self):
@@ -406,6 +396,253 @@ def _minimal_fsm_dict():
             },
         },
     }
+
+
+def _branching_fsm_dict():
+    """Three states, a self-loop, two priorities, one label over 30 chars."""
+    return {
+        "name": "Branching",
+        "description": "Ask until answered, then finish or give up",
+        "initial_state": "ask",
+        "states": {
+            "ask": {
+                "id": "ask",
+                "description": "Ask the question",
+                "purpose": "Collect the answer",
+                "transitions": [
+                    {"target_state": "ask", "description": "No answer yet"},
+                    {
+                        "target_state": "done",
+                        "description": "The user gave a complete and usable answer",
+                        "priority": 50,
+                        "conditions": [
+                            {"description": "has answer", "logic": {"var": "answer"}}
+                        ],
+                    },
+                    {"target_state": "gave_up", "description": "", "priority": 200},
+                ],
+            },
+            "done": {"id": "done", "description": "Answered", "purpose": "Thank"},
+            "gave_up": {"id": "gave_up", "description": "No answer", "purpose": "End"},
+        },
+    }
+
+
+class TestFSMDictToSnapshot:
+    """The info-panel snapshot of a definition dict (`/api/fsm/load`)."""
+
+    def test_basic_conversion(self):
+        snap = _fsm_dict_to_snapshot({**_minimal_fsm_dict(), "version": "4.1"})
+        assert snap.name == "TestFSM"
+        assert snap.version == "4.1"
+        assert snap.initial_state == "start"
+        assert snap.state_count == 2
+
+    def test_state_flags(self):
+        snap = _fsm_dict_to_snapshot(_minimal_fsm_dict())
+        start = next(s for s in snap.states if s.state_id == "start")
+        end = next(s for s in snap.states if s.state_id == "end")
+        assert (start.is_initial, start.is_terminal) == (True, False)
+        assert (end.is_initial, end.is_terminal) == (False, True)
+
+    def test_transition_info(self):
+        snap = _fsm_dict_to_snapshot(_branching_fsm_dict())
+        ask = next(s for s in snap.states if s.state_id == "ask")
+        assert ask.transition_count == 3
+        to_done = ask.transitions[1]
+        assert to_done.target_state == "done"
+        assert to_done.priority == 50
+        assert (to_done.condition_count, to_done.has_logic) == (1, True)
+        assert (ask.transitions[0].condition_count, ask.transitions[0].has_logic) == (
+            0,
+            False,
+        )
+
+    def test_empty_fsm(self):
+        snap = _fsm_dict_to_snapshot({"states": {}})
+        assert snap.state_count == 0
+        assert snap.states == []
+
+
+class TestFSMVisualizeReadsTheCoreGraph:
+    """`/api/fsm/visualize` nodes and edges are core's `build_fsm_graph` data.
+
+    plan-2026-09-30T062855-07ad3f8c D-018: the monitor adds the `from`/`to`
+    names, a grid position and the 30-char label, nothing else.
+    """
+
+    def setup_method(self):
+        configure(manager=InstanceManager())
+        self.client = TestClient(app)
+
+    def test_payload_equals_the_core_graph(self):
+        from fsm_llm.visualizer import build_fsm_graph
+
+        fsm = _branching_fsm_dict()
+        graph = build_fsm_graph(fsm)
+        data = self.client.post("/api/fsm/visualize", json=fsm).json()
+
+        assert [
+            {
+                k: n[k]
+                for k in ("id", "description", "purpose", "is_initial", "is_terminal")
+            }
+            for n in data["nodes"]
+        ] == [n.model_dump() for n in graph.nodes]
+        assert [n["label"] for n in data["nodes"]] == ["ask", "done", "gave_up"]
+        assert [(e["from"], e["to"], e["priority"]) for e in data["edges"]] == [
+            (e.source, e.target, e.priority) for e in graph.edges
+        ]
+        assert data["edges"] == [
+            {"from": "ask", "to": "ask", "label": "No answer yet", "priority": 100},
+            {
+                "from": "ask",
+                "to": "done",
+                "label": "The user gave a complete and u",
+                "priority": 50,
+            },
+            {"from": "ask", "to": "gave_up", "label": "", "priority": 200},
+        ]
+        assert [(n["x"], n["y"]) for n in data["nodes"]] == [
+            (150, 80),
+            (350, 80),
+            (550, 80),
+        ]
+        assert set(data) == {"fsm", "nodes", "edges"}
+        assert data["fsm"]["state_count"] == 3
+
+    def test_endpoint_follows_build_fsm_graph(self, monkeypatch):
+        """Fails if the monitor builds nodes and edges from the definition."""
+        from fsm_llm.monitor import server
+        from fsm_llm.visualizer import FSMGraph, FSMGraphEdge, FSMGraphNode
+
+        seen = []
+
+        def _fake_graph(fsm):
+            seen.append(fsm)
+            return FSMGraph(
+                name="from core",
+                initial_state="only_in_core",
+                nodes=(
+                    FSMGraphNode(
+                        id="only_in_core",
+                        description="d",
+                        purpose="p",
+                        is_initial=True,
+                        is_terminal=False,
+                    ),
+                ),
+                edges=(
+                    FSMGraphEdge(
+                        source="only_in_core",
+                        target="only_in_core",
+                        description="core edge",
+                        priority=7,
+                    ),
+                ),
+            )
+
+        monkeypatch.setattr(server, "build_fsm_graph", _fake_graph)
+        fsm = _branching_fsm_dict()
+        data = self.client.post("/api/fsm/visualize", json=fsm).json()
+
+        assert seen == [fsm]
+        assert data["nodes"] == [
+            {
+                "id": "only_in_core",
+                "label": "only_in_core",
+                "description": "d",
+                "purpose": "p",
+                "is_initial": True,
+                "is_terminal": False,
+                "x": 150,
+                "y": 80,
+            }
+        ]
+        assert data["edges"] == [
+            {
+                "from": "only_in_core",
+                "to": "only_in_core",
+                "label": "core edge",
+                "priority": 7,
+            }
+        ]
+
+    def test_preset_route_follows_build_fsm_graph(self, monkeypatch):
+        from fsm_llm.monitor import server
+        from fsm_llm.visualizer import build_fsm_graph
+
+        calls = []
+
+        def _spy(fsm):
+            calls.append(fsm)
+            return build_fsm_graph(fsm)
+
+        monkeypatch.setattr(server, "build_fsm_graph", _spy)
+        monkeypatch.setattr(
+            server, "_read_preset_json", lambda _id: _minimal_fsm_dict()
+        )
+        resp = self.client.get("/api/fsm/visualize/preset/basic/x/fsm.json")
+
+        assert resp.status_code == 200
+        assert calls == [_minimal_fsm_dict()]
+        assert [e["to"] for e in resp.json()["edges"]] == ["end"]
+
+    @pytest.mark.parametrize(
+        "broken",
+        [
+            {"initial_state": "missing", "states": {"a": {"id": "a"}}},
+            {
+                "initial_state": "a",
+                "states": {"a": {"transitions": [{"target_state": "nowhere"}]}},
+            },
+        ],
+        ids=["unknown-initial-state", "dangling-target"],
+    )
+    def test_a_definition_core_cannot_graph_is_400(self, broken):
+        """Core refuses these; the old monitor-built graph drew them anyway."""
+        resp = self.client.post("/api/fsm/visualize", json=broken)
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "failed to parse FSM definition"
+
+
+class TestRemovedMonitorLegacy:
+    """Names removed in plan-2026-09-30T062855-07ad3f8c step 19 stay gone."""
+
+    def test_monitor_bridge_is_gone(self):
+        import importlib
+
+        with pytest.raises(ImportError):
+            from fsm_llm.monitor import MonitorBridge  # noqa: F401
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("fsm_llm.monitor.bridge")
+
+    def test_configure_takes_no_bridge(self):
+        with pytest.raises(TypeError):
+            configure(bridge=object())
+        with pytest.raises(TypeError):
+            configure(InstanceManager())  # keyword-only: no positional bridge slot
+
+    def test_server_has_no_get_bridge(self):
+        from fsm_llm.monitor import server
+
+        assert not hasattr(server, "get_bridge")
+        assert not hasattr(server, "_bridge_cache")
+
+    def test_instance_manager_has_no_connect_bridge(self):
+        assert not hasattr(InstanceManager, "connect_bridge")
+        assert callable(InstanceManager.attach_api)
+
+    def test_theme_constants_are_gone(self):
+        import fsm_llm.monitor as monitor
+        from fsm_llm.monitor import constants
+
+        for module in (monitor, constants):
+            leftovers = [
+                n for n in dir(module) if n.startswith("COLOR_") or n == "THEME_NAME"
+            ]
+            assert leftovers == []
+        assert "MonitorBridge" not in monitor.__all__
 
 
 class TestServerFSMEndpoints:
@@ -779,7 +1016,7 @@ class TestServerHygieneAndWorkflow:
     """server.py hygiene + workflow endpoints (plan Steps 1,3,5)."""
 
     def setup_method(self):
-        configure(MonitorBridge())
+        configure()
         self.client = TestClient(app)
 
     def test_500_detail_is_generic(self):

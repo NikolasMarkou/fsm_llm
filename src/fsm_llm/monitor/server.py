@@ -31,9 +31,13 @@ from starlette.requests import Request
 from fsm_llm.definitions import ConversationBusyError
 from fsm_llm.logging import logger
 from fsm_llm.utilities import redacting_json_default
+from fsm_llm.visualizer import build_fsm_graph
 
-from .bridge import MonitorBridge, _fsm_dict_to_snapshot
-from .constants import MAX_BUILDER_SESSIONS, MAX_REQUEST_BODY_BYTES
+from .constants import (
+    MAX_BUILDER_SESSIONS,
+    MAX_REQUEST_BODY_BYTES,
+    VIZ_EDGE_LABEL_CHARS,
+)
 from .definitions import (
     BuilderSendRequest,
     BuilderStartRequest,
@@ -45,6 +49,8 @@ from .definitions import (
     MonitorConfig,
     SendMessageRequest,
     StartConversationRequest,
+    StateInfo,
+    TransitionInfo,
     WorkflowAdvanceRequest,
     WorkflowCancelRequest,
     WorkflowEventRequest,
@@ -244,7 +250,7 @@ def _load_flows() -> dict[str, Any]:
 
 
 def configure(
-    bridge: MonitorBridge | None = None,
+    *,
     manager: InstanceManager | None = None,
     cors_origins: list[str] | None = None,
     api_key: str | None = None,
@@ -252,9 +258,11 @@ def configure(
 ) -> None:
     """Configure the global instance manager for the web server.
 
-    Accepts either a MonitorBridge (backward compat) or an InstanceManager.
-    If a bridge is provided, an InstanceManager is created wrapping it.
+    All arguments are keyword-only.
 
+    :param manager: The ``InstanceManager`` the server reads. Defaults to a new
+        one. To show conversations of an ``API`` you created yourself, call
+        ``manager.attach_api(api)`` and pass that manager here.
     :param cors_origins: List of allowed CORS origins. Defaults to localhost only.
         Pass ``["*"]`` to allow all origins (not recommended for production).
     :param api_key: Optional API key required (via an ``Authorization: Bearer
@@ -278,7 +286,7 @@ def configure(
         check (needed when serving on a LAN address). Like ``cors_origins``,
         only changed when given.
     """
-    global _manager, _flows, _bridge_cache, _CORS_ORIGINS, _CORS_ORIGIN_REGEX, _api_key
+    global _manager, _flows, _CORS_ORIGINS, _CORS_ORIGIN_REGEX, _api_key
     # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006: raise on an empty or
     # whitespace-only api_key, before any global changes. Do NOT store it
     # (compare_digest(b"", b"") is True, so an empty header would authenticate)
@@ -326,7 +334,6 @@ def configure(
                 if "allow_origin_regex" in middleware.kwargs:
                     middleware.kwargs["allow_origin_regex"] = None
     _flows = _load_flows()
-    _bridge_cache = None  # Reset cached bridge
 
     # Detach the old manager (log sink, handlers on its APIs) -- but never the
     # manager being re-installed: configure(manager=current, api_key=...) is
@@ -336,13 +343,6 @@ def configure(
 
     if manager is not None:
         _manager = manager
-    elif bridge is not None:
-        _manager = InstanceManager(config=bridge.config)
-        if bridge.connected and bridge.api is not None:
-            # The bridge's own collector handlers are switched off so the API
-            # does not feed two collectors (connect_bridge is idempotent).
-            bridge.disconnect()
-            _manager.connect_bridge(bridge.api)
     else:
         _manager = InstanceManager()
 
@@ -354,21 +354,6 @@ def get_manager() -> InstanceManager:
     if not _flows:
         _flows = _load_flows()
     return _manager
-
-
-# Backward compatibility alias — cached to avoid creating detached instances
-_bridge_cache: MonitorBridge | None = None
-
-
-def get_bridge() -> MonitorBridge:
-    """Backward compat: returns a MonitorBridge-compatible wrapper."""
-    global _bridge_cache
-    mgr = get_manager()
-    if _bridge_cache is None or _bridge_cache.collector is not mgr.global_collector:
-        _bridge_cache = MonitorBridge(config=mgr.config)
-        # Use the public setter to share the global collector
-        _bridge_cache.set_collector(mgr.global_collector)
-    return _bridge_cache
 
 
 def _require_api_key(request: Request) -> None:
@@ -1066,32 +1051,94 @@ def _snapshot_or_400(data: Any) -> FSMSnapshot:
         ) from e
 
 
-def _fsm_snapshot_to_viz(snap: Any) -> dict[str, Any]:
-    """Convert an FSMSnapshot to visualization data (nodes + edges)."""
-    nodes = []
-    edges = []
-    for i, state in enumerate(snap.states):
-        nodes.append(
-            {
-                "id": state.state_id,
-                "label": state.state_id,
-                "description": state.description,
-                "purpose": state.purpose,
-                "is_initial": state.is_initial,
-                "is_terminal": state.is_terminal,
-                "x": 150 + (i % 4) * 200,
-                "y": 80 + (i // 4) * 140,
-            }
-        )
-        for t in state.transitions:
-            edges.append(
-                {
-                    "from": state.state_id,
-                    "to": t.target_state,
-                    "label": t.description[:30] if t.description else "",
-                    "priority": t.priority,
-                }
+def _fsm_dict_to_snapshot(data: dict[str, Any]) -> FSMSnapshot:
+    """Convert a raw FSM definition dict to an FSMSnapshot (the info panel)."""
+    states_data = data.get("states", {})
+    initial_state = data.get("initial_state", "")
+
+    states = []
+    for state_id, state_def in states_data.items():
+        transitions_raw = state_def.get("transitions", [])
+        transitions = []
+        for t in transitions_raw:
+            conditions = t.get("conditions") or []
+            transitions.append(
+                TransitionInfo(
+                    target_state=t.get("target_state", ""),
+                    description=t.get("description", ""),
+                    priority=t.get("priority", 100),
+                    condition_count=len(conditions),
+                    has_logic=any(c.get("logic") for c in conditions),
+                )
             )
+
+        states.append(
+            StateInfo(
+                state_id=state_id,
+                description=state_def.get("description", ""),
+                purpose=state_def.get("purpose", ""),
+                is_initial=(state_id == initial_state),
+                is_terminal=len(transitions_raw) == 0,
+                transition_count=len(transitions_raw),
+                transitions=transitions,
+            )
+        )
+
+    return FSMSnapshot(
+        name=data.get("name", ""),
+        description=data.get("description", ""),
+        version=data.get("version", ""),
+        initial_state=initial_state,
+        persona=data.get("persona"),
+        state_count=len(states),
+        states=states,
+    )
+
+
+def _fsm_viz_or_400(data: Any) -> dict[str, Any]:
+    """The visualize payload of an FSM definition dict, or raise 400.
+
+    ``nodes`` and ``edges`` are core's ``build_fsm_graph`` output in the key
+    names the page reads (``from``/``to``), plus the two things only the page
+    needs: a grid position per node and the edge label cut to
+    ``VIZ_EDGE_LABEL_CHARS``.
+    """
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-018
+    # Nodes and edges come from core's build_fsm_graph. Do NOT derive them from
+    # the FSMSnapshot below (it only feeds the info panel) or from the raw
+    # dict: a second graph builder drifts from the Mermaid/DOT exporters. A
+    # definition core cannot graph (unknown initial state, dangling target) is
+    # a 400, not a diagram with edges to nowhere (D-040).
+    snap = _snapshot_or_400(data)
+    try:
+        graph = build_fsm_graph(data)
+    except Exception as e:
+        logger.debug(f"Failed to build the FSM graph: {e}")
+        raise HTTPException(
+            status_code=400, detail="failed to parse FSM definition"
+        ) from e
+    nodes = [
+        {
+            "id": node.id,
+            "label": node.id,
+            "description": node.description,
+            "purpose": node.purpose,
+            "is_initial": node.is_initial,
+            "is_terminal": node.is_terminal,
+            "x": 150 + (i % 4) * 200,
+            "y": 80 + (i // 4) * 140,
+        }
+        for i, node in enumerate(graph.nodes)
+    ]
+    edges = [
+        {
+            "from": edge.source,
+            "to": edge.target,
+            "label": edge.description[:VIZ_EDGE_LABEL_CHARS],
+            "priority": edge.priority,
+        }
+        for edge in graph.edges
+    ]
     return {"fsm": snap.model_dump(), "nodes": nodes, "edges": edges}
 
 
@@ -1102,7 +1149,7 @@ async def api_fsm_visualize(request: Request) -> dict[str, Any]:
         data = await request.json()
     except Exception as e:
         raise HTTPException(status_code=400, detail="invalid JSON") from e
-    return _fsm_snapshot_to_viz(_snapshot_or_400(data))
+    return _fsm_viz_or_400(data)
 
 
 def _resolve_preset_path(preset_id: str) -> Path:
@@ -1135,7 +1182,7 @@ def _read_preset_json(preset_id: str) -> dict[str, Any]:
 async def api_fsm_visualize_preset(preset_id: str) -> dict[str, Any]:
     """Load an FSM preset by ID and return visualization data."""
     data = _read_preset_json(preset_id)
-    return _fsm_snapshot_to_viz(_snapshot_or_400(data))
+    return _fsm_viz_or_400(data)
 
 
 # --- REST API: Presets ---

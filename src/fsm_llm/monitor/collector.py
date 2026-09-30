@@ -340,7 +340,6 @@ class EventCollector:
             "PRE_PROCESSING": self._on_pre_processing,
             "POST_PROCESSING": self._on_post_processing,
             "PRE_TRANSITION": self._on_pre_transition,
-            "POST_TRANSITION": self._on_post_transition,  # no-op; not registered
             "CONTEXT_UPDATE": self._on_context_update,
             "END_CONVERSATION": self._on_end_conversation,
             "ERROR": self._on_error,
@@ -418,15 +417,6 @@ class EventCollector:
                 level="INFO",
             )
         )
-        return {}
-
-    def _on_post_transition(
-        self,
-        context: dict[str, Any],
-        current_state: str | None = None,
-        target_state: str | None = None,
-    ) -> dict[str, Any]:
-        # Post-transition is informational; pre-transition already captured
         return {}
 
     def _on_context_update(

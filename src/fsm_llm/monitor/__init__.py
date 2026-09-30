@@ -16,9 +16,10 @@ Quick Start::
     python -m fsm_llm.monitor
 
     # Or programmatically
-    from fsm_llm.monitor import MonitorBridge, configure, app
-    bridge = MonitorBridge(api=my_api)
-    configure(bridge)
+    from fsm_llm.monitor import InstanceManager, configure, app
+    manager = InstanceManager()
+    manager.attach_api(my_api)  # show an API you created yourself
+    configure(manager=manager)
     # Run with uvicorn: uvicorn fsm_llm.monitor.server:app
 """
 
@@ -27,12 +28,10 @@ from __future__ import annotations
 from .__version__ import __version__
 
 # Core classes
-from .bridge import MonitorBridge
 from .collector import EventCollector
 
 # Constants
 from .constants import (
-    COLOR_PRIMARY,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_EVENTS,
     DEFAULT_MAX_LOG_LINES,
@@ -61,7 +60,6 @@ from .constants import (
     EVENT_WORKFLOW_STARTED,
     MONITOR_HANDLER_NAME,
     MONITOR_HANDLER_PRIORITY,
-    THEME_NAME,
 )
 
 # Definitions
@@ -108,7 +106,6 @@ __all__ = [
     # Version
     "__version__",
     # Core classes
-    "MonitorBridge",
     "EventCollector",
     "InstanceManager",
     # Server
@@ -140,8 +137,6 @@ __all__ = [
     "DashboardAlert",
     "model_to_dict",
     # Constants
-    "THEME_NAME",
-    "COLOR_PRIMARY",
     "DEFAULT_REFRESH_INTERVAL",
     "DEFAULT_MAX_EVENTS",
     "DEFAULT_MAX_LOG_LINES",

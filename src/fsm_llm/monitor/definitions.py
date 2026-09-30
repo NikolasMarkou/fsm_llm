@@ -2,7 +2,7 @@
 Pydantic models for fsm_llm.monitor.
 
 Defines event, metric, configuration, and snapshot models used by
-the collector, bridge, and web dashboard.
+the collector, instance manager, and web dashboard.
 """
 
 from __future__ import annotations

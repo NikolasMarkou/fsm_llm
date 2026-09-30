@@ -14,7 +14,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from fsm_llm.handlers import HandlerTiming
-from fsm_llm.monitor.bridge import MonitorBridge, _fsm_dict_to_snapshot
 from fsm_llm.monitor.collector import EventCollector, redact_context
 from fsm_llm.monitor.constants import (
     EVENT_STATE_TRANSITION,
@@ -38,6 +37,7 @@ from fsm_llm.monitor.instance_manager import (
     snapshot_from_api,
     unregister_monitor_handlers,
 )
+from fsm_llm.monitor.server import _fsm_dict_to_snapshot
 
 # ---------------------------------------------------------------
 # helpers
@@ -335,15 +335,27 @@ class TestHandlerLifecycle:
         _fire(api, HandlerTiming.PRE_TRANSITION, "a", "b")
         assert collector.get_metrics().total_events == 0
 
-    def test_bridge_reconnect_and_disconnect(self):
+    def test_attach_api_twice_and_shutdown(self):
         api = _FakeAPI()
-        bridge = MonitorBridge(api=api)
-        bridge.connect(api)
+        mgr = _manager()
+        mgr.attach_api(api)
+        mgr.attach_api(api)
         _fire(api, HandlerTiming.PRE_TRANSITION, "a", "b")
-        assert bridge.collector.get_metrics().total_transitions == 1
-        bridge.disconnect()
+        assert mgr.global_collector.get_metrics().total_transitions == 1
+        mgr.shutdown()
         _fire(api, HandlerTiming.PRE_TRANSITION, "b", "c")
-        assert bridge.collector.get_metrics().total_transitions == 1
+        assert mgr.global_collector.get_metrics().total_transitions == 1
+
+    def test_attaching_another_api_switches_the_previous_one_off(self):
+        first, second = _FakeAPI(), _FakeAPI()
+        mgr = _manager()
+        mgr.attach_api(first)
+        mgr.attach_api(second)
+        _fire(first, HandlerTiming.PRE_TRANSITION, "a", "b")
+        assert mgr.global_collector.get_metrics().total_transitions == 0
+        _fire(second, HandlerTiming.PRE_TRANSITION, "a", "b")
+        assert mgr.global_collector.get_metrics().total_transitions == 1
+        mgr.global_collector.cleanup()
 
     def test_handler_never_writes_context(self):
         handler = _MonitorHandler(

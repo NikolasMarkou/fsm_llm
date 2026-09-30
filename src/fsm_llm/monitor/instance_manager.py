@@ -54,7 +54,11 @@ from .definitions import (
     model_to_dict,
     normalize_message_history,
 )
-from .exceptions import MonitorCapacityError, MonitorInitializationError
+from .exceptions import (
+    MonitorCapacityError,
+    MonitorConnectionError,
+    MonitorInitializationError,
+)
 
 # Optional imports for workflows and agents
 _HAS_WORKFLOWS = False
@@ -389,9 +393,6 @@ def _handlers_for(
             priority=priority,
         )
         for timing_name, callback in callbacks.items()
-        # POST_TRANSITION is a no-op observer; registering it would only make
-        # the core deep-copy the context once more per transition.
-        if timing_name != "POST_TRANSITION"
     ]
 
 
@@ -521,9 +522,13 @@ def snapshot_from_api(
 ) -> ConversationSnapshot | None:
     """Build a ConversationSnapshot from a live API instance.
 
-    Shared helper used by both MonitorBridge and InstanceManager to avoid
-    duplicating the snapshot extraction logic.
+    Returns ``None`` when the conversation is unknown or cannot be read.
     """
+    # DECISION plan-2026-09-12T135914-45a654de/D-017
+    # The default is fail-CLOSED (show_internal_keys=False) so a caller that
+    # forgets the parameter cannot leak internal context keys into the
+    # dashboard. Do NOT flip it to True "for convenience"; a caller that wants
+    # internal keys passes the config flag explicitly.
     try:
         complete = api.fsm_manager.get_complete_conversation(conversation_id)
         if complete is None:
@@ -593,9 +598,8 @@ class InstanceManager:
         ] = collections.OrderedDict()
         self._max_ended_conversations = 1000
 
-        # For backward compat: an externally-connected bridge API
-        self._bridge_api: API | None = None
-        self._bridge_collector: EventCollector | None = None
+        # An API created by the caller and attached with attach_api()
+        self._attached_api: API | None = None
 
         # Custom dashboard configuration from MonitorBuilder
         self._dashboard_config: DashboardConfig | None = None
@@ -654,28 +658,39 @@ class InstanceManager:
     def global_collector(self) -> EventCollector:
         return self._global_collector
 
-    def connect_bridge(self, api: API) -> None:
-        """Connect an external API instance (backward compat with MonitorBridge).
+    def attach_api(self, api: API) -> None:
+        """Show an ``API`` the caller created: its events and conversations.
 
-        Idempotent for the same API; connecting a different API switches the
-        monitor handlers on the previous one off.
+        Registers the monitor handlers on ``api`` (they feed the global
+        collector) and lists its conversations next to the launched ones. One
+        API is attached at a time: attaching the same one again changes
+        nothing, attaching another switches the handlers on the previous one
+        off.
+
+        Raises:
+            MonitorConnectionError: the handlers could not be registered; the
+                previously attached API (if any) stays attached.
         """
+        try:
+            register_monitor_handlers(api, self._global_collector)
+        except Exception as e:
+            raise MonitorConnectionError(
+                f"Failed to register monitor handlers: {e}"
+            ) from e
         with self._lock:
-            previous = self._bridge_api
-            self._bridge_api = api
-            self._bridge_collector = self._global_collector
+            previous = self._attached_api
+            self._attached_api = api
         if previous is not None and previous is not api:
             unregister_monitor_handlers(previous, self._global_collector)
-        register_monitor_handlers(api, self._global_collector)
 
     def shutdown(self) -> None:
         """Detach from every API and remove the log sink (the manager can no
         longer be used afterwards)."""
         with self._lock:
-            bridge_api = self._bridge_api
+            attached_api = self._attached_api
             fsms = [i for i in self._instances.values() if isinstance(i, ManagedFSM)]
-        if bridge_api is not None:
-            unregister_monitor_handlers(bridge_api, self._global_collector)
+        if attached_api is not None:
+            unregister_monitor_handlers(attached_api, self._global_collector)
         for inst in fsms:
             unregister_monitor_handlers(inst.api, self._global_collector)
         self._global_collector.cleanup()
@@ -730,18 +745,18 @@ class InstanceManager:
     def get_events(self, limit: int = 50) -> list[MonitorEvent]:
         return self._global_collector.get_events(limit=limit)
 
-    # --- Conversation queries (aggregated across all FSM instances + bridge) ---
+    # --- Conversation queries (all FSM instances + the attached API) ---
 
     def get_active_conversations(self) -> list[str]:
         result: list[str] = []
-        # From bridge API (snapshot the reference under lock; D-003)
+        # From the attached API (snapshot the reference under lock; D-003)
         with self._lock:
-            bridge_api = self._bridge_api
-        if bridge_api is not None:
+            attached_api = self._attached_api
+        if attached_api is not None:
             try:
-                result.extend(bridge_api.list_active_conversations())
+                result.extend(attached_api.list_active_conversations())
             except Exception as e:
-                logger.debug(f"Failed to list bridge API conversations: {e}")
+                logger.debug(f"Failed to list attached API conversations: {e}")
         # From managed FSMs
         with self._lock:
             for inst in self._instances.values():
@@ -769,11 +784,11 @@ class InstanceManager:
         self, conversation_id: str
     ) -> ConversationSnapshot | None:
         """Find and return a conversation snapshot from any FSM instance."""
-        # Check bridge API first (snapshot the reference under lock; D-003)
+        # Check the attached API first (snapshot the reference under lock; D-003)
         with self._lock:
-            bridge_api = self._bridge_api
-        if bridge_api is not None:
-            snap = self._snapshot_from_api(bridge_api, conversation_id)
+            attached_api = self._attached_api
+        if attached_api is not None:
+            snap = self._snapshot_from_api(attached_api, conversation_id)
             if snap is not None:
                 return snap
         # Check managed FSMs

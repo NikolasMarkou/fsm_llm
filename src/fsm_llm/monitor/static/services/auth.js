@@ -67,10 +67,6 @@ export async function checkAuthRequired() {
     }
 }
 
-export function isAuthRequired() {
-    return _authRequired;
-}
-
 export function isApiKeyModalOpen() {
     return _pending !== null;
 }

@@ -214,8 +214,114 @@ class TestRegisterMonitorHandlers:
         api = MagicMock()
         collector = EventCollector()
         register_monitor_handlers(api, collector)
-        # 7: the no-op POST_TRANSITION observer is not registered.
+        # 7 of the 8 timings: nothing observes POST_TRANSITION.
         assert api.register_handler.call_count == 7
+
+
+def _api_with_conversations(collected_data=None):
+    """A mock API with two active conversations sitting in state ``greeting``."""
+    api = MagicMock()
+    api.list_active_conversations.return_value = ["c1", "c2"]
+    api.get_stack_depth.return_value = 1
+    api.fsm_manager.get_complete_conversation.return_value = {
+        "current_state": {
+            "id": "greeting",
+            "description": "Greet user",
+            "is_terminal": False,
+        },
+        "collected_data": collected_data or {"name": "Alice"},
+        "conversation_history": [{"user": "Hi"}, {"system": "Hello!"}],
+        "last_extraction_response": None,
+        "last_transition_decision": None,
+        "last_response_generation": None,
+    }
+    return api
+
+
+class TestAttachApi:
+    """`InstanceManager.attach_api`: show an API the caller created."""
+
+    def _manager(self, **config):
+        mgr = InstanceManager(config=MonitorConfig(**config))
+        mgr.global_collector.cleanup()
+        return mgr
+
+    def test_nothing_attached_shows_nothing(self):
+        mgr = self._manager()
+        assert mgr.get_active_conversations() == []
+        assert mgr.get_conversation_snapshot("c1") is None
+        assert mgr.get_all_conversation_snapshots() == []
+
+    def test_attach_registers_the_monitor_handlers(self):
+        api = _api_with_conversations()
+        self._manager().attach_api(api)
+        assert api.register_handler.call_count == 7
+
+    def test_attached_api_conversations_are_listed(self):
+        mgr = self._manager()
+        mgr.attach_api(_api_with_conversations())
+        assert mgr.get_active_conversations() == ["c1", "c2"]
+
+    def test_attached_api_conversation_snapshot(self):
+        mgr = self._manager()
+        mgr.attach_api(_api_with_conversations())
+        snap = mgr.get_conversation_snapshot("c1")
+        assert snap is not None
+        assert snap.conversation_id == "c1"
+        assert snap.current_state == "greeting"
+        assert snap.context_data == {"name": "Alice"}
+        assert snap.message_history == [
+            {"role": "user", "content": "Hi"},
+            {"role": "system", "content": "Hello!"},
+        ]
+
+    def test_all_snapshots_include_the_attached_api(self):
+        mgr = self._manager()
+        mgr.attach_api(_api_with_conversations())
+        snaps = mgr.get_all_conversation_snapshots()
+        assert [s.conversation_id for s in snaps] == ["c1", "c2"]
+
+    def test_listing_failure_of_the_attached_api_is_not_raised(self):
+        api = _api_with_conversations()
+        api.list_active_conversations.side_effect = RuntimeError("boom")
+        mgr = self._manager()
+        mgr.attach_api(api)
+        assert mgr.get_active_conversations() == []
+
+    def test_snapshot_failure_of_the_attached_api_is_none(self):
+        api = _api_with_conversations()
+        api.fsm_manager.get_complete_conversation.side_effect = RuntimeError("fail")
+        mgr = self._manager()
+        mgr.attach_api(api)
+        assert mgr.get_conversation_snapshot("c1") is None
+
+    def test_internal_keys_hidden_unless_configured(self):
+        data = {"name": "Alice", "_internal_secret": "shh", "_internal_note": "n"}
+        hidden = self._manager(show_internal_keys=False)
+        hidden.attach_api(_api_with_conversations(data))
+        assert hidden.get_conversation_snapshot("c1").context_data == {"name": "Alice"}
+
+        shown = self._manager(show_internal_keys=True)
+        shown.attach_api(_api_with_conversations(data))
+        context = shown.get_conversation_snapshot("c1").context_data
+        assert "_internal_note" in context
+        # Secret-looking entries stay hidden even when internal keys are shown.
+        assert "_internal_secret" not in context
+
+    def test_failed_registration_raises_and_keeps_the_previous_api(self):
+        import pytest
+
+        from fsm_llm.monitor.exceptions import MonitorConnectionError
+
+        mgr = self._manager()
+        mgr.attach_api(_api_with_conversations())
+        broken = _api_with_conversations()
+        broken.list_active_conversations.return_value = ["other"]
+        broken.register_handler.side_effect = RuntimeError("no handlers here")
+
+        with pytest.raises(MonitorConnectionError, match="no handlers here"):
+            mgr.attach_api(broken)
+        assert mgr.get_active_conversations() == ["c1", "c2"]
 
 
 class TestSnapshotInternalKeyHiding:

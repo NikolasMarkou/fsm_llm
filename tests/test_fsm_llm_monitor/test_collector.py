@@ -169,7 +169,7 @@ class TestHandlerCallbacks:
         callbacks = collector.create_handler_callbacks()
         assert "START_CONVERSATION" in callbacks
         assert "ERROR" in callbacks
-        assert len(callbacks) == 8
+        assert len(callbacks) == 7
 
     def test_start_conversation_callback(self):
         collector = EventCollector()
@@ -390,13 +390,11 @@ class TestHandlerCallbackBehavior:
         assert events[0].event_type == "conversation_end"
         assert "conv-1" in events[0].message
 
-    def test_post_transition_callback_is_noop(self):
-        """POST_TRANSITION should return empty dict and not record events."""
+    def test_there_is_no_post_transition_observer(self):
+        """PRE_TRANSITION records the transition; nothing observes POST."""
         collector = EventCollector()
-        callbacks = collector.create_handler_callbacks()
-        result = callbacks["POST_TRANSITION"]({"_conversation_id": "conv-1"})
-        assert result == {}
-        assert len(collector.get_events()) == 0
+        assert "POST_TRANSITION" not in collector.create_handler_callbacks()
+        assert not hasattr(collector, "_on_post_transition")
 
     def test_pre_processing_callback(self):
         collector = EventCollector()

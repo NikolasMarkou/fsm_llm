@@ -69,7 +69,7 @@
     --info-rgb: 103, 232, 249;
     --info-bright: #8fd4ff;
 
-    /* Legacy aliases — used by visualizer.js style lookups */
+    /* Color names read by pages/visualizer.js */
     --yellow: var(--warning);
     --cyan:   var(--info);
 

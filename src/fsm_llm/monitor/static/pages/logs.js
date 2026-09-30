@@ -43,11 +43,6 @@ function _takeUnseen(logs) {
     return fresh;
 }
 
-
-export function isLogPaused() {
-    return _logPaused;
-}
-
 // --- Pill Toggles ---
 
 export function toggleLogPill(btn) {
