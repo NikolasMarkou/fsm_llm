@@ -630,12 +630,9 @@ class TestEscapeCdata:
         assert builder._escape_cdata(text) == text
 
 
-class TestFieldExtractionContinueDeAnchor:
-    """Step 2b: build_field_extraction_prompt de-anchors from the agent-loop
-    sentinel 'Continue.' — when user_message == 'Continue.' it adds guidance to
-    extract from task/context; a normal user message leaves the path unchanged."""
-
-    _SENTINEL_MARKER = "agent-loop continuation signal"
+class TestFieldPromptHasNoSpecialUserMessage:
+    """No user message text is special to the per-field prompt: a user who
+    types ``Continue.`` gets the same prompt as any other message."""
 
     def _build(self, user_message: str) -> str:
         builder = FieldExtractionPromptBuilder()
@@ -652,22 +649,24 @@ class TestFieldExtractionContinueDeAnchor:
             dynamic_context={"task": "compute the sum of 2 and 3"},
         )
 
-    def test_continue_sentinel_adds_deanchor_instruction(self):
-        prompt = self._build("Continue.")
-        assert self._SENTINEL_MARKER in prompt
-        # Still anchors on the task/context.
-        assert "Already extracted" in prompt or "task" in prompt.lower()
+    @pytest.mark.parametrize(
+        "message", ["Continue.", "  Continue.  ", "continue", "Continue reasoning."]
+    )
+    def test_prompt_differs_from_another_message_only_in_the_text(self, message):
+        other = "Proceed!"
+        prompt = self._build(message)
+        emitted = FieldExtractionPromptBuilder()._sanitize_text_for_prompt(message)
+        line = f"User message: {emitted}\n"
 
-    def test_normal_message_path_unchanged(self):
-        prompt = self._build("I want to book a flight to Paris")
-        assert self._SENTINEL_MARKER not in prompt
+        assert prompt.count(line) == 1
+        assert prompt.replace(line, f"User message: {other}\n") == self._build(other)
 
-    def test_real_user_typing_continue_is_not_suppressed(self):
-        # The de-anchor branch only ADDS guidance; it does not remove the
-        # normal "User message:" line, so a real user typing 'Continue.' is
-        # unharmed.
+    def test_continue_message_gets_no_note(self):
         prompt = self._build("Continue.")
-        assert "User message: Continue." in prompt
+
+        assert "NOTE:" not in prompt
+        assert "continuation signal" not in prompt
+        assert prompt.count("Continue.") == 1
 
 
 # ============================================================================

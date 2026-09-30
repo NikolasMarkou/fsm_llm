@@ -4,12 +4,10 @@ These tests drive an adversarial ``user_message`` and conversation history all
 the way through ``API.converse`` -> ``MessagePipeline._execute_field_extractions``
 -> ``FieldExtractionPromptBuilder.build_field_extraction_prompt`` and capture the
 prompt at the LLM boundary (``LLMInterface.extract_field``).  That seam is the
-point of this file: the pre-existing suite
-(``test_prompts_unit.py::TestFieldExtractionContinueDeAnchor``) only exercised
-the ``"Continue."`` sentinel branch, and the sanitizer tests
-(``TestSanitizeText...``) only exercised ``BasePromptBuilder`` in isolation --
-neither could see that this builder embedded ``user_message`` and every history
-turn as raw, unsanitized plaintext.
+point of this file: the sanitizer tests (``TestSanitizeText...``) only
+exercised ``BasePromptBuilder`` in isolation and could not see that this
+builder embedded ``user_message`` and every history turn as raw, unsanitized
+plaintext.
 
 Contract under test:
   1. No newline in user- or LLM-controlled text may reach the prompt, because
@@ -18,8 +16,8 @@ Contract under test:
      no structural (XML/CDATA) boundary to escape.  One literal newline is
      enough to fabricate a turn or a whole new instruction block.
   2. Critical XML tags in that text are escaped, not passed through.
-  3. The D-002 ``"Continue."`` de-anchor branch still fires -- it reads the RAW
-     ``user_message``, not the sanitized copy.
+  3. No user message text is special: ``"Continue."`` gets the ordinary
+     prompt, with no added note.
 """
 
 import time
@@ -270,34 +268,24 @@ class TestAdversarialUserMessageIsSanitized:
 
 
 # ----------------------------------------------------------------------
-# D-002 non-regression
+# No special user message
 # ----------------------------------------------------------------------
 
 
-class TestContinueDeAnchorNonRegression:
-    """The ``"Continue."`` sentinel test reads the RAW ``user_message``; adding
-    sanitization to the emitted copy must not disturb it (D-002 / D-007)."""
+class TestContinueMessageIsOrdinaryAtTheSeam:
+    """A user typing ``Continue.`` reaches the LLM with the same per-field
+    prompt shape as any other message: the message line, and no added note."""
 
-    _SENTINEL_MARKER = "agent-loop continuation signal"
-
-    def test_deanchor_note_still_present(self, injection_api, injection_llm):
+    def test_continue_gets_the_ordinary_prompt(self, injection_api, injection_llm):
         api, conv_id = injection_api
         api.converse("Continue.", conv_id)
 
         prompts = _captured_extraction_prompts(injection_llm)
         assert prompts
         for prompt in prompts:
-            assert self._SENTINEL_MARKER in prompt
             assert "User message: Continue." in prompt
-
-    def test_normal_message_does_not_trigger_deanchor(
-        self, injection_api, injection_llm
-    ):
-        api, conv_id = injection_api
-        api.converse("I want to book a flight to Paris", conv_id)
-
-        for prompt in _captured_extraction_prompts(injection_llm):
-            assert self._SENTINEL_MARKER not in prompt
+            assert "NOTE:" not in prompt
+            assert "continuation signal" not in prompt
 
 
 # ----------------------------------------------------------------------

@@ -881,7 +881,7 @@ class TestCutOffFieldEnvelopeIsUnwrapped:
             _FakeResponse(content),
             FieldExtractionRequest(
                 system_prompt="write the draft",
-                user_message="Continue.",
+                user_message="Write the report.",
                 field_name="draft_output",
                 field_type=field_type,
             ),

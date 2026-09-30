@@ -1733,22 +1733,6 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 f"User message: {self._sanitize_text_for_prompt(user_message)}"
             )
 
-        # DECISION plan_2026-05-31_f08da86d/D-002 [STALE]: literal "Continue." is INLINED,
-        # NOT imported from fsm_llm.agents.constants.CONTINUE_MESSAGE — core
-        # (src/fsm_llm/) must never import the agents package. Do NOT replace this
-        # with that import. The branch only ADDS guidance (it never suppresses
-        # normal user-message extraction) so a real user typing "Continue." is
-        # unharmed. See decisions.md D-002.
-        # DECISION plan-2026-07-18T051819-80b0bd4d/D-007 [STALE]: this sentinel test reads the
-        # RAW user_message, NOT the sanitized copy emitted above. Do NOT collapse
-        # the two into one local — see decisions.md D-007.
-        if user_message is not None and user_message.strip() == "Continue.":
-            sections.append(
-                "NOTE: 'Continue.' is an agent-loop continuation signal, not new "
-                "user input. Extract the value from the task and the 'Already "
-                "extracted:' context above, not from this message."
-            )
-
         # Response format — concise since JSON schema is enforced
         examples = (
             "(e.g., 'next Saturday' for a date, 'around 7pm' for a time, "
