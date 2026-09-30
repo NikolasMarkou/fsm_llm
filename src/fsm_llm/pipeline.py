@@ -1041,7 +1041,7 @@ class MessagePipeline:
     def _execute_extraction_and_transition_pass(
         self,
         instance: FSMInstance,
-        user_message: str,
+        user_message: str | None,
         conversation_id: str,
         *,
         turn: _TurnRecord | None = None,
@@ -1316,7 +1316,7 @@ class MessagePipeline:
     def _bulk_extract_from_instructions(
         self,
         instance: FSMInstance,
-        user_message: str,
+        user_message: str | None,
         state: State,
         conversation_id: str,
     ) -> dict[str, Any]:
@@ -1326,18 +1326,52 @@ class MessagePipeline:
         Uses a single LLM call with a simple prompt to extract whatever
         data the instructions describe.  Returns a dict of extracted
         key-value pairs (may be empty).
+
+        ``user_message`` of ``None`` (a turn with no user message) builds the
+        prompt from the context the state may read and the recent
+        conversation instead of a message, and sends ``""`` on the request.
         """
         log = logger.bind(conversation_id=conversation_id)
 
-        safe_message = sanitize_text_for_prompt(user_message)
+        if user_message is None:
+            # DECISION plan-2026-09-30T062855-07ad3f8c/D-023
+            # With no message the model extracts from the context, so the
+            # context is rendered INTO this prompt. Do NOT dump
+            # instance.context.data here (json.dumps or an f-string): it must
+            # pass the state's read_keys scope and then the prompt security
+            # filter inside build_extraction_source_sections, the same two
+            # gates <current_context> has in Pass 2. Do NOT skip the bulk call
+            # on a message-free turn either: a bulk-only state would then
+            # never extract anything. See decisions.md D-023.
+            source_sections = (
+                self.data_extraction_prompt_builder.build_extraction_source_sections(
+                    instance,
+                    self._apply_context_scope(
+                        instance.context.get_user_visible_data(),
+                        state,
+                        conversation_id,
+                    ),
+                )
+            )
+            source = "\n".join(source_sections).rstrip() or "(no context available)"
+            subject = "the current context and the recent conversation below"
+            source_block = (
+                "There is no user message. Extract only from this context "
+                f"and conversation:\n{source}"
+            )
+            present_in = "the context or the conversation above"
+        else:
+            subject = "the user's message"
+            source_block = f"User message: {sanitize_text_for_prompt(user_message)}"
+            present_in = "the user's message"
         prompt = (
-            f"Extract information from the user's message.\n\n"
+            f"Extract information from {subject}.\n\n"
             f"Instructions: {state.extraction_instructions}\n\n"
-            f"User message: {safe_message}\n\n"
+            f"{source_block}\n\n"
             f'Respond with JSON: {{"extracted_data": {{"key": "value", ...}}, '
             f'"confidence": 0.95, "reasoning": "..."}}\n\n'
-            f"Only include keys for information actually present in the "
-            f"user's message. Use descriptive snake_case key names."
+            f"Only include keys for information actually present in "
+            f"{present_in}. Use descriptive snake_case key names."
         )
 
         # DECISION plan-2026-09-12T135914-45a654de/D-015
@@ -1354,7 +1388,7 @@ class MessagePipeline:
         # mirroring `extract_field`). See decisions.md D-015.
         try:
             request = BulkExtractionRequest(
-                system_prompt=prompt, user_message=user_message
+                system_prompt=prompt, user_message=user_message or ""
             )
             response = self.llm_interface.extract_bulk_data(request)
             # Filter out None/empty values — extract_bulk_data returns the
@@ -1465,7 +1499,7 @@ class MessagePipeline:
         return configs
 
     def _execute_data_extraction(
-        self, instance: FSMInstance, user_message: str, conversation_id: str
+        self, instance: FSMInstance, user_message: str | None, conversation_id: str
     ) -> DataExtractionResponse:
         """Execute data extraction via per-field ``extract_field`` calls
         and classification extractions.
@@ -1730,9 +1764,14 @@ class MessagePipeline:
                         extracted_data[key] = value
                         log.debug(f"Bulk extraction added missing field: {key}")
                     elif (
-                        not agent_managed
+                        user_message is not None
+                        and not agent_managed
                         and str(value).strip().lower() != str(current).strip().lower()
                     ):
+                        # plan-2026-09-30T062855-07ad3f8c/D-023: a correction
+                        # is something a user message asks for. With no
+                        # message a set key is neither overwritten nor
+                        # reported as a rejected correction.
                         # DECISION plan-2026-09-19T175721-21cd7f8e/D-052 (4):
                         # an instruction-only key (no config) is never
                         # corrected (skip-if-set) but IS reported below under
@@ -1787,7 +1826,7 @@ class MessagePipeline:
     def _execute_field_extractions(
         self,
         instance: FSMInstance,
-        user_message: str,
+        user_message: str | None,
         field_configs: list[FieldExtractionConfig],
         conversation_id: str,
         memo: dict[tuple[str, str], FieldExtractionResponse] | None = None,
@@ -1800,6 +1839,9 @@ class MessagePipeline:
         Previously extracted values are added to the dynamic context
         for subsequent extractions, enabling dependent field extraction
         (e.g., tool_input can see that tool_name was already extracted).
+
+        ``user_message`` of ``None`` (no user message) gives the context-only
+        prompt and ``""`` on the request.
 
         ``memo`` (D-035, ``None`` = disabled) maps ``(field_name, built prompt
         + "|" + message)`` to a previous NULL result; it is only ever handed an
@@ -1846,10 +1888,12 @@ class MessagePipeline:
                 )
             )
 
-            # Build request
+            # Build request. Request models carry a string: no message is ""
+            # here and the LLM layer fills the provider turn (D-015).
+            request_message = user_message or ""
             request = FieldExtractionRequest(
                 system_prompt=system_prompt,
-                user_message=user_message,
+                user_message=request_message,
                 field_name=field_config.field_name,
                 field_type=field_config.field_type,
                 context=dynamic_context,
@@ -1859,7 +1903,7 @@ class MessagePipeline:
             # Call LLM (or reuse an identical null, D-035)
             memo_key = (
                 field_config.field_name,
-                f"{system_prompt}|{user_message}",
+                f"{system_prompt}|{request_message}",
             )
             try:
                 if memo is not None and memo_key in memo:
@@ -2093,7 +2137,7 @@ class MessagePipeline:
     def _execute_transition_evaluation_and_execution(
         self,
         instance: FSMInstance,
-        user_message: str,
+        user_message: str | None,
         extraction_response: DataExtractionResponse,
         conversation_id: str,
         *,
@@ -2295,7 +2339,7 @@ class MessagePipeline:
     def _execute_classification_extractions(
         self,
         current_state: State,
-        user_message: str,
+        user_message: str | None,
         instance: FSMInstance,
         conversation_id: str,
         *,
@@ -2320,7 +2364,9 @@ class MessagePipeline:
 
         Args:
             current_state: Current state (for config lookup).
-            user_message: User input to classify.
+            user_message: User input to classify, or ``None`` when the turn
+                has no user message (the classifier then decides from the
+                per-call context alone).
             instance: FSM instance (for model fallback).
             conversation_id: Logging context.
             configs_override: If provided, run only these configs
@@ -2372,7 +2418,11 @@ class MessagePipeline:
                 result: ClassificationResult = classifier.classify(
                     user_message,
                     context=self._build_classifier_context(
-                        instance, current_state, conversation_id, config.context_keys
+                        instance,
+                        current_state,
+                        conversation_id,
+                        config.context_keys,
+                        user_message=user_message,
                     ),
                 )
 
@@ -2446,7 +2496,7 @@ class MessagePipeline:
     def _resolve_ambiguous_transition(
         self,
         evaluation: TransitionEvaluation,
-        user_message: str,
+        user_message: str | None,
         extraction_response: DataExtractionResponse,
         instance: FSMInstance,
         conversation_id: str,
@@ -2456,6 +2506,8 @@ class MessagePipeline:
         Classification is always-on for ambiguous transitions. Builds a
         ClassificationSchema from available transition options and uses
         the Classifier to make a structured, confidence-scored decision.
+        ``user_message`` of ``None`` (no user message) makes the classifier
+        decide among the tied options from the per-call context alone.
 
         Returns the selected target state id, or ``None`` when no transition
         should happen (classifier failure, or the fallback intent). The caller
@@ -2490,7 +2542,10 @@ class MessagePipeline:
             result: ClassificationResult = classifier.classify(
                 user_message,
                 context=self._build_classifier_context(
-                    instance, current_state, conversation_id
+                    instance,
+                    current_state,
+                    conversation_id,
+                    user_message=user_message,
                 ),
             )
         except _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS as e:
@@ -2584,12 +2639,15 @@ class MessagePipeline:
         state: State,
         conversation_id: str,
         context_keys: list[str] | None = None,
+        *,
+        user_message: str | None,
     ) -> dict[str, Any]:
         """Per-call classifier context: ``{"history", "purpose", "data"}``.
 
         ``history`` is the last ``CLASSIFIER_HISTORY_EXCHANGES`` exchanges
         without the in-flight user message (the classifier receives that as
-        its user turn). ``data`` is ``get_user_visible_data()`` (WorkingMemory
+        its user turn). With ``user_message`` of ``None`` no exchange is in
+        flight, so a trailing user entry is a past message and stays. ``data`` is ``get_user_visible_data()`` (WorkingMemory
         included, data wins) scoped by the state's ``read_keys`` and then, when
         given, narrowed to ``context_keys`` (the intersection: ``context_keys``
         can never expose a key ``read_keys`` hides). Security filtering,
@@ -2602,7 +2660,7 @@ class MessagePipeline:
         # must hide from the classifier what it hides from Pass 2, and the
         # result is per-call input to classify(), never a cache-key input.
         history = instance.context.conversation.get_recent(CLASSIFIER_HISTORY_EXCHANGES)
-        if history and "user" in history[-1]:
+        if user_message is not None and history and "user" in history[-1]:
             history = history[:-1]
         # DECISION plan-2026-09-21T203800-8a03483a/D-047: read_keys ALWAYS
         # applies first; context_keys only narrows it. Do NOT return to

@@ -1463,3 +1463,247 @@ class TestFieldTypeCoercionRejectsWrongTypes:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ══════════════════════════════════════════════════════════════
+# Plan 07ad3f8c step 4: Pass-1 prompts for a turn with no user message
+# ══════════════════════════════════════════════════════════════
+
+
+def _research_fsm(read_keys=None, required=None):
+    """Initial ``start`` and a bulk-extracting second state ``research``."""
+    research = State(
+        id="research",
+        description="research step",
+        purpose="Work out the findings",
+        required_context_keys=required,
+        extraction_instructions="Extract the findings and the next_action.",
+        context_scope=ContextScope(read_keys=read_keys) if read_keys else None,
+        transitions=[],
+    )
+    start = _make_state(
+        "start",
+        transitions=[
+            Transition(target_state="research", description="go", priority=100)
+        ],
+    )
+    return _make_fsm_definition({"start": start, "research": research}), research
+
+
+class _RecordingBulk:
+    """``extract_bulk_data`` stand-in that keeps every request."""
+
+    def __init__(self, extracted=None):
+        from fsm_llm.definitions import DataExtractionResponse
+
+        self.requests = []
+        self._response = DataExtractionResponse(
+            extracted_data=extracted or {}, confidence=0.9
+        )
+
+    def __call__(self, request):
+        self.requests.append(request)
+        return self._response
+
+
+class TestBulkPromptWithoutUserMessage:
+    """``_bulk_extract_from_instructions(instance, None, ...)`` builds its
+    prompt from the scoped, security-filtered context."""
+
+    def _run(self, context_data, *, read_keys=None, exchanges=None, message=None):
+        fsm_def, research = _research_fsm(read_keys=read_keys)
+        llm = _make_mock_llm()
+        llm.extract_bulk_data = _RecordingBulk({"findings": "42"})
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        instance = _make_instance(current_state="research", context_data=context_data)
+        for role, text in exchanges or []:
+            if role == "user":
+                instance.context.conversation.add_user_message(text)
+            else:
+                instance.context.conversation.add_system_message(text)
+        result = pipeline._bulk_extract_from_instructions(
+            instance, message, research, "conv-1"
+        )
+        (request,) = llm.extract_bulk_data.requests
+        return request, result
+
+    def test_prompt_has_no_user_message_line_and_no_continue(self):
+        request, result = self._run({"task": "sum 2 and 3"})
+        prompt = request.system_prompt
+        assert "User message" not in prompt
+        assert "user's message" not in prompt
+        assert "Continue" not in prompt
+        assert result == {"findings": "42"}
+
+    def test_prompt_says_what_to_extract_from_and_carries_the_context(self):
+        request, _ = self._run(
+            {"task": "sum 2 and 3"},
+            exchanges=[("user", "use whole numbers"), ("system", "Understood.")],
+        )
+        prompt = request.system_prompt
+        assert prompt.startswith(
+            "Extract information from the current context and the recent "
+            "conversation below.\n\nInstructions: Extract the findings and "
+            "the next_action.\n\nThere is no user message."
+        )
+        assert "<current_context>" in prompt
+        assert "sum 2 and 3" in prompt
+        assert "use whole numbers" in prompt
+        assert "present in the context or the conversation above" in prompt
+
+    def test_request_carries_an_empty_string_not_none(self):
+        request, _ = self._run({"task": "sum 2 and 3"})
+        assert request.user_message == ""
+
+    def test_forbidden_and_internal_keys_never_reach_the_prompt(self):
+        request, _ = self._run(
+            {
+                "task": "sum 2 and 3",
+                "api_key": "sk-live-abcdef0123456789abcdef",
+                "db_password": "hunter2",
+                "_approval_granted": {"tool": "wire_money"},
+                "system_secret_note": "sys-only",
+                "internal_trace": "int-only",
+                "account": {"token": "tok-nested-9f8e7d6c5b4a", "owner": "bo"},
+            }
+        )
+        prompt = request.system_prompt
+        assert "sum 2 and 3" in prompt
+        assert '"owner": "bo"' in prompt
+        for leaked in (
+            "sk-live-abcdef0123456789abcdef",
+            "hunter2",
+            "_approval_granted",
+            "wire_money",
+            "sys-only",
+            "int-only",
+            "tok-nested-9f8e7d6c5b4a",
+        ):
+            assert leaked not in prompt
+
+    def test_read_keys_scope_is_honoured(self):
+        request, _ = self._run(
+            {"task": "sum 2 and 3", "salary": 90210, "notes": "private-notes"},
+            read_keys=["task"],
+        )
+        prompt = request.system_prompt
+        assert "sum 2 and 3" in prompt
+        assert "salary" not in prompt
+        assert "90210" not in prompt
+        assert "private-notes" not in prompt
+
+    def test_read_keys_cannot_expose_a_secret(self):
+        request, _ = self._run(
+            {"task": "t", "password": "hunter2"}, read_keys=["task", "password"]
+        )
+        assert "hunter2" not in request.system_prompt
+
+    def test_no_context_and_no_history_still_builds_a_prompt(self):
+        request, _ = self._run({})
+        assert "(no context available)" in request.system_prompt
+
+    def test_message_prompt_is_byte_identical(self):
+        request, _ = self._run({"task": "hidden from a message prompt"}, message="hi")
+        assert request.system_prompt == (
+            "Extract information from the user's message.\n\n"
+            "Instructions: Extract the findings and the next_action.\n\n"
+            "User message: hi\n\n"
+            'Respond with JSON: {"extracted_data": {"key": "value", ...}, '
+            '"confidence": 0.95, "reasoning": "..."}\n\n'
+            "Only include keys for information actually present in the "
+            "user's message. Use descriptive snake_case key names."
+        )
+        assert request.user_message == "hi"
+
+    def test_empty_string_message_keeps_the_message_prompt(self):
+        request, _ = self._run({"task": "t"}, message="")
+        assert "User message: \n\n" in request.system_prompt
+        assert "<current_context>" not in request.system_prompt
+
+
+class TestFieldExtractionWithoutUserMessage:
+    """``_execute_field_extractions`` with ``None`` sends the context-only
+    prompt and an empty string on the request."""
+
+    def test_request_and_prompt(self):
+        fsm_def, _ = _research_fsm()
+        llm = _make_mock_llm()
+        requests = []
+
+        def _extract(request):
+            requests.append(request)
+            return FieldExtractionResponse(
+                field_name=request.field_name, value="done", confidence=1.0
+            )
+
+        llm.extract_field.side_effect = _extract
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        instance = _make_instance(
+            current_state="research",
+            context_data={"task": "sum 2 and 3", "password": "hunter2"},
+        )
+        config = FieldExtractionConfig(
+            field_name="next_action",
+            field_type="str",
+            extraction_instructions="Extract the next action.",
+        )
+
+        results = pipeline._execute_field_extractions(
+            instance, None, [config], "conv-1"
+        )
+
+        assert [r.value for r in results] == ["done"]
+        (request,) = requests
+        assert request.user_message == ""
+        assert "User message" not in request.system_prompt
+        assert "Continue" not in request.system_prompt
+        assert "sum 2 and 3" in request.system_prompt
+        assert "hunter2" not in request.system_prompt
+
+
+class TestNoCorrectionWithoutUserMessage:
+    """A correction is something a user message asks for: a message-free
+    turn neither overwrites a set key nor reports a rejected correction."""
+
+    def _setup(self, *, with_provenance):
+        from fsm_llm.pipeline import _record_provenance
+
+        fsm_def, _ = _research_fsm(required=["findings"])
+        llm = _make_mock_llm()
+        llm.extract_bulk_data = _RecordingBulk({"findings": "navy"})
+        pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
+        instance = _make_instance(
+            current_state="research", context_data={"findings": "red"}
+        )
+        if with_provenance:
+            _record_provenance(instance, {"findings": "red"})
+        return pipeline, instance
+
+    def test_message_turn_reports_a_grounded_rejected_correction(self):
+        pipeline, instance = self._setup(with_provenance=False)
+        resp = pipeline._execute_data_extraction(instance, "make it navy", "c")
+        assert resp.rejected_corrections == {"findings": "navy"}
+
+    def test_no_message_produces_no_rejected_correction(self):
+        pipeline, instance = self._setup(with_provenance=False)
+        resp = pipeline._execute_data_extraction(instance, None, "c")
+        assert resp.rejected_corrections == {}
+        assert "findings" not in resp.extracted_data
+
+    def test_message_turn_corrects_a_pipeline_extracted_value(self):
+        pipeline, instance = self._setup(with_provenance=True)
+        resp = pipeline._execute_data_extraction(instance, "make it navy", "c")
+        assert resp.extracted_data == {"findings": "navy"}
+
+    def test_no_message_does_not_overwrite_a_pipeline_extracted_value(self):
+        pipeline, instance = self._setup(with_provenance=True)
+        resp = pipeline._execute_data_extraction(instance, None, "c")
+        assert resp.extracted_data == {}
+        assert resp.rejected_corrections == {}
+
+    def test_no_message_still_fills_an_unset_key(self):
+        pipeline, instance = self._setup(with_provenance=False)
+        instance.context.data.pop("findings")
+        configure_mock_extract_field(pipeline.llm_interface, {})
+        resp = pipeline._execute_data_extraction(instance, None, "c")
+        assert resp.extracted_data == {"findings": "navy"}

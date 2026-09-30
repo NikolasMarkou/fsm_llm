@@ -744,7 +744,9 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
 
     It carries the shared ``BasePromptBuilder`` machinery (sanitizer, security
     filter, history and context sections); the pipeline builds its bulk
-    extraction prompt inline and calls this builder for sanitization.
+    extraction prompt inline and calls this builder for sanitization and,
+    on a turn with no user message, for the context and history sections
+    the extraction reads (``build_extraction_source_sections``).
     """
 
     # DECISION plan-2026-09-21T203800-8a03483a/D-041
@@ -759,6 +761,31 @@ class DataExtractionPromptBuilder(BasePromptBuilder):
     def __init__(self, config: DataExtractionPromptConfig | None = None):
         """Initialize data extraction prompt builder with configuration."""
         super().__init__(config or DataExtractionPromptConfig())
+
+    def build_extraction_source_sections(
+        self, instance: FSMInstance, context: dict[str, Any]
+    ) -> list[str]:
+        """Render what a bulk extraction with no user message reads from.
+
+        Contract: ``context`` is the context view the state may read (the
+        pipeline passes user-visible data after ``context_scope.read_keys``).
+        Returns prompt lines: the ``<current_context>`` section (security
+        filter, then the key cap, exactly as Pass 2 renders it) followed by
+        the conversation summary and ``<conversation_history>`` section. An
+        empty ``context`` yields no context section; it never falls back to
+        the full ``instance.context.data``. Returns ``[]`` when there is
+        neither context nor history. Never raises.
+        """
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-023
+        # These are SECTIONS of the one bulk prompt the pipeline builds, not a
+        # second Pass-1 prompt (8a03483a/D-041 above still holds). Do NOT
+        # render the context here with a bare json.dumps or a new filter: the
+        # shared section methods are the only path that applies
+        # has_internal_prefix / is_forbidden_context_entry and the caps.
+        return [
+            *self._build_enhanced_context_section(instance, context),
+            *self._build_enhanced_history_section(instance),
+        ]
 
 
 # ============================================================================
@@ -1258,12 +1285,19 @@ def build_classification_json_schema(
 def build_classification_system_prompt(
     schema: ClassificationSchema,
     config: ClassificationPromptConfig | None = None,
+    *,
+    user_message: str | None = "",
 ) -> str:
     """
     Build the system prompt for an intent classification task.
 
     Includes intent definitions and behavioral rules. The JSON schema
     is embedded so prompt-only approaches also get structure guidance.
+
+    ``user_message`` is the text being classified; only ``None`` changes the
+    prompt. ``None`` means there is no user message: the prompt then asks for
+    a classification of the current context and recent conversation. Any
+    string, the empty one included, gives the message wording.
     """
     if config is None:
         config = ClassificationPromptConfig()
@@ -1303,7 +1337,12 @@ def build_classification_system_prompt(
     if config.multi_intent:
         rules.append(
             f"{next_rule}. "
-            "If the message contains multiple intents, return them ranked by confidence."
+            + (
+                "If several intents apply, return them ranked by confidence."
+                if user_message is None
+                else "If the message contains multiple intents, "
+                "return them ranked by confidence."
+            )
         )
 
     rules_block = "\n".join(rules)
@@ -1316,8 +1355,14 @@ def build_classification_system_prompt(
     else:
         classify_instruction = "classify it into exactly one of the following intents"
 
+    subject = (
+        "the current context and the recent conversation given below "
+        "(there is no user message) and"
+        if user_message is None
+        else "the user's message and"
+    )
     return (
-        f"You are an intent classification engine. Analyze the user's message and "
+        f"You are an intent classification engine. Analyze {subject} "
         f"{classify_instruction}:\n\n"
         f"{intent_block}\n\n"
         f"Rules:\n{rules_block}\n\n"
@@ -1342,7 +1387,9 @@ def sanitize_text_for_prompt(text: str | None) -> str:
     return _CLASSIFICATION_CONTEXT_BUILDER._sanitize_text_for_prompt(text)
 
 
-def build_classification_context_block(context: dict[str, Any] | None) -> str:
+def build_classification_context_block(
+    context: dict[str, Any] | None, *, user_message: str | None = ""
+) -> str:
     """Render per-call classifier context as a ``<classification_context>`` block.
 
     Contract (shared by ``Classifier`` and ``MessagePipeline``):
@@ -1358,6 +1405,9 @@ def build_classification_context_block(context: dict[str, Any] | None) -> str:
     - Returns ``""`` when ``context`` is None/empty or nothing survives
       filtering, so a context-free call keeps a byte-identical system prompt.
       Unserializable data is dropped with a WARNING; this never raises.
+    - ``user_message`` is the text being classified; only ``None`` (no user
+      message) changes the block: its lead line then says the context is
+      what to classify, not an aid to reading a message.
     """
     if not context:
         return ""
@@ -1395,8 +1445,12 @@ def build_classification_context_block(context: dict[str, Any] | None) -> str:
             "",
             "",
             "<classification_context>",
-            "Use this context only to interpret the user's message; "
-            "classify the message itself.",
+            (
+                "There is no user message. Classify from this context."
+                if user_message is None
+                else "Use this context only to interpret the user's message; "
+                "classify the message itself."
+            ),
             *parts,
             "</classification_context>",
         ]
@@ -1433,7 +1487,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         self,
         instance: FSMInstance,
         field_config: FieldExtractionConfig,
-        user_message: str,
+        user_message: str | None,
         dynamic_context: dict[str, Any] | None = None,
     ) -> str:
         """Build a focused prompt for extracting a single field.
@@ -1441,7 +1495,11 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         Args:
             instance: Current FSM instance (for conversation history).
             field_config: Configuration for the field to extract.
-            user_message: The user input to extract from.
+            user_message: The user input to extract from, or ``None`` when
+                the turn has no user message. With ``None`` the prompt names
+                the context and the recent conversation as the source and
+                carries no "User message:" line; a string, the empty one
+                included, gives the message prompt.
             dynamic_context: Subset of context keys relevant to this field.
 
         Returns:
@@ -1458,8 +1516,13 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         # so we focus on WHAT to extract rather than HOW to format.
         from datetime import date as _date
 
+        source = (
+            "the context and recent conversation below"
+            if user_message is None
+            else "the user's message"
+        )
         sections: list[str] = [
-            f"Extract the field '{field_name}' ({field_type}) from the user's message.",
+            f"Extract the field '{field_name}' ({field_type}) from {source}.",
             f"Today's date: {_date.today().isoformat()}",
             "",
             f"Instructions: {instructions}",
@@ -1560,8 +1623,11 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                         sections.append(f"  {label}: {msg}")
 
         # User message
-        sections.append("")
-        sections.append(f"User message: {self._sanitize_text_for_prompt(user_message)}")
+        if user_message is not None:
+            sections.append("")
+            sections.append(
+                f"User message: {self._sanitize_text_for_prompt(user_message)}"
+            )
 
         # DECISION plan_2026-05-31_f08da86d/D-002 [STALE]: literal "Continue." is INLINED,
         # NOT imported from fsm_llm.agents.constants.CONTINUE_MESSAGE — core
@@ -1572,7 +1638,7 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
         # DECISION plan-2026-07-18T051819-80b0bd4d/D-007 [STALE]: this sentinel test reads the
         # RAW user_message, NOT the sanitized copy emitted above. Do NOT collapse
         # the two into one local — see decisions.md D-007.
-        if user_message.strip() == "Continue.":
+        if user_message is not None and user_message.strip() == "Continue.":
             sections.append(
                 "NOTE: 'Continue.' is an agent-loop continuation signal, not new "
                 "user input. Extract the value from the task and the 'Already "
@@ -1588,9 +1654,14 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 "",
                 "IMPORTANT: Extract the value even if partial or relative "
                 "(e.g., 'next Saturday' for a date, 'around 7pm' for a time, "
-                "'a few' for a number). If the value is not in the current "
-                "message, check the recent conversation above. Only set null "
-                "if the information is completely absent.",
+                "'a few' for a number). "
+                + (
+                    ""
+                    if user_message is None
+                    else "If the value is not in the current "
+                    "message, check the recent conversation above. "
+                )
+                + "Only set null if the information is completely absent.",
             ]
         )
 

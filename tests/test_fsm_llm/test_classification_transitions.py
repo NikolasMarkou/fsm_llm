@@ -978,3 +978,216 @@ class TestClassifierCache:
         assert first is not second
         assert [c.kwargs["api_key"] for c in mock_cls.call_args_list] == ["k1", "k2"]
         assert len(pipeline._classifier_cache) == 2
+
+
+# ---------------------------------------------------------------------------
+# Plan 07ad3f8c step 4: classification with no user message
+# ---------------------------------------------------------------------------
+
+
+def _route_fsm() -> tuple[FSMDefinition, State]:
+    """Initial ``start`` and a second state ``route`` with two tied exits."""
+    route = _make_state(
+        "route",
+        transitions=[
+            _make_transition("billing", "The account has an unpaid invoice"),
+            _make_transition("support", "The device reports a fault"),
+        ],
+    )
+    start = _make_state("start", transitions=[_make_transition("route")])
+    return _make_fsm_definition({"start": start, "route": route}), route
+
+
+class _StructuredProvider:
+    """Scripted ``fsm_llm.llm.completion`` that records each request."""
+
+    def __init__(self, intent: str):
+        self.calls: list[dict[str, Any]] = []
+        self._intent = intent
+
+    def completion(self, **kwargs: Any) -> MagicMock:
+        import json
+
+        self.calls.append(kwargs)
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = json.dumps(
+            {"reasoning": "r", "intent": self._intent, "confidence": 0.95}
+        )
+        response.choices[0].message.reasoning_content = None
+        return response
+
+    def __enter__(self) -> _StructuredProvider:
+        self._patches = [
+            patch("fsm_llm.llm.completion", side_effect=self.completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ]
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        for p in reversed(self._patches):
+            p.stop()
+
+
+class TestAmbiguousTransitionWithoutUserMessage:
+    """A turn with no user message resolves a tie from the context alone."""
+
+    def _instance(self) -> FSMInstance:
+        instance = _make_instance(current_state="route")
+        instance.context.data.update(
+            {
+                "invoice_status": "unpaid",
+                "api_key": "sk-live-abcdef0123456789abcdef",
+                "_approval_granted": {"tool": "refund"},
+            }
+        )
+        instance.context.conversation.add_user_message("my bill looks wrong")
+        return instance
+
+    def test_classifier_receives_none_and_the_context(self):
+        fsm_def, _ = _route_fsm()
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, fsm_def)
+        instance = self._instance()
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls_cls:
+            classifier = MagicMock()
+            classifier.classify.return_value = _mock_classifier_result("billing")
+            mock_cls_cls.return_value = classifier
+            result = pipeline._resolve_ambiguous_transition(
+                _make_ambiguous_evaluation("billing", "support"),
+                None,
+                DataExtractionResponse(),
+                instance,
+                "conv-1",
+            )
+
+        assert result == "billing"
+        args, kwargs = classifier.classify.call_args
+        assert args == (None,)
+        # No exchange is in flight, so the last user entry is history.
+        assert kwargs["context"]["history"] == [{"user": "my bill looks wrong"}]
+        assert kwargs["context"]["data"]["invoice_status"] == "unpaid"
+
+    def test_message_turn_still_drops_the_in_flight_user_entry(self):
+        fsm_def, route = _route_fsm()
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, fsm_def)
+        context = pipeline._build_classifier_context(
+            self._instance(), route, "conv-1", user_message="my bill looks wrong"
+        )
+        assert context["history"] == []
+
+    def test_provider_request_is_context_only(self):
+        from fsm_llm.constants import NEUTRAL_USER_TURN
+
+        fsm_def, _ = _route_fsm()
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4o"
+        pipeline = _make_pipeline(mock_llm, fsm_def)
+        instance = self._instance()
+
+        with _StructuredProvider("billing") as provider:
+            result = pipeline._resolve_ambiguous_transition(
+                _make_ambiguous_evaluation("billing", "support"),
+                None,
+                DataExtractionResponse(),
+                instance,
+                "conv-1",
+            )
+
+        assert result == "billing"
+        (call,) = provider.calls
+        system, user = call["messages"]
+        prompt = system["content"]
+        assert "Analyze the user's message" not in prompt
+        assert "classify the message itself" not in prompt
+        assert "there is no user message" in prompt
+        assert "There is no user message. Classify from this context." in prompt
+        assert "unpaid" in prompt
+        assert "my bill looks wrong" in prompt
+        assert "sk-live-abcdef0123456789abcdef" not in prompt
+        assert "_approval_granted" not in prompt
+        assert "Continue" not in prompt
+        assert user == {"role": "user", "content": NEUTRAL_USER_TURN}
+
+    def test_fallback_intent_means_stay(self):
+        fsm_def, _ = _route_fsm()
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4o"
+        pipeline = _make_pipeline(mock_llm, fsm_def)
+
+        with _StructuredProvider(TRANSITION_CLASSIFICATION_FALLBACK_INTENT):
+            result = pipeline._resolve_ambiguous_transition(
+                _make_ambiguous_evaluation("billing", "support"),
+                None,
+                DataExtractionResponse(),
+                self._instance(),
+                "conv-1",
+            )
+
+        assert result is None
+
+
+class TestClassificationExtractionWithoutUserMessage:
+    """``classification_extractions`` on a turn with no user message."""
+
+    def test_context_only_prompt_and_cached_message_prompt_untouched(self):
+        from fsm_llm.classification import Classifier
+
+        schema = _schema("act", "done")
+        with _StructuredProvider("act") as provider:
+            classifier = Classifier(schema, model="gpt-4o")
+            cached = classifier._system_prompt
+            first = classifier.classify(None, context={"data": {"task": "sum"}})
+            second = classifier.classify("please add", context={"data": {"t": 1}})
+
+        assert first.intent == second.intent == "act"
+        no_message, with_message = provider.calls
+        assert "there is no user message" in no_message["messages"][0]["content"]
+        assert with_message["messages"][0]["content"].startswith(cached)
+        assert "Analyze the user's message" in cached
+        assert with_message["messages"][1]["content"] == "please add"
+        assert classifier._system_prompt == cached
+
+    def test_pipeline_extraction_site_passes_none(self):
+        state = State(
+            id="route",
+            description="d",
+            purpose="Pick the next move",
+            classification_extractions=[
+                ClassificationExtractionConfig(
+                    field_name="next_move",
+                    intents=[
+                        IntentDefinition(name="act", description="Call a tool"),
+                        IntentDefinition(name="done", description="Answer now"),
+                    ],
+                    fallback_intent="done",
+                )
+            ],
+            transitions=[],
+        )
+        start = _make_state("start", transitions=[_make_transition("route")])
+        fsm_def = _make_fsm_definition({"start": start, "route": state})
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4o"
+        pipeline = _make_pipeline(mock_llm, fsm_def)
+        instance = _make_instance(current_state="route")
+        instance.context.data["task"] = "sum 2 and 3"
+
+        with _StructuredProvider("act") as provider:
+            data = pipeline._execute_classification_extractions(
+                state, None, instance, "conv-1"
+            )
+
+        assert data == {"next_move": "act"}
+        (call,) = provider.calls
+        assert "there is no user message" in call["messages"][0]["content"]
+        assert "sum 2 and 3" in call["messages"][0]["content"]

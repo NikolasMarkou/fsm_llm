@@ -947,3 +947,204 @@ class TestNestedContextSecurityFiltering:
         assert "nickname" in prompt
         # ...and the secret nested inside it was still removed.
         assert "hunter2" not in prompt
+
+
+# ============================================================================
+# Plan 07ad3f8c step 4 -- prompts for a turn with no user message
+# ============================================================================
+
+
+def _plan_field_prompt(user_message, exchanges=None):
+    builder = FieldExtractionPromptBuilder()
+    instance = _make_instance(current_state="plan", exchanges=exchanges)
+    field_config = FieldExtractionConfig(
+        field_name="plan_steps",
+        field_type="any",
+        extraction_instructions="Extract the list of plan steps.",
+    )
+    return builder.build_field_extraction_prompt(
+        instance=instance,
+        field_config=field_config,
+        user_message=user_message,
+        dynamic_context={"task": "compute the sum of 2 and 3"},
+    )
+
+
+class TestFieldExtractionPromptWithoutUserMessage:
+    """``user_message=None`` is a turn with no user message: the per-field
+    prompt names the context and the conversation as its source."""
+
+    def test_no_user_message_line(self):
+        prompt = _plan_field_prompt(None)
+        assert "User message" not in prompt
+        assert "user's message" not in prompt
+
+    def test_no_continue_note(self):
+        prompt = _plan_field_prompt(None)
+        assert "Continue" not in prompt
+        assert "continuation signal" not in prompt
+
+    def test_no_current_message_tail(self):
+        prompt = _plan_field_prompt(None)
+        assert "not in the current message" not in prompt
+        assert "Only set null if the information is completely absent." in prompt
+
+    def test_names_context_and_conversation_as_the_source(self):
+        prompt = _plan_field_prompt(None)
+        first_line = prompt.splitlines()[0]
+        assert first_line == (
+            "Extract the field 'plan_steps' (any) from the context and "
+            "recent conversation below."
+        )
+        assert "compute the sum of 2 and 3" in prompt
+
+    def test_history_is_still_rendered(self):
+        prompt = _plan_field_prompt(
+            None, exchanges=[{"user": "add two numbers"}, {"system": "Sure."}]
+        )
+        assert "  User: add two numbers" in prompt
+        assert "  Assistant: Sure." in prompt
+
+    def test_empty_string_is_a_message_not_the_no_message_case(self):
+        # converse("") is a real (empty) message: the prompt keeps its shape.
+        prompt = _plan_field_prompt("")
+        assert prompt.splitlines()[0] == (
+            "Extract the field 'plan_steps' (any) from the user's message."
+        )
+        assert "\nUser message: \n" in prompt
+        assert "If the value is not in the current message" in prompt
+
+    def test_message_prompt_tail_is_unchanged(self):
+        prompt = _plan_field_prompt("three steps please")
+        assert prompt.endswith(
+            "IMPORTANT: Extract the value even if partial or relative "
+            "(e.g., 'next Saturday' for a date, 'around 7pm' for a time, "
+            "'a few' for a number). If the value is not in the current "
+            "message, check the recent conversation above. Only set null "
+            "if the information is completely absent."
+        )
+        assert "\nUser message: three steps please\n" in prompt
+
+
+class TestExtractionSourceSections:
+    """``DataExtractionPromptBuilder.build_extraction_source_sections`` renders
+    the context and history a message-free bulk extraction reads."""
+
+    def _sections(self, context, *, instance_data=None, exchanges=None):
+        from fsm_llm.prompts import DataExtractionPromptBuilder
+
+        instance = _make_instance(context_data=instance_data, exchanges=exchanges)
+        return "\n".join(
+            DataExtractionPromptBuilder().build_extraction_source_sections(
+                instance, context
+            )
+        )
+
+    def test_renders_context_and_history(self):
+        text = self._sections(
+            {"task": "book a table"},
+            exchanges=[{"user": "for four people"}, {"system": "Noted."}],
+        )
+        assert "<current_context>" in text
+        assert "book a table" in text
+        assert "<conversation_history>" in text
+        assert "for four people" in text
+
+    def test_forbidden_and_internal_keys_are_dropped(self):
+        text = self._sections(
+            {
+                "task": "book a table",
+                "api_key": "sk-live-abcdef0123456789abcdef",
+                "password": "hunter2",
+                "_approval_granted": {"tool": "x"},
+                "system_note": "internal-only",
+                "profile": {"password": "nested-hunter2", "nickname": "bo"},
+            }
+        )
+        assert "book a table" in text
+        assert "bo" in text
+        for leaked in (
+            "sk-live-abcdef0123456789abcdef",
+            "hunter2",
+            "_approval_granted",
+            "internal-only",
+        ):
+            assert leaked not in text
+
+    def test_empty_view_never_falls_back_to_the_full_context(self):
+        # read_keys may scope everything away; the instance data must not
+        # reappear through a "no context given" default.
+        text = self._sections({}, instance_data={"salary": 90000})
+        assert "salary" not in text
+        assert text == ""
+
+
+class TestClassificationPromptWithoutUserMessage:
+    """The classifier prompt functions take the message; only ``None`` (no
+    user message) changes their wording."""
+
+    def _schema(self):
+        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+
+        return ClassificationSchema(
+            intents=[
+                IntentDefinition(name="act", description="A tool call is needed"),
+                IntentDefinition(name="done", description="The task is answered"),
+            ],
+            fallback_intent="done",
+        )
+
+    def test_system_prompt_asks_for_a_classification_of_the_context(self):
+        from fsm_llm.prompts import build_classification_system_prompt
+
+        prompt = build_classification_system_prompt(self._schema(), user_message=None)
+        assert "Analyze the user's message" not in prompt
+        assert "there is no user message" in prompt
+        assert "the current context and the recent conversation" in prompt
+        assert "- act: A tool call is needed" in prompt
+
+    def test_multi_intent_rule_does_not_mention_a_message(self):
+        from fsm_llm.prompts import (
+            ClassificationPromptConfig,
+            build_classification_system_prompt,
+        )
+
+        config = ClassificationPromptConfig(multi_intent=True)
+        prompt = build_classification_system_prompt(
+            self._schema(), config, user_message=None
+        )
+        assert "If the message contains multiple intents" not in prompt
+        assert "If several intents apply" in prompt
+
+    @pytest.mark.parametrize("message", ["", "hello"])
+    def test_a_string_message_keeps_the_default_prompt(self, message):
+        from fsm_llm.prompts import build_classification_system_prompt
+
+        default = build_classification_system_prompt(self._schema())
+        assert (
+            build_classification_system_prompt(self._schema(), user_message=message)
+            == default
+        )
+        assert "Analyze the user's message and classify it" in default
+
+    def test_context_block_lead_line(self):
+        from fsm_llm.prompts import build_classification_context_block
+
+        context = {"purpose": "Decide the next step", "data": {"task": "sum"}}
+        block = build_classification_context_block(context, user_message=None)
+        assert "There is no user message. Classify from this context." in block
+        assert "classify the message itself" not in block
+        assert "sum" in block
+        default = build_classification_context_block(context)
+        assert "classify the message itself" in default
+        assert build_classification_context_block(context, user_message="") == default
+
+    def test_context_block_still_filters_secrets(self):
+        from fsm_llm.prompts import build_classification_context_block
+
+        block = build_classification_context_block(
+            {"data": {"task": "sum", "password": "hunter2", "_grant": "g"}},
+            user_message=None,
+        )
+        assert "hunter2" not in block
+        assert "_grant" not in block

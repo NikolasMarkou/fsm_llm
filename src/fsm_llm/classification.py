@@ -144,13 +144,16 @@ class Classifier:
     # ----------------------------------------------------------
 
     def classify(
-        self, user_message: str, context: dict[str, Any] | None = None
+        self, user_message: str | None, context: dict[str, Any] | None = None
     ) -> ClassificationResult:
         """
         Classify a single user message into one intent.
 
         Args:
-            user_message: The message to classify (sent as the user turn).
+            user_message: The message to classify (sent as the user turn), or
+                ``None`` when there is no user message: the system prompt
+                then asks for a classification of ``context`` alone and the
+                user turn is left empty for the LLM layer to fill.
             context: Optional per-call context ``{"history", "purpose",
                 "data"}`` rendered, sanitized and security-filtered, into the
                 system prompt (see ``build_classification_context_block``).
@@ -166,12 +169,13 @@ class Classifier:
         return self._parse_single(raw)
 
     def classify_multi(
-        self, user_message: str, context: dict[str, Any] | None = None
+        self, user_message: str | None, context: dict[str, Any] | None = None
     ) -> MultiClassificationResult:
         """
         Classify a message that may contain multiple intents.
 
-        ``context`` is the same optional per-call context as ``classify``.
+        ``user_message`` and ``context`` have the meaning they have in
+        ``classify``.
 
         Returns:
             MultiClassificationResult with a ranked list of IntentScores.
@@ -189,12 +193,16 @@ class Classifier:
 
     def _call_llm(
         self,
-        user_message: str,
+        user_message: str | None,
         *,
         multi_intent: bool,
         context: dict[str, Any] | None = None,
     ) -> dict:
-        """Make the LLM call and return the parsed JSON dict."""
+        """Make the LLM call and return the parsed JSON dict.
+
+        ``user_message`` of ``None`` selects the context-only system prompt
+        and sends ``""`` as the user turn.
+        """
         start = time.time()
 
         # DECISION plan-2026-09-21T203800-8a03483a/D-004: per-call context is
@@ -204,13 +212,25 @@ class Classifier:
         # a constructor input would either go stale or bust the content-keyed
         # cache on every turn. Do NOT render context text without the shared
         # prompts.py sanitizer/filter: history and data are user-controlled.
-        system_prompt = (
-            self._multi_system_prompt if multi_intent else self._system_prompt
-        ) + build_classification_context_block(context)
+        if user_message is None:
+            # Built per call: the cached prompts are the message wording, and
+            # a message-free call is the rarer path.
+            base_prompt = build_classification_system_prompt(
+                self.schema,
+                replace(self.config, multi_intent=multi_intent),
+                user_message=None,
+            )
+        else:
+            base_prompt = (
+                self._multi_system_prompt if multi_intent else self._system_prompt
+            )
+        system_prompt = base_prompt + build_classification_context_block(
+            context, user_message=user_message
+        )
         try:
             response = self._llm.complete_structured(
                 system_prompt,
-                user_message,
+                user_message or "",
                 json_schema=(
                     self._multi_json_schema if multi_intent else self._json_schema
                 ),
@@ -451,7 +471,7 @@ class HierarchicalClassifier:
         }
 
     def classify(
-        self, user_message: str, context: dict[str, Any] | None = None
+        self, user_message: str | None, context: dict[str, Any] | None = None
     ) -> HierarchicalResult:
         """
         Run two-stage classification: domain then intent.
