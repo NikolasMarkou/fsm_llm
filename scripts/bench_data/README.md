@@ -1,6 +1,7 @@
 # bench_data -- committed harness bench artifacts
 
-Raw, append-only evidence produced by `scripts/harness_bench.py`. This
+Raw, append-only evidence produced by `scripts/harness_bench.py` and
+`scripts/agents_bench.py`. This
 directory is GIT-TRACKED on purpose: the predecessor plan's bench scripts and
 jsonl traces lived in gitignored scratch directories and are gone, so none of
 its live numbers can be diffed or recomputed (plans/LESSONS.md [I:4]). Nothing
@@ -22,6 +23,9 @@ bench_data/
 ├── l7-explore-coldstart/     # EXPLORE cold-start A/B, one dispatch per row
 │   └── <block>/              # B0, ... manifest_<arm>.json + rows_<arm>.jsonl
 │                             #   + summary_<arm>.json, arm in {bare, seeded}
+├── agents-react/             # agents_bench.py: ground-truth tool-loop tasks,
+│   └── <block>/              #   one row per (task, trial); manifest_<arm>.json
+│                             #   + rows_<arm>.jsonl + summary_<arm>.json
 └── seed-probe/               # probe-seed records (plan step 2)
 ```
 
@@ -35,6 +39,11 @@ read as the same axis:
   `PlanDirectory.seed_protocol_skeleton()`) -- these are PLAN-DIRECTORY shapes,
   and BOTH run `native_function_calling=True`. The independent variable is the
   on-disk population, not the agent.
+- `agents-react`: agent engines on the same task set. `legacy` is
+  `create_agent("react", tools, config=...)` (the FSM-driven ReactAgent),
+  `native_fc` is `NativeFunctionCallingReactAgent`; a later block uses a new
+  arm label for changed code, never an old one. `report` reads arm labels from the `rows_<arm>.jsonl` file names, so
+  rows of an arm whose code was deleted still recount.
 
 ## Pre-registration rule (D-002)
 
@@ -73,3 +82,45 @@ Recompute everything from the raw rows:
 ```
 .venv/bin/python scripts/harness_bench.py report <bench-id>
 ```
+
+## agents-react (scripts/agents_bench.py)
+
+38 deterministic tasks in 7 categories (`single_tool`, `multi_step_chain`,
+`no_tool_needed`, `error_recovery`, `typed_args`, `distractor_tools`,
+`unanswerable`) with pure in-file tools and non-LLM graders; each task runs
+for `trials` (3) fresh trials, trial-major. `list-tasks --verify` grades every
+reference answer. `register` writes a manifest alone, so it can be committed
+before row 1; `run` then checks it (task hash, trials, model, limits, wrapper,
+served digest) and refuses on drift.
+
+Manifest: the six fields above (`fixture_hash` equals `tasks_sha256`,
+`prompt_bytes_sha256` hashes the task prompts, `tool_surface` holds the arm,
+limits and per-task tool names, `arm` is `{name, factory}`) plus
+`tasks_sha256` (sha256 of the file region between the `BEGIN TASKS` and
+`END TASKS` markers: tools, tasks, graders, reference solvers; arms and limits
+sit outside it), `trials`, `temperature`, `limits`, `wrapper_version`,
+`n_tasks`, `n_preregistered`, `order`, `model`.
+
+Row schema (rows_<arm>.jsonl): `task_id`, `category`, `arm`, `trial`,
+`correct` (grader on `answer`), `success`, `stop_reason` (`timeout`/`error`
+when the run raised), `iterations`, `tool_calls`, `tools_used`, `llm_calls`,
+`llm_errors`, `usage_missing`, `prompt_tokens`, `completion_tokens`,
+`total_tokens` (a bench-local wrapper on `litellm.completion`,
+`litellm.acompletion`, `fsm_llm.llm.completion`,
+`fsm_llm.classification.completion`), `latency_s`, `error`, `answer`
+(first 500 chars), `bench_id`, `block`, `ts`.
+
+Summary `metrics` (all recounted by `report`): first-trial pass@1 (primary,
+one independent unit per task) with Wilson, mean over trials, pass^k, the
+success x correct cross-tab, error count, llm calls and tokens mean/median,
+tool calls mean, nearest-rank p50/p95 latency, stop_reason histogram, and a
+per-category table.
+
+```
+.venv/bin/python scripts/agents_bench.py report agents-react \
+    --blocks B0 B1 --pair B1/<new-arm>:B0/legacy
+```
+
+`--pair A:B` (each side `ARM` or `BLOCK/ARM`) prints Fisher two-sided on
+first-trial pass@1 and pass^k, only when both manifests pin the same model
+digest.

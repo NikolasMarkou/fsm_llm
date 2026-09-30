@@ -268,3 +268,48 @@ Work deferred to Phases 2-6 of the original roadmap:
 - Harness migration to the new runtime after Phase 4 (roadmap D8).
 
 Deprecations (roadmap D5), deferred to Track B: ParallelReact, Debate and SelfConsistency, once the runtime offers replacements (D-020). Also candidates: the positional `create_agent(system_prompt, ...)` shim (warns since this change), `DecompositionError`, `ToolValidationError`.
+
+## Recorded baselines at `d4b1626`
+
+Two "before" records for later agent changes. Both measure the agents code of commit `d4b1626`.
+
+### G3 baseline
+
+`fsm-llm-eval examples --category agents` run from a clean worktree at `d4b1626`. N=1 heuristic score (a coarse proxy, not a success rate).
+
+| Point | Commit | Model | Workers | Health | Envelope leaks | `Success:` lines (True / False) | stop_reason lines | Output |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Baseline | `d4b1626` | `ollama_chat/qwen3.5:4b` | 4 | 178/192 = 92.7% | 0 | 20 / 9 | 0 | `evaluation/2026-09-29_22-12_d4b1626_g3-baseline/` (gitignored, local only) |
+
+Score distribution: 43 PASS, 1 PARTIAL, 4 BROKEN. Wall time 1,517.5 s for 48 examples.
+
+Non-PASS:
+
+| Example | Score | Failure | Time |
+| --- | --- | --- | --- |
+| concurrent_react | 2 (PARTIAL) | F-EXTRACT (1/3 fields; `all_tasks_succeeded` and `all_answers_present` reported False) | 108.0 s |
+| hierarchical_orchestrator | 1 (BROKEN) | F-LOOP, timeout | 300.1 s |
+| orchestrator_specialist | 1 (BROKEN) | F-LOOP, timeout | 300.1 s |
+| plan_execute | 1 (BROKEN) | F-LOOP, timeout | 180.1 s |
+| supply_chain_optimizer | 1 (BROKEN) | F-LOOP, timeout | 300.1 s |
+
+How the counts were read (raw logs, not the score):
+
+- Envelope leaks: no log contains `"field_name"` or `extracted_data`.
+- `Success:` lines: 18 `Success: True` and 7 `Success: False` lines, plus `Pipeline success: True` in react_structured_pipeline and three panel lines in multi_debate_panel (1 `success=True`, 2 `success=False`). 21 examples print no success line at all.
+- All 7 examples that print `Success: False` still score 4 (PASS): architecture_review, debate, eval_opt_structured, legal_document_review, maker_checker_code, reflexion, regulatory_compliance. The scorer does not read `result.success`.
+- No example prints a `stop_reason`, so the logs cannot show why a run stopped.
+- The four timed-out examples left empty STDOUT and STDERR in their logs (output is lost when the process is killed), so they give no raw evidence beyond the timeout.
+
+Compared with the G3 at `7696061` (181/192 = 94.3%): 3 points lower, within N=1 noise. concurrent_react, orchestrator_specialist and supply_chain_optimizer are non-PASS in both runs. Of the D-040 re-check list, adapt and maker_checker_code now pass and hierarchical_orchestrator times out.
+
+### Agent bench block B0
+
+`scripts/bench_data/agents-react/B0/` (tracked; never edited or re-run). 38 tasks, 3 trials, `ollama_chat/qwen3.5:4b` (digest `2a654d98...`), max_iterations 8, timeout 180 s, temperature 0.5. The rows were produced at commit `73d7a6c`, whose `src/` is identical to `d4b1626`. Recount offline with `.venv/bin/python scripts/agents_bench.py report agents-react`.
+
+| Arm | Engine | First-trial pass@1 (Wilson 95%) | pass^3 | Rows correct | success but incorrect | LLM calls mean | Latency p50 | Stop reasons |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `legacy` | `create_agent("react", ...)` (FSM ReactAgent) | 28/38 = 73.7% (0.580-0.850) | 26/38 | 81/114 | 15 | 11.5 | 12.2 s | answered 93, stalled 15, max_iterations 6 |
+| `native_fc` | `NativeFunctionCallingReactAgent` | 37/38 = 97.4% (0.865-0.995) | 36/38 | 110/114 | 4 | 2.4 | 0.95 s | answered 114 |
+
+The `legacy` arm loses mostly on `multi_step_chain` (2/6 first trial) and `no_tool_needed` (2/5). A comparison block must use a new block id, a new arm label, the same task hash and limits, and the same model digest.
