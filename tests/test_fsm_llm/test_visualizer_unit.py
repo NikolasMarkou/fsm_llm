@@ -1386,3 +1386,495 @@ class TestStatesSectionIconBudgetTruncationIsVisible:
             "content was shortened with no ellipsis marker in the STATES "
             "section icon-budget branch:\n" + "\n".join(rows)
         )
+
+
+# ------------------------------------------------------------------
+# Graph data, Mermaid and DOT export, `--format`
+# ------------------------------------------------------------------
+
+import re
+
+import pydantic
+
+import fsm_llm
+from fsm_llm.definitions import FSMDefinition
+from fsm_llm.visualizer import (
+    OUTPUT_FORMATS,
+    FSMGraph,
+    FSMGraphEdge,
+    FSMGraphNode,
+    build_fsm_graph,
+    to_dot,
+    to_mermaid,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _claude_md_example_fsm() -> dict:
+    """The FSM definition example of the root ``CLAUDE.md``, read from the file."""
+    text = (_REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    blocks = [
+        block
+        for block in re.findall(r"```json\n(.*?)```", text, re.DOTALL)
+        if '"initial_state"' in block
+    ]
+    assert len(blocks) == 1, "root CLAUDE.md must hold exactly one FSM example"
+    return json.loads(blocks[0])
+
+
+def _tricky_fsm_data() -> dict:
+    """Four states in one FSM: a self-loop, two terminal states, a state id
+    with a space and a hyphen, one that is a Mermaid keyword (``end``), one
+    that equals a generated alias (``state_1``), a label with quotes, a
+    newline and ``: ; # < >``, a label with a backslash, and a transition
+    with neither description nor priority."""
+    return {
+        "name": 'Tricky "FSM"',
+        "description": "Export edge cases",
+        "initial_state": "intake",
+        "states": {
+            "intake": {
+                "description": "Collect the request",
+                "purpose": "Route it",
+                "transitions": [
+                    {
+                        "target_state": "my state-1",
+                        "description": 'Say "hi":\n next; #1 <b>',
+                        "priority": 5,
+                    },
+                    {
+                        "target_state": "intake",
+                        "description": "again",
+                        "priority": 20,
+                    },
+                    {"target_state": "end"},
+                    {
+                        "target_state": "state_1",
+                        "description": "back\\slash",
+                        "priority": 0,
+                    },
+                ],
+            },
+            "my state-1": {
+                "description": "Needs quoting",
+                "purpose": "Review",
+                "transitions": [{"target_state": "end", "description": "done"}],
+            },
+            "end": {"description": "Done", "purpose": "Stop", "transitions": []},
+            "state_1": {"description": "Rejected", "purpose": "Stop"},
+        },
+    }
+
+
+_DOT_STRING = r'"(?:[^"\\\n]|\\.)*"'
+_DOT_STATEMENT = re.compile(
+    rf"    (?:rankdir=LR"
+    rf"|{_DOT_STRING}(?: \[shape=(?:point|doublecircle)\])?"
+    rf"|{_DOT_STRING} -> {_DOT_STRING}(?: \[label={_DOT_STRING}\])?);\Z"
+)
+_MERMAID_STATEMENT = re.compile(
+    r"    (?:state \"(?P<display>[^\"\n]*)\" as \w+"
+    r"|(?:\[\*\]|\w+) --> (?:\[\*\]|\w+)(?: : (?P<label>.+))?)\Z"
+)
+
+
+def _assert_well_formed_dot(text: str) -> None:
+    lines = text.split("\n")
+    assert re.fullmatch(rf"digraph {_DOT_STRING} \{{", lines[0]), lines[0]
+    assert lines[-1] == "}"
+    for line in lines[1:-1]:
+        assert _DOT_STATEMENT.match(line), f"not a DOT statement: {line!r}"
+
+
+def _assert_well_formed_mermaid(text: str) -> None:
+    lines = text.split("\n")
+    assert lines[0] == "stateDiagram-v2"
+    for line in lines[1:]:
+        match = _MERMAID_STATEMENT.match(line)
+        assert match, f"not a state-diagram statement: {line!r}"
+        free_text = match.group("display") or match.group("label") or ""
+        leftover = re.sub(r"#\w+;", "", free_text)
+        assert not set(leftover) & set('"#;:<>'), f"unescaped text in {line!r}"
+
+
+class TestFsmGraph:
+    """`build_fsm_graph`: the one graph of an FSM definition (D-018)."""
+
+    def test_claude_md_example(self):
+        graph = build_fsm_graph(_claude_md_example_fsm())
+
+        assert graph.name == "MyBot"
+        assert graph.initial_state == "start"
+        assert graph.nodes == (
+            FSMGraphNode(
+                id="start",
+                description="Brief state description",
+                purpose="What should be accomplished",
+                is_initial=True,
+                is_terminal=False,
+            ),
+            FSMGraphNode(
+                id="next",
+                description="Terminal state",
+                purpose="Wrap up the conversation",
+                is_initial=False,
+                is_terminal=True,
+            ),
+        )
+        assert graph.edges == (
+            FSMGraphEdge(
+                source="start",
+                target="next",
+                description="When this transition should fire",
+                priority=100,
+            ),
+        )
+
+    def test_definition_and_its_dict_give_the_same_graph(self):
+        data = _claude_md_example_fsm()
+        assert build_fsm_graph(FSMDefinition(**data)) == build_fsm_graph(data)
+
+    def test_order_priority_self_loop_and_terminals(self):
+        graph = build_fsm_graph(_tricky_fsm_data())
+
+        assert [n.id for n in graph.nodes] == ["intake", "my state-1", "end", "state_1"]
+        assert [n.id for n in graph.nodes if n.is_initial] == ["intake"]
+        assert [n.id for n in graph.nodes if n.is_terminal] == ["end", "state_1"]
+        assert [(e.source, e.target, e.priority) for e in graph.edges] == [
+            ("intake", "my state-1", 5),
+            ("intake", "intake", 20),
+            ("intake", "end", 100),  # no priority: the Transition default
+            ("intake", "state_1", 0),  # an explicit 0 is kept, not defaulted
+            ("my state-1", "end", 100),
+        ]
+        assert graph.edges[2].description == ""
+
+    def test_descriptions_are_not_shortened(self):
+        data = _linear_fsm_data()
+        long_text = "word " * 60 + 'and the "last" word\nis on a second line'
+        data["states"]["start"]["transitions"][0]["description"] = long_text
+
+        assert build_fsm_graph(data).edges[0].description == long_text
+
+    def test_null_transitions_is_a_terminal_state(self):
+        data = _linear_fsm_data()
+        data["states"]["end"]["transitions"] = None
+
+        assert build_fsm_graph(data).nodes[1].is_terminal is True
+
+    def test_a_state_that_is_initial_and_terminal(self):
+        data = {
+            "name": "One",
+            "initial_state": "only",
+            "states": {"only": {"description": "d", "purpose": "p"}},
+        }
+        graph = build_fsm_graph(data)
+
+        assert (graph.nodes[0].is_initial, graph.nodes[0].is_terminal) == (True, True)
+        assert graph.edges == ()
+        assert to_mermaid(graph).split("\n")[1:] == [
+            "    [*] --> only",
+            "    only --> [*]",
+        ]
+
+    def test_missing_initial_state_is_refused(self):
+        data = _linear_fsm_data()
+        data["initial_state"] = "nowhere"
+
+        with pytest.raises(ValueError, match="initial_state 'nowhere'"):
+            build_fsm_graph(data)
+
+    def test_dangling_target_is_refused(self):
+        data = _linear_fsm_data()
+        data["states"]["start"]["transitions"][0]["target_state"] = "ghost"
+
+        with pytest.raises(ValueError, match="non-existent state 'ghost'"):
+            build_fsm_graph(data)
+
+    def test_a_non_integer_priority_is_refused(self):
+        data = _linear_fsm_data()
+        data["states"]["start"]["transitions"][0]["priority"] = "high"
+
+        with pytest.raises(ValueError, match="priority"):
+            build_fsm_graph(data)
+
+    def test_graph_is_frozen(self):
+        graph = build_fsm_graph(_linear_fsm_data())
+
+        with pytest.raises(pydantic.ValidationError):
+            graph.name = "other"
+        with pytest.raises(pydantic.ValidationError):
+            graph.nodes[0].is_terminal = True
+        with pytest.raises(pydantic.ValidationError):
+            graph.edges[0].priority = 1
+
+    def test_input_is_not_mutated(self):
+        data = _tricky_fsm_data()
+        before = json.dumps(data, sort_keys=True)
+        build_fsm_graph(data)
+
+        assert json.dumps(data, sort_keys=True) == before
+
+    def test_public_names_are_exported(self):
+        for name in (
+            "FSMGraph",
+            "FSMGraphNode",
+            "FSMGraphEdge",
+            "build_fsm_graph",
+            "to_mermaid",
+            "to_dot",
+        ):
+            assert name in fsm_llm.__all__
+            assert getattr(fsm_llm, name) is getattr(fsm_llm.visualizer, name)
+
+
+class TestMermaidExport:
+    def test_claude_md_example(self):
+        assert to_mermaid(build_fsm_graph(_claude_md_example_fsm())) == (
+            "stateDiagram-v2\n"
+            "    [*] --> start\n"
+            "    start --> next : P100 When this transition should fire\n"
+            "    next --> [*]"
+        )
+
+    def test_escaping_aliases_self_loop_and_two_terminals(self):
+        text = to_mermaid(build_fsm_graph(_tricky_fsm_data()))
+
+        assert text == (
+            "stateDiagram-v2\n"
+            '    state "my state-1" as state_1_\n'
+            '    state "end" as state_2\n'
+            "    [*] --> intake\n"
+            "    intake --> state_1_ : "
+            "P5 Say #quot;hi#quot;#58; next#59; #35;1 #lt;b#gt;\n"
+            "    intake --> intake : P20 again\n"
+            "    intake --> state_2 : P100\n"
+            "    intake --> state_1 : P0 back\\slash\n"
+            "    state_1_ --> state_2 : P100 done\n"
+            "    state_2 --> [*]\n"
+            "    state_1 --> [*]"
+        )
+        _assert_well_formed_mermaid(text)
+
+    def test_a_state_id_with_quotes_and_a_newline_is_escaped_in_its_label(self):
+        data = _linear_fsm_data()
+        data["states"]['the "end"\n#2'] = data["states"].pop("end")
+        data["states"]["start"]["transitions"][0]["target_state"] = 'the "end"\n#2'
+        text = to_mermaid(build_fsm_graph(data))
+
+        assert text == (
+            "stateDiagram-v2\n"
+            '    state "the #quot;end#quot; #35;2" as state_1\n'
+            "    [*] --> start\n"
+            "    start --> state_1 : P100 Finish\n"
+            "    state_1 --> [*]"
+        )
+        _assert_well_formed_mermaid(text)
+
+    @pytest.mark.parametrize("keyword", ["end", "End", "state", "note", "direction"])
+    def test_a_keyword_state_id_is_never_a_bare_id(self, keyword):
+        data = _linear_fsm_data()
+        data["states"][keyword] = data["states"].pop("end")
+        data["states"]["start"]["transitions"][0]["target_state"] = keyword
+        lines = to_mermaid(build_fsm_graph(data)).split("\n")
+
+        assert f'    state "{keyword}" as state_1' in lines
+        assert "    start --> state_1 : P100 Finish" in lines
+        edges = [ln.split(" : ")[0].split() for ln in lines if "-->" in ln]
+        assert edges == [
+            ["[*]", "-->", "start"],
+            ["start", "-->", "state_1"],
+            ["state_1", "-->", "[*]"],
+        ]
+
+    def test_renderer_reads_only_the_graph(self):
+        graph = FSMGraph(
+            name="Hand built",
+            initial_state="a",
+            nodes=(
+                FSMGraphNode(id="a", is_initial=True),
+                FSMGraphNode(id="b", is_terminal=True),
+            ),
+            edges=(FSMGraphEdge(source="a", target="b", priority=7),),
+        )
+
+        assert to_mermaid(graph) == (
+            "stateDiagram-v2\n    [*] --> a\n    a --> b : P7\n    b --> [*]"
+        )
+        assert to_mermaid(graph) == to_mermaid(graph)
+
+
+class TestDotExport:
+    def test_claude_md_example(self):
+        text = to_dot(build_fsm_graph(_claude_md_example_fsm()))
+
+        assert text == (
+            'digraph "MyBot" {\n'
+            "    rankdir=LR;\n"
+            '    "__start__" [shape=point];\n'
+            '    "start";\n'
+            '    "next" [shape=doublecircle];\n'
+            '    "__start__" -> "start";\n'
+            '    "start" -> "next" [label="P100 When this transition should fire"];\n'
+            "}"
+        )
+        _assert_well_formed_dot(text)
+
+    def test_escaping_quoted_ids_self_loop_and_two_terminals(self):
+        text = to_dot(build_fsm_graph(_tricky_fsm_data()))
+
+        assert text == (
+            'digraph "Tricky \\"FSM\\"" {\n'
+            "    rankdir=LR;\n"
+            '    "__start__" [shape=point];\n'
+            '    "intake";\n'
+            '    "my state-1";\n'
+            '    "end" [shape=doublecircle];\n'
+            '    "state_1" [shape=doublecircle];\n'
+            '    "__start__" -> "intake";\n'
+            '    "intake" -> "my state-1" '
+            '[label="P5 Say \\"hi\\": next; #1 <b>"];\n'
+            '    "intake" -> "intake" [label="P20 again"];\n'
+            '    "intake" -> "end" [label="P100"];\n'
+            '    "intake" -> "state_1" [label="P0 back\\\\slash"];\n'
+            '    "my state-1" -> "end" [label="P100 done"];\n'
+            "}"
+        )
+        _assert_well_formed_dot(text)
+
+    def test_a_state_id_with_a_quote_a_backslash_and_a_newline(self):
+        odd = 'a"b\\c\nd'
+        data = _linear_fsm_data()
+        data["states"][odd] = data["states"].pop("end")
+        data["states"]["start"]["transitions"][0]["target_state"] = odd
+        text = to_dot(build_fsm_graph(data))
+
+        assert '    "a\\"b\\\\c\\nd" [shape=doublecircle];' in text.split("\n")
+        assert '    "start" -> "a\\"b\\\\c\\nd" [label="P100 Finish"];' in text
+        _assert_well_formed_dot(text)
+
+    def test_the_entry_point_never_reuses_a_state_id(self):
+        data = _linear_fsm_data()
+        data["states"]["__start__"] = data["states"].pop("start")
+        data["initial_state"] = "__start__"
+        lines = to_dot(build_fsm_graph(data)).split("\n")
+
+        assert '    "__start___" [shape=point];' in lines
+        assert '    "__start___" -> "__start__";' in lines
+        assert '    "__start__";' in lines
+
+    def test_renderer_reads_only_the_graph(self):
+        graph = FSMGraph(
+            name="G",
+            initial_state="a",
+            nodes=(FSMGraphNode(id="a", is_initial=True, is_terminal=True),),
+            edges=(),
+        )
+
+        assert to_dot(graph) == (
+            'digraph "G" {\n'
+            "    rankdir=LR;\n"
+            '    "__start__" [shape=point];\n'
+            '    "a" [shape=doublecircle];\n'
+            '    "__start__" -> "a";\n'
+            "}"
+        )
+
+
+class TestVisualizeFormatFlag:
+    """`fsm-llm-visualize --format ascii|mermaid|dot` through `main_cli`."""
+
+    @staticmethod
+    def _run(tmp_path, data, *flags):
+        path = tmp_path / "fsm.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        with _cli_capture() as buffer:
+            with patch.object(
+                sys, "argv", ["fsm-llm-visualize", "--fsm", str(path), *flags]
+            ):
+                with pytest.raises(SystemExit) as exc_info:
+                    main_cli()
+        return exc_info.value.code, buffer.getvalue()
+
+    def test_formats_are_ascii_mermaid_dot(self):
+        assert OUTPUT_FORMATS == ("ascii", "mermaid", "dot")
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_default_output_is_the_ascii_diagram_unchanged(self, tmp_path, style):
+        data = _claude_md_example_fsm()
+        expected = visualize_fsm_ascii(data, style) + "\n"
+
+        assert self._run(tmp_path, data, "--style", style) == (0, expected)
+        assert self._run(tmp_path, data, "--style", style, "--format", "ascii") == (
+            0,
+            expected,
+        )
+
+    def test_no_flag_at_all_is_the_full_ascii_diagram(self, tmp_path):
+        data = _claude_md_example_fsm()
+
+        assert self._run(tmp_path, data) == (
+            0,
+            visualize_fsm_ascii(data, "full") + "\n",
+        )
+
+    def test_format_mermaid(self, tmp_path):
+        data = _claude_md_example_fsm()
+        code, output = self._run(tmp_path, data, "--format", "mermaid")
+
+        assert code == 0
+        assert output == to_mermaid(build_fsm_graph(data)) + "\n"
+        assert output.startswith("stateDiagram-v2\n    [*] --> start\n")
+        assert "    next --> [*]\n" in output
+        assert [ln for ln in output.split("\n") if "P100" in ln] == [
+            "    start --> next : P100 When this transition should fire"
+        ]
+
+    def test_format_dot(self, tmp_path):
+        data = _tricky_fsm_data()
+        code, output = self._run(tmp_path, data, "--format", "dot")
+
+        assert code == 0
+        assert output == to_dot(build_fsm_graph(data)) + "\n"
+        _assert_well_formed_dot(output.rstrip("\n"))
+
+    def test_style_does_not_change_a_graph_export(self, tmp_path):
+        data = _claude_md_example_fsm()
+
+        assert self._run(
+            tmp_path, data, "--format", "mermaid", "--style", "minimal"
+        ) == (self._run(tmp_path, data, "--format", "mermaid"))
+
+    @pytest.mark.parametrize("flag", ["--format", "--style"])
+    def test_an_invalid_choice_is_an_argparse_usage_error(self, tmp_path, flag, capsys):
+        """An unknown `--format` exits as an unknown `--style` always has:
+        argparse's usage error (code 2), with nothing on stdout."""
+        code, output = self._run(tmp_path, _linear_fsm_data(), flag, "svg")
+
+        assert code == 2
+        assert output == ""
+        assert "invalid choice: 'svg'" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("output_format", ["mermaid", "dot"])
+    def test_an_invalid_definition_exits_1_with_the_reason(
+        self, tmp_path, output_format
+    ):
+        data = _linear_fsm_data()
+        data["initial_state"] = "nowhere"
+        code, output = self._run(tmp_path, data, "--format", output_format)
+
+        assert code == 1
+        assert output.startswith("Error: initial_state 'nowhere' is not present")
+        assert "stateDiagram" not in output and "digraph" not in output
+
+    def test_from_file_refuses_an_unknown_format(self, tmp_path):
+        path = tmp_path / "fsm.json"
+        path.write_text(json.dumps(_linear_fsm_data()), encoding="utf-8")
+
+        assert visualize_fsm_from_file(str(path), output_format="svg") == (
+            "Error: unknown output format 'svg' (choose from ascii, mermaid, dot)"
+        )
+        assert visualize_fsm_from_file(str(path), output_format="dot") == to_dot(
+            build_fsm_graph(_linear_fsm_data())
+        )

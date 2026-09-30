@@ -167,7 +167,16 @@ from .validator import FSMValidationResult, FSMValidator, validate_fsm_from_file
 # --------------------------------------------------------------
 # Visualization Components
 # --------------------------------------------------------------
-from .visualizer import visualize_fsm_ascii, visualize_fsm_from_file
+from .visualizer import (
+    FSMGraph,
+    FSMGraphEdge,
+    FSMGraphNode,
+    build_fsm_graph,
+    to_dot,
+    to_mermaid,
+    visualize_fsm_ascii,
+    visualize_fsm_from_file,
+)
 
 # --------------------------------------------------------------
 # Public API Definition
@@ -265,6 +274,12 @@ __all__ = [
     # Visualization
     "visualize_fsm_ascii",
     "visualize_fsm_from_file",
+    "FSMGraph",
+    "FSMGraphNode",
+    "FSMGraphEdge",
+    "build_fsm_graph",
+    "to_mermaid",
+    "to_dot",
     # Exceptions
     "FSMError",
     "FSMDefinitionNotFoundError",
