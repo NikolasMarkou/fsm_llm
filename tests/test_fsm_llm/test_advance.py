@@ -706,6 +706,51 @@ class TestConverseUnchanged:
         assert api.get_conversation_history(conv_id) == before
 
 
+class TestStepResponsePrompt:
+    """Plan 07ad3f8c step 13 (D-035): a step's Pass-2 prompt has the
+    no-message wording; a ``converse`` turn and the greeting keep theirs."""
+
+    _ACK = "Acknowledge this transition naturally."
+
+    def test_advance_reply_prompt_asks_for_no_acknowledgement(self):
+        llm = _ScriptedLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(plan_speaks=True), llm)
+
+        result = api.advance(conv_id)
+
+        assert (result.state_before, result.state_after) == ("collect", "plan")
+        (request,) = llm.response_requests
+        assert "<current_state>plan</current_state>" in request.system_prompt
+        assert "No user message was sent on this step." in request.system_prompt
+        assert "cknowledge" not in request.system_prompt
+        assert "<transition_info>" not in request.system_prompt
+        # The request model still carries an empty string (D-015).
+        assert request.user_message == ""
+
+    def test_converse_reply_prompt_keeps_the_conversational_wording(self):
+        llm = _ScriptedLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(plan_speaks=True), llm)
+
+        api.converse("I want to go to Paris", conv_id)
+
+        (request,) = llm.response_requests
+        assert "<current_state>plan</current_state>" in request.system_prompt
+        assert self._ACK in request.system_prompt
+        assert "No user message was sent" not in request.system_prompt
+
+    def test_greeting_prompt_keeps_the_conversational_wording(self):
+        llm = _ScriptedLLM()
+        fsm = _trip_fsm()
+        fsm["states"]["collect"]["response_instructions"] = "Ask for the city."
+        api = API.from_definition(fsm, llm_interface=llm)
+
+        api.start_conversation()
+
+        (request,) = llm.response_requests
+        assert "conversational AI system" in request.system_prompt
+        assert "No user message was sent" not in request.system_prompt
+
+
 # ---------------------------------------------------------------------------
 # advance_stream
 # ---------------------------------------------------------------------------
@@ -1222,6 +1267,30 @@ class TestAdvanceStream:
         assert saved is not None
         assert saved.current_state == "plan"
         assert saved.conversation_history[-1] == {"system": "".join(_CHUNKS)}
+
+    def test_streamed_step_prompt_asks_for_no_acknowledgement(self):
+        # Step 13 (D-035): the stream site passes the same "no message" value.
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+
+        assert list(api.advance_stream(conv_id)) == _CHUNKS
+
+        (request,) = llm.stream_requests
+        assert "No user message was sent on this step." in request.system_prompt
+        assert "Respond with plain text only: the output itself." in (
+            request.system_prompt
+        )
+        assert "cknowledge" not in request.system_prompt
+
+    def test_streamed_converse_prompt_keeps_the_conversational_wording(self):
+        llm = _StreamingLLM({"city": "Paris"})
+        api, conv_id = _prepared_stream(llm)
+
+        assert list(api.converse_stream("Paris please", conv_id)) == _CHUNKS
+
+        (request,) = llm.stream_requests
+        assert "Acknowledge this transition naturally." in request.system_prompt
+        assert "No user message was sent" not in request.system_prompt
 
     def test_auto_save_when_the_stream_is_abandoned(self, tmp_path):
         store = FileSessionStore(tmp_path)

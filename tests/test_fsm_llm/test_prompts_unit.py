@@ -1181,3 +1181,173 @@ class TestClassificationPromptWithoutUserMessage:
         )
         assert "hunter2" not in block
         assert "_grant" not in block
+
+
+# ============================================================================
+# Plan 07ad3f8c step 13 -- the response prompt for a step with no user message
+# ============================================================================
+
+
+def _response_prompt(user_message, *, plain=False, exchanges=None):
+    """The Pass-2 prompt of a state entered from ``review`` on this turn."""
+    builder = ResponseGenerationPromptBuilder()
+    instance = _make_instance(
+        current_state="report",
+        context_data={"task": "compute the sum of 2 and 3", "total": 5},
+        exchanges=exchanges,
+    )
+    state = _make_state(
+        state_id="report",
+        purpose="Report the result",
+        response_instructions="State the total, then how it was computed.",
+    )
+    return builder.build_response_prompt(
+        instance,
+        state,
+        _make_fsm_definition(persona="A careful accountant"),
+        extracted_data={"total": 5},
+        transition_occurred=True,
+        previous_state="review",
+        user_message=user_message,
+        plain_text_response=plain,
+    )
+
+
+def _section(prompt: str, tag: str) -> str:
+    return prompt.split(f"<{tag}>\n", 1)[1].split(f"\n</{tag}>", 1)[0]
+
+
+class TestResponsePromptWithoutUserMessage:
+    """``user_message=None`` is a step with no user message (D-035): the reply
+    is the state's output, and nothing asks the model to acknowledge a message,
+    new information or a state change. Live (qwen3.5:4b), the conversational
+    wording made final answers open with thanks for a message nobody sent."""
+
+    @pytest.mark.parametrize("plain", [False, True], ids=["json", "plain_text"])
+    def test_nothing_asks_for_an_acknowledgement(self, plain):
+        prompt = _response_prompt(None, plain=plain)
+
+        assert "cknowledge" not in prompt
+        assert "<transition_info>" not in prompt
+        assert "Just transitioned" not in prompt
+        assert "follow-up questions" not in prompt
+        assert "conversational" not in prompt
+        assert "user-facing" not in prompt
+        assert "response to the user" not in prompt
+
+    def test_task_section_says_no_message_and_asks_for_the_state_output(self):
+        assert _section(_response_prompt(None), "task") == (
+            "You are the Response Generation component of a state machine run.\n"
+            "No user message was sent on this step. Your responsibility is to:\n"
+            "- Write the output of the current state, as its "
+            "<response_instructions> describe it,\n"
+            "- Base it on the context given below,\n"
+            "- Open the output with its content: nobody has just spoken, so do "
+            "not greet, thank or reply to anyone, and do not comment on a "
+            "state change,\n"
+            "- Maintain the <persona> when one is given."
+        )
+
+    def test_guidelines_open_with_the_instructions_and_ban_openers(self):
+        assert _section(_response_prompt(None), "guidelines") == (
+            "Response Generation Guidelines:\n"
+            "- Follow the <response_instructions>: they say what the output is.\n"
+            "- The output opens with content: no greeting, no thanks, no praise "
+            "and no remark about the step itself.\n"
+            "- Maintain consistent persona based on the <persona>.\n"
+            "- Don't mention technical system details or internal states."
+        )
+
+    def test_json_format_asks_for_the_output_inside_the_envelope(self):
+        # Live, a no-message prompt that only said "start with the content"
+        # got bare text (some of it in quotes) instead of the JSON envelope in
+        # 9 of 58 replies; the conversational prompt got 0.
+        section = _section(_response_prompt(None), "response_format")
+
+        assert '"message": "The output text"' in section
+        assert "`message` is REQUIRED and contains the complete output text." in (
+            section
+        )
+        assert section.splitlines()[-2:] == [
+            "\t- Return ONLY valid JSON - no markdown code fences, no additional text",
+            "\t- The output goes inside `message`; never reply with the bare text",
+        ]
+
+    def test_plain_text_format_asks_for_the_output_itself(self):
+        section = _section(_response_prompt(None, plain=True), "response_format")
+
+        assert section.splitlines()[0] == (
+            "Respond with plain text only: the output itself."
+        )
+        assert "Do NOT use JSON" in section
+        assert '"message"' not in section
+
+    def test_keeps_state_persona_data_context_and_history(self):
+        prompt = _response_prompt(
+            None, exchanges=[{"user": "add two numbers"}, {"system": "Sure."}]
+        )
+
+        assert "<current_state>report</current_state>" in prompt
+        assert "State the total, then how it was computed." in prompt
+        assert "A careful accountant" in prompt
+        assert "<extracted_data>" in prompt
+        assert "compute the sum of 2 and 3" in prompt
+        assert "add two numbers" in prompt
+        assert "<user_message>" not in prompt
+
+    def test_names_no_agent_concept(self):
+        prompt = _response_prompt(None).lower()
+        for word in ("continue", "agent", "tool", "loop", "debate"):
+            assert word not in prompt
+
+    @pytest.mark.parametrize("plain", [False, True], ids=["json", "plain_text"])
+    def test_empty_string_is_a_message_not_the_no_message_case(self, plain):
+        # The greeting and converse("") send "": the conversational prompt.
+        prompt = _response_prompt("", plain=plain)
+
+        assert (
+            "<transition_info>Just transitioned from 'review' to 'report'. "
+            "Acknowledge this transition naturally.</transition_info>"
+        ) in prompt
+        assert "Acknowledge new information when appropriate" in prompt
+        assert "No user message was sent" not in prompt
+
+    def test_message_prompt_wording_is_unchanged(self):
+        prompt = _response_prompt("what is the total?")
+
+        assert _section(prompt, "task") == (
+            "You are the Response Generation component in a conversational "
+            "AI system.\n"
+            "Your responsibility is to:\n"
+            "- Generate appropriate user-facing responses based on the <persona>,\n"
+            "- Respond based on the current conversation state and context,\n"
+            "- Acknowledge any new information that was extracted from user "
+            "input,\n"
+            "- Guide the conversation naturally toward the current state's "
+            "purpose.\n"
+            "- Maintain consistent persona and conversational flow."
+        )
+        assert _section(prompt, "guidelines") == (
+            "Response Generation Guidelines:\n"
+            "- Acknowledge new information the user has provided when it's "
+            "significant.\n"
+            "- Guide the conversation toward the current state's purpose when "
+            "appropriate.\n"
+            "- Ask follow-up questions if more information is needed.\n"
+            "- Maintain consistent persona based on the <persona>.\n"
+            "- Don't mention technical system details or internal states to users."
+        )
+        assert '"message": "Your natural response to the user"' in prompt
+        assert "<original_input>what is the total?</original_input>" in prompt
+        assert "Acknowledge this transition naturally." in prompt
+
+    def test_default_argument_is_the_conversational_prompt(self):
+        builder = ResponseGenerationPromptBuilder()
+        args = (_make_instance(), _make_state(), _make_fsm_definition())
+
+        assert builder.build_response_prompt(*args) == builder.build_response_prompt(
+            *args, user_message=""
+        )
+        assert builder._build_response_task_section() == (
+            builder._build_response_task_section(user_message="hello")
+        )

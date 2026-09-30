@@ -482,6 +482,10 @@ class _DecomposeScriptLLM(LLMInterface):
             return False if depth == 0 else ok
         if field == ContextKeys.SUBTASKS:
             return list(self.subtasks) if depth == 0 else None
+        if field == ContextKeys.OPERATOR:
+            # Typed optional field of `decompose` (plan 07ad3f8c D-036; it
+            # came from that state's bulk call before).
+            return self.operator if depth == 0 else None
         if field == ContextKeys.FINAL_ANSWER:
             if depth == 0:
                 return self.root_final
@@ -499,14 +503,6 @@ class _DecomposeScriptLLM(LLMInterface):
             reasoning="script",
             is_valid=value is not None,
         )
-
-    def extract_bulk_data(self, request: Any) -> Any:
-        from fsm_llm.definitions import DataExtractionResponse
-
-        data = (
-            {"operator": self.operator} if '"operator"' in request.system_prompt else {}
-        )
-        return DataExtractionResponse(extracted_data=data)
 
     def generate_response(
         self, request: ResponseGenerationRequest

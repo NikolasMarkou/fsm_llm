@@ -152,7 +152,9 @@ class ADaPTAgent(BaseAgent):
                 # A decomposed run succeeds on its subtasks, not on the combine
                 # text: AND needs every executed subtask, OR needs one.
                 oks = [bool(entry.get("success")) for entry in subtask_results]
-                operator = self._normalize_operator(final_context.get("operator"))
+                operator = self._normalize_operator(
+                    final_context.get(ContextKeys.OPERATOR)
+                )
                 success = any(oks) if operator == "OR" else all(oks)
                 stop_reason = StopReason.EVIDENCE if success else StopReason.NO_RESULT
                 if not success:
@@ -345,7 +347,7 @@ class ADaPTAgent(BaseAgent):
             # recursive subtask calls re-enter run() (A-ISSUE-005).
             subtask_results = agent._execute_subtasks(
                 subtasks=subtasks_raw,
-                operator=agent._normalize_operator(context.get("operator")),
+                operator=agent._normalize_operator(context.get(ContextKeys.OPERATOR)),
                 depth=current_depth + 1,
                 initial_context=initial_context,
                 start_time=start_time,

@@ -2902,30 +2902,47 @@ class TestSuccessReflectsWhoConcluded:
             {ContextKeys.FORCED_STOP_REASON: "stalled"},
         ],
     )
-    def test_model_cannot_plant_framework_keys_through_bulk_extraction(self, planted):
-        # ADaPT's attempt state runs a bulk call; before D-051 such a reply
-        # could write the forced flag or reason and flip a real run to failed.
-        # (REWOO's plan_all, the first subject of this test, has no bulk call
-        # since plan 07ad3f8c step 10.)
-        # Mutation-checked (plan 07ad3f8c step 11): with FRAMEWORK_ONLY_KEYS
-        # emptied the reason case fails as (False, "stalled"). The flag has a
-        # second guard, the False seed of c1d5bfbc/D-007 (bulk fills unset
-        # keys only); with both removed it fails as (False, "max_iterations").
-        from fsm_llm.agents import ADaPTAgent, AgentConfig
+    def test_model_cannot_plant_framework_keys_through_bulk_extraction(
+        self, planted, monkeypatch
+    ):
+        # The one state-level bulk call left in the agent FSMs is React's
+        # `think` under `use_classification=True` (21cd7f8e/D-019); before
+        # D-051 such a reply could write the forced flag or reason and flip a
+        # real run to failed. Earlier subjects of this test lost their bulk
+        # call: REWOO `plan_all` (plan 07ad3f8c step 10) and ADaPT `attempt`
+        # (step 13, D-036).
+        # Mutation-checked on this channel (plan 07ad3f8c step 13): with
+        # FRAMEWORK_ONLY_KEYS emptied the reason case fails (the planted
+        # `forced_stop_reason` is in the final context). The flag has a second
+        # guard, the False seed of c1d5bfbc/D-007 (bulk fills unset keys
+        # only); with both removed the flag case fails too (the planted flag
+        # ends the run before the tool runs).
+        from types import SimpleNamespace
 
-        llm = _PlantingLLM(
-            planted,
-            facts={
-                "attempt_result": ("A direct answer to the plan", "Plan the trip"),
-                "attempt_succeeded": (True, "A direct answer"),
-            },
+        from fsm_llm.agents import AgentConfig, ReactAgent
+        from fsm_llm.definitions import ClassificationResult
+
+        def classify(message: object, context: object = None) -> ClassificationResult:
+            return ClassificationResult(reasoning="m", intent="lookup", confidence=1)
+
+        monkeypatch.setattr(
+            "fsm_llm.pipeline.Classifier",
+            lambda **_: SimpleNamespace(classify=classify),
         )
-        result = ADaPTAgent(
-            config=AgentConfig(max_iterations=10), max_depth=1, llm_interface=llm
-        ).run("Plan the trip")
+        runs: list[str] = []
+        llm = _PlantingLLM(
+            planted, facts=_REACT_FACTS, default_response="Paris is the capital."
+        )
+        result = ReactAgent(
+            tools=_lookup_registry(runs),
+            config=AgentConfig(max_iterations=6),
+            use_classification=True,
+            llm_interface=llm,
+        ).run("What is the capital of France?")
 
         assert llm.calls("extract_bulk_data"), "no bulk channel was exercised"
+        assert runs == ["capital of France"]
         assert result.final_context[ContextKeys.MAX_ITERATIONS_REACHED] is False
         assert ContextKeys.FORCED_STOP_REASON not in result.final_context
         assert (result.success, result.stop_reason) == (True, "answered")
-        assert result.answer == "A direct answer to the plan"
+        assert result.answer == "Paris is the capital."

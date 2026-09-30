@@ -16,6 +16,12 @@ no channel (step 12.1, D-033).
 Step 12: PlanExecute, REWOO and ParallelReact are pinned on the same loop
 with exact outcomes: which tool ran with which arguments inside which step,
 ``success`` and ``stop_reason``.
+
+Step 13: the reply-speaking patterns (Debate, EvaluatorOptimizer,
+MakerChecker, PromptChain, Orchestrator, ADaPT) are pinned the same way:
+where the answer comes from, that every round is judged again, that a forced
+stop keeps its answer with ``success=False``, that no answer fallback can
+return a ``[state]`` marker, and that ADaPT sub-runs share the parent's clock.
 """
 
 from __future__ import annotations
@@ -30,11 +36,18 @@ import pytest
 
 from fsm_llm import API
 from fsm_llm.agents import (
+    ADaPTAgent,
     AgentConfig,
     AutoMemoryReactAgent,
+    ChainStep,
+    DebateAgent,
+    EvaluatorOptimizerAgent,
     HumanInTheLoop,
+    MakerCheckerAgent,
+    OrchestratorAgent,
     ParallelReactAgent,
     PlanExecuteAgent,
+    PromptChainAgent,
     ReactAgent,
     ReflexionAgent,
     REWOOAgent,
@@ -51,6 +64,7 @@ from fsm_llm.agents.exceptions import (
 )
 from fsm_llm.agents.fsm_definitions import (
     _await_approval_state,
+    build_adapt_fsm,
     build_react_fsm,
     build_reflexion_fsm,
 )
@@ -63,6 +77,7 @@ from fsm_llm.definitions import (
     FSMDefinition,
 )
 from tests.conftest import PromptGroundedLLM
+from tests.test_fsm_llm_agents.test_grounded_patterns import _TurnAwareLLM
 
 _TASK = "What is the capital of France?"
 _ANSWER = "The capital of France is Paris."
@@ -1863,3 +1878,715 @@ class TestPlannerPatternsMakeNoSyntheticTurns:
             for text in (request.system_prompt, request.user_message)
         ]
         assert not [text for text in texts if "Continue" in text]
+
+
+# ---------------------------------------------------------------------------
+# Step 13: reply-speaking patterns on the core loop
+# ---------------------------------------------------------------------------
+
+_STATE_TAG = re.compile(r"<current_state>([^<]+)</current_state>")
+_MARKER = re.compile(r"^\[\w+\]$")
+_NUMBER = re.compile(r"(\d+)")
+
+
+def _spoken(llm: PromptGroundedLLM) -> list[str]:
+    """The state of every real (not skipped) reply request, in call order."""
+    return [
+        match.group(1)
+        for request in llm.calls("generate_response")
+        if not request.skip_generation
+        and (match := _STATE_TAG.search(request.system_prompt))
+    ]
+
+
+def _version(value: object) -> int | None:
+    """The number in a scripted value such as ``"MEMO v2"``."""
+    match = _NUMBER.search(str(value or ""))
+    return int(match.group(1)) if match else None
+
+
+def _field_contexts(llm: PromptGroundedLLM, field: str, key: str) -> list[Any]:
+    """``context[key]`` of every per-field request for ``field``, in order."""
+    return [
+        (request.context or {}).get(key)
+        for request in llm.calls("extract_field")
+        if request.field_name == field
+    ]
+
+
+# -- Debate -----------------------------------------------------------------
+
+_DEBATE_TASK = "Should cities put bikes first?"
+_DEBATE_REPLY = "Cities should put bikes first, with protected lanes."
+
+
+def _debate_run(*, agree_at: int | None, num_rounds: int) -> tuple:
+    """A debate whose proposer improves its position every round (the round
+    number is read from ``debate_rounds``) and whose judge agrees from round
+    ``agree_at`` on (never, when ``None``)."""
+
+    def position(ctx: dict[str, Any]) -> int | None:
+        return _version(ctx.get(ContextKeys.PROPOSITION))
+
+    llm = _TurnAwareLLM(
+        {
+            ContextKeys.PROPOSITION: lambda _t, ctx: (
+                f"Position {len(ctx.get(ContextKeys.DEBATE_ROUNDS) or []) + 1}"
+            ),
+            ContextKeys.CRITIQUE: lambda _t, ctx: (
+                position(ctx) and f"Critique of position {position(ctx)}"
+            ),
+            ContextKeys.COUNTER_ARGUMENT: lambda _t, ctx: (
+                position(ctx) and f"Counter for position {position(ctx)}"
+            ),
+            ContextKeys.JUDGE_VERDICT: lambda _t, ctx: (
+                position(ctx) and f"Verdict on position {position(ctx)}"
+            ),
+            ContextKeys.CONSENSUS_REACHED: lambda _t, ctx: bool(
+                agree_at and (position(ctx) or 0) >= agree_at
+            ),
+        },
+        responses={"conclude": _DEBATE_REPLY},
+    )
+    agent = DebateAgent(num_rounds=num_rounds, llm_interface=llm)
+    run = _Run(agent, llm, [])
+    return agent.run(_DEBATE_TASK), run
+
+
+_ROUND = ["propose", "critique", "counter", "judge"]
+
+
+class TestDebateOnTheCoreLoop:
+    """Each round is argued and judged again (core extracts a key only while
+    it is unset; ``propose`` entry clears the round's keys), the answer is the
+    ``conclude`` reply, and a consensus the round cap forced is not a success."""
+
+    def test_judge_rules_again_each_round_and_its_own_consensus_is_success(self):
+        result, run = _debate_run(agree_at=2, num_rounds=3)
+
+        assert run.steps() == _ROUND * 2
+        assert _field_contexts(
+            run.llm, ContextKeys.CONSENSUS_REACHED, ContextKeys.PROPOSITION
+        ) == ["Position 1", "Position 2"]
+        assert [r["judge_verdict"] for r in run.final[ContextKeys.DEBATE_ROUNDS]] == [
+            "Verdict on position 1",
+            "Verdict on position 2",
+        ]
+        assert ContextKeys.FORCED_STOP_REASON not in run.final
+        assert (result.success, result.stop_reason) == (True, "answered")
+        # The answer is the terminal reply, not a context key (06a5ec0a/D-036).
+        assert result.answer == _DEBATE_REPLY
+        assert _DEBATE_REPLY not in [
+            v for v in run.final.values() if isinstance(v, str)
+        ]
+
+    def test_consensus_forced_by_the_round_cap_keeps_its_answer(self):
+        result, run = _debate_run(agree_at=None, num_rounds=2)
+
+        assert run.steps() == _ROUND * 2
+        assert run.final[ContextKeys.FORCED_STOP_REASON] == "forced_pass"
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+        assert result.answer == _DEBATE_REPLY
+
+
+# -- EvaluatorOptimizer -----------------------------------------------------
+
+_REPORT_TASK = "Write the quarterly report"
+_REPORT_REPLY = "Here is the evaluated report."
+
+
+def _evalopt_run(*, pass_at: int | None, max_refinements: int) -> tuple:
+    """The model writes ``REPORT v1``, then the version its prompt's
+    ``refinement_feedback`` asks for; the evaluator passes version ``pass_at``
+    (none, when ``None``) and records every output it is given."""
+    events: list[tuple[Any, ...]] = []
+
+    def output(_text: str, ctx: dict[str, Any]) -> str:
+        asked = _version(ctx.get(ContextKeys.REFINEMENT_FEEDBACK))
+        return f"REPORT v{asked or 1}"
+
+    def evaluate(text: str, _ctx: dict[str, Any]) -> EvaluationResult:
+        events.append(("evaluate", text))
+        version = _version(text) or 0
+        passed = bool(pass_at and version >= pass_at)
+        return EvaluationResult(
+            passed=passed,
+            score=0.9 if passed else 0.2,
+            feedback=f"NEEDS v{version + 1}",
+        )
+
+    llm = _TurnAwareLLM(
+        {ContextKeys.GENERATED_OUTPUT: output}, responses={"output": _REPORT_REPLY}
+    )
+    agent = EvaluatorOptimizerAgent(
+        evaluation_fn=evaluate,
+        max_refinements=max_refinements,
+        config=AgentConfig(max_iterations=20),
+        llm_interface=llm,
+    )
+    run = _Run(agent, llm, events)
+    return agent.run(_REPORT_TASK), run
+
+
+class TestEvaluatorOptimizerOnTheCoreLoop:
+    """Every refined output is evaluated again inside the step that produced
+    it (``refine`` entry moves the old output aside so core extracts a new
+    one), and the answer is the evaluated ``generated_output``, not the reply."""
+
+    def test_every_refined_output_is_evaluated_again(self):
+        result, run = _evalopt_run(pass_at=3, max_refinements=3)
+
+        assert run.events == [
+            ("step", "generate"),
+            ("evaluate", "REPORT v1"),
+            ("step", "evaluate"),
+            ("step", "refine"),
+            ("evaluate", "REPORT v2"),
+            ("step", "evaluate"),
+            ("step", "refine"),
+            ("evaluate", "REPORT v3"),
+            ("step", "evaluate"),
+        ]
+        assert run.fields() == [ContextKeys.GENERATED_OUTPUT] * 3
+        assert run.final[ContextKeys.REFINEMENT_COUNT] == 2
+        assert (result.success, result.stop_reason) == (True, "answered")
+        assert result.answer == "REPORT v3" == run.final[ContextKeys.GENERATED_OUTPUT]
+        assert _spoken(run.llm) == ["output"]
+
+    def test_forced_pass_at_max_refinements_ships_the_last_evaluated_output(self):
+        result, run = _evalopt_run(pass_at=None, max_refinements=1)
+
+        assert [e for e in run.events if e[0] == "evaluate"] == [
+            ("evaluate", "REPORT v1"),
+            ("evaluate", "REPORT v2"),
+        ]
+        assert run.final[ContextKeys.FORCED_STOP_REASON] == "forced_pass"
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+        assert result.answer == "REPORT v2"
+
+
+# -- MakerChecker -----------------------------------------------------------
+
+_MEMO_TASK = "Write the release memo"
+_MEMO_REPLY = "Here is the reviewed memo."
+_CHECK_FIELDS = [
+    ContextKeys.CHECKER_FEEDBACK,
+    "quality_score",
+    ContextKeys.CHECKER_PASSED,
+]
+
+
+def _maker_checker_run(*, pass_at: int | None, max_revisions: int) -> tuple:
+    """The maker writes ``MEMO v1``, then the version the checker's feedback
+    asks for; the checker passes version ``pass_at`` (none, when ``None``)."""
+
+    def draft(_text: str, ctx: dict[str, Any]) -> str:
+        return f"MEMO v{_version(ctx.get(ContextKeys.CHECKER_FEEDBACK)) or 1}"
+
+    def judged(ctx: dict[str, Any]) -> int | None:
+        return _version(ctx.get(ContextKeys.DRAFT_OUTPUT))
+
+    def good(ctx: dict[str, Any]) -> bool:
+        return bool(pass_at and (judged(ctx) or 0) >= pass_at)
+
+    llm = _TurnAwareLLM(
+        {
+            ContextKeys.DRAFT_OUTPUT: draft,
+            ContextKeys.CHECKER_FEEDBACK: lambda _t, ctx: (
+                judged(ctx) and f"FIX to v{(judged(ctx) or 0) + 1}"
+            ),
+            "quality_score": lambda _t, ctx: (
+                judged(ctx) and (0.9 if good(ctx) else 0.2)
+            ),
+            ContextKeys.CHECKER_PASSED: lambda _t, ctx: good(ctx),
+        },
+        responses={"output": _MEMO_REPLY},
+    )
+    agent = MakerCheckerAgent(
+        maker_instructions="Write a memo.",
+        checker_instructions="Check the memo.",
+        max_revisions=max_revisions,
+        config=AgentConfig(max_iterations=20),
+        llm_interface=llm,
+    )
+    run = _Run(agent, llm, [])
+    return agent.run(_MEMO_TASK), run
+
+
+class TestMakerCheckerOnTheCoreLoop:
+    """The checker rules on every redraft (``revise`` entry clears a False
+    verdict and its score, so core extracts them again), and the answer is the
+    judged ``draft_output``, not the reply."""
+
+    def test_checker_judges_every_redraft(self):
+        result, run = _maker_checker_run(pass_at=3, max_revisions=5)
+
+        assert run.steps() == ["make", "check", "revise", "check", "revise", "check"]
+        assert run.fields() == [ContextKeys.DRAFT_OUTPUT, *_CHECK_FIELDS] * 3
+        for field in _CHECK_FIELDS:
+            assert _field_contexts(run.llm, field, ContextKeys.DRAFT_OUTPUT) == [
+                "MEMO v1",
+                "MEMO v2",
+                "MEMO v3",
+            ]
+        assert run.final[ContextKeys.REVISION_COUNT] == 3
+        assert ContextKeys.FORCED_STOP_REASON not in run.final
+        assert (result.success, result.stop_reason) == (True, "answered")
+        assert result.answer == "MEMO v3" == run.final[ContextKeys.DRAFT_OUTPUT]
+        assert _spoken(run.llm) == ["output"]
+
+    def test_forced_pass_at_max_revisions_ships_the_judged_draft(self):
+        result, run = _maker_checker_run(pass_at=None, max_revisions=2)
+
+        assert _field_contexts(
+            run.llm, ContextKeys.CHECKER_PASSED, ContextKeys.DRAFT_OUTPUT
+        ) == ["MEMO v1", "MEMO v2"]
+        assert run.final[ContextKeys.FORCED_STOP_REASON] == "forced_pass"
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+        # The draft the checker ruled on ships, never an unjudged redraft.
+        assert result.answer == "MEMO v2"
+
+
+# -- PromptChain ------------------------------------------------------------
+
+_CHAIN_TASK = "Write a note about tides"
+_CHAIN_REPLIES = {
+    "step_0": "Reply of stage 0.",
+    "step_1": "Reply of stage 1.",
+    "step_2": "Reply of stage 2.",
+    "output": "Final reply of the chain.",
+}
+
+
+def _chain_run(*, gates: dict[int, Any] | None = None, produce: bool = True) -> tuple:
+    """Three speaking steps; step ``k`` outputs ``Stage k output text`` (``k``
+    is the number of earlier results its prompt shows), or nothing when
+    ``produce`` is False. ``gates`` maps a step index to its ``validation_fn``."""
+
+    def step_result(_text: str, ctx: dict[str, Any]) -> str | None:
+        if not produce:
+            return None
+        return f"Stage {len(ctx.get(ContextKeys.CHAIN_RESULTS) or [])} output text"
+
+    chain = [
+        ChainStep(
+            step_id=f"s{i}",
+            name=f"Stage {i}",
+            extraction_instructions=f"Extract stage {i} text.",
+            response_instructions=f"Present stage {i}.",
+            validation_fn=(gates or {}).get(i),
+        )
+        for i in range(3)
+    ]
+    llm = _TurnAwareLLM(
+        {ContextKeys.CHAIN_STEP_RESULT: step_result}, responses=_CHAIN_REPLIES
+    )
+    agent = PromptChainAgent(chain=chain, llm_interface=llm)
+    run = _Run(agent, llm, [])
+    return agent.run(_CHAIN_TASK), run
+
+
+class TestPromptChainOnTheCoreLoop:
+    """Every chain state speaks (the step replies are user-owned), the answer
+    is the last step's result, and a failed gate keeps the gated step's result
+    as the answer of a failed run."""
+
+    def test_every_step_speaks_and_the_answer_is_the_last_step_result(self):
+        result, run = _chain_run()
+
+        assert run.steps() == ["step_0", "step_1", "step_2"]
+        assert run.fields() == [ContextKeys.CHAIN_STEP_RESULT] * 3
+        # The initial state's reply is the greeting; each step replies from
+        # the state it entered.
+        assert _spoken(run.llm) == ["step_0", "step_1", "step_2", "output"]
+        assert run.history == [{"system": text} for text in _CHAIN_REPLIES.values()]
+        assert run.final[ContextKeys.CHAIN_RESULTS] == [
+            "Stage 0 output text",
+            "Stage 1 output text",
+            "Stage 2 output text",
+        ]
+        assert (result.success, result.stop_reason) == (True, "answered")
+        assert result.answer == "Stage 2 output text"
+
+    def test_failed_gate_keeps_the_gated_steps_result_as_the_answer(self):
+        result, run = _chain_run(gates={0: lambda ctx: False})
+
+        # The gate of step 0 runs on entry to step_1, whose step then takes
+        # the gate edge to output without extracting.
+        assert run.steps() == ["step_0", "step_1"]
+        assert run.fields() == [ContextKeys.CHAIN_STEP_RESULT]
+        assert run.final[ContextKeys.CHAIN_RESULTS] == ["Stage 0 output text"]
+        assert (result.success, result.stop_reason) == (False, "gate_failed")
+        assert result.answer == "Stage 0 output text"
+
+    def test_without_step_results_the_answer_is_the_last_reply(self):
+        result, run = _chain_run(produce=False)
+
+        assert run.final[ContextKeys.CHAIN_RESULTS] == []
+        assert (result.success, result.stop_reason) == (False, "no_result")
+        assert result.answer == _CHAIN_REPLIES["output"]
+
+
+# -- Orchestrator -----------------------------------------------------------
+
+_TRIP_TASK = "Plan the trip"
+_ORCHESTRATOR_REPLIES = {
+    "orchestrate": "Splitting the work into subtasks.",
+    "delegate": "The workers have finished.",
+    "collect": "Reviewing what the workers returned.",
+    "synthesize": "The trip: dates first, then the hotel.",
+}
+
+
+def _orchestrator_run() -> tuple:
+    """Two delegation rounds: the planner names one new subtask per round and
+    the collector is satisfied only once two worker results are in."""
+    events: list[tuple[Any, ...]] = []
+
+    def results(ctx: dict[str, Any]) -> list[Any]:
+        return ctx.get(ContextKeys.WORKER_RESULTS) or []
+
+    def worker(subtask: str) -> AgentResult:
+        events.append(("worker", subtask))
+        return AgentResult(answer=f"done {subtask}", success=True)
+
+    llm = _TurnAwareLLM(
+        {
+            ContextKeys.SUBTASKS: lambda _t, ctx: (
+                ["book hotel"] if results(ctx) else ["pick dates"]
+            ),
+            ContextKeys.ALL_COLLECTED: lambda _t, ctx: len(results(ctx)) >= 2,
+        },
+        responses=_ORCHESTRATOR_REPLIES,
+    )
+    agent = OrchestratorAgent(
+        worker_factory=worker, config=AgentConfig(max_iterations=12), llm_interface=llm
+    )
+    run = _Run(agent, llm, events)
+    return agent.run(_TRIP_TASK), run
+
+
+class TestOrchestratorOnTheCoreLoop:
+    """The collector rules again after every delegation round
+    (``orchestrate`` entry clears its verdict), workers run inside the
+    ``orchestrate`` step, and the answer is the ``synthesize`` reply."""
+
+    def test_collect_rules_again_after_each_delegation_round(self):
+        result, run = _orchestrator_run()
+
+        assert run.events == [
+            ("step", "orchestrate"),
+            ("worker", "pick dates"),
+            ("step", "delegate"),
+            ("step", "collect"),
+            ("step", "orchestrate"),
+            ("worker", "book hotel"),
+            ("step", "delegate"),
+            ("step", "collect"),
+        ]
+        assert run.fields() == [ContextKeys.SUBTASKS, ContextKeys.ALL_COLLECTED] * 2
+        seen = _field_contexts(
+            run.llm, ContextKeys.ALL_COLLECTED, ContextKeys.WORKER_RESULTS
+        )
+        assert [len(results) for results in seen] == [1, 2]
+        assert (result.success, result.stop_reason) == (True, "evidence")
+        assert result.answer == _ORCHESTRATOR_REPLIES["synthesize"]
+        round_replies = [
+            _ORCHESTRATOR_REPLIES[state]
+            for state in ("orchestrate", "delegate", "collect")
+        ]
+        assert [entry["system"] for entry in run.history] == [
+            *round_replies,
+            *round_replies,
+            _ORCHESTRATOR_REPLIES["synthesize"],
+        ]
+
+
+# -- ADaPT ------------------------------------------------------------------
+
+_ADAPT_REPLIES = {
+    "attempt": "Attempt reply text.",
+    "assess": "Assess reply text.",
+    "decompose": "Decompose reply text.",
+    "combine": "Combined final reply.",
+}
+_ADAPT_SUBTASKS = ["pick dates", "book hotel"]
+_ROOT_ATTEMPT = "Direct answer to the root task."
+
+
+def _adapt_run(
+    *, decompose: bool, attempt_seconds: float = 0.0, timeout_seconds: float = 300.0
+) -> tuple:
+    """The root attempt (which takes ``attempt_seconds``) is judged a failure
+    when ``decompose`` and split into two subtasks; every subtask attempt
+    succeeds."""
+
+    def is_root(ctx: dict[str, Any]) -> bool:
+        return ctx.get(ContextKeys.TASK) == _TRIP_TASK
+
+    def attempt(_text: str, ctx: dict[str, Any]) -> str:
+        if is_root(ctx):
+            time.sleep(attempt_seconds)
+            return _ROOT_ATTEMPT
+        return f"Answer for {ctx.get(ContextKeys.TASK)}."
+
+    llm = _TurnAwareLLM(
+        {
+            ContextKeys.ATTEMPT_RESULT: attempt,
+            ContextKeys.ATTEMPT_SUCCEEDED: lambda _t, ctx: (
+                not (decompose and is_root(ctx))
+            ),
+            ContextKeys.SUBTASKS: lambda _t, _ctx: list(_ADAPT_SUBTASKS),
+            ContextKeys.OPERATOR: lambda _t, _ctx: "AND",
+        },
+        responses=_ADAPT_REPLIES,
+    )
+    agent = ADaPTAgent(
+        config=AgentConfig(max_iterations=10, timeout_seconds=timeout_seconds),
+        max_depth=1,
+        llm_interface=llm,
+    )
+    run = _Run(agent, llm, [])
+    return agent.run(_TRIP_TASK), run
+
+
+class TestAdaptOnTheCoreLoop:
+    """ADaPT extracts through its typed fields only (step 13, D-036: no
+    state-level bulk call, RED on the parent), answers from the succeeded
+    attempt or from the subtasks, and its sub-runs spend the parent's clock."""
+
+    def test_succeeded_attempt_is_the_answer_and_no_bulk_call_runs(self):
+        result, run = _adapt_run(decompose=False)
+
+        assert run.steps() == ["attempt", "assess"]
+        assert run.fields() == [
+            ContextKeys.ATTEMPT_RESULT,
+            ContextKeys.ATTEMPT_SUCCEEDED,
+        ]
+        assert run.llm.calls("extract_bulk_data") == []
+        assert (result.success, result.stop_reason) == (True, "answered")
+        # The answer is the attempt the assessor accepted, not the combine reply.
+        assert result.answer == _ROOT_ATTEMPT
+        assert _spoken(run.llm) == ["attempt", "assess", "combine"]
+
+    def test_decomposed_run_answers_from_its_subtasks_and_no_bulk_call_runs(self):
+        result, run = _adapt_run(decompose=True)
+
+        per_run = [ContextKeys.ATTEMPT_RESULT, ContextKeys.ATTEMPT_SUCCEEDED]
+        assert run.fields() == [
+            *per_run,
+            ContextKeys.SUBTASKS,
+            ContextKeys.OPERATOR,
+            *per_run,
+            *per_run,
+        ]
+        assert run.llm.calls("extract_bulk_data") == []
+        assert result.final_context[ContextKeys.OPERATOR] == "AND"
+        assert [
+            (entry["subtask"], entry["success"])
+            for entry in result.final_context[ContextKeys.SUBTASK_RESULTS]
+        ] == [(subtask, True) for subtask in _ADAPT_SUBTASKS]
+        assert (result.success, result.stop_reason) == (True, "evidence")
+        assert result.answer == "Answer for pick dates.\n\nAnswer for book hotel."
+
+    def test_loop_states_declare_typed_fields_and_no_bulk_instructions(self):
+        states = build_adapt_fsm(task_description="t")["states"]
+
+        declared = {
+            name: [field["field_name"] for field in states[name]["field_extractions"]]
+            for name in ("attempt", "assess", "decompose")
+        }
+        assert declared == {
+            "attempt": [ContextKeys.ATTEMPT_RESULT],
+            "assess": [ContextKeys.ATTEMPT_SUCCEEDED],
+            "decompose": [ContextKeys.SUBTASKS, ContextKeys.OPERATOR],
+        }
+        for name in declared:
+            assert states[name]["extraction_instructions"] == ""
+        operator = states["decompose"]["field_extractions"][1]
+        assert (operator["field_type"], operator["required"]) == ("str", False)
+
+    def test_sub_runs_get_what_is_left_of_the_parents_wall_clock(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        budgets: list[float] = []
+        run_until_terminal = API.run_until_terminal
+
+        def _recording(self: API, conv_id: str, **kwargs: Any) -> Any:
+            budgets.append(kwargs["max_seconds"])
+            return run_until_terminal(self, conv_id, **kwargs)
+
+        monkeypatch.setattr(API, "run_until_terminal", _recording)
+
+        result, _ = _adapt_run(decompose=True, attempt_seconds=0.05, timeout_seconds=60)
+
+        assert result.success is True
+        root, first, second = budgets
+        assert 59.0 < root <= 60.0
+        # The root attempt took 0.05 s of the one clock before any sub-run.
+        assert first <= 60.0 - 0.05
+        assert second <= first
+
+
+# -- Every reply-speaking pattern -------------------------------------------
+
+_SPEAKING_RUNS = [
+    pytest.param(lambda: _debate_run(agree_at=2, num_rounds=3), id="debate"),
+    pytest.param(
+        lambda: _evalopt_run(pass_at=2, max_refinements=3), id="evaluator_optimizer"
+    ),
+    pytest.param(
+        lambda: _maker_checker_run(pass_at=2, max_revisions=5), id="maker_checker"
+    ),
+    pytest.param(_chain_run, id="prompt_chain"),
+    pytest.param(_orchestrator_run, id="orchestrator"),
+    pytest.param(lambda: _adapt_run(decompose=False), id="adapt"),
+]
+
+
+@pytest.mark.parametrize("start", _SPEAKING_RUNS)
+class TestReplySpeakingPatternsMakeNoSyntheticTurns:
+    """The six patterns run on the core loop: no ``converse`` turn, a history
+    of spoken replies only, and no skipped reply call once the steps start."""
+
+    def test_run_never_calls_converse(self, start: Any, converse_calls: list[str]):
+        result, _ = start()
+
+        assert result.success is True
+        assert converse_calls == []
+
+    def test_history_holds_the_spoken_replies_only(self, start: Any):
+        _, run = start()
+
+        assert run.history
+        assert all(list(entry) == ["system"] for entry in run.history)
+        assert not [e for e in run.history if _MARKER.match(e["system"])]
+        assert len(run.history) == len(_spoken(run.llm))
+
+    def test_steps_send_no_skip_request_no_bulk_call_and_no_user_message(
+        self, start: Any
+    ):
+        _, run = start()
+
+        kinds = [kind for kind, _ in run.llm.requests]
+        stepped = run.llm.requests[kinds.index("extract_field") :]
+        # A silent initial state's greeting is the only skip request (D-028).
+        replies = [r for kind, r in stepped if kind == "generate_response"]
+        assert replies and not [r for r in replies if r.skip_generation]
+        assert run.llm.calls("extract_bulk_data") == []
+        assert {request.user_message for _, request in stepped} == {""}
+        texts = [
+            text
+            for _, request in run.llm.requests
+            for text in (request.system_prompt, request.user_message)
+        ]
+        assert not [text for text in texts if "Continue" in text]
+
+    def test_step_replies_are_asked_for_without_an_acknowledgement(self, start: Any):
+        # Step 13 (D-035): a reply made on a step uses core's no-message
+        # wording; only a greeting (no step yet) keeps the conversational one.
+        _, run = start()
+
+        kinds = [kind for kind, _ in run.llm.requests]
+        stepped = run.llm.requests[kinds.index("extract_field") :]
+        prompts = [
+            r.system_prompt for kind, r in stepped if kind == "generate_response"
+        ]
+        assert prompts
+        for prompt in prompts:
+            assert "No user message was sent on this step." in prompt
+            assert "cknowledge" not in prompt
+
+
+# -- Answer fallbacks -------------------------------------------------------
+
+
+def _mute_llm() -> PromptGroundedLLM:
+    """A model that fills no field and whose replies are all the short "ok"."""
+    return PromptGroundedLLM(default_response="ok")
+
+
+def _mute_agent(pattern: str, llm: PromptGroundedLLM) -> BaseAgent:
+    config = AgentConfig(max_iterations=4)
+    if pattern == "adapt":
+        return ADaPTAgent(config=config, max_depth=1, llm_interface=llm)
+    if pattern == "evaluator_optimizer":
+        return EvaluatorOptimizerAgent(
+            evaluation_fn=lambda _out, _ctx: EvaluationResult(
+                passed=False, score=0.0, feedback="nothing to evaluate"
+            ),
+            max_refinements=1,
+            config=config,
+            llm_interface=llm,
+        )
+    if pattern == "maker_checker":
+        return MakerCheckerAgent(
+            maker_instructions="Write a memo.",
+            checker_instructions="Check the memo.",
+            max_revisions=1,
+            config=config,
+            llm_interface=llm,
+        )
+    # Two silent steps: the step out of `step_0` ends on the silent `step_1`.
+    chain = [
+        ChainStep(
+            step_id=f"s{i}",
+            name=f"Stage {i}",
+            extraction_instructions="Extract it.",
+            response_instructions="",
+        )
+        for i in range(2)
+    ]
+    return PromptChainAgent(chain=chain, config=config, llm_interface=llm)
+
+
+_NO_ANSWER = "Agent could not determine an answer."
+
+
+class TestAnswerFallbacksNeverReturnAStateMarker:
+    """When no field is filled, the answer fallback reads the replies of the
+    states that spoke. A silent step contributes no text, so no fallback can
+    return a ``[state]`` marker (on d4b1626 the loop collected ``[generate]``,
+    ``[evaluate]`` ... and a marker passed the ``MIN_ANSWER_LENGTH`` filter).
+    Every ADaPT state speaks, so its case pins the default text only."""
+
+    @pytest.mark.parametrize(
+        ("pattern", "answer", "outcome"),
+        [
+            ("adapt", "ADaPT agent could not determine an answer.", "no_result"),
+            ("evaluator_optimizer", _NO_ANSWER, "forced_pass"),
+            ("maker_checker", "ok", "forced_pass"),
+            ("prompt_chain", _NO_ANSWER, "no_result"),
+        ],
+    )
+    def test_run_with_no_filled_field_never_answers_a_marker(
+        self, pattern: str, answer: str, outcome: str
+    ):
+        llm = _mute_llm()
+        agent = _mute_agent(pattern, llm)
+        seen: list[list[str]] = []
+        extract = agent._extract_answer
+
+        def _extract(final_context: dict, responses: list, *args: Any) -> str:
+            seen.append(list(responses))
+            return extract(final_context, responses, *args)
+
+        agent._extract_answer = _extract  # type: ignore[method-assign]
+
+        result = agent.run("Write the release memo")
+
+        (responses,) = seen
+        assert responses and set(responses) == {"ok"}
+        assert not _MARKER.match(result.answer)
+        assert result.answer == answer
+        assert (result.success, result.stop_reason) == (False, outcome)
+
+    @pytest.mark.parametrize(
+        "pattern", ["adapt", "evaluator_optimizer", "maker_checker", "prompt_chain"]
+    )
+    def test_fallback_with_no_reply_at_all_is_the_default_text(self, pattern: str):
+        agent = _mute_agent(pattern, _mute_llm())
+
+        answer = agent._extract_answer({}, [])
+
+        assert answer.endswith("could not determine an answer.")

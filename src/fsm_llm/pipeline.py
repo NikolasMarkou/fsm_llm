@@ -959,7 +959,10 @@ class MessagePipeline:
             extracted_data=extraction_response.extracted_data,
             transition_occurred=transition_occurred,
             previous_state=previous_state,
-            user_message=user_message or "",
+            # None (a step without a user message) selects the prompt's
+            # no-message wording (07ad3f8c/D-035); the request below
+            # still carries "".
+            user_message=user_message,
             plain_text_response=output_response_format is None,
             context=self._apply_context_scope(
                 instance.context.get_merged_data(), current_state, conversation_id
@@ -2959,7 +2962,10 @@ class MessagePipeline:
             extracted_data=extraction_response.extracted_data,
             transition_occurred=transition_occurred,
             previous_state=previous_state,
-            user_message=user_message or "",
+            # None (a step without a user message) selects the prompt's
+            # no-message wording (07ad3f8c/D-035); the request below
+            # still carries "".
+            user_message=user_message,
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-005: scope the
             # PROMPT, the only context channel (request.context is gone). Do NOT
             # revert to full instance.context.data: read_keys would then

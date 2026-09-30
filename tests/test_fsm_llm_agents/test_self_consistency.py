@@ -2,14 +2,21 @@ from __future__ import annotations
 
 """Tests for fsm_llm.agents.self_consistency module."""
 
+import ast
+import inspect
+import textwrap
+from typing import Any
+
 import pytest
 
+from fsm_llm import API
 from fsm_llm.agents.constants import ContextKeys, Defaults, SelfConsistencyStates
 from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.fsm_definitions import build_self_consistency_fsm
 from fsm_llm.agents.self_consistency import SelfConsistencyAgent, _majority_vote
 from fsm_llm.definitions import FSMDefinition
+from tests.conftest import PromptGroundedLLM
 
 
 class TestSelfConsistencyCreation:
@@ -159,3 +166,120 @@ class TestMajorityVote:
     def test_majority_vote_all_empty(self):
         result = _majority_vote(["", "  ", ""])
         assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# Plan 07ad3f8c step 13: a sample is one turn (the dead loop is gone)
+# ---------------------------------------------------------------------------
+
+
+class _SampleProbe:
+    """A SelfConsistencyAgent on a recording fake, plus every ``API`` entry
+    its samples called and each sample conversation's history."""
+
+    REPLY = "Canberra is the capital.\nAnswer: Canberra"
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, num_samples: int = 3) -> None:
+        self.llm = PromptGroundedLLM(default_response=self.REPLY)
+        self.calls: list[str] = []
+        self.histories: list[list[dict[str, str]]] = []
+        for name in (
+            "start_conversation",
+            "converse",
+            "converse_stream",
+            "advance",
+            "advance_stream",
+            "run_until_terminal",
+            "run_until_terminal_stream",
+        ):
+            self._record(monkeypatch, name)
+        end = API.end_conversation
+        probe = self
+
+        def _end(api: API, conversation_id: str) -> None:
+            probe.histories.append(api.get_conversation_history(conversation_id))
+            end(api, conversation_id)
+
+        monkeypatch.setattr(API, "end_conversation", _end)
+        self.agent = SelfConsistencyAgent(
+            config=AgentConfig(model="mock/model"),
+            num_samples=num_samples,
+            llm_interface=self.llm,
+        )
+
+    def _record(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+        real = getattr(API, name)
+
+        def _entry(api: API, *args: Any, **kwargs: Any) -> Any:
+            self.calls.append(name)
+            return real(api, *args, **kwargs)
+
+        monkeypatch.setattr(API, name, _entry)
+
+
+class TestSampleIsOneTurn:
+    """A sample is the greeting reply of the terminal initial state: one
+    ``start_conversation``, one reply request, and no further turn. On d4b1626
+    a dead ``iteration < 5`` loop stood ready to send "Continue." turns."""
+
+    def test_each_sample_makes_exactly_one_turn(self, monkeypatch):
+        probe = _SampleProbe(monkeypatch, num_samples=3)
+
+        result = probe.agent.run("What is the capital of Australia?")
+
+        assert probe.calls == ["start_conversation"] * 3
+        assert [kind for kind, _ in probe.llm.requests] == ["generate_response"] * 3
+        assert not [
+            r for r in probe.llm.calls("generate_response") if r.skip_generation
+        ]
+        assert result.final_context[ContextKeys.SAMPLES] == [_SampleProbe.REPLY] * 3
+        assert result.trace.total_iterations == 3
+        assert (result.success, result.stop_reason) == (True, "answered")
+        assert result.answer == _SampleProbe.REPLY
+
+    def test_sample_history_is_the_reply_alone(self, monkeypatch):
+        probe = _SampleProbe(monkeypatch, num_samples=2)
+
+        probe.agent.run("What is the capital of Australia?")
+
+        assert probe.histories == [[{"system": _SampleProbe.REPLY}]] * 2
+
+    def test_sample_request_carries_no_synthetic_message(self, monkeypatch):
+        probe = _SampleProbe(monkeypatch, num_samples=1)
+
+        probe.agent.run("What is the capital of Australia?")
+
+        (request,) = probe.llm.calls("generate_response")
+        assert request.user_message == ""
+        assert "Continue" not in request.system_prompt
+        assert "What is the capital of Australia?" in request.system_prompt
+
+    def test_generate_single_holds_no_loop(self):
+        source = textwrap.dedent(
+            inspect.getsource(SelfConsistencyAgent._generate_single)
+        )
+        nodes = list(ast.walk(ast.parse(source)))
+
+        assert not [n for n in nodes if isinstance(n, ast.While | ast.For)]
+        called = {
+            n.func.attr
+            for n in nodes
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        assert {"start_conversation", "end_conversation"} <= called
+        assert not called & {"converse", "advance", "run_until_terminal"}
+
+    def test_builder_keeps_its_signature_and_loads(self):
+        # examples/agents/workflow_agent/run.py builds the FSM by keyword.
+        assert list(inspect.signature(build_self_consistency_fsm).parameters) == [
+            "task_description"
+        ]
+        fsm = build_self_consistency_fsm(task_description="x")
+
+        definition = FSMDefinition(**fsm)
+        assert definition.initial_state == SelfConsistencyStates.GENERATE
+        assert definition.states[SelfConsistencyStates.GENERATE].transitions == []
+        api = API.from_definition(fsm, llm_interface=PromptGroundedLLM())
+        conv_id, greeting = api.start_conversation({"task": "x"})
+        assert greeting == "ok"
+        assert api.has_conversation_ended(conv_id) is True

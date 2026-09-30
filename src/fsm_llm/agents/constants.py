@@ -263,6 +263,8 @@ class ContextKeys:
     ATTEMPT_RESULT = "attempt_result"
     ATTEMPT_SUCCEEDED = "attempt_succeeded"
     SUBTASK_RESULTS = "subtask_results"
+    # How a decomposition's subtasks combine: "AND" (all) or "OR" (any).
+    OPERATOR = "operator"
     CURRENT_DEPTH = "current_depth"
 
 

@@ -228,20 +228,19 @@ def build_adapt_fsm(
                       -> decompose (failure) -> combine (depth limit)
                                              -> [triggers recursive run()]
 
-    ``attempt_result`` (str), ``attempt_succeeded`` (bool) and ``subtasks``
-    (list) are explicit typed fields whose prompts show the task, the
-    attempt (assess, decompose) and the caller's ``context_keys``, never
-    ``agent_trace``. Raises ``ValueError`` like :func:`_typed_field_extraction`.
+    ``attempt_result`` (str), ``attempt_succeeded`` (bool), ``subtasks``
+    (list) and ``operator`` (str, optional) are explicit typed fields whose
+    prompts show the task, the attempt (assess, decompose) and the caller's
+    ``context_keys``, never ``agent_trace``. The three loop states make no
+    state-level bulk call. Raises ``ValueError`` like
+    :func:`_typed_field_extraction`.
     """
     from .prompts import (
         build_adapt_field_instructions,
-        build_assess_extraction_instructions,
         build_assess_response_instructions,
-        build_attempt_extraction_instructions,
         build_attempt_response_instructions,
         build_combine_extraction_instructions,
         build_combine_response_instructions,
-        build_decompose_extraction_instructions,
         build_decompose_response_instructions,
     )
 
@@ -256,6 +255,15 @@ def build_adapt_fsm(
     # configs replace core's auto-minted `any` ones (whole context). Do NOT
     # type `subtasks` `any`: the subtask executor needs a list, and `list`
     # also parses a JSON-string list.
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-036: `attempt`, `assess` and
+    # `decompose` make no state-level bulk call. The typed fields are every
+    # key the run reads; the bulk calls only added `confidence`, `reasoning`
+    # and `evaluation_feedback`, which nothing read, and were the one channel
+    # through which a model reply could write any unset key (`final_answer`
+    # included, which the answer prefers). `operator`, once filled only by
+    # decompose's bulk call, is a typed optional field (a null means AND).
+    # Do NOT add bulk instructions back as a second chance for a null field:
+    # a null takes the state's unconditional edge (3e4eb3e5/D-002).
     judged = (ContextKeys.ATTEMPT_RESULT, *context_keys)
 
     states: dict[str, Any] = {
@@ -264,9 +272,7 @@ def build_adapt_fsm(
             "description": "Attempt to solve the task directly",
             "purpose": "Give a direct attempt at solving the task",
             "required_context_keys": [ContextKeys.ATTEMPT_RESULT],
-            "extraction_instructions": build_attempt_extraction_instructions(
-                registry, task_description=task_description
-            ),
+            "extraction_instructions": "",
             "field_extractions": [
                 # DECISION plan-2026-09-29T103145-06a5ec0a/D-057
                 # `str`, not D-050's artifact `any`: an attempt is a short
@@ -307,7 +313,7 @@ def build_adapt_fsm(
             "description": "Assess whether the attempt succeeded",
             "purpose": "Determine if the attempt is satisfactory or needs decomposition",
             "required_context_keys": [ContextKeys.ATTEMPT_SUCCEEDED],
-            "extraction_instructions": build_assess_extraction_instructions(),
+            "extraction_instructions": "",
             "field_extractions": [
                 _typed_field_extraction(
                     ContextKeys.ATTEMPT_SUCCEEDED,
@@ -400,14 +406,21 @@ def build_adapt_fsm(
             "description": "Decompose the task into simpler subtasks",
             "purpose": "Break the task down for recursive solving",
             "required_context_keys": [ContextKeys.SUBTASKS],
-            "extraction_instructions": build_decompose_extraction_instructions(),
+            "extraction_instructions": "",
             "field_extractions": [
                 _typed_field_extraction(
                     ContextKeys.SUBTASKS,
                     "list",
                     fields[ContextKeys.SUBTASKS],
                     extra_context_keys=judged,
-                )
+                ),
+                _typed_field_extraction(
+                    ContextKeys.OPERATOR,
+                    "str",
+                    fields[ContextKeys.OPERATOR],
+                    extra_context_keys=(*judged, ContextKeys.SUBTASKS),
+                    required=False,
+                ),
             ],
             "response_instructions": build_decompose_response_instructions(),
             "transitions": [

@@ -827,7 +827,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         extracted_data: dict[str, Any] | None = None,
         transition_occurred: bool = False,
         previous_state: str | None = None,
-        user_message: str = "",
+        user_message: str | None = "",
         plain_text_response: bool = False,
         context: dict[str, Any] | None = None,
         rejected_corrections: dict[str, Any] | None = None,
@@ -843,7 +843,12 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             extracted_data: Data extracted in Pass 1
             transition_occurred: Whether a state transition occurred
             previous_state: Previous state if transition occurred
-            user_message: Original user message
+            user_message: Original user message. ``None`` is a step without a
+                user message (``API.advance``): the prompt then asks for the
+                state's output as its response instructions describe it, and
+                for no acknowledgement of a message, of new information or of
+                a state change. A string, ``""`` included (the greeting,
+                ``converse("")``), builds the conversational prompt unchanged.
             plain_text_response: Ask for plain user-facing text instead of the
                 ``{"message", "reasoning"}`` JSON envelope. The streaming path
                 sets this so the yielded tokens and the stored history are the
@@ -868,7 +873,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         sections = []
 
         # Task definition (enhanced for response generation)
-        sections.extend(self._build_response_task_section())
+        sections.extend(self._build_response_task_section(user_message=user_message))
 
         # Response generation wrapper
         sections.append("<response_generation>")
@@ -880,12 +885,12 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         # Final state context
         sections.extend(
             self._build_final_state_context_section(
-                state, transition_occurred, previous_state
+                state, transition_occurred, previous_state, user_message=user_message
             )
         )
 
         # User message context
-        sections.extend(self._build_user_message_section(user_message))
+        sections.extend(self._build_user_message_section(user_message or ""))
 
         # Extracted data context
         if self.config.include_extracted_data and extracted_data:
@@ -907,11 +912,17 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         sections.extend(self._build_enhanced_context_section(instance, context))
 
         # Response format
-        sections.extend(self._build_response_format_section(plain_text_response))
+        sections.extend(
+            self._build_response_format_section(
+                plain_text_response, user_message=user_message
+            )
+        )
 
         # Guidelines
         if self.config.enable_response_guidelines:
-            sections.extend(self._build_response_guidelines_section())
+            sections.extend(
+                self._build_response_guidelines_section(user_message=user_message)
+            )
 
         sections.append("</response_generation>")
 
@@ -920,8 +931,31 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
 
         return prompt
 
-    def _build_response_task_section(self) -> list[str]:
-        """Build enhanced task definition section for response generation."""
+    def _build_response_task_section(
+        self, *, user_message: str | None = ""
+    ) -> list[str]:
+        """Build enhanced task definition section for response generation.
+
+        ``user_message=None`` (a step without a user message) gets the
+        no-message wording; any string keeps the conversational one.
+        """
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-035
+        # A step without a user message has nobody to answer: its reply is
+        # the state's output. Do NOT send it the conversational wording below
+        # ("acknowledge new information from user input", "acknowledge this
+        # transition", "ask follow-up questions"): live, the model then opened
+        # final answers with thanks for a message nobody sent. Do NOT key this
+        # on an empty string either: `""` is the greeting and `converse("")`,
+        # whose prompts must stay byte-identical. See decisions.md D-035.
+        if user_message is None:
+            return self._build_task_section("""
+            You are the Response Generation component of a state machine run.
+            No user message was sent on this step. Your responsibility is to:
+            - Write the output of the current state, as its <response_instructions> describe it,
+            - Base it on the context given below,
+            - Open the output with its content: nobody has just spoken, so do not greet, thank or reply to anyone, and do not comment on a state change,
+            - Maintain the <persona> when one is given.
+            """)
         return self._build_task_section("""
             You are the Response Generation component in a conversational AI system.
             Your responsibility is to:
@@ -943,9 +977,18 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         return ["<persona>", self._sanitize_text_for_prompt(persona), "</persona>", ""]
 
     def _build_final_state_context_section(
-        self, state: State, transition_occurred: bool, previous_state: str | None = None
+        self,
+        state: State,
+        transition_occurred: bool,
+        previous_state: str | None = None,
+        *,
+        user_message: str | None = "",
     ) -> list[str]:
-        """Build final state context section."""
+        """Build final state context section.
+
+        ``user_message=None`` (a step without a user message) leaves out the
+        ``<transition_info>`` line: there is nobody to acknowledge it to.
+        """
         sections = [
             "<final_state_context>",
             f"<current_state>{state.id}</current_state>",
@@ -975,7 +1018,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
                 sections.append(f"- {natural_key}")
             sections.append("</information_still_needed>")
 
-        if transition_occurred and previous_state:
+        if transition_occurred and previous_state and user_message is not None:
             sections.append(
                 f"<transition_info>Just transitioned from '{previous_state}' to '{state.id}'. "
                 f"Acknowledge this transition naturally.</transition_info>"
@@ -1077,12 +1120,44 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             "",
         ]
 
-    def _build_response_format_section(self, plain_text: bool = False) -> list[str]:
+    def _build_response_format_section(
+        self, plain_text: bool = False, *, user_message: str | None = ""
+    ) -> list[str]:
         """Build response format section.
 
         ``plain_text=True`` replaces the JSON envelope with a plain-text
         instruction (streaming path, see ``build_response_prompt``).
+        ``user_message=None`` (a step without a user message) keeps both
+        formats and drops their conversational notes.
         """
+        if user_message is None:
+            if plain_text:
+                return [
+                    "<response_format>",
+                    "Respond with plain text only: the output itself.",
+                    "",
+                    "Important:",
+                    "\t- Do NOT use JSON, curly braces, or markdown code fences",
+                    "\t- Do NOT include your reasoning or any field names",
+                    "</response_format>",
+                    "",
+                ]
+            return self._build_response_format(
+                json_schema="""
+            {
+                "message": "The output text",
+                "reasoning": "Brief internal reasoning (optional)"
+            }""",
+                field_descriptions=[
+                    "`message` is REQUIRED and contains the complete output text.",
+                    "`reasoning` is OPTIONAL and explains your decisions (not part of the output).",
+                ],
+                notes=[
+                    "Important:",
+                    "Return ONLY valid JSON - no markdown code fences, no additional text",
+                    "The output goes inside `message`; never reply with the bare text",
+                ],
+            )
         if plain_text:
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-003: the streaming
             # path yields raw deltas and persists their concatenation, so a
@@ -1123,8 +1198,22 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
             ],
         )
 
-    def _build_response_guidelines_section(self) -> list[str]:
-        """Build detailed guidelines section for response generation."""
+    def _build_response_guidelines_section(
+        self, *, user_message: str | None = ""
+    ) -> list[str]:
+        """Build detailed guidelines section for response generation.
+
+        ``user_message=None`` (a step without a user message) gets guidelines
+        with no acknowledgement or follow-up question.
+        """
+        if user_message is None:
+            return self._build_guidelines("""
+            Response Generation Guidelines:
+            - Follow the <response_instructions>: they say what the output is.
+            - The output opens with content: no greeting, no thanks, no praise and no remark about the step itself.
+            - Maintain consistent persona based on the <persona>.
+            - Don't mention technical system details or internal states.
+            """)
         return self._build_guidelines("""
             Response Generation Guidelines:
             - Acknowledge new information the user has provided when it's significant.

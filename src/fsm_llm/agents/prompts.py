@@ -661,31 +661,6 @@ def build_orchestrator_synthesize_response_instructions() -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_attempt_extraction_instructions(
-    registry: ToolRegistry | None = None,
-    task_description: str | None = None,
-) -> str:
-    """Build extraction instructions for the ADaPT attempt state."""
-    tool_section = ""
-    if registry is not None and len(registry) > 0:
-        tool_text, _ = _get_tool_list(registry, task_description)
-        tool_section = "\n\n" + tool_text
-
-    return "\n".join(
-        [
-            "Attempt to solve the task directly using your knowledge "
-            "and any available tools." + tool_section,
-            "",
-            "Give your best attempt at answering the task completely.",
-            "",
-            "Extract the following as JSON:",
-            '- "attempt_result": your attempted answer to the task',
-            '- "confidence": your confidence in this attempt (0.0 to 1.0)',
-            '- "reasoning": your reasoning process',
-        ]
-    )
-
-
 def build_attempt_response_instructions() -> str:
     """Build response instructions for the ADaPT attempt state."""
     return (
@@ -694,48 +669,11 @@ def build_attempt_response_instructions() -> str:
     )
 
 
-def build_assess_extraction_instructions() -> str:
-    """Build extraction instructions for the ADaPT assess state."""
-    return "\n".join(
-        [
-            "Evaluate whether the previous attempt successfully solved the task.",
-            "",
-            "Consider:",
-            "- Is the answer complete and correct?",
-            "- Are there gaps in the reasoning?",
-            "- Would breaking this into subtasks yield a better result?",
-            "",
-            "Extract the following as JSON:",
-            '- "attempt_succeeded": true if the attempt is satisfactory, false otherwise',
-            '- "evaluation_feedback": brief explanation of the assessment',
-        ]
-    )
-
-
 def build_assess_response_instructions() -> str:
     """Build response instructions for the ADaPT assess state."""
     return (
         "Explain your assessment of the attempt quality. "
         "If the attempt failed, explain what went wrong."
-    )
-
-
-def build_decompose_extraction_instructions() -> str:
-    """Build extraction instructions for the ADaPT decompose state."""
-    return "\n".join(
-        [
-            "The previous attempt was insufficient. Decompose the task into "
-            "smaller, simpler subtasks.",
-            "",
-            "Choose an operator:",
-            "- AND: all subtasks must succeed (combine results)",
-            "- OR: any subtask success is sufficient (take best result)",
-            "",
-            "Extract the following as JSON:",
-            '- "subtasks": a JSON list of subtask description strings',
-            '- "operator": either "AND" or "OR"',
-            '- "reasoning": your reasoning for this decomposition',
-        ]
     )
 
 
@@ -754,11 +692,11 @@ def build_adapt_field_instructions(
     """Per-field instructions for the ADaPT states' typed fields.
 
     Returns ``{field_name: instructions}`` for ``attempt_result`` (attempt),
-    ``attempt_succeeded`` (assess) and ``subtasks`` (decompose); fix 21.1 of
-    plan 06a5ec0a. The generated values open with :data:`_COMPOSE`; the
-    ``attempt_succeeded`` wording is permissive (a false costs a whole
-    decomposition). ``registry``/``task_description`` list the tools like
-    :func:`build_attempt_extraction_instructions`.
+    ``attempt_succeeded`` (assess), ``subtasks`` and ``operator`` (decompose);
+    fix 21.1 of plan 06a5ec0a. The generated values open with
+    :data:`_COMPOSE`; the ``attempt_succeeded`` wording is permissive (a false
+    costs a whole decomposition). ``registry``/``task_description`` add the
+    tool list to the ``attempt_result`` instructions.
     """
     tool_section = ""
     if registry is not None and len(registry) > 0:
@@ -781,6 +719,12 @@ def build_adapt_field_instructions(
             "decomposition of the task: a JSON list of short subtask "
             "description strings, each simpler than the task and solvable on "
             "its own, together covering what the attempt missed."
+        ),
+        ContextKeys.OPERATOR: (
+            "How the subtasks of your decomposition combine. 'AND' when every "
+            "subtask is needed to answer the task (their results are combined); "
+            "'OR' when any single subtask would answer the task on its own (the "
+            "first one that succeeds is enough). Answer with exactly AND or OR."
         ),
     }
 
