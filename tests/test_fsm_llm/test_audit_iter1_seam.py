@@ -1194,10 +1194,21 @@ class TestStayIsNotATransition:
 # ══════════════════════════════════════════════════════════════
 
 
+def _is_classifier_call(kwargs: dict) -> bool:
+    """True for a provider request the ``Classifier`` issued.
+
+    Every core call goes through ``fsm_llm.llm.completion``; a classifier
+    request is the one carrying the ``intent_classification`` schema (sent
+    when the model supports ``response_format``).
+    """
+    fmt = kwargs.get("response_format") or {}
+    return fmt.get("json_schema", {}).get("name") == "intent_classification"
+
+
 class _ConnectionHarness:
-    """`API.converse` with the REAL Classifier and a spying
-    ``fsm_llm.classification.completion``; records every classifier call's
-    kwargs. The Pass-1/Pass-2 LLM (``fsm_llm.llm.completion``) is faked."""
+    """`API.converse` with the REAL Classifier over a scripted
+    ``fsm_llm.llm.completion`` (the one binding every core call uses);
+    records the kwargs of every classifier call, fakes Pass 1 / Pass 2."""
 
     def __init__(self, fsm: dict, intent: str, **api_kwargs):
         self.fsm = fsm
@@ -1212,6 +1223,8 @@ class _ConnectionHarness:
         )
 
     def _llm_completion(self, **kwargs):
+        if _is_classifier_call(kwargs):
+            return self._classifier_completion(**kwargs)
         return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
 
     def run(self):
@@ -1220,14 +1233,6 @@ class _ConnectionHarness:
             patch(
                 "fsm_llm.llm.get_supported_openai_params",
                 return_value=["response_format"],
-            ),
-            patch(
-                "fsm_llm.classification.completion",
-                side_effect=self._classifier_completion,
-            ),
-            patch(
-                "fsm_llm.classification.get_supported_openai_params",
-                return_value=[],
             ),
         ):
             api = API.from_definition(self.fsm, **self.api_kwargs)
@@ -1494,11 +1499,11 @@ class TestDictOnlyJsonContract:
         clf = _classifier()
         with (
             patch(
-                "fsm_llm.classification.completion",
+                "fsm_llm.llm.completion",
                 return_value=_fake_response(content),
             ),
             patch(
-                "fsm_llm.classification.get_supported_openai_params",
+                "fsm_llm.llm.get_supported_openai_params",
                 return_value=[],
             ),
             pytest.raises(ClassificationResponseError),

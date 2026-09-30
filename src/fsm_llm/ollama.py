@@ -7,8 +7,8 @@ corrupt structured JSON output.  Thinking and structured output cannot
 coexist in a single Ollama call (ollama/ollama#10538).
 
 This module centralises detection and parameter configuration so that
-both ``LiteLLMInterface`` and the classification ``Classifier`` (which
-calls ``litellm.completion()`` directly) apply the same fixes:
+``LiteLLMInterface`` applies the same fixes to every call, including the
+classification ``Classifier``'s (it sends through that interface):
 
 - ``reasoning_effort = "none"`` — LiteLLM (>=1.82) maps this to
   Ollama's top-level ``think: false`` flag

@@ -390,10 +390,8 @@ class _ClassifierCapture:
         self.intent, self.confidence = intent, confidence
         self.calls: list[list[dict[str, str]]] = []
         self._patches = [
-            patch("fsm_llm.classification.completion", side_effect=self._reply),
-            patch(
-                "fsm_llm.classification.get_supported_openai_params", return_value=[]
-            ),
+            patch("fsm_llm.llm.completion", side_effect=self._reply),
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
         ]
 
     def _reply(self, **kwargs):
@@ -4219,10 +4217,8 @@ class TestStep15D6D12B8:
             return _d_response(json.dumps({"intent": "buy", "confidence": 0.9}))
 
         with (
-            patch("fsm_llm.classification.completion", _fake_completion),
-            patch(
-                "fsm_llm.classification.get_supported_openai_params", return_value=[]
-            ),
+            patch("fsm_llm.llm.completion", _fake_completion),
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
         ):
             clf.classify("I want it")
         assert "stream" not in captured

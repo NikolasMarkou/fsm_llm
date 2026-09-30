@@ -555,12 +555,11 @@ class TestCallMeter:
             2,
         )
 
-    def test_completion_targets_cover_all_four_bindings(self):
+    def test_completion_targets_cover_every_binding(self):
         """Defect guarded: a binding left unwrapped (core `from litellm import
-        completion` in llm.py/classification.py), so legacy calls go uncounted."""
+        completion` in llm.py), so legacy calls go uncounted."""
         import litellm
 
-        import fsm_llm.classification
         import fsm_llm.llm
 
         targets = {(mod.__name__, attr) for mod, attr in ab._completion_targets()}
@@ -568,8 +567,46 @@ class TestCallMeter:
             (litellm.__name__, "completion"),
             (litellm.__name__, "acompletion"),
             (fsm_llm.llm.__name__, "completion"),
-            (fsm_llm.classification.__name__, "completion"),
         }
+
+    def test_one_classifier_call_is_one_count(self, monkeypatch):
+        """Defect guarded: the classifier, which sends through the LLM layer's
+        binding, going uncounted or counted twice by the real target list."""
+        import litellm
+
+        import fsm_llm.llm
+        from fsm_llm.classification import Classifier
+        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+
+        def fake_completion(**kw):
+            message = SimpleNamespace(content='{"intent": "buy", "confidence": 0.9}')
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=message)],
+                usage=SimpleNamespace(prompt_tokens=7, completion_tokens=3),
+            )
+
+        monkeypatch.setattr(litellm, "completion", fake_completion)
+        monkeypatch.setattr(fsm_llm.llm, "completion", fake_completion)
+        monkeypatch.setattr(
+            fsm_llm.llm, "get_supported_openai_params", lambda model: []
+        )
+        schema = ClassificationSchema(
+            intents=[
+                IntentDefinition(name="buy", description="b"),
+                IntentDefinition(name="browse", description="x"),
+            ],
+            fallback_intent="browse",
+        )
+        meter = ab.CallMeter()
+        restore = ab.install_meter(meter, ab._completion_targets())
+        try:
+            result = Classifier(schema, model="gpt-4o").classify("I want it")
+        finally:
+            restore()
+        assert result.intent == "buy"
+        snap = meter.snapshot()
+        assert snap["llm_calls"] == 1
+        assert (snap["prompt_tokens"], snap["completion_tokens"]) == (7, 3)
 
 
 class _FakeResult:

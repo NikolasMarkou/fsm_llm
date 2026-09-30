@@ -80,6 +80,13 @@ RESERVED_LLM_CALL_KWARGS = frozenset(
     {"model", "messages", "temperature", "max_tokens", "stream", "response_format"}
 )
 
+# The one user turn the LLM layer sends in place of an empty one (a greeting,
+# a classifier call with no message, ``converse("")``). Providers may reject an
+# empty user content. Written only into the provider request by
+# ``LiteLLMInterface._build_call_params``; it never enters conversation history
+# or a prompt builder.
+NEUTRAL_USER_TURN = "Proceed according to the instructions above."
+
 # --------------------------------------------------------------
 # Conversation Management Constants
 # --------------------------------------------------------------

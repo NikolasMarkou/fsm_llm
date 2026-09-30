@@ -12,8 +12,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from litellm import completion, get_supported_openai_params
-
 from .constants import (
     DEFAULT_LLM_MODEL,
     MAX_MULTI_INTENTS,
@@ -30,8 +28,8 @@ from .definitions import (
     IntentScore,
     MultiClassificationResult,
 )
+from .llm import LiteLLMInterface
 from .logging import logger
-from .ollama import apply_ollama_params, prepare_ollama_messages
 from .prompts import (
     ClassificationPromptConfig,
     build_classification_context_block,
@@ -68,8 +66,12 @@ class Classifier:
     LLM-backed intent classifier.
 
     Wraps a ClassificationSchema and an LLM model to provide a simple
-    ``classify()`` / ``classify_multi()`` interface.  Follows the same
-    LiteLLM integration pattern used by ``fsm_llm.LiteLLMInterface``.
+    ``classify()`` / ``classify_multi()`` interface. Every request is built
+    and sent by a ``fsm_llm.LiteLLMInterface`` constructed here from
+    ``model``, ``api_key`` and ``llm_kwargs`` (``timeout`` defaults to
+    120 seconds; ``retries`` has that interface's meaning; names in
+    ``RESERVED_LLM_CALL_KWARGS`` are ignored, the prompt config owns
+    ``temperature`` and ``max_tokens``).
     """
 
     def __init__(
@@ -79,7 +81,7 @@ class Classifier:
         *,
         api_key: str | None = None,
         config: ClassificationPromptConfig | None = None,
-        **litellm_kwargs,
+        **llm_kwargs,
     ) -> None:
         if not model or not model.strip():
             raise ValueError("model must be a non-empty string")
@@ -87,9 +89,26 @@ class Classifier:
         self.schema = schema
         self.model = model
         self.config = config or ClassificationPromptConfig()
-        self._kwargs: dict[str, Any] = {**litellm_kwargs}
-        if api_key:
-            self._kwargs["api_key"] = api_key
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-022: the classifier owns
+        # a LiteLLMInterface and sends through it. Do NOT import the provider
+        # SDK here or rebuild call params (model kwargs, timeout,
+        # response_format, Ollama preparation, the neutral user turn): llm.py
+        # is the one request path. The 120s default bounds a stalled provider
+        # so it cannot hold the conversation thread and its conv_lock
+        # (CA3-003). See decisions.md D-022.
+        connection: dict[str, Any] = {
+            "timeout": 120.0,
+            **{
+                k: v for k, v in llm_kwargs.items() if k not in RESERVED_LLM_CALL_KWARGS
+            },
+        }
+        self._llm = LiteLLMInterface(
+            model,
+            api_key=api_key,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+            **connection,
+        )
 
         # Pre-build prompts so they're not reconstructed on every call.
         single_config = replace(self.config, multi_intent=False)
@@ -188,52 +207,15 @@ class Classifier:
         system_prompt = (
             self._multi_system_prompt if multi_intent else self._system_prompt
         ) + build_classification_context_block(context)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ]
-
-        safe_kwargs = {
-            k: v for k, v in self._kwargs.items() if k not in RESERVED_LLM_CALL_KWARGS
-        }
-        call_params = {
-            **safe_kwargs,
-            "model": self.model,
-            "messages": messages,
-            "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
-        }
-        # Bound the call so a stalled provider cannot hang the conversation
-        # thread (and its conv_lock) indefinitely. Mirrors LiteLLMInterface's
-        # 120s default; respects a caller-supplied timeout in litellm_kwargs
-        # (CA3-003).
-        call_params.setdefault("timeout", 120.0)
-
-        # Use structured output when the provider supports it
-        supported = get_supported_openai_params(model=self.model)
-        if supported and "response_format" in supported:
-            target_schema = (
-                self._multi_json_schema if multi_intent else self._json_schema
-            )
-            call_params["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "intent_classification",
-                    "schema": target_schema,
-                },
-            }
-
-        # Ollama: disable thinking mode and force temperature=0
-        apply_ollama_params(call_params, self.model, structured=True)
-
-        # Ollama: prepend /nothink and embed schema in prompt
-        messages = prepare_ollama_messages(
-            messages, self.model, call_params.get("response_format")
-        )
-        call_params["messages"] = messages
-
         try:
-            response = completion(**call_params)
+            response = self._llm.complete_structured(
+                system_prompt,
+                user_message,
+                json_schema=(
+                    self._multi_json_schema if multi_intent else self._json_schema
+                ),
+                schema_name="intent_classification",
+            )
         except Exception as e:
             raise ClassificationError(f"Classification LLM call failed: {e!s}") from e
         elapsed = time.time() - start
@@ -290,7 +272,7 @@ class Classifier:
         # Thinking model fallback -- content is empty/None, recover the answer
         # from the model's reasoning trace. Routes through the SINGLE shared
         # `_resolve_reasoning_trace` (utilities.py) rather than a private
-        # `getattr(msg, "thinking", None)`: the installed litellm range renames
+        # `getattr(msg, "thinking", None)`: the installed provider SDK renames
         # `thinking` to `reasoning_content` and deletes `thinking`, so a
         # `.thinking`-only read was dead code here for the default Ollama model
         # (NL1). See utilities.py D-002.
@@ -457,10 +439,10 @@ class HierarchicalClassifier:
         *,
         api_key: str | None = None,
         config: ClassificationPromptConfig | None = None,
-        **litellm_kwargs,
+        **llm_kwargs,
     ) -> None:
         self.schema = schema
-        shared = dict(model=model, api_key=api_key, config=config, **litellm_kwargs)
+        shared = dict(model=model, api_key=api_key, config=config, **llm_kwargs)
 
         self._domain_classifier = Classifier(schema=schema.domain_schema, **shared)
         self._intent_classifiers: dict[str, Classifier] = {

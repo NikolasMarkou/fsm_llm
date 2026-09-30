@@ -29,6 +29,7 @@ from tests.test_fsm_llm.test_audit_iter1_seam import (
     _ConnectionHarness,
     _correction_fsm,
     _fake_response,
+    _is_classifier_call,
 )
 
 # ══════════════════════════════════════════════════════════════
@@ -729,7 +730,9 @@ class TestSameConversationReentrancyIsBounded:
             with pytest.raises(FSMError):
                 s.api.converse("hello", s.cid)
             assert depth["max"] == 1
-            assert s.provider.calls <= 2
+            # greeting + the ambiguity classifier (same binding) + the turn's
+            # own generation call; a recursing handler adds one per level.
+            assert s.provider.calls <= 3
             assert len(raised) == 1
             assert "already being processed" in str(raised[0])
 
@@ -755,7 +758,9 @@ class TestSameConversationReentrancyIsBounded:
             with pytest.raises(FSMError):
                 list(s.api.converse_stream("hello", s.cid))
             assert depth["max"] == 1
-            assert s.provider.calls <= 2
+            # greeting + the ambiguity classifier (same binding) + the turn's
+            # own generation call; a recursing handler adds one per level.
+            assert s.provider.calls <= 3
 
     def test_pre_processing_handler_calling_converse_raises_not_nests(self):
         from fsm_llm.definitions import FSMError
@@ -1277,7 +1282,7 @@ class TestBulkExtractionIsSanitizedAndFiltered:
 
 class _ClassBulkProv(_BulkProv):
     """``_BulkProv`` with the REAL Classifier over a scripted
-    ``fsm_llm.classification.completion`` (fixed intent and confidence)."""
+    ``fsm_llm.llm.completion`` (fixed intent and confidence)."""
 
     def __init__(
         self,
@@ -1301,17 +1306,10 @@ class _ClassBulkProv(_BulkProv):
             )
         )
 
-    def __enter__(self):
-        self._stack.enter_context(
-            patch(
-                "fsm_llm.classification.completion",
-                side_effect=self._classifier_completion,
-            )
-        )
-        self._stack.enter_context(
-            patch("fsm_llm.classification.get_supported_openai_params", return_value=[])
-        )
-        return super().__enter__()
+    def _completion(self, **kwargs):
+        if _is_classifier_call(kwargs):
+            return self._classifier_completion(**kwargs)
+        return super()._completion(**kwargs)
 
 
 def _classified_bulk_fsm() -> dict:

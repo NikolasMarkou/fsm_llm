@@ -941,20 +941,19 @@ def install_meter(
 def _completion_targets() -> list[tuple[Any, str]]:
     """Every binding an agent can reach litellm's completion through.
 
-    ``fsm_llm.llm`` and ``fsm_llm.classification`` bind ``completion`` by name
-    at import; native_fc and composition look ``litellm.completion`` up at
-    call time. Loaded here, BEFORE any arm imports ``fsm_llm.agents``.
+    ``fsm_llm.llm`` binds ``completion`` by name at import (the classifier
+    sends through it too, so a classifier call is one count there); native_fc
+    and composition look ``litellm.completion`` up at call time. Loaded here,
+    BEFORE any arm imports ``fsm_llm.agents``.
     """
     import litellm
 
-    import fsm_llm.classification as classification
     import fsm_llm.llm as llm
 
     return [
         (litellm, "completion"),
         (litellm, "acompletion"),
         (llm, "completion"),
-        (classification, "completion"),
     ]
 
 

@@ -61,6 +61,7 @@ from litellm import completion, get_supported_openai_params
 
 from .constants import (
     DEFAULT_TEMPERATURE,
+    NEUTRAL_USER_TURN,
     RESERVED_LLM_CALL_KWARGS,
     TRUNCATED_SALVAGE_CONFIDENCE,
 )
@@ -264,6 +265,35 @@ def _salvage_envelope_value(raw: str, field_name: str) -> tuple[bool, Any, bool]
     if isinstance(value, str) and not value.strip():
         value = None
     return True, value, truncated
+
+
+# Call types whose reply is parsed as JSON: on Ollama they run at temperature 0.
+_STRUCTURED_CALL_TYPES = frozenset(
+    {"data_extraction", "field_extraction", "classification"}
+)
+
+
+def _fill_empty_user_turns(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Replace every empty user turn with ``NEUTRAL_USER_TURN``.
+
+    Args:
+        messages: the provider message list of one request.
+
+    Returns:
+        A new list. A ``user`` message whose content is ``""`` or whitespace
+        only is copied with the neutral instruction as its content; every
+        other message is the same object. The input list is not mutated.
+
+    Failure mode: none, never raises for a list of dicts.
+    """
+    return [
+        {**message, "content": NEUTRAL_USER_TURN}
+        if message.get("role") == "user"
+        and isinstance(message.get("content"), str)
+        and not message["content"].strip()
+        else message
+        for message in messages
+    ]
 
 
 def _safe_str(value: Any) -> str | None:
@@ -836,6 +866,56 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
+    def complete_structured(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        json_schema: dict[str, Any],
+        schema_name: str,
+    ) -> Any:
+        """Issue one JSON-schema-constrained completion and return the raw reply.
+
+        The request is built by ``_build_call_params`` like every other call:
+        connection kwargs, timeout, the neutral user turn for an empty
+        ``user_message``, and Ollama preparation (thinking off, temperature 0,
+        ``/nothink`` and the schema in the user turn). The schema is sent as a
+        ``json_schema`` response format when the model supports it; otherwise
+        the call goes out without one and a WARNING is logged.
+
+        Args:
+            system_prompt: the system turn.
+            user_message: the user turn; may be empty.
+            json_schema: JSON schema the reply must match.
+            schema_name: name sent with the schema.
+
+        Returns:
+            The provider response object, unvalidated: the caller owns parsing
+            and shape checks (``Classifier`` maps them to its own errors).
+
+        Raises:
+            Exception: whatever the provider call raises, unwrapped.
+        """
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-022: returns the raw
+        # reply and does NOT reuse _make_llm_call's validation, which rewrites
+        # an empty content from the reasoning trace and raises
+        # LLMResponseError; the classifier's own reader and its
+        # ClassificationResponseError contract must see the reply as sent.
+        # Do NOT add a second `completion` binding or a request builder in
+        # classification.py for this. See decisions.md D-022.
+        call_params = self._build_call_params(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "classification",
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": schema_name, "schema": json_schema},
+            },
+        )
+        return completion(**call_params)
+
     def _supported_openai_params(self) -> list[str] | None:
         """Return litellm's supported-param list for ``self.model``, memoised.
 
@@ -860,7 +940,9 @@ class LiteLLMInterface(LLMInterface):
     ) -> dict[str, Any]:
         """
         Build the ``litellm.completion(**call_params)`` kwargs shared by
-        ``_make_llm_call`` (non-streaming) and ``generate_response_stream``.
+        ``_make_llm_call`` (non-streaming), ``generate_response_stream`` and
+        ``complete_structured``. An empty user turn in ``messages`` is sent as
+        ``NEUTRAL_USER_TURN``; the caller's list is not mutated.
 
         # DECISION plan-2026-09-12T135914-45a654de/D-015
         # Extracted from two independently-maintained ~40-line builders
@@ -906,7 +988,7 @@ class LiteLLMInterface(LLMInterface):
         call_params: dict[str, Any] = {
             **safe_kwargs,
             "model": self.model,
-            "messages": messages,
+            "messages": _fill_empty_user_turns(messages),
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
@@ -1056,7 +1138,7 @@ class LiteLLMInterface(LLMInterface):
         """
         # Ollama: disable thinking mode and force deterministic output
         # for structured calls (data extraction, transition decisions).
-        is_structured = call_type in ("data_extraction", "field_extraction")
+        is_structured = call_type in _STRUCTURED_CALL_TYPES
         apply_ollama_params(call_params, self.model, structured=is_structured)
 
     @staticmethod

@@ -758,8 +758,8 @@ def _classify_browse() -> Any:
         {"reasoning": "r", "intent": "browse", "confidence": 0.95, "entities": {}}
     )
     return (
-        patch("fsm_llm.classification.completion", return_value=resp),
-        patch("fsm_llm.classification.get_supported_openai_params", return_value=[]),
+        patch("fsm_llm.llm.completion", return_value=resp),
+        patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
     )
 
 
