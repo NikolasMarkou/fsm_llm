@@ -123,6 +123,90 @@ class ADaPTStates:
     COMBINE = "combine"
 
 
+class NativeFCStates:
+    """States in the native function-calling FSM (``build_native_fc_fsm``)."""
+
+    CALL_MODEL = "call_model"
+    RUN_TOOLS = "run_tools"
+    FORCE_FINAL = "force_final"
+    REPAIR = "repair"
+    CONCLUDE = "conclude"
+
+
+class NativeFCContextKeys:
+    """Context keys of the native function-calling FSM.
+
+    ``MODEL_REPLY``, ``FORCED_REPLY`` and ``REPAIR_REPLY`` are the result keys
+    of the three completion states (core treats them as handler-only). The
+    three message keys are the transcripts those states send (internal: no
+    prompt, extraction or ``get_data`` reaches them). Every other key is
+    written only by the native handlers (``NATIVE_FC_HANDLER_ONLY_KEYS``).
+    """
+
+    # The run's transcript: the task as a user turn, then one paired
+    # tool exchange per tool turn (``call_model`` sends it).
+    TRANSCRIPT = "_native_messages"
+    # Copies of the transcript plus one nudge user turn, sent by the
+    # post-loop forced-tool and repair turns only.
+    FORCE_MESSAGES = "_native_force_messages"
+    REPAIR_MESSAGES = "_native_repair_messages"
+    # Completion results ({kind, text, calls}).
+    MODEL_REPLY = "model_reply"
+    FORCED_REPLY = "forced_reply"
+    REPAIR_REPLY = "repair_reply"
+    # Tool turns run so far (a turn whose calls ran).
+    TOOL_TURNS = "_native_tool_turns"
+    # The run's answer: the final turn's text, or a repair that parsed.
+    ANSWER = "native_answer"
+    # How the model loop ended (a ``NativeLoopEnd`` value); unset while it runs.
+    LOOP_END = "loop_end"
+    # Post-loop routing, written when the loop ends.
+    FORCE_PENDING = "force_final_pending"
+    REPAIR_PENDING = "repair_pending"
+
+
+class NativeLoopEnd:
+    """Values of ``NativeFCContextKeys.LOOP_END``."""
+
+    # A tool-call-free model turn: the run concluded on its own.
+    FINAL = "final"
+    # A garbled tool-call turn (provider error or non-object arguments).
+    MALFORMED = "malformed"
+    # ``max_iterations`` tool turns ran without a final turn.
+    EXHAUSTED = "exhausted"
+
+    ALL: tuple[str, ...] = (FINAL, MALFORMED, EXHAUSTED)
+
+
+class NativeFCHandlerNames:
+    """Names of the handlers ``NativeFCHandlers`` registers on its API."""
+
+    SEED = "native_seed"
+    MODEL_REPLY = "native_model_reply"
+    RUN_TOOLS = "native_run_tools"
+    FORCE_ENTRY = "native_force_entry"
+    FORCED_REPLY = "native_forced_reply"
+    REPAIR_ENTRY = "native_repair_entry"
+    REPAIR_REPLY = "native_repair_reply"
+    CONCLUDE = "native_conclude"
+
+
+# Keys of the native FSM that only its handlers write: listed as core
+# ``handler_only_keys`` beside ``FRAMEWORK_ONLY_KEYS``, so no extraction
+# channel can plant a routing flag, a loop verdict or an answer. The result
+# keys are handler-only in core already (D-021) and listed for the record; the
+# internal-prefixed keys need no entry.
+NATIVE_FC_HANDLER_ONLY_KEYS: tuple[str, ...] = (
+    NativeFCContextKeys.MODEL_REPLY,
+    NativeFCContextKeys.FORCED_REPLY,
+    NativeFCContextKeys.REPAIR_REPLY,
+    NativeFCContextKeys.ANSWER,
+    NativeFCContextKeys.LOOP_END,
+    NativeFCContextKeys.FORCE_PENDING,
+    NativeFCContextKeys.REPAIR_PENDING,
+)
+
+
 # ---------------------------------------------------------------------------
 # Context keys
 # ---------------------------------------------------------------------------
