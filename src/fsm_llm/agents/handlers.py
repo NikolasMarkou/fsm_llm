@@ -22,7 +22,12 @@ from .constants import (
 from .definitions import AgentStep, ToolCall
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 from .hitl import ApprovalPolicy
-from .tools import ToolRegistry, normalize_tool_input, redact_secret_entries
+from .tools import (
+    ToolRegistry,
+    normalize_tool_input,
+    redact_secret_entries,
+    refuse_execute_without_gated,
+)
 from .truncation import smart_truncate
 
 # Errors that end a whole run even when a sub-agent raises them inside a handler.
@@ -191,7 +196,12 @@ class AgentHandlers:
             (``hitl.requires_approval``), passed only under the predicate that
             builds ``await_approval`` and registers the gate. When set, a
             known tool it gates runs only on a matching driver grant.
+
+        Raises:
+            AgentError: ``registry.execute`` cannot take ``gated=``
+                (``refuse_execute_without_gated``).
         """
+        refuse_execute_without_gated(registry)
         self.registry = registry
         self.requires_approval = requires_approval
         self._current_iteration = 0
@@ -377,10 +387,9 @@ class AgentHandlers:
                 LogMessages.TOOL_FAILED.format(name=tool_name, error=result.error)
             )
 
-        # Build observation string — prefix failures so LLM can distinguish
-        observation = result.summary
-        if not result.success:
-            observation = f"[TOOL FAILED] {observation}"
+        # Observation string: a failure (or a timeout, outcome unknown) is
+        # prefixed so the LLM can tell (`ToolResult.observation`).
+        observation = result.observation
 
         # Accumulate observations
         observations = context.get(ContextKeys.OBSERVATIONS, [])

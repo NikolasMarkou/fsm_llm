@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from .constants import ContextKeys, Defaults, EvalOptStates, MakerCheckerStates
-from .tools import ToolRegistry
+from .tools import ToolRegistry, schema_types, tool_parameters_schema
 
 if TYPE_CHECKING:
     from .semantic_tools import SemanticToolRegistry
@@ -34,7 +34,8 @@ def _build_tool_example(tool_name: str, params: dict) -> str:
 
     example_values: dict[str, object] = {}
     for pname, pschema in params.items():
-        ptype = pschema.get("type", "string")
+        types = [t for t in schema_types(pschema) if t != "null"]
+        ptype = types[0] if types else "string"
         if ptype == "number" or ptype == "integer":
             example_values[pname] = 0
         elif ptype == "boolean":
@@ -99,10 +100,9 @@ def build_think_extraction_instructions(
     # Generate per-tool examples from registry (uses filtered list if semantic)
     tools_with_params = []
     for tool in tools:
-        if tool.parameter_schema:
-            props = tool.parameter_schema.get("properties", {})
-            if props:
-                tools_with_params.append((tool.name, props))
+        props = tool_parameters_schema(tool).get("properties", {})
+        if props:
+            tools_with_params.append((tool.name, props))
 
     if tools_with_params:
         parts.append("")

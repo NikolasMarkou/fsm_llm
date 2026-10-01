@@ -44,7 +44,12 @@ from fsm_llm.agents.native_fc import (
     NativeFCHandlers,
 )
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
-from fsm_llm.definitions import CompletionResponse, FSMDefinition, ModelToolCall
+from fsm_llm.definitions import (
+    CompletionResponse,
+    FSMDefinition,
+    LLMResponseError,
+    ModelToolCall,
+)
 from fsm_llm.llm import check_tool_transcript
 from fsm_llm.utilities import extract_json_from_text
 from fsm_llm.validator import FSMValidator
@@ -356,7 +361,7 @@ class TestGoldenRequestsThroughCore:
         )
         NativeFCHandlers(
             registry,
-            max_tool_turns=5,
+            max_tool_turns=options.get("max_iterations", 5),
             force_final_tool=force,
             parse_structured=_parser(schema) if schema is not None else None,
         ).register(api)
@@ -369,7 +374,12 @@ class TestGoldenRequestsThroughCore:
                 schema
             )
         conv_id, _ = api.start_conversation(context)
-        api.run_until_terminal(conv_id, max_steps=20)
+        if spec.get("raises"):
+            # A provider error fails the step (core's LLMResponseError).
+            with pytest.raises(LLMResponseError):
+                api.run_until_terminal(conv_id, max_steps=20)
+        else:
+            api.run_until_terminal(conv_id, max_steps=20)
 
         expected = golden._golden()["scenarios"][name]
         assert recorder.script == [], "a scripted reply was never requested"
@@ -378,6 +388,8 @@ class TestGoldenRequestsThroughCore:
             zip(recorder.requests, expected["requests"], strict=True)
         ):
             assert got == want, f"{name} request {index} differs"
+        if spec.get("raises"):
+            return
         data = api.get_data(conv_id)
         outcome = expected["outcome"]
         assert data[_K.ANSWER] == outcome["answer"]

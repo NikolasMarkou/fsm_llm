@@ -679,3 +679,93 @@ class TestRunArguments:
 
         with pytest.raises(ValueError, match="max_steps"):
             api.run_until_terminal(conv_id, max_steps=0)
+
+
+class TestSecondsExemptStates:
+    """``seconds_exempt_states`` (D-032 of plan 944e2692): a spent seconds
+    budget does not stop a round whose current state is exempt; the steps
+    budget still does. RED on the parent: the keyword did not exist and the
+    clock stopped every state alike."""
+
+    def test_exempt_state_finishes_after_the_clock_is_spent(self, clock):
+        # Step 1 (collect -> plan) costs 5 s of a 3 s budget.
+        llm = _SlowLLM(clock, 5.0, fields={"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+
+        results = api.run_until_terminal(
+            conv_id, max_steps=10, max_seconds=3.0, seconds_exempt_states={"plan"}
+        )
+
+        assert _path(results) == [("collect", "plan"), ("plan", "done")]
+        assert api.has_conversation_ended(conv_id)
+
+    def test_stream_form_honours_the_exemption(self, clock):
+        llm = _SlowStreamingLLM(clock, 5.0, fields={"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+
+        chunks = list(
+            api.run_until_terminal_stream(
+                conv_id, max_steps=10, max_seconds=3.0, seconds_exempt_states=["plan"]
+            )
+        )
+
+        assert "".join(chunks) == _REPLY
+        assert api.has_conversation_ended(conv_id)
+
+    def test_a_state_not_named_is_still_stopped(self, clock):
+        llm = _SlowLLM(clock, 5.0, fields={"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+
+        with pytest.raises(RunBudgetExceededError) as excinfo:
+            api.run_until_terminal(
+                conv_id, max_steps=10, max_seconds=3.0, seconds_exempt_states={"done"}
+            )
+
+        assert (excinfo.value.budget, excinfo.value.steps_done) == ("seconds", 1)
+        assert api.get_current_state(conv_id) == "plan"
+
+    def test_the_steps_budget_still_applies_in_an_exempt_state(self, clock):
+        llm = _SlowLLM(clock, 5.0, fields={"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+
+        with pytest.raises(RunBudgetExceededError) as excinfo:
+            api.run_until_terminal(
+                conv_id, max_steps=1, max_seconds=3.0, seconds_exempt_states={"plan"}
+            )
+
+        assert (excinfo.value.budget, excinfo.value.limit) == ("steps", 1)
+
+    def test_default_exempts_nothing(self, clock):
+        llm = _SlowLLM(clock, 5.0, fields={"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+
+        with pytest.raises(RunBudgetExceededError):
+            api.run_until_terminal(conv_id, max_steps=10, max_seconds=3.0)
+
+    def test_state_is_not_read_while_time_is_left(self, clock, monkeypatch):
+        api, conv_id = _start(_trip_fsm(), _ScriptedLLM({"city": "Paris"}))
+        reads: list[str] = []
+        original = api.get_current_state
+
+        def spy(cid: str) -> str:
+            reads.append(cid)
+            return original(cid)
+
+        monkeypatch.setattr(api, "get_current_state", spy)
+        api.run_until_terminal(
+            conv_id, max_steps=10, max_seconds=30.0, seconds_exempt_states={"plan"}
+        )
+
+        assert reads == []
+
+    @pytest.mark.parametrize("states", ["plan", b"plan", [1], {None}, 5])
+    def test_invalid_states_raise_value_error(self, states):
+        api, conv_id = _start(_trip_fsm(), _ScriptedLLM({"city": "Paris"}))
+
+        with pytest.raises(ValueError, match="seconds_exempt_states"):
+            api.run_until_terminal(conv_id, max_steps=5, seconds_exempt_states=states)
+        with pytest.raises(ValueError, match="seconds_exempt_states"):
+            api.run_until_terminal_stream(
+                conv_id, max_steps=5, seconds_exempt_states=states
+            )
+        assert api.get_current_state(conv_id) == "collect"

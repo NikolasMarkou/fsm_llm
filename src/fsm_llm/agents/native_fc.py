@@ -116,6 +116,12 @@ def _turn_calls(reply: Any) -> list[dict[str, Any]] | None:
     ``arguments`` (core's normaliser guarantees it for a ``calls`` reply; a
     result planted or damaged in context is refused here, whole turn).
     """
+    # DECISION plan-2026-10-01T093600-944e2692/D-033: a call with an empty
+    # tool name is malformed, like one with non-object arguments: the whole
+    # turn runs nothing and the loop ends `malformed` (core's normaliser
+    # already makes a provider turn with a nameless call `kind="malformed"`,
+    # D-027). Do NOT run it as an unknown tool and continue the loop (the
+    # e1f63a9 behaviour): a nameless call is a garbled turn, not a choice.
     calls = reply.get("calls") if isinstance(reply, dict) else None
     if not isinstance(calls, list) or not calls:
         return None
@@ -275,14 +281,13 @@ class NativeFCHandlers:
     def _execute(self, entry: dict[str, Any], trace: list[Any]) -> str:
         """Run one call through ``tools.execute``; trace it; return its text.
 
-        The text is the result summary, prefixed ``[TOOL FAILED]`` for a
-        failed call. Appends the redacted trace entry to ``trace``.
+        The text is ``ToolResult.observation`` (the summary, prefixed
+        ``[TOOL FAILED]`` for a failed call and ``[TOOL OUTCOME UNKNOWN]`` for
+        a timed-out one). Appends the redacted trace entry to ``trace``.
         """
         call = ToolCall(tool_name=entry["name"], parameters=entry["arguments"])
         result = self.tools.execute(call)
-        observation = result.summary
-        if not result.success:
-            observation = f"[TOOL FAILED] {observation}"
+        observation = result.observation
         trace.append(_trace_step(trace, call, observation))
         return observation
 
@@ -345,7 +350,11 @@ class NativeFCHandlers:
                 "Native function-calling tool turn has a call that cannot run; "
                 "running none of its calls and ending the loop."
             )
-            return self._end_loop(context, NativeLoopEnd.MALFORMED, "")
+            # The refused reply's raw arguments never reach final_context.
+            return {
+                **self._end_loop(context, NativeLoopEnd.MALFORMED, ""),
+                _K.MODEL_REPLY: None,
+            }
         trace = list(context.get(ContextKeys.AGENT_TRACE) or [])
         observations = [self._execute(entry, trace) for entry in calls]
         transcript = list(context.get(_K.TRANSCRIPT) or [])
@@ -388,7 +397,9 @@ class NativeFCHandlers:
         """``force_final`` reply: run its calls through ``tools.execute``.
 
         A malformed forced turn runs nothing and keeps the trace and answer.
-        The results are traced, not fed back: no model turn follows.
+        The results are traced, not fed back: no model turn follows. The
+        reply is cleared (its raw arguments never reach ``final_context``;
+        the trace holds the redacted copy).
         """
         # DECISION plan-2026-10-01T093600-944e2692/D-027 (carries
         # bb230f18/D-003): the forced write is the MODEL's call (named
@@ -400,17 +411,18 @@ class NativeFCHandlers:
         reply = context.get(_K.FORCED_REPLY)
         kind = reply.get("kind") if isinstance(reply, dict) else None
         calls = _turn_calls(reply) if kind == "calls" else None
+        done: dict[str, Any] = {_K.FORCE_PENDING: False, _K.FORCED_REPLY: None}
         if calls is None:
             if kind != "final":
                 logger.warning(
                     "Forced-write turn was malformed; keeping the trace and "
                     "answer gathered so far."
                 )
-            return {_K.FORCE_PENDING: False}
+            return done
         trace = list(context.get(ContextKeys.AGENT_TRACE) or [])
         for entry in calls:
             self._execute(entry, trace)
-        return {ContextKeys.AGENT_TRACE: trace, _K.FORCE_PENDING: False}
+        return {**done, ContextKeys.AGENT_TRACE: trace}
 
     @staticmethod
     def repair_entry(context: dict[str, Any]) -> dict[str, Any]:
@@ -495,6 +507,12 @@ class NativeFunctionCallingReactAgent(BaseAgent):
     # Keys the run writes for itself; a caller's ``initial_context`` never
     # seeds them (``strip_caller_context``; the seed handler resets them too).
     _run_output_keys: ClassVar[frozenset[str]] = frozenset(NATIVE_FC_HANDLER_ONLY_KEYS)
+    # DECISION plan-2026-10-01T093600-944e2692/D-032: past the model loop the
+    # run finishes even when the clock is spent, so a final answer in hand is
+    # never lost to the forced or repair turn (e1f63a9 checked the clock only
+    # before loop turns). Do NOT add a clock check, a deadline flag or a loop
+    # in this agent: core's `seconds_exempt_states` carries it. See D-032.
+    _seconds_exempt_states: ClassVar[frozenset[str]] = NativeFCStates.SECONDS_EXEMPT
 
     def __init__(
         self,
@@ -511,10 +529,33 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         self.tools = tools
         self._refuse_flagged_tools()
         self.seed = seed
-        #: Public and mutable on purpose -- see :meth:`_system_message`.
         self.system_policy = (
             system_policy if system_policy is not None else self.config.instructions
         )
+
+    @property
+    def system_policy(self) -> str | None:
+        """Standing instructions appended to the system message, or ``None``.
+
+        Public and settable after construction on purpose (see
+        :meth:`_system_message`); setting anything but a ``str`` or ``None``
+        raises ``TypeError``.
+        """
+        return self._system_policy
+
+    @system_policy.setter
+    def system_policy(self, value: str | None) -> None:
+        # DECISION plan-2026-10-01T093600-944e2692/D-033: the third
+        # positional parameter was `complete_fn` before D-028; a caller of
+        # the old API bound a function here and its repr was sent as the
+        # system policy. Do NOT accept a non-str value silently.
+        if value is not None and not isinstance(value, str):
+            raise TypeError(
+                "system_policy must be a str or None, got "
+                f"{type(value).__name__} (complete_fn was removed: inject "
+                "llm_interface= instead)"
+            )
+        self._system_policy = value
 
     @property
     def seed(self) -> int | None:

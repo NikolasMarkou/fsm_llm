@@ -329,9 +329,7 @@ class ParallelReactAgent(BaseAgent):
         any_success = False
         for call, result in results:
             any_success = any_success or result.success
-            observation = result.summary
-            if not result.success:
-                observation = f"[TOOL FAILED] {observation}"
+            observation = result.observation
             step_num = next_step_number(trace)
             # plan-2026-09-29T103145-06a5ec0a/D-016: show a redacted copy.
             shown_input = redact_secret_entries(call.parameters)

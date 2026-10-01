@@ -4,6 +4,8 @@ Constants for the agents package.
 
 from __future__ import annotations
 
+import threading
+
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 
 # ---------------------------------------------------------------------------
@@ -131,6 +133,11 @@ class NativeFCStates:
     FORCE_FINAL = "force_final"
     REPAIR = "repair"
     CONCLUDE = "conclude"
+    # States past the model loop's deadline check: a run that reached one
+    # finishes even when the wall clock is spent (core's
+    # ``seconds_exempt_states``, D-032). Only ``call_model`` starts a loop
+    # model turn, so the clock is checked before each one, as before.
+    SECONDS_EXEMPT = frozenset({RUN_TOOLS, FORCE_FINAL, REPAIR, CONCLUDE})
 
 
 class NativeFCContextKeys:
@@ -561,6 +568,9 @@ class Defaults:
     TIMEOUT_SECONDS = 300.0
     MCP_TIMEOUT_SECONDS = 30.0
     MAX_OBSERVATION_LENGTH = 2000
+    # Largest per-call tool ``timeout_s``: the most a thread wait accepts
+    # (``threading.TIMEOUT_MAX``; a larger wait raises OverflowError).
+    MAX_TOOL_TIMEOUT_S = threading.TIMEOUT_MAX
     MAX_OBSERVATIONS = 20
     CONFIDENCE_THRESHOLD = 0.3
     MIN_ANSWER_LENGTH = 5
@@ -853,12 +863,35 @@ class MetaErrorMessages:
     CONVERSATION_ALREADY_STARTED = "Conversation has already been started"
 
 
+class ToolObservationPrefix:
+    """Prefixes that tell the model how a tool call ended (``ToolResult.observation``)."""
+
+    # The call ran and failed (or never ran: unknown tool, bad arguments).
+    FAILED = "[TOOL FAILED]"
+    # The call timed out: it may still be running, its effects may happen.
+    OUTCOME_UNKNOWN = "[TOOL OUTCOME UNKNOWN]"
+
+
 class ErrorMessages:
     """Standard error messages."""
 
     TOOL_NOT_FOUND = "Tool '{name}' not found in registry"
     TOOL_EXECUTION_FAILED = "Tool '{name}' execution failed: {error}"
-    TOOL_TIMED_OUT = "Tool '{name}' timed out after {timeout} s"
+    TOOL_TIMED_OUT = (
+        "Tool '{name}' timed out after {timeout} s; its outcome is unknown: it "
+        "may still be running and its side effects may still happen. Do not "
+        "assume it did not run"
+    )
+    TOOL_BAD_TIMEOUT = (
+        "Tool '{name}' has an invalid timeout_s {timeout!r}: it must be a "
+        "finite number above 0 and at most {limit} s; the tool was not run"
+    )
+    EXECUTE_WITHOUT_GATED = (
+        "{registry}.execute does not accept the keyword argument 'gated': a "
+        "ToolRegistry subclass must keep the signature "
+        "execute(tool_call, *, gated=False) (agents pass gated=True for a call "
+        "an approver granted, so it is never re-run)"
+    )
     EMPTY_CHAIN = "Cannot create prompt chain agent with empty chain"
     NO_SAMPLES = "num_samples must be at least 1"
     PROMPT_SLOT_OVERFLOW = (

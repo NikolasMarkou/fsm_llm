@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.logging import logger
 
-from .constants import Defaults, MetaDefaults
+from .constants import Defaults, MetaDefaults, ToolObservationPrefix
 from .truncation import smart_truncate
 
 # DECISION plan-2026-07-20T040150-876e7164/D-008 [STALE]
@@ -76,8 +76,10 @@ class ToolDefinition(BaseModel):
     """Definition of a tool available to an agent.
 
     ``timeout_s`` is the per-call limit ``ToolRegistry.execute`` enforces (a
-    failed result past it; the tool itself keeps running, a Python thread
-    cannot be killed). ``None`` means no limit.
+    ``timed_out`` result past it; the tool itself keeps running, a Python
+    thread cannot be killed). ``None`` means no limit; otherwise a finite
+    number above 0 and at most ``Defaults.MAX_TOOL_TIMEOUT_S``
+    (``threading.TIMEOUT_MAX``).
     ``args_model`` is the pydantic model of the arguments, built from the
     function signature by ``@tool``/``register_function`` when every parameter
     is annotated; ``None`` for dict-style tools and explicit schemas. When set,
@@ -89,7 +91,9 @@ class ToolDefinition(BaseModel):
     parameter_schema: dict[str, Any] = Field(default_factory=dict)
     requires_approval: bool = False
     annotations: ToolAnnotations = Field(default_factory=ToolAnnotations)
-    timeout_s: float | None = Field(default=None, gt=0)
+    timeout_s: float | None = Field(
+        default=None, gt=0, le=Defaults.MAX_TOOL_TIMEOUT_S, allow_inf_nan=False
+    )
 
     # Not serialized — runtime only
     execute_fn: Callable[..., Any] | None = Field(default=None, exclude=True)
@@ -120,13 +124,19 @@ class ToolCall(BaseModel):
 
 
 class ToolResult(BaseModel):
-    """Result of a tool execution."""
+    """Result of a tool execution.
+
+    ``timed_out`` marks a call stopped waiting for at its ``timeout_s``
+    (``success`` is False): its outcome is unknown, since the tool may still
+    be running and its side effects may still happen.
+    """
 
     tool_name: str
     success: bool
     result: Any = None
     error: str | None = None
     execution_time_ms: float = 0.0
+    timed_out: bool = False
 
     @property
     def summary(self) -> str:
@@ -140,6 +150,19 @@ class ToolResult(BaseModel):
                 return smart_truncate(text, Defaults.MAX_OBSERVATION_LENGTH)
             return text
         return f"Error: {self.error}"
+
+    @property
+    def observation(self) -> str:
+        """What the model is shown: ``summary``, prefixed when the call failed.
+
+        A failed call is prefixed ``[TOOL FAILED]``; a timed-out one
+        ``[TOOL OUTCOME UNKNOWN]`` (it may still run and take effect).
+        """
+        if self.success:
+            return self.summary
+        if self.timed_out:
+            return f"{ToolObservationPrefix.OUTCOME_UNKNOWN} {self.summary}"
+        return f"{ToolObservationPrefix.FAILED} {self.summary}"
 
 
 class AgentStep(BaseModel):

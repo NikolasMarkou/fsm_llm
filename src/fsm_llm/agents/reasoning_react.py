@@ -35,7 +35,7 @@ from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers, forced_stop_skip, next_step_number
 from .hitl import HumanInTheLoop
-from .tools import ToolRegistry, redact_secret_entries
+from .tools import ToolRegistry, redact_secret_entries, refuse_execute_without_gated
 
 # Optional import — reasoning package may not be installed
 try:
@@ -85,6 +85,8 @@ class _ReasonToolRegistry(ToolRegistry):
     # the run() refusal could not see a flag added after construction. Do NOT
     # copy `base`'s tools into this registry again.
     def __init__(self, base: ToolRegistry) -> None:
+        # `execute` passes `gated` on to *base* (D-033).
+        refuse_execute_without_gated(base)
         super().__init__()
         self._base = base
 

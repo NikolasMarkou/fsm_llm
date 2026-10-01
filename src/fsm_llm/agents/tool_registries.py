@@ -45,7 +45,8 @@ class CachingToolRegistry(ToolRegistry):
     """A :class:`ToolRegistry` that memoizes successful tool results.
 
     Identical ``(tool_name, parameters)`` calls return the cached
-    :class:`ToolResult` instead of re-invoking the tool. Only *successful*
+    :class:`ToolResult` instead of re-invoking the tool; a granted (gated)
+    call is never served from or stored in the cache. Only *successful*
     results are cached — failures always re-execute so transient errors are
     retryable. This is a pure latency/cost optimization for idempotent tools
     (search, lookups); do NOT use it for tools with side effects whose result
@@ -70,8 +71,17 @@ class CachingToolRegistry(ToolRegistry):
     def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult:
         """Return a cached success for an identical call, else run it.
 
-        ``gated`` is passed on unchanged (see :meth:`ToolRegistry.execute`).
+        A ``gated`` call (one an approver granted) always runs and is never
+        cached: one approval covers exactly one execution.
         """
+        # DECISION plan-2026-10-01T093600-944e2692/D-033: a granted call
+        # bypasses the cache both ways. Do NOT serve it from the cache (the
+        # approver approved an execution that would never happen, and the
+        # model reports it as done) and do NOT store its result (a later
+        # identical call, granted or not, would replay the side effect's
+        # result without running). See D-052 of plan 06a5ec0a, D-008, D-033.
+        if gated:
+            return super().execute(tool_call, gated=True)
         key = self._cache_key(tool_call)
         with self._cache_lock:
             cached = self._cache.get(key)

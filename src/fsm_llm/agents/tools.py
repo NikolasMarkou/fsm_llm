@@ -8,6 +8,7 @@ import contextvars
 import functools
 import inspect
 import json
+import math
 import re
 import threading
 import time
@@ -22,9 +23,9 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from fsm_llm.logging import logger
 from fsm_llm.runner import _redact_context
 
-from .constants import ContextKeys, ErrorMessages, LogMessages
+from .constants import ContextKeys, Defaults, ErrorMessages, LogMessages
 from .definitions import ToolAnnotations, ToolCall, ToolDefinition, ToolResult
-from .exceptions import ToolExecutionError, ToolNotFoundError
+from .exceptions import AgentError, ToolExecutionError, ToolNotFoundError
 
 # A string (``from __future__``) dict annotation: dict, dict[...], (typing.)Dict[...]
 _DICT_ANNOTATION_RE = re.compile(r"\s*(dict|(typing\.)?Dict)(\[.*\])?\s*")
@@ -256,6 +257,59 @@ def _fallback_arguments(
             f"Expected format: {example_params}"
         ) from None
     raise bind_error
+
+
+def refuse_execute_without_gated(tools: Any) -> None:
+    """Raise ``AgentError`` when *tools*' ``execute`` cannot take ``gated=``.
+
+    Interface contract (callers: the two components that pass ``gated=``:
+    ``AgentHandlers.__init__``, built at the start of every run of the
+    agents whose executor it is (ReAct family, Reflexion, ReasoningReact,
+    PlanExecute), before any model call; and
+    ``reasoning_react._ReasonToolRegistry.__init__`` for the caller's
+    registry it delegates to). Agents that call ``execute(call)`` without
+    ``gated`` (REWOO, ParallelReact, native_fc) never check: an older
+    override still works there.
+
+    Args:
+        tools: a ``ToolRegistry`` (or any object with ``execute``), or
+            ``None``/an object without ``execute`` (no check).
+
+    Raises:
+        AgentError: ``execute`` has neither a ``gated`` parameter that can be
+            passed by keyword nor ``**kwargs`` (``EXECUTE_WITHOUT_GATED``,
+            naming the registry class). An ``execute`` whose signature
+            cannot be read is not refused.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-033: refuse where `gated`
+    # is passed, when that component is built (before any model call). An
+    # override written against the old `execute(self, tool_call)` failed only
+    # at the first tool call, deep in a handler, with a bare TypeError that
+    # the run turned into a failed tool. Do NOT pass `gated` only when True to
+    # dodge the break: it would hide it until the first approved call. Do NOT
+    # move this into agent constructors or check agents that never pass
+    # `gated` (REWOO, ParallelReact, native_fc): the harness builds its
+    # agents outside its dispatch error handling and its live suite spies on
+    # `execute` with the old signature (STOP IF 2 of plan 944e2692).
+    execute = getattr(tools, "execute", None)
+    if execute is None:
+        return
+    try:
+        params = inspect.signature(execute).parameters
+    except (TypeError, ValueError):
+        return
+    gated = params.get("gated")
+    keyword_kinds = (
+        inspect.Parameter.KEYWORD_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    )
+    if gated is not None and gated.kind in keyword_kinds:
+        return
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return
+    raise AgentError(
+        ErrorMessages.EXECUTE_WITHOUT_GATED.format(registry=type(tools).__name__)
+    )
 
 
 class ToolRegistry:
@@ -511,9 +565,10 @@ class ToolRegistry:
         re-run calls (``RetryingToolRegistry``) must never re-run a gated one.
 
         A tool with ``timeout_s`` runs in a worker thread: past the limit the
-        call returns a failed result ("timed out after N s"). A Python thread
-        cannot be killed, so the tool keeps running and its side effects
-        still happen; its late result is discarded with a WARNING.
+        call returns a failed result with ``timed_out=True`` whose error says
+        the outcome is unknown. A Python thread cannot be killed, so the tool
+        keeps running and its side effects may still happen; its late result
+        is discarded with a WARNING.
         """
         # Single locked lookup instead of `in` + `[]`: the two-step form could see
         # the tool present and then KeyError when a concurrent caller replaced the
@@ -568,6 +623,7 @@ class ToolRegistry:
                 success=False,
                 error=str(e),
                 execution_time_ms=elapsed_ms,
+                timed_out=isinstance(e, _ToolTimedOut),
             )
 
     def to_prompt_description(self) -> str:
@@ -579,19 +635,17 @@ class ToolRegistry:
         lines = ["Available tools:"]
         for tool in tools:
             lines.append(f"- {tool.name}: {tool.description}")
-            if tool.parameter_schema:
-                params = tool.parameter_schema.get("properties", {})
-                if params:
-                    required_keys = set(tool.parameter_schema.get("required", []))
-                    param_parts = []
-                    for pname, pschema in params.items():
-                        ptype = pschema.get("type", "any")
-                        pdesc = pschema.get("description", "")
-                        marker = (
-                            "[REQUIRED]" if pname in required_keys else "[optional]"
-                        )
-                        param_parts.append(f"{pname} {marker} ({ptype}): {pdesc}")
-                    lines.append(f"  Parameters: {', '.join(param_parts)}")
+            schema = tool_parameters_schema(tool)
+            params = schema.get("properties", {})
+            if params:
+                required_keys = set(schema.get("required", []))
+                param_parts = []
+                for pname, pschema in params.items():
+                    ptype = " or ".join(schema_types(pschema)) or "any"
+                    pdesc = pschema.get("description", "")
+                    marker = "[REQUIRED]" if pname in required_keys else "[optional]"
+                    param_parts.append(f"{pname} {marker} ({ptype}): {pdesc}")
+                lines.append(f"  Parameters: {', '.join(param_parts)}")
 
         return "\n".join(lines)
 
@@ -668,8 +722,7 @@ class ToolRegistry:
         """
         schemas: list[dict[str, Any]] = []
         for tool in self.list_tools():
-            model_schema = _args_model_schema(tool.args_model)
-            schema = model_schema or tool.parameter_schema or {}
+            schema = tool_parameters_schema(tool)
             parameters: dict[str, Any] = {
                 "type": "object",
                 "properties": schema.get("properties", {}),
@@ -677,8 +730,8 @@ class ToolRegistry:
             required = schema.get("required")
             if required:
                 parameters["required"] = required
-            if model_schema and "$defs" in model_schema:
-                parameters["$defs"] = model_schema["$defs"]
+            if "$defs" in schema:
+                parameters["$defs"] = schema["$defs"]
             schemas.append(
                 {
                     "type": "function",
@@ -804,12 +857,22 @@ def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     return schema
 
 
+class _ToolTimedOut(ToolExecutionError):
+    """``_call_with_timeout`` stopped waiting: the call's outcome is unknown."""
+
+
 # DECISION plan-2026-10-01T093600-944e2692/D-008: `timeout_s` is enforced
 # here, in the one execute path, with a daemon worker thread (supersedes D-026
 # of plan 65baa765, whose runtime enforcement point no longer exists). Do NOT
 # hold `_tools_lock` while waiting, do NOT run a tool without `timeout_s` in a
 # thread (every call would pay one), and do NOT claim the tool was stopped: a
-# Python thread cannot be killed, so a timed-out tool keeps running.
+# Python thread cannot be killed, so a timed-out tool keeps running (one more
+# live thread per timed-out call; a tool that keeps hanging accumulates them).
+# DECISION plan-2026-10-01T093600-944e2692/D-033: every step that can fail
+# runs BEFORE `thread.start()`; do NOT add one after it (a tool that ran must
+# never be reported as a plain failure, and a retry-safe one would be re-run),
+# and do NOT report a timeout as a failure: its outcome is unknown
+# (`ToolResult.timed_out`).
 def _call_with_timeout(
     call: Callable[[], Any], tool_name: str, timeout_s: float
 ) -> Any:
@@ -817,13 +880,40 @@ def _call_with_timeout(
 
     Interface contract (caller: ``ToolRegistry.execute``, for a tool with
     ``timeout_s``):
+        - Raises ``ToolExecutionError`` (``TOOL_BAD_TIMEOUT``) without running
+          *call* when *timeout_s* is not a finite number in
+          ``(0, Defaults.MAX_TOOL_TIMEOUT_S]``.
         - Returns ``call()``'s value, or re-raises its exception, when it ends
           in time. The worker runs in a copy of the caller's context variables.
-        - On expiry raises ``ToolExecutionError`` (``TOOL_TIMED_OUT``). The
-          worker keeps running; its late value or exception is discarded with
-          a WARNING naming the tool (``TOOL_LATE_RESULT``).
-        - Holds no lock while waiting.
+        - On expiry raises ``_ToolTimedOut`` (a ``ToolExecutionError``,
+          ``TOOL_TIMED_OUT``: outcome unknown). The worker keeps running; its
+          late value or exception is discarded with a WARNING naming the tool
+          (``TOOL_LATE_RESULT``).
+        - Holds no lock while waiting. Nothing it does after the worker starts
+          can raise, except the timeout and the tool's own exception.
     """
+    if (
+        isinstance(timeout_s, bool)
+        or not isinstance(timeout_s, (int, float))
+        or not math.isfinite(timeout_s)
+        or not 0 < timeout_s <= Defaults.MAX_TOOL_TIMEOUT_S
+    ):
+        raise ToolExecutionError(
+            ErrorMessages.TOOL_BAD_TIMEOUT.format(
+                name=tool_name, timeout=timeout_s, limit=Defaults.MAX_TOOL_TIMEOUT_S
+            ),
+            tool_name=tool_name,
+        )
+    timed_out_error = _ToolTimedOut(
+        ErrorMessages.TOOL_TIMED_OUT.format(name=tool_name, timeout=timeout_s),
+        tool_name=tool_name,
+    )
+    late_warning = {
+        kind: LogMessages.TOOL_LATE_RESULT.format(
+            name=tool_name, timeout=timeout_s, outcome=kind
+        )
+        for kind in ("result", "error")
+    }
     finished = threading.Event()
     state_lock = threading.Lock()
     outcome: dict[str, Any] = {}
@@ -840,13 +930,7 @@ def _call_with_timeout(
             outcome[entry[0]] = entry[1]
         finished.set()
         if abandoned:
-            logger.warning(
-                LogMessages.TOOL_LATE_RESULT.format(
-                    name=tool_name,
-                    timeout=timeout_s,
-                    outcome="result" if entry[0] == "value" else "error",
-                )
-            )
+            logger.warning(late_warning["result" if entry[0] == "value" else "error"])
 
     thread = threading.Thread(
         target=contextvars.copy_context().run,
@@ -859,10 +943,7 @@ def _call_with_timeout(
     with state_lock:
         if "value" not in outcome and "error" not in outcome:
             outcome["abandoned"] = True
-            raise ToolExecutionError(
-                ErrorMessages.TOOL_TIMED_OUT.format(name=tool_name, timeout=timeout_s),
-                tool_name=tool_name,
-            )
+            raise timed_out_error
     if "error" in outcome:
         raise outcome["error"]
     return outcome["value"]
@@ -895,6 +976,51 @@ def _strip_schema_titles(node: Any) -> Any:
         else:
             out[key] = _strip_schema_titles(value)
     return out
+
+
+def tool_parameters_schema(tool: ToolDefinition) -> dict[str, Any]:
+    """The one parameter schema a model is shown for *tool*.
+
+    Interface contract (callers: ``ToolRegistry.get_json_schemas`` for native
+    tool calling, ``ToolRegistry.to_prompt_description`` and the think-state
+    examples in ``prompts.py`` for prompt-mode agents):
+        - The title-free JSON schema of ``tool.args_model`` when it has one
+          (exact ``Optional``/``Union``/``Literal`` types, ``$defs`` kept),
+          else ``tool.parameter_schema``, else ``{}``.
+        - Returns the schema dict (``properties``, ``required``, ``$defs``
+          when present); never raises.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-033: one schema source per
+    # tool for everything a model is shown. Do NOT read
+    # `tool.parameter_schema` directly in a prompt or a payload builder: a
+    # prompt-mode agent was shown `Optional[int]` as `string` while the
+    # native payload said integer-or-null. See decisions.md D-033.
+    return _args_model_schema(tool.args_model) or tool.parameter_schema or {}
+
+
+def schema_types(prop: Any) -> list[str]:
+    """The JSON types a property schema allows, in order, without repeats.
+
+    Reads ``type`` (a string or a list), ``anyOf``/``oneOf`` members and a
+    ``$ref`` (shown as ``object``). ``[]`` when none is stated (any value).
+    Never raises.
+    """
+    if not isinstance(prop, dict):
+        return []
+    found: list[str] = []
+    declared = prop.get("type")
+    if isinstance(declared, str):
+        found.append(declared)
+    elif isinstance(declared, list):
+        found.extend(t for t in declared if isinstance(t, str))
+    if "$ref" in prop:
+        found.append("object")
+    for key in ("anyOf", "oneOf"):
+        members = prop.get(key)
+        if isinstance(members, list):
+            for member in members:
+                found.extend(schema_types(member))
+    return list(dict.fromkeys(found))
 
 
 def _args_model_schema(args_model: type[BaseModel] | None) -> dict[str, Any]:

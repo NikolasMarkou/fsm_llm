@@ -146,8 +146,8 @@ def prompt_overflow_error(
 def _output_response_format(schema: Any) -> dict[str, Any] | None:
     """Build the ``response_format`` envelope for a Pydantic *schema*.
 
-    Interface contract (two call sites: ``_init_context`` here, and
-    ``native_fc``'s post-loop repair turn):
+    Interface contract (one call site, ``_init_context`` here; native_fc's
+    repair turn reads the envelope it writes from context):
 
     Args:
         schema: ``AgentConfig.output_schema`` — a Pydantic ``BaseModel``
@@ -159,21 +159,22 @@ def _output_response_format(schema: Any) -> dict[str, Any] | None:
         ``response_format``, or ``None`` when *schema* is ``None`` or does not
         expose ``model_json_schema``.  Never raises.
     """
-    # DECISION plan-2026-07-21T191807-bf7ffe24/D-002
-    # This helper is the ONE new abstraction that plan's Complexity Budget
-    # allows inside the five existing packages (1/1), and it is earned by
-    # EXACTLY two call sites: `_init_context` below, and `native_fc.run`'s
-    # post-loop repair turn. It was extracted rather than copied because the
-    # alternative -- native_fc building its own `{"type": "json_schema", ...}`
-    # envelope -- is a second builder of the same provider contract, kept in
-    # lockstep by hand, which is the drift `hardening.py`'s D-059 block already
-    # records this repo paying for once.
-    # Do NOT add a third caller by reflex: a call site that can set
+    # DECISION plan-2026-07-21T191807-bf7ffe24/D-002 (call sites restated by
+    # plan-2026-10-01T093600-944e2692/D-033)
+    # This helper is the ONE builder of the `{"type": "json_schema", ...}`
+    # envelope in this package. It has ONE call site, `_init_context` below,
+    # which writes the envelope under CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT; the
+    # native_fc repair turn (a core completion state, D-009 of plan 944e2692)
+    # reads it from there (`response_format_key`). The alternative -- native_fc
+    # building its own envelope -- is a second builder of the same provider
+    # contract, kept in lockstep by hand, which is the drift `hardening.py`'s
+    # D-059 block already records this repo paying for once.
+    # Do NOT add a second caller by reflex: a call site that can set
     # `AgentConfig.output_schema` and go through `BaseAgent` gets this for free
-    # and should. Do NOT make it raise on a bad schema either -- both callers
+    # and should. Do NOT make it raise on a bad schema either -- the readers
     # treat `None` as "no constrained decoding available", and an exception here
     # would turn a missing capability into a failed run.
-    # See decisions.md D-002.
+    # See decisions.md D-002 (plan bf7ffe24), D-033 (plan 944e2692).
     if schema is None or not hasattr(schema, "model_json_schema"):
         return None
     return {
@@ -453,6 +454,10 @@ class BaseAgent(ABC):
     # pattern's run output can be a legitimate input of another pattern.
     # Do NOT list a key a caller legitimately supplies (task, domain hints).
     _run_output_keys: ClassVar[frozenset[str]] = frozenset()
+    # States in which core's seconds budget does not stop the run (core
+    # `seconds_exempt_states`, D-032 of plan 944e2692): a pattern's wind-down
+    # that must finish once reached. Empty: the clock is checked every step.
+    _seconds_exempt_states: ClassVar[frozenset[str]] = frozenset()
 
     def __init__(
         self,
@@ -534,6 +539,7 @@ class BaseAgent(ABC):
                     max_steps=max_steps,
                     max_seconds=max_seconds,
                     before_step=partial(self._on_loop_iteration, api, conv_id),
+                    seconds_exempt_states=self._seconds_exempt_states,
                 )
             except RunBudgetExceededError as exc:
                 raise self._budget_error(exc, max_iterations) from exc
@@ -1440,6 +1446,7 @@ class BaseAgent(ABC):
                     max_steps=max_steps,
                     max_seconds=max_seconds,
                     before_step=partial(self._on_loop_iteration, api, conv_id),
+                    seconds_exempt_states=self._seconds_exempt_states,
                 )
             finally:
                 self._end_run_conversation(api, conv_id)

@@ -95,9 +95,9 @@ class TestExactArgumentSchema:
         assert params["properties"]["mode"]["enum"] == ["a", "b"]
         assert params["required"] == ["n"]
 
-    def test_parameter_schema_stays_coarse_for_the_prompt(self):
-        # The prompt description and the dict-style binder read the coarse
-        # schema; only the provider schema changed.
+    def test_parameter_schema_stays_coarse_for_the_binder(self):
+        # The dict-style binder reads the coarse schema; the provider schema
+        # and the prompt description read the args_model schema (D-033).
         schema = typed._tool_definition.parameter_schema
         assert schema["properties"]["opt"] == {"type": "string"}
 

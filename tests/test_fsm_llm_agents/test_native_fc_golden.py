@@ -132,7 +132,36 @@ def _calls(*calls: tuple[str, str, dict[str, Any]]) -> ModelResponse:
     )
 
 
+def _raw_calls(*calls: tuple[str, str, str]) -> ModelResponse:
+    """A provider reply carrying ``(id, name, raw arguments text)`` tool calls."""
+    return ModelResponse(
+        model="stub",
+        choices=[
+            {
+                "index": 0,
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {"name": name, "arguments": raw},
+                        }
+                        for call_id, name, raw in calls
+                    ],
+                },
+            }
+        ],
+        usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    )
+
+
 _PARIS = ("call_1", "weather", {"city": "Paris"})
+_ROME = ("call_2", "weather", {"city": "Rome"})
+_NOTE = ("call_9", "write_note", {"text": "Paris: sunny, 21 C"})
+_REPORT = '{"city": "Paris", "conditions": "sunny"}'
 
 
 def _scenario_specs() -> dict[str, dict[str, Any]]:
@@ -181,6 +210,49 @@ def _scenario_specs() -> dict[str, dict[str, Any]]:
             "system_policy": "Answer in one sentence. Never guess a temperature.",
             "script": lambda: [_calls(_PARIS), _final("It is sunny in Paris.")],
         },
+        # Added in step 18.2 (review round 1, D-029), captured at e1f63a9 like
+        # the scenarios above: the harness EXPLORE configuration (forced
+        # tool plus output schema), the iteration limit (alone and with both
+        # post-loop turns), a malformed turn and a provider error.
+        "forced_tool_output_schema": {
+            "task": "Check the weather in Paris, record it and report it.",
+            "config": {
+                "force_final_tool": "write_note",
+                "output_schema": _WeatherReport,
+            },
+            "script": lambda: [
+                _calls(_PARIS),
+                _final("Paris is sunny."),
+                _calls(_NOTE),
+                _final(_REPORT),
+            ],
+        },
+        "iteration_limit": {
+            "task": "Compare the weather in Paris and Rome.",
+            "config": {"max_iterations": 2},
+            "script": lambda: [_calls(_PARIS), _calls(_ROME)],
+        },
+        "iteration_limit_forced_repair": {
+            "task": "Check the weather in Paris, record it and report it.",
+            "config": {
+                "max_iterations": 1,
+                "force_final_tool": "write_note",
+                "output_schema": _WeatherReport,
+            },
+            "script": lambda: [_calls(_PARIS), _calls(_NOTE), _final(_REPORT)],
+        },
+        "malformed_turn": {
+            "task": "What is the weather in Paris?",
+            "script": lambda: [
+                _calls(_PARIS),
+                _raw_calls(("call_2", "weather", '{"city": ')),
+            ],
+        },
+        "provider_error": {
+            "task": "What is the weather in Paris?",
+            "raises": True,
+            "script": lambda: [_calls(_PARIS), RuntimeError("provider is down")],
+        },
     }
 
 
@@ -189,9 +261,12 @@ def _scenario_names() -> list[str]:
 
 
 class _Recorder:
-    """A completion stub: answers from a script, records each request."""
+    """A completion stub: answers from a script, records each request.
 
-    def __init__(self, script: list[ModelResponse]) -> None:
+    A scripted exception is raised instead of answered (a provider error).
+    """
+
+    def __init__(self, script: list[ModelResponse | Exception]) -> None:
         self.script = list(script)
         self.requests: list[dict[str, Any]] = []
 
@@ -202,7 +277,10 @@ class _Recorder:
         self.requests.append(json.loads(json.dumps(payload)))
         if not self.script:
             raise AssertionError("native_fc sent more requests than scripted")
-        return self.script.pop(0)
+        reply = self.script.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
 
 
 def _shown(value: Any) -> Any:
@@ -213,16 +291,13 @@ def _run_scenario(name: str, mp: pytest.MonkeyPatch) -> dict[str, Any]:
     """Run scenario *name* (``base/model``) and return its requests and outcome."""
     base, label = name.split("/")
     spec = _scenario_specs()[base]
-    script: Callable[[], list[ModelResponse]] = spec["script"]
+    script: Callable[[], list[ModelResponse | Exception]] = spec["script"]
     recorder = _Recorder(script())
     for binding in _BINDINGS:
         mp.setattr(binding, recorder)
+    settings: dict[str, Any] = {"max_iterations": 5, **spec.get("config", {})}
     config = AgentConfig(
-        model=_MODELS[label],
-        temperature=0.5,
-        max_tokens=1000,
-        max_iterations=5,
-        **spec.get("config", {}),
+        model=_MODELS[label], temperature=0.5, max_tokens=1000, **settings
     )
     agent = NativeFunctionCallingReactAgent(
         _registry(),
@@ -230,6 +305,16 @@ def _run_scenario(name: str, mp: pytest.MonkeyPatch) -> dict[str, Any]:
         system_policy=spec.get("system_policy"),
         seed=spec.get("seed"),
     )
+    if spec.get("raises"):
+        # Only the requests and the error type are pinned: the error text
+        # names the code path (D-027 moved the wrap to `_standard_run`).
+        with pytest.raises(Exception) as excinfo:
+            agent.run(spec["task"])
+        assert recorder.script == [], "a scripted reply was never requested"
+        return {
+            "requests": recorder.requests,
+            "outcome": {"raised": type(excinfo.value).__name__},
+        }
     result = agent.run(spec["task"])
     assert recorder.script == [], "a scripted reply was never requested"
     return {

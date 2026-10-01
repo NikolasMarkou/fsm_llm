@@ -91,7 +91,7 @@ import json
 import os
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
@@ -254,6 +254,25 @@ def _check_run_budgets(max_steps: int, max_seconds: float | None) -> None:
         )
 
 
+def _seconds_exempt_set(states: Collection[str]) -> frozenset[str]:
+    """Validate ``seconds_exempt_states`` of a bounded run; return it as a set.
+
+    Contract: ``states`` must be a collection of state ids (``str``), not a
+    single ``str`` (whose characters would be taken as ids); ``ValueError``
+    otherwise. Returns a ``frozenset`` (empty for ``()``).
+    """
+    if isinstance(states, (str, bytes)) or not isinstance(states, Collection):
+        raise ValueError(
+            f"seconds_exempt_states must be a collection of state ids, got {states!r}"
+        )
+    exempt = frozenset(states)
+    if not all(isinstance(state, str) for state in exempt):
+        raise ValueError(
+            f"seconds_exempt_states must hold state ids (str), got {states!r}"
+        )
+    return exempt
+
+
 # DECISION plan-2026-09-30T062855-07ad3f8c/D-027
 # The ONE bounded-run sequence, shared by ``API.run_until_terminal`` and
 # ``API.run_until_terminal_stream``: "has it ended", both budgets, the hook,
@@ -274,6 +293,7 @@ def _run_rounds(
     max_steps: int,
     max_seconds: float | None,
     before_step: Callable[[int], None] | None,
+    seconds_exempt: frozenset[str] = frozenset(),
 ) -> Iterator[int]:
     """Yield 1, 2, ... once for each step a bounded run is allowed to take.
 
@@ -288,14 +308,28 @@ def _run_rounds(
     raises propagates unchanged and no step runs. Budgets must already be
     valid (``_check_run_budgets``). A step that raises in the caller ends the
     run: the generator is simply not resumed. A conversation ID that was never
-    started raises ``ValueError`` from the first "ended" question.
+    started raises ``ValueError`` from the first "ended" question. A spent
+    seconds budget does not stop a round whose current state (top of the
+    stack) is in ``seconds_exempt``; the steps budget still applies there.
     """
     started = time.monotonic()
     steps_done = 0
 
+    # DECISION plan-2026-10-01T093600-944e2692/D-032: the seconds budget is
+    # waived only in the states the caller names (a run's wind-down: a
+    # post-loop write or repair after its answer is in hand), so a finished
+    # answer is never lost to the clock between its last steps. Do NOT waive
+    # the steps budget there (it still bounds the run), do NOT decide the
+    # exemption in a subpackage (an agent-side clock or loop is the parallel
+    # path D-027 forbids), and do NOT read the state when no state is exempt.
     def check_seconds() -> None:
-        if max_seconds is not None and time.monotonic() - started >= max_seconds:
-            raise RunBudgetExceededError("seconds", max_seconds, steps_done)
+        if max_seconds is None or time.monotonic() - started < max_seconds:
+            return
+        if seconds_exempt and (
+            api.get_current_state(conversation_id) in seconds_exempt
+        ):
+            return
+        raise RunBudgetExceededError("seconds", max_seconds, steps_done)
 
     while not api.has_conversation_ended(conversation_id):
         check_seconds()
@@ -845,6 +879,7 @@ class API:
         max_steps: int,
         max_seconds: float | None = None,
         before_step: Callable[[int], None] | None = None,
+        seconds_exempt_states: Collection[str] = (),
     ) -> tuple[AdvanceResult, ...]:
         """Run message-free steps (``advance``) until the conversation ends.
 
@@ -862,6 +897,9 @@ class API:
                 (1, 2, ...), after the budget checks. It may write context
                 (``update_context``); that step sees it. What it raises
                 propagates unchanged and the step does not run.
+            seconds_exempt_states: State ids in which a spent ``max_seconds``
+                does not stop the run (a wind-down that must finish once
+                reached); ``max_steps`` still applies. Default: none.
 
         Returns:
             The ``AdvanceResult`` of every step, in order; ``()`` when the
@@ -870,9 +908,10 @@ class API:
             thread) ends the run normally with the results so far.
 
         Raises:
-            ValueError: an invalid ``max_steps`` or ``max_seconds`` (wrong
-                type, ``max_steps < 1``, ``max_seconds <= 0``), or a
-                conversation ID that was never started.
+            ValueError: an invalid ``max_steps``, ``max_seconds`` (wrong
+                type, ``max_steps < 1``, ``max_seconds <= 0``) or
+                ``seconds_exempt_states`` (a ``str``, or a non-``str`` member),
+                or a conversation ID that was never started.
             RunBudgetExceededError: a budget was spent before the conversation
                 ended. The steps already run are kept in the conversation, but
                 the error does not carry their ``AdvanceResult``s: read the
@@ -883,9 +922,10 @@ class API:
                 kept), or a turn is already running for the conversation.
         """
         _check_run_budgets(max_steps, max_seconds)
+        exempt = _seconds_exempt_set(seconds_exempt_states)
         results: list[AdvanceResult] = []
         for _ in _run_rounds(
-            self, conversation_id, max_steps, max_seconds, before_step
+            self, conversation_id, max_steps, max_seconds, before_step, exempt
         ):
             with _closed_conversation_ends_run(self, conversation_id):
                 results.append(self.advance(conversation_id))
@@ -898,6 +938,7 @@ class API:
         max_steps: int,
         max_seconds: float | None = None,
         before_step: Callable[[int], None] | None = None,
+        seconds_exempt_states: Collection[str] = (),
     ) -> Iterator[str]:
         """Run message-free steps until the conversation ends, streaming the
         replies.
@@ -918,13 +959,15 @@ class API:
                 time budget.
             before_step: Called once before each step with its number
                 (1, 2, ...), after the budget checks.
+            seconds_exempt_states: As in ``run_until_terminal``.
 
         Yields:
             String chunks of each speaking state's reply as they arrive.
 
         Raises:
-            ValueError: at call time, for an invalid ``max_steps`` or
-                ``max_seconds`` or a conversation ID that was never started.
+            ValueError: at call time, for an invalid ``max_steps``,
+                ``max_seconds`` or ``seconds_exempt_states``, or a
+                conversation ID that was never started.
             RunBudgetExceededError: while iterating, when a budget was spent
                 before the conversation ended.
             FSMError: while iterating, when a step failed (after its
@@ -934,6 +977,7 @@ class API:
         ``run_until_terminal``.
         """
         _check_run_budgets(max_steps, max_seconds)
+        exempt = _seconds_exempt_set(seconds_exempt_states)
         # Existence check at call time, holding no lock afterwards. An ended
         # conversation (terminal, or already closed and remembered) is valid
         # and streams nothing; an unknown ID raises ``ValueError`` here.
@@ -944,7 +988,7 @@ class API:
         # plan-2026-07-21T082818-4c63deac/D-002 there).
         def _stream() -> Iterator[str]:
             for _ in _run_rounds(
-                self, conversation_id, max_steps, max_seconds, before_step
+                self, conversation_id, max_steps, max_seconds, before_step, exempt
             ):
                 with _closed_conversation_ends_run(self, conversation_id):
                     yield from self.advance_stream(conversation_id)
