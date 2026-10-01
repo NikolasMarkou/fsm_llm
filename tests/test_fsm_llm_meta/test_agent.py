@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """Tests for MetaBuilderAgent — agentic architecture."""
 
+import json
 import socket
-from typing import ClassVar
 
 import pytest
 
@@ -20,6 +20,61 @@ from fsm_llm.agents.exceptions import (
 )
 from fsm_llm.agents.meta_builder import MetaBuilderAgent
 from fsm_llm.agents.meta_prompts import artifact_schema
+from fsm_llm.definitions import (
+    CompletionRequest,
+    CompletionResponse,
+    LLMResponseError,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.llm import LLMInterface
+
+
+class _ScriptedLLM(LLMInterface):
+    """Answers the meta FSM's calls: classifier intents, build replies, replies.
+
+    ``intents`` items are an intent name (confidence 0.95) or an
+    ``(intent, confidence)`` pair; ``builds`` items are reply texts, or an
+    exception instance the build call raises. Every request is recorded.
+    """
+
+    def __init__(
+        self, *, intents: list | None = None, builds: list | None = None
+    ) -> None:
+        self.intents = list(intents or [])
+        self.builds = list(builds or [])
+        self.requests: list[CompletionRequest] = []
+        self.replies: list[ResponseGenerationRequest] = []
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        self.requests.append(request)
+        if request.call_type == "classification":
+            intent = self.intents.pop(0) if self.intents else "fsm"
+            confidence = 0.95
+            if isinstance(intent, tuple):
+                intent, confidence = intent
+            return CompletionResponse(
+                kind="final",
+                text=json.dumps(
+                    {"intent": intent, "confidence": confidence, "reasoning": "x"}
+                ),
+            )
+        build = self.builds.pop(0)
+        if isinstance(build, BaseException):
+            raise build
+        return CompletionResponse(kind="final", text=build)
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        self.replies.append(request)
+        return ResponseGenerationResponse(
+            message="Noted. Say 'build it' when you're ready.",
+            message_type="response",
+        )
+
+    def build_requests(self) -> list[CompletionRequest]:
+        return [r for r in self.requests if r.call_type != "classification"]
 
 
 class TestOfflineNetworkGuard:
@@ -61,17 +116,12 @@ class TestSchemaEchoRejection:
             {"name": "Agent", "tools": [{"name": "search"}]}
         )
 
-    def test_pipeline_raises_on_schema_echo(self):
-        import json
-
-        agent = MetaBuilderAgent()
-        builder = agent._create_builder(ArtifactType.FSM)
-        # Force the LLM to echo a schema.
-        agent._llm_call = lambda *a, **k: json.dumps(
-            {"type": "object", "properties": {}, "required": ["name"]}
-        )
+    def test_run_raises_on_schema_echo(self):
+        # The build call echoes a schema.
+        echo = json.dumps({"type": "object", "properties": {}, "required": ["name"]})
+        agent = MetaBuilderAgent(llm_interface=_ScriptedLLM(builds=[echo]))
         with pytest.raises(MetaValidationError, match="JSON schema"):
-            agent._run_deterministic_pipeline("build a bot", ArtifactType.FSM, builder)
+            agent.run("build a bot")
 
 
 class TestMetaAgentInit:
@@ -127,9 +177,9 @@ class TestMetaAgentLifecycle:
             agent.send("hello")
 
 
-@pytest.mark.usefixtures("offline_llm")
 class TestTypeDetection:
-    """Test artifact type detection from user text."""
+    """The keyword type the driver writes as ``keyword_type`` (used when the
+    classification gives no type)."""
 
     def test_fsm_aliases(self):
         agent = MetaBuilderAgent()
@@ -139,7 +189,7 @@ class TestTypeDetection:
             "conversation bot",
             "state machine for support",
         ]:
-            result = agent._detect_type(text)
+            result = agent._detect_type_fallback(text)
             assert result == ArtifactType.FSM, f"'{text}' should resolve to FSM"
 
     def test_workflow_aliases(self):
@@ -150,7 +200,7 @@ class TestTypeDetection:
             "automation process",
             "ETL steps",
         ]:
-            result = agent._detect_type(text)
+            result = agent._detect_type_fallback(text)
             assert result == ArtifactType.WORKFLOW, (
                 f"'{text}' should resolve to WORKFLOW"
             )
@@ -162,16 +212,18 @@ class TestTypeDetection:
             "react pattern",
             "research agent",
         ]:
-            result = agent._detect_type(text)
+            result = agent._detect_type_fallback(text)
             assert result == ArtifactType.AGENT, f"'{text}' should resolve to AGENT"
 
     def test_unknown_defaults_to_fsm(self):
         agent = MetaBuilderAgent()
-        assert agent._detect_type("build something amazing") == ArtifactType.FSM
+        assert (
+            agent._detect_type_fallback("build something amazing") == ArtifactType.FSM
+        )
 
     def test_just_build_defaults_to_fsm(self):
         agent = MetaBuilderAgent()
-        assert agent._detect_type("just build it") == ArtifactType.FSM
+        assert agent._detect_type_fallback("just build it") == ArtifactType.FSM
 
 
 class TestBuildTrigger:
@@ -374,34 +426,34 @@ class TestFewShotFSMExample:
     a valid FSM. A model that copies it must get a loadable definition with
     its transition kept (the example once pointed at an undeclared state)."""
 
-    def test_copied_example_builds_a_loadable_fsm(self, monkeypatch):
-        import json
+    def test_copied_example_builds_a_loadable_fsm(self):
         import re
 
-        from fsm_llm.agents.meta_builders import FSMBuilder
         from fsm_llm.definitions import FSMDefinition
 
-        agent = MetaBuilderAgent()
-        prompts: list[str] = []
+        class _EchoExample(_ScriptedLLM):
+            def complete(self, request):
+                if request.call_type == "classification":
+                    return super().complete(request)
+                self.requests.append(request)
+                prompt = request.messages[-1]["content"]
+                match = re.search(r"Example:\n(\{.*\})\n", prompt)
+                assert match, prompt
+                return CompletionResponse(kind="final", text=match.group(1))
 
-        def echo_example(prompt, **_kw):
-            prompts.append(prompt)
-            match = re.search(r"Example:\n(\{.*\})\n", prompt)
-            assert match, prompt
-            return match.group(1)
+        llm = _EchoExample()
+        result = MetaBuilderAgent(llm_interface=llm).run("a greeter")
 
-        monkeypatch.setattr(agent, "_llm_call", echo_example)
-        builder = FSMBuilder()
-        agent._run_deterministic_pipeline("a greeter", ArtifactType.FSM, builder)
-
-        spec = json.loads(re.search(r"Example:\n(\{.*\})\n", prompts[0]).group(1))
+        prompt = llm.build_requests()[0].messages[-1]["content"]
+        spec = json.loads(re.search(r"Example:\n(\{.*\})\n", prompt).group(1))
         declared = {s["state_id"] for s in spec["states"]}
         for trans in spec["transitions"]:
             assert trans["from_state"] in declared
             assert trans["target_state"] in declared
 
-        assert builder.validate_complete() == []
-        definition = FSMDefinition.model_validate(builder.to_dict())
+        assert result.is_valid
+        assert result.validation_errors == []
+        definition = FSMDefinition.model_validate(result.artifact)
         edges = [
             (sid, t.target_state)
             for sid, state in definition.states.items()
@@ -413,96 +465,84 @@ class TestFewShotFSMExample:
 
 
 class TestLlmCallProviderFailure:
-    """F-03 / SC-10 — `_llm_call` used to convert ANY provider failure into
-    ``""`` via `except Exception: return ""`, making a total outage
-    indistinguishable from a model that answered with nothing. It must now
-    raise ``BuilderError`` (an ``AgentError`` subclass) chained from the
-    provider exception.
+    """F-03 / SC-10 — a provider failure of the build call used to be turned
+    into ``""``, making a total outage indistinguishable from a model that
+    answered with nothing. It must raise ``BuilderError`` (an ``AgentError``
+    subclass) chained from core's ``LLMResponseError`` (which chains the
+    provider exception).
 
     DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE].
     """
 
-    @staticmethod
-    def _explode(exc):
-        def _completion(**kwargs):
-            raise exc
-
-        return _completion
-
     def test_provider_failure_raises_builder_error_chained(self, monkeypatch):
         provider_error = RuntimeError("provider unreachable")
-        monkeypatch.setattr("litellm.completion", self._explode(provider_error))
 
-        agent = MetaBuilderAgent()
+        def _explode(**kwargs):
+            raise provider_error
+
+        # The one send binding of core's LLM layer: classifier and build call.
+        monkeypatch.setattr("fsm_llm.llm.completion", _explode)
+        agent = MetaBuilderAgent(config=MetaBuilderConfig(model="gpt-4o-mini"))
         with pytest.raises(BuilderError) as excinfo:
-            agent._llm_call("design an FSM")
+            agent.run("design an FSM")
 
         # Wraps to the package root, never to core's FSMError surface (I-5).
         assert isinstance(excinfo.value, AgentError)
-        assert excinfo.value.__cause__ is provider_error
+        assert isinstance(excinfo.value.__cause__, LLMResponseError)
+        assert excinfo.value.__cause__.__cause__ is provider_error
 
-    def test_provider_failure_does_not_return_empty_string(self, monkeypatch):
-        """The exact inverse defect: the un-fixed source returned `""` here."""
-        monkeypatch.setattr(
-            "litellm.completion", self._explode(RuntimeError("provider unreachable"))
-        )
-
-        agent = MetaBuilderAgent()
+    def test_provider_failure_does_not_return_a_result(self):
+        """The exact inverse defect: the un-fixed source returned a stub."""
+        llm = _ScriptedLLM(builds=[LLMResponseError("provider unreachable")])
+        agent = MetaBuilderAgent(llm_interface=llm)
         result = None
         try:
-            result = agent._llm_call("design an FSM")
+            result = agent.run("design an FSM")
         except BuilderError:
             pass
         assert result is None, "provider failure must not be reported as an answer"
+        assert not agent.is_complete()
 
-    def test_empty_answer_still_returns_empty_string(self, monkeypatch):
+    def test_empty_answer_is_an_invalid_build_not_an_error(self):
         """`""` keeps its one true meaning — the model answered with nothing.
         Pins that the fix did not turn a legitimate empty answer into an error."""
+        agent = MetaBuilderAgent(llm_interface=_ScriptedLLM(builds=[""]))
+        result = agent.run("say nothing")
+        assert result.is_valid is False
+        assert agent.is_complete()
 
-        class _Msg:
-            content = ""
-
-        class _Choice:
-            message = _Msg()
-
-        class _Resp:
-            choices: ClassVar[list] = [_Choice()]
-
-        monkeypatch.setattr("litellm.completion", lambda **kwargs: _Resp())
-
-        assert MetaBuilderAgent()._llm_call("say nothing") == ""
-
-    def test_provider_failure_propagates_out_of_the_build_pipeline(self, monkeypatch):
-        """Previously the `""` flowed into `_parse_extraction_response`, yielded
-        an empty spec, logged 'builder will be incomplete' and returned
-        NORMALLY — so `run()` emitted a stub artifact after a total outage."""
-        monkeypatch.setattr(
-            "litellm.completion", self._explode(RuntimeError("provider unreachable"))
+    def test_send_keeps_the_session_open_after_a_build_outage(self):
+        """In turn-by-turn mode an outage of the build call is a failed build:
+        the reply lists it, the session stays open and a second "build it"
+        calls the model again."""
+        spec = json.dumps(
+            {
+                "name": "Bot",
+                "description": "A bot",
+                "states": [{"state_id": "start", "description": "S", "purpose": "P"}],
+            }
         )
+        llm = _ScriptedLLM(builds=[LLMResponseError("provider unreachable"), spec])
+        agent = MetaBuilderAgent(llm_interface=llm)
+        agent.start("I want a support bot")
+        reply = agent.send("build it")
+        assert "The build call failed" in reply
+        assert "say 'build it' again" in reply
+        assert not agent.is_complete()
+        assert "Build complete!" in agent.send("build it")
+        assert agent.is_complete()
+        assert len(llm.build_requests()) == 2
 
+    @pytest.mark.usefixtures("offline_llm")
+    def test_collect_response_fallback_survives_the_raise(self):
+        """A-5 census pin (decisions.md D-007 of 876e7164). A provider failure of
+        the collect reply keeps the session open with the canned reply."""
         agent = MetaBuilderAgent()
-        builder = agent._create_builder(ArtifactType.FSM)
-        with pytest.raises(BuilderError):
-            agent._run_deterministic_pipeline("build a bot", ArtifactType.FSM, builder)
-
-    def test_collect_response_fallback_survives_the_raise(self, monkeypatch):
-        """A-5 census pin (decisions.md D-007). `_generate_collect_response` is
-        the ONE caller that reads the result as a truthiness sentinel
-        (`if response and len(response) > 10`), but it already wraps the call in
-        `except Exception`, so the raise routes to the byte-identical fallback.
-        This test is what makes that claim measured rather than asserted."""
-        monkeypatch.setattr(
-            "litellm.completion", self._explode(RuntimeError("provider unreachable"))
-        )
-
-        agent = MetaBuilderAgent()
-        agent._artifact_type = ArtifactType.FSM
-        agent._messages = ["I want a support bot"]
-
-        reply = agent._generate_collect_response("I want a support bot")
+        reply = agent.start("I want a support bot")
 
         assert "Say 'build it' when ready" in reply
         assert reply.strip() != ""
+        assert not agent.is_complete()
 
 
 class TestWorkflowStepTypeEnum:
@@ -523,8 +563,6 @@ class TestWorkflowStepTypeEnum:
         assert prop["enum"] == sorted(WorkflowBuilder.VALID_STEP_TYPES)
 
     def test_enum_reaches_response_format_and_ollama_format(self, monkeypatch):
-        import json
-
         from litellm.llms.ollama.chat.transformation import OllamaChatConfig
 
         from fsm_llm.agents.meta_builders import WorkflowBuilder
@@ -551,23 +589,28 @@ class TestWorkflowStepTypeEnum:
             message = _Msg()
 
         class _Resp:
-            choices: ClassVar[list] = [_Choice()]
+            choices = (_Choice(),)
 
         def _completion(**kwargs):
             sent.append(kwargs)
+            if kwargs["response_format"]["json_schema"]["name"] != "artifact_spec":
+                raise RuntimeError("classifier offline: keyword type is used")
             return _Resp()
 
-        monkeypatch.setattr("litellm.completion", _completion)
+        monkeypatch.setattr("fsm_llm.llm.completion", _completion)
         agent = MetaBuilderAgent(
             config=MetaBuilderConfig(model="ollama_chat/qwen3.5:4b")
         )
-        builder = agent._create_builder(ArtifactType.WORKFLOW)
-        agent._run_deterministic_pipeline(
-            "build a flow", ArtifactType.WORKFLOW, builder
-        )
+        result = agent.run("build a flow")
+        assert result.artifact_type == ArtifactType.WORKFLOW
 
-        assert len(sent) == 1
-        response_format = sent[0]["response_format"]
+        builds = [
+            kw
+            for kw in sent
+            if kw["response_format"]["json_schema"]["name"] == "artifact_spec"
+        ]
+        assert len(builds) == 1
+        response_format = builds[0]["response_format"]
         schema = response_format["json_schema"]["schema"]
         expected = sorted(WorkflowBuilder.VALID_STEP_TYPES)
         assert self._step_type_prop(schema)["enum"] == expected
@@ -579,3 +622,153 @@ class TestWorkflowStepTypeEnum:
             False,
         )
         assert self._step_type_prop(mapped["format"])["enum"] == expected
+
+
+_FSM_SPEC = json.dumps(
+    {
+        "name": "Bot",
+        "description": "A support bot",
+        "states": [
+            {"state_id": "start", "description": "Greet", "purpose": "Greet"},
+            {"state_id": "end", "description": "Bye", "purpose": "Close"},
+        ],
+        "transitions": [
+            {"from_state": "start", "target_state": "end", "description": "Done"}
+        ],
+    }
+)
+_EMPTY_SPEC = json.dumps({"name": "Bot", "description": "A bot", "states": []})
+
+
+class TestRunsThroughCore:
+    """Plan 944e2692 step 11 (D-011): ``MetaBuilderAgent`` drives the meta FSM
+    on a core ``API``. Every model call goes through the conversation's LLM
+    interface (an injected one included); the agent makes no call of its own.
+    On the parent commit an injected ``llm_interface`` was ignored and every
+    call went to ``litellm.completion``."""
+
+    @pytest.fixture
+    def provider_calls(self, monkeypatch) -> list[dict]:
+        calls: list[dict] = []
+
+        def _record(**kwargs):
+            calls.append(kwargs)
+            raise RuntimeError("no provider call expected")
+
+        monkeypatch.setattr("litellm.completion", _record)
+        monkeypatch.setattr("fsm_llm.llm.completion", _record)
+        return calls
+
+    def test_run_sends_every_call_to_the_injected_interface(self, provider_calls):
+        from fsm_llm.agents.meta_prompts import (
+            build_artifact_prompt,
+            build_response_format,
+        )
+
+        llm = _ScriptedLLM(intents=["fsm"], builds=[_FSM_SPEC])
+        task = "A support bot that greets users"
+        result = MetaBuilderAgent(llm_interface=llm).run(task)
+
+        assert provider_calls == []
+        assert [r.call_type for r in llm.requests] == ["classification", "completion"]
+        assert llm.replies == []  # no state on the run path speaks
+        assert task in json.dumps(llm.requests[0].messages)
+        (build,) = llm.build_requests()
+        assert build.messages == [
+            {"role": "user", "content": build_artifact_prompt(ArtifactType.FSM, task)}
+        ]
+        assert build.response_format == build_response_format(ArtifactType.FSM)
+        assert build.tools is None
+        assert result.is_valid
+        assert result.artifact["name"] == "Bot"
+
+    def test_session_sends_every_call_to_the_injected_interface(self, provider_calls):
+        llm = _ScriptedLLM(intents=["fsm"], builds=[_FSM_SPEC])
+        agent = MetaBuilderAgent(llm_interface=llm)
+
+        reply = agent.start("I want a support chatbot")
+        assert reply == "Noted. Say 'build it' when you're ready."
+        assert agent.send("with a greeting and a goodbye") == reply
+        assert "Build complete!" in agent.send("build it")
+
+        assert provider_calls == []
+        assert [r.call_type for r in llm.requests] == ["classification", "completion"]
+        assert len(llm.replies) == 2  # the two collect replies (Pass 2)
+        assert agent.is_complete()
+        assert agent.get_result().is_valid
+
+    def test_build_retry_calls_the_model_again(self, provider_calls):
+        """A failed build clears its result on the next ``build`` entry, so the
+        retry is a new build call (core skips a completion state whose result
+        key is set)."""
+        llm = _ScriptedLLM(intents=["fsm"], builds=[_EMPTY_SPEC, _FSM_SPEC])
+        agent = MetaBuilderAgent(llm_interface=llm)
+        agent.start("I want a support chatbot")
+
+        failed = agent.send("build it")
+        assert "At least one state is required" in failed
+        assert not agent.is_complete()
+        assert "Build complete!" in agent.send("build it")
+
+        assert len(llm.build_requests()) == 2
+        assert agent.get_result().is_valid
+
+    def test_type_switch_classifies_once(self, provider_calls):
+        """A switch routes ``collect -> classify``; the one ``advance`` then
+        classifies ``latest_request`` with no user message (D-023: one
+        classifier call per switch, as before the FSM)."""
+        llm = _ScriptedLLM(intents=["fsm", "agent"])
+        agent = MetaBuilderAgent(llm_interface=llm)
+        agent.start("I want a support chatbot")
+        assert agent.get_internal_state()["artifact_type"] == "fsm"
+
+        reply = agent.send("actually make it a research agent")
+        assert reply == "Noted. Say 'build it' when you're ready."
+        assert agent.get_internal_state()["artifact_type"] == "agent"
+        classifications = [r for r in llm.requests if r.call_type == "classification"]
+        assert len(classifications) == 2
+        assert "research agent" in json.dumps(classifications[1].messages)
+
+    def test_unclassified_type_falls_back_to_the_keyword_type(self, provider_calls):
+        """A low-confidence first classification leaves ``artifact_type`` unset;
+        ``classify`` exit fills it from the message's keyword type."""
+        llm = _ScriptedLLM(intents=[("agent", 0.1)])
+        agent = MetaBuilderAgent(llm_interface=llm)
+        agent.start("a data pipeline that loads CSV files")
+        assert agent.get_internal_state()["artifact_type"] == "workflow"
+
+    def test_agent_pattern_comes_from_the_build_reply(self, provider_calls):
+        spec = json.dumps(
+            {
+                "name": "Researcher",
+                "description": "Searches the web",
+                "agent_type": "plan_execute",
+                "tools": [{"name": "search", "description": "Search the web"}],
+            }
+        )
+        llm = _ScriptedLLM(intents=["agent"], builds=[spec])
+        result = MetaBuilderAgent(llm_interface=llm).run("a research agent")
+
+        assert result.artifact_type == ArtifactType.AGENT
+        assert result.artifact["agent_type"] == "plan_execute"
+        schema = llm.build_requests()[0].response_format["json_schema"]["schema"]
+        assert "agent_type" in schema["required"]
+
+    def test_config_timeout_reaches_the_interface(self):
+        agent = MetaBuilderAgent(config=MetaBuilderConfig(timeout_seconds=42.0))
+        agent.start()
+        assert agent._api is not None
+        assert agent._api.llm_interface.timeout == 42.0
+
+    @pytest.mark.parametrize("kwarg", ["model", "temperature", "max_tokens", "hitl"])
+    def test_config_owned_and_misplaced_kwargs_are_refused(self, kwarg):
+        with pytest.raises(TypeError, match=kwarg):
+            MetaBuilderAgent(**{kwarg: 1})
+
+    def test_module_has_no_direct_litellm_use(self):
+        import inspect
+
+        from fsm_llm.agents import meta_builder
+
+        assert "litellm" not in inspect.getsource(meta_builder)
+        assert not hasattr(MetaBuilderAgent, "_llm_call")

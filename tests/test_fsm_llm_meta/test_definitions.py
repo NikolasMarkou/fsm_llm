@@ -55,7 +55,32 @@ class TestMetaBuilderConfig:
         assert config.temperature == 0.7
         assert config.max_tokens == 4096
         assert config.max_turns == 50
-        assert config.max_iterations == 25
+
+    def test_max_iterations_is_the_inherited_unused_field(self):
+        """D-012 of plan 944e2692: the override (25) is gone; the inherited
+        AgentConfig field stays so callers passing it keep validating."""
+        from fsm_llm.agents.definitions import AgentConfig
+
+        assert MetaBuilderConfig().max_iterations == AgentConfig().max_iterations
+        assert MetaBuilderConfig(max_iterations=20).max_iterations == 20
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("build_temperature", 0.3),
+            ("build_max_iterations", 25),
+            ("build_timeout_seconds", 120.0),
+        ],
+    )
+    def test_removed_build_fields_are_rejected(self, field, value):
+        """D-012 of plan 944e2692: the three unread build_* fields are removed;
+        the config is extra="forbid", so an old caller gets an error naming
+        the key (the parent commit accepted them)."""
+        from pydantic import ValidationError
+
+        assert field not in MetaBuilderConfig.model_fields
+        with pytest.raises(ValidationError, match=field):
+            MetaBuilderConfig(**{field: value})
 
     def test_custom_values(self):
         config = MetaBuilderConfig(model="gpt-4o", temperature=0.3, max_turns=100)

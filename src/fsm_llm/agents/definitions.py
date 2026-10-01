@@ -444,15 +444,18 @@ class BuildProgress(BaseModel):
 
 
 class MetaBuilderConfig(AgentConfig):
-    """Configuration for the meta-builder agent."""
+    """Configuration for the meta-builder agent.
 
-    max_iterations: int = MetaDefaults.BUILD_MAX_ITERATIONS
+    ``model``, ``temperature`` and ``max_tokens`` configure the conversation's
+    LLM interface; ``timeout_seconds`` is its per-request timeout;
+    ``max_turns`` caps ``send`` calls. ``max_iterations`` is inherited from
+    ``AgentConfig`` and not read by the meta-builder (kept so existing callers
+    that pass it keep validating, D-012).
+    """
+
     temperature: float = MetaDefaults.TEMPERATURE
     max_tokens: int = MetaDefaults.MAX_TOKENS
     max_turns: int = MetaDefaults.MAX_TURNS
-    build_max_iterations: int = MetaDefaults.BUILD_MAX_ITERATIONS
-    build_timeout_seconds: float = MetaDefaults.BUILD_TIMEOUT_SECONDS
-    build_temperature: float = MetaDefaults.BUILD_TEMPERATURE
 
     @field_validator("max_turns")
     @classmethod

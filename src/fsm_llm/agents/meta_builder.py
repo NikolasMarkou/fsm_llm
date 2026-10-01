@@ -1,36 +1,43 @@
 """
 MetaBuilderAgent: builds an FSM, workflow or agent artifact from a description.
 
-Pipeline (both ``run()`` and the turn-by-turn ``send("build it")`` path):
-1. Classify the artifact type (fsm, workflow, agent) with a ``Classifier``,
-   falling back to keyword aliases; for agents, classify the agent pattern too.
-2. Make ONE schema-constrained LLM call that extracts the whole artifact spec
-   as JSON (``_run_deterministic_pipeline``).
-3. Assemble the spec deterministically in Python on an ``ArtifactBuilder``
-   (``_assemble_fsm`` / ``_assemble_workflow`` / ``_assemble_agent``) and
-   validate it.
+The agent drives the meta-builder FSM (``build_meta_builder_fsm``) on a core
+``API``: ``classify`` (the artifact type, a ``classification_extractions``
+call), ``collect`` (the reply that gathers requirements, Pass 2), ``build``
+(one structured completion that returns the whole artifact spec as JSON),
+``build_failed`` and ``done``. Every model call is core's: this module makes
+no LLM call of its own.
 
-There is no per-tool classify-then-extract loop. The tool registries in
-``meta_tools.py`` (``create_fsm_tools`` and friends) are a separate public API
-for driving a builder programmatically; this agent does not use them.
+Python keeps what an FSM cannot express: the keyword hints the driver computes
+from each message (``build_requested``, ``type_switch``, ``keyword_type``) and
+writes before the turn, the handlers that write the build request and
+assemble the returned spec deterministically on an ``ArtifactBuilder``
+(``_assemble_fsm`` / ``_assemble_workflow`` / ``_assemble_agent``) and
+validate it, the session lifecycle (``start``/``send``/``max_turns``) and the
+canned texts (welcome, build complete, build failed, collect fallback).
+
+The tool registries in ``meta_tools.py`` (``create_fsm_tools`` and friends)
+are a separate public API for driving a builder programmatically; this agent
+does not use them.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
-import litellm
-
-from fsm_llm.classification import Classifier
-from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+from fsm_llm import API
+from fsm_llm.definitions import LLMResponseError
 from fsm_llm.logging import logger
 
+from .base import _reject_misplaced_kwargs
 from .constants import (
-    META_AGENT_PATTERN_INTENTS,
-    META_ARTIFACT_TYPE_INTENTS,
-    MetaDefaults,
+    META_BUILD_CALL_FAILED,
+    MetaBuilderStates,
+    MetaBuildOutcome,
+    MetaContextKeys,
     MetaErrorMessages,
+    MetaHandlerNames,
     MetaLogMessages,
 )
 from .definitions import (
@@ -39,6 +46,8 @@ from .definitions import (
     MetaBuilderResult,
 )
 from .exceptions import BuilderError, MetaBuilderError, MetaValidationError
+from .fsm_definitions import build_meta_builder_fsm
+from .handlers import make_fresh_keys_handler
 from .meta_builders import (
     AgentBuilder,
     ArtifactBuilder,
@@ -47,21 +56,65 @@ from .meta_builders import (
 )
 from .meta_output import format_artifact_json
 from .meta_prompts import (
-    artifact_schema,
     build_artifact_prompt,
+    build_response_format,
     build_review_presentation,
+    build_welcome_message,
 )
+
+__all__ = ["MetaBuilderAgent", "MetaBuilderConfig"]
+
+_S = MetaBuilderStates
+_K = MetaContextKeys
+
+# Words that make a message a request to change the artifact type: the turn
+# routes back to ``classify`` (A-ISSUE-011: no classifier call otherwise).
+_SWITCH_WORDS: tuple[str, ...] = (
+    "instead",
+    "actually",
+    "change",
+    "switch",
+    "no,",
+    "not a",
+)
+
+# Whole messages that ask for the build, and phrases that ask for it anywhere.
+_BUILD_TRIGGERS: frozenset[str] = frozenset(
+    {
+        "build it",
+        "build",
+        "go",
+        "build now",
+        "create it",
+        "make it",
+        "generate",
+        "done",
+        "finish",
+        "approve",
+        "yes",
+        "ok",
+        "lgtm",
+        "ship it",
+        "do it",
+    }
+)
+_BUILD_PHRASES: tuple[str, ...] = ("build it", "create it", "generate it")
 
 
 class MetaBuilderAgent:
-    """Meta-builder: classify the artifact type, extract, then assemble.
+    """Meta-builder: classify the artifact type, collect, then build.
 
-    One build is a type classification plus a single schema-constrained
-    extraction call; the returned spec is assembled and validated in Python
-    (see the module docstring). In turn-by-turn mode, ``send()`` collects
-    requirements until a build trigger ("build it"); a build with validation
-    errors keeps the session open for another try. ``is_valid`` on a workflow
-    or agent result means a structurally complete spec, not a loadable object.
+    A build is one structured completion (the ``build`` state of the meta
+    FSM) whose JSON spec is assembled and validated in Python. In
+    turn-by-turn mode, ``send()`` collects requirements until a build trigger
+    ("build it"); a build with validation errors keeps the session open for
+    another try. ``is_valid`` on a workflow or agent result means a
+    structurally complete spec, not a loadable object.
+
+    ``api_kwargs`` go to the core ``API`` (``llm_interface=`` injects the
+    interface every model call goes through; other names are LLM call
+    kwargs). ``model``, ``temperature`` and ``max_tokens`` belong on
+    ``MetaBuilderConfig`` and raise ``TypeError`` here.
 
     Usage (single-shot)::
 
@@ -119,26 +172,12 @@ class MetaBuilderAgent:
         }
         return dict(sorted(raw.items(), key=lambda kv: -len(kv[0])))
 
-    _JUST_BUILD_PHRASES: ClassVar[frozenset[str]] = frozenset(
-        {
-            "just build it",
-            "just build",
-            "whatever",
-            "anything",
-            "surprise me",
-            "random",
-            "just do it",
-            "just make it",
-            "build something",
-            "make something",
-        }
-    )
-
     def __init__(
         self,
         config: MetaBuilderConfig | None = None,
         **api_kwargs: Any,
     ) -> None:
+        _reject_misplaced_kwargs(type(self).__name__, api_kwargs)
         if config is None:
             config = MetaBuilderConfig()
         self.meta_config = config
@@ -147,91 +186,230 @@ class MetaBuilderAgent:
         self._artifact_type: ArtifactType | None = None
         self._builder: ArtifactBuilder | None = None
         self._result: MetaBuilderResult | None = None
+        # A schema echo found by the build handler; ``run`` raises it.
+        self._build_error: MetaValidationError | None = None
+
+        self._api: API | None = None
+        self._conversation_id: str | None = None
 
         self._started = False
         self._complete = False
         self._messages: list[str] = []
         self._turn_count = 0
 
-        # Lazy-initialized classifiers (built on first use)
-        self._type_classifier: Classifier | None = None
-        self._agent_type_classifier: Classifier | None = None
-
     # ------------------------------------------------------------------
-    # Single-shot API
+    # Keyword hints (pure functions of one message)
     # ------------------------------------------------------------------
 
-    def run(
-        self,
-        task: str,
-        initial_context: dict[str, Any] | None = None,
-    ) -> MetaBuilderResult:
-        """Run the meta-builder in single-shot mode."""
-        logger.info(MetaLogMessages.META_STARTED.format(model=self.meta_config.model))
+    @staticmethod
+    def _is_build_trigger(normalized: str) -> bool:
+        """True when the (stripped, lower-cased) message asks for the build."""
+        return normalized in _BUILD_TRIGGERS or any(
+            phrase in normalized for phrase in _BUILD_PHRASES
+        )
 
-        artifact_type = self._detect_type(task)
-        self._artifact_type = artifact_type
-        builder = self._create_builder(artifact_type)
-        self._builder = builder
+    @staticmethod
+    def _is_type_switch(normalized: str) -> bool:
+        """True when the (stripped, lower-cased) message may change the type."""
+        return any(word in normalized for word in _SWITCH_WORDS)
 
-        # Pre-set agent type from task description when detectable
-        if artifact_type == ArtifactType.AGENT:
-            self._preseed_agent_type(task, builder)
+    @classmethod
+    def _detect_type_fallback(cls, text: str) -> ArtifactType:
+        """The artifact type named by a keyword alias in ``text``, else FSM.
 
+        Used when the type classification gives no type (provider failure or
+        a low-confidence intent).
+        """
+        normalized = text.strip().lower()
+        for alias, type_str in cls._build_type_aliases().items():
+            if alias in normalized:
+                return ArtifactType(type_str)
+        return ArtifactType.FSM
+
+    def _turn_hints(
+        self, message: str, *, build_requested: bool | None = None
+    ) -> dict[str, Any]:
+        """Driver-written context for the next turn on ``message``.
+
+        ``build_requested`` overrides the keyword trigger (``run`` always
+        builds).
+        """
+        normalized = message.strip().lower()
+        if build_requested is None:
+            build_requested = self._is_build_trigger(normalized)
+        return {
+            _K.REQUIREMENTS: list(self._messages),
+            _K.LATEST_REQUEST: message,
+            _K.BUILD_REQUESTED: build_requested,
+            _K.TYPE_SWITCH: self._is_type_switch(normalized),
+            _K.KEYWORD_TYPE: self._detect_type_fallback(message).value,
+        }
+
+    # ------------------------------------------------------------------
+    # Core API and handlers
+    # ------------------------------------------------------------------
+
+    def _create_api(self) -> API:
+        """The core ``API`` over the meta FSM, with the build handlers."""
+        api_kwargs: dict[str, Any] = {
+            "timeout": self.meta_config.timeout_seconds,
+            **self._api_kwargs,
+        }
+        api = API.from_definition(
+            build_meta_builder_fsm(),
+            model=self.meta_config.model,
+            temperature=self.meta_config.temperature,
+            max_tokens=self.meta_config.max_tokens,
+            **api_kwargs,
+        )
+        # DECISION plan-2026-10-01T093600-944e2692/D-023: a type switch
+        # re-enters `classify` with `artifact_type` still set. Do NOT clear
+        # `artifact_type` on entry: core classifies an unset classification
+        # field of a newly entered state in the same turn (post-transition,
+        # 8a03483a/D-006), so a clear here plus the driver's `advance` (which
+        # the collect reply needs) would classify twice per switch. The one
+        # classification is the `advance`'s; a failed or low-confidence one
+        # keeps the previous type. The old build's errors are cleared: they
+        # belong to the old type. See decisions.md D-023.
+        api.register_handler(
+            api.create_handler(MetaHandlerNames.CLASSIFY_ENTRY)
+            .on_state_entry(_S.CLASSIFY)
+            .do(make_fresh_keys_handler([_K.VALIDATION_ERRORS]))
+        )
+        api.register_handler(
+            api.create_handler(MetaHandlerNames.CLASSIFY_EXIT)
+            .on_state_exit(_S.CLASSIFY)
+            .do(self._resolve_artifact_type)
+        )
+        api.register_handler(
+            api.create_handler(MetaHandlerNames.BUILD_ENTRY)
+            .on_state_entry(_S.BUILD)
+            .do(self._write_build_request)
+        )
+        api.register_handler(
+            api.create_handler(MetaHandlerNames.BUILD_REPLY)
+            .on_state(_S.BUILD)
+            .on_context_update(_K.BUILD_REPLY)
+            .critical()
+            .do(self._assemble_build_reply)
+        )
+        return api
+
+    @staticmethod
+    def _resolve_artifact_type(context: dict[str, Any]) -> dict[str, Any]:
+        """``classify`` exit: keep the classified type, else the keyword type.
+
+        The classification leaves ``artifact_type`` unset on a provider
+        failure or a low-confidence intent; the driver's ``keyword_type``
+        (FSM when no alias matched) fills it so every later state has a type.
+        """
+        valid = {t.value for t in ArtifactType}
+        if context.get(_K.ARTIFACT_TYPE) in valid:
+            return {}
+        keyword = context.get(_K.KEYWORD_TYPE)
+        fallback = keyword if keyword in valid else ArtifactType.FSM.value
+        logger.debug(f"No classified artifact type; using '{fallback}'")
+        return {_K.ARTIFACT_TYPE: fallback}
+
+    @staticmethod
+    def _write_build_request(context: dict[str, Any]) -> dict[str, Any]:
+        """``build`` entry: the build request, and a cleared result.
+
+        Clearing ``build_reply`` (and ``build_outcome``) on every entry makes
+        a retry after a failed build call the model again: core skips a
+        completion state whose result key is set.
+        """
+        artifact_type = ArtifactType(context[_K.ARTIFACT_TYPE])
+        requirement = "\n".join(context.get(_K.REQUIREMENTS) or [])
         logger.info(
             MetaLogMessages.BUILD_STARTED.format(artifact_type=artifact_type.value)
         )
+        return {
+            _K.BUILD_REPLY: None,
+            _K.BUILD_OUTCOME: None,
+            _K.BUILD_MESSAGES: [
+                {
+                    "role": "user",
+                    "content": build_artifact_prompt(artifact_type, requirement),
+                }
+            ],
+            _K.BUILD_RESPONSE_FORMAT: build_response_format(artifact_type),
+        }
 
-        self._run_deterministic_pipeline(task, artifact_type, builder)
+    def _assemble_build_reply(self, context: dict[str, Any]) -> dict[str, Any]:
+        """``build_reply`` committed: parse, assemble, validate, judge.
 
-        self._build_result()
-        self._complete = True
-        return self._result  # type: ignore[return-value]
+        Writes ``build_outcome`` (``valid`` iff the assembled artifact has no
+        validation error), ``artifact``, ``validation_errors`` and, for a
+        valid build, ``review_presentation``. A JSON-schema echo is kept on
+        the agent (``run`` raises it) and reported as a validation error.
+        """
+        reply = context.get(_K.BUILD_REPLY)
+        if not isinstance(reply, dict) or reply.get("kind") == META_BUILD_CALL_FAILED:
+            # Cleared on entry, or the driver's record of a failed call
+            # (``update_context`` runs CONTEXT_UPDATE handlers too).
+            return {}
+        artifact_type = ArtifactType(context[_K.ARTIFACT_TYPE])
+        requirement = "\n".join(context.get(_K.REQUIREMENTS) or [])
+        builder = self._builder_for(artifact_type)
+        self._build_error = None
 
-    # ------------------------------------------------------------------
-    # Deterministic build pipeline
-    # ------------------------------------------------------------------
-
-    def _run_deterministic_pipeline(
-        self,
-        task: str,
-        artifact_type: ArtifactType,
-        builder: ArtifactBuilder,
-    ) -> None:
-        """Extract the complete artifact spec in one LLM call, then build deterministically."""
-        schema = artifact_schema(artifact_type)
-        type_label = artifact_type.value.upper()
-        prompt = build_artifact_prompt(artifact_type, task)
-
-        response = self._llm_call(prompt, response_schema=schema)
-        spec = self._parse_extraction_response(response)
+        spec = self._parse_extraction_response(reply.get("text") or "")
         if not spec:
             logger.warning(
                 "Extraction returned empty spec — builder will be incomplete"
             )
-            return
-
-        logger.debug(f"Extracted spec keys: {list(spec.keys())}")
-
-        # DECISION plan_2026-05-30_26c9510a/D-001 [STALE]: reject a JSON-schema echo —
-        # small models sometimes return the type definition ({"type",
-        # "properties","required"}) instead of a concrete artifact. Without
-        # this guard, _assemble_fsm silently emits an empty stub ("Unnamed
-        # FSM", states={}) and the build reports as nominally complete.
-        if self._is_schema_echo(spec):
-            raise MetaValidationError(
+        elif self._is_schema_echo(spec):
+            # DECISION plan_2026-05-30_26c9510a/D-001 [STALE]: reject a JSON-schema
+            # echo — small models sometimes return the type definition ({"type",
+            # "properties","required"}) instead of a concrete artifact. Without
+            # this guard, _assemble_fsm silently emits an empty stub ("Unnamed
+            # FSM", states={}) and the build reports as nominally complete.
+            self._build_error = MetaValidationError(
                 f"LLM returned a JSON schema instead of a concrete "
-                f"{type_label} (keys={list(spec.keys())}). Expected an "
-                f"artifact with actual values, not a type definition."
+                f"{artifact_type.value.upper()} (keys={list(spec.keys())}). "
+                f"Expected an artifact with actual values, not a type definition."
             )
+        else:
+            logger.debug(f"Extracted spec keys: {list(spec.keys())}")
+            if artifact_type == ArtifactType.FSM:
+                self._assemble_fsm(spec, builder)
+            elif artifact_type == ArtifactType.WORKFLOW:
+                self._assemble_workflow(spec, builder)
+            else:
+                self._assemble_agent(spec, builder, requirement)
 
-        # Dispatch to type-specific assembly
-        if artifact_type == ArtifactType.FSM:
-            self._assemble_fsm(spec, builder)
-        elif artifact_type == ArtifactType.WORKFLOW:
-            self._assemble_workflow(spec, builder)
-        elif artifact_type == ArtifactType.AGENT:
-            self._assemble_agent(spec, builder)
+        errors = builder.validate_complete()
+        if self._build_error is not None:
+            errors = [str(self._build_error), *errors]
+        valid = not errors
+        return {
+            _K.BUILD_OUTCOME: (
+                MetaBuildOutcome.VALID if valid else MetaBuildOutcome.INVALID
+            ),
+            _K.ARTIFACT: builder.to_dict(),
+            _K.VALIDATION_ERRORS: errors,
+            _K.REVIEW_PRESENTATION: (
+                build_review_presentation(builder, artifact_type) if valid else None
+            ),
+        }
+
+    def _builder_for(self, artifact_type: ArtifactType) -> ArtifactBuilder:
+        """The session's builder for ``artifact_type``.
+
+        A retry of the same type reuses the builder (a set agent pattern and
+        earlier valid fields survive); a different type starts a fresh one.
+        """
+        builder = self._builder
+        if builder is None or self._artifact_type != artifact_type:
+            builder = self._create_builder(artifact_type)
+            self._builder = builder
+            self._artifact_type = artifact_type
+        return builder
+
+    # ------------------------------------------------------------------
+    # Deterministic assembly
+    # ------------------------------------------------------------------
 
     def _assemble_fsm(self, spec: dict[str, Any], builder: ArtifactBuilder) -> None:
         """Deterministic FSM assembly from extracted spec."""
@@ -320,11 +498,19 @@ class MetaBuilderAgent:
         if step_ids:
             try:
                 builder.set_initial_step(step_ids[0])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"set_initial_step failed for '{step_ids[0]}': {e}")
 
-    def _assemble_agent(self, spec: dict[str, Any], builder: ArtifactBuilder) -> None:
-        """Deterministic agent assembly from extracted spec."""
+    def _assemble_agent(
+        self, spec: dict[str, Any], builder: ArtifactBuilder, requirement: str
+    ) -> None:
+        """Deterministic agent assembly from extracted spec.
+
+        The agent pattern comes from the reply's ``agent_type`` (an enum of
+        the build schema); when it is missing or unknown, the first pattern
+        named in ``requirement`` (``plan_execute`` or "plan execute"), else
+        the builder's current pattern is kept.
+        """
         # Dispatched only for ArtifactType.AGENT → runtime type is AgentBuilder.
         builder = cast(AgentBuilder, builder)
         # Only set overview if name isn't already set (preserves on retry)
@@ -335,7 +521,7 @@ class MetaBuilderAgent:
         elif desc and not builder.description:
             builder.set_overview(name=builder.name or "Unnamed Agent", description=desc)
 
-        # Agent type already pre-seeded by classifier — don't overwrite
+        self._set_agent_type(builder, spec.get("agent_type"), requirement)
 
         # Add tools (skip duplicates by name)
         existing_names = {t.get("name") for t in builder.tools}
@@ -352,6 +538,23 @@ class MetaBuilderAgent:
                 existing_names.add(tool_name)
             except Exception as e:
                 logger.warning(f"Failed to add tool: {e}")
+
+    @staticmethod
+    def _set_agent_type(
+        builder: AgentBuilder, agent_type: Any, requirement: str
+    ) -> None:
+        """Set the pattern from the reply, else by keyword from the requirement."""
+        if isinstance(agent_type, str):
+            try:
+                builder.set_agent_type(agent_type)
+                return
+            except BuilderError as e:
+                logger.warning(f"Build reply agent_type rejected: {e}")
+        normalized = requirement.strip().lower()
+        for pattern in sorted(AgentBuilder.VALID_AGENT_TYPES):
+            if pattern in normalized or pattern.replace("_", " ") in normalized:
+                builder.set_agent_type(pattern)
+                return
 
     @staticmethod
     def _is_schema_echo(spec: dict[str, Any]) -> bool:
@@ -397,131 +600,83 @@ class MetaBuilderAgent:
         logger.warning(f"Could not parse extraction response: {text[:200]}")
         return {}
 
-    def _llm_call(
+    # ------------------------------------------------------------------
+    # Single-shot API
+    # ------------------------------------------------------------------
+
+    def run(
         self,
-        prompt: str,
-        *,
-        response_schema: dict[str, Any] | None = None,
-    ) -> str:
-        """Make a single LLM call with thinking disabled.
+        task: str,
+        initial_context: dict[str, Any] | None = None,
+    ) -> MetaBuilderResult:
+        """Build an artifact from ``task`` in one go.
 
-        Args:
-            prompt: The user prompt.
-            response_schema: Optional JSON schema to enforce structured output
-                via ``response_format``. The schema is also included in the
-                prompt so the model sees it as context.
-
-        Returns:
-            Response text. An empty string means the model genuinely answered
-            with nothing — it is NOT a failure signal.
+        One type classification and one build call. ``initial_context`` is
+        accepted for the agent call shape and not used. The session is
+        complete afterwards, valid or not.
 
         Raises:
-            BuilderError: The provider call failed (outage, auth, rate limit,
-                timeout). Callers must distinguish this from an empty answer.
+            BuilderError: the build call failed (chained from core's
+                ``LLMResponseError``).
+            MetaValidationError: the model returned a JSON schema instead of
+                an artifact.
         """
-        from fsm_llm.ollama import is_ollama_model
-
-        model = self.meta_config.model
-        reserved = {"model", "messages", "temperature", "max_tokens"}
-        safe_kwargs = {k: v for k, v in self._api_kwargs.items() if k not in reserved}
-
-        # Prepend /nothink for Qwen3 models on Ollama
-        nothink_prefix = "/nothink\n" if is_ollama_model(model) else ""
-        full_prompt = f"{nothink_prefix}{prompt}"
-
-        # If schema provided, append it to prompt so model sees it as context
-        if response_schema:
-            schema_str = json.dumps(response_schema, indent=2)
-            full_prompt += f"\n\nRespond in JSON matching this schema:\n{schema_str}"
-
-        call_params: dict[str, Any] = {
-            "model": model,
-            "messages": [{"role": "user", "content": full_prompt}],
-            "temperature": self.meta_config.temperature,
-            "max_tokens": self.meta_config.max_tokens,
-            **safe_kwargs,
-        }
-
-        # Disable thinking via reasoning_effort=none
-        if is_ollama_model(model):
-            call_params["reasoning_effort"] = "none"
-
-        # Apply response_format for structured output
-        if response_schema:
-            call_params["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "tool_params",
-                    "schema": response_schema,
-                },
-            }
-
-        # DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE]: this clause used to be
-        # `except Exception as e: logger.error(...); return ""`. Do NOT restore
-        # that. It reported a provider outage as an EMPTY ANSWER, which is
-        # strictly worse than an exception: `_run_deterministic_pipeline` fed
-        # the `""` to `_parse_extraction_response`, got `{}`, logged
-        # "builder will be incomplete" and returned normally — so a total
-        # provider failure and a model that answered with nothing were
-        # indistinguishable, and `run()` went on to emit a stub artifact as if
-        # the build had merely underperformed. `""` is now reserved for its one
-        # true meaning: the model answered with nothing.
-        #
-        # The try is also NARROWED to the network call alone (it previously
-        # spanned the content/thinking extraction below), so a bug in that
-        # parsing keeps raising as itself instead of being relabelled a
-        # provider failure. Do not widen it back. `except Exception` is correct
-        # HERE for the same reason `fsm_llm/classification.py` D-004 records:
-        # litellm's transient classes descend from openai.APIError -> Exception
-        # and share no narrower common base.
-        #
-        # Both in-repo callers were censused before this landed (see
-        # decisions.md D-007): `_generate_collect_response` already wraps its
-        # call in `except Exception` and returns an identical fallback string,
-        # and `_execute_build` already catches and routes to its
-        # validation-error path. See decisions.md D-006.
+        logger.info(MetaLogMessages.META_STARTED.format(model=self.meta_config.model))
+        self._messages = [task]
+        api = self._create_api()
+        conversation_id, _ = api.start_conversation(
+            initial_context=self._turn_hints(task, build_requested=True)
+        )
         try:
-            response = litellm.completion(**call_params)
-        except Exception as e:
-            raise BuilderError(f"Meta-builder LLM call failed: {e!s}") from e
+            # classify -> build (entry writes the request), then the build call.
+            api.converse(task, conversation_id)
+            self._advance_build(api, conversation_id)
+            if self._build_error is not None:
+                raise self._build_error
+        finally:
+            api.close()
+        self._build_result()
+        self._complete = True
+        return cast(MetaBuilderResult, self._result)
 
-        content = response.choices[0].message.content
-        if not content and hasattr(response.choices[0].message, "thinking"):
-            thinking = response.choices[0].message.thinking or ""
-            if thinking:
-                for line in reversed(thinking.strip().split("\n")):
-                    line = line.strip()
-                    if line and not line.startswith("<"):
-                        return cast(str, line)
-        return content.strip() if content else ""
+    def _advance_build(self, api: API, conversation_id: str) -> None:
+        """Run the ``build`` state's step (the build call and the assembly).
+
+        Raises:
+            BuilderError: the build call failed; the step was rolled back, so
+                the conversation is still in ``build`` with no result.
+        """
+        try:
+            api.advance(conversation_id)
+        except LLMResponseError as e:
+            # DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE]: a provider
+            # outage is an error, never an empty answer. Do NOT turn it into
+            # `""` or an empty spec: `run()` would then emit a stub artifact
+            # as if the build had merely underperformed. `""` keeps its one
+            # meaning: the model answered with nothing (an invalid build).
+            raise BuilderError(f"Meta-builder LLM call failed: {e!s}") from e
 
     # ------------------------------------------------------------------
     # Turn-by-turn API (for monitor server + interactive)
     # ------------------------------------------------------------------
 
     def start(self, initial_message: str = "") -> str:
-        """Initialize a builder session."""
+        """Initialize a builder session.
+
+        With a message, the first turn classifies it and returns the
+        generated collect reply; without one, the welcome text.
+        """
         if self._started:
             raise MetaBuilderError(MetaErrorMessages.CONVERSATION_ALREADY_STARTED)
         self._started = True
-
-        if initial_message:
-            self._messages.append(initial_message)
-            artifact_type = self._detect_type(initial_message)
-            self._artifact_type = artifact_type
-            return (
-                f"I'll build a {artifact_type.value.upper()} based on your "
-                f"description. Tell me more details, "
-                f"or say 'build it' when you're ready."
-            )
-
-        return (
-            "Welcome! I can help you build:\n"
-            "  1. An FSM for stateful conversations\n"
-            "  2. A Workflow for multi-step processes\n"
-            "  3. An Agent for tool-using AI\n\n"
-            "Describe what you'd like to create."
+        self._api = self._create_api()
+        self._conversation_id, _ = self._api.start_conversation(
+            initial_context=self._turn_hints("", build_requested=False)
         )
+        if not initial_message:
+            return build_welcome_message()
+        self._messages.append(initial_message)
+        return self._turn(initial_message)
 
     def send(self, message: str) -> str:
         """Send a message in a turn-by-turn session."""
@@ -537,86 +692,129 @@ class MetaBuilderAgent:
             )
 
         self._messages.append(message)
-        normalized = message.strip().lower()
+        return self._turn(message)
 
-        if self._is_build_trigger(normalized):
-            return self._execute_build()
+    def _session(self) -> tuple[API, str]:
+        """The started session's API and conversation id."""
+        if self._api is None or self._conversation_id is None:
+            raise MetaBuilderError(MetaErrorMessages.CONVERSATION_NOT_STARTED)
+        return self._api, self._conversation_id
 
-        # Detect or re-detect artifact type from this message.
-        # The classifier is only invoked when switching keywords are present
-        # (or when no type has been set yet) to avoid an LLM call on every turn
-        # whose result would be discarded (A-ISSUE-011).
-        _switching_keywords = (
-            "instead",
-            "actually",
-            "change",
-            "switch",
-            "no,",
-            "not a",
-        )
-        if self._artifact_type is None or any(
-            kw in normalized for kw in _switching_keywords
-        ):
-            detected = self._detect_type(message)
-            if detected != self._artifact_type and self._artifact_type is not None:
-                # User changed mind — reset builder so it doesn't carry stale data
-                self._builder = None
-                logger.info(
-                    f"Artifact type changed: {self._artifact_type.value} -> {detected.value}"
-                )
-            self._artifact_type = detected
+    def _turn(self, message: str) -> str:
+        """One user turn: ``converse``, then one ``advance`` when it is due.
 
-        if self._artifact_type is None:
+        The turn ends in ``classify`` after a type switch (the message-free
+        step classifies ``latest_request`` and the collect reply follows) or
+        in ``build`` (the step makes the build call).
+        """
+        api, conversation_id = self._session()
+        api.update_context(conversation_id, self._turn_hints(message))
+        try:
+            reply = api.converse(message, conversation_id)
+            state = api.get_current_state(conversation_id)
+            if state == _S.CLASSIFY:
+                step = api.advance(conversation_id)
+                reply = step.response or ""
+                state = step.state_after
+        except LLMResponseError as e:
+            # The turn was rolled back; the requirement is kept in context.
+            logger.warning(f"Collect reply failed, using the canned reply: {e}")
+            return self._collect_fallback(message)
+        finally:
+            self._sync_artifact_type(api, conversation_id)
+        if state != _S.BUILD:
+            return reply
+        return self._build_turn(api, conversation_id)
+
+    def _build_turn(self, api: API, conversation_id: str) -> str:
+        """The build step of a ``send``; the reply reports its outcome."""
+        try:
+            self._advance_build(api, conversation_id)
+        except BuilderError as e:
+            logger.error(f"Build execution failed: {e}")
+            self._record_failed_build_call(api, conversation_id, e)
+        self._sync_artifact_type(api, conversation_id)
+        self._build_result()
+        data = api.get_data(conversation_id)
+        if api.get_current_state(conversation_id) == _S.DONE:
+            self._complete = True
+            presentation = data.get(_K.REVIEW_PRESENTATION) or ""
             return (
-                "I'm not sure what type of artifact you want. "
-                "Could you mention: FSM, Workflow, or Agent?"
+                f"Build complete!\n\n{presentation}\n\n"
+                f"The artifact JSON has been generated."
             )
 
-        return self._generate_collect_response(message)
-
-    def _generate_collect_response(self, latest_message: str) -> str:
-        """Use the LLM to generate a contextual response during collection."""
-        type_label = self._artifact_type.value.upper()  # type: ignore[union-attr]
-        history = "\n".join(f"- {m}" for m in self._messages)
-
-        prompt = (
-            f"<role>You are helping a user design a {type_label} artifact.</role>\n"
-            f"<messages>\n{history}\n</messages>\n"
-            f"<instructions>\n"
-            f"Acknowledge what the user just said. "
-            f"Note what you will include in the {type_label.lower()}. "
-            f"Ask a short follow-up question about anything still unclear. "
-            f"End with: say 'build it' when you're ready.\n"
-            f"Keep your response to 2-3 sentences.\n"
-            f"</instructions>"
+        # Build produced validation errors — keep session open.
+        errors = data.get(_K.VALIDATION_ERRORS) or ["Build failed"]
+        error_list = "\n".join(f"  - {e}" for e in errors)
+        return (
+            f"I couldn't complete the build yet:\n{error_list}\n\n"
+            f"Please provide the missing information, then say 'build it' again."
         )
 
-        try:
-            response = self._llm_call(prompt)
-            if response and len(response) > 10:
-                return response
-        except Exception:
-            pass
+    @staticmethod
+    def _record_failed_build_call(
+        api: API, conversation_id: str, error: BuilderError
+    ) -> None:
+        """Route a ``build`` state whose call failed to ``build_failed``.
 
-        # Fallback if LLM fails
+        The failed step left the conversation in ``build`` with no result.
+        Recording the failure as the result (``kind`` ``call_failed``) makes
+        the next step a no-call step that takes the ``build_failed`` edge, so
+        the session continues like any failed build.
+        """
+        # DECISION plan-2026-10-01T093600-944e2692/D-023: the outage is
+        # recorded as the build state's result so the FSM's own edge takes the
+        # session to `build_failed`. Do NOT leave the conversation in `build`
+        # (the next `converse` there would make a build call whatever the user
+        # said) and do NOT jump states with `set_conversation_state` (a
+        # transition outside the FSM's rules). See decisions.md D-023.
+        message = f"The build call failed: {error}"
+        api.update_context(
+            conversation_id,
+            {
+                _K.BUILD_REPLY: {
+                    "kind": META_BUILD_CALL_FAILED,
+                    "text": message,
+                    "calls": [],
+                },
+                _K.BUILD_OUTCOME: MetaBuildOutcome.INVALID,
+                _K.VALIDATION_ERRORS: [message],
+            },
+        )
+        api.advance(conversation_id)
+
+    def _sync_artifact_type(self, api: API, conversation_id: str) -> None:
+        """Mirror the conversation's artifact type on the agent."""
+        value = api.get_data(conversation_id).get(_K.ARTIFACT_TYPE)
+        if value in {t.value for t in ArtifactType}:
+            self._artifact_type = ArtifactType(value)
+
+    def _collect_fallback(self, message: str) -> str:
+        """The canned collect reply used when the reply call failed."""
+        artifact_type = self._artifact_type or self._detect_type_fallback(message)
+        self._artifact_type = artifact_type
         return (
-            f"Got it — added to your {type_label} spec. "
+            f"Got it — added to your {artifact_type.value.upper()} spec. "
             f"Say 'build it' when ready, or keep adding details."
         )
 
     def is_complete(self) -> bool:
+        """True once a build produced a valid artifact (or ``run`` finished)."""
         return self._complete
 
     def get_result(self) -> MetaBuilderResult:
+        """The build result; raises ``MetaBuilderError`` before completion."""
         if not self._complete:
             raise MetaBuilderError(
                 "Build is not complete. Say 'build it' to trigger the build."
             )
         if self._result is None:
             self._build_result()
-        return self._result  # type: ignore[return-value]
+        return cast(MetaBuilderResult, self._result)
 
     def get_internal_state(self) -> dict[str, Any]:
+        """Session state for the monitor: phase, turns, type, builder progress."""
         result: dict[str, Any] = {
             "phase": "complete" if self._complete else "collecting",
             "turn_count": self._turn_count,
@@ -652,6 +850,7 @@ class MetaBuilderAgent:
         return result
 
     def run_interactive(self) -> MetaBuilderResult:
+        """Run a session on stdin/stdout until the build completes or EOF."""
         response = self.start()
         print(f"\n{response}\n")
 
@@ -669,175 +868,7 @@ class MetaBuilderAgent:
         if self.is_complete():
             return self.get_result()
         self._build_result()
-        return self._result  # type: ignore[return-value]
-
-    # ------------------------------------------------------------------
-    # Build execution (for turn-by-turn)
-    # ------------------------------------------------------------------
-
-    def _execute_build(self) -> str:
-        combined_task = "\n".join(self._messages)
-        artifact_type = self._artifact_type or self._detect_type(combined_task)
-        self._artifact_type = artifact_type
-
-        # On first build: create builder from scratch.
-        # On retry: reuse existing builder so we don't lose pre-seeded
-        # agent type or previously valid fields.
-        if self._builder is None:
-            builder = self._create_builder(artifact_type)
-            self._builder = builder
-            if artifact_type == ArtifactType.AGENT:
-                self._preseed_agent_type(combined_task, builder)
-        else:
-            # _builder is only ever a concrete builder (set above / on prior turn).
-            builder = cast("FSMBuilder | WorkflowBuilder | AgentBuilder", self._builder)
-
-        try:
-            logger.info(
-                MetaLogMessages.BUILD_STARTED.format(artifact_type=artifact_type.value)
-            )
-            self._run_deterministic_pipeline(combined_task, artifact_type, builder)
-            self._build_result()
-        except Exception as e:
-            logger.error(f"Build execution failed: {e}")
-            self._build_result()
-
-        if self._result and self._result.is_valid:
-            self._complete = True
-            presentation = build_review_presentation(builder, artifact_type)
-            return (
-                f"Build complete!\n\n{presentation}\n\n"
-                f"The artifact JSON has been generated."
-            )
-
-        # Build produced validation errors — keep session open.
-        self._complete = False
-        errors = self._result.validation_errors if self._result else ["Build failed"]
-        error_list = "\n".join(f"  - {e}" for e in errors)
-        return (
-            f"I couldn't complete the build yet:\n{error_list}\n\n"
-            f"Please provide the missing information, then say 'build it' again."
-        )
-
-    @staticmethod
-    def _is_build_trigger(normalized: str) -> bool:
-        triggers = {
-            "build it",
-            "build",
-            "go",
-            "build now",
-            "create it",
-            "make it",
-            "generate",
-            "done",
-            "finish",
-            "approve",
-            "yes",
-            "ok",
-            "lgtm",
-            "ship it",
-            "do it",
-        }
-        return normalized in triggers or any(
-            t in normalized for t in ("build it", "create it", "generate it")
-        )
-
-    # ------------------------------------------------------------------
-    # Type detection (LLM classification)
-    # ------------------------------------------------------------------
-
-    def _get_type_classifier(self) -> Classifier:
-        """Lazily build a Classifier for artifact type detection."""
-        if self._type_classifier is None:
-            schema = ClassificationSchema(
-                intents=[
-                    IntentDefinition(name=name, description=description)
-                    for name, description in META_ARTIFACT_TYPE_INTENTS
-                ],
-                fallback_intent="fsm",
-                confidence_threshold=MetaDefaults.TYPE_CONFIDENCE_THRESHOLD,
-            )
-            self._type_classifier = Classifier(
-                schema,
-                model=self.meta_config.model,
-                **self._api_kwargs,
-            )
-        return self._type_classifier
-
-    def _get_agent_type_classifier(self) -> Classifier:
-        """Lazily build a Classifier for agent pattern detection."""
-        if self._agent_type_classifier is None:
-            schema = ClassificationSchema(
-                intents=[
-                    IntentDefinition(name=name, description=description)
-                    for name, description in META_AGENT_PATTERN_INTENTS
-                ],
-                fallback_intent="react",
-                confidence_threshold=0.3,
-            )
-            self._agent_type_classifier = Classifier(
-                schema,
-                model=self.meta_config.model,
-                **self._api_kwargs,
-            )
-        return self._agent_type_classifier
-
-    def _detect_type(self, text: str) -> ArtifactType:
-        """Classify the artifact type from user text using LLM classification."""
-        normalized = text.strip().lower()
-        if normalized in self._JUST_BUILD_PHRASES:
-            return ArtifactType.FSM
-
-        try:
-            classifier = self._get_type_classifier()
-            result = classifier.classify(text)
-            logger.debug(
-                f"Type classification: intent={result.intent}, "
-                f"confidence={result.confidence:.2f}"
-            )
-            return ArtifactType(result.intent)
-        except Exception as e:
-            logger.warning(f"Type classification failed, using fallback: {e}")
-            return self._detect_type_fallback(text)
-
-    @classmethod
-    def _detect_type_fallback(cls, text: str) -> ArtifactType:
-        """Keyword-based fallback when LLM classification is unavailable."""
-        aliases = cls._build_type_aliases()
-        normalized = text.strip().lower()
-        for alias, type_str in aliases.items():
-            if alias in normalized:
-                try:
-                    return ArtifactType(type_str)
-                except ValueError:
-                    pass
-        return ArtifactType.FSM
-
-    def _preseed_agent_type(self, task: str, builder: ArtifactBuilder) -> None:
-        """Classify agent pattern type from task and pre-set it on the builder."""
-        if not isinstance(builder, AgentBuilder):
-            return
-
-        try:
-            classifier = self._get_agent_type_classifier()
-            result = classifier.classify(task)
-            logger.debug(
-                f"Agent type classification: intent={result.intent}, "
-                f"confidence={result.confidence:.2f}"
-            )
-            builder.set_agent_type(result.intent)
-        except Exception as e:
-            logger.warning(f"Agent type classification failed: {e}")
-            # Keyword fallback
-            normalized = task.strip().lower()
-            for agent_type in AgentBuilder.VALID_AGENT_TYPES:
-                pattern = agent_type.replace("_", " ")
-                if agent_type in normalized or pattern in normalized:
-                    try:
-                        builder.set_agent_type(agent_type)
-                    except Exception:
-                        pass
-                    return
+        return cast(MetaBuilderResult, self._result)
 
     # ------------------------------------------------------------------
     # Builder creation + result

@@ -571,11 +571,6 @@ class MetaDefaults:
     # Artifact-type classification (the ``classify`` state of the meta FSM)
     TYPE_CONFIDENCE_THRESHOLD = 0.4
 
-    # ReactAgent configuration for the build phase
-    BUILD_MAX_ITERATIONS = 25
-    BUILD_TIMEOUT_SECONDS = 120.0
-    BUILD_TEMPERATURE = 0.3
-
     # Agent builder defaults (for the agent artifact being built)
     AGENT_MODEL = "gpt-4o-mini"
     AGENT_MAX_ITERATIONS = 10
@@ -627,6 +622,22 @@ class MetaBuildOutcome:
 
     VALID = "valid"
     INVALID = "invalid"
+
+
+# ``kind`` of the ``build_reply`` record ``MetaBuilderAgent.send`` writes when
+# the build call itself failed (provider outage): a ``build`` state whose
+# result key is set makes no call, so the next step routes to ``build_failed``.
+# Never a ``CompletionResponse`` kind (``calls``, ``final``, ``malformed``).
+META_BUILD_CALL_FAILED = "call_failed"
+
+
+class MetaHandlerNames:
+    """Names of the handlers ``MetaBuilderAgent`` registers on its API."""
+
+    CLASSIFY_ENTRY = "meta_classify_entry"
+    CLASSIFY_EXIT = "meta_classify_exit"
+    BUILD_ENTRY = "meta_build_entry"
+    BUILD_REPLY = "meta_build_reply"
 
 
 # Keys of the meta-builder FSM that only the driver and its handlers write:
