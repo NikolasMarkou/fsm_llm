@@ -45,16 +45,55 @@ from .truncation import smart_truncate
 _TOOL_NAME_PATTERN = re.compile(r"[a-zA-Z0-9_-]{1,64}")
 
 
+class ToolAnnotations(BaseModel):
+    """Behaviour hints for a tool, mirroring the MCP tool annotations.
+
+    Each hint is ``True``, ``False`` or ``None`` (unknown). Only an explicit
+    ``True`` counts: a tool with unknown hints is treated as neither read-only
+    nor idempotent (``RetryingToolRegistry`` never retries it).
+
+    - ``read_only``: the tool does not change its environment.
+    - ``destructive``: a change it makes may be irreversible.
+    - ``idempotent``: calling it again with the same arguments has no
+      further effect.
+    - ``open_world``: it reaches outside a closed domain (network, web).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    read_only: bool | None = None
+    destructive: bool | None = None
+    idempotent: bool | None = None
+    open_world: bool | None = None
+
+    @property
+    def retry_safe(self) -> bool:
+        """True when a failed call may be re-run: idempotent or read-only."""
+        return self.idempotent is True or self.read_only is True
+
+
 class ToolDefinition(BaseModel):
-    """Definition of a tool available to an agent."""
+    """Definition of a tool available to an agent.
+
+    ``timeout_s`` is the per-call limit ``ToolRegistry.execute`` enforces (a
+    failed result past it; the tool itself keeps running, a Python thread
+    cannot be killed). ``None`` means no limit.
+    ``args_model`` is the pydantic model of the arguments, built from the
+    function signature by ``@tool``/``register_function`` when every parameter
+    is annotated; ``None`` for dict-style tools and explicit schemas. When set,
+    ``ToolRegistry.get_json_schemas`` emits its JSON schema.
+    """
 
     name: str
     description: str
     parameter_schema: dict[str, Any] = Field(default_factory=dict)
     requires_approval: bool = False
+    annotations: ToolAnnotations = Field(default_factory=ToolAnnotations)
+    timeout_s: float | None = Field(default=None, gt=0)
 
     # Not serialized — runtime only
     execute_fn: Callable[..., Any] | None = Field(default=None, exclude=True)
+    args_model: type[BaseModel] | None = Field(default=None, exclude=True)
 
     model_config = {"arbitrary_types_allowed": True}
 

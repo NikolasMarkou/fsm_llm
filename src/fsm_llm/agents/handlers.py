@@ -360,7 +360,15 @@ class AgentHandlers:
             reasoning=reasoning,
         )
 
-        result = self.registry.execute(tool_call)
+        # DECISION plan-2026-10-01T093600-944e2692/D-008: a granted call is
+        # executed with `gated=True`, so a RetryingToolRegistry never re-runs it
+        # (policy-gated tools included; D-052 of plan 06a5ec0a). Do NOT mark it
+        # through a context variable or a `ToolCall` field (a side channel, and
+        # `ToolCall` is built from model output), and do NOT pass `gated=True`
+        # for any call whose grant was not spent on this turn.
+        result = self.registry.execute(
+            tool_call, gated=ContextKeys.APPROVALS_SPENT in spent
+        )
 
         if result.success:
             logger.info(LogMessages.TOOL_EXECUTED.format(name=tool_name))

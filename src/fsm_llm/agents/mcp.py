@@ -14,7 +14,7 @@ from typing import Any
 from fsm_llm.logging import logger
 
 from .constants import Defaults
-from .definitions import ToolDefinition
+from .definitions import ToolAnnotations, ToolDefinition
 from .exceptions import AgentTimeoutError, ToolExecutionError
 
 try:
@@ -44,6 +44,41 @@ def _mcp_schema_to_parameter_schema(input_schema: dict[str, Any]) -> dict[str, A
     if "required" in input_schema:
         schema["required"] = input_schema["required"]
     return schema
+
+
+# ToolAnnotations field -> (mcp 1.x camelCase hint, snake_case spelling).
+_MCP_ANNOTATION_HINTS: dict[str, tuple[str, str]] = {
+    "read_only": ("readOnlyHint", "read_only_hint"),
+    "destructive": ("destructiveHint", "destructive_hint"),
+    "idempotent": ("idempotentHint", "idempotent_hint"),
+    "open_world": ("openWorldHint", "open_world_hint"),
+}
+
+
+def _mcp_annotations(mcp_tool: Any) -> ToolAnnotations:
+    """Map an MCP tool's ``annotations`` hints onto :class:`ToolAnnotations`.
+
+    Reads an object or a dict, each hint under its 1.x camelCase name, else
+    its snake_case name. Only a real ``bool`` is taken; anything else (absent,
+    ``None``, a Mock attribute) stays unknown (``None``). Never raises.
+    """
+    raw = getattr(mcp_tool, "annotations", None)
+    if raw is None:
+        return ToolAnnotations()
+
+    def read(name: str) -> Any:
+        if isinstance(raw, dict):
+            return raw.get(name)
+        return getattr(raw, name, None)
+
+    values: dict[str, bool] = {}
+    for field, names in _MCP_ANNOTATION_HINTS.items():
+        for name in names:
+            value = read(name)
+            if isinstance(value, bool):
+                values[field] = value
+                break
+    return ToolAnnotations(**values)
 
 
 def _format_mcp_result(result: Any, tool_name: str | None = None) -> str:
@@ -275,6 +310,7 @@ class MCPToolProvider:
             description=getattr(mcp_tool, "description", "")
             or f"MCP tool: {mcp_tool.name}",
             parameter_schema=param_schema,
+            annotations=_mcp_annotations(mcp_tool),
             execute_fn=make_executor(
                 mcp_tool.name, self._server_params, self._server_url, self._timeout
             ),

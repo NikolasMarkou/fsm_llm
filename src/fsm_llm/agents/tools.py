@@ -4,6 +4,7 @@ Tool registry for agent tool management.
 
 from __future__ import annotations
 
+import contextvars
 import functools
 import inspect
 import json
@@ -12,14 +13,17 @@ import threading
 import time
 import types
 import typing
+import warnings
 from collections.abc import Callable, Sequence
 from typing import Any, get_type_hints
+
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from fsm_llm.logging import logger
 from fsm_llm.runner import _redact_context
 
-from .constants import ContextKeys, ErrorMessages
-from .definitions import ToolCall, ToolDefinition, ToolResult
+from .constants import ContextKeys, ErrorMessages, LogMessages
+from .definitions import ToolAnnotations, ToolCall, ToolDefinition, ToolResult
 from .exceptions import ToolExecutionError, ToolNotFoundError
 
 # A string (``from __future__``) dict annotation: dict, dict[...], (typing.)Dict[...]
@@ -304,11 +308,20 @@ class ToolRegistry:
         description: str | None = None,
         parameter_schema: dict[str, Any] | None = None,
         requires_approval: bool = False,
+        *,
+        annotations: ToolAnnotations | None = None,
+        timeout_s: float | None = None,
     ) -> ToolRegistry:
-        """Register a function as a tool. Returns self for chaining."""
+        """Register a function as a tool. Returns self for chaining.
+
+        ``annotations`` and ``timeout_s`` go to the ``ToolDefinition`` (see
+        there). An inferred schema also gets an ``args_model``; an explicit
+        ``parameter_schema`` does not.
+        """
         tool_name = name or _callable_name(fn)
         tool_desc = description or fn.__doc__ or f"Tool: {tool_name}"
 
+        args_model: type[BaseModel] | None = None
         if parameter_schema is None:
             # TOOL-03: infer like ``@tool`` so a one-param annotated function is
             # called by keyword, not handed the whole dict. A single unannotated
@@ -321,13 +334,18 @@ class ToolRegistry:
                 len(sig_params) == 1 and _is_dict_annotation(sig_params[0].annotation)
             )
             parameter_schema = {} if dict_style else _infer_schema_from_hints(fn)
+            if parameter_schema:
+                args_model = _args_model_from_hints(fn, tool_name)
 
         tool = ToolDefinition(
             name=tool_name,
             description=tool_desc.strip(),
             parameter_schema=parameter_schema,
             requires_approval=requires_approval,
+            annotations=annotations or ToolAnnotations(),
+            timeout_s=timeout_s,
             execute_fn=fn,
+            args_model=args_model,
         )
         return self.register(tool)
 
@@ -485,8 +503,18 @@ class ToolRegistry:
             )
         return fn(*bound.args, **bound.kwargs)
 
-    def execute(self, tool_call: ToolCall) -> ToolResult:
-        """Execute a tool call and return the result."""
+    def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult:
+        """Execute a tool call and return the result. Never raises.
+
+        ``gated=True`` marks a call an approver granted (passed by the HITL
+        executor). This registry runs it like any call; subclasses that
+        re-run calls (``RetryingToolRegistry``) must never re-run a gated one.
+
+        A tool with ``timeout_s`` runs in a worker thread: past the limit the
+        call returns a failed result ("timed out after N s"). A Python thread
+        cannot be killed, so the tool keeps running and its side effects
+        still happen; its late result is discarded with a WARNING.
+        """
         # Single locked lookup instead of `in` + `[]`: the two-step form could see
         # the tool present and then KeyError when a concurrent caller replaced the
         # dict entry between the check and the read.
@@ -509,7 +537,16 @@ class ToolRegistry:
                 )
 
             schema_props = self._validate_tool_params(tool, tool_call.parameters)
-            result = self._invoke_tool_fn(fn, tool_call.parameters, schema_props)
+            if tool.timeout_s is None:
+                result = self._invoke_tool_fn(fn, tool_call.parameters, schema_props)
+            else:
+                result = _call_with_timeout(
+                    functools.partial(
+                        self._invoke_tool_fn, fn, tool_call.parameters, schema_props
+                    ),
+                    tool.name,
+                    tool.timeout_s,
+                )
             elapsed_ms = (time.monotonic() - start_time) * 1000
 
             return ToolResult(
@@ -623,15 +660,16 @@ class ToolRegistry:
                 },
             }
 
-        The ``parameters`` object is derived from each tool's
-        ``parameter_schema`` (``properties`` + ``required``). Tools with no
-        schema get an empty-properties object. This is additive — the default
-        agent dispatch path remains JSON-in-prompt; this method only enables
-        opt-in native function calling (see ``NativeFunctionCallingReactAgent``).
+        The ``parameters`` object is the tool's ``args_model`` JSON schema when
+        it has one (``Optional``/``Union``/``Literal`` typed exactly, ``title``
+        keywords dropped), else it is derived from ``parameter_schema``
+        (``properties`` + ``required``). Tools with no schema get an
+        empty-properties object.
         """
         schemas: list[dict[str, Any]] = []
         for tool in self.list_tools():
-            schema = tool.parameter_schema or {}
+            model_schema = _args_model_schema(tool.args_model)
+            schema = model_schema or tool.parameter_schema or {}
             parameters: dict[str, Any] = {
                 "type": "object",
                 "properties": schema.get("properties", {}),
@@ -639,6 +677,8 @@ class ToolRegistry:
             required = schema.get("required")
             if required:
                 parameters["required"] = required
+            if model_schema and "$defs" in model_schema:
+                parameters["$defs"] = model_schema["$defs"]
             schemas.append(
                 {
                     "type": "function",
@@ -764,6 +804,173 @@ def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     return schema
 
 
+# DECISION plan-2026-10-01T093600-944e2692/D-008: `timeout_s` is enforced
+# here, in the one execute path, with a daemon worker thread (supersedes D-026
+# of plan 65baa765, whose runtime enforcement point no longer exists). Do NOT
+# hold `_tools_lock` while waiting, do NOT run a tool without `timeout_s` in a
+# thread (every call would pay one), and do NOT claim the tool was stopped: a
+# Python thread cannot be killed, so a timed-out tool keeps running.
+def _call_with_timeout(
+    call: Callable[[], Any], tool_name: str, timeout_s: float
+) -> Any:
+    """Run *call* in a daemon worker thread and wait at most *timeout_s* seconds.
+
+    Interface contract (caller: ``ToolRegistry.execute``, for a tool with
+    ``timeout_s``):
+        - Returns ``call()``'s value, or re-raises its exception, when it ends
+          in time. The worker runs in a copy of the caller's context variables.
+        - On expiry raises ``ToolExecutionError`` (``TOOL_TIMED_OUT``). The
+          worker keeps running; its late value or exception is discarded with
+          a WARNING naming the tool (``TOOL_LATE_RESULT``).
+        - Holds no lock while waiting.
+    """
+    finished = threading.Event()
+    state_lock = threading.Lock()
+    outcome: dict[str, Any] = {}
+
+    def worker() -> None:
+        # BaseException: the caller re-raises whatever the tool raised, as an
+        # inline call would; nothing is swallowed while the caller still waits.
+        try:
+            entry: tuple[str, Any] = ("value", call())
+        except BaseException as exc:
+            entry = ("error", exc)
+        with state_lock:
+            abandoned = outcome.get("abandoned", False)
+            outcome[entry[0]] = entry[1]
+        finished.set()
+        if abandoned:
+            logger.warning(
+                LogMessages.TOOL_LATE_RESULT.format(
+                    name=tool_name,
+                    timeout=timeout_s,
+                    outcome="result" if entry[0] == "value" else "error",
+                )
+            )
+
+    thread = threading.Thread(
+        target=contextvars.copy_context().run,
+        args=(worker,),
+        name=f"fsm-llm-tool-{tool_name}",
+        daemon=True,
+    )
+    thread.start()
+    finished.wait(timeout_s)
+    with state_lock:
+        if "value" not in outcome and "error" not in outcome:
+            outcome["abandoned"] = True
+            raise ToolExecutionError(
+                ErrorMessages.TOOL_TIMED_OUT.format(name=tool_name, timeout=timeout_s),
+                tool_name=tool_name,
+            )
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
+# Keywords whose values are data, not schemas: never walked for ``title``.
+_SCHEMA_DATA_KEYWORDS = frozenset({"default", "enum", "const", "examples"})
+# Keywords whose values map names to schemas: the names are not keywords.
+_SCHEMA_NAME_MAPS = frozenset({"properties", "$defs", "definitions"})
+
+
+def _strip_schema_titles(node: Any) -> Any:
+    """A copy of a JSON schema without pydantic's generated ``title`` keywords.
+
+    Property names (even one called ``title``) and data values (``default``,
+    ``enum``, ``const``, ``examples``) are kept as they are. Never raises.
+    """
+    if isinstance(node, list):
+        return [_strip_schema_titles(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    out: dict[str, Any] = {}
+    for key, value in node.items():
+        if key == "title" and isinstance(value, str):
+            continue
+        if key in _SCHEMA_DATA_KEYWORDS:
+            out[key] = value
+        elif key in _SCHEMA_NAME_MAPS and isinstance(value, dict):
+            out[key] = {name: _strip_schema_titles(s) for name, s in value.items()}
+        else:
+            out[key] = _strip_schema_titles(value)
+    return out
+
+
+def _args_model_schema(args_model: type[BaseModel] | None) -> dict[str, Any]:
+    """The title-free JSON schema of *args_model*; ``{}`` when absent or failing."""
+    if args_model is None:
+        return {}
+    try:
+        return typing.cast(
+            dict[str, Any], _strip_schema_titles(args_model.model_json_schema())
+        )
+    except Exception as exc:
+        logger.debug(f"No JSON schema for {args_model.__name__}: {exc}")
+        return {}
+
+
+def _args_model_from_hints(
+    fn: Callable[..., Any], tool_name: str
+) -> type[BaseModel] | None:
+    """A pydantic model of *fn*'s keyword arguments, built from its signature.
+
+    Interface contract (callers: ``@tool`` and ``register_function``, only for
+    a function whose inferred ``parameter_schema`` is non-empty):
+        - One field per parameter (``self``/``cls`` skipped), typed by its
+          resolved hint; ``Annotated[T, "desc"]`` becomes ``T`` with that
+          description (other ``Annotated`` metadata is kept); a default makes
+          the field optional.
+        - Returns ``None`` when a parameter has no annotation, is ``*args``/
+          ``**kwargs``, the hints cannot be resolved, or pydantic cannot build
+          the model or its JSON schema: those tools keep the coarse
+          ``parameter_schema`` and the registry binder.
+        - Never raises.
+    """
+    try:
+        hints = get_type_hints(_introspection_target(fn), include_extras=True)
+        params = [
+            p
+            for p in inspect.signature(fn).parameters.values()
+            if p.name not in ("self", "cls")
+        ]
+    except Exception as exc:
+        logger.debug(f"No args model for {tool_name}: {exc}")
+        return None
+    fields: dict[str, Any] = {}
+    for param in params:
+        if param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            return None
+        hint = hints.get(param.name)
+        if hint is None:
+            return None
+        desc = None
+        if typing.get_origin(hint) is typing.Annotated:
+            base, *meta = typing.get_args(hint)
+            desc = next((m for m in meta if isinstance(m, str)), None)
+            kept = [m for m in meta if not isinstance(m, str)]
+            hint = typing.Annotated[(base, *kept)] if kept else base
+        default = ... if param.default is inspect.Parameter.empty else param.default
+        fields[param.name] = (hint, Field(default, description=desc))
+    try:
+        # Field names that shadow BaseModel attributes only warn; the model works.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model: type[BaseModel] = create_model(
+                f"{tool_name}_args",
+                __config__=ConfigDict(arbitrary_types_allowed=True),
+                **fields,
+            )
+            model.model_json_schema()
+    except Exception as exc:
+        logger.debug(f"No args model for {tool_name}: {exc}")
+        return None
+    return model
+
+
 def tool(
     fn: Callable[..., Any] | None = None,
     *,
@@ -771,6 +978,8 @@ def tool(
     description: str | None = None,
     parameter_schema: dict[str, Any] | None = None,
     requires_approval: bool = False,
+    annotations: ToolAnnotations | None = None,
+    timeout_s: float | None = None,
 ) -> Any:
     """Decorator to mark a function as an agent tool.
 
@@ -790,6 +999,10 @@ def tool(
     When called without explicit *parameter_schema*, the decorator infers a
     JSON schema from the function's type hints (str→string, int→integer, etc.).
     Use ``typing.Annotated[str, "description"]`` for per-parameter descriptions.
+    An inferred schema also gets an ``args_model`` (pydantic, from the
+    signature) whose exact JSON schema ``get_json_schemas`` emits.
+    ``annotations`` (:class:`ToolAnnotations`) and ``timeout_s`` go to the
+    ``ToolDefinition``.
 
     The decorated function gains a ``_tool_definition`` attribute
     that can be used with ``ToolRegistry.register()``.
@@ -802,17 +1015,23 @@ def tool(
             description or raw_doc.strip().split("\n")[0] or f"Tool: {tool_name}"
         )
 
+        args_model: type[BaseModel] | None = None
         if parameter_schema is not None:
             schema = parameter_schema
         else:
             schema = _infer_schema_from_hints(fn)
+            if schema:
+                args_model = _args_model_from_hints(fn, tool_name)
 
         fn._tool_definition = ToolDefinition(  # type: ignore[attr-defined]
             name=tool_name,
             description=tool_desc.strip(),
             parameter_schema=schema,
             requires_approval=requires_approval,
+            annotations=annotations or ToolAnnotations(),
+            timeout_s=timeout_s,
             execute_fn=fn,
+            args_model=args_model,
         )
         return fn
 

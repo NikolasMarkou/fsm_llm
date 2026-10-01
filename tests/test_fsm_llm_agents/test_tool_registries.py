@@ -7,7 +7,7 @@ from typing import Annotated
 import pytest
 
 from fsm_llm.agents import CachingToolRegistry, RetryingToolRegistry, tool
-from fsm_llm.agents.definitions import ToolCall
+from fsm_llm.agents.definitions import ToolAnnotations, ToolCall
 from fsm_llm.agents.tools import ToolRegistry
 
 
@@ -189,6 +189,7 @@ class TestRetryingToolRegistry:
             flaky,
             name="flaky",
             description="f",
+            annotations=ToolAnnotations(idempotent=True),
             parameter_schema={
                 "properties": {"query": {"type": "string"}},
                 "required": ["query"],

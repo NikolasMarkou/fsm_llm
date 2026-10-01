@@ -768,6 +768,7 @@ class ErrorMessages:
 
     TOOL_NOT_FOUND = "Tool '{name}' not found in registry"
     TOOL_EXECUTION_FAILED = "Tool '{name}' execution failed: {error}"
+    TOOL_TIMED_OUT = "Tool '{name}' timed out after {timeout} s"
     EMPTY_CHAIN = "Cannot create prompt chain agent with empty chain"
     NO_SAMPLES = "num_samples must be at least 1"
     PROMPT_SLOT_OVERFLOW = (
@@ -786,6 +787,10 @@ class LogMessages:
     TOOL_SELECTED = "Selected tool: {name} with input: {input}"
     TOOL_EXECUTED = "Tool '{name}' executed successfully"
     TOOL_FAILED = "Tool '{name}' failed: {error}"
+    TOOL_LATE_RESULT = (
+        "Tool '{name}' finished after its {timeout} s timeout; "
+        "its {outcome} was discarded"
+    )
     ITERATION = "Iteration {current}/{max}"
     AGENT_COMPLETE = "Agent completed in {iterations} iterations"
     APPROVAL_REQUESTED = "Requesting approval for: {action}"

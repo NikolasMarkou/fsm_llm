@@ -56,6 +56,7 @@ from .definitions import (
     MetaBuilderResult,
     PlanStep,
     ReflexionMemory,
+    ToolAnnotations,
     ToolCall,
     ToolDefinition,
     ToolResult,
@@ -325,6 +326,7 @@ __all__ = [
     "save_artifact",
     # Models
     "ToolDefinition",
+    "ToolAnnotations",
     "ToolCall",
     "ToolResult",
     "AgentStep",

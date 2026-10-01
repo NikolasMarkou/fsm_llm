@@ -109,10 +109,14 @@ class _ReasonToolRegistry(ToolRegistry):
     def __contains__(self, name: str) -> bool:
         return name in self._base or super().__contains__(name)
 
-    def execute(self, tool_call: ToolCall) -> ToolResult:
+    def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult:
+        """Run a caller tool on the caller's registry, else the ``reason`` tool.
+
+        ``gated`` reaches whichever registry runs the call.
+        """
         if tool_call.tool_name in self._base:
-            return self._base.execute(tool_call)
-        return super().execute(tool_call)
+            return self._base.execute(tool_call, gated=gated)
+        return super().execute(tool_call, gated=gated)
 
 
 class ReasoningReactAgent(BaseAgent):

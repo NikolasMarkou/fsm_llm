@@ -33,6 +33,7 @@ from fsm_llm.agents.definitions import (
     AgentConfig,
     AgentResult,
     EvaluationResult,
+    ToolAnnotations,
     ToolCall,
 )
 from fsm_llm.agents.evaluator_optimizer import EvaluatorOptimizerAgent
@@ -566,8 +567,13 @@ class TestRetryingRegistryRespectsApproval:
             runs.append(amount)
             raise RuntimeError("gateway down")
 
+        # Idempotent, so only the approval flag decides (step 5 retry rule).
         registry.register_function(
-            pay, name="pay", description="d", requires_approval=flagged
+            pay,
+            name="pay",
+            description="d",
+            requires_approval=flagged,
+            annotations=ToolAnnotations(idempotent=True),
         )
 
     def test_flagged_tool_runs_once(self):
@@ -578,7 +584,7 @@ class TestRetryingRegistryRespectsApproval:
         assert result.success is False
         assert runs == ["9"]
 
-    def test_unflagged_tool_is_still_retried(self):
+    def test_unflagged_idempotent_tool_is_still_retried(self):
         registry = RetryingToolRegistry(max_retries=3)
         runs: list[str] = []
         self._failing(registry, runs, flagged=False)

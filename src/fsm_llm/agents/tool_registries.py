@@ -3,8 +3,8 @@ Drop-in :class:`ToolRegistry` subclasses that add cross-cutting execution
 behavior (result caching, retry-on-failure) without changing the dispatch
 contract.
 
-Both classes are 100% additive: they override only :meth:`ToolRegistry.execute`,
-preserve its ``ToolCall -> ToolResult`` signature, and inherit every other
+Both classes override only :meth:`ToolRegistry.execute`,
+preserve its ``(ToolCall, *, gated=False) -> ToolResult`` signature, and inherit every other
 method (registration, schema generation, prompt description). Any agent that
 accepts a ``ToolRegistry`` accepts these unchanged.
 
@@ -67,7 +67,11 @@ class CachingToolRegistry(ToolRegistry):
     def _cache_key(self, tool_call: ToolCall) -> tuple[str, Any]:
         return (tool_call.tool_name, _freeze(tool_call.parameters))
 
-    def execute(self, tool_call: ToolCall) -> ToolResult:
+    def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult:
+        """Return a cached success for an identical call, else run it.
+
+        ``gated`` is passed on unchanged (see :meth:`ToolRegistry.execute`).
+        """
         key = self._cache_key(tool_call)
         with self._cache_lock:
             cached = self._cache.get(key)
@@ -78,7 +82,7 @@ class CachingToolRegistry(ToolRegistry):
             return cached.model_copy(deep=True)
 
         self.cache_misses += 1
-        result = super().execute(tool_call)
+        result = super().execute(tool_call, gated=gated)
         if result.success:
             with self._cache_lock:
                 if self._max_entries is not None:
@@ -108,10 +112,11 @@ class RetryingToolRegistry(ToolRegistry):
         backoff_seconds: Base sleep between attempts; attempt *n* sleeps
             ``backoff_seconds * n`` (linear). ``0`` disables sleeping.
 
-    A tool registered with ``requires_approval=True`` is never retried: one
-    human approval covers exactly one execution. A tool that only an approval
-    *policy* gates is not known to the registry and is still retried; do not
-    wrap such tools in this registry.
+    Only a tool whose annotations say ``idempotent=True`` or
+    ``read_only=True`` (``ToolAnnotations.retry_safe``) is retried. A tool
+    registered with ``requires_approval=True``, and any execution an approver
+    granted (``execute(..., gated=True)``, which covers policy-gated tools), is
+    never retried: one approval covers exactly one execution.
     """
 
     def __init__(self, max_retries: int = 2, backoff_seconds: float = 0.0) -> None:
@@ -123,17 +128,30 @@ class RetryingToolRegistry(ToolRegistry):
         self._max_retries = max_retries
         self._backoff = backoff_seconds
 
-    def execute(self, tool_call: ToolCall) -> ToolResult:
-        result = super().execute(tool_call)
+    def _retryable(self, tool_call: ToolCall, *, gated: bool) -> bool:
+        """True when a failed *tool_call* may be re-run. Never raises."""
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-052: one approval = one
         # call (D-015). The approval gate and grant spend run once per executor
         # turn, so a retry here would re-run an approved side effect with no
-        # second approval. Do NOT retry a requires_approval tool.
-        if not result.success:
-            with self._tools_lock:
-                tool = self._tools.get(tool_call.tool_name)
-            if tool is not None and tool.requires_approval:
-                return result
+        # second approval. Do NOT retry a requires_approval tool, and do NOT
+        # retry any granted execution (the executor passes `gated=True`, D-008
+        # of plan 944e2692; the registry cannot see the policy itself).
+        if gated:
+            return False
+        with self._tools_lock:
+            tool = self._tools.get(tool_call.tool_name)
+        if tool is None or tool.requires_approval:
+            return False
+        return tool.annotations.retry_safe
+
+    def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult:
+        """Run *tool_call*, re-running a failed retry-safe, ungated call.
+
+        ``gated=True`` (a call an approver granted) is never retried.
+        """
+        result = super().execute(tool_call, gated=gated)
+        if not result.success and not self._retryable(tool_call, gated=gated):
+            return result
         attempt = 0
         while not result.success and attempt < self._max_retries:
             attempt += 1
@@ -143,5 +161,5 @@ class RetryingToolRegistry(ToolRegistry):
                 f"Retrying tool '{tool_call.tool_name}' "
                 f"(attempt {attempt + 1}/{self._max_retries + 1})"
             )
-            result = super().execute(tool_call)
+            result = super().execute(tool_call, gated=gated)
         return result
