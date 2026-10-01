@@ -83,6 +83,12 @@ class BulkExtractionRequest(BaseModel):
     ``LLMInterface.extract_bulk_data`` for the ABC contract this feeds.
     """
 
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-044: request models refuse
+    # unknown fields. Do NOT relax this to the pydantic default ("ignore"): a
+    # removed field (``skip_generation``) was then dropped silently and the
+    # request went out as a paid call. See decisions.md D-044.
+    model_config = ConfigDict(extra="forbid")
+
     system_prompt: str = Field(
         ...,
         description="Prompt describing what free-form data to extract",
@@ -90,9 +96,12 @@ class BulkExtractionRequest(BaseModel):
         max_length=30000,
     )
 
-    user_message: str = Field(
+    user_message: str | None = Field(
         ...,
-        description="User input to extract data from",
+        description=(
+            "User input to extract data from; None when the turn has no user "
+            "message (a step, the greeting), which is not an empty message"
+        ),
         min_length=0,
         max_length=10000,
     )
@@ -156,6 +165,8 @@ class ResponseGenerationRequest(BaseModel):
     pipeline makes no LLM call there.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     system_prompt: str = Field(
         ...,
         description="Prompt focused on response generation for current state",
@@ -163,9 +174,12 @@ class ResponseGenerationRequest(BaseModel):
         max_length=30000,
     )
 
-    user_message: str = Field(
+    user_message: str | None = Field(
         ...,
-        description="Original user message for context",
+        description=(
+            "Original user message for context; None when the turn has no user "
+            "message (a step, the greeting), which is not an empty message"
+        ),
         min_length=0,
         max_length=10000,
     )
@@ -349,6 +363,8 @@ class FieldExtractionConfig(BaseModel):
 class FieldExtractionRequest(BaseModel):
     """Request for extracting a single specific field from user input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     system_prompt: str = Field(
         ...,
         description="Focused prompt for single-field extraction",
@@ -356,9 +372,12 @@ class FieldExtractionRequest(BaseModel):
         max_length=30000,
     )
 
-    user_message: str = Field(
+    user_message: str | None = Field(
         ...,
-        description="User input to extract the field from",
+        description=(
+            "User input to extract the field from; None when the turn has no user "
+            "message (a step, the greeting), which is not an empty message"
+        ),
         min_length=0,
         max_length=10000,
     )
@@ -1296,7 +1315,7 @@ class FSMContext(BaseModel):
     Supports an optional ``working_memory`` for structured buffer-based
     context management. When set, ``get_user_visible_data()`` includes
     data from all non-hidden working memory buffers (flattened). The flat
-    ``data`` dict remains the primary storage for backward compatibility.
+    ``data`` dict remains the primary storage.
 
     Prompt reach: non-hidden buffer data sits under ``data`` (``data`` wins
     on collision) in ``get_merged_data()``, which feeds the transition
@@ -1739,7 +1758,10 @@ class RunBudgetExceededError(FSMError):
 
     Raised before the step that would exceed the budget, so every step already
     run is kept (nothing is rolled back) and the conversation stays usable.
-    A state that stays BLOCKED on every step ends here too.
+    A state that stays BLOCKED on every step ends here too. The error does not
+    carry the ``AdvanceResult`` of the completed steps: read their replies from
+    ``API.get_conversation_history`` and the position from
+    ``API.get_current_state`` / ``API.get_data``.
 
     Attributes:
         budget: ``"steps"`` (``max_steps``) or ``"seconds"`` (``max_seconds``).

@@ -244,7 +244,7 @@ class TestSampleIsOneTurn:
         probe.agent.run("What is the capital of Australia?")
 
         (request,) = probe.llm.calls("generate_response")
-        assert request.user_message == ""
+        assert request.user_message is None
         assert "Continue" not in request.system_prompt
         assert "What is the capital of Australia?" in request.system_prompt
 

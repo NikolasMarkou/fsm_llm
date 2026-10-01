@@ -347,7 +347,7 @@ class TestAdvanceHistory:
         assert result.response == _REPLY
         assert api.get_conversation_history(conv_id)[-1] == {"system": _REPLY}
         (request,) = llm.response_requests
-        assert request.user_message == ""
+        assert request.user_message is None
         assert "<user_message>" not in request.system_prompt
 
 
@@ -358,7 +358,7 @@ class TestAdvanceExtraction:
         api.advance(conv_id)
         (request,) = llm.field_requests
         assert request.field_name == "city"
-        assert request.user_message == ""
+        assert request.user_message is None
         assert "User message:" not in request.system_prompt
 
     def test_skip_if_set(self):
@@ -397,7 +397,7 @@ class TestAdvanceExtraction:
         result = api.advance(conv_id)
 
         (request,) = llm.bulk_requests
-        assert request.user_message == ""
+        assert request.user_message is None
         assert "There is no user message" in request.system_prompt
         assert "User message:" not in request.system_prompt
         assert "wants to see a volcano" in request.system_prompt
@@ -723,8 +723,8 @@ class TestStepResponsePrompt:
         assert "No user message was sent on this step." in request.system_prompt
         assert "cknowledge" not in request.system_prompt
         assert "<transition_info>" not in request.system_prompt
-        # The request model still carries an empty string (D-015).
-        assert request.user_message == ""
+        # The request says "no user message" with None (D-044).
+        assert request.user_message is None
 
     def test_converse_reply_prompt_keeps_the_conversational_wording(self):
         llm = _ScriptedLLM({"city": "Paris"})
@@ -1141,7 +1141,7 @@ class TestAdvanceStream:
         list(api.advance_stream(conv_id))
 
         (request,) = llm.stream_requests
-        assert request.user_message == ""
+        assert request.user_message is None
         assert "Continue" not in request.system_prompt
         (field_request,) = llm.field_requests
         assert "User message" not in field_request.system_prompt

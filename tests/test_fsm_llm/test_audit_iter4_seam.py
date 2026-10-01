@@ -518,10 +518,40 @@ def _fsm_with_handler_only(keys: list[str]) -> dict:
 
 
 class TestHandlerOnlyKeysValidatorWarnings:
-    def test_a_key_no_state_references_gets_one_warning_naming_it(self):
-        warnings = _handler_only_warnings(_fsm_with_handler_only(["is_admn"]))
-        assert len(warnings) == 1
-        assert "is_admn" in warnings[0]
+    def test_a_key_no_state_references_gets_one_info_line_naming_it(self):
+        """An unreferenced listed key is what a handler-written key looks
+        like, so it is an INFO line, not a WARNING (07ad3f8c/D-044)."""
+        from fsm_llm.validator import FSMValidator
+
+        fsm = _fsm_with_handler_only(["is_admn"])
+        assert _handler_only_warnings(fsm) == []
+        info = [
+            line
+            for line in FSMValidator(fsm).validate().info
+            if "handler_only_keys" in line
+        ]
+        assert len(info) == 1
+        assert "is_admn" in info[0]
+
+    def test_agent_fsms_get_no_handler_only_keys_warning(self):
+        """RED on a167edc: every agent FSM warned once per framework key."""
+        from fsm_llm.agents.fsm_definitions import (
+            build_debate_fsm,
+            build_plan_execute_fsm,
+            build_react_fsm,
+        )
+        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.definitions import FSMDefinition
+
+        built = (
+            build_react_fsm(ToolRegistry()),
+            build_plan_execute_fsm(),
+            build_debate_fsm("a", "b", "c"),
+        )
+        for fsm in built:
+            dumped = FSMDefinition(**fsm).model_dump()
+            assert dumped["handler_only_keys"]
+            assert _handler_only_warnings(dumped) == []
 
     def test_a_classification_field_name_gets_one_warning_about_the_channel(self):
         fsm = _fsm_with_handler_only(["user_intent"])
@@ -607,17 +637,17 @@ class TestHandlerOnlyKeysValidatorWarnings:
         from fsm_llm.agents.tools import ToolRegistry
 
         # Agent FSMs list the framework-written keys (D-051 of plan
-        # 2026-09-29T103145-06a5ec0a); a key a state never reads warns as
-        # "unless a handler sets it", which the framework handlers do. No
-        # other handler_only_keys warning may appear.
+        # 2026-09-29T103145-06a5ec0a); a key a state never reads is an INFO
+        # line naming one of them. No handler_only_keys warning may appear.
         for fsm in (build_react_fsm(ToolRegistry()), build_plan_execute_fsm()):
             result = FSMValidator(fsm).validate()
-            warnings = [w for w in result.warnings if "handler_only_keys" in w]
+            assert [w for w in result.warnings if "handler_only_keys" in w] == []
+            info = [line for line in result.info if "handler_only_keys" in line]
             expected = {
-                f"handler_only_keys lists '{key}' but no state references it"
+                f"handler_only_keys lists '{key}' and no state references it"
                 for key in FRAMEWORK_ONLY_KEYS
             }
-            assert all(w.split(" (")[0] in expected for w in warnings), warnings
+            assert all(line.split(" (")[0] in expected for line in info), info
 
 
 # ══════════════════════════════════════════════════════════════

@@ -244,7 +244,9 @@ def main(fsm_path, max_history_size, max_message_length):
 
     # Start a new conversation
     conversation_id, response = fsm.start_conversation()
-    logger.info(f"System: {response}")
+    # A silent state replies "": print no empty "System:" line for it.
+    if response:
+        logger.info(f"System: {response}")
 
     try:
         # Main conversation loop
@@ -266,7 +268,8 @@ def main(fsm_path, max_history_size, max_message_length):
                 response = fsm.converse(
                     user_message=user_input, conversation_id=conversation_id
                 )
-                logger.info(f"System: {response}")
+                if response:
+                    logger.info(f"System: {response}")
 
                 # Log the current state and context
                 data = fsm.get_data(conversation_id)

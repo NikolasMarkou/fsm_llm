@@ -1586,9 +1586,9 @@ class TestBulkPromptWithoutUserMessage:
         assert "use whole numbers" in prompt
         assert "present in the context or the conversation above" in prompt
 
-    def test_request_carries_an_empty_string_not_none(self):
+    def test_request_carries_none_not_an_empty_string(self):
         request, _ = self._run({"task": "sum 2 and 3"})
-        assert request.user_message == ""
+        assert request.user_message is None
 
     def test_forbidden_and_internal_keys_never_reach_the_prompt(self):
         request, _ = self._run(
@@ -1689,7 +1689,7 @@ class TestFieldExtractionWithoutUserMessage:
 
         assert [r.value for r in results] == ["done"]
         (request,) = requests
-        assert request.user_message == ""
+        assert request.user_message is None
         assert "User message" not in request.system_prompt
         assert "Continue" not in request.system_prompt
         assert "sum 2 and 3" in request.system_prompt

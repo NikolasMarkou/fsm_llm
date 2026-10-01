@@ -2802,7 +2802,13 @@ class TestStep11B7B11B12B13:
         data["states"]["start"]["transitions"][0]["conditions"] = [
             {"description": "lit", "logic": {"==": [{"var": "kind"}, "account"]}}
         ]
-        assert _b12_warnings(data, "handler_only_keys")
+        # Reported as INFO, not WARNING (07ad3f8c/D-044): an unreferenced
+        # listed key is what a handler-written key looks like.
+        from fsm_llm.validator import FSMValidator
+
+        assert _b12_warnings(data, "handler_only_keys") == []
+        info = FSMValidator(data).validate().info
+        assert [line for line in info if "handler_only_keys lists 'account'" in line]
 
     def test_b13_strict_false_same_outcome_more_diagnostics(self):
         state = State(

@@ -79,7 +79,7 @@ class WorkingMemory:
         memory.set("core", "user_name", "Alice")
         memory.set("environment", "search_result", {"title": "..."})
 
-        # Flat view for backward compat
+        # Flat view of every buffer
         all_data = memory.get_all_data()  # {"user_name": "Alice", "search_result": {...}}
 
         # Key-filtered view (public helper; the pipeline does not use it)
@@ -313,7 +313,7 @@ class WorkingMemory:
     # ------------------------------------------------------------------
 
     def get_all_data(self) -> dict[str, Any]:
-        """Flatten all buffers into a single dict for backward compat.
+        """Flatten all buffers into a single dict.
 
         When the same key exists in multiple buffers, the **core** buffer
         wins; among the others the most recently created buffer wins
@@ -646,10 +646,9 @@ class WorkingMemory:
                 used as the DEFAULT hidden-buffer set.
             hidden_buffers: Buffer names to exclude from aggregate views.
                 Takes precedence over an embedded ``"_hidden_buffers"`` key
-                in *data* when both are given (back-compat override).
+                in *data* when both are given.
                 Defaults to ``DEFAULT_HIDDEN_BUFFERS`` when NEITHER is given
-                (e.g. *data* came from a pre-D-021 ``to_dict()`` call, or a
-                hand-built dict with no such key).
+                (e.g. a hand-built dict with no such key).
 
         Returns:
             New WorkingMemory instance.

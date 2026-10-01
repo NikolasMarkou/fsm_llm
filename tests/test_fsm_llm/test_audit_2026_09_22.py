@@ -1600,10 +1600,10 @@ class TestSilentStateMakesNoInterfaceCall:
         from fsm_llm.definitions import ResponseGenerationRequest
 
         assert "skip_generation" not in ResponseGenerationRequest.model_fields
-        # The model ignores unknown keywords (no ``extra="forbid"``), so an
-        # old caller's flag is dropped, not stored.
-        request = _step11_request(skip_generation=True)
-        assert not hasattr(request, "skip_generation")
+        # The model refuses unknown keywords (07ad3f8c/D-044): an old caller's
+        # flag fails loudly instead of being dropped.
+        with pytest.raises(ValueError, match="skip_generation"):
+            _step11_request(skip_generation=True)
 
     def test_dot_system_prompt_is_an_ordinary_prompt(self):
         from fsm_llm.llm import LiteLLMInterface
@@ -1633,12 +1633,13 @@ class TestSilentStateMakesNoInterfaceCall:
             assert list(llm.generate_response_stream(request)) == ["Hi"]
         assert completion.call_count == 1
 
-    def test_write_only_fields_are_gone_and_old_kwargs_are_ignored(self):
-        request = _step11_request(
-            extracted_data={"a": 1}, context={"b": 2}, previous_state="s"
-        )
+    def test_write_only_fields_are_gone_and_old_kwargs_are_refused(self):
+        from fsm_llm.definitions import ResponseGenerationRequest
+
         for name in ("extracted_data", "context", "previous_state"):
-            assert not hasattr(request, name)
+            assert name not in ResponseGenerationRequest.model_fields
+            with pytest.raises(ValueError, match=name):
+                _step11_request(**{name: "x"})
 
 
 # ---------------------------------------------------------------------------

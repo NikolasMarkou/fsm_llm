@@ -61,6 +61,7 @@ from litellm import completion, get_supported_openai_params
 
 from .constants import (
     DEFAULT_TEMPERATURE,
+    EMPTY_USER_MESSAGE_TURN,
     NEUTRAL_USER_TURN,
     RESERVED_LLM_CALL_KWARGS,
     TRUNCATED_SALVAGE_CONFIDENCE,
@@ -273,27 +274,42 @@ _STRUCTURED_CALL_TYPES = frozenset(
 )
 
 
-def _fill_empty_user_turns(messages: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Replace every empty user turn with ``NEUTRAL_USER_TURN``.
+def _fill_empty_user_turns(
+    messages: list[dict[str, str | None]],
+) -> list[dict[str, str]]:
+    """Give every user turn without text a provider-safe content.
 
     Args:
-        messages: the provider message list of one request.
+        messages: the provider message list of one request. A ``user``
+            content of ``None`` means there is no user message; a string is
+            the user's message, empty or not.
 
     Returns:
-        A new list. A ``user`` message whose content is ``""`` or whitespace
-        only is copied with the neutral instruction as its content; every
-        other message is the same object. The input list is not mutated.
+        A new list of new dicts. A ``user`` content of ``None`` becomes
+        ``NEUTRAL_USER_TURN``, a ``""`` or whitespace-only one becomes
+        ``EMPTY_USER_MESSAGE_TURN``; any other content is sent unchanged (a
+        ``None`` content of another role becomes ``""``). The input is not
+        mutated.
 
     Failure mode: none, never raises for a list of dicts.
     """
-    return [
-        {**message, "content": NEUTRAL_USER_TURN}
-        if message.get("role") == "user"
-        and isinstance(message.get("content"), str)
-        and not message["content"].strip()
-        else message
-        for message in messages
-    ]
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-044: ``None`` and an empty
+    # string are different facts. Do NOT collapse them (`content or ""`, one
+    # constant for both): an instruction-shaped turn sent for a real empty
+    # message is read by the model as the user's utterance. See decisions.md
+    # D-044.
+    filled: list[dict[str, str]] = []
+    for message in messages:
+        content = message.get("content")
+        if message.get("role") == "user":
+            if content is None:
+                content = NEUTRAL_USER_TURN
+            elif not content.strip():
+                content = EMPTY_USER_MESSAGE_TURN
+        copy = {key: value or "" for key, value in message.items()}
+        copy["content"] = content or ""
+        filled.append(copy)
+    return filled
 
 
 def _safe_str(value: Any) -> str | None:
@@ -556,7 +572,7 @@ class LiteLLMInterface(LLMInterface):
             )
 
             # Prepare messages for response generation
-            messages = [
+            messages: list[dict[str, str | None]] = [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.user_message},
             ]
@@ -618,7 +634,7 @@ class LiteLLMInterface(LLMInterface):
         (user-facing response generation).
         """
         try:
-            messages = [
+            messages: list[dict[str, str | None]] = [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.user_message},
             ]
@@ -715,7 +731,7 @@ class LiteLLMInterface(LLMInterface):
                 f"(type={request.field_type}) with {self.model}"
             )
 
-            messages = [
+            messages: list[dict[str, str | None]] = [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.user_message},
             ]
@@ -779,7 +795,7 @@ class LiteLLMInterface(LLMInterface):
               envelope keys (the confidence is still read from it).
         """
         try:
-            messages = [
+            messages: list[dict[str, str | None]] = [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.user_message},
             ]
@@ -847,7 +863,7 @@ class LiteLLMInterface(LLMInterface):
     def complete_structured(
         self,
         system_prompt: str,
-        user_message: str,
+        user_message: str | None,
         *,
         json_schema: dict[str, Any],
         schema_name: str,
@@ -855,15 +871,17 @@ class LiteLLMInterface(LLMInterface):
         """Issue one JSON-schema-constrained completion and return the raw reply.
 
         The request is built by ``_build_call_params`` like every other call:
-        connection kwargs, timeout, the neutral user turn for an empty
-        ``user_message``, and Ollama preparation (thinking off, temperature 0,
+        connection kwargs, timeout, the filled user turn when ``user_message``
+        has no text, and Ollama preparation (thinking off, temperature 0,
         ``/nothink`` and the schema in the user turn). The schema is sent as a
         ``json_schema`` response format when the model supports it; otherwise
         the call goes out without one and a WARNING is logged.
 
         Args:
             system_prompt: the system turn.
-            user_message: the user turn; may be empty.
+            user_message: the user turn. ``None`` means there is no user
+                message (sent as the neutral instruction); an empty string is
+                an empty user message (sent as the empty-message placeholder).
             json_schema: JSON schema the reply must match.
             schema_name: name sent with the schema.
 
@@ -910,7 +928,7 @@ class LiteLLMInterface(LLMInterface):
 
     def _build_call_params(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, str | None]],
         call_type: str,
         *,
         response_format: dict[str, Any] | None = None,
@@ -919,8 +937,10 @@ class LiteLLMInterface(LLMInterface):
         """
         Build the ``litellm.completion(**call_params)`` kwargs shared by
         ``_make_llm_call`` (non-streaming), ``generate_response_stream`` and
-        ``complete_structured``. An empty user turn in ``messages`` is sent as
-        ``NEUTRAL_USER_TURN``; the caller's list is not mutated.
+        ``complete_structured``. A user turn without text is filled by
+        ``_fill_empty_user_turns`` (``None``: the neutral instruction; empty
+        string: the empty-message placeholder); the caller's list is not
+        mutated.
 
         # DECISION plan-2026-09-12T135914-45a654de/D-015
         # Extracted from two independently-maintained ~40-line builders
@@ -1037,7 +1057,7 @@ class LiteLLMInterface(LLMInterface):
 
     def _make_llm_call(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, str | None]],
         call_type: str,
         response_format: dict[str, Any] | None = None,
     ) -> Any:

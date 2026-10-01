@@ -239,12 +239,19 @@ def _check_run_budgets(max_steps: int, max_seconds: float | None) -> None:
     """Validate the budgets of a bounded run; raise ``ValueError`` if invalid.
 
     Contract: ``max_steps`` must be an ``int`` (not a ``bool``) of at least 1;
-    ``max_seconds`` must be ``None`` or a number above 0 (NaN is refused).
+    ``max_seconds`` must be ``None`` or an ``int`` or ``float`` (not a
+    ``bool``) above 0 (NaN is refused).
     """
     if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
         raise ValueError(f"max_steps must be an integer >= 1, got {max_steps!r}")
-    if max_seconds is not None and not max_seconds > 0:
-        raise ValueError(f"max_seconds must be > 0 or None, got {max_seconds!r}")
+    if max_seconds is not None and (
+        isinstance(max_seconds, bool)
+        or not isinstance(max_seconds, (int, float))
+        or not max_seconds > 0
+    ):
+        raise ValueError(
+            f"max_seconds must be a number > 0 or None, got {max_seconds!r}"
+        )
 
 
 # DECISION plan-2026-09-30T062855-07ad3f8c/D-027
@@ -254,7 +261,9 @@ def _check_run_budgets(max_steps: int, max_seconds: float | None) -> None:
 # yielded number. Do NOT write this sequence a second time in either method or
 # in a subpackage (agents, reasoning and the harness pass their limits and
 # their hook in). Do NOT move a budget check after the step: a spent budget
-# must never start a step. Do NOT decide "ended" from ``AdvanceResult.ended``:
+# must never start a step, so the seconds budget and "has it ended" are asked
+# again after ``before_step`` returns (the hook may wait, or end the
+# conversation). Do NOT decide "ended" from ``AdvanceResult.ended``:
 # the stream step has no result (D-025), and a handler may push or pop an FSM
 # during a step, so the top of the stack is asked again every round. Do NOT
 # hold a lock or an open turn across the ``yield``: every step takes and
@@ -273,30 +282,61 @@ def _run_rounds(
     (normal return) when the top of the FSM stack has ended; raise
     ``RunBudgetExceededError`` when ``max_seconds`` have passed since the first
     round began, or when ``max_steps`` steps were already taken (the seconds
-    budget is reported when both are spent); call ``before_step(n)``; yield
-    ``n``. Whatever ``before_step`` raises propagates unchanged and no step
-    runs. Budgets must already be valid (``_check_run_budgets``). A step that
-    raises in the caller ends the run: the generator is simply not resumed.
+    budget is reported when both are spent); call ``before_step(n)``, then ask
+    "ended" and the seconds budget once more (the hook may have ended the
+    conversation or used up the time); yield ``n``. Whatever ``before_step``
+    raises propagates unchanged and no step runs. Budgets must already be
+    valid (``_check_run_budgets``). A step that raises in the caller ends the
+    run: the generator is simply not resumed. A conversation ID that was never
+    started raises ``ValueError`` from the first "ended" question.
     """
     started = time.monotonic()
     steps_done = 0
-    while not api.has_conversation_ended(conversation_id):
+
+    def check_seconds() -> None:
         if max_seconds is not None and time.monotonic() - started >= max_seconds:
             raise RunBudgetExceededError("seconds", max_seconds, steps_done)
+
+    while not api.has_conversation_ended(conversation_id):
+        check_seconds()
         if steps_done >= max_steps:
             raise RunBudgetExceededError("steps", max_steps, steps_done)
         if before_step is not None:
             before_step(steps_done + 1)
+            if api.has_conversation_ended(conversation_id):
+                return
+            check_seconds()
         yield steps_done + 1
         steps_done += 1
+
+
+@contextmanager
+def _closed_conversation_ends_run(api: API, conversation_id: str) -> Iterator[None]:
+    """Let a step's error pass silently when the conversation was closed.
+
+    Contract: wraps exactly one step of a bounded run. When the step raises
+    because ``conversation_id`` was closed (``end_conversation`` from another
+    thread between the round's "ended" question and the step), the error is
+    swallowed and the next round of ``_run_rounds`` ends the run normally.
+    Every other error, and any error for a conversation that is still live,
+    propagates unchanged.
+    """
+    try:
+        yield
+    except (ValueError, KeyError, FSMError):
+        if not (
+            api._conversation_gone(conversation_id)
+            and api._ended_cache_entry(conversation_id) is not None
+        ):
+            raise
 
 
 class API:
     """
     Enhanced API for Improved 2-Pass FSM-LLM Architecture.
 
-    This class provides a backward-compatible interface while internally
-    implementing the 2-pass architecture for better conversation quality
+    This class is the public entry point; internally it runs
+    the 2-pass architecture for better conversation quality
     and response generation after transition evaluation.
     """
 
@@ -520,11 +560,30 @@ class API:
     @classmethod
     def from_definition(
         cls,
-        fsm_definition: FSMDefinition | dict[str, Any],
+        fsm_definition: FSMDefinition | dict[str, Any] | None = None,
+        *,
+        definition: FSMDefinition | dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> API:
-        """Create API instance from FSM definition object or dictionary."""
-        return cls(fsm_definition=fsm_definition, **kwargs)
+        """Create API instance from FSM definition object or dictionary.
+
+        Args:
+            fsm_definition: The definition, positionally or by keyword.
+            definition: The same argument under the keyword the shipped
+                examples use. Give exactly one of the two.
+            **kwargs: Passed to the constructor.
+
+        Raises:
+            TypeError: both ``fsm_definition`` and ``definition`` were given,
+                or neither.
+        """
+        chosen = fsm_definition if fsm_definition is not None else definition
+        if chosen is None or (fsm_definition is not None and definition is not None):
+            raise TypeError(
+                "from_definition() takes exactly one of 'fsm_definition' and "
+                "'definition'"
+            )
+        return cls(fsm_definition=chosen, **kwargs)
 
     def start_conversation(
         self,
@@ -620,7 +679,12 @@ class API:
             ValueError: unknown conversation ID.
             FSMError: the conversation has ended (terminal state), a turn is
                 already running for it (a handler calling back, or another
-                thread), or the step failed; a failed step is rolled back.
+                thread), or the step failed. A failed step is rolled back as a
+                ``converse`` turn is: a Pass-2 or POST_PROCESSING failure
+                restores the whole turn; a failure in a Pass-1 handler
+                (CONTEXT_UPDATE, PRE_TRANSITION, POST_TRANSITION) follows the
+                same partial-commit rules as ``converse`` (keys extracted
+                before the failure can stay).
         """
         with _turn_errors("advancing without a", "advance without a"):
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
@@ -744,19 +808,31 @@ class API:
 
         Returns:
             The ``AdvanceResult`` of every step, in order; ``()`` when the
-            conversation had already ended.
+            conversation had already ended. A conversation closed during the
+            run (``end_conversation`` from ``before_step`` or from another
+            thread) ends the run normally with the results so far.
 
         Raises:
-            ValueError: ``max_steps < 1``, ``max_seconds <= 0``, or an unknown
-                conversation ID.
+            ValueError: an invalid ``max_steps`` or ``max_seconds`` (wrong
+                type, ``max_steps < 1``, ``max_seconds <= 0``), or a
+                conversation ID that was never started.
             RunBudgetExceededError: a budget was spent before the conversation
-                ended. The steps already run are kept.
-            FSMError: a step failed (that step is rolled back, earlier steps
-                are kept), or a turn is already running for the conversation.
+                ended. The steps already run are kept in the conversation, but
+                the error does not carry their ``AdvanceResult``s: read the
+                replies from ``get_conversation_history`` and the position
+                from ``get_current_state`` / ``get_data``.
+            FSMError: a step failed (that step is rolled back as a
+                ``converse`` turn is, see ``advance``; earlier steps are
+                kept), or a turn is already running for the conversation.
         """
         _check_run_budgets(max_steps, max_seconds)
-        rounds = _run_rounds(self, conversation_id, max_steps, max_seconds, before_step)
-        return tuple(self.advance(conversation_id) for _ in rounds)
+        results: list[AdvanceResult] = []
+        for _ in _run_rounds(
+            self, conversation_id, max_steps, max_seconds, before_step
+        ):
+            with _closed_conversation_ends_run(self, conversation_id):
+                results.append(self.advance(conversation_id))
+        return tuple(results)
 
     def run_until_terminal_stream(
         self,
@@ -790,12 +866,15 @@ class API:
             String chunks of each speaking state's reply as they arrive.
 
         Raises:
-            ValueError: at call time, for ``max_steps < 1``,
-                ``max_seconds <= 0`` or an unknown conversation ID.
+            ValueError: at call time, for an invalid ``max_steps`` or
+                ``max_seconds`` or a conversation ID that was never started.
             RunBudgetExceededError: while iterating, when a budget was spent
                 before the conversation ended.
             FSMError: while iterating, when a step failed (after its
                 rollback) or a turn is already running for the conversation.
+
+        A conversation closed during the run ends the stream normally, as in
+        ``run_until_terminal``.
         """
         _check_run_budgets(max_steps, max_seconds)
         # Existence check at call time, holding no lock afterwards. An ended
@@ -810,7 +889,8 @@ class API:
             for _ in _run_rounds(
                 self, conversation_id, max_steps, max_seconds, before_step
             ):
-                yield from self.advance_stream(conversation_id)
+                with _closed_conversation_ends_run(self, conversation_id):
+                    yield from self.advance_stream(conversation_id)
 
         return _stream()
 

@@ -497,14 +497,15 @@ class FSMValidator:
                 )
 
     def _validate_handler_only_keys(self):
-        """D-051: warn when a ``handler_only_keys`` entry protects nothing.
+        """D-051: report a ``handler_only_keys`` entry that may protect nothing.
 
         A security control whose failure mode is silence: a typo in the list
-        is accepted and guards no key. Two WARNINGs (never errors, so the
-        validator stays no stricter than ``API.from_file``): a listed key no
-        state references (it may still be set by a handler), and a listed key
-        that is a ``classification_extractions`` field name (the
-        classification channel is not covered by the list).
+        is accepted and guards no key. Never an error (the validator stays no
+        stricter than ``API.from_file``). A listed key that is a
+        ``classification_extractions`` field name is a WARNING (the
+        classification channel is not covered by the list). A listed key no
+        state references is an INFO line: that is what a key written only by
+        a handler looks like, and the validator cannot see handlers.
 
         A condition's ``logic`` references the keys
         ``definitions.logic_referenced_keys`` returns (``var`` names including
@@ -535,10 +536,13 @@ class FSMValidator:
                     "field name: classification writes are not covered by the list"
                 )
             elif key not in referenced:
-                self.result.add_warning(
-                    f"handler_only_keys lists '{key}' but no state references it "
-                    "(unless a handler sets it, the entry protects nothing; "
-                    "check for a typo)"
+                # INFO, not WARNING: a key only handlers write is the list's
+                # normal use (every agent FSM lists its framework keys), and
+                # the validator cannot see handlers.
+                self.result.add_info(
+                    f"handler_only_keys lists '{key}' and no state references it "
+                    "(expected for a key only a handler writes; otherwise check "
+                    "for a typo)"
                 )
 
     def _validate_unknown_keys(self):

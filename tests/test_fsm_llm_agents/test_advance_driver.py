@@ -155,7 +155,7 @@ class _Probe:
         """The system prompt and user message of every LLM request."""
         texts: list[str] = []
         for _, request in self.llm.requests:
-            texts += [request.system_prompt, request.user_message]
+            texts += [request.system_prompt, request.user_message or ""]
         return texts
 
 
@@ -247,7 +247,7 @@ class TestNoSyntheticTurns:
         # history entry, no <original_input>, no instruction text (step 10).
         assert not [text for text in probe.prompts() if "Continue" in text]
         # A step sends no user message at all.
-        assert {request.user_message for _, request in probe.llm.requests} == {""}
+        assert {request.user_message for _, request in probe.llm.requests} == {None}
 
     def test_loop_returns_only_the_replies_of_speaking_states(self):
         probe = _Probe()
@@ -1866,11 +1866,11 @@ class TestPlannerPatternsMakeNoSyntheticTurns:
         replies = [r for kind, r in stepped if kind == "generate_response"]
         assert len(replies) == 1
         assert run.llm.calls("extract_bulk_data") == []
-        assert {request.user_message for _, request in stepped} == {""}
+        assert {request.user_message for _, request in stepped} == {None}
         texts = [
             text
             for _, request in run.llm.requests
-            for text in (request.system_prompt, request.user_message)
+            for text in (request.system_prompt, request.user_message or "")
         ]
         assert not [text for text in texts if "Continue" in text]
 
@@ -2469,11 +2469,11 @@ class TestReplySpeakingPatternsMakeNoSyntheticTurns:
         # No request carries the removed "." sentinel (07ad3f8c/D-037).
         assert not [r for _, r in run.llm.requests if r.system_prompt == "."]
         assert run.llm.calls("extract_bulk_data") == []
-        assert {request.user_message for _, request in stepped} == {""}
+        assert {request.user_message for _, request in stepped} == {None}
         texts = [
             text
             for _, request in run.llm.requests
-            for text in (request.system_prompt, request.user_message)
+            for text in (request.system_prompt, request.user_message or "")
         ]
         assert not [text for text in texts if "Continue" in text]
 

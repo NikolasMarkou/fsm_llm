@@ -8,15 +8,18 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 import fsm_llm.classification as classification_module
 from fsm_llm import constants
 from fsm_llm.api import API
 from fsm_llm.classification import Classifier
 from fsm_llm.definitions import (
+    BulkExtractionRequest,
     ClassificationError,
     ClassificationResponseError,
     ClassificationSchema,
+    FieldExtractionRequest,
     IntentDefinition,
     ResponseGenerationRequest,
 )
@@ -246,22 +249,55 @@ class TestClassifierUsesTheLLMLayer:
 
 
 class TestNeverAnEmptyUserTurn:
-    def test_greeting_and_classifier_requests_hold_no_empty_user_content(self):
+    """``None`` (no user message) and an empty string (an empty user message)
+    are different provider turns (07ad3f8c/D-044)."""
+
+    @pytest.mark.parametrize("message", ["", "   ", "\n\t"])
+    def test_an_empty_user_message_is_sent_as_the_placeholder(self, message):
         with _Provider() as provider:
             api = API.from_definition(_shop_fsm(), model="gpt-4o", api_key="sk-x")
             cid, greeting = api.start_conversation()
-            api.converse("", cid)
+            api.converse(message, cid)
         assert greeting == "Hello there"
         assert len(provider.classifier_calls()) == 1
         turns = provider.user_turns()
+        # The greeting has no user message; the classifier and the reply of
+        # the turn carry the user's empty message.
+        assert turns[0] == constants.NEUTRAL_USER_TURN
+        assert len(turns) >= 3
+        assert set(turns[1:]) == {constants.EMPTY_USER_MESSAGE_TURN}
+
+    def test_a_step_without_a_message_sends_the_neutral_turn(self):
+        with _Provider() as provider:
+            api = API.from_definition(_shop_fsm(), model="gpt-4o", api_key="sk-x")
+            cid, _ = api.start_conversation()
+            api.advance(cid)
+        turns = provider.user_turns()
+        assert len(provider.classifier_calls()) == 1
         assert len(turns) >= 3  # greeting, classifier, reply
-        assert all(turn.strip() for turn in turns)
         assert set(turns) == {constants.NEUTRAL_USER_TURN}
 
-    def test_classifier_with_an_empty_message_sends_the_neutral_turn(self):
+    def test_the_placeholder_is_not_an_instruction(self):
+        placeholder = constants.EMPTY_USER_MESSAGE_TURN
+        assert placeholder.strip()
+        assert placeholder != constants.NEUTRAL_USER_TURN
+        assert "proceed" not in placeholder.lower()
+        assert "instruction" not in placeholder.lower()
+
+    @pytest.mark.parametrize("message", ["", "  "])
+    def test_classifier_with_an_empty_message_sends_the_placeholder(self, message):
         with _Provider() as provider:
-            Classifier(_schema(), model="gpt-4o").classify("")
+            Classifier(_schema(), model="gpt-4o").classify(message)
+        assert provider.user_turns() == [constants.EMPTY_USER_MESSAGE_TURN]
+
+    def test_classifier_without_a_message_sends_the_neutral_turn(self):
+        with _Provider() as provider:
+            Classifier(_schema(), model="gpt-4o").classify(
+                None, context={"data": {"cart": "phone"}}
+            )
         assert provider.user_turns() == [constants.NEUTRAL_USER_TURN]
+        system = provider.calls[0]["messages"][0]["content"]
+        assert "(there is no user message)" in system
 
     def test_ollama_greeting_prepares_the_neutral_turn(self):
         with _Provider() as provider:
@@ -269,20 +305,61 @@ class TestNeverAnEmptyUserTurn:
             api.start_conversation()
         assert provider.user_turns() == [f"/nothink\n{constants.NEUTRAL_USER_TURN}"]
 
-    def test_stream_request_holds_no_empty_user_content(self):
+    @pytest.mark.parametrize(
+        ("message", "sent"),
+        [
+            (None, "NEUTRAL_USER_TURN"),
+            ("  ", "EMPTY_USER_MESSAGE_TURN"),
+            ("", "EMPTY_USER_MESSAGE_TURN"),
+            (" hi ", None),
+        ],
+    )
+    def test_stream_request_holds_no_empty_user_content(self, message, sent):
         chunk = MagicMock()
         chunk.choices = [MagicMock()]
         chunk.choices[0].delta.content = "Hi"
         chunk.choices[0].delta.reasoning_content = None
         llm = LiteLLMInterface(model="gpt-4o")
-        request = ResponseGenerationRequest(system_prompt="Greet.", user_message="  ")
+        request = ResponseGenerationRequest(
+            system_prompt="Greet.", user_message=message
+        )
         with (
             patch("fsm_llm.llm.completion", return_value=iter([chunk])) as completion,
             patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
         ):
             assert list(llm.generate_response_stream(request)) == ["Hi"]
-        sent = completion.call_args.kwargs["messages"]
-        assert sent[1] == {"role": "user", "content": constants.NEUTRAL_USER_TURN}
+        assert completion.call_args.kwargs["messages"][1] == {
+            "role": "user",
+            "content": getattr(constants, sent) if sent else message,
+        }
+
+    def test_greeting_request_carries_none_not_an_empty_string(self):
+        seen: list[ResponseGenerationRequest] = []
+        llm = LiteLLMInterface(model="gpt-4o", api_key="sk-x")
+        real = llm.generate_response
+
+        def spy(request):
+            seen.append(request)
+            return real(request)
+
+        llm.generate_response = spy  # type: ignore[method-assign]
+        with _Provider():
+            api = API.from_definition(_shop_fsm(), llm_interface=llm)
+            cid, _ = api.start_conversation()
+            api.converse("", cid)
+        assert [request.user_message for request in seen] == [None, ""]
+
+    @pytest.mark.parametrize(
+        "model",
+        [ResponseGenerationRequest, BulkExtractionRequest, FieldExtractionRequest],
+    )
+    def test_request_models_refuse_unknown_fields(self, model):
+        fields = {"system_prompt": "x", "user_message": None}
+        if model is FieldExtractionRequest:
+            fields["field_name"] = "city"
+        assert model(**fields).user_message is None
+        with pytest.raises(ValidationError, match="skip_generation"):
+            model(**fields, skip_generation=True)
 
     def test_neutral_turn_never_enters_history_or_a_prompt(self):
         with _Provider() as provider:
@@ -291,11 +368,11 @@ class TestNeverAnEmptyUserTurn:
             api.converse("", cid)
             history = api.get_conversation_history(cid)
             data = api.get_data(cid)
-        neutral = constants.NEUTRAL_USER_TURN
-        assert neutral not in json.dumps(history)
-        assert neutral not in json.dumps(data, default=str)
-        for call in provider.calls:
-            assert neutral not in call["messages"][0]["content"]
+        for turn in (constants.NEUTRAL_USER_TURN, constants.EMPTY_USER_MESSAGE_TURN):
+            assert turn not in json.dumps(history)
+            assert turn not in json.dumps(data, default=str)
+            for call in provider.calls:
+                assert turn not in call["messages"][0]["content"]
 
     def test_real_user_message_is_sent_unchanged(self):
         with _Provider() as provider:
@@ -310,10 +387,15 @@ class TestNeverAnEmptyUserTurn:
         messages = [
             {"role": "system", "content": ""},
             {"role": "user", "content": ""},
+            {"role": "user", "content": None},
             {"role": "user", "content": "hi"},
         ]
+        before = [dict(message) for message in messages]
         filled = _fill_empty_user_turns(messages)
-        assert messages[1]["content"] == ""
-        assert filled[0] is messages[0]  # an empty system turn is not a user turn
-        assert filled[1] == {"role": "user", "content": constants.NEUTRAL_USER_TURN}
-        assert filled[2] is messages[2]
+        assert messages == before
+        assert filled == [
+            {"role": "system", "content": ""},  # not a user turn: left empty
+            {"role": "user", "content": constants.EMPTY_USER_MESSAGE_TURN},
+            {"role": "user", "content": constants.NEUTRAL_USER_TURN},
+            {"role": "user", "content": "hi"},
+        ]

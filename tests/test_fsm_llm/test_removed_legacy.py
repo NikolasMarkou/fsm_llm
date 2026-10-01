@@ -83,15 +83,22 @@ class TestRemovedCoreNames:
         )
         assert kept.strict_condition_matching is False
 
-    def test_from_definition_requires_fsm_definition(self, mock_llm2_interface):
-        # `definition=` used to be an alias; it is now just an unknown kwarg
-        # and the real parameter is required.
+    def test_from_definition_takes_exactly_one_definition(self, mock_llm2_interface):
+        # `definition=` is a declared keyword (the shipped examples use it,
+        # 07ad3f8c/D-044): exactly one of the two names must be given.
+        llm = mock_llm2_interface
+        for api in (
+            API.from_definition(_FSM, llm_interface=llm),
+            API.from_definition(fsm_definition=_FSM, llm_interface=llm),
+            API.from_definition(definition=_FSM, llm_interface=llm),
+        ):
+            assert api.fsm_definition.name == "two_way"
+        with pytest.raises(TypeError, match="exactly one"):
+            API.from_definition(llm_interface=llm)
+        with pytest.raises(TypeError, match="exactly one"):
+            API.from_definition(_FSM, definition=_FSM, llm_interface=llm)
         with pytest.raises(TypeError):
-            API.from_definition(definition=_FSM, llm_interface=mock_llm2_interface)
-        with pytest.raises(TypeError):
-            API.from_definition(llm_interface=mock_llm2_interface)
-        api = API.from_definition(_FSM, llm_interface=mock_llm2_interface)
-        assert api.fsm_definition.name == "two_way"
+            API.from_definition(_FSM, _FSM, llm_interface=llm)
 
     def test_handler_system_close_is_gone(self, mock_llm2_interface):
         assert not hasattr(HandlerSystem, "close")

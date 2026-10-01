@@ -57,12 +57,18 @@ RESERVED_LLM_CALL_KWARGS = frozenset(
     {"model", "messages", "temperature", "max_tokens", "stream", "response_format"}
 )
 
-# The one user turn the LLM layer sends in place of an empty one (a greeting,
-# a classifier call with no message, ``converse("")``). Providers may reject an
-# empty user content. Written only into the provider request by
-# ``LiteLLMInterface._build_call_params``; it never enters conversation history
-# or a prompt builder.
+# DECISION plan-2026-09-30T062855-07ad3f8c/D-044: two provider user turns for
+# two different facts. ``NEUTRAL_USER_TURN`` stands for NO user message (a
+# request whose ``user_message`` is ``None``: a message-free step, the
+# greeting, a context-only classifier call). ``EMPTY_USER_MESSAGE_TURN`` stands
+# for a user message that is ``""`` or whitespace only. Do NOT merge them and do
+# NOT make the second one an instruction: sent for ``converse("")`` the
+# imperative sentence was read as the user saying "proceed" (live: a payment
+# transition fired 5/10 against 0/10). Do NOT send either outside
+# ``LiteLLMInterface._build_call_params``: neither may enter conversation
+# history or a prompt body. See decisions.md D-044.
 NEUTRAL_USER_TURN = "Proceed according to the instructions above."
+EMPTY_USER_MESSAGE_TURN = "(empty message)"
 
 # --------------------------------------------------------------
 # Conversation Management Constants

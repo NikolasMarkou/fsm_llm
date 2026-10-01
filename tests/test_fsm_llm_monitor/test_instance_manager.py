@@ -1135,7 +1135,7 @@ class TestAgentRunEventsOnTheCoreLoop:
             "agent_completed",
         ]
         # No step carried a user message.
-        assert {request.user_message for _, request in llm.requests} == {""}
+        assert {request.user_message for _, request in llm.requests} == {None}
 
     def test_status_and_conversation_log_need_no_turn_text(self, monkeypatch):
         import json

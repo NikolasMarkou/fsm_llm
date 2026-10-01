@@ -200,6 +200,38 @@ def _one_line(value: Any, default: str) -> str:
     return " ".join(str(value).split()) if value else default
 
 
+def _require_definition_shapes(states: Any) -> None:
+    """Reject a definition whose ``states`` or their parts are not mappings.
+
+    Args:
+        states: the FSM's ``states`` value, as read from the definition.
+
+    Raises:
+        ValueError: ``states`` is not a dict, a state is not a dict, a
+            state's ``transitions`` is not a list, or a transition is not a
+            dict. The message names the state.
+    """
+    if not isinstance(states, dict):
+        raise ValueError(f"'states' must be a mapping, got {type(states).__name__}")
+    for state_id, state in states.items():
+        if not isinstance(state, dict):
+            raise ValueError(
+                f"State {state_id!r} must be a mapping, got {type(state).__name__}"
+            )
+        transitions = _transitions_of(state)
+        if not isinstance(transitions, list):
+            raise ValueError(
+                f"'transitions' of state {state_id!r} must be a list, "
+                f"got {type(transitions).__name__}"
+            )
+        for transition in transitions:
+            if not isinstance(transition, dict):
+                raise ValueError(
+                    f"A transition of state {state_id!r} must be a mapping, "
+                    f"got {type(transition).__name__}"
+                )
+
+
 def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:
     """Reject an FSM whose ``initial_state`` is not a key of ``states``.
 
@@ -1409,9 +1441,10 @@ def build_fsm_graph(fsm: FSMDefinition | dict[str, Any]) -> FSMGraph:
         An ``FSMGraph`` with full, untruncated descriptions.
 
     Raises:
-        ValueError: ``initial_state`` is not a key of ``states``, a transition
-            names a ``target_state`` that is not one, or a field has the wrong
-            type (pydantic's ``ValidationError`` is a ``ValueError``).
+        ValueError: ``states``, a state or a transition is not a mapping,
+            ``initial_state`` is not a key of ``states``, a transition names a
+            ``target_state`` that is not one, or a field has the wrong type
+            (pydantic's ``ValidationError`` is a ``ValueError``).
     """
     # DECISION plan-2026-09-30T062855-07ad3f8c/D-018
     # This is the ONE definition of an FSM's graph: the Mermaid and DOT
@@ -1424,6 +1457,7 @@ def build_fsm_graph(fsm: FSMDefinition | dict[str, Any]) -> FSMGraph:
     data = fsm.model_dump() if isinstance(fsm, FSMDefinition) else fsm
     states: dict[str, Any] = data.get("states") or {}
     initial_state = data.get("initial_state", "")
+    _require_definition_shapes(states)
     _require_initial_state(states, initial_state)
     _require_valid_transition_targets(states)
 

@@ -200,7 +200,8 @@ class Classifier:
         """Make the LLM call and return the parsed JSON dict.
 
         ``user_message`` of ``None`` selects the context-only system prompt
-        and sends ``""`` as the user turn.
+        and reaches the LLM layer as ``None`` (no user message); a string,
+        ``""`` included, is sent as the user's message.
         """
         start = time.time()
 
@@ -229,7 +230,7 @@ class Classifier:
         try:
             response = self._llm.complete_structured(
                 system_prompt,
-                user_message or "",
+                user_message,
                 json_schema=(
                     self._multi_json_schema if multi_intent else self._json_schema
                 ),

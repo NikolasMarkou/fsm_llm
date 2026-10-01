@@ -239,7 +239,7 @@ class PromptGroundedLLM(LLMInterface):
         text = "\n".join(
             [
                 request.system_prompt,
-                request.user_message,
+                request.user_message or "",
                 json.dumps(request.context or {}, default=str),
             ]
         )
@@ -256,7 +256,7 @@ class PromptGroundedLLM(LLMInterface):
         self, request: BulkExtractionRequest
     ) -> DataExtractionResponse:
         self.requests.append(("extract_bulk_data", request))
-        text = f"{request.system_prompt}\n{request.user_message}"
+        text = f"{request.system_prompt}\n{request.user_message or ''}"
         data = {}
         for name in self.facts:
             if f'"{name}"' not in request.system_prompt:

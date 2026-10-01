@@ -5706,7 +5706,7 @@ class TestRunsOnTheCoreLoop:
         # message, and no Pass-1 call at all (D-041).
         kinds = [kind for kind, _ in harness.llm.call_history]
         assert kinds == ["generate_response"] * (1 + len(spy.steps))
-        assert {req.user_message for _, req in harness.llm.call_history} == {""}
+        assert {req.user_message for _, req in harness.llm.call_history} == {None}
         assert result.success is True
         assert len(spy.ended) == 1
         assert api.has_conversation_ended(spy.ended[0])

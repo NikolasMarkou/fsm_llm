@@ -951,8 +951,7 @@ class MessagePipeline:
             transition_occurred=transition_occurred,
             previous_state=previous_state,
             # None (a step without a user message) selects the prompt's
-            # no-message wording (07ad3f8c/D-035); the request below
-            # still carries "".
+            # no-message wording (07ad3f8c/D-035).
             user_message=user_message,
             plain_text_response=output_response_format is None,
             context=self._apply_context_scope(
@@ -970,7 +969,7 @@ class MessagePipeline:
 
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
-            user_message=user_message or "",
+            user_message=user_message,
             transition_occurred=transition_occurred,
             response_format=output_response_format,
         )
@@ -1083,9 +1082,12 @@ class MessagePipeline:
             ),
         )
 
+        # The greeting has no user message: the request says so with None
+        # (07ad3f8c/D-044). The prompt above keeps the conversational wording
+        # it is built with for "" (07ad3f8c/D-035).
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
-            user_message="",
+            user_message=None,
             transition_occurred=False,
         )
 
@@ -1115,7 +1117,7 @@ class MessagePipeline:
         log = logger.bind(conversation_id=conversation_id)
         log.debug("Executing data extraction and transition pass")
 
-        # Step 1: Unified field-based extraction (auto-converts legacy
+        # Step 1: Unified field-based extraction (converts
         # required_context_keys and merges with explicit field_extractions)
         extraction_response = self._execute_data_extraction(
             instance, user_message, conversation_id
@@ -1450,7 +1452,7 @@ class MessagePipeline:
         # mirroring `extract_field`). See decisions.md D-015.
         try:
             request = BulkExtractionRequest(
-                system_prompt=prompt, user_message=user_message or ""
+                system_prompt=prompt, user_message=user_message
             )
             response = self.llm_interface.extract_bulk_data(request)
             # Filter out None/empty values — extract_bulk_data returns the
@@ -1493,7 +1495,7 @@ class MessagePipeline:
 
     @staticmethod
     def _build_field_configs_from_state(state: State) -> list[FieldExtractionConfig]:
-        """Auto-convert legacy state fields to FieldExtractionConfig list.
+        """Convert a state's key-based fields to a FieldExtractionConfig list.
 
         Translates ``required_context_keys`` + ``extraction_instructions``
         into per-field configs so the pipeline can use the unified
@@ -1567,7 +1569,7 @@ class MessagePipeline:
         and classification extractions.
 
         Builds a unified list of ``FieldExtractionConfig`` from both
-        legacy ``required_context_keys`` and explicit ``field_extractions``,
+        ``required_context_keys`` and explicit ``field_extractions``,
         then extracts each field individually.  Also runs any
         ``classification_extractions`` declared on the state.  Supports
         multi-pass retry for missing required fields (up to ``extraction_retries``).
@@ -1950,12 +1952,11 @@ class MessagePipeline:
                 )
             )
 
-            # Build request. Request models carry a string: no message is ""
-            # here and the LLM layer fills the provider turn (D-015).
-            request_message = user_message or ""
+            # Build request. None (no user message) stays None on the request:
+            # the LLM layer fills the provider turn (07ad3f8c/D-044).
             request = FieldExtractionRequest(
                 system_prompt=system_prompt,
-                user_message=request_message,
+                user_message=user_message,
                 field_name=field_config.field_name,
                 field_type=field_config.field_type,
                 context=dynamic_context,
@@ -1965,7 +1966,7 @@ class MessagePipeline:
             # Call LLM (or reuse an identical null, D-035)
             memo_key = (
                 field_config.field_name,
-                f"{system_prompt}|{request_message}",
+                f"{system_prompt}|{user_message or ''}",
             )
             try:
                 if memo is not None and memo_key in memo:
@@ -2904,8 +2905,7 @@ class MessagePipeline:
             transition_occurred=transition_occurred,
             previous_state=previous_state,
             # None (a step without a user message) selects the prompt's
-            # no-message wording (07ad3f8c/D-035); the request below
-            # still carries "".
+            # no-message wording (07ad3f8c/D-035).
             user_message=user_message,
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-005: scope the
             # PROMPT, the only context channel (request.context is gone). Do NOT
@@ -2937,7 +2937,7 @@ class MessagePipeline:
 
         request = ResponseGenerationRequest(
             system_prompt=system_prompt,
-            user_message=user_message or "",
+            user_message=user_message,
             transition_occurred=transition_occurred,
             response_format=output_response_format,
         )
@@ -2966,7 +2966,7 @@ class MessagePipeline:
         may be entered before all keys are populated).
 
         If ``context_scope`` is ``None``, returns the full context
-        unchanged (backward-compatible default).
+        unchanged.
         """
         if state.context_scope is None:
             return context

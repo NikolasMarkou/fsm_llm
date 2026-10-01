@@ -346,7 +346,7 @@ class TestStepsOverTheRealCore:
         assert result.data["finding"] == answer
         assert result.data["calls"] == 1
         assert converse_calls == []
-        assert {request.user_message for _, request in llm.requests} == {""}
+        assert {request.user_message for _, request in llm.requests} == {None}
 
     async def test_conversation_step_sends_its_auto_messages_as_user_turns(
         self, converse_calls, monkeypatch
