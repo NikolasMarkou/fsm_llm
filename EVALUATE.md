@@ -458,4 +458,20 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ---
 
+### Run 007 -- 2026-10-01 (101 Examples, core step driver A/B against `d4b1626` on the same day, 96.0% vs 96.8%)
+
+- **Files**: `evaluation/2026-10-01_09-23_0f0789c_qwen3.5-4b/scorecard.md` (HEAD) and `evaluation/2026-10-01_09-54_d4b1626_qwen3.5-4b_same-day-baseline/scorecard.md` (baseline, run from an isolated `d4b1626` worktree with `PYTHONPATH=<worktree>/src`; `results.json` records `git_commit` `d4b1626`)
+- **Model**: `ollama_chat/qwen3.5:4b` (digest `2a654d98e6fb`) | **Workers**: 4 | **Timeouts**: default 120 s plus the built-in overrides (eval code and `examples/` unchanged since `d4b1626`) | **N**: 1 per commit, run one after the other
+- **Commits**: `0f0789c` (plan `07ad3f8c` iteration 1: agent loops on core `advance`/`run_until_terminal`, no synthetic "Continue." turn) vs `d4b1626`
+- **Examples**: 101
+- **Health Score**: `0f0789c` 96.0% (388/404) vs `d4b1626` 96.8% (391/404), -3 points
+- **Score distribution**: `0f0789c` 95x4, 0x3, 2x2, 4x1, 0x0; `d4b1626` 96x4, 0x3, 2x2, 3x1, 0x0
+- **Category breakdown**: identical at both commits except agents (180/192 vs 183/192): advanced 64/68, basic 56/56, classification 20/20, intermediate 12/12, meta 20/20, reasoning 4/4, workflows 32/32
+- **Top failure codes**: `0f0789c` F-LOOP (4, all timeouts), F-EXTRACT (2); `d4b1626` F-LOOP (3, all timeouts), F-EXTRACT (2); F-CODE 0 at both
+- **Only changed score**: `agents/plan_execute_recovery` 4 -> 1 (timeout at 180 s; 136.6 s at `d4b1626`). Not model noise: run alone 3 times per commit, `0f0789c` builds a 7-step plan (15 iterations, 24 LLM calls) every time, `d4b1626` a 4-step plan (9 iterations, 16 calls); both succeed alone.
+- **Raw logs**: 0 envelope leaks (`"field_name"`, `"extracted_data"`), 0 `Continue.`, 0 tracebacks at both commits. Agents `Success: True`/`False` lines: 22/3 vs 22/4. Every `Success: False` example still scores 4.
+- **Note**: the agents category alone (180/192) is 2 points above the recorded G3 baseline at `d4b1626` (178/192, 2026-09-29). Bench block `agents-react/B1` from the same day is in `docs/agents_roadmap.md`.
+
+---
+
 _New evaluation runs should be appended above this line._

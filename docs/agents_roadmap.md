@@ -313,3 +313,74 @@ Compared with the G3 at `7696061` (181/192 = 94.3%): 3 points lower, within N=1 
 | `native_fc` | `NativeFunctionCallingReactAgent` | 37/38 = 97.4% (0.865-0.995) | 36/38 | 110/114 | 4 | 2.4 | 0.95 s | answered 114 |
 
 The `legacy` arm loses mostly on `multi_step_chain` (2/6 first trial) and `no_tool_needed` (2/5). A comparison block must use a new block id, a new arm label, the same task hash and limits, and the same model digest.
+
+## Measured after the core step driver (plan `07ad3f8c`, iteration 1)
+
+Agent loops are driven by core's `advance`/`run_until_terminal` (no synthetic "Continue." turn). Both measurements below were taken on 2026-10-01, `ollama_chat/qwen3.5:4b`, Ollama digest `2a654d98e6fb...` (same as B0 and the G3 baseline), one Ollama workload at a time.
+
+### Agent bench block B1
+
+`scripts/bench_data/agents-react/B1/` (tracked; run once, 05:52-06:22 UTC, never edited or re-run). Arm `fsm_advance` = `create_agent("react", tools, config=...)` on the migrated code (rows produced at `0f0789c`; `src/` identical to the manifest's `1c8572e`). Same 38 tasks (`tasks_sha256` `831a7cd5...`), 3 trials, max_iterations 8, timeout 180 s, temperature 0.5, max_tokens 1000, same call meter as B0. Pass rule (D-052) fixed before the run.
+
+```bash
+.venv/bin/python scripts/agents_bench.py run --bench-id agents-react --block B1 --arm fsm_advance --trials 3
+.venv/bin/python scripts/agents_bench.py report agents-react --blocks B0 B1 --pair B1/fsm_advance:B0/legacy
+```
+
+| Block / arm | First-trial pass@1 (Wilson 95%) | pass^3 | Rows correct | success but incorrect | fail but correct | LLM calls mean / median | Tokens mean | Latency p50 / p95 | Stop reasons |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| B0 `legacy` (`d4b1626` code) | 28/38 = 73.7% (0.580-0.850) | 26/38 | 81/114 | 15 | 3 | 11.5 / 9.0 | 10,948 | 12.2 s / 69.2 s | answered 93, stalled 15, max_iterations 6 |
+| B1 `fsm_advance` | 32/38 = 84.2% (0.696-0.926) | 32/38 | 96/114 | 12 | 9 | 10.97 / 8.0 | 9,463 | 10.1 s / 42.7 s | answered 99, stalled 12, max_iterations 3 |
+
+Fisher two-sided, B1 vs B0 first-trial pass@1: p = 0.399 (pass^3: p = 0.176).
+
+| Category | Tasks | B0 first trial | B1 first trial | B0 rows | B1 rows |
+| --- | --- | --- | --- | --- | --- |
+| single_tool | 6 | 5 | 6 | 15/18 | 18/18 |
+| multi_step_chain | 6 | 2 | 2 | 6/18 | 6/18 |
+| no_tool_needed | 5 | 2 | 4 | 6/15 | 12/15 |
+| error_recovery | 5 | 5 | 5 | 15/15 | 15/15 |
+| typed_args | 5 | 4 | 5 | 12/15 | 15/15 |
+| distractor_tools | 6 | 5 | 5 | 15/18 | 15/18 |
+| unanswerable | 5 | 5 | 5 | 12/15 | 15/15 |
+
+Read from the raw rows:
+
+- Envelope leaks (`"field_name"`, `"extracted_data"` in an answer): 0 of 114 (B0: 0). `Continue.` in an answer: 0 (B0: 1). Error rows: 0. Empty answers: 0.
+- Forced stops: 15 of 114 (B0: 21). All 12 `stalled` rows are the four no-tool tasks `nt-ready`, `nt-reverse`, `nt-paint`, `nt-rgb` (17 calls each, every trial); `nt-ready`, `nt-paint` and `nt-rgb` still carry the correct answer with `success=False`. The 3 `max_iterations` rows are `di-currency` (30 calls).
+- First-trial flips: 4, all B0-incorrect to B1-correct, none the other way: `st-capital` ("The capital of Veloria is Maskett." to "Maskett"), `ty-repeat`, `nt-ready`, `nt-paint`. Each task asks for the bare value; the B1 answers follow that instruction. Over all three trials `un-employee` (1/3 to 3/3) and `un-founder` (2/3 to 3/3) also improved.
+- Remaining incorrect tasks (incorrect in all 3 trials): `ch-density`, `ch-manager-budget`, `ch-salaries`, `ch-order-local`, `nt-reverse`, `di-currency`. Per task, B1 is either correct in all 3 trials or in none.
+
+### Full examples evaluation, `0f0789c` against `d4b1626` (same day)
+
+`fsm-llm-eval examples`, all 101 examples, 4 workers, default timeout 120 s with the built-in per-example and per-category overrides (`src/fsm_llm/eval/` is unchanged since `d4b1626`, and so is `examples/`). The `d4b1626` run used an isolated worktree with `PYTHONPATH=<worktree>/src`; the example subprocesses inherited it (checked in a live subprocess environment), and its `results.json` records `git_commit` `d4b1626`. N=1 heuristic score each.
+
+```bash
+LLM_MODEL=ollama_chat/qwen3.5:4b .venv/bin/fsm-llm-eval examples --workers 4 --model ollama_chat/qwen3.5:4b
+cd <worktree at d4b1626> && PYTHONPATH=$PWD/src LLM_MODEL=ollama_chat/qwen3.5:4b \
+  <repo>/.venv/bin/python -m fsm_llm.eval examples --workers 4 --model ollama_chat/qwen3.5:4b \
+  --output-dir <repo>/evaluation/2026-10-01_09-54_d4b1626_qwen3.5-4b_same-day-baseline
+```
+
+| Point | Commit | Started (UTC) | Health | agents | Distribution (4/2/1) | Timeouts | F-CODE | Wall time | Output (gitignored, local only) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| HEAD | `0f0789c` | 06:23 | 388/404 = 96.0% | 180/192 | 95 / 2 / 4 | 4 | 0 | 1,897 s | `evaluation/2026-10-01_09-23_0f0789c_qwen3.5-4b/` |
+| Same-day baseline | `d4b1626` | 06:55 | 391/404 = 96.8% | 183/192 | 96 / 2 / 3 | 3 | 0 | 2,030 s | `evaluation/2026-10-01_09-54_d4b1626_qwen3.5-4b_same-day-baseline/` |
+| G3 baseline (2026-09-29, agents only) | `d4b1626` | | | 178/192 | | 4 | 0 | 1,518 s | `evaluation/2026-09-29_22-12_d4b1626_g3-baseline/` |
+
+All non-agent categories score the same at both commits (advanced 64/68, basic 56/56, classification 20/20, intermediate 12/12, meta 20/20, reasoning 4/4, workflows 32/32; the two advanced PARTIALs `multi_level_stack` and `support_pipeline` are F-EXTRACT at both).
+
+Examples whose score changed:
+
+| Example | `d4b1626` same day | `0f0789c` | G3 baseline | Cause |
+| --- | --- | --- | --- | --- |
+| agents/plan_execute_recovery | 4 (136.6 s) | 1, F-LOOP, timeout at 180 s | 4 (123.4 s) | Code, not model noise: run alone 3 times per commit, `0f0789c` makes a 7-step plan, 15 iterations, 24 LLM calls, 24,368 prompt tokens (35-36 s) in every run; `d4b1626` makes a 4-step plan, 9 iterations, 16 calls, 14,884 prompt tokens (25.7 s) in every run. Both answer with `Success: True` when run alone. |
+| agents/concurrent_react | 4 | 4 | 2 (F-EXTRACT) | Same at both commits today |
+| agents/hierarchical_orchestrator | 4 | 4 | 1 (timeout) | Same at both commits today |
+
+Read from the raw logs:
+
+- Envelope leaks (`"field_name"`, `"extracted_data"`): 0 logs at either commit. `Continue.`: 0 logs at either commit. Tracebacks: 0 at either commit.
+- `Success: True` / `Success: False` lines in agents logs: `0f0789c` 22 / 3 (architecture_review, eval_opt_structured, regulatory_compliance); `d4b1626` 22 / 4 (eval_opt_structured, legal_document_review, reflexion, regulatory_compliance). Every example printing `Success: False` still scores 4. No example prints a `stop_reason`.
+- Timeouts at both commits: plan_execute (180 s), orchestrator_specialist (300 s), supply_chain_optimizer (300 s); plan_execute_recovery only at `0f0789c`. Timed-out logs hold no output.
+- Total agents wall time: 4,597 s at `0f0789c`, 5,157 s at `d4b1626`.
