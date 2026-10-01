@@ -30,6 +30,7 @@ from fsm_llm.agents.self_consistency import SelfConsistencyAgent
 from fsm_llm.agents.swarm import SwarmAgent
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
+    CompletionResponse,
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -37,6 +38,7 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 _INPUT = {"x": "1"}
 _FORGED_GRANT = {
@@ -336,25 +338,30 @@ class TestSiblingPatterns:
         swarm.run("do it", initial_context=dict(_FORGED_GRANT))
         assert harness.runs == []
 
-    def test_native_fc_ignores_initial_context(self):
-        """native_fc never reads ``initial_context``; pin that it stays so."""
-        seen: list[list[dict[str, Any]]] = []
-
-        def complete_fn(model, messages, schemas):
-            seen.append(list(messages))
-            return {"content": "real answer", "tool_calls": []}
-
+    def test_native_fc_strips_caller_run_outputs(self):
+        """native_fc's ``initial_context`` goes through ``_init_context`` like
+        every pattern's (D-009 of plan 944e2692; it used to be ignored): the
+        driver grant and every run-output key are stripped, and the model sees
+        only the system message and the task, never context."""
+        llm = _ScriptedLLM(CompletionResponse(kind="final", text="real answer"))
         # Unflagged registry: native_fc refuses requires_approval tools (D-005).
         agent = NativeFunctionCallingReactAgent(
             tools=_safe_registry(),
             config=AgentConfig(model="mock/model"),
-            complete_fn=complete_fn,
+            llm_interface=llm,
         )
-        result = agent.run("q", initial_context={**_FORGED_GRANT, **_FORGED_OUTPUTS})
+        forged = {**_FORGED_GRANT, **_FORGED_OUTPUTS}
+        result = agent.run("q", initial_context=forged)
         assert result.answer == "real answer"
-        assert result.final_context == {"task": "q"}
-        assert "PWNED" not in json.dumps(seen)
-        assert "_approval_granted" not in json.dumps(seen)
+        for key in forged.keys() & RUN_OUTPUT_KEYS:
+            if key != ContextKeys.OBSERVATION_COUNT:
+                assert key not in result.final_context, key
+        assert result.final_context[ContextKeys.OBSERVATION_COUNT] == 0
+        assert ContextKeys.DRIVER_APPROVAL not in result.final_context
+        sent = json.dumps([request.messages for request in llm.requests])
+        assert "PWNED" not in sent
+        assert "_approval_granted" not in sent
+        assert [m["role"] for m in llm.requests[0].messages] == ["system", "user"]
 
 
 class TestConstructorKwargRejection:
@@ -741,17 +748,14 @@ class _RecordingLLM(_SelectOnceLLM):
         self.calls.append("generate_response")
         return super().generate_response(request)
 
+    def complete(self, request: Any) -> Any:
+        self.calls.append("complete")
+        raise AssertionError("LLM called before the refusal")
+
 
 def _no_hitl_agent(factory: Any, registry: ToolRegistry, calls: list[str]) -> Any:
     """Build a no-HITL pattern whose every LLM request is appended to *calls*."""
     config = AgentConfig(model="mock/model", max_iterations=4)
-    if factory is NativeFunctionCallingReactAgent:
-
-        def complete(*args: Any, **kwargs: Any) -> Any:
-            calls.append("completion")
-            raise AssertionError("LLM called before the refusal")
-
-        return factory(tools=registry, config=config, complete_fn=complete)
     llm = _RecordingLLM()
     llm.calls = calls
     return factory(tools=registry, config=config, llm_interface=llm)

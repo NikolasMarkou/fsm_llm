@@ -580,6 +580,12 @@ class Defaults:
     # conclude). ``AgentHandlers.check_iteration_limit`` forces the stop this
     # many transitions before the hard ceiling (capped at ``max_iterations``).
     FORCED_STOP_MARGIN = 3
+    # Native function calling (``build_native_fc_fsm``): core steps per model
+    # loop turn (``call_model`` then ``run_tools``) and the steps allowed on
+    # top of them (the final model turn, the forced-tool turn, the repair
+    # turn, one spare). Step ceiling = per turn x max_iterations + post-loop.
+    NATIVE_FC_STEPS_PER_TURN = 2
+    NATIVE_FC_POST_LOOP_STEPS = 4
 
     # Reflexion
     MAX_REFLECTIONS = 3

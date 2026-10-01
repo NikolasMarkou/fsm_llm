@@ -1,10 +1,20 @@
 """Tests for NativeFunctionCallingReactAgent (provider-native tool calling).
 
-The LLM is replaced with an injected complete_fn returning normalized
-responses, so the loop is exercised with no live provider.
+The agent is an FSM run by core (plan 944e2692 step 16, D-009, D-028): every
+model turn is a core completion state. The loop tests inject a scripted
+``LLMInterface`` through ``llm_interface=`` (the seam that replaced
+``complete_fn``); the argument-shape tests stub the one provider binding
+``fsm_llm.llm.completion`` under the agent's own ``LiteLLMInterface``. The
+request rules (tools XOR response_format, Ollama preparation, seed, reply
+normalisation) are core's and tested in ``tests/test_fsm_llm/test_llm_complete.py``;
+the request bytes are pinned by ``test_native_fc_golden.py``.
 """
 
 from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
@@ -15,10 +25,18 @@ from fsm_llm.agents import (
     ToolRegistry,
     tool,
 )
-from fsm_llm.agents.base import _output_response_format
-from fsm_llm.agents.exceptions import AgentError
+from fsm_llm.agents.base import BaseAgent, _output_response_format
+from fsm_llm.agents.constants import ContextKeys, NativeFCContextKeys, StopReason
+from fsm_llm.agents.definitions import AgentTrace, ToolCall
+from fsm_llm.agents.exceptions import AgentError, BudgetExhaustedError
 from fsm_llm.agents.native_fc import _SYSTEM_PROMPT
-from fsm_llm.ollama import apply_ollama_params, prepare_ollama_messages
+from fsm_llm.definitions import (
+    CompletionResponse,
+    LLMResponseError,
+    ModelToolCall,
+    RunBudgetExceededError,
+)
+from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 
 @tool
@@ -27,351 +45,86 @@ def weather(city: str) -> str:
     return f"sunny in {city}"
 
 
-def _registry():
+def _registry() -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(weather._tool_definition)
     return reg
 
 
-def _scripted(*responses):
-    """Return a complete_fn yielding the given normalized responses in order."""
-    it = iter(responses)
+def _calls(*calls: tuple[str, dict[str, Any]], text: str | None = None) -> Any:
+    """A ``calls`` reply: ``(name, arguments)`` pairs, ids ``c1``, ``c2``..."""
+    return CompletionResponse(
+        kind="calls",
+        text=text,
+        calls=tuple(
+            ModelToolCall(id=f"c{i}", name=name, arguments=args)
+            for i, (name, args) in enumerate(calls, start=1)
+        ),
+    )
 
-    def complete_fn(model, messages, schemas):
-        return next(it)
 
-    return complete_fn
+def _final(text: str | None) -> CompletionResponse:
+    return CompletionResponse(kind="final", text=text)
+
+
+_MALFORMED = CompletionResponse(kind="malformed")
+
+
+def _agent(
+    llm: Any, *, registry: ToolRegistry | None = None, **config: Any
+) -> NativeFunctionCallingReactAgent:
+    return NativeFunctionCallingReactAgent(
+        tools=registry or _registry(),
+        config=AgentConfig(model="mock/model", **config),
+        llm_interface=llm,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Minimal litellm response stand-ins for the `_litellm_complete` path.
+# Provider-binding stub (argument shapes a scripted interface cannot carry)
 # ---------------------------------------------------------------------------
 
 
-class _FakeFunction:
-    def __init__(self, name, arguments):
-        self.name = name
-        self.arguments = arguments
+def _provider_reply(content: Any = None, calls: list[Any] | None = None) -> Any:
+    """A provider reply read by attribute, like litellm's: any argument value."""
+    tool_calls = [
+        SimpleNamespace(
+            id=call_id, function=SimpleNamespace(name=name, arguments=arguments)
+        )
+        for call_id, name, arguments in calls or []
+    ]
+    message = SimpleNamespace(content=content, tool_calls=tool_calls or None)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
 
 
-class _FakeToolCall:
-    def __init__(self, id, name, arguments):
-        self.id = id
-        self.function = _FakeFunction(name, arguments)
+def _stub_provider(
+    monkeypatch: pytest.MonkeyPatch, *replies: Any
+) -> list[dict[str, Any]]:
+    """Patch core's one ``completion`` binding; return the recorded requests."""
+    sent: list[dict[str, Any]] = []
+    queue = list(replies)
+
+    def fake(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        return queue.pop(0)
+
+    monkeypatch.setattr("fsm_llm.llm.completion", fake)
+    monkeypatch.setattr(
+        "fsm_llm.llm.get_supported_openai_params",
+        lambda **_: ["response_format", "tools", "tool_choice"],
+    )
+    return sent
 
 
-class _FakeMessage:
-    def __init__(self, content=None, tool_calls=None, reasoning_content=None):
-        self.content = content
-        self.tool_calls = tool_calls
-        self.reasoning_content = reasoning_content
-
-
-class _FakeResponse:
-    def __init__(self, message):
-        self.choices = [type("_Choice", (), {"message": message})()]
-
-
-def _stub_completion(monkeypatch, message, captured=None):
-    """Patch ``litellm.completion`` to return *message*, recording kwargs."""
-
-    def fake(**kwargs):
-        if captured is not None:
-            captured.update(kwargs)
-        return _FakeResponse(message)
-
-    monkeypatch.setattr("litellm.completion", fake)
+# ---------------------------------------------------------------------------
+# Construction and API (kept)
+# ---------------------------------------------------------------------------
 
 
 class TestConstruction:
     def test_empty_registry_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(AgentError, match="empty tool registry"):
             NativeFunctionCallingReactAgent(tools=ToolRegistry())
-
-
-class TestLoop:
-    def test_direct_answer_no_tools(self):
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            complete_fn=_scripted({"content": "42", "tool_calls": []}),
-        )
-        result = agent.run("what is the answer?")
-        assert result.answer == "42"
-        assert result.success is True
-        assert result.tools_used == []
-
-    def test_single_tool_then_answer(self):
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            complete_fn=_scripted(
-                {
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": "c1",
-                            "name": "weather",
-                            "arguments": {"city": "Paris"},
-                        }
-                    ],
-                },
-                {"content": "It's sunny in Paris.", "tool_calls": []},
-            ),
-        )
-        result = agent.run("weather in Paris?")
-        assert "sunny in Paris" in result.answer or "Paris" in result.answer
-        assert "weather" in result.tools_used
-        assert result.success
-
-    def test_multiple_tool_calls_in_one_turn(self):
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            complete_fn=_scripted(
-                {
-                    "content": None,
-                    "tool_calls": [
-                        {"id": "a", "name": "weather", "arguments": {"city": "Paris"}},
-                        {"id": "b", "name": "weather", "arguments": {"city": "Rome"}},
-                    ],
-                },
-                {"content": "Done.", "tool_calls": []},
-            ),
-        )
-        result = agent.run("compare weather")
-        assert len(result.trace.tool_calls) == 2
-
-    def test_string_arguments_are_parsed(self):
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            complete_fn=_scripted(
-                {
-                    "content": None,
-                    "tool_calls": [
-                        {"id": "c1", "name": "weather", "arguments": {"city": "Oslo"}}
-                    ],
-                },
-                {"content": "ok", "tool_calls": []},
-            ),
-        )
-        result = agent.run("q")
-        assert result.trace.tool_calls[0].parameters == {"city": "Oslo"}
-
-    def test_max_iterations_exhausted(self):
-        # Always returns a tool call → never concludes; bounded by max_iterations.
-        def always_tool(model, messages, schemas):
-            return {
-                "content": None,
-                "tool_calls": [
-                    {"id": "x", "name": "weather", "arguments": {"city": "X"}}
-                ],
-            }
-
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model", max_iterations=3),
-            complete_fn=always_tool,
-        )
-        result = agent.run("loop")
-        # No final answer; the tool calls still land in the trace. Whether that
-        # counts as success is D-005's question, asserted in TestSuccessSignal.
-        assert result.answer == ""
-        assert len(result.trace.tool_calls) == 3
-
-    def test_uses_get_json_schemas(self):
-        captured = {}
-
-        def cap(model, messages, schemas):
-            captured["schemas"] = schemas
-            return {"content": "ok", "tool_calls": []}
-
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            complete_fn=cap,
-        )
-        agent.run("q")
-        assert captured["schemas"][0]["type"] == "function"
-        assert captured["schemas"][0]["function"]["name"] == "weather"
-
-    def test_assistant_message_reconstruction(self):
-        msg = NativeFunctionCallingReactAgent._assistant_message(
-            None, [{"id": "c1", "name": "weather", "arguments": {"city": "Paris"}}]
-        )
-        assert msg["role"] == "assistant"
-        assert msg["tool_calls"][0]["function"]["name"] == "weather"
-        # arguments serialized as a JSON string per OpenAI format
-        assert isinstance(msg["tool_calls"][0]["function"]["arguments"], str)
-
-
-class TestLitellmBoundaryWrap:
-    """F-03 / SC-10 — `_litellm_complete` is the agent's raw provider boundary.
-    A provider failure must surface as an ``AgentError`` (the package root)
-    with the provider exception preserved as ``__cause__``.
-
-    DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE].
-    """
-
-    @staticmethod
-    def _agent():
-        # complete_fn=None so `_complete` routes to the real litellm path.
-        return NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-        )
-
-    def test_provider_failure_raises_agent_error_chained(self, monkeypatch):
-        provider_error = RuntimeError("provider timeout")
-
-        def explode(**kwargs):
-            raise provider_error
-
-        monkeypatch.setattr("litellm.completion", explode)
-
-        with pytest.raises(AgentError) as excinfo:
-            self._agent()._litellm_complete([{"role": "user", "content": "q"}], [])
-
-        assert excinfo.value.__cause__ is provider_error
-        assert not isinstance(excinfo.value, RuntimeError)
-
-    def test_wrap_reaches_the_run_loop(self, monkeypatch):
-        """The wrap is on the path `run()` actually takes when no complete_fn
-        is injected — not only on a directly-called private helper."""
-
-        def explode(**kwargs):
-            raise RuntimeError("provider down")
-
-        monkeypatch.setattr("litellm.completion", explode)
-
-        with pytest.raises(AgentError):
-            self._agent()._complete([{"role": "user", "content": "q"}], [])
-
-    def test_parsing_errors_are_not_relabelled_as_provider_failures(self, monkeypatch):
-        """Only the network call is inside the try. A malformed response object
-        must raise as itself, not be reported as an LLM call failure."""
-
-        def bad_shape(**kwargs):
-            return object()  # no `.choices`
-
-        monkeypatch.setattr("litellm.completion", bad_shape)
-
-        with pytest.raises(AttributeError):
-            self._agent()._litellm_complete([{"role": "user", "content": "q"}], [])
-
-
-class TestOllamaHelperGating:
-    """DECISION plan-2026-07-21T191807-bf7ffe24/D-003 — the Ollama call-shape helpers
-    run inside ``_litellm_complete``, gated by ``is_ollama_model``. Off Ollama
-    the blast radius must be exactly zero: the helpers are never even called.
-    """
-
-    @staticmethod
-    def _agent(model):
-        return NativeFunctionCallingReactAgent(
-            tools=_registry(), config=AgentConfig(model=model)
-        )
-
-    @staticmethod
-    def _spy_helpers(monkeypatch):
-        seen = {"params": [], "messages": []}
-
-        def spy_params(call_params, model, *, structured=True):
-            seen["params"].append((dict(call_params), model, structured))
-            return apply_ollama_params(call_params, model, structured=structured)
-
-        def spy_messages(messages, model, response_format=None):
-            seen["messages"].append((messages, model, response_format))
-            return prepare_ollama_messages(messages, model, response_format)
-
-        monkeypatch.setattr("fsm_llm.agents.native_fc.apply_ollama_params", spy_params)
-        monkeypatch.setattr(
-            "fsm_llm.agents.native_fc.prepare_ollama_messages", spy_messages
-        )
-        return seen
-
-    def test_non_ollama_model_never_calls_the_helpers(self, monkeypatch):
-        """Criterion 10 / the no-op proof: for a non-Ollama model neither helper
-        is invoked at all, so no Ollama-shaped param can leak to a provider."""
-        seen = self._spy_helpers(monkeypatch)
-        captured: dict = {}
-        _stub_completion(monkeypatch, _FakeMessage(content="hi"), captured)
-
-        out = self._agent("mock/model")._litellm_complete(
-            [{"role": "user", "content": "q"}], []
-        )
-
-        assert seen["params"] == []
-        assert seen["messages"] == []
-        assert "reasoning_effort" not in captured
-        assert out["content"] == "hi"
-
-    def test_ollama_model_applies_both_helpers(self, monkeypatch):
-        seen = self._spy_helpers(monkeypatch)
-        captured: dict = {}
-        _stub_completion(monkeypatch, _FakeMessage(content="hi"), captured)
-
-        self._agent("ollama_chat/qwen3.5:4b")._litellm_complete(
-            [{"role": "user", "content": "q"}], []
-        )
-
-        assert len(seen["params"]) == 1
-        assert len(seen["messages"]) == 1
-        # D-002: the tool turn carries no response_format — one native tool call
-        # OR one constrained payload per turn, never stacked.
-        assert seen["messages"][0][2] is None
-        # structured=False mirrors llm.py:642 for free-text replies: the user's
-        # temperature is preserved, only thinking is disabled.
-        assert seen["params"][0][2] is False
-        assert captured["reasoning_effort"] == "none"
-        assert captured["messages"][-1]["content"].startswith("/nothink")
-
-    def test_ollama_preparation_does_not_mutate_the_caller_messages(self, monkeypatch):
-        _stub_completion(monkeypatch, _FakeMessage(content="hi"))
-        messages = [{"role": "user", "content": "q"}]
-
-        self._agent("ollama_chat/qwen3.5:4b")._litellm_complete(messages, [])
-
-        assert messages == [{"role": "user", "content": "q"}]
-
-
-class TestSeedPassthrough:
-    """DECISION plan-2026-07-22T114536-879d04a0/D-008 — the live seed probe
-    measured Ollama HONORING ``seed`` for `qwen3.5:4b` (temperature=0.7, same
-    seed twice: byte-identical; different seed: diverged), so the optional
-    ``seed`` constructor parameter must land at this agent's own
-    ``litellm.completion`` call site — native_fc bypasses ``apply_ollama_params``
-    and core's ``LiteLLMInterface``, so nowhere else can carry it.
-
-    Prior defect guarded against: an unset seed leaking as ``seed=None`` into
-    the provider payload would change the call shape for every existing caller;
-    ``None`` must mean the key is ABSENT, byte-identical to today's calls.
-    """
-
-    @staticmethod
-    def _agent(seed=None):
-        return NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            seed=seed,
-        )
-
-    def test_seed_forwarded_when_set(self, monkeypatch):
-        captured: dict = {}
-        _stub_completion(monkeypatch, _FakeMessage(content="hi"), captured)
-
-        self._agent(seed=1234)._litellm_complete([{"role": "user", "content": "q"}], [])
-
-        assert captured["seed"] == 1234
-
-    def test_seed_key_absent_when_none(self, monkeypatch):
-        captured: dict = {}
-        _stub_completion(monkeypatch, _FakeMessage(content="hi"), captured)
-
-        self._agent()._litellm_complete([{"role": "user", "content": "q"}], [])
-
-        assert "seed" not in captured
 
     def test_seed_defaults_to_none(self):
         agent = NativeFunctionCallingReactAgent(
@@ -380,119 +133,74 @@ class TestSeedPassthrough:
         assert agent.seed is None
 
 
-class TestReasoningTraceRecovery:
-    """DECISION plan-2026-07-21T191807-bf7ffe24/D-003 — an empty ``content`` with no
-    tool calls is a reasoning-only reply; recover it through the SHARED
-    resolver. With tool calls present, ``content=None`` is the normal shape and
-    no recovery may be attempted.
+class TestSystemPolicy:
+    """Standing instructions go in the SYSTEM message, not the user turn.
+
+    Measured on `ollama_chat/qwen3.5:4b` (see decisions.md D-021 of plan
+    bf7ffe24): the harness's role prompt delivered entirely in the user turn
+    produced ZERO writes in 5/5 dispatches; the same text with its standing
+    half moved here produced 4/5. These tests pin the seam: the no-policy path
+    is the base prompt and the policy, when set, lands in the system message
+    and nowhere else.
     """
 
     @staticmethod
-    def _agent():
+    def _first_request(agent, llm, task="q"):
+        agent.run(task)
+        return llm.requests[0].messages
+
+    def _agent(self, llm, **kwargs):
         return NativeFunctionCallingReactAgent(
-            tools=_registry(), config=AgentConfig(model="ollama_chat/qwen3.5:4b")
-        )
-
-    def test_empty_content_without_tool_calls_recovers_from_trace(self, monkeypatch):
-        _stub_completion(
-            monkeypatch,
-            _FakeMessage(content=None, reasoning_content="the real answer"),
-        )
-
-        out = self._agent()._litellm_complete([{"role": "user", "content": "q"}], [])
-
-        assert out["content"] == "the real answer"
-
-    def test_empty_content_with_tool_calls_attempts_no_recovery(self, monkeypatch):
-        calls = []
-
-        def spy(message):
-            calls.append(message)
-            return "SHOULD NOT BE USED"
-
-        monkeypatch.setattr("fsm_llm.agents.native_fc._resolve_reasoning_trace", spy)
-        _stub_completion(
-            monkeypatch,
-            _FakeMessage(
-                content=None,
-                tool_calls=[_FakeToolCall("c1", "weather", '{"city": "Paris"}')],
-                reasoning_content="noise",
-            ),
-        )
-
-        out = self._agent()._litellm_complete([{"role": "user", "content": "q"}], [])
-
-        assert calls == []
-        assert not out["content"]
-        assert out["tool_calls"][0]["name"] == "weather"
-        assert out["tool_calls"][0]["arguments"] == {"city": "Paris"}
-
-
-class TestSuccessSignal:
-    """DECISION plan-2026-07-21T191807-bf7ffe24/D-005 — ``success`` must distinguish a
-    working run from a doomed one. The old ``bool(answer) or bool(trace_calls)``
-    reported True on three live runs that wrote nothing and answered nothing.
-    """
-
-    def test_tool_calls_without_a_final_answer_are_not_success(self):
-        agent = NativeFunctionCallingReactAgent(
             tools=_registry(),
             config=AgentConfig(model="mock/model"),
-            complete_fn=_scripted(
-                {
-                    "content": None,
-                    "tool_calls": [
-                        {"id": "c1", "name": "weather", "arguments": {"city": "Oslo"}}
-                    ],
-                },
-                {"content": "", "tool_calls": []},
-            ),
+            llm_interface=llm,
+            **kwargs,
         )
-        result = agent.run("q")
-        assert result.tools_used == ["weather"]
-        assert result.answer == ""
-        assert result.success is False
 
-    def test_exhausted_max_iterations_is_not_success(self):
-        def always_tool(model, messages, schemas):
-            return {
-                "content": None,
-                "tool_calls": [
-                    {"id": "x", "name": "weather", "arguments": {"city": "X"}}
-                ],
-            }
+    def test_no_policy_leaves_the_system_message_exactly_as_it_was(self):
+        llm = _ScriptedLLM(_final("done"))
+        messages = self._first_request(self._agent(llm), llm)
 
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model", max_iterations=3),
-            complete_fn=always_tool,
+        assert messages[0] == {"role": "system", "content": _SYSTEM_PROMPT}
+        assert messages[1] == {"role": "user", "content": "q"}
+
+    def test_a_constructor_policy_is_appended_to_the_base_prompt(self):
+        """Appended, never substituted: the base prompt is what offers tools."""
+        llm = _ScriptedLLM(_final("done"))
+        agent = self._agent(llm, system_policy="RULES:\n- write the file")
+
+        messages = self._first_request(agent, llm)
+
+        assert messages[0]["content"] == (
+            f"{_SYSTEM_PROMPT}\n\nRULES:\n- write the file"
         )
-        result = agent.run("loop")
-        assert len(result.trace.tool_calls) == 3
-        assert result.success is False
+        assert messages[1] == {"role": "user", "content": "q"}
 
-    def test_final_answer_after_tool_use_is_success(self):
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            complete_fn=_scripted(
-                {
-                    "content": None,
-                    "tool_calls": [
-                        {"id": "c1", "name": "weather", "arguments": {"city": "Oslo"}}
-                    ],
-                },
-                {"content": "It is sunny.", "tool_calls": []},
-            ),
-        )
-        result = agent.run("q")
-        assert result.answer == "It is sunny."
-        assert result.success is True
+    def test_the_policy_is_read_at_run_time_not_at_construction(self):
+        """`roles.py` sets this on an agent it received from a factory."""
+        llm = _ScriptedLLM(_final("done"))
+        agent = self._agent(llm)
+        agent.system_policy = "EXIT GATE: stop when done"
 
+        messages = self._first_request(agent, llm)
 
-# ---------------------------------------------------------------------------
-# Terminal-turn constrained decoding (D-002)
-# ---------------------------------------------------------------------------
+        assert messages[0]["content"].endswith("EXIT GATE: stop when done")
+
+    def test_a_blank_policy_is_treated_as_no_policy(self):
+        """An empty string must not append a trailing separator to the prompt."""
+        agent = self._agent(_ScriptedLLM(), system_policy="")
+
+        assert agent._system_message() == _SYSTEM_PROMPT
+
+    def test_the_policy_does_not_leak_into_the_user_turn(self):
+        """The whole point is that the standing half is NOT in the task."""
+        llm = _ScriptedLLM(_final("done"))
+        agent = self._agent(llm, system_policy="RULES:\n- write the file")
+
+        messages = self._first_request(agent, llm, task="GOAL: ship it")
+
+        assert messages[1]["content"] == "GOAL: ship it"
+        assert "RULES:" not in messages[1]["content"]
 
 
 class _Answer(BaseModel):
@@ -503,22 +211,9 @@ class _Answer(BaseModel):
 _VALID_PAYLOAD = '{"findings_count": 3, "needs_explore": false}'
 
 
-class _Counter:
-    """A complete_fn that yields scripted responses and counts invocations."""
-
-    def __init__(self, *responses):
-        self._it = iter(responses)
-        self.calls: list[list[dict]] = []
-
-    def __call__(self, model, messages, schemas):
-        self.calls.append(list(messages))
-        return next(self._it)
-
-
 class TestOutputResponseFormatHelper:
     """``base._output_response_format`` is the single envelope builder shared by
-    ``_init_context`` and ``native_fc``'s repair turn. Extraction must be a PURE
-    refactor of the inline block it replaced.
+    ``_init_context`` (which the native repair state reads) and Pass 2.
     """
 
     def test_none_schema_returns_none(self):
@@ -528,8 +223,6 @@ class TestOutputResponseFormatHelper:
         assert _output_response_format(object()) is None
 
     def test_envelope_matches_the_pre_extraction_shape(self):
-        # Byte-for-byte the dict `_init_context` built inline before the
-        # extraction (base.py:175-184).
         assert _output_response_format(_Answer) == {
             "type": "json_schema",
             "json_schema": {
@@ -553,628 +246,314 @@ class TestOutputResponseFormatHelper:
         assert "_output_response_format" not in agent._init_context("task")
 
 
-class TestTerminalConstrainedDecoding:
-    """DECISION plan-2026-07-21T191807-bf7ffe24/D-002 — after the loop, when a schema
-    is configured and the free-text answer does not validate, make EXACTLY ONE
-    extra completion carrying ``response_format=`` and NO ``tools=``.
+# ---------------------------------------------------------------------------
+# The model loop (ported from the private loop to the FSM run)
+# ---------------------------------------------------------------------------
+
+
+class TestLoop:
+    def test_direct_answer_no_tools(self):
+        llm = _ScriptedLLM(_final("42"))
+        result = _agent(llm).run("what is the answer?")
+        assert result.answer == "42"
+        assert result.success is True
+        assert result.stop_reason == StopReason.ANSWERED
+        assert result.tools_used == []
+        assert len(llm.requests) == 1
+
+    def test_single_tool_then_answer(self):
+        llm = _ScriptedLLM(
+            _calls(("weather", {"city": "Paris"})), _final("It's sunny in Paris.")
+        )
+        result = _agent(llm).run("weather in Paris?")
+        assert result.answer == "It's sunny in Paris."
+        assert result.tools_used == ["weather"]
+        assert result.success
+        tool_message = llm.requests[1].messages[-1]
+        assert tool_message == {
+            "role": "tool",
+            "tool_call_id": "c1",
+            "content": "sunny in Paris",
+        }
+
+    def test_multiple_tool_calls_in_one_turn(self):
+        llm = _ScriptedLLM(
+            _calls(("weather", {"city": "Paris"}), ("weather", {"city": "Rome"})),
+            _final("Done."),
+        )
+        result = _agent(llm).run("compare weather")
+        assert [c.parameters for c in result.trace.tool_calls] == [
+            {"city": "Paris"},
+            {"city": "Rome"},
+        ]
+        assert [m["role"] for m in llm.requests[1].messages[-2:]] == ["tool", "tool"]
+
+    def test_max_iterations_exhausted(self):
+        llm = _ScriptedLLM(*[_calls(("weather", {"city": "X"})) for _ in range(3)])
+        result = _agent(llm, max_iterations=3).run("loop")
+        # No final answer; the tool calls still land in the trace. Whether that
+        # counts as success is D-005's question, asserted in TestSuccessSignal.
+        assert result.answer == ""
+        assert len(result.trace.tool_calls) == 3
+        assert len(llm.requests) == 3
+        assert result.iterations_used == 3
+
+    def test_uses_get_json_schemas(self):
+        llm = _ScriptedLLM(_final("ok"))
+        registry = _registry()
+        _agent(llm, registry=registry).run("q")
+        request = llm.requests[0]
+        assert list(request.tools or []) == registry.get_json_schemas()
+        assert request.tools[0]["function"]["name"] == "weather"
+        assert request.tool_choice is None  # core sends "auto"
+
+
+class TestSuccessSignal:
+    """DECISION plan-2026-07-21T191807-bf7ffe24/D-005 (carried by D-027 of plan
+    944e2692): ``success`` must distinguish a working run from a doomed one.
+    The old ``bool(answer) or bool(trace_calls)`` reported True on three live
+    runs that wrote nothing and answered nothing.
     """
 
-    @staticmethod
-    def _agent(counter, schema=_Answer):
-        return NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model", output_schema=schema),
-            complete_fn=counter,
+    def test_tool_calls_without_a_final_answer_are_not_success(self):
+        llm = _ScriptedLLM(_calls(("weather", {"city": "Oslo"})), _final(""))
+        result = _agent(llm).run("q")
+        assert result.tools_used == ["weather"]
+        assert result.answer == ""
+        assert result.success is False
+        assert result.stop_reason == StopReason.NO_RESULT
+
+    def test_exhausted_max_iterations_is_not_success(self):
+        llm = _ScriptedLLM(*[_calls(("weather", {"city": "X"})) for _ in range(3)])
+        result = _agent(llm, max_iterations=3).run("loop")
+        assert len(result.trace.tool_calls) == 3
+        assert result.success is False
+        assert result.stop_reason == StopReason.MAX_ITERATIONS
+
+    def test_final_answer_after_tool_use_is_success(self):
+        llm = _ScriptedLLM(
+            _calls(("weather", {"city": "Oslo"})), _final("It is sunny.")
         )
+        result = _agent(llm).run("q")
+        assert result.answer == "It is sunny."
+        assert result.success is True
+
+
+class TestTerminalConstrainedDecoding:
+    """DECISION plan-2026-07-21T191807-bf7ffe24/D-002: after the loop, when a
+    schema is configured and the free-text answer does not validate, make
+    EXACTLY ONE extra completion carrying ``response_format`` and NO tools.
+    """
 
     def test_does_not_fire_without_an_output_schema(self):
-        counter = _Counter({"content": "just prose", "tool_calls": []})
-        result = self._agent(counter, schema=None).run("q")
-        assert len(counter.calls) == 1
+        llm = _ScriptedLLM(_final("just prose"))
+        result = _agent(llm).run("q")
+        assert len(llm.requests) == 1
         assert result.answer == "just prose"
 
     def test_does_not_fire_when_the_answer_already_parses(self):
-        counter = _Counter({"content": _VALID_PAYLOAD, "tool_calls": []})
-        result = self._agent(counter).run("q")
-        assert len(counter.calls) == 1
+        llm = _ScriptedLLM(_final(_VALID_PAYLOAD))
+        result = _agent(llm, output_schema=_Answer).run("q")
+        assert len(llm.requests) == 1
         assert result.structured_output.findings_count == 3
 
     def test_fires_once_when_the_answer_does_not_parse(self):
-        counter = _Counter(
-            {"content": "I looked at three files.", "tool_calls": []},
-            {"content": _VALID_PAYLOAD, "tool_calls": []},
-        )
-        result = self._agent(counter).run("q")
-        # EXACTLY one repair attempt — no retry loop.
-        assert len(counter.calls) == 2
+        llm = _ScriptedLLM(_final("I looked at three files."), _final(_VALID_PAYLOAD))
+        result = _agent(llm, output_schema=_Answer).run("q")
+        # EXACTLY one repair attempt: no retry loop.
+        assert len(llm.requests) == 2
         assert result.structured_output.findings_count == 3
         assert result.answer == _VALID_PAYLOAD
-        # The repair turn appends its own user message so the Ollama schema echo
-        # lands on the LAST message, not on the buried original task.
-        assert counter.calls[1][-1]["role"] == "user"
-        assert "single JSON object" in counter.calls[1][-1]["content"]
+        repair = llm.requests[1]
+        assert repair.tools is None
+        assert repair.response_format == _output_response_format(_Answer)
+        # The repair turn appends its own user message so the Ollama schema
+        # echo lands on the LAST message, not on the buried original task.
+        assert repair.messages[-1]["role"] == "user"
+        assert "single JSON object" in repair.messages[-1]["content"]
 
     def test_repair_reuses_the_tool_result_history(self):
-        counter = _Counter(
-            {
-                "content": None,
-                "tool_calls": [
-                    {"id": "c1", "name": "weather", "arguments": {"city": "Oslo"}}
-                ],
-            },
-            {"content": "It was sunny.", "tool_calls": []},
-            {"content": _VALID_PAYLOAD, "tool_calls": []},
+        llm = _ScriptedLLM(
+            _calls(("weather", {"city": "Oslo"})),
+            _final("It was sunny."),
+            _final(_VALID_PAYLOAD),
         )
-        result = self._agent(counter).run("q")
-        assert len(counter.calls) == 3
-        roles = [m["role"] for m in counter.calls[2]]
+        result = _agent(llm, output_schema=_Answer).run("q")
+        assert len(llm.requests) == 3
+        roles = [m["role"] for m in llm.requests[2].messages]
         assert "tool" in roles
         assert result.structured_output.needs_explore is False
 
     def test_unparseable_repair_leaves_the_original_answer_intact(self):
-        counter = _Counter(
-            {"content": "a perfectly usable prose answer", "tool_calls": []},
-            {"content": "still not JSON", "tool_calls": []},
+        llm = _ScriptedLLM(
+            _final("a perfectly usable prose answer"), _final("still not JSON")
         )
-        result = self._agent(counter).run("q")
-        assert len(counter.calls) == 2
+        result = _agent(llm, output_schema=_Answer).run("q")
+        assert len(llm.requests) == 2
         assert result.answer == "a perfectly usable prose answer"
         assert result.structured_output is None
         assert result.success is True
 
     def test_repair_can_rescue_an_empty_final_answer(self):
         """The measured live failure: Ollama returns empty content on the final
-        turn. `success` is computed AFTER the repair, so the rescue counts."""
-        counter = _Counter(
-            {"content": "", "tool_calls": []},
-            {"content": _VALID_PAYLOAD, "tool_calls": []},
-        )
-        result = self._agent(counter).run("q")
+        turn. Success is decided AFTER the repair, so the rescue counts."""
+        llm = _ScriptedLLM(_final(""), _final(_VALID_PAYLOAD))
+        result = _agent(llm, output_schema=_Answer).run("q")
         assert result.answer == _VALID_PAYLOAD
         assert result.success is True
 
     def test_exhausted_loop_is_not_relabelled_success_by_a_repair(self):
         """D-005 stays intact: a loop that never concluded did not finish its
         work, so a payload extracted afterwards must not report success."""
-
-        def always_tool(model, messages, schemas):
-            if any(
-                m["role"] == "user" and "single JSON" in m["content"] for m in messages
-            ):
-                return {"content": _VALID_PAYLOAD, "tool_calls": []}
-            return {
-                "content": None,
-                "tool_calls": [
-                    {"id": "x", "name": "weather", "arguments": {"city": "X"}}
-                ],
-            }
-
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(
-                model="mock/model", output_schema=_Answer, max_iterations=2
-            ),
-            complete_fn=always_tool,
+        llm = _ScriptedLLM(
+            _calls(("weather", {"city": "X"})),
+            _calls(("weather", {"city": "X"})),
+            _final(_VALID_PAYLOAD),
         )
-        result = agent.run("loop")
+        result = _agent(llm, output_schema=_Answer, max_iterations=2).run("loop")
         assert result.structured_output.findings_count == 3
         assert result.success is False
-
-
-class TestRepairCallEnvelope:
-    """The A1 guard. ``tools=`` and ``response_format=`` in ONE completion was
-    never measured against the default 4B model; the repair call must carry the
-    schema and NO tool surface at all.
-    """
-
-    @staticmethod
-    def _agent(model="mock/model"):
-        return NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model=model, output_schema=_Answer),
-        )
-
-    @staticmethod
-    def _stub_sequence(monkeypatch, messages_seq):
-        captured: list[dict] = []
-        it = iter(messages_seq)
-
-        def fake(**kwargs):
-            captured.append(kwargs)
-            return _FakeResponse(next(it))
-
-        monkeypatch.setattr("litellm.completion", fake)
-        return captured
-
-    def test_repair_call_carries_response_format_and_no_tools(self, monkeypatch):
-        captured = self._stub_sequence(
-            monkeypatch,
-            [_FakeMessage(content="prose"), _FakeMessage(content=_VALID_PAYLOAD)],
-        )
-
-        result = self._agent().run("q")
-
-        assert len(captured) == 2
-        # Tool turn: tools present, response_format absent.
-        assert captured[0]["tools"]
-        assert "response_format" not in captured[0]
-        # Repair turn: response_format present, `tools` key absent ENTIRELY —
-        # not merely None. The two are never stacked in one call.
-        assert "tools" not in captured[1]
-        assert "tool_choice" not in captured[1]
-        assert captured[1]["response_format"] == _output_response_format(_Answer)
-        assert result.structured_output.findings_count == 3
-
-    def test_ollama_repair_turn_is_schema_enforced_and_echoed(self, monkeypatch):
-        seen = TestOllamaHelperGating._spy_helpers(monkeypatch)
-        captured = self._stub_sequence(
-            monkeypatch,
-            [_FakeMessage(content="prose"), _FakeMessage(content=_VALID_PAYLOAD)],
-        )
-
-        self._agent("ollama_chat/qwen3.5:4b").run("q")
-
-        # Tool turn: structured=False, no schema echoed.
-        assert seen["params"][0][2] is False
-        assert seen["messages"][0][2] is None
-        # Repair turn: structured=True (temperature pinned to 0) and the schema
-        # handed to prepare_ollama_messages so it is echoed into the prompt —
-        # that echo is what made the payload land 5/5 live.
-        assert seen["params"][1][2] is True
-        assert seen["messages"][1][2] == _output_response_format(_Answer)
-        assert captured[1]["temperature"] == 0
-        assert captured[1]["messages"][-1]["content"].startswith("/nothink")
+        assert result.stop_reason == StopReason.MAX_ITERATIONS
 
 
 class TestForcedFinalTool:
-    """DECISION plan-2026-07-23T073649-bb230f18/D-003 -- forced-write
-    finalization. When ``force_final_tool`` is set and the read loop never
-    called that tool, the agent issues EXACTLY ONE post-loop completion with
-    ``tool_choice`` pinned to that function, so the MODEL itself emits the
-    write. The forced call runs through the SAME ``self.tools.execute`` /
-    ``trace_calls`` path, carries ``tools=``+``tool_choice`` and NO
-    ``response_format=`` (D-002 anchor), fires at most once, and a malformed
-    forced turn is absorbed. Default ``None`` is byte-identical.
+    """DECISION plan-2026-07-23T073649-bb230f18/D-003 (carried by D-027 of plan
+    944e2692): when ``force_final_tool`` is set and the loop never called that
+    tool, the agent makes EXACTLY ONE post-loop model turn with ``tool_choice``
+    pinned to that function, so the MODEL itself emits the write, run through
+    ``self.tools.execute``. Default ``None`` adds no turn.
     """
 
     def test_forced_turn_fires_and_executes_after_toolless_conclusion(self):
-        """A dispatch that concludes in prose without calling the write tool is
-        forced to issue+execute the tool, landing it in ``trace.tool_calls``.
-        """
         reg = _registry()
         executed: list[str] = []
         original_execute = reg.execute
 
-        def spy(call):
+        def spy(call, **kwargs):
             executed.append(call.tool_name)
-            return original_execute(call)
+            return original_execute(call, **kwargs)
 
         reg.execute = spy  # type: ignore[method-assign]
 
-        counter = _Counter(
-            {"content": "here is my prose answer", "tool_calls": []},
-            {
-                "content": None,
-                "tool_calls": [
-                    {"id": "f1", "name": "weather", "arguments": {"city": "Paris"}}
-                ],
-            },
+        llm = _ScriptedLLM(
+            _final("here is my prose answer"),
+            _calls(("weather", {"city": "Paris"})),
         )
-        agent = NativeFunctionCallingReactAgent(
-            tools=reg,
-            config=AgentConfig(model="mock/model", force_final_tool="weather"),
-            complete_fn=counter,
+        result = _agent(llm, registry=reg, force_final_tool="weather").run(
+            "explore the tree"
         )
-
-        result = agent.run("explore the tree")
 
         # One loop turn + exactly one forced turn.
-        assert len(counter.calls) == 2
-        # The forced write is a REAL model tool call routed through execute...
-        assert executed == ["weather"]
-        # ...and recorded in the trace like any loop call.
-        assert [c.tool_name for c in result.trace.tool_calls] == ["weather"]
-
-    def test_forced_turn_carries_tools_and_tool_choice_no_response_format(
-        self, monkeypatch
-    ):
-        """The forced completion names the forced function via ``tool_choice`` and
-        ships NO ``response_format=`` (D-002 mutual-exclusion anchor).
-        """
-        captured: list[dict] = []
-        it = iter(
-            [
-                _FakeMessage(content="prose answer, no tool call"),
-                _FakeMessage(
-                    content=None,
-                    tool_calls=[_FakeToolCall("f1", "weather", '{"city": "Paris"}')],
-                ),
-            ]
-        )
-
-        def fake(**kwargs):
-            captured.append(kwargs)
-            return _FakeResponse(next(it))
-
-        monkeypatch.setattr("litellm.completion", fake)
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model", force_final_tool="weather"),
-        )
-
-        agent.run("explore the tree")
-
-        assert len(captured) == 2
-        forced = captured[1]
-        assert forced["tool_choice"] == {
+        assert len(llm.requests) == 2
+        forced = llm.requests[1]
+        assert forced.tool_choice == {
             "type": "function",
             "function": {"name": "weather"},
         }
-        assert "response_format" not in forced
-        assert forced["tools"]  # only the forced tool's schema
-        # The loop turn keeps the default `auto` tool_choice — unchanged.
-        assert captured[0]["tool_choice"] == "auto"
+        assert forced.response_format is None
+        assert executed == ["weather"]
+        assert [c.tool_name for c in result.trace.tool_calls] == ["weather"]
+        assert result.answer == "here is my prose answer"
 
     def test_default_off_issues_no_forced_turn(self):
-        """``force_final_tool=None`` (every existing caller) is byte-identical:
-        no third completion, no synthesized write.
-        """
-        counter = _Counter({"content": "prose answer", "tool_calls": []})
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            complete_fn=counter,
-        )
+        llm = _ScriptedLLM(_final("prose answer"))
+        result = _agent(llm).run("q")
 
-        result = agent.run("q")
-
-        assert len(counter.calls) == 1  # loop only, no forced turn
+        assert len(llm.requests) == 1
         assert result.trace.tool_calls == []
 
     def test_forced_turn_fires_exactly_once(self):
-        """A single guarded ``if``, not a loop: only ONE forced completion."""
-        counter = _Counter(
-            {"content": "prose", "tool_calls": []},
-            {
-                "content": None,
-                "tool_calls": [
-                    {"id": "f1", "name": "weather", "arguments": {"city": "X"}}
-                ],
-            },
-        )
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model", force_final_tool="weather"),
-            complete_fn=counter,
-        )
+        llm = _ScriptedLLM(_final("prose"), _calls(("weather", {"city": "X"})))
+        _agent(llm, force_final_tool="weather").run("q")
 
-        agent.run("q")
-
-        # Exactly two completions total; a third would raise StopIteration.
-        assert len(counter.calls) == 2
+        # Exactly two completions; a third would find no scripted reply.
+        assert len(llm.requests) == 2
+        assert llm.replies == []
 
     def test_malformed_forced_turn_is_absorbed(self):
-        """A degradable ``AgentError`` on the forced turn does not crash the
-        dispatch, fabricate a write, or invent a false success.
-        """
-        state = {"turn": 0}
-
-        def complete_fn(model, messages, schemas):
-            state["turn"] += 1
-            if state["turn"] == 1:
-                return {"content": "prose", "tool_calls": []}
-            raise AgentError(
-                "Native function-calling LLM call failed: "
-                "XML syntax error on line 5: element <function> closed",
-                details={"malformed_tool_call": True},
-            )
-
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model", force_final_tool="weather"),
-            complete_fn=complete_fn,
-        )
-
-        result = agent.run("q")
+        llm = _ScriptedLLM(_final("prose"), _MALFORMED)
+        result = _agent(llm, force_final_tool="weather").run("q")
 
         assert result.answer == "prose"
-        # No fabricated write landed in the trace.
         assert [c.tool_name for c in result.trace.tool_calls] == []
+        assert result.success is True
 
     def test_non_degradable_forced_turn_error_still_propagates(self):
         """A genuine outage on the forced turn is NOT swallowed."""
+        outage = LLMResponseError("Completion call failed: 503")
+        llm = _ScriptedLLM(_final("prose"), outage)
 
-        def complete_fn(model, messages, schemas):
-            if any(
-                "record your findings" in str(m.get("content", "")) for m in messages
-            ):
-                raise AgentError("Native function-calling LLM call failed: 503")
-            return {"content": "prose", "tool_calls": []}
+        with pytest.raises(AgentError) as excinfo:
+            _agent(llm, force_final_tool="weather").run("q")
 
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model", force_final_tool="weather"),
-            complete_fn=complete_fn,
-        )
-
-        with pytest.raises(AgentError):
-            agent.run("q")
+        assert excinfo.value.__cause__ is outage
 
     def test_forced_turn_skipped_when_tool_already_called(self):
-        """If the model DID call the forced tool during the loop, the forced turn
-        does NOT fire.
-        """
-        counter = _Counter(
-            {
-                "content": None,
-                "tool_calls": [
-                    {"id": "c1", "name": "weather", "arguments": {"city": "Paris"}}
-                ],
-            },
-            {"content": "done", "tool_calls": []},
-        )
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(
-                model="mock/model", force_final_tool="weather", max_iterations=3
-            ),
-            complete_fn=counter,
-        )
+        llm = _ScriptedLLM(_calls(("weather", {"city": "Paris"})), _final("done"))
+        result = _agent(llm, force_final_tool="weather", max_iterations=3).run("q")
 
-        result = agent.run("q")
-
-        assert len(counter.calls) == 2  # loop only, no forced turn
+        assert len(llm.requests) == 2
         assert [c.tool_name for c in result.trace.tool_calls] == ["weather"]
 
     def test_forced_turn_skipped_when_tool_absent_from_registry(self):
-        """``force_final_tool`` naming a tool not in the registry is guarded: no
-        forced turn, no crash.
-        """
-        counter = _Counter({"content": "prose", "tool_calls": []})
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model", force_final_tool="not_a_tool"),
-            complete_fn=counter,
-        )
+        llm = _ScriptedLLM(_final("prose"))
+        result = _agent(llm, force_final_tool="not_a_tool").run("q")
 
-        result = agent.run("q")
-
-        assert len(counter.calls) == 1
+        assert len(llm.requests) == 1
         assert result.trace.tool_calls == []
 
 
-# ---------------------------------------------------------------------------
-# A malformed tool-call turn must not cost the whole dispatch (D-016)
-# ---------------------------------------------------------------------------
-
-#: The exact provider message observed 1/35 on `ollama_chat/qwen3.5:4b`: the
-#: tool-call template failed to render, litellm surfaced it as an
-#: APIConnectionError, and the run -- which had ALREADY written real bytes --
-#: was lost.
-_MALFORMED_TOOL_CALL_ERROR = (
-    'litellm.APIConnectionError: Ollama_chatException - "XML syntax error on '
-    'line 5: element <function> closed by </parameter>"'
-)
-
-
 class TestMalformedToolCallDegrades:
-    """DECISION plan-2026-07-21T191807-bf7ffe24/D-016 -- a provider that garbles ONE
-    tool-call turn must not delete the dispatch's trace, its written bytes and
-    its answer.  A genuine outage still propagates: the two are distinguished,
-    not merged.
+    """DECISION plan-2026-07-21T191807-bf7ffe24/D-016 (carried by D-027 of plan
+    944e2692): a provider that garbles ONE tool-call turn (core returns
+    ``kind="malformed"``) must not delete the run's trace and answer. A
+    genuine outage (core raises) still ends the run.
     """
 
-    @staticmethod
-    def _agent(complete_fn, *, schema=_Answer, max_iterations=6):
-        return NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(
-                model="mock/model",
-                output_schema=schema,
-                max_iterations=max_iterations,
-            ),
-            complete_fn=complete_fn,
-        )
-
-    @staticmethod
-    def _malformed() -> AgentError:
-        return AgentError(
-            f"Native function-calling LLM call failed: {_MALFORMED_TOOL_CALL_ERROR}",
-            details={"malformed_tool_call": True},
-        )
-
-    def test_the_litellm_boundary_labels_the_measured_error(self, monkeypatch):
-        """The classification is made where the tool surface is known."""
-
-        def explode(**kwargs):
-            raise RuntimeError(_MALFORMED_TOOL_CALL_ERROR)
-
-        monkeypatch.setattr("litellm.completion", explode)
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(), config=AgentConfig(model="mock/model")
-        )
-
-        with pytest.raises(AgentError) as excinfo:
-            agent._litellm_complete(
-                [{"role": "user", "content": "q"}], _registry().get_json_schemas()
-            )
-
-        assert excinfo.value.details.get("malformed_tool_call") is True
-
-    def test_a_genuine_outage_is_not_labelled_malformed(self, monkeypatch):
-        """Otherwise a provider being down would be silently degraded away."""
-
-        def explode(**kwargs):
-            raise RuntimeError("Connection refused: ollama not running")
-
-        monkeypatch.setattr("litellm.completion", explode)
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(), config=AgentConfig(model="mock/model")
-        )
-
-        with pytest.raises(AgentError) as excinfo:
-            agent._litellm_complete(
-                [{"role": "user", "content": "q"}], _registry().get_json_schemas()
-            )
-
-        assert not excinfo.value.details.get("malformed_tool_call")
-
-    def test_a_toolless_turn_is_never_labelled_a_malformed_tool_call(self, monkeypatch):
-        """The repair turn declares no tools, so it cannot garble one."""
-
-        def explode(**kwargs):
-            raise RuntimeError(_MALFORMED_TOOL_CALL_ERROR)
-
-        monkeypatch.setattr("litellm.completion", explode)
-        agent = NativeFunctionCallingReactAgent(
-            tools=_registry(), config=AgentConfig(model="mock/model")
-        )
-
-        with pytest.raises(AgentError) as excinfo:
-            agent._litellm_complete([{"role": "user", "content": "q"}], [])
-
-        assert not excinfo.value.details.get("malformed_tool_call")
-
     def test_the_already_populated_trace_and_answer_survive(self):
-        """The measured loss: a run that had already written real bytes."""
-        state = {"turn": 0}
-
-        def complete_fn(model, messages, schemas):
-            state["turn"] += 1
-            if state["turn"] == 1:
-                return {
-                    "content": "checking the weather",
-                    "tool_calls": [
-                        {"id": "c1", "name": "weather", "arguments": {"city": "Oslo"}}
-                    ],
-                }
-            raise TestMalformedToolCallDegrades._malformed()
-
-        result = self._agent(complete_fn, schema=None).run("q")
+        llm = _ScriptedLLM(
+            _calls(("weather", {"city": "Oslo"}), text="checking the weather"),
+            _MALFORMED,
+        )
+        result = _agent(llm, max_iterations=6).run("q")
 
         assert [c.tool_name for c in result.trace.tool_calls] == ["weather"]
         assert result.success is False
+        assert result.stop_reason == StopReason.NO_RESULT
+        assert len(llm.requests) == 2
 
     def test_the_repair_turn_still_runs_after_a_malformed_tool_turn(self):
-        """The degraded turn drops the TOOL surface, which is exactly the shape
-        the D-002 repair call already uses -- so a payload is still reachable."""
-        state = {"turn": 0}
+        llm = _ScriptedLLM(_MALFORMED, _final(_VALID_PAYLOAD))
+        result = _agent(llm, output_schema=_Answer).run("q")
 
-        def complete_fn(model, messages, schemas):
-            state["turn"] += 1
-            if state["turn"] == 1:
-                raise TestMalformedToolCallDegrades._malformed()
-            return {"content": _VALID_PAYLOAD, "tool_calls": []}
-
-        result = self._agent(complete_fn).run("q")
-
+        assert llm.requests[1].tools is None
         assert result.structured_output.findings_count == 3
         assert result.success is False  # the loop never concluded (D-005)
 
     def test_a_genuine_outage_still_ends_the_run(self):
-        """Do NOT swallow provider outages: they are not a model behaviour."""
+        outage = LLMResponseError("Completion call failed: 503")
+        llm = _ScriptedLLM(outage)
 
-        def complete_fn(model, messages, schemas):
-            raise AgentError("Native function-calling LLM call failed: 503")
+        with pytest.raises(AgentError) as excinfo:
+            _agent(llm, output_schema=_Answer).run("q")
 
-        with pytest.raises(AgentError):
-            self._agent(complete_fn).run("q")
+        assert excinfo.value.__cause__ is outage
 
     def test_a_malformed_repair_turn_keeps_the_original_answer(self):
-        """The degradation is symmetric: neither call site loses the run."""
-        state = {"turn": 0}
-
-        def complete_fn(model, messages, schemas):
-            state["turn"] += 1
-            if state["turn"] == 1:
-                return {"content": "a usable prose answer", "tool_calls": []}
-            raise TestMalformedToolCallDegrades._malformed()
-
-        result = self._agent(complete_fn).run("q")
+        llm = _ScriptedLLM(_final("a usable prose answer"), _MALFORMED)
+        result = _agent(llm, output_schema=_Answer).run("q")
 
         assert result.answer == "a usable prose answer"
         assert result.structured_output is None
         assert result.success is True
 
 
-class TestSystemPolicy:
-    """Standing instructions go in the SYSTEM message, not the user turn.
-
-    Measured on `ollama_chat/qwen3.5:4b` (see decisions.md D-021): the harness's
-    role prompt delivered entirely in the user turn produced ZERO writes in 5/5
-    dispatches; the same text with its standing half moved here produced 4/5.
-    These tests pin the seam, not the model behaviour -- what they guarantee is
-    that the no-policy path is byte-identical to before and that the policy,
-    when set, lands in the system message and nowhere else.
-    """
-
-    @staticmethod
-    def _capture_messages(agent, task="q"):
-        """Run *agent* against a stub and return the messages of the first call."""
-        seen: list[list[dict]] = []
-
-        def complete_fn(model, messages, schemas):
-            seen.append([dict(m) for m in messages])
-            return {"content": "done", "tool_calls": []}
-
-        agent._complete_fn = complete_fn
-        agent.run(task)
-        return seen[0]
-
-    def _agent(self, **kwargs):
-        return NativeFunctionCallingReactAgent(
-            tools=_registry(),
-            config=AgentConfig(model="mock/model"),
-            complete_fn=_scripted({"content": "done", "tool_calls": []}),
-            **kwargs,
-        )
-
-    def test_no_policy_leaves_the_system_message_exactly_as_it_was(self):
-        messages = self._capture_messages(self._agent())
-
-        assert messages[0] == {"role": "system", "content": _SYSTEM_PROMPT}
-        assert messages[1] == {"role": "user", "content": "q"}
-
-    def test_a_constructor_policy_is_appended_to_the_base_prompt(self):
-        """Appended, never substituted: the base prompt is what offers tools."""
-        agent = self._agent(system_policy="RULES:\n- write the file")
-
-        messages = self._capture_messages(agent)
-
-        assert messages[0]["content"] == (
-            f"{_SYSTEM_PROMPT}\n\nRULES:\n- write the file"
-        )
-        assert messages[1] == {"role": "user", "content": "q"}
-
-    def test_the_policy_is_read_at_run_time_not_at_construction(self):
-        """`roles.py` sets this on an agent it received from a factory."""
-        agent = self._agent()
-        agent.system_policy = "EXIT GATE: stop when done"
-
-        messages = self._capture_messages(agent)
-
-        assert messages[0]["content"].endswith("EXIT GATE: stop when done")
-
-    def test_a_blank_policy_is_treated_as_no_policy(self):
-        """An empty string must not append a trailing separator to the prompt."""
-        agent = self._agent(system_policy="")
-
-        assert agent._system_message() == _SYSTEM_PROMPT
-
-    def test_the_policy_does_not_leak_into_the_user_turn(self):
-        """The whole point is that the standing half is NOT in the task."""
-        agent = self._agent(system_policy="RULES:\n- write the file")
-
-        messages = self._capture_messages(agent, task="GOAL: ship it")
-
-        assert messages[1]["content"] == "GOAL: ship it"
-        assert "RULES:" not in messages[1]["content"]
-
-
 class TestMalformedArgumentsAreNotExecuted:
-    """REACT-11 (D-025 of plan 06a5ec0a): a tool call whose arguments are not
-    a JSON object is a malformed turn under D-016. It never runs (the old code
-    ran it with ``{}``), the loop ends, and the trace gathered so far is kept.
+    """REACT-11 (D-025 of plan 06a5ec0a, carried by D-027 of plan 944e2692): a
+    tool call whose arguments are not a JSON object makes the whole turn
+    malformed in core: no call of it runs, the loop ends, the trace is kept.
+    Driven through the agent's own ``LiteLLMInterface`` with the provider
+    binding stubbed, so the arguments arrive exactly as a provider sends them.
     """
 
     @staticmethod
@@ -1190,107 +569,192 @@ class TestMalformedArgumentsAreNotExecuted:
         reg.register_function(ping, name="ping", description="Record a call.")
         return reg, invocations
 
-    @pytest.mark.parametrize("bad", ["{not json", "[1, 2]", '"text"', "null", 7, ["a"]])
-    def test_complete_fn_turn_with_bad_arguments_runs_nothing(self, bad):
-        reg, invocations = self._counting_registry()
-        calls = {"n": 0}
-
-        def complete_fn(model, messages, schemas):
-            calls["n"] += 1
-            return {
-                "content": None,
-                "tool_calls": [{"id": "c1", "name": "ping", "arguments": bad}],
-            }
-
-        agent = NativeFunctionCallingReactAgent(
-            tools=reg,
-            config=AgentConfig(model="mock/model", max_iterations=5),
-            complete_fn=complete_fn,
+    @staticmethod
+    def _agent(reg: ToolRegistry, **config: Any) -> NativeFunctionCallingReactAgent:
+        return NativeFunctionCallingReactAgent(
+            tools=reg, config=AgentConfig(model="mock/model", **config)
         )
-        result = agent.run("q")
+
+    @pytest.mark.parametrize("bad", ["{not json", "[1, 2]", '"text"', "null", 7, ["a"]])
+    def test_turn_with_bad_arguments_runs_nothing(self, bad, monkeypatch):
+        reg, invocations = self._counting_registry()
+        sent = _stub_provider(monkeypatch, _provider_reply(None, [("c1", "ping", bad)]))
+
+        result = self._agent(reg, max_iterations=5).run("q")
 
         assert invocations == []
         assert result.trace.tool_calls == []
-        # The loop ENDS (D-016 break), it does not retry the same turn.
-        assert calls["n"] == 1
+        # The loop ENDS (D-016), it does not retry the same turn.
+        assert len(sent) == 1
         assert result.success is False
 
-    def test_earlier_calls_survive_and_no_call_of_the_bad_turn_runs(self):
+    def test_earlier_calls_survive_and_no_call_of_the_bad_turn_runs(self, monkeypatch):
         reg, invocations = self._counting_registry()
-        agent = NativeFunctionCallingReactAgent(
-            tools=reg,
-            config=AgentConfig(model="mock/model", max_iterations=5),
-            complete_fn=_scripted(
-                {
-                    "content": None,
-                    "tool_calls": [
-                        {"id": "a", "name": "ping", "arguments": {"note": "one"}}
-                    ],
-                },
-                {
-                    "content": None,
-                    "tool_calls": [
-                        {"id": "b", "name": "ping", "arguments": {"note": "two"}},
-                        {"id": "c", "name": "ping", "arguments": "{broken"},
-                    ],
-                },
+        _stub_provider(
+            monkeypatch,
+            _provider_reply(None, [("a", "ping", '{"note": "one"}')]),
+            _provider_reply(
+                None, [("b", "ping", '{"note": "two"}'), ("c", "ping", "{broken")]
             ),
         )
-        result = agent.run("q")
+        result = self._agent(reg, max_iterations=5).run("q")
 
         assert invocations == [{"note": "one"}]
         assert [c.parameters for c in result.trace.tool_calls] == [{"note": "one"}]
 
-    def test_litellm_string_arguments_that_do_not_parse_are_not_run(self, monkeypatch):
-        reg, invocations = self._counting_registry()
-        _stub_completion(
-            monkeypatch,
-            _FakeMessage(
-                content=None, tool_calls=[_FakeToolCall("c1", "ping", "{oops")]
-            ),
-        )
-        agent = NativeFunctionCallingReactAgent(
-            tools=reg, config=AgentConfig(model="mock/model", max_iterations=3)
-        )
-        result = agent.run("q")
-
-        assert invocations == []
-        assert result.trace.tool_calls == []
-
     @pytest.mark.parametrize("empty", ["", "  ", None, {}])
-    def test_blank_arguments_still_mean_no_arguments(self, empty):
+    def test_blank_arguments_still_mean_no_arguments(self, empty, monkeypatch):
         reg, invocations = self._counting_registry()
-        agent = NativeFunctionCallingReactAgent(
-            tools=reg,
-            config=AgentConfig(model="mock/model"),
-            complete_fn=_scripted(
-                {
-                    "content": None,
-                    "tool_calls": [{"id": "c1", "name": "ping", "arguments": empty}],
-                },
-                {"content": "done", "tool_calls": []},
-            ),
+        _stub_provider(
+            monkeypatch,
+            _provider_reply(None, [("c1", "ping", empty)]),
+            _provider_reply("done"),
         )
-        result = agent.run("q")
+        result = self._agent(reg).run("q")
 
         assert invocations == [{"note": ""}]
         assert result.success is True
 
-    def test_forced_final_turn_with_bad_arguments_runs_nothing(self):
+    def test_forced_final_turn_with_bad_arguments_runs_nothing(self, monkeypatch):
         reg, invocations = self._counting_registry()
-        agent = NativeFunctionCallingReactAgent(
-            tools=reg,
-            config=AgentConfig(model="mock/model", force_final_tool="ping"),
-            complete_fn=_scripted(
-                {"content": "prose answer", "tool_calls": []},
-                {
-                    "content": None,
-                    "tool_calls": [{"id": "f1", "name": "ping", "arguments": "{x"}],
-                },
-            ),
+        _stub_provider(
+            monkeypatch,
+            _provider_reply("prose answer"),
+            _provider_reply(None, [("f1", "ping", "{x")]),
         )
-        result = agent.run("q")
+        result = self._agent(reg, force_final_tool="ping").run("q")
 
         assert invocations == []
         assert result.trace.tool_calls == []
         assert result.answer == "prose answer"
+
+
+# ---------------------------------------------------------------------------
+# On core (plan 944e2692 step 16; RED on the parent commit ced9eb5)
+# ---------------------------------------------------------------------------
+
+
+class TestRunsOnCore:
+    def test_every_model_call_goes_to_the_injected_interface(self, monkeypatch):
+        """Parent: the private loop called ``litellm.completion`` and ignored
+        ``llm_interface``."""
+
+        def refuse(**kwargs: Any) -> Any:
+            raise AssertionError("a provider binding was called")
+
+        monkeypatch.setattr("fsm_llm.llm.completion", refuse)
+        monkeypatch.setattr("litellm.completion", refuse)
+        llm = _ScriptedLLM(
+            _calls(("weather", {"city": "Oslo"})),
+            _final("Sunny."),
+            _final(_VALID_PAYLOAD),
+        )
+        result = _agent(llm, output_schema=_Answer).run("q")
+
+        assert len(llm.requests) == 3
+        assert llm.other_calls == []
+        assert result.success is True
+
+    def test_requests_carry_the_interface_timeout(self, monkeypatch):
+        """D-009: a native request now has core's per-call timeout (120 s by
+        default). Parent: no ``timeout`` key (no bound on a hung provider)."""
+        sent = _stub_provider(monkeypatch, _provider_reply("done"))
+
+        NativeFunctionCallingReactAgent(
+            tools=_registry(), config=AgentConfig(model="mock/model")
+        ).run("q")
+
+        assert sent[0]["timeout"] == 120.0
+
+    def test_seed_reaches_the_provider_and_is_read_at_run_time(self, monkeypatch):
+        sent = _stub_provider(monkeypatch, _provider_reply("a"), _provider_reply("b"))
+        agent = NativeFunctionCallingReactAgent(
+            tools=_registry(), config=AgentConfig(model="mock/model"), seed=7
+        )
+        agent.run("q")
+        agent.seed = None
+        agent.run("q")
+
+        assert sent[0]["seed"] == 7
+        assert "seed" not in sent[1]
+
+    def test_initial_context_goes_through_init_context(self):
+        """D-009: caller context is the run's context like every pattern's
+        (parent: ignored, ``final_context == {"task": task}``); run outputs
+        and the pattern's own keys are stripped, and the model never sees it."""
+        llm = _ScriptedLLM(_final("real answer"))
+        result = _agent(llm).run(
+            "q",
+            initial_context={
+                "domain": "weather",
+                ContextKeys.FINAL_ANSWER: "PWNED",
+                NativeFCContextKeys.ANSWER: "PWNED",
+                ContextKeys.FORCED_STOP_REASON: StopReason.MAX_ITERATIONS,
+            },
+        )
+
+        assert result.final_context["domain"] == "weather"
+        assert ContextKeys.FINAL_ANSWER not in result.final_context
+        assert result.answer == "real answer"
+        assert (result.success, result.stop_reason) == (True, StopReason.ANSWERED)
+        assert "PWNED" not in json.dumps(llm.requests[0].messages)
+        assert "weather" not in json.dumps(llm.requests[0].messages)
+
+    @pytest.mark.parametrize("max_iterations", [1, 2])
+    def test_the_step_ceiling_covers_every_turn(self, max_iterations):
+        """An exhausted loop, the forced turn and the repair turn all fit."""
+        llm = _ScriptedLLM(
+            *[_calls(("weather", {"city": "X"})) for _ in range(max_iterations)],
+            _calls(("write_note", {"text": "notes"})),
+            _final(_VALID_PAYLOAD),
+        )
+        registry = _registry()
+        registry.register_function(
+            lambda text: f"saved {text}", name="write_note", description="Save."
+        )
+
+        result = _agent(
+            llm,
+            registry=registry,
+            max_iterations=max_iterations,
+            force_final_tool="write_note",
+            output_schema=_Answer,
+        ).run("q")
+
+        assert llm.replies == []
+        assert result.stop_reason == StopReason.MAX_ITERATIONS
+        assert result.structured_output.findings_count == 3
+
+    def test_step_ceiling_and_budget_error_text(self):
+        agent = _agent(_ScriptedLLM(), max_iterations=3)
+
+        assert agent._step_ceiling(3) == (
+            10,
+            "2 x max_iterations 3 + 4 post-loop steps",
+        )
+        error = agent._budget_error(RunBudgetExceededError("steps", 10, 10))
+        assert isinstance(error, BudgetExhaustedError)
+        assert "10 loop turns = 2 x max_iterations 3 + 4 post-loop steps" in str(error)
+
+
+class TestSuccessSeam:
+    """D-028: the one seam honours a handler-recorded ``no_result``."""
+
+    def test_recorded_no_result_beats_a_traced_tool_call(self):
+        """Parent: a run with a tool call read as ``(True, "answered")``."""
+        trace = AgentTrace(
+            tool_calls=[ToolCall(tool_name="weather", parameters={})],
+            total_iterations=2,
+        )
+        outcome = BaseAgent._run_outcome(
+            {ContextKeys.FORCED_STOP_REASON: StopReason.NO_RESULT},
+            trace,
+            [NativeFCContextKeys.ANSWER],
+        )
+        assert outcome == (False, StopReason.NO_RESULT)
+
+    def test_without_a_recorded_reason_the_rule_is_unchanged(self):
+        trace = AgentTrace(tool_calls=[], total_iterations=1)
+        assert BaseAgent._run_outcome(
+            {NativeFCContextKeys.ANSWER: "Paris"}, trace, [NativeFCContextKeys.ANSWER]
+        ) == (True, StopReason.ANSWERED)

@@ -292,6 +292,18 @@ class TestCompleteRequestRules:
             _reply("x"),
         )
         assert sent["tool_choice"] == choice
+        assert "response_format" not in sent
+
+    def test_a_structured_request_carries_no_tool_keys(self):
+        """native_fc's repair turn: the schema and NO tool surface at all, not
+        merely ``tools: None`` (bf7ffe24/D-002, carried by D-027)."""
+        _, sent = _complete(
+            CompletionRequest(messages=_TRANSCRIPT, response_format=_SCHEMA_FORMAT),
+            _reply('{"answer": "5"}'),
+        )
+        assert sent["response_format"] == _SCHEMA_FORMAT
+        assert "tools" not in sent
+        assert "tool_choice" not in sent
 
     def test_tools_are_never_gated_on_the_supported_params_list(self):
         """litellm lists no tools for ``ollama/`` although calls work."""
@@ -337,6 +349,14 @@ class TestCompleteRequestRules:
         user = sent["messages"][1]["content"]
         assert user.startswith("/nothink\nWhat is 2 + 3?")
         assert "Respond in JSON matching this schema:" in user
+
+    def test_ollama_preparation_does_not_mutate_the_request_messages(self):
+        messages = [dict(m) for m in _TRANSCRIPT[:2]]
+        request = CompletionRequest(messages=messages, tools=[_ADD_TOOL])
+        _, sent = _complete(request, _reply("x"), model=OLLAMA_MODEL)
+        assert sent["messages"][-1]["content"].startswith("/nothink")
+        assert request.messages == _TRANSCRIPT[:2]
+        assert messages == _TRANSCRIPT[:2]
 
     def test_non_ollama_request_gets_no_ollama_preparation(self):
         _, sent = _complete(
@@ -486,6 +506,18 @@ class TestCompleteReplies:
         with pytest.raises(LLMResponseError, match="Empty response"):
             _complete(_TOOL_REQUEST, ModelResponse(choices=[]))
 
+    def test_an_unreadable_reply_shape_is_not_reported_as_an_outage(self):
+        """A reply that cannot be read is named as such, chained from the
+        reading error; only the provider call itself is an outage
+        (876e7164/D-006 [STALE], reshaped by D-019)."""
+        unreadable = type("_Reply", (), {"choices": [object()]})()
+        with pytest.raises(
+            LLMResponseError, match="Malformed LLM response shape"
+        ) as exc:
+            _complete(_TOOL_REQUEST, unreadable)
+        assert isinstance(exc.value.__cause__, AttributeError)
+        assert "Completion call failed" not in str(exc.value)
+
 
 class TestCompleteFailures:
     @pytest.mark.parametrize(
@@ -494,6 +526,10 @@ class TestCompleteFailures:
             "Ollama: XML syntax error on line 1",
             "element <function> closed by </parameter>",
             "Invalid tool call in model output",
+            # The exact provider error measured 1/35 on qwen3.5:4b
+            # (bf7ffe24/D-016).
+            'litellm.APIConnectionError: Ollama_chatException - "XML syntax error '
+            'on line 5: element <function> closed by </parameter>"',
         ],
     )
     def test_provider_malformed_tool_call_error_is_a_malformed_reply(self, text):
@@ -583,11 +619,31 @@ class TestInterfaceSurface:
             "complete"
         ]
 
-    def test_native_fc_uses_the_core_malformed_rules(self):
-        """The markers and the argument rule live once, in core."""
+    def test_native_fc_holds_no_request_or_reply_rule(self):
+        """native_fc runs on core (step 16, D-027): the markers, the argument
+        rule, the Ollama preparation and the reasoning-trace recovery live
+        once, here, and native_fc imports none of them (nor litellm)."""
         from fsm_llm.agents import native_fc
 
-        assert native_fc.decode_tool_arguments is decode_tool_arguments
-        assert native_fc.is_malformed_tool_call_error is is_malformed_tool_call_error
-        assert not hasattr(native_fc, "_MALFORMED_TOOL_CALL_MARKERS")
+        for name in (
+            "decode_tool_arguments",
+            "is_malformed_tool_call_error",
+            "apply_ollama_params",
+            "prepare_ollama_messages",
+            "is_ollama_model",
+            "_resolve_reasoning_trace",
+            "_MALFORMED_TOOL_CALL_MARKERS",
+        ):
+            assert not hasattr(native_fc, name), name
+        imported = {
+            alias.name.split(".")[0]
+            for node in ast.walk(ast.parse(inspect.getsource(native_fc)))
+            if isinstance(node, ast.Import | ast.ImportFrom)
+            for alias in (
+                node.names
+                if isinstance(node, ast.Import)
+                else [ast.alias(name=node.module or "")]
+            )
+        }
+        assert "litellm" not in imported
         assert constants.MALFORMED_TOOL_CALL_MARKERS

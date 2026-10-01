@@ -21,11 +21,14 @@ from fsm_llm.agents.handlers import make_fresh_keys_handler
 from fsm_llm.api import API
 from fsm_llm.definitions import (
     BulkExtractionRequest,
+    CompletionResponse,
     FieldExtractionConfig,
     FieldExtractionRequest,
+    ModelToolCall,
     ResponseGenerationRequest,
 )
 from tests.conftest import _CURRENT_STATE_TAG, PromptGroundedLLM, network_exempt
+from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 
 def _field_request(**overrides: object) -> FieldExtractionRequest:
@@ -675,16 +678,16 @@ class TestSuccessContract:
         from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
 
         runs: list[str] = []
-        call = {
-            "content": "",
-            "tool_calls": [
-                {"id": "c1", "name": "lookup", "arguments": {"query": "France"}}
-            ],
-        }
+        call = CompletionResponse(
+            kind="calls",
+            calls=(
+                ModelToolCall(id="c1", name="lookup", arguments={"query": "France"}),
+            ),
+        )
         agent = NativeFunctionCallingReactAgent(
             tools=_lookup_registry(runs),
             config=AgentConfig(model="mock/model", max_iterations=2),
-            complete_fn=lambda model, messages, schemas: call,
+            llm_interface=_ScriptedLLM(call, call),
         )
         result = agent.run("What is the capital of France?")
 
@@ -698,10 +701,7 @@ class TestSuccessContract:
         agent = NativeFunctionCallingReactAgent(
             tools=_lookup_registry([]),
             config=AgentConfig(model="mock/model"),
-            complete_fn=lambda model, messages, schemas: {
-                "content": "Paris",
-                "tool_calls": [],
-            },
+            llm_interface=_ScriptedLLM(CompletionResponse(kind="final", text="Paris")),
         )
         result = agent.run("What is the capital of France?")
 

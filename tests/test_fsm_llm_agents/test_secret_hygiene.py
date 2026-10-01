@@ -28,8 +28,10 @@ from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm.agents.parallel_react import TOOL_CALLS_KEY, ParallelReactAgent
 from fsm_llm.agents.rewoo import REWOOAgent
 from fsm_llm.agents.tools import ToolRegistry, redact_secret_entries
+from fsm_llm.definitions import CompletionResponse, ModelToolCall
 from fsm_llm.logging import logger
 from fsm_llm.memory import BUFFER_CORE, BUFFER_METADATA, WorkingMemory
+from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 _SECRET = "sk-SECRET-abc123def456ghi789"
 _INPUT = {"q": "weather", "api_key": _SECRET}
@@ -222,25 +224,17 @@ class TestSiblingExecutors:
 
     def test_native_fc_trace(self):
         tool = _Tool()
-        turns = iter(
-            [
-                {
-                    "content": None,
-                    "tool_calls": [
-                        {"id": "c1", "name": "lookup", "arguments": dict(_INPUT)}
-                    ],
-                },
-                {"content": "done", "tool_calls": []},
-            ]
+        llm = _ScriptedLLM(
+            CompletionResponse(
+                kind="calls",
+                calls=(ModelToolCall(id="c1", name="lookup", arguments=dict(_INPUT)),),
+            ),
+            CompletionResponse(kind="final", text="done"),
         )
-
-        def complete_fn(model, messages, schemas):
-            return next(turns)
-
         agent = NativeFunctionCallingReactAgent(
             tools=tool.registry,
             config=AgentConfig(model="mock/model"),
-            complete_fn=complete_fn,
+            llm_interface=llm,
         )
         with _Capture() as lines:
             result = agent.run("q")

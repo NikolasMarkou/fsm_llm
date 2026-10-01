@@ -526,6 +526,13 @@ def _completion_response(response: Any) -> CompletionResponse:
             f"Malformed LLM response shape: content is {type(content).__name__}"
         )
 
+    # DECISION plan-2026-10-01T093600-944e2692/D-027: a tool turn with ANY
+    # call that has no name or non-object arguments is `malformed` with no
+    # calls, the valid ones included, so a consumer runs none of them
+    # (06a5ec0a/D-025, bf7ffe24/D-016). Do NOT coerce bad arguments to `{}`
+    # (a tool ran with parameters the model never sent) or drop only the bad
+    # call. The reasoning trace is recovered only without tool calls
+    # (bf7ffe24/D-003: `content: None` is their normal shape). See D-027.
     calls: list[ModelToolCall] = []
     for raw_call in raw_calls:
         function = getattr(raw_call, "function", None)
@@ -1502,6 +1509,15 @@ class LiteLLMInterface(LLMInterface):
         )
         if stream:
             call_params["stream"] = True
+        # DECISION plan-2026-10-01T093600-944e2692/D-027: native_fc's measured
+        # request rules live HERE now (its private litellm call is gone):
+        # `tools`+`tool_choice` are sent only with tools and never beside a
+        # `response_format` (bf7ffe24/D-002; CompletionRequest refuses both),
+        # never as a present-but-None key; Ollama preparation runs below
+        # gated by `is_ollama_model`, a tool turn keeping the caller's
+        # temperature (bf7ffe24/D-003, measured 0/3 -> 3/3 tool calls on 4b);
+        # `seed` is sent only when the interface was built with one
+        # (879d04a0/D-008). Do NOT re-home any of them in an agent. D-027.
         if tools is not None:
             call_params["tools"] = tools
             call_params["tool_choice"] = "auto" if tool_choice is None else tool_choice

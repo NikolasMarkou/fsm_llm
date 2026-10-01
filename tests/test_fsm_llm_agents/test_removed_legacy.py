@@ -116,6 +116,37 @@ class TestRemovedAgentNames:
         assert not hasattr(prompts, name)
 
 
+class TestNativeFcPrivateLoopIsGone:
+    """native_fc runs on core (plan 944e2692 step 16, D-028): its private
+    loop, its litellm call and the ``complete_fn`` seam are removed outright;
+    the replacement seam is ``llm_interface=``."""
+
+    @pytest.mark.parametrize(
+        "name", ["CompleteFn", "_degrades_turn", "json", "time", "litellm"]
+    )
+    def test_module_name_is_gone(self, name):
+        from fsm_llm.agents import native_fc
+
+        assert not hasattr(native_fc, name)
+
+    @pytest.mark.parametrize(
+        "name", ["_litellm_complete", "_complete", "_assistant_message"]
+    )
+    def test_agent_method_is_gone(self, name):
+        from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
+
+        assert not hasattr(NativeFunctionCallingReactAgent, name)
+
+    def test_complete_fn_is_not_a_parameter(self):
+        import inspect
+
+        from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
+
+        params = inspect.signature(NativeFunctionCallingReactAgent).parameters
+        assert "complete_fn" not in params
+        assert list(params)[:3] == ["tools", "config", "system_policy"]
+
+
 def _definitions() -> list[tuple[str, dict[str, Any]]]:
     chain = [
         ChainStep(

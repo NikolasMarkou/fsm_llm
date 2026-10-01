@@ -977,7 +977,7 @@ class BaseAgent(ABC):
         """Raise ``AgentTimeoutError`` when the wall clock of a run is spent.
 
         For callers that are not inside a core bounded run (SelfConsistency
-        samples, ``native_fc``). FSM runs pass their budgets to core instead
+        samples). FSM runs pass their budgets to core instead
         (``_run_budgets``).
         """
         if time.monotonic() - start_time > self.config.timeout_seconds:
@@ -989,17 +989,33 @@ class BaseAgent(ABC):
         """The ``(max_steps, max_seconds)`` of a core bounded run.
 
         Interface contract (callers: ``_run_conversation_loop``,
-        ``_standard_run_stream``): ``max_steps`` is ``max_iterations`` (default
-        ``config.max_iterations``) times ``FSM_BUDGET_MULTIPLIER``;
-        ``max_seconds`` is what is left of ``config.timeout_seconds`` since
-        ``start_time`` (always above 0). Raises ``AgentTimeoutError`` when
-        nothing is left: core refuses a non-positive time budget.
+        ``_standard_run_stream``): ``max_steps`` is the pattern's
+        ``_step_ceiling`` for ``max_iterations`` (default
+        ``config.max_iterations``); ``max_seconds`` is what is left of
+        ``config.timeout_seconds`` since ``start_time`` (always above 0).
+        Raises ``AgentTimeoutError`` when nothing is left: core refuses a
+        non-positive time budget.
         """
         remaining = self.config.timeout_seconds - (time.monotonic() - start_time)
         if remaining <= 0:
             raise AgentTimeoutError(self.config.timeout_seconds)
-        max_iters = max_iterations or self.config.max_iterations
-        return max_iters * Defaults.FSM_BUDGET_MULTIPLIER, remaining
+        ceiling, _ = self._step_ceiling(max_iterations or self.config.max_iterations)
+        return ceiling, remaining
+
+    def _step_ceiling(self, max_iterations: int) -> tuple[int, str]:
+        """The core step ceiling of a run with *max_iterations*, and its formula.
+
+        Interface contract (callers: ``_run_budgets``, ``_budget_error``; a
+        pattern whose loop turn is not ``FSM_BUDGET_MULTIPLIER`` steps
+        overrides it, as ``NativeFunctionCallingReactAgent`` does): returns
+        ``(ceiling, formula)``, ``ceiling >= 1`` and ``formula`` the text the
+        budget error cites after ``"<ceiling> loop turns = "``. Never raises.
+        """
+        multiplier = Defaults.FSM_BUDGET_MULTIPLIER
+        return (
+            max_iterations * multiplier,
+            f"max_iterations {max_iterations} x FSM_BUDGET_MULTIPLIER {multiplier}",
+        )
 
     def _budget_error(
         self, exc: RunBudgetExceededError, max_iterations: int | None = None
@@ -1013,16 +1029,12 @@ class BaseAgent(ABC):
         """
         if exc.budget == "seconds":
             return AgentTimeoutError(self.config.timeout_seconds)
-        max_iters = max_iterations or self.config.max_iterations
-        ceiling = max_iters * Defaults.FSM_BUDGET_MULTIPLIER
+        ceiling, formula = self._step_ceiling(
+            max_iterations or self.config.max_iterations
+        )
         # LOOP-17: cite the loop-turn ceiling that was hit, not max_iterations.
         return BudgetExhaustedError(
-            "iterations",
-            ceiling,
-            detail=(
-                f"{ceiling} loop turns = max_iterations {max_iters} x "
-                f"FSM_BUDGET_MULTIPLIER {Defaults.FSM_BUDGET_MULTIPLIER}"
-            ),
+            "iterations", ceiling, detail=f"{ceiling} loop turns = {formula}"
         )
 
     # ------------------------------------------------------------------
@@ -1178,7 +1190,10 @@ class BaseAgent(ABC):
 
         Returns:
             ``(False, <forced reason>)`` when the run was forced to stop
-            (``_forced_stop_reason``, ``judged`` passed through); else, in
+            (``_forced_stop_reason``, ``judged`` passed through);
+            ``(False, "no_result")`` when a handler recorded
+            ``StopReason.NO_RESULT`` under ``forced_stop_reason`` (the run
+            ended without a result its own rule accepts: native_fc); else, in
             planner mode
             (``execution_evidence_keys``), ``(True, "evidence")`` with real
             execution evidence; otherwise ``(True, "answered")`` when
@@ -1199,6 +1214,17 @@ class BaseAgent(ABC):
         forced = BaseAgent._forced_stop_reason(final_context, judged=judged)
         if forced is not None:
             return False, forced
+        # DECISION plan-2026-10-01T093600-944e2692/D-028: a pattern whose
+        # success rule is stricter than "an answer key or a tool call" (native
+        # function calling: the loop reached a tool-call-free final turn with
+        # a non-empty answer, bf7ffe24/D-005) states its verdict through a
+        # handler-recorded `no_result`, read HERE. Do NOT compute success in
+        # the pattern, add a per-pattern keyword or put NO_RESULT in
+        # StopReason.FORCED (it is not a forced stop: no warning, no limiter
+        # reads it). The key is handler-only and a run output, so a model or
+        # caller cannot write it. See decisions.md D-028.
+        if final_context.get(ContextKeys.FORCED_STOP_REASON) == StopReason.NO_RESULT:
+            return False, StopReason.NO_RESULT
         if execution_evidence_keys:
             if BaseAgent._has_execution_evidence(
                 final_context, execution_evidence_keys
