@@ -309,11 +309,16 @@ class StopReason:
     NO_RESULT = "no_result"
     # A prompt-chain validation gate failed.
     GATE_FAILED = "gate_failed"
+    # The conversation was ended from outside the run (a hook, another
+    # thread, a monitor) before it reached a final state; recorded by
+    # ``BaseAgent._run_conversation_loop``, the last output still ships.
+    ENDED = "ended"
 
     # Reasons a forcing handler may record in ``ContextKeys.FORCED_STOP_REASON``
-    # (the prompt-chain gate handler records ``GATE_FAILED``).
+    # (the prompt-chain gate handler records ``GATE_FAILED``; the run loop
+    # records ``ENDED``).
     FORCED: frozenset[str] = frozenset(
-        {MAX_ITERATIONS, FORCED_PASS, STALLED, GATE_FAILED}
+        {MAX_ITERATIONS, FORCED_PASS, STALLED, GATE_FAILED, ENDED}
     )
 
 

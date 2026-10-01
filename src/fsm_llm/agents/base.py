@@ -27,7 +27,7 @@ from pydantic import BaseModel, ValidationError
 from fsm_llm import API
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
 from fsm_llm.context import ContextCompactor
-from fsm_llm.definitions import RunBudgetExceededError
+from fsm_llm.definitions import FSMError, RunBudgetExceededError
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
@@ -540,11 +540,44 @@ class BaseAgent(ABC):
 
             replies = [greeting or None, *(step.response for step in steps)]
             final_context = api.get_data(conv_id)
+            # D-050: core ends the run normally when the conversation is
+            # closed from outside (a hook, another thread, a monitor). That
+            # run reached no final state, so it is a forced stop, not an
+            # answer: the conversation is no longer active and its last step
+            # did not end it.
+            if conv_id not in api.list_active_conversations() and not (
+                steps and steps[-1].ended
+            ):
+                final_context[ContextKeys.FORCED_STOP_REASON] = StopReason.ENDED
             log.info(LogMessages.AGENT_COMPLETE.format(iterations=len(steps)))
             return [r for r in replies if r is not None], final_context, len(steps)
 
         finally:
+            self._end_run_conversation(api, conv_id)
+
+    @staticmethod
+    def _end_run_conversation(api: API, conv_id: str) -> None:
+        """End the run's conversation unless something else already ended it.
+
+        Interface contract (callers: the ``finally`` of
+        ``_run_conversation_loop`` and ``_standard_run_stream``): calls
+        ``api.end_conversation(conv_id)``. A failure is re-raised unless
+        ``conv_id`` is no longer an active conversation (a hook, another
+        thread or a monitor ended it during the run). A refused end
+        (``ConversationBusyError``) leaves the conversation active, so it is
+        re-raised.
+        """
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-050: a conversation that
+        # was ended from outside the run (the run itself stops cleanly, D-044)
+        # must not fail the run in its own cleanup with "Conversation not
+        # found". Do NOT catch every error here: only an end that failed
+        # because the conversation is already gone is tolerated. See D-050.
+        try:
             api.end_conversation(conv_id)
+        except FSMError:
+            if conv_id in api.list_active_conversations():
+                raise
+            logger.debug(f"Conversation {conv_id} was already ended")
 
     def _on_loop_iteration(  # noqa: B027
         self,
@@ -837,8 +870,8 @@ class BaseAgent(ABC):
         (ReactAgent, ReflexionAgent, ReasoningReactAgent).  Subclasses must
         set ``self.hitl`` to a :class:`HumanInTheLoop` instance (or ``None``).
         """
-        from .handlers import approval_grant, refusal_record
-        from .tools import normalize_tool_input, redact_secret_entries
+        from .handlers import approval_grant, call_label, call_ran, refusal_record
+        from .tools import normalize_tool_input
 
         hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
         if hitl is None:
@@ -903,28 +936,38 @@ class BaseAgent(ABC):
             # LOOP-06 (D-021 of plan 06a5ec0a): the denial reaches the next think
             # turn as feedback, never as an observation: an observation would
             # bump observation_count and satisfy the D-008 conclude guard with
-            # no tool result. The input shown is the redacted copy (D-016).
-            shown = redact_secret_entries(tool_input)
+            # no tool result. The input shown is the redacted copy (D-016,
+            # `call_label`).
             # D-034 (plan 07ad3f8c): the feedback is gone after the next think
             # turn, so the refusal is also kept as a fact for conclude. The
             # executor drops the entry if this call is approved later and runs
             # (D-045, `AgentHandlers.spend_grant`).
+            # DECISION plan-2026-09-30T062855-07ad3f8c/D-049
+            # A denied re-ask of a call that already ran in this run gets no
+            # record: "was not performed" would be false, and the conclude
+            # prompt would tell the model to deny an action that ran (a user
+            # who retries then performs it twice). Do NOT record it with other
+            # wording (two facts about one call in one prompt), and do NOT keep
+            # a raw copy of executed calls to compare (an unredacted second
+            # copy of the parameters in context, D-045); the run's trace is the
+            # record of executed calls. See decisions.md D-049.
             record = refusal_record(tool_name, tool_input)
             refused = list(full.get(ContextKeys.REFUSED_ACTIONS) or [])
-            if record not in refused:
+            ran = call_ran(full.get(ContextKeys.AGENT_TRACE), tool_name, tool_input)
+            if record not in refused and not ran:
                 refused.append(record)
-            api.update_context(
-                conv_id,
-                {
-                    ContextKeys.TOOL_NAME: None,
-                    ContextKeys.TOOL_INPUT: None,
-                    ContextKeys.AGENT_FEEDBACK: (
-                        f"The human reviewer denied the call {tool_name}({shown}). "
-                        "Do not repeat it; choose another tool or approach."
-                    ),
-                    ContextKeys.REFUSED_ACTIONS: refused,
-                },
-            )
+            denial: dict[str, Any] = {
+                ContextKeys.TOOL_NAME: None,
+                ContextKeys.TOOL_INPUT: None,
+                ContextKeys.AGENT_FEEDBACK: (
+                    f"The human reviewer denied the call "
+                    f"{call_label(tool_name, tool_input)}. "
+                    "Do not repeat it; choose another tool or approach."
+                ),
+            }
+            if refused:
+                denial[ContextKeys.REFUSED_ACTIONS] = refused
+            api.update_context(conv_id, denial)
 
     # ------------------------------------------------------------------
     # Budget enforcement
@@ -1373,7 +1416,7 @@ class BaseAgent(ABC):
                     before_step=partial(self._on_loop_iteration, api, conv_id),
                 )
             finally:
-                api.end_conversation(conv_id)
+                self._end_run_conversation(api, conv_id)
         except RunBudgetExceededError as exc:
             raise self._budget_error(exc, max_iterations) from exc
         except (AgentTimeoutError, BudgetExhaustedError):

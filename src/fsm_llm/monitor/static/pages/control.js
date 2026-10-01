@@ -761,7 +761,6 @@ const _KEY_LABELS = [
     ['tool_name',           'Tool'],
     ['tool_input',          'Input'],
     ['tool_result',         'Result'],
-    ['final_answer',        'Answer'],
     ['observations',        'Observations'],
     ['evaluation_feedback', 'Feedback'],
     ['reflection',          'Reflection'],

@@ -1393,7 +1393,9 @@ class MessagePipeline:
 
         ``user_message`` of ``None`` (a turn with no user message) builds the
         prompt from the context the state may read and the recent
-        conversation instead of a message, and sends ``""`` on the request.
+        conversation instead of a message; the request carries ``None``
+        (the LLM layer sends the neutral instruction), never ``""`` (an empty
+        string is a message the user sent empty, D-044).
         """
         log = logger.bind(conversation_id=conversation_id)
 
@@ -1905,7 +1907,7 @@ class MessagePipeline:
         (e.g., tool_input can see that tool_name was already extracted).
 
         ``user_message`` of ``None`` (no user message) gives the context-only
-        prompt and ``""`` on the request.
+        prompt and stays ``None`` on the request, never ``""`` (D-044).
 
         ``memo`` (D-035, ``None`` = disabled) maps ``(field_name, built prompt
         + "|" + message)`` to a previous NULL result; it is only ever handed an

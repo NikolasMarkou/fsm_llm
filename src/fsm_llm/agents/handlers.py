@@ -87,20 +87,44 @@ def approval_grant(tool_name: Any, tool_input: Any) -> dict[str, Any]:
     }
 
 
+def call_label(tool_name: Any, tool_input: Any) -> str:
+    """How one tool call is shown: ``<tool>(<redacted parameters>)``.
+
+    The parameters are the :func:`redact_secret_entries` copy of the
+    :func:`normalize_tool_input` form (secret-looking keys at any depth, in
+    nested mappings and in lists, show ``<redacted>``). Shared by the
+    executor's trace ``action`` (:meth:`AgentHandlers._run_selected_tool`),
+    :func:`refusal_record` and :func:`call_ran`, so a refused call and a call
+    that ran compare equal exactly when they are the same call. Never raises.
+    """
+    return f"{tool_name}({redact_secret_entries(normalize_tool_input(tool_input))})"
+
+
+def call_ran(trace: Any, tool_name: Any, tool_input: Any) -> bool:
+    """Whether the run's ``agent_trace`` holds an executed ``tool_name`` call
+    with these parameters (compared by :func:`call_label`).
+
+    ``trace`` is the context's ``agent_trace`` value; anything but a list is
+    an empty trace. Never raises.
+    """
+    if not isinstance(trace, list):
+        return False
+    label = call_label(tool_name, tool_input)
+    return any(isinstance(step, dict) and step.get("action") == label for step in trace)
+
+
 def refusal_record(tool_name: Any, tool_input: Any) -> str:
     """The ``refused_actions`` entry for one call a human approver refused.
 
     Shared by the approval driver (``BaseAgent._handle_hitl_approval``, which
-    appends it on a denial) and :meth:`AgentHandlers.spend_grant` (which
-    removes it when the same call is later approved and runs), so both build
-    the same text. The parameters are the :func:`redact_secret_entries` copy
-    of the :func:`normalize_tool_input` form (secret-looking keys at any depth,
-    in nested mappings and in lists, show ``<redacted>``). Never raises.
+    appends it on a denial of a call that has not run in this run) and
+    :meth:`AgentHandlers.spend_grant` (which removes it when the same call is
+    later approved and runs), so both build the same text, the
+    :func:`call_label` of the call. Never raises.
     """
-    shown = redact_secret_entries(normalize_tool_input(tool_input))
     return (
-        f"{tool_name}({shown}): was refused by the human approver and was "
-        "not performed."
+        f"{call_label(tool_name, tool_input)}: was refused by the human "
+        "approver and was not performed."
     )
 
 
@@ -385,7 +409,7 @@ class AgentHandlers:
         trace_step = AgentStep(
             iteration=step_num,
             thought=reasoning,
-            action=f"{tool_name}({shown_input})",
+            action=call_label(tool_name, tool_input),
             observation=observation,
         ).model_dump(mode="json")
         # Preserve structured tool input so _build_trace can recover parameters
