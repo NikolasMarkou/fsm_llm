@@ -259,47 +259,6 @@ ORCHESTRATOR_HANDLER_ONLY_KEYS: tuple[str, ...] = (
     ContextKeys.REASONING_PUSH_PENDING,
 )
 
-# Orchestrator keys ``ContextManager.merge_reasoning_results`` may write back
-# from a strategy FSM (its ``<type>_reasoning_completed`` flags aside): what
-# the synthesize_solution fields read.
-MERGED_RESULT_KEYS: tuple[str, ...] = (
-    ContextKeys.CALCULATION_RESULT,
-    ContextKeys.CALCULATION_ERROR_DETAILS,
-    ContextKeys.INTEGRATED_ANALYSIS,
-    ContextKeys.KEY_INSIGHTS,
-    ContextKeys.DEDUCTIVE_CONCLUSION,
-    ContextKeys.LOGICAL_VALIDITY,
-    ContextKeys.INDUCTIVE_HYPOTHESIS,
-    ContextKeys.GENERALIZATION_STRENGTH,
-    ContextKeys.BEST_CREATIVE_SOLUTION,
-    ContextKeys.INNOVATION_RATING,
-    ContextKeys.CRITICAL_ASSESSMENT,
-    ContextKeys.ASSESSMENT_CONFIDENCE,
-    ContextKeys.FINAL_HYBRID_SOLUTION,
-    ContextKeys.HYBRID_SYNTHESIS_SUMMARY,
-    ContextKeys.BEST_EXPLANATION,
-    ContextKeys.EXPLANATION_CONFIDENCE,
-    ContextKeys.ANALOGICAL_SOLUTION,
-    ContextKeys.ANALOGY_CONFIDENCE,
-)
-
-# Opens the instructions of every typed field whose value the model writes
-# (an analysis, a list of ideas, an answer): the field prompt frames each value
-# as an extraction, and a small model returns null for text nothing in the
-# context holds (LESSONS, 06a5ec0a D-036).
-COMPOSE_INSTRUCTION = (
-    "This value does not exist yet: do not look for it in the context, work "
-    "it out yourself now and never return null. "
-)
-
-# Pass-2 instructions of the states whose reply is kept: the orchestrator's
-# final_answer and each strategy FSM's terminal state (its reply goes into
-# ``all_responses``). Every other reasoning state is silent (no Pass-2 call).
-ANSWER_RESPONSE_INSTRUCTIONS = (
-    "Present the final result clearly. Do not ask questions or request "
-    "additional input from the user."
-)
-
 # The hybrid strategy state whose exit the loop counter handler counts; its
 # back edge to the first hybrid state runs at most Defaults.MAX_HYBRID_LOOPS
 # times.

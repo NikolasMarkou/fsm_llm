@@ -4,28 +4,12 @@ Complete FSM definitions for the reasoning engine.
 Contains all finite state machine definitions for reasoning strategies:
 orchestrator, classifier, and 9 specialized reasoning FSMs.
 All FSMs use standardized context keys from constants.py.
-
-Every key the model writes is one core typed field (``field_extractions``)
-with its own instructions and a narrowed prompt context; no state has
-state-level ``extraction_instructions`` (no bulk extraction call), and only
-the states whose reply is kept (``final_answer`` and each strategy FSM's
-terminal state) have ``response_instructions``: every other state is silent
-and makes no Pass-2 call.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
-
-from fsm_llm import typed_field_extraction
-from fsm_llm.definitions import TypedFieldType
-
 from .constants import (
-    ANSWER_RESPONSE_INSTRUCTIONS,
-    COMPOSE_INSTRUCTION,
     HYBRID_EVALUATION_STATE,
-    MERGED_RESULT_KEYS,
     ORCHESTRATOR_HANDLER_ONLY_KEYS,
     ClassifierStates,
     ContextKeys,
@@ -33,87 +17,9 @@ from .constants import (
     OrchestratorStates,
 )
 
-_C = COMPOSE_INSTRUCTION
-_K = ContextKeys
-
-# Keys the first state of every strategy FSM reads besides the problem
-# statement: what the engine passes into a pushed strategy FSM.
-_PROBLEM_READS: tuple[str, ...] = (
-    _K.PROBLEM_TYPE,
-    _K.PROBLEM_COMPONENTS,
-    _K.CONSTRAINTS,
-)
-
-
-def _field(
-    name: str,
-    field_type: TypedFieldType,
-    instructions: str,
-    *,
-    reads: Sequence[str] = (),
-    required: bool = True,
-) -> dict[str, Any]:
-    """One typed field of a reasoning state.
-
-    Contract: core ``typed_field_extraction`` with ``context_keys`` set to
-    ``problem_statement`` followed by ``reads`` (the keys the value is worked
-    out from; a key absent from context is simply not shown). Raises what the
-    core builder raises (an envelope-key name, an internal-prefixed key).
-    """
-    # DECISION plan-2026-10-01T093600-944e2692/D-055: every model-written
-    # reasoning key is a typed field on a narrowed context. Do NOT put back
-    # state-level extraction_instructions or required_context_keys for these
-    # keys: the first buys a bulk call per step, the second mints an untyped
-    # `any` field that reads the whole context (reasoning_trace included).
-    # Do NOT add a field for a handler-only key (ORCHESTRATOR_HANDLER_ONLY_KEYS,
-    # hybrid_loop_count): the model must never write the verdict or a counter.
-    return typed_field_extraction(
-        name,
-        field_type,
-        instructions,
-        context_keys=(_K.PROBLEM_STATEMENT, *reads),
-        required=required,
-    )
-
-
-def _state(
-    state_id: str,
-    description: str,
-    purpose: str,
-    fields: Sequence[dict[str, Any]],
-    transitions: Sequence[dict[str, Any]],
-    *,
-    response_instructions: str = "",
-) -> dict[str, Any]:
-    """One reasoning state: typed fields only, silent unless given
-    ``response_instructions`` (only answer states are, see the module
-    docstring). Returns the raw state dict ``FSMDefinition`` accepts."""
-    return {
-        "id": state_id,
-        "description": description,
-        "purpose": purpose,
-        "field_extractions": list(fields),
-        "response_instructions": response_instructions,
-        "transitions": list(transitions),
-    }
-
-
-def _then(target_state: str, description: str) -> list[dict[str, Any]]:
-    """The single unconditional transition of a linear chain state."""
-    return [{"target_state": target_state, "description": description}]
-
-
 # ============================================================================
 # ORCHESTRATOR FSM - Main control flow with retry management
 # ============================================================================
-
-_STRATEGY_NAMES = (
-    "simple_calculator (arithmetic), analytical (systematic breakdown), "
-    "deductive (logic from premises), inductive (patterns from cases), "
-    "creative (new ideas), critical (judging an argument or evidence), "
-    "abductive (best explanation of a phenomenon), analogical (reasoning by "
-    "similarity), hybrid (several approaches combined)"
-)
 
 orchestrator_fsm = {
     "name": "reasoning_orchestrator",
@@ -127,28 +33,27 @@ orchestrator_fsm = {
     # state's required_context_keys (never extracted, the validator warns).
     "handler_only_keys": list(ORCHESTRATOR_HANDLER_ONLY_KEYS),
     "states": {
-        OrchestratorStates.PROBLEM_ANALYSIS: _state(
-            OrchestratorStates.PROBLEM_ANALYSIS,
-            "Initial analysis of the problem",
-            f"Analyze the '{_K.PROBLEM_STATEMENT}' to identify '{_K.PROBLEM_TYPE}' and '{_K.PROBLEM_COMPONENTS}'",
-            [
-                _field(
-                    _K.PROBLEM_TYPE,
-                    "str",
-                    f"{_C}A short label for the kind of problem in "
-                    "problem_statement: arithmetic, logic, explanation, "
-                    "creative, evaluation, analysis or similar. Use "
-                    "'arithmetic' for a calculation.",
-                ),
-                _field(
-                    _K.PROBLEM_COMPONENTS,
-                    "list",
-                    f"{_C}A JSON list of the key parts of the problem: the "
-                    "given facts, quantities or premises, and what is asked. "
-                    "For a calculation, the numbers and the operation.",
-                ),
+        OrchestratorStates.PROBLEM_ANALYSIS: {
+            "id": OrchestratorStates.PROBLEM_ANALYSIS,
+            "description": "Initial analysis of the problem",
+            "purpose": f"Analyze the '{ContextKeys.PROBLEM_STATEMENT}' to identify '{ContextKeys.PROBLEM_TYPE}', '{ContextKeys.PROBLEM_COMPONENTS}', and '{ContextKeys.CONSTRAINTS}'",
+            "required_context_keys": [
+                ContextKeys.PROBLEM_TYPE,
+                ContextKeys.PROBLEM_COMPONENTS,
             ],
-            [
+            "extraction_instructions": """
+            Break down the problem systematically. For simple arithmetic (e.g., '1+1'), set problem_type='arithmetic' and components as operands/operator.
+
+            Identify:
+            - The type of problem (arithmetic, logical, creative, analytical, etc.)
+            - Key components or elements involved
+            - Any constraints or limitations
+            - The expected outcome or goal
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Work with the problem statement provided in the context.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
                 {
                     "target_state": OrchestratorStates.STRATEGY_SELECTION,
                     "description": "Problem analyzed successfully",
@@ -157,86 +62,112 @@ orchestrator_fsm = {
                         {
                             "description": "Problem type and components identified",
                             "requires_context_keys": [
-                                _K.PROBLEM_TYPE,
-                                _K.PROBLEM_COMPONENTS,
+                                ContextKeys.PROBLEM_TYPE,
+                                ContextKeys.PROBLEM_COMPONENTS,
                             ],
                         }
                     ],
                 }
             ],
-        ),
-        OrchestratorStates.STRATEGY_SELECTION: _state(
-            OrchestratorStates.STRATEGY_SELECTION,
-            "Select appropriate reasoning strategy",
-            f"Choose '{_K.REASONING_STRATEGY}' based on problem analysis. For arithmetic, choose 'simple_calculator'.",
-            [
-                _field(
-                    _K.REASONING_STRATEGY,
-                    "str",
-                    f"{_C}The reasoning strategy for the problem, exactly one "
-                    f"of: {_STRATEGY_NAMES}. Use the classified_problem_type "
-                    "value when it is set; use simple_calculator when "
-                    "problem_type is arithmetic.",
-                    reads=(
-                        _K.PROBLEM_TYPE,
-                        _K.PROBLEM_COMPONENTS,
-                        _K.CLASSIFIED_PROBLEM_TYPE,
-                    ),
-                ),
-                _field(
-                    _K.STRATEGY_RATIONALE,
-                    "str",
-                    f"{_C}One sentence on why the reasoning_strategy value "
-                    "fits the problem.",
-                    reads=(_K.PROBLEM_TYPE, _K.REASONING_STRATEGY),
-                ),
+        },
+        OrchestratorStates.STRATEGY_SELECTION: {
+            "id": OrchestratorStates.STRATEGY_SELECTION,
+            "description": "Select appropriate reasoning strategy",
+            "purpose": f"Choose '{ContextKeys.REASONING_STRATEGY}' based on problem analysis. For arithmetic, choose 'simple_calculator'.",
+            "required_context_keys": [
+                ContextKeys.REASONING_STRATEGY,
+                ContextKeys.STRATEGY_RATIONALE,
             ],
-            _then(OrchestratorStates.EXECUTE_REASONING, "Strategy selected"),
-        ),
-        # The strategy FSM runs here, pushed and popped by the engine's
-        # before_step hook: nothing to extract, nothing to say.
-        OrchestratorStates.EXECUTE_REASONING: _state(
-            OrchestratorStates.EXECUTE_REASONING,
-            "Execute selected reasoning strategy",
-            "Apply the chosen reasoning approach through specialized FSM execution",
-            [],
-            _then(OrchestratorStates.SYNTHESIZE_SOLUTION, "Reasoning completed"),
-        ),
-        OrchestratorStates.SYNTHESIZE_SOLUTION: _state(
-            OrchestratorStates.SYNTHESIZE_SOLUTION,
-            "Synthesize solution from reasoning results",
-            f"Create '{_K.PROPOSED_SOLUTION}' and '{_K.KEY_INSIGHTS}' from reasoning results",
-            [
-                _field(
-                    _K.PROPOSED_SOLUTION,
-                    "any",
-                    f"{_C}Your complete answer to problem_statement, built "
-                    "from the strategy results given (for a calculation, the "
-                    "calculation_result value). State the answer itself "
-                    "first, then the reasoning that supports it.",
-                    reads=MERGED_RESULT_KEYS,
-                ),
-                _field(
-                    _K.KEY_INSIGHTS,
-                    "list",
-                    f"{_C}A JSON list of 2 to 4 short insights that support "
-                    "the answer.",
-                    reads=(
-                        _K.PROPOSED_SOLUTION,
-                        *(k for k in MERGED_RESULT_KEYS if k != _K.KEY_INSIGHTS),
-                    ),
-                ),
+            "extraction_instructions": """
+            Select the most appropriate reasoning strategy based on the problem analysis:
+            - If problem_type is 'arithmetic', set reasoning_strategy to 'simple_calculator'
+            - For logical problems, consider 'deductive' or 'analytical'
+            - For creative problems, use 'creative' or 'hybrid'
+            - For evaluation tasks, use 'critical'
+            - For pattern recognition, use 'inductive'
+            - For explanation tasks, use 'abductive'
+            - For similarity-based problems, use 'analogical'
+            - For complex multi-faceted problems, use 'hybrid'
+
+            Provide clear rationale for your choice.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Make the strategy selection based on your problem analysis.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": OrchestratorStates.EXECUTE_REASONING,
+                    "description": "Strategy selected",
+                }
             ],
-            _then(OrchestratorStates.VALIDATE_REFINE, "Solution synthesized"),
-        ),
-        # The verdict and the retry counters are written by handlers only
-        # (D-054): this state extracts nothing.
-        OrchestratorStates.VALIDATE_REFINE: _state(
-            OrchestratorStates.VALIDATE_REFINE,
-            "Validate solution with retry limit protection",
-            f"Check '{_K.VALIDATION_RESULT}' and retry if needed (max {Defaults.MAX_RETRIES} times)",
-            [],
-            [
+        },
+        OrchestratorStates.EXECUTE_REASONING: {
+            "id": OrchestratorStates.EXECUTE_REASONING,
+            "description": "Execute selected reasoning strategy",
+            "purpose": "Apply the chosen reasoning approach through specialized FSM execution",
+            "extraction_instructions": """
+            The appropriate reasoning FSM will be executed here by handlers based on the selected strategy.
+            This state serves as a coordination point for specialized reasoning execution.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. The execution will be handled automatically.
+            """,
+            "response_instructions": "Acknowledge the current state of reasoning. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": OrchestratorStates.SYNTHESIZE_SOLUTION,
+                    "description": "Reasoning completed",
+                }
+            ],
+        },
+        OrchestratorStates.SYNTHESIZE_SOLUTION: {
+            "id": OrchestratorStates.SYNTHESIZE_SOLUTION,
+            "description": "Synthesize solution from reasoning results",
+            "purpose": f"Create '{ContextKeys.PROPOSED_SOLUTION}' and '{ContextKeys.KEY_INSIGHTS}' from reasoning results",
+            "required_context_keys": [
+                ContextKeys.PROPOSED_SOLUTION,
+                ContextKeys.KEY_INSIGHTS,
+            ],
+            "extraction_instructions": f"""
+            Synthesize a comprehensive solution from the reasoning results:
+
+            - If '{ContextKeys.CALCULATION_RESULT}' exists (from simple calculator), use it as the proposed_solution
+            - If analytical results exist, synthesize from integrated_analysis and conclusions
+            - If creative results exist, use the best_creative_solution
+            - If critical results exist, incorporate the critical_assessment
+            - Always provide key_insights as a list of important findings
+            - Ensure the solution directly addresses the original problem
+
+            Create a clear, actionable solution with supporting insights.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Synthesize based on available reasoning outputs.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": OrchestratorStates.VALIDATE_REFINE,
+                    "description": "Solution synthesized",
+                }
+            ],
+        },
+        OrchestratorStates.VALIDATE_REFINE: {
+            "id": OrchestratorStates.VALIDATE_REFINE,
+            "description": "Validate solution with retry limit protection",
+            "purpose": f"Check '{ContextKeys.VALIDATION_RESULT}' and retry if needed (max {Defaults.MAX_RETRIES} times)",
+            "extraction_instructions": """
+            Validate the proposed solution:
+
+            - Check if the solution adequately addresses the original problem
+            - Evaluate the logical consistency and completeness
+            - Assess confidence level (1-10 scale)
+            - Identify any significant gaps or errors
+            - Consider if retry is warranted (only for serious issues)
+
+            Handlers set validation_result and manage retry_count to prevent infinite loops.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Validate based on the solution quality and completeness.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
                 {
                     "target_state": OrchestratorStates.FINAL_ANSWER,
                     "description": "Solution valid or max retries reached",
@@ -246,8 +177,18 @@ orchestrator_fsm = {
                             "description": "Valid solution or retry limit hit",
                             "logic": {
                                 "or": [
-                                    {"==": [{"var": _K.VALIDATION_RESULT}, True]},
-                                    {"==": [{"var": _K.MAX_RETRIES_REACHED}, True]},
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.VALIDATION_RESULT},
+                                            True,
+                                        ]
+                                    },
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.MAX_RETRIES_REACHED},
+                                            True,
+                                        ]
+                                    },
                                 ]
                             },
                         }
@@ -262,39 +203,50 @@ orchestrator_fsm = {
                             "description": "Invalid and can retry",
                             "logic": {
                                 "and": [
-                                    {"==": [{"var": _K.VALIDATION_RESULT}, False]},
-                                    {"!=": [{"var": _K.MAX_RETRIES_REACHED}, True]},
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.VALIDATION_RESULT},
+                                            False,
+                                        ]
+                                    },
+                                    {
+                                        "!=": [
+                                            {"var": ContextKeys.MAX_RETRIES_REACHED},
+                                            True,
+                                        ]
+                                    },
                                 ]
                             },
                         }
                     ],
                 },
             ],
-        ),
-        OrchestratorStates.FINAL_ANSWER: _state(
-            OrchestratorStates.FINAL_ANSWER,
-            "Present final answer with complete reasoning trace",
-            f"Set '{_K.FINAL_SOLUTION}' and final metadata",
-            [
-                _field(
-                    _K.FINAL_SOLUTION,
-                    "any",
-                    f"{_C}The final answer to problem_statement as the user "
-                    "will read it: the proposed_solution value restated "
-                    "clearly and completely (without a proposed_solution, "
-                    "your own best answer to the problem). When "
-                    "max_retries_reached is true, add one sentence saying the "
-                    "answer could not be fully validated.",
-                    reads=(
-                        _K.PROPOSED_SOLUTION,
-                        _K.KEY_INSIGHTS,
-                        _K.MAX_RETRIES_REACHED,
-                    ),
-                ),
+        },
+        OrchestratorStates.FINAL_ANSWER: {
+            "id": OrchestratorStates.FINAL_ANSWER,
+            "description": "Present final answer with complete reasoning trace",
+            "purpose": f"Set '{ContextKeys.FINAL_SOLUTION}' and final metadata",
+            "required_context_keys": [
+                ContextKeys.FINAL_SOLUTION,
+                ContextKeys.REASONING_TRACE,
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+            "extraction_instructions": """
+            Present the final solution with complete context:
+
+            Set final_solution to:
+            - proposed_solution if validation_result is True
+            - proposed_solution with retry warning if max_retries_reached but solution exists
+            - 'Unable to find valid solution after maximum attempts' if no valid solution
+
+            Include:
+            - Complete reasoning_trace showing the path taken
+            - Summary of key insights and approach used
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Present the final solution based on the reasoning process.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -303,128 +255,137 @@ orchestrator_fsm = {
 # CLASSIFIER FSM - Problem classification and strategy recommendation
 # ============================================================================
 
-# The classifier's reply is never read (the engine reads its context only), so
-# even its terminal state is silent.
-_CLASSIFIER_READS: tuple[str, ...] = (_K.PROBLEM_TYPE, _K.PROBLEM_COMPONENTS)
-
 classifier_fsm = {
     "name": "problem_classifier",
     "description": "Classifies problems to determine the most appropriate reasoning strategy",
     "initial_state": ClassifierStates.ANALYZE_DOMAIN,
     "persona": "You are an expert problem analyst who identifies the best reasoning approach for any given problem.",
     "states": {
-        ClassifierStates.ANALYZE_DOMAIN: _state(
-            ClassifierStates.ANALYZE_DOMAIN,
-            "Identify problem domain and context",
-            f"Determine '{_K.PROBLEM_DOMAIN}' and '{_K.DOMAIN_INDICATORS}'",
-            [
-                _field(
-                    _K.PROBLEM_DOMAIN,
-                    "str",
-                    f"{_C}The primary domain of the problem, one of: "
-                    "mathematics, logic, creativity, analysis, evaluation, "
-                    "empirical, explanatory, comparative.",
-                    reads=_CLASSIFIER_READS,
-                ),
-                _field(
-                    _K.DOMAIN_INDICATORS,
-                    "list",
-                    f"{_C}A JSON list of the features of the problem that "
-                    "point to the problem_domain value (numbers and "
-                    "operations, premises, a request for ideas, an argument "
-                    "to judge, observations to explain, a comparison).",
-                    reads=(*_CLASSIFIER_READS, _K.PROBLEM_DOMAIN),
-                ),
+        ClassifierStates.ANALYZE_DOMAIN: {
+            "id": ClassifierStates.ANALYZE_DOMAIN,
+            "description": "Identify problem domain and context",
+            "purpose": f"Determine '{ContextKeys.PROBLEM_DOMAIN}' and '{ContextKeys.DOMAIN_INDICATORS}'",
+            "required_context_keys": [
+                ContextKeys.PROBLEM_DOMAIN,
+                ContextKeys.DOMAIN_INDICATORS,
             ],
-            _then(ClassifierStates.ANALYZE_STRUCTURE, "Domain identified"),
-        ),
-        ClassifierStates.ANALYZE_STRUCTURE: _state(
-            ClassifierStates.ANALYZE_STRUCTURE,
-            "Analyze problem structure and complexity",
-            f"Identify '{_K.PROBLEM_STRUCTURE}' and '{_K.STRUCTURAL_ELEMENTS}'",
-            [
-                _field(
-                    _K.PROBLEM_STRUCTURE,
-                    "str",
-                    f"{_C}The structure of the problem, one of: simple (one "
-                    "step), sequential, hierarchical, network, complex.",
-                    reads=(*_CLASSIFIER_READS, _K.PROBLEM_DOMAIN),
-                ),
-                _field(
-                    _K.STRUCTURAL_ELEMENTS,
-                    "list",
-                    f"{_C}A JSON list of the problem's structural elements: "
-                    "its components, relationships, dependencies and "
-                    "constraints.",
-                    reads=(*_CLASSIFIER_READS, _K.PROBLEM_STRUCTURE),
-                ),
+            "extraction_instructions": """
+            Analyze the problem domain:
+
+            Identify the primary domain (mathematics, logic, creativity, analysis, evaluation, etc.) and specific indicators:
+            - Mathematical: Contains numbers, operations, calculations, formulas
+            - Logical: Involves premises, conclusions, if-then relationships
+            - Creative: Requires novel solutions, brainstorming, innovation
+            - Analytical: Needs breakdown, decomposition, systematic analysis
+            - Critical: Involves evaluation, judgment, argument assessment
+            - Empirical: Based on observations, patterns, data analysis
+            - Explanatory: Seeks to explain phenomena or observations
+            - Comparative: Involves analogies, similarities, pattern matching
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Analyze the domain based on the problem statement provided.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": ClassifierStates.ANALYZE_STRUCTURE,
+                    "description": "Domain identified",
+                }
             ],
-            _then(ClassifierStates.IDENTIFY_REASONING_NEEDS, "Structure analyzed"),
-        ),
-        ClassifierStates.IDENTIFY_REASONING_NEEDS: _state(
-            ClassifierStates.IDENTIFY_REASONING_NEEDS,
-            "Identify specific reasoning requirements",
-            f"Determine '{_K.REASONING_REQUIREMENTS}' and '{_K.KEY_CHALLENGES}'",
-            [
-                _field(
-                    _K.REASONING_REQUIREMENTS,
-                    "str",
-                    f"{_C}The kind of reasoning the problem needs, in a few "
-                    "words: decomposition, deduction from premises, pattern "
-                    "generalization, idea generation, critical evaluation, "
-                    "best explanation, analogy, or several combined. Use "
-                    "'direct computation' for a plain calculation.",
-                    reads=(
-                        *_CLASSIFIER_READS,
-                        _K.PROBLEM_DOMAIN,
-                        _K.PROBLEM_STRUCTURE,
-                    ),
-                ),
-                _field(
-                    _K.KEY_CHALLENGES,
-                    "list",
-                    f"{_C}A JSON list of the main challenges the reasoning "
-                    "must handle.",
-                    reads=(*_CLASSIFIER_READS, _K.REASONING_REQUIREMENTS),
-                ),
+        },
+        ClassifierStates.ANALYZE_STRUCTURE: {
+            "id": ClassifierStates.ANALYZE_STRUCTURE,
+            "description": "Analyze problem structure and complexity",
+            "purpose": f"Identify '{ContextKeys.PROBLEM_STRUCTURE}' and '{ContextKeys.STRUCTURAL_ELEMENTS}'",
+            "required_context_keys": [
+                ContextKeys.PROBLEM_STRUCTURE,
+                ContextKeys.STRUCTURAL_ELEMENTS,
             ],
-            _then(ClassifierStates.RECOMMEND_STRATEGY, "Needs identified"),
-        ),
-        ClassifierStates.RECOMMEND_STRATEGY: _state(
-            ClassifierStates.RECOMMEND_STRATEGY,
-            "Recommend optimal reasoning strategy",
-            f"Set '{_K.RECOMMENDED_REASONING_TYPE}', '{_K.STRATEGY_JUSTIFICATION}', and '{_K.ALTERNATIVE_APPROACHES}'",
-            [
-                _field(
-                    _K.RECOMMENDED_REASONING_TYPE,
-                    "str",
-                    f"{_C}The best reasoning strategy for the problem, exactly "
-                    f"one of: {_STRATEGY_NAMES}.",
-                    reads=(
-                        *_CLASSIFIER_READS,
-                        _K.PROBLEM_DOMAIN,
-                        _K.PROBLEM_STRUCTURE,
-                        _K.REASONING_REQUIREMENTS,
-                    ),
-                ),
-                _field(
-                    _K.STRATEGY_JUSTIFICATION,
-                    "str",
-                    f"{_C}One sentence on why the recommended_reasoning_type "
-                    "value fits the problem.",
-                    reads=(_K.REASONING_REQUIREMENTS, _K.RECOMMENDED_REASONING_TYPE),
-                ),
-                _field(
-                    _K.ALTERNATIVE_APPROACHES,
-                    "list",
-                    f"{_C}A JSON list of 1 or 2 other strategy names from the "
-                    "same set that could also work.",
-                    reads=(_K.RECOMMENDED_REASONING_TYPE,),
-                    required=False,
-                ),
+            "extraction_instructions": """
+            Analyze the structural characteristics:
+
+            Identify structure type and key elements:
+            - Simple: Single-step, direct solution path
+            - Sequential: Multi-step process with clear order
+            - Hierarchical: Nested components with dependencies
+            - Network: Multiple interconnected elements
+            - Complex: Multi-faceted with various approaches needed
+
+            Document structural elements like components, relationships, dependencies, constraints.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Analyze structure from the given problem.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": ClassifierStates.IDENTIFY_REASONING_NEEDS,
+                    "description": "Structure analyzed",
+                }
             ],
-            [],
-        ),
+        },
+        ClassifierStates.IDENTIFY_REASONING_NEEDS: {
+            "id": ClassifierStates.IDENTIFY_REASONING_NEEDS,
+            "description": "Identify specific reasoning requirements",
+            "purpose": f"Determine '{ContextKeys.REASONING_REQUIREMENTS}' and '{ContextKeys.KEY_CHALLENGES}'",
+            "required_context_keys": [
+                ContextKeys.REASONING_REQUIREMENTS,
+                ContextKeys.KEY_CHALLENGES,
+            ],
+            "extraction_instructions": """
+            Identify what type of reasoning is needed:
+
+            For simple calculations, set reasoning_requirements='direct computation'.
+            For other problems, identify specific needs:
+            - Decomposition and analysis
+            - Logical deduction from premises
+            - Pattern recognition and generalization
+            - Creative solution generation
+            - Critical evaluation of arguments
+            - Best explanation finding
+            - Analogical transfer of insights
+            - Multi-approach integration
+
+            Document key challenges that the reasoning approach must address.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Determine requirements based on your analysis.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": ClassifierStates.RECOMMEND_STRATEGY,
+                    "description": "Needs identified",
+                }
+            ],
+        },
+        ClassifierStates.RECOMMEND_STRATEGY: {
+            "id": ClassifierStates.RECOMMEND_STRATEGY,
+            "description": "Recommend optimal reasoning strategy",
+            "purpose": f"Set '{ContextKeys.RECOMMENDED_REASONING_TYPE}', '{ContextKeys.STRATEGY_JUSTIFICATION}', and '{ContextKeys.ALTERNATIVE_APPROACHES}'",
+            "required_context_keys": [
+                ContextKeys.RECOMMENDED_REASONING_TYPE,
+                ContextKeys.STRATEGY_JUSTIFICATION,
+                ContextKeys.ALTERNATIVE_APPROACHES,
+            ],
+            "extraction_instructions": """
+            Recommend the best reasoning strategy:
+
+            Choose from available strategies:
+            - simple_calculator: For basic arithmetic operations
+            - analytical: For systematic breakdown and analysis
+            - deductive: For logical reasoning from premises
+            - inductive: For pattern recognition and generalization
+            - creative: For novel solution generation
+            - critical: For argument and evidence evaluation
+            - abductive: For finding best explanations
+            - analogical: For similarity-based problem solving
+            - hybrid: For complex problems needing multiple approaches
+
+            Provide clear justification and identify 1-2 alternative approaches that could also work.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Make recommendation based on your complete analysis.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -439,53 +400,61 @@ simple_calculator_fsm = {
     "initial_state": "extract_elements",
     "persona": "You are a precise calculator that performs arithmetic operations accurately.",
     "states": {
-        "extract_elements": _state(
-            "extract_elements",
-            "Extract operands and operator from problem",
-            f"Extract '{_K.OPERAND1}', '{_K.OPERAND2}', and '{_K.OPERATOR}'",
-            [
-                _field(
-                    _K.OPERAND1,
-                    "any",
-                    "The first number of the calculation the problem asks "
-                    "for (decimals and negative numbers allowed).",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.OPERAND2,
-                    "any",
-                    "The second number of the calculation the problem asks "
-                    "for (decimals and negative numbers allowed).",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.OPERATOR,
-                    "str",
-                    "The operation between the two numbers: +, -, *, /, ^ "
-                    "(power) or %.",
-                    reads=_PROBLEM_READS,
-                ),
+        "extract_elements": {
+            "id": "extract_elements",
+            "description": "Extract operands and operator from problem",
+            "purpose": f"Extract '{ContextKeys.OPERAND1}', '{ContextKeys.OPERAND2}', and '{ContextKeys.OPERATOR}'",
+            "required_context_keys": [
+                ContextKeys.OPERAND1,
+                ContextKeys.OPERAND2,
+                ContextKeys.OPERATOR,
             ],
-            _then("perform_calculation", "Elements extracted successfully"),
-        ),
-        "perform_calculation": _state(
-            "perform_calculation",
-            "Calculate the arithmetic result",
-            f"Calculate and store result in '{_K.CALCULATION_RESULT}'",
-            [
-                _field(
-                    _K.CALCULATION_RESULT,
-                    "any",
-                    f"{_C}The result of the calculation problem_statement asks "
-                    "for: work it out step by step (operand1 operator "
-                    "operand2 for a single operation) and give the final "
-                    "number, with its unit when the problem has one.",
-                    reads=(_K.OPERAND1, _K.OPERAND2, _K.OPERATOR),
-                ),
+            "extraction_instructions": """
+            Extract the mathematical elements from the problem:
+
+            - Identify the first number (operand1)
+            - Identify the second number (operand2)
+            - Identify the operation (+, -, *, /, ^, etc.)
+            - Handle decimal numbers and negative numbers
+            - Extract from problem_components if available, otherwise parse from problem_statement
+
+            For expressions like "2 + 3", set operand1=2, operand2=3, operator="+"
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Extract elements from the available problem information.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "perform_calculation",
+                    "description": "Elements extracted successfully",
+                }
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+        },
+        "perform_calculation": {
+            "id": "perform_calculation",
+            "description": "Calculate the arithmetic result",
+            "purpose": f"Calculate and store result in '{ContextKeys.CALCULATION_RESULT}'",
+            "required_context_keys": [ContextKeys.CALCULATION_RESULT],
+            "extraction_instructions": """
+            Perform the arithmetic calculation:
+
+            - Execute the operation: operand1 operator operand2
+            - Handle basic operations: +, -, *, /, ^(power)
+            - Manage edge cases: division by zero, overflow, invalid operations
+            - Store the numerical result in calculation_result
+            - If error occurs, store error description in calculation_error
+
+            Examples:
+            - 2 + 3 = 5
+            - 10 / 2 = 5
+            - 5 * 4 = 20
+            - 2^3 = 8
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Perform calculation with extracted elements.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -494,127 +463,125 @@ simple_calculator_fsm = {
 # ANALYTICAL REASONING FSM - Systematic decomposition and analysis
 # ============================================================================
 
-_ANALYTICAL_DECOMPOSED = (_K.COMPONENTS, _K.ATTRIBUTES, _K.RELATIONSHIPS)
-
 analytical_fsm = {
     "name": "analytical_reasoning",
     "description": "Analytical reasoning through systematic decomposition and component analysis",
     "initial_state": "decompose",
     "persona": "You are a methodical analytical thinker who breaks down complex problems systematically.",
     "states": {
-        "decompose": _state(
-            "decompose",
-            "Break down the problem into component parts",
-            f"Identify '{_K.COMPONENTS}', '{_K.ATTRIBUTES}', and '{_K.RELATIONSHIPS}'",
-            [
-                _field(
-                    _K.COMPONENTS,
-                    "list",
-                    f"{_C}A JSON list of the smaller, manageable parts the "
-                    "problem breaks into.",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.ATTRIBUTES,
-                    "any",
-                    f"{_C}The key attributes of each component in the "
-                    "components value.",
-                    reads=(_K.COMPONENTS,),
-                ),
-                _field(
-                    _K.RELATIONSHIPS,
-                    "list",
-                    f"{_C}A JSON list of short statements of how the "
-                    "components relate to and depend on each other.",
-                    reads=(_K.COMPONENTS,),
-                ),
+        "decompose": {
+            "id": "decompose",
+            "description": "Break down the problem into component parts",
+            "purpose": f"Identify '{ContextKeys.COMPONENTS}', '{ContextKeys.ATTRIBUTES}', and '{ContextKeys.RELATIONSHIPS}'",
+            "required_context_keys": [
+                ContextKeys.COMPONENTS,
+                ContextKeys.ATTRIBUTES,
+                ContextKeys.RELATIONSHIPS,
             ],
-            _then("analyze_components", "Decomposition complete"),
-        ),
-        "analyze_components": _state(
-            "analyze_components",
-            "Analyze each component in detail",
-            f"Create '{_K.COMPONENT_ANALYSIS}' and identify '{_K.DATA_REQUIREMENTS}'",
-            [
-                _field(
-                    _K.COMPONENT_ANALYSIS,
-                    "any",
-                    f"{_C}Your analysis of each component: its role, its "
-                    "properties, how it contributes to the whole and how "
-                    "much it matters.",
-                    reads=_ANALYTICAL_DECOMPOSED,
-                ),
-                _field(
-                    _K.DATA_REQUIREMENTS,
-                    "list",
-                    f"{_C}A JSON list of extra information a complete "
-                    "analysis would need (an empty list when nothing is "
-                    "missing).",
-                    reads=(_K.COMPONENTS, _K.COMPONENT_ANALYSIS),
-                ),
+            "extraction_instructions": """
+            Systematically decompose the problem:
+
+            - Break the problem into smaller, manageable components
+            - Identify key attributes of each component
+            - Map relationships and dependencies between components
+            - Organize components hierarchically if applicable
+            - Note any emergent properties from component interactions
+
+            Focus on creating a clear structural understanding of the problem space.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Decompose based on the problem as presented.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "analyze_components",
+                    "description": "Decomposition complete",
+                }
             ],
-            _then("identify_patterns", "Component analysis complete"),
-        ),
-        "identify_patterns": _state(
-            "identify_patterns",
-            "Find patterns and dependencies between components",
-            f"Identify '{_K.PATTERNS}', '{_K.CAUSAL_LINKS}', and '{_K.DEPENDENCIES}'",
-            [
-                _field(
-                    _K.PATTERNS,
-                    "list",
-                    f"{_C}A JSON list of the recurring patterns and "
-                    "regularities across the components.",
-                    reads=(*_ANALYTICAL_DECOMPOSED, _K.COMPONENT_ANALYSIS),
-                ),
-                _field(
-                    _K.CAUSAL_LINKS,
-                    "list",
-                    f"{_C}A JSON list of cause-effect links between the "
-                    "components, each as 'cause -> effect'.",
-                    reads=(*_ANALYTICAL_DECOMPOSED, _K.COMPONENT_ANALYSIS),
-                ),
-                _field(
-                    _K.DEPENDENCIES,
-                    "list",
-                    f"{_C}A JSON list of what depends on what, including any "
-                    "feedback loops.",
-                    reads=(*_ANALYTICAL_DECOMPOSED, _K.COMPONENT_ANALYSIS),
-                ),
+        },
+        "analyze_components": {
+            "id": "analyze_components",
+            "description": "Analyze each component in detail",
+            "purpose": f"Create '{ContextKeys.COMPONENT_ANALYSIS}' and identify '{ContextKeys.DATA_REQUIREMENTS}'",
+            "required_context_keys": [
+                ContextKeys.COMPONENT_ANALYSIS,
+                ContextKeys.DATA_REQUIREMENTS,
             ],
-            _then("integrate_findings", "Patterns identified"),
-        ),
-        "integrate_findings": _state(
-            "integrate_findings",
-            "Synthesize understanding from all analytical work",
-            f"Create '{_K.INTEGRATED_ANALYSIS}' and '{_K.KEY_INSIGHTS}'",
-            [
-                _field(
-                    _K.INTEGRATED_ANALYSIS,
-                    "any",
-                    f"{_C}Your integrated answer to problem_statement drawn "
-                    "from the analysis: what the components, patterns and "
-                    "causal links mean together, ending with the conclusion "
-                    "that answers the problem.",
-                    reads=(
-                        _K.COMPONENTS,
-                        _K.COMPONENT_ANALYSIS,
-                        _K.PATTERNS,
-                        _K.CAUSAL_LINKS,
-                        _K.DEPENDENCIES,
-                    ),
-                ),
-                _field(
-                    _K.KEY_INSIGHTS,
-                    "list",
-                    f"{_C}A JSON list of the 2 to 4 most important insights "
-                    "of the analysis.",
-                    reads=(_K.INTEGRATED_ANALYSIS, _K.PATTERNS, _K.CAUSAL_LINKS),
-                ),
+            "extraction_instructions": """
+            Conduct detailed analysis of each component:
+
+            - Examine the function and role of each component
+            - Identify the properties and characteristics
+            - Determine how each component contributes to the whole
+            - Assess the importance and priority of each component
+            - Note what additional data might be needed for complete analysis
+
+            Create comprehensive component analysis with clear insights.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Analyze components based on your decomposition.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "identify_patterns",
+                    "description": "Component analysis complete",
+                }
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+        },
+        "identify_patterns": {
+            "id": "identify_patterns",
+            "description": "Find patterns and dependencies between components",
+            "purpose": f"Identify '{ContextKeys.PATTERNS}', '{ContextKeys.CAUSAL_LINKS}', and '{ContextKeys.DEPENDENCIES}'",
+            "required_context_keys": [
+                ContextKeys.PATTERNS,
+                ContextKeys.CAUSAL_LINKS,
+                ContextKeys.DEPENDENCIES,
+            ],
+            "extraction_instructions": """
+            Identify patterns and relationships:
+
+            - Look for recurring patterns across components
+            - Establish causal relationships (cause-effect links)
+            - Map dependencies (what depends on what)
+            - Identify feedback loops or circular dependencies
+            - Note any systematic behaviors or regularities
+
+            Focus on understanding the dynamic interactions between components.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Identify patterns from your component analysis.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "integrate_findings",
+                    "description": "Patterns identified",
+                }
+            ],
+        },
+        "integrate_findings": {
+            "id": "integrate_findings",
+            "description": "Synthesize understanding from all analytical work",
+            "purpose": f"Create '{ContextKeys.INTEGRATED_ANALYSIS}' and '{ContextKeys.KEY_INSIGHTS}'",
+            "required_context_keys": [
+                ContextKeys.INTEGRATED_ANALYSIS,
+                ContextKeys.KEY_INSIGHTS,
+            ],
+            "extraction_instructions": """
+            Integrate all analytical findings:
+
+            - Synthesize component analysis, patterns, and relationships
+            - Create a comprehensive understanding of the problem
+            - Highlight the most important insights and discoveries
+            - Identify implications and potential solutions
+            - Summarize the analytical understanding clearly
+
+            Provide integrated analysis that brings together all analytical work into coherent understanding.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Integrate based on your complete analytical process.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -629,81 +596,85 @@ deductive_fsm = {
     "initial_state": "identify_premises",
     "persona": "You are a logical thinker who applies established principles and rules to reach certain conclusions through valid reasoning.",
     "states": {
-        "identify_premises": _state(
-            "identify_premises",
-            "Identify the general rules, principles, and assumptions",
-            f"Establish '{_K.PREMISES}' and identify '{_K.ASSUMPTIONS}'",
-            [
-                _field(
-                    _K.PREMISES,
-                    "list",
-                    f"{_C}A JSON list of the premises: the rules, principles "
-                    "and facts the problem gives or relies on, each as a "
-                    "short statement.",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.ASSUMPTIONS,
-                    "list",
-                    f"{_C}A JSON list of the stated and unstated assumptions "
-                    "the reasoning rests on.",
-                    reads=(_K.PREMISES,),
-                ),
+        "identify_premises": {
+            "id": "identify_premises",
+            "description": "Identify the general rules, principles, and assumptions",
+            "purpose": f"Establish '{ContextKeys.PREMISES}' and identify '{ContextKeys.ASSUMPTIONS}'",
+            "required_context_keys": [ContextKeys.PREMISES, ContextKeys.ASSUMPTIONS],
+            "extraction_instructions": """
+            Identify the starting points for deductive reasoning:
+
+            - What general rules, laws, or principles apply to this problem?
+            - What facts or givens can we assume as true?
+            - What established knowledge is relevant?
+            - What premises does any argument rely on?
+            - What assumptions are being made (both stated and unstated)?
+
+            Be explicit about both obvious and hidden assumptions that underlie the reasoning.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Work with the premises and information already provided in the problem.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "apply_logic",
+                    "description": "Premises and assumptions identified",
+                }
             ],
-            _then("apply_logic", "Premises and assumptions identified"),
-        ),
-        "apply_logic": _state(
-            "apply_logic",
-            "Apply logical rules to derive conclusions step by step",
-            f"Document '{_K.LOGICAL_STEPS}' and '{_K.INTERMEDIATE_CONCLUSIONS}'",
-            [
-                _field(
-                    _K.LOGICAL_STEPS,
-                    "list",
-                    f"{_C}A JSON list of the inference steps from the "
-                    "premises, in order, each naming the rule it uses "
-                    "(modus ponens, modus tollens, syllogism, ...).",
-                    reads=(_K.PREMISES, _K.ASSUMPTIONS),
-                ),
-                _field(
-                    _K.INTERMEDIATE_CONCLUSIONS,
-                    "list",
-                    f"{_C}A JSON list of what each step establishes with certainty.",
-                    reads=(_K.PREMISES, _K.LOGICAL_STEPS),
-                ),
+        },
+        "apply_logic": {
+            "id": "apply_logic",
+            "description": "Apply logical rules to derive conclusions step by step",
+            "purpose": f"Document '{ContextKeys.LOGICAL_STEPS}' and '{ContextKeys.INTERMEDIATE_CONCLUSIONS}'",
+            "required_context_keys": [
+                ContextKeys.LOGICAL_STEPS,
+                ContextKeys.INTERMEDIATE_CONCLUSIONS,
             ],
-            _then("derive_conclusion", "Logical steps applied"),
-        ),
-        "derive_conclusion": _state(
-            "derive_conclusion",
-            "Reach final conclusions and assess logical validity",
-            f"State final '{_K.CONCLUSION}' and assess '{_K.LOGICAL_VALIDITY}'",
-            [
-                _field(
-                    _K.CONCLUSION,
-                    "any",
-                    f"{_C}The conclusion that answers problem_statement, "
-                    "stated plainly (a yes or no first when the problem asks "
-                    "a yes/no question), followed by the one-line reason.",
-                    reads=(
-                        _K.PREMISES,
-                        _K.LOGICAL_STEPS,
-                        _K.INTERMEDIATE_CONCLUSIONS,
-                    ),
-                ),
-                _field(
-                    _K.LOGICAL_VALIDITY,
-                    "bool",
-                    "Your judgment: true when the conclusion follows "
-                    "necessarily from the premises, false when the chain has "
-                    "a gap or an invalid step.",
-                    reads=(_K.PREMISES, _K.LOGICAL_STEPS, _K.CONCLUSION),
-                    required=False,
-                ),
+            "extraction_instructions": """
+            Apply logical reasoning systematically:
+
+            - What follows logically from the established premises?
+            - What intermediate conclusions can be drawn at each step?
+            - What logical rules or forms are being applied (modus ponens, syllogism, etc.)?
+            - How does each step follow necessarily from the previous ones?
+            - What can be concluded with certainty at each stage?
+
+            Show your logical work clearly, step by step, ensuring valid inferences.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Apply logical reasoning to the premises you've identified.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "derive_conclusion",
+                    "description": "Logical steps applied",
+                }
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+        },
+        "derive_conclusion": {
+            "id": "derive_conclusion",
+            "description": "Reach final conclusions and assess logical validity",
+            "purpose": f"State final '{ContextKeys.CONCLUSION}' and assess '{ContextKeys.LOGICAL_VALIDITY}'",
+            "required_context_keys": [
+                ContextKeys.CONCLUSION,
+                ContextKeys.LOGICAL_VALIDITY,
+            ],
+            "extraction_instructions": """
+            Derive the final conclusion and validate the reasoning:
+
+            - What specific conclusion follows from the complete logical chain?
+            - Is the reasoning logically valid (do conclusions follow necessarily)?
+            - Does the conclusion adequately address the original problem?
+            - Are there any logical gaps, errors, or invalid inferences?
+            - How certain can we be about the final conclusion?
+
+            State your conclusion clearly and provide honest assessment of the logical validity.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Derive your conclusion from the logical steps you've taken.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -718,103 +689,115 @@ inductive_fsm = {
     "initial_state": "gather_observations",
     "persona": "You are an empirical thinker who discovers patterns by carefully examining specific examples and building general understanding from evidence.",
     "states": {
-        "gather_observations": _state(
-            "gather_observations",
-            "Collect and organize specific observations and data points",
-            f"Identify '{_K.OBSERVATIONS}' and '{_K.DATA_POINTS}' relevant to the problem",
-            [
-                _field(
-                    _K.OBSERVATIONS,
-                    "list",
-                    f"{_C}A JSON list of concrete, specific observations, "
-                    "examples or cases relevant to the problem.",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.DATA_POINTS,
-                    "list",
-                    f"{_C}A JSON list of the facts, measurements or data "
-                    "points relevant to the problem.",
-                    reads=(*_PROBLEM_READS, _K.OBSERVATIONS),
-                ),
+        "gather_observations": {
+            "id": "gather_observations",
+            "description": "Collect and organize specific observations and data points",
+            "purpose": f"Identify '{ContextKeys.OBSERVATIONS}' and '{ContextKeys.DATA_POINTS}' relevant to the problem",
+            "required_context_keys": [
+                ContextKeys.OBSERVATIONS,
+                ContextKeys.DATA_POINTS,
             ],
-            _then("identify_commonalities", "Observations gathered"),
-        ),
-        "identify_commonalities": _state(
-            "identify_commonalities",
-            "Find patterns and commonalities across observations",
-            f"Identify '{_K.COMMONALITIES}' and '{_K.TRENDS}' in the data",
-            [
-                _field(
-                    _K.COMMONALITIES,
-                    "list",
-                    f"{_C}A JSON list of what several observations have in common.",
-                    reads=(_K.OBSERVATIONS, _K.DATA_POINTS),
-                ),
-                _field(
-                    _K.TRENDS,
-                    "list",
-                    f"{_C}A JSON list of the trends, regularities and "
-                    "correlations across the observations.",
-                    reads=(_K.OBSERVATIONS, _K.DATA_POINTS),
-                ),
+            "extraction_instructions": """
+            Systematically gather specific, concrete observations:
+
+            - What specific examples, cases, or instances are available?
+            - What data points, measurements, or facts are relevant?
+            - What have we observed in similar situations or contexts?
+            - What specific behaviors, outcomes, or phenomena are documented?
+            - What concrete evidence is available for analysis?
+
+            Focus on collecting concrete, specific observations rather than general statements or theories.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Work with the observations and data available in the problem context.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "identify_commonalities",
+                    "description": "Observations gathered",
+                }
             ],
-            _then("form_hypothesis", "Commonalities identified"),
-        ),
-        "form_hypothesis": _state(
-            "form_hypothesis",
-            "Form general hypothesis based on observed patterns",
-            f"Create '{_K.HYPOTHESIS}' supported by '{_K.SUPPORTING_EVIDENCE}'",
-            [
-                _field(
-                    _K.HYPOTHESIS,
-                    "any",
-                    f"{_C}The general rule or principle that explains the "
-                    "observed patterns and answers problem_statement, stated "
-                    "specifically enough to test.",
-                    reads=(_K.OBSERVATIONS, _K.COMMONALITIES, _K.TRENDS),
-                ),
-                _field(
-                    _K.SUPPORTING_EVIDENCE,
-                    "list",
-                    f"{_C}A JSON list of the observations that best support "
-                    "the hypothesis.",
-                    reads=(_K.OBSERVATIONS, _K.HYPOTHESIS),
-                ),
+        },
+        "identify_commonalities": {
+            "id": "identify_commonalities",
+            "description": "Find patterns and commonalities across observations",
+            "purpose": f"Identify '{ContextKeys.COMMONALITIES}' and '{ContextKeys.TRENDS}' in the data",
+            "required_context_keys": [ContextKeys.COMMONALITIES, ContextKeys.TRENDS],
+            "extraction_instructions": """
+            Systematically look for patterns across your observations:
+
+            - What do multiple cases, examples, or instances have in common?
+            - What trends, regularities, or consistencies emerge from the data?
+            - What relationships appear consistently across different observations?
+            - What factors or variables seem to be associated or correlated?
+            - What sequences, progressions, or developmental patterns do you notice?
+
+            Identify both obvious and subtle patterns that might not be immediately apparent.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Find patterns in the observations you've systematically gathered.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "form_hypothesis",
+                    "description": "Commonalities identified",
+                }
             ],
-            _then("test_generalization", "Hypothesis formed"),
-        ),
-        "test_generalization": _state(
-            "test_generalization",
-            "Test the strength and limits of the generalization",
-            f"Evaluate with '{_K.TEST_RESULTS}', '{_K.COUNTER_EXAMPLES}', and '{_K.GENERALIZATION_STRENGTH}'",
-            [
-                _field(
-                    _K.TEST_RESULTS,
-                    "any",
-                    f"{_C}How well the hypothesis predicts or explains cases "
-                    "not used to form it, and when it holds or fails.",
-                    reads=(_K.HYPOTHESIS, _K.SUPPORTING_EVIDENCE),
-                ),
-                _field(
-                    _K.COUNTER_EXAMPLES,
-                    "list",
-                    f"{_C}A JSON list of counter-examples or exceptions to the "
-                    "hypothesis (an empty list when none is known).",
-                    reads=(_K.HYPOTHESIS,),
-                ),
-                _field(
-                    _K.GENERALIZATION_STRENGTH,
-                    "float",
-                    "Your rating from 1 to 10 of how strongly the evidence "
-                    "supports the hypothesis.",
-                    reads=(_K.HYPOTHESIS, _K.SUPPORTING_EVIDENCE, _K.TEST_RESULTS),
-                    required=False,
-                ),
+        },
+        "form_hypothesis": {
+            "id": "form_hypothesis",
+            "description": "Form general hypothesis based on observed patterns",
+            "purpose": f"Create '{ContextKeys.HYPOTHESIS}' supported by '{ContextKeys.SUPPORTING_EVIDENCE}'",
+            "required_context_keys": [
+                ContextKeys.HYPOTHESIS,
+                ContextKeys.SUPPORTING_EVIDENCE,
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+            "extraction_instructions": """
+            Form a well-grounded general hypothesis from the identified patterns:
+
+            - What general rule, principle, or law might explain the observed patterns?
+            - What predictions can you make about future or unobserved cases?
+            - What broader principle or generalization seems to apply?
+            - How would you clearly state this generalization?
+            - What specific evidence best supports this hypothesis?
+
+            Make your hypothesis specific enough to be testable while being general enough to be useful for prediction.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Form your hypothesis based on the patterns you've systematically identified.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "test_generalization",
+                    "description": "Hypothesis formed",
+                }
+            ],
+        },
+        "test_generalization": {
+            "id": "test_generalization",
+            "description": "Test the strength and limits of the generalization",
+            "purpose": f"Evaluate with '{ContextKeys.TEST_RESULTS}', '{ContextKeys.COUNTER_EXAMPLES}', and '{ContextKeys.GENERALIZATION_STRENGTH}'",
+            "required_context_keys": [
+                ContextKeys.TEST_RESULTS,
+                ContextKeys.COUNTER_EXAMPLES,
+                ContextKeys.GENERALIZATION_STRENGTH,
+            ],
+            "extraction_instructions": """
+            Rigorously test your generalization against available evidence:
+
+            - How well does it predict or explain other cases not used in forming it?
+            - What counter-examples, exceptions, or contradictory evidence exist?
+            - Under what conditions does the generalization hold or fail?
+            - How strong is the inductive support based on sample size and quality?
+            - What would strengthen or weaken confidence in this generalization?
+
+            Rate the strength of your generalization from 1-10 based on the quality and quantity of supporting evidence.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Test your generalization rigorously with all available information.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -829,107 +812,108 @@ creative_fsm = {
     "initial_state": "explore_perspectives",
     "persona": "You are an innovative creative thinker who generates novel solutions by seeing problems from fresh perspectives and making unexpected connections.",
     "states": {
-        "explore_perspectives": _state(
-            "explore_perspectives",
-            "Explore the problem from multiple creative perspectives",
-            f"Generate '{_K.PERSPECTIVES}' and '{_K.REFRAMINGS}' of the problem",
-            [
-                _field(
-                    _K.PERSPECTIVES,
-                    "list",
-                    f"{_C}A JSON list of different angles on the problem (how "
-                    "a child, an artist, an engineer or someone from another "
-                    "field would see it).",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.REFRAMINGS,
-                    "list",
-                    f"{_C}A JSON list of fresh ways to frame the problem "
-                    "(flipped assumptions, removed constraints, metaphors).",
-                    reads=(*_PROBLEM_READS, _K.PERSPECTIVES),
-                ),
+        "explore_perspectives": {
+            "id": "explore_perspectives",
+            "description": "Explore the problem from multiple creative perspectives",
+            "purpose": f"Generate '{ContextKeys.PERSPECTIVES}' and '{ContextKeys.REFRAMINGS}' of the problem",
+            "required_context_keys": [ContextKeys.PERSPECTIVES, ContextKeys.REFRAMINGS],
+            "extraction_instructions": """
+            Systematically explore the problem through different creative lenses:
+
+            - How would different people approach this (child, artist, engineer, scientist, entrepreneur)?
+            - What if we flipped key assumptions or removed major constraints?
+            - How is this problem similar to or different from challenges in completely different domains?
+            - What would this look like from the opposite or inverse perspective?
+            - What metaphors, analogies, or artistic representations reveal new angles?
+
+            Generate multiple fresh ways of viewing and framing the problem to unlock creative potential.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Generate diverse perspectives based on the problem as stated.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "generate_ideas",
+                    "description": "Multiple perspectives explored",
+                }
             ],
-            _then("generate_ideas", "Multiple perspectives explored"),
-        ),
-        "generate_ideas": _state(
-            "generate_ideas",
-            "Brainstorm creative and unconventional ideas without judgment",
-            f"Create '{_K.CREATIVE_IDEAS}' and '{_K.UNCONVENTIONAL_APPROACHES}'",
-            [
-                _field(
-                    _K.CREATIVE_IDEAS,
-                    "list",
-                    f"{_C}A JSON list of many creative ideas for the problem, "
-                    "favouring novelty over practicality.",
-                    reads=(_K.PERSPECTIVES, _K.REFRAMINGS),
-                ),
-                _field(
-                    _K.UNCONVENTIONAL_APPROACHES,
-                    "list",
-                    f"{_C}A JSON list of approaches that break conventional "
-                    "thinking about the problem.",
-                    reads=(_K.PERSPECTIVES, _K.REFRAMINGS),
-                ),
+        },
+        "generate_ideas": {
+            "id": "generate_ideas",
+            "description": "Brainstorm creative and unconventional ideas without judgment",
+            "purpose": f"Create '{ContextKeys.CREATIVE_IDEAS}' and '{ContextKeys.UNCONVENTIONAL_APPROACHES}'",
+            "required_context_keys": [
+                ContextKeys.CREATIVE_IDEAS,
+                ContextKeys.UNCONVENTIONAL_APPROACHES,
             ],
-            _then("combine_concepts", "Ideas generated"),
-        ),
-        "combine_concepts": _state(
-            "combine_concepts",
-            "Combine and synthesize ideas in novel ways",
-            f"Create '{_K.COMBINATIONS}' and develop '{_K.NOVEL_SOLUTIONS}'",
-            [
-                _field(
-                    _K.COMBINATIONS,
-                    "list",
-                    f"{_C}A JSON list of new combinations of the ideas, each "
-                    "merging elements of two or more.",
-                    reads=(_K.CREATIVE_IDEAS, _K.UNCONVENTIONAL_APPROACHES),
-                ),
-                _field(
-                    _K.NOVEL_SOLUTIONS,
-                    "list",
-                    f"{_C}A JSON list of complete, novel solutions to the "
-                    "problem built from those combinations.",
-                    reads=(
-                        _K.CREATIVE_IDEAS,
-                        _K.UNCONVENTIONAL_APPROACHES,
-                        _K.COMBINATIONS,
-                    ),
-                ),
+            "extraction_instructions": """
+            Generate creative ideas through divergent thinking:
+
+            - What wild, impossible, or seemingly silly ideas come to mind?
+            - What if we completely removed key constraints or limitations?
+            - How do completely different fields or domains solve similar challenges?
+            - What would an ideal, unlimited-resource solution look like?
+            - What approaches break conventional thinking or challenge standard methods?
+
+            Focus on quantity and novelty over immediate practicality. Suspend judgment and let creativity flow freely.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Generate ideas freely based on your thorough perspective exploration.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {"target_state": "combine_concepts", "description": "Ideas generated"}
             ],
-            _then("evaluate_novelty", "Concepts combined"),
-        ),
-        "evaluate_novelty": _state(
-            "evaluate_novelty",
-            "Evaluate creative solutions for novelty, feasibility, and impact",
-            f"Select '{_K.BEST_CREATIVE_SOLUTION}' and rate '{_K.INNOVATION_RATING}'",
-            [
-                _field(
-                    _K.BEST_CREATIVE_SOLUTION,
-                    "any",
-                    f"{_C}Your final creative answer to problem_statement, "
-                    "complete as asked (when the problem asks for several "
-                    "items, give all of them), with a short reason for the "
-                    "choice.",
-                    reads=(
-                        _K.CREATIVE_IDEAS,
-                        _K.COMBINATIONS,
-                        _K.NOVEL_SOLUTIONS,
-                    ),
-                ),
-                _field(
-                    _K.INNOVATION_RATING,
-                    "float",
-                    "Your rating from 1 to 10 of how novel and original the "
-                    "chosen answer is.",
-                    reads=(_K.BEST_CREATIVE_SOLUTION,),
-                    required=False,
-                ),
+        },
+        "combine_concepts": {
+            "id": "combine_concepts",
+            "description": "Combine and synthesize ideas in novel ways",
+            "purpose": f"Create '{ContextKeys.COMBINATIONS}' and develop '{ContextKeys.NOVEL_SOLUTIONS}'",
+            "required_context_keys": [
+                ContextKeys.COMBINATIONS,
+                ContextKeys.NOVEL_SOLUTIONS,
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+            "extraction_instructions": """
+            Systematically combine ideas in unexpected and innovative ways:
+
+            - What happens when we merge different approaches or solutions?
+            - How can we combine the best elements of multiple ideas into something new?
+            - What entirely new solutions emerge from mixing seemingly unrelated concepts?
+            - How can we build bridges between ideas from different domains or perspectives?
+            - What hybrid approaches might leverage multiple creative insights?
+
+            Create truly novel solutions that integrate multiple creative elements in unexpected ways.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Combine the ideas you've generated in innovative ways.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {"target_state": "evaluate_novelty", "description": "Concepts combined"}
+            ],
+        },
+        "evaluate_novelty": {
+            "id": "evaluate_novelty",
+            "description": "Evaluate creative solutions for novelty, feasibility, and impact",
+            "purpose": f"Select '{ContextKeys.BEST_CREATIVE_SOLUTION}' and rate '{ContextKeys.INNOVATION_RATING}'",
+            "required_context_keys": [
+                ContextKeys.BEST_CREATIVE_SOLUTION,
+                ContextKeys.INNOVATION_RATING,
+            ],
+            "extraction_instructions": """
+            Critically evaluate your creative solutions using convergent thinking:
+
+            - Which solutions are most genuinely novel and original?
+            - Which best balance creativity with potential feasibility?
+            - What makes each solution truly innovative or groundbreaking?
+            - Which has the greatest potential for positive impact or effectiveness?
+            - How would you rate the overall creativity and innovation level (1-10 scale)?
+
+            Select the most promising creative solution and provide a detailed innovation assessment.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate and select based on the creative solutions you've systematically developed.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -944,136 +928,141 @@ critical_fsm = {
     "initial_state": "identify_claims",
     "persona": "You are a rigorous critical thinker who carefully evaluates arguments, evidence, and reasoning to separate truth from error and strong arguments from weak ones.",
     "states": {
-        "identify_claims": _state(
-            "identify_claims",
-            "Identify and categorize the main claims and arguments",
-            f"Extract '{_K.CLAIMS}' and '{_K.ARGUMENTS}' from the problem or text",
-            [
-                _field(
-                    _K.CLAIMS,
-                    "list",
-                    f"{_C}A JSON list of the main claims or conclusions made "
-                    "in the problem, each marked as fact, opinion or value "
-                    "judgment.",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.ARGUMENTS,
-                    "list",
-                    f"{_C}A JSON list of the arguments offered for those "
-                    "claims, including unstated ones.",
-                    reads=(*_PROBLEM_READS, _K.CLAIMS),
-                ),
+        "identify_claims": {
+            "id": "identify_claims",
+            "description": "Identify and categorize the main claims and arguments",
+            "purpose": f"Extract '{ContextKeys.CLAIMS}' and '{ContextKeys.ARGUMENTS}' from the problem or text",
+            "required_context_keys": [ContextKeys.CLAIMS, ContextKeys.ARGUMENTS],
+            "extraction_instructions": """
+            Systematically identify what is being claimed or argued:
+
+            - What are the main conclusions, assertions, or claims being made?
+            - What specific arguments are presented to support these claims?
+            - What is the overall thesis, position, or central argument?
+            - Are there implicit or unstated assumptions underlying the arguments?
+            - How are factual claims distinguished from opinions, interpretations, or value judgments?
+
+            Clearly separate main arguments from supporting points and distinguish between different types of claims.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Work with the claims and arguments present in the given material.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "examine_evidence",
+                    "description": "Claims and arguments identified",
+                }
             ],
-            _then("examine_evidence", "Claims and arguments identified"),
-        ),
-        "examine_evidence": _state(
-            "examine_evidence",
-            "Critically examine the quality and sufficiency of supporting evidence",
-            f"Assess '{_K.EVIDENCE_QUALITY}' and identify '{_K.EVIDENCE_GAPS}'",
-            [
-                _field(
-                    _K.EVIDENCE_QUALITY,
-                    "any",
-                    f"{_C}Your assessment of the evidence behind the claims: "
-                    "is it relevant, sufficient, representative and free of "
-                    "bias?",
-                    reads=(_K.CLAIMS, _K.ARGUMENTS),
-                ),
-                _field(
-                    _K.EVIDENCE_GAPS,
-                    "list",
-                    f"{_C}A JSON list of the evidence that is missing and "
-                    "would strengthen or weaken the argument.",
-                    reads=(_K.CLAIMS, _K.ARGUMENTS, _K.EVIDENCE_QUALITY),
-                ),
+        },
+        "examine_evidence": {
+            "id": "examine_evidence",
+            "description": "Critically examine the quality and sufficiency of supporting evidence",
+            "purpose": f"Assess '{ContextKeys.EVIDENCE_QUALITY}' and identify '{ContextKeys.EVIDENCE_GAPS}'",
+            "required_context_keys": [
+                ContextKeys.EVIDENCE_QUALITY,
+                ContextKeys.EVIDENCE_GAPS,
             ],
-            _then("analyze_logic", "Evidence examined"),
-        ),
-        "analyze_logic": _state(
-            "analyze_logic",
-            "Analyze logical structure and identify reasoning flaws",
-            f"Conduct '{_K.LOGICAL_ANALYSIS}', identify '{_K.ASSUMPTIONS}' and '{_K.FALLACIES}'",
-            [
-                _field(
-                    _K.LOGICAL_ANALYSIS,
-                    "any",
-                    f"{_C}Your analysis of whether the conclusions follow "
-                    "from the premises: gaps, leaps and inconsistencies.",
-                    reads=(_K.CLAIMS, _K.ARGUMENTS, _K.EVIDENCE_QUALITY),
-                ),
-                _field(
-                    _K.ASSUMPTIONS,
-                    "list",
-                    f"{_C}A JSON list of the stated and unstated assumptions "
-                    "the argument makes.",
-                    reads=(_K.CLAIMS, _K.ARGUMENTS),
-                ),
-                _field(
-                    _K.FALLACIES,
-                    "list",
-                    f"{_C}A JSON list of the logical fallacies in the "
-                    "argument, each named (ad hominem, straw man, false "
-                    "dilemma, appeal to authority, ...) with a few words on "
-                    "where it occurs; an empty list when there is none.",
-                    reads=(_K.CLAIMS, _K.ARGUMENTS, _K.LOGICAL_ANALYSIS),
-                ),
+            "extraction_instructions": """
+            Rigorously examine the evidence supporting the identified claims:
+
+            - What evidence is actually provided? Is it relevant, sufficient, and appropriate?
+            - How reliable, credible, and authoritative are the sources?
+            - Is the evidence current, representative, and methodologically sound?
+            - What important evidence is missing that would strengthen or weaken the argument?
+            - Are there potential biases, conflicts of interest, or limitations in how evidence was collected or presented?
+
+            Be specific about both strengths and critical weaknesses of the evidence base.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate the evidence that is already available in the material.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {"target_state": "analyze_logic", "description": "Evidence examined"}
             ],
-            _then("consider_alternatives", "Logic analyzed"),
-        ),
-        "consider_alternatives": _state(
-            "consider_alternatives",
-            "Consider alternative explanations and strong counter-arguments",
-            f"Identify '{_K.ALTERNATIVE_EXPLANATIONS}' and '{_K.COUNTER_ARGUMENTS}'",
-            [
-                _field(
-                    _K.ALTERNATIVE_EXPLANATIONS,
-                    "list",
-                    f"{_C}A JSON list of other plausible interpretations or "
-                    "conclusions from the same evidence.",
-                    reads=(_K.CLAIMS, _K.LOGICAL_ANALYSIS),
-                ),
-                _field(
-                    _K.COUNTER_ARGUMENTS,
-                    "list",
-                    f"{_C}A JSON list of the strongest counter-arguments to "
-                    "the main claims.",
-                    reads=(_K.CLAIMS, _K.LOGICAL_ANALYSIS, _K.FALLACIES),
-                ),
+        },
+        "analyze_logic": {
+            "id": "analyze_logic",
+            "description": "Analyze logical structure and identify reasoning flaws",
+            "purpose": f"Conduct '{ContextKeys.LOGICAL_ANALYSIS}', identify '{ContextKeys.ASSUMPTIONS}' and '{ContextKeys.FALLACIES}'",
+            "required_context_keys": [
+                ContextKeys.LOGICAL_ANALYSIS,
+                ContextKeys.ASSUMPTIONS,
+                ContextKeys.FALLACIES,
             ],
-            _then("form_judgment", "Alternatives considered"),
-        ),
-        "form_judgment": _state(
-            "form_judgment",
-            "Form comprehensive critical assessment with justified confidence level",
-            f"Provide '{_K.CRITICAL_ASSESSMENT}' and '{_K.CONFIDENCE_RATING}'",
-            [
-                _field(
-                    _K.CRITICAL_ASSESSMENT,
-                    "any",
-                    f"{_C}Your overall judgment of the argument in "
-                    "problem_statement: whether it holds, its main flaws "
-                    "named, and why.",
-                    reads=(
-                        _K.CLAIMS,
-                        _K.EVIDENCE_GAPS,
-                        _K.LOGICAL_ANALYSIS,
-                        _K.FALLACIES,
-                        _K.COUNTER_ARGUMENTS,
-                    ),
-                ),
-                _field(
-                    _K.CONFIDENCE_RATING,
-                    "float",
-                    "Your rating from 1 to 10 of how confident you are in "
-                    "that judgment.",
-                    reads=(_K.CRITICAL_ASSESSMENT,),
-                    required=False,
-                ),
+            "extraction_instructions": """
+            Systematically analyze the logical structure and identify flaws:
+
+            - Do the conclusions actually follow logically from the stated premises?
+            - What key assumptions are being made (both stated and unstated)?
+            - Are there identifiable logical fallacies (ad hominem, straw man, false dilemma, appeal to authority, etc.)?
+            - Are there gaps in reasoning, unsupported logical leaps, or non sequiturs?
+            - Is the reasoning internally consistent throughout the argument?
+
+            Identify specific logical strengths and weaknesses with clear examples.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Analyze the logical structure of what has been provided.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "consider_alternatives",
+                    "description": "Logic analyzed",
+                }
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+        },
+        "consider_alternatives": {
+            "id": "consider_alternatives",
+            "description": "Consider alternative explanations and strong counter-arguments",
+            "purpose": f"Identify '{ContextKeys.ALTERNATIVE_EXPLANATIONS}' and '{ContextKeys.COUNTER_ARGUMENTS}'",
+            "required_context_keys": [
+                ContextKeys.ALTERNATIVE_EXPLANATIONS,
+                ContextKeys.COUNTER_ARGUMENTS,
+            ],
+            "extraction_instructions": """
+            Systematically consider alternatives and opposing viewpoints:
+
+            - What alternative explanations, interpretations, or conclusions are plausible?
+            - What are the strongest possible counter-arguments to the main claims?
+            - What would informed opponents or skeptics of this position argue?
+            - Are there other reasonable ways to interpret the same evidence?
+            - What additional considerations or factors might change the evaluation?
+
+            Present fair and intellectually honest alternatives rather than weak straw man arguments.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Generate thoughtful alternatives based on your systematic analysis.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "form_judgment",
+                    "description": "Alternatives considered",
+                }
+            ],
+        },
+        "form_judgment": {
+            "id": "form_judgment",
+            "description": "Form comprehensive critical assessment with justified confidence level",
+            "purpose": f"Provide '{ContextKeys.CRITICAL_ASSESSMENT}' and '{ContextKeys.CONFIDENCE_RATING}'",
+            "required_context_keys": [
+                ContextKeys.CRITICAL_ASSESSMENT,
+                ContextKeys.CONFIDENCE_RATING,
+            ],
+            "extraction_instructions": """
+            Form a well-reasoned overall critical judgment:
+
+            - How strong and convincing are the arguments when all factors are considered?
+            - What are the most significant strengths and critical weaknesses?
+            - How much confidence should we reasonably have in the main claims?
+            - What would most significantly strengthen or weaken these arguments?
+            - What is your final, balanced assessment of the overall reasoning quality?
+
+            Provide a fair, balanced evaluation with a confidence rating from 1-10 and clear justification.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Form your critical judgment based on your complete systematic analysis.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -1088,118 +1077,120 @@ abductive_fsm = {
     "initial_state": "identify_observations",
     "persona": "You are a detective and investigator who excels at finding the most plausible explanations for puzzling observations and unexplained phenomena.",
     "states": {
-        "identify_observations": _state(
-            "identify_observations",
-            "Identify key observations that require explanation",
-            f"Catalog '{_K.OBSERVATIONS}' and identify '{_K.SURPRISING_ELEMENTS}' that require explanation",
-            [
-                _field(
-                    _K.OBSERVATIONS,
-                    "list",
-                    f"{_C}A JSON list of the concrete facts or phenomena the "
-                    "problem asks to explain.",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.SURPRISING_ELEMENTS,
-                    "list",
-                    f"{_C}A JSON list of what is surprising or puzzling in "
-                    "those observations.",
-                    reads=(_K.OBSERVATIONS,),
-                ),
+        "identify_observations": {
+            "id": "identify_observations",
+            "description": "Identify key observations that require explanation",
+            "purpose": f"Catalog '{ContextKeys.OBSERVATIONS}' and identify '{ContextKeys.SURPRISING_ELEMENTS}' that require explanation",
+            "required_context_keys": [
+                ContextKeys.OBSERVATIONS,
+                ContextKeys.SURPRISING_ELEMENTS,
             ],
-            _then("generate_hypotheses", "Key observations identified"),
-        ),
-        "generate_hypotheses": _state(
-            "generate_hypotheses",
-            "Generate multiple potential explanations",
-            f"Create '{_K.POTENTIAL_HYPOTHESES}' with '{_K.HYPOTHESIS_RATIONALES}' for each explanation",
-            [
-                _field(
-                    _K.POTENTIAL_HYPOTHESES,
-                    "list",
-                    f"{_C}A JSON list of 2 to 4 competing explanations that "
-                    "could account for the observations.",
-                    reads=(_K.OBSERVATIONS, _K.SURPRISING_ELEMENTS),
-                ),
-                _field(
-                    _K.HYPOTHESIS_RATIONALES,
-                    "any",
-                    f"{_C}For each potential hypothesis, why it could account "
-                    "for the observations.",
-                    reads=(_K.OBSERVATIONS, _K.POTENTIAL_HYPOTHESES),
-                ),
+            "extraction_instructions": """
+            Systematically identify what needs to be explained:
+
+            - What specific facts, phenomena, or observations are we trying to explain?
+            - What seems surprising, unexpected, anomalous, or puzzling?
+            - What patterns, behaviors, or outcomes need to be accounted for?
+            - What data points or evidence require explanation?
+            - What aspects of the situation seem to call for further understanding?
+
+            Focus on concrete, specific observations rather than interpretations or preliminary explanations.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Work with the observations already provided in the problem context.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "generate_hypotheses",
+                    "description": "Key observations identified",
+                }
             ],
-            _then("evaluate_hypotheses", "Hypotheses generated"),
-        ),
-        "evaluate_hypotheses": _state(
-            "evaluate_hypotheses",
-            "Systematically evaluate each hypothesis against standard criteria",
-            f"Create '{_K.HYPOTHESIS_EVALUATIONS}' using '{_K.EVALUATION_CRITERIA}' for systematic assessment",
-            [
-                _field(
-                    _K.HYPOTHESIS_EVALUATIONS,
-                    "any",
-                    f"{_C}Your evaluation of each potential hypothesis for "
-                    "explanatory scope, simplicity, plausibility, "
-                    "testability and consistency with known facts.",
-                    reads=(
-                        _K.OBSERVATIONS,
-                        _K.POTENTIAL_HYPOTHESES,
-                        _K.HYPOTHESIS_RATIONALES,
-                    ),
-                ),
-                _field(
-                    _K.EVALUATION_CRITERIA,
-                    "list",
-                    f"{_C}A JSON list of the criteria the evaluation used.",
-                    reads=(_K.HYPOTHESIS_EVALUATIONS,),
-                ),
+        },
+        "generate_hypotheses": {
+            "id": "generate_hypotheses",
+            "description": "Generate multiple potential explanations",
+            "purpose": f"Create '{ContextKeys.POTENTIAL_HYPOTHESES}' with '{ContextKeys.HYPOTHESIS_RATIONALES}' for each explanation",
+            "required_context_keys": [
+                ContextKeys.POTENTIAL_HYPOTHESES,
+                ContextKeys.HYPOTHESIS_RATIONALES,
             ],
-            _then("select_best_explanation", "Hypotheses evaluated"),
-        ),
-        "select_best_explanation": _state(
-            "select_best_explanation",
-            "Select most plausible explanation with clear justification",
-            f"Choose '{_K.BEST_HYPOTHESIS}' with '{_K.SELECTION_JUSTIFICATION}', '{_K.CONFIDENCE_IN_EXPLANATION}', and '{_K.NEXT_STEPS_FOR_VALIDATION}'",
-            [
-                _field(
-                    _K.BEST_HYPOTHESIS,
-                    "any",
-                    f"{_C}The most plausible explanation, the one that "
-                    "answers problem_statement, stated plainly with the "
-                    "mechanism behind it.",
-                    reads=(
-                        _K.OBSERVATIONS,
-                        _K.POTENTIAL_HYPOTHESES,
-                        _K.HYPOTHESIS_EVALUATIONS,
-                    ),
-                ),
-                _field(
-                    _K.SELECTION_JUSTIFICATION,
-                    "any",
-                    f"{_C}Why that explanation beats the others.",
-                    reads=(_K.BEST_HYPOTHESIS, _K.HYPOTHESIS_EVALUATIONS),
-                ),
-                _field(
-                    _K.CONFIDENCE_IN_EXPLANATION,
-                    "float",
-                    "Your rating from 1 to 10 of how confident you are in "
-                    "the best_hypothesis value.",
-                    reads=(_K.BEST_HYPOTHESIS, _K.HYPOTHESIS_EVALUATIONS),
-                    required=False,
-                ),
-                _field(
-                    _K.NEXT_STEPS_FOR_VALIDATION,
-                    "list",
-                    f"{_C}A JSON list of ways to test or confirm the explanation.",
-                    reads=(_K.BEST_HYPOTHESIS,),
-                    required=False,
-                ),
+            "extraction_instructions": """
+            Generate multiple plausible explanations for the observations:
+
+            - What could reasonably account for what we observe?
+            - Consider different types of causes (direct, indirect, systemic, multiple contributing factors)
+            - Think about both obvious and less obvious potential explanations
+            - Include competing or alternative hypotheses that might explain the same phenomena
+            - Consider explanations at different levels (individual, systemic, environmental, etc.)
+
+            For each hypothesis, provide a clear rationale explaining why it could account for the observations.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Generate comprehensive hypotheses based on the observations you've identified.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "evaluate_hypotheses",
+                    "description": "Hypotheses generated",
+                }
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+        },
+        "evaluate_hypotheses": {
+            "id": "evaluate_hypotheses",
+            "description": "Systematically evaluate each hypothesis against standard criteria",
+            "purpose": f"Create '{ContextKeys.HYPOTHESIS_EVALUATIONS}' using '{ContextKeys.EVALUATION_CRITERIA}' for systematic assessment",
+            "required_context_keys": [
+                ContextKeys.HYPOTHESIS_EVALUATIONS,
+                ContextKeys.EVALUATION_CRITERIA,
+            ],
+            "extraction_instructions": """
+            Systematically evaluate each hypothesis using standard criteria for explanatory adequacy:
+
+            - Explanatory scope: How comprehensively does it explain the observations?
+            - Simplicity/parsimony: Is it unnecessarily complex or does it invoke minimal assumptions?
+            - Plausibility: How likely is it given our background knowledge and experience?
+            - Testability: Can it be verified, falsified, or further investigated?
+            - Consistency: Does it fit coherently with other established knowledge?
+            - Predictive power: Does it suggest new predictions or help anticipate future observations?
+
+            Rate each hypothesis systematically on these dimensions with clear justifications.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate based on the hypotheses you've systematically generated.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "select_best_explanation",
+                    "description": "Hypotheses evaluated",
+                }
+            ],
+        },
+        "select_best_explanation": {
+            "id": "select_best_explanation",
+            "description": "Select most plausible explanation with clear justification",
+            "purpose": f"Choose '{ContextKeys.BEST_HYPOTHESIS}' with '{ContextKeys.SELECTION_JUSTIFICATION}', '{ContextKeys.CONFIDENCE_IN_EXPLANATION}', and '{ContextKeys.NEXT_STEPS_FOR_VALIDATION}'",
+            "required_context_keys": [
+                ContextKeys.BEST_HYPOTHESIS,
+                ContextKeys.SELECTION_JUSTIFICATION,
+                ContextKeys.CONFIDENCE_IN_EXPLANATION,
+                ContextKeys.NEXT_STEPS_FOR_VALIDATION,
+            ],
+            "extraction_instructions": """
+            Select the best explanation through careful comparative analysis:
+
+            - Which hypothesis best balances all the evaluative criteria?
+            - Why is this the most plausible and compelling explanation overall?
+            - What is your confidence level in this explanation (1-10 scale) and why?
+            - What would you need to do to further test, validate, or investigate this explanation?
+            - What are the key strengths of this explanation and what limitations or uncertainties remain?
+
+            Provide clear, detailed justification for your selection and acknowledge appropriate levels of uncertainty.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Make your selection based on your systematic evaluation process.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -1214,168 +1205,151 @@ analogical_fsm = {
     "initial_state": "define_target_problem",
     "persona": "You are an expert at finding meaningful connections and analogies. You help solve problems by identifying similar situations and transferring insights across domains.",
     "states": {
-        "define_target_problem": _state(
-            "define_target_problem",
-            "Clearly define and characterize the target problem",
-            f"Analyze the problem to identify '{_K.TARGET_PROBLEM_DESCRIPTION}' and '{_K.KEY_FEATURES_OF_TARGET}'",
-            [
-                _field(
-                    _K.TARGET_PROBLEM_DESCRIPTION,
-                    "any",
-                    f"{_C}The core challenge of the problem and the kind of "
-                    "answer it seeks, in one or two sentences.",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.KEY_FEATURES_OF_TARGET,
-                    "list",
-                    f"{_C}A JSON list of the structural and functional "
-                    "features a good analogy must share with the problem.",
-                    reads=(*_PROBLEM_READS, _K.TARGET_PROBLEM_DESCRIPTION),
-                ),
+        "define_target_problem": {
+            "id": "define_target_problem",
+            "description": "Clearly define and characterize the target problem",
+            "purpose": f"Analyze the problem to identify '{ContextKeys.TARGET_PROBLEM_DESCRIPTION}' and '{ContextKeys.KEY_FEATURES_OF_TARGET}'",
+            "required_context_keys": [
+                ContextKeys.TARGET_PROBLEM_DESCRIPTION,
+                ContextKeys.KEY_FEATURES_OF_TARGET,
             ],
-            _then("find_source_analogs", "Target problem clearly defined"),
-        ),
-        "find_source_analogs": _state(
-            "find_source_analogs",
-            "Identify potential analogous situations across various domains",
-            f"Find '{_K.POTENTIAL_ANALOGS}' with '{_K.RATIONALE_FOR_CHOICE}' and '{_K.SIMILARITY_CRITERIA_USED}'",
-            [
-                _field(
-                    _K.POTENTIAL_ANALOGS,
-                    "list",
-                    f"{_C}A JSON list of 2 to 4 situations from other domains "
-                    "(nature, technology, history, ...) that share the "
-                    "problem's structure.",
-                    reads=(_K.TARGET_PROBLEM_DESCRIPTION, _K.KEY_FEATURES_OF_TARGET),
-                ),
-                _field(
-                    _K.RATIONALE_FOR_CHOICE,
-                    "any",
-                    f"{_C}Why each potential analog could offer insight into "
-                    "the problem.",
-                    reads=(_K.KEY_FEATURES_OF_TARGET, _K.POTENTIAL_ANALOGS),
-                ),
-                _field(
-                    _K.SIMILARITY_CRITERIA_USED,
-                    "list",
-                    f"{_C}A JSON list of the similarity criteria used to pick "
-                    "the analogs.",
-                    reads=(_K.KEY_FEATURES_OF_TARGET, _K.POTENTIAL_ANALOGS),
-                ),
+            "extraction_instructions": """
+            Systematically define and characterize the target problem:
+
+            - What is the core challenge, question, or problem we're trying to solve?
+            - What are the key features, constraints, context, and important characteristics?
+            - What kind of solution, understanding, or outcome are we seeking?
+            - What essential structural or functional characteristics should any good analogy match?
+            - What are the most important aspects that an analogical source should share?
+
+            Create a clear, comprehensive characterization of the target problem for analogical matching.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Work only with the information already provided in the problem statement and context.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "find_source_analogs",
+                    "description": "Target problem clearly defined",
+                }
             ],
-            _then("map_correspondences", "Source analogs identified"),
-        ),
-        "map_correspondences": _state(
-            "map_correspondences",
-            "Create systematic mapping between source analog and target problem",
-            f"Select best analog and create detailed mapping with '{_K.SELECTED_ANALOG}', '{_K.ANALOGICAL_MAPPING}', '{_K.IDENTIFIED_SIMILARITIES}', '{_K.IDENTIFIED_DIFFERENCES}'",
-            [
-                _field(
-                    _K.SELECTED_ANALOG,
-                    "any",
-                    f"{_C}The potential analog with the strongest structural "
-                    "similarity to the problem.",
-                    reads=(
-                        _K.KEY_FEATURES_OF_TARGET,
-                        _K.POTENTIAL_ANALOGS,
-                        _K.RATIONALE_FOR_CHOICE,
-                    ),
-                ),
-                _field(
-                    _K.ANALOGICAL_MAPPING,
-                    "any",
-                    f"{_C}What in the selected analog corresponds to what in "
-                    "the problem (A corresponds to X, B to Y).",
-                    reads=(_K.KEY_FEATURES_OF_TARGET, _K.SELECTED_ANALOG),
-                ),
-                _field(
-                    _K.IDENTIFIED_SIMILARITIES,
-                    "list",
-                    f"{_C}A JSON list of the strongest similarities between "
-                    "the selected analog and the problem.",
-                    reads=(_K.SELECTED_ANALOG, _K.ANALOGICAL_MAPPING),
-                ),
-                _field(
-                    _K.IDENTIFIED_DIFFERENCES,
-                    "list",
-                    f"{_C}A JSON list of the important differences that limit "
-                    "the analogy.",
-                    reads=(_K.SELECTED_ANALOG, _K.ANALOGICAL_MAPPING),
-                ),
+        },
+        "find_source_analogs": {
+            "id": "find_source_analogs",
+            "description": "Identify potential analogous situations across various domains",
+            "purpose": f"Find '{ContextKeys.POTENTIAL_ANALOGS}' with '{ContextKeys.RATIONALE_FOR_CHOICE}' and '{ContextKeys.SIMILARITY_CRITERIA_USED}'",
+            "required_context_keys": [
+                ContextKeys.POTENTIAL_ANALOGS,
+                ContextKeys.RATIONALE_FOR_CHOICE,
+                ContextKeys.SIMILARITY_CRITERIA_USED,
             ],
-            _then("transfer_insights", "Correspondences systematically mapped"),
-        ),
-        "transfer_insights": _state(
-            "transfer_insights",
-            "Transfer knowledge and solutions from analog to target domain",
-            f"Generate '{_K.TRANSFERRED_INSIGHTS_OR_SOLUTIONS}' and '{_K.POTENTIAL_INFERENCES}'",
-            [
-                _field(
-                    _K.TRANSFERRED_INSIGHTS_OR_SOLUTIONS,
-                    "any",
-                    f"{_C}The solutions, principles or mechanisms from the "
-                    "selected analog that apply to the problem, and how they "
-                    "apply.",
-                    reads=(
-                        _K.SELECTED_ANALOG,
-                        _K.ANALOGICAL_MAPPING,
-                        _K.IDENTIFIED_SIMILARITIES,
-                        _K.IDENTIFIED_DIFFERENCES,
-                    ),
-                ),
-                _field(
-                    _K.POTENTIAL_INFERENCES,
-                    "list",
-                    f"{_C}A JSON list of predictions or inferences about the "
-                    "problem that the analogy suggests.",
-                    reads=(_K.ANALOGICAL_MAPPING, _K.TRANSFERRED_INSIGHTS_OR_SOLUTIONS),
-                ),
+            "extraction_instructions": """
+            Systematically search for analogous situations across different domains:
+
+            - What situations, problems, or systems share important structural similarities?
+            - What comparable processes, mechanisms, or functional relationships exist in other fields?
+            - What parallel challenges exist in different domains (nature, technology, history, etc.)?
+            - What historical precedents, case studies, or examples show similar patterns?
+            - What systems or situations exhibit comparable dynamics or relationships?
+
+            Provide 2-4 potential analogs with clear rationale for why each might offer valuable insights.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Search for analogs based on your target problem characterization.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "map_correspondences",
+                    "description": "Source analogs identified",
+                }
             ],
-            _then("evaluate_analogy_fit", "Insights transferred"),
-        ),
-        "evaluate_analogy_fit": _state(
-            "evaluate_analogy_fit",
-            "Critically evaluate the analogy's validity and practical utility",
-            f"Assess analogy with '{_K.ANALOGY_STRENGTHS}', '{_K.ANALOGY_WEAKNESSES_OR_LIMITATIONS}', '{_K.ADAPTED_SOLUTION_OR_UNDERSTANDING}', '{_K.ANALOGY_CONFIDENCE_RATING}'",
-            [
-                _field(
-                    _K.ANALOGY_STRENGTHS,
-                    "list",
-                    f"{_C}A JSON list of the most compelling aspects of the analogy.",
-                    reads=(_K.SELECTED_ANALOG, _K.IDENTIFIED_SIMILARITIES),
-                ),
-                _field(
-                    _K.ANALOGY_WEAKNESSES_OR_LIMITATIONS,
-                    "list",
-                    f"{_C}A JSON list of where the analogy breaks down or misleads.",
-                    reads=(_K.SELECTED_ANALOG, _K.IDENTIFIED_DIFFERENCES),
-                ),
-                _field(
-                    _K.ADAPTED_SOLUTION_OR_UNDERSTANDING,
-                    "any",
-                    f"{_C}Your answer to problem_statement adapted from the "
-                    "analogy: the transferred insight fitted to the problem, "
-                    "stated plainly.",
-                    reads=(
-                        _K.SELECTED_ANALOG,
-                        _K.TRANSFERRED_INSIGHTS_OR_SOLUTIONS,
-                        _K.POTENTIAL_INFERENCES,
-                        _K.IDENTIFIED_DIFFERENCES,
-                    ),
-                ),
-                _field(
-                    _K.ANALOGY_CONFIDENCE_RATING,
-                    "float",
-                    "Your rating from 1 to 10 of how confident you are in "
-                    "the adapted answer.",
-                    reads=(_K.ADAPTED_SOLUTION_OR_UNDERSTANDING,),
-                    required=False,
-                ),
+        },
+        "map_correspondences": {
+            "id": "map_correspondences",
+            "description": "Create systematic mapping between source analog and target problem",
+            "purpose": f"Select best analog and create detailed mapping with '{ContextKeys.SELECTED_ANALOG}', '{ContextKeys.ANALOGICAL_MAPPING}', '{ContextKeys.IDENTIFIED_SIMILARITIES}', '{ContextKeys.IDENTIFIED_DIFFERENCES}'",
+            "required_context_keys": [
+                ContextKeys.SELECTED_ANALOG,
+                ContextKeys.ANALOGICAL_MAPPING,
+                ContextKeys.IDENTIFIED_SIMILARITIES,
+                ContextKeys.IDENTIFIED_DIFFERENCES,
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+            "extraction_instructions": """
+            Create systematic correspondences between the most promising analog and target:
+
+            - Choose the analog with the strongest structural and functional similarities
+            - Map specific elements from source to target (A corresponds to X, B relates to Y, etc.)
+            - Identify the strongest similarities that support and validate the analogy
+            - Note important differences or limitations that constrain the analogical inference
+            - Create explicit, systematic mapping of relationships and correspondences
+
+            Be precise about what maps to what and provide clear justification for the correspondences.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Create the mapping based on your analysis of potential analogs.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "transfer_insights",
+                    "description": "Correspondences systematically mapped",
+                }
+            ],
+        },
+        "transfer_insights": {
+            "id": "transfer_insights",
+            "description": "Transfer knowledge and solutions from analog to target domain",
+            "purpose": f"Generate '{ContextKeys.TRANSFERRED_INSIGHTS_OR_SOLUTIONS}' and '{ContextKeys.POTENTIAL_INFERENCES}'",
+            "required_context_keys": [
+                ContextKeys.TRANSFERRED_INSIGHTS_OR_SOLUTIONS,
+                ContextKeys.POTENTIAL_INFERENCES,
+            ],
+            "extraction_instructions": """
+            Systematically transfer insights using the analogical mapping:
+
+            - What solutions, strategies, or approaches worked effectively in the source domain?
+            - What principles, patterns, or mechanisms can be transferred to the target?
+            - What new understanding or perspective does the analogy provide about the target problem?
+            - What predictions, inferences, or hypotheses can we generate through analogical reasoning?
+            - How do successful strategies in the source domain suggest approaches for the target?
+
+            Be specific and explicit about how insights from the analog apply to and illuminate the target problem.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Generate insights based on the systematic analogical mapping you've created.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "evaluate_analogy_fit",
+                    "description": "Insights transferred",
+                }
+            ],
+        },
+        "evaluate_analogy_fit": {
+            "id": "evaluate_analogy_fit",
+            "description": "Critically evaluate the analogy's validity and practical utility",
+            "purpose": f"Assess analogy with '{ContextKeys.ANALOGY_STRENGTHS}', '{ContextKeys.ANALOGY_WEAKNESSES_OR_LIMITATIONS}', '{ContextKeys.ADAPTED_SOLUTION_OR_UNDERSTANDING}', '{ContextKeys.ANALOGY_CONFIDENCE_RATING}'",
+            "required_context_keys": [
+                ContextKeys.ANALOGY_STRENGTHS,
+                ContextKeys.ANALOGY_WEAKNESSES_OR_LIMITATIONS,
+                ContextKeys.ADAPTED_SOLUTION_OR_UNDERSTANDING,
+                ContextKeys.ANALOGY_CONFIDENCE_RATING,
+            ],
+            "extraction_instructions": """
+            Critically and systematically evaluate the analogical reasoning:
+
+            - What are the strongest, most compelling aspects of this analogy?
+            - Where does the analogy break down, mislead, or have significant limitations?
+            - How should the transferred solution or insight be adapted for the target context?
+            - What level of confidence is warranted in this analogical reasoning (1-10 scale)?
+            - What would strengthen or weaken confidence in the analogical inference?
+
+            Provide balanced evaluation with adapted solution and justified confidence rating.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Complete your evaluation with the information developed through your systematic analogical process.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
@@ -1384,12 +1358,6 @@ analogical_fsm = {
 # HYBRID REASONING FSM - Integrated multi-approach reasoning with loop prevention
 # ============================================================================
 
-_HYBRID_WORK = (
-    _K.ANALYTICAL_BREAKDOWN,
-    _K.LOGICAL_CONCLUSIONS,
-    _K.CREATIVE_INSIGHTS,
-)
-
 hybrid_fsm = {
     "name": "hybrid_reasoning",
     "description": "Systematically combines multiple reasoning approaches for comprehensive problem solving with loop prevention mechanisms",
@@ -1397,127 +1365,144 @@ hybrid_fsm = {
     "persona": "You are a master strategist who skillfully combines different reasoning approaches to tackle complex problems from multiple complementary angles.",
     # The loop counter is written only by the HybridLoopCounter handler on
     # critical_evaluation exit (D-054); the model never sets it.
-    "handler_only_keys": [_K.HYBRID_LOOP_COUNT],
+    "handler_only_keys": [ContextKeys.HYBRID_LOOP_COUNT],
     "states": {
-        "identify_components": _state(
-            "identify_components",
-            "Break problem into components requiring different reasoning approaches",
-            f"Map '{_K.PROBLEM_ASPECTS}' to reasoning types in '{_K.REASONING_MAP}'",
-            [
-                _field(
-                    _K.PROBLEM_ASPECTS,
-                    "list",
-                    f"{_C}A JSON list of the aspects of the problem that need "
-                    "different kinds of reasoning.",
-                    reads=_PROBLEM_READS,
-                ),
-                _field(
-                    _K.REASONING_MAP,
-                    "any",
-                    f"{_C}For each problem aspect, the reasoning approach it "
-                    "needs (analytical, logical, creative, critical or "
-                    "inductive).",
-                    reads=(_K.PROBLEM_ASPECTS,),
-                ),
+        "identify_components": {
+            "id": "identify_components",
+            "description": "Break problem into components requiring different reasoning approaches",
+            "purpose": f"Map '{ContextKeys.PROBLEM_ASPECTS}' to reasoning types in '{ContextKeys.REASONING_MAP}'",
+            "required_context_keys": [
+                ContextKeys.PROBLEM_ASPECTS,
+                ContextKeys.REASONING_MAP,
             ],
-            _then(
-                "apply_analytical",
-                "Components identified and mapped to reasoning approaches",
-            ),
-        ),
-        "apply_analytical": _state(
-            "apply_analytical",
-            "Apply systematic analytical reasoning to understand problem structure",
-            f"Create '{_K.ANALYTICAL_BREAKDOWN}' and '{_K.COMPONENT_RELATIONSHIPS}'",
-            [
-                _field(
-                    _K.ANALYTICAL_BREAKDOWN,
-                    "any",
-                    f"{_C}Your analytical breakdown of the problem into "
-                    "simpler parts and how each contributes to the whole.",
-                    reads=(_K.PROBLEM_ASPECTS, _K.REASONING_MAP),
-                ),
-                _field(
-                    _K.COMPONENT_RELATIONSHIPS,
-                    "any",
-                    f"{_C}The relationships, dependencies and interactions "
-                    "between those parts.",
-                    reads=(_K.PROBLEM_ASPECTS, _K.ANALYTICAL_BREAKDOWN),
-                ),
+            "extraction_instructions": """
+            Systematically analyze the problem to identify aspects requiring different reasoning approaches:
+
+            - What parts need systematic analytical breakdown and decomposition?
+            - What components require logical deduction from established principles?
+            - Where might creative, innovative thinking provide valuable insights?
+            - What aspects need critical evaluation of arguments or evidence?
+            - What patterns might inductive reasoning help reveal from available data?
+
+            Create a comprehensive map of problem aspects to appropriate reasoning approaches.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Analyze the problem as presented to identify reasoning needs.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "apply_analytical",
+                    "description": "Components identified and mapped to reasoning approaches",
+                }
             ],
-            _then("apply_logical", "Analytical reasoning systematically applied"),
-        ),
-        "apply_logical": _state(
-            "apply_logical",
-            "Apply logical reasoning to derive sound conclusions",
-            f"Establish '{_K.LOGICAL_CONCLUSIONS}' and '{_K.REASONING_CHAIN}'",
-            [
-                _field(
-                    _K.LOGICAL_CONCLUSIONS,
-                    "list",
-                    f"{_C}A JSON list of what follows logically from the "
-                    "analytical breakdown.",
-                    reads=(_K.ANALYTICAL_BREAKDOWN, _K.COMPONENT_RELATIONSHIPS),
-                ),
-                _field(
-                    _K.REASONING_CHAIN,
-                    "list",
-                    f"{_C}A JSON list of the logical steps, in order, that "
-                    "lead to those conclusions.",
-                    reads=(_K.ANALYTICAL_BREAKDOWN, _K.LOGICAL_CONCLUSIONS),
-                ),
+        },
+        "apply_analytical": {
+            "id": "apply_analytical",
+            "description": "Apply systematic analytical reasoning to understand problem structure",
+            "purpose": f"Create '{ContextKeys.ANALYTICAL_BREAKDOWN}' and '{ContextKeys.COMPONENT_RELATIONSHIPS}'",
+            "required_context_keys": [
+                ContextKeys.ANALYTICAL_BREAKDOWN,
+                ContextKeys.COMPONENT_RELATIONSHIPS,
             ],
-            _then("apply_creative", "Logical reasoning systematically applied"),
-        ),
-        "apply_creative": _state(
-            "apply_creative",
-            "Apply creative thinking to generate novel approaches and insights",
-            f"Generate '{_K.CREATIVE_INSIGHTS}' and '{_K.NOVEL_APPROACHES}'",
-            [
-                _field(
-                    _K.CREATIVE_INSIGHTS,
-                    "list",
-                    f"{_C}A JSON list of new perspectives or connections that "
-                    "extend the analytical and logical work.",
-                    reads=(_K.ANALYTICAL_BREAKDOWN, _K.LOGICAL_CONCLUSIONS),
-                ),
-                _field(
-                    _K.NOVEL_APPROACHES,
-                    "list",
-                    f"{_C}A JSON list of unconventional approaches to the problem.",
-                    reads=(_K.LOGICAL_CONCLUSIONS, _K.CREATIVE_INSIGHTS),
-                ),
+            "extraction_instructions": """
+            Apply systematic analytical thinking to the problem:
+
+            - Break down complex aspects into simpler, more manageable components
+            - Identify relationships, dependencies, and interactions between components
+            - Understand the underlying structure and organizational principles
+            - Analyze how different elements contribute to the overall problem
+            - Document systematic findings from the analytical decomposition
+
+            Provide thorough analytical breakdown that will inform other reasoning approaches.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Proceed with systematic analytical breakdown based on your component identification.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "apply_logical",
+                    "description": "Analytical reasoning systematically applied",
+                }
             ],
-            _then(HYBRID_EVALUATION_STATE, "Creative reasoning systematically applied"),
-        ),
-        HYBRID_EVALUATION_STATE: _state(
-            HYBRID_EVALUATION_STATE,
-            "Critically evaluate all findings with systematic loop prevention",
-            f"Create '{_K.EVALUATION_RESULTS}' and determine if refinement needed (maximum {Defaults.MAX_HYBRID_LOOPS} loops)",
-            [
-                _field(
-                    _K.EVALUATION_RESULTS,
-                    "any",
-                    f"{_C}Your critical evaluation of the combined work: how "
-                    "the approaches complement each other, contradictions or "
-                    "gaps, strengths and weaknesses.",
-                    reads=_HYBRID_WORK,
-                ),
-                # DECISION plan-2026-10-01T093600-944e2692/D-055: the back
-                # edge reads an explicit bool field. Do NOT drop it back to a
-                # sentence in state-level instructions: with no bulk call
-                # nothing would ever write needs_refinement.
-                _field(
-                    _K.NEEDS_REFINEMENT,
-                    "bool",
-                    "Your judgment: true only when the evaluation_results "
-                    "value names a serious, fundamental flaw that another "
-                    "pass would fix; false otherwise.",
-                    reads=(*_HYBRID_WORK, _K.EVALUATION_RESULTS),
-                    required=False,
-                ),
+        },
+        "apply_logical": {
+            "id": "apply_logical",
+            "description": "Apply logical reasoning to derive sound conclusions",
+            "purpose": f"Establish '{ContextKeys.LOGICAL_CONCLUSIONS}' and '{ContextKeys.REASONING_CHAIN}'",
+            "required_context_keys": [
+                ContextKeys.LOGICAL_CONCLUSIONS,
+                ContextKeys.REASONING_CHAIN,
             ],
-            [
+            "extraction_instructions": """
+            Apply systematic logical reasoning to the analytical findings:
+
+            - What can be logically deduced from the analytical breakdown and identified relationships?
+            - What logical steps follow necessarily from the evidence and established facts?
+            - What conclusions can be drawn with high confidence based on logical inference?
+            - How do the logical pieces fit together to form coherent understanding?
+            - What clear chain of reasoning emerges from the logical analysis?
+
+            Build a clear, valid chain of logical reasoning that builds on the analytical foundation.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Apply logical reasoning systematically to your analytical findings.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "apply_creative",
+                    "description": "Logical reasoning systematically applied",
+                }
+            ],
+        },
+        "apply_creative": {
+            "id": "apply_creative",
+            "description": "Apply creative thinking to generate novel approaches and insights",
+            "purpose": f"Generate '{ContextKeys.CREATIVE_INSIGHTS}' and '{ContextKeys.NOVEL_APPROACHES}'",
+            "required_context_keys": [
+                ContextKeys.CREATIVE_INSIGHTS,
+                ContextKeys.NOVEL_APPROACHES,
+            ],
+            "extraction_instructions": """
+            Apply creative thinking to complement and enhance the analytical and logical work:
+
+            - What new perspectives or insights emerge from viewing the analysis creatively?
+            - How might innovative approaches complement or extend the logical conclusions?
+            - What novel solutions become possible when we think beyond conventional boundaries?
+            - What creative connections or unexpected relationships can enhance understanding?
+            - How can creative thinking add value to the systematic analysis already completed?
+
+            Generate creative insights that meaningfully enhance rather than contradict the systematic reasoning.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Generate creative insights building on your comprehensive analytical and logical work.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": HYBRID_EVALUATION_STATE,
+                    "description": "Creative reasoning systematically applied",
+                }
+            ],
+        },
+        HYBRID_EVALUATION_STATE: {
+            "id": HYBRID_EVALUATION_STATE,
+            "description": "Critically evaluate all findings with systematic loop prevention",
+            "purpose": f"Create '{ContextKeys.EVALUATION_RESULTS}' and determine if refinement needed (maximum {Defaults.MAX_HYBRID_LOOPS} loops)",
+            "required_context_keys": [ContextKeys.EVALUATION_RESULTS],
+            "extraction_instructions": """
+            Critically evaluate the integration of all reasoning approaches:
+
+            - How effectively do the analytical, logical, and creative approaches complement each other?
+            - Are there significant contradictions, gaps, or inconsistencies that need resolution?
+            - What are the key strengths and potential weaknesses of this combined approach?
+            - Are there critical flaws or missing elements that would justify returning for refinement?
+            - How robust and comprehensive is the overall reasoning when considered together?
+
+            Set needs_refinement=True only for serious, fundamental issues.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate comprehensively based on your multi-faceted analysis.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
                 {
                     "target_state": "integrate_solution",
                     "description": "Ready to integrate (no critical issues or loop limit reached)",
@@ -1527,10 +1512,15 @@ hybrid_fsm = {
                             "description": "No critical issues found or maximum loops reached",
                             "logic": {
                                 "or": [
-                                    {"!=": [{"var": _K.NEEDS_REFINEMENT}, True]},
+                                    {
+                                        "!=": [
+                                            {"var": ContextKeys.NEEDS_REFINEMENT},
+                                            True,
+                                        ]
+                                    },
                                     {
                                         ">=": [
-                                            {"var": [_K.HYBRID_LOOP_COUNT, 0]},
+                                            {"var": [ContextKeys.HYBRID_LOOP_COUNT, 0]},
                                             Defaults.MAX_HYBRID_LOOPS,
                                         ]
                                     },
@@ -1548,10 +1538,15 @@ hybrid_fsm = {
                             "description": "Critical issues found and loops available",
                             "logic": {
                                 "and": [
-                                    {"==": [{"var": _K.NEEDS_REFINEMENT}, True]},
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.NEEDS_REFINEMENT},
+                                            True,
+                                        ]
+                                    },
                                     {
                                         "<": [
-                                            {"var": [_K.HYBRID_LOOP_COUNT, 0]},
+                                            {"var": [ContextKeys.HYBRID_LOOP_COUNT, 0]},
                                             Defaults.MAX_HYBRID_LOOPS,
                                         ]
                                     },
@@ -1561,56 +1556,60 @@ hybrid_fsm = {
                     ],
                 },
             ],
-        ),
-        "integrate_solution": _state(
-            "integrate_solution",
-            "Integrate insights from all reasoning approaches into comprehensive solution",
-            f"Create '{_K.INTEGRATED_SOLUTION}' with '{_K.REASONING_SYNTHESIS_NOTES}'",
-            [
-                _field(
-                    _K.INTEGRATED_SOLUTION,
-                    "any",
-                    f"{_C}Your integrated answer to problem_statement that "
-                    "combines the analytical, logical and creative work and "
-                    "addresses the evaluation.",
-                    reads=(*_HYBRID_WORK, _K.EVALUATION_RESULTS),
-                ),
-                _field(
-                    _K.REASONING_SYNTHESIS_NOTES,
-                    "any",
-                    f"{_C}How the reasoning approaches reinforced or "
-                    "challenged each other in that answer.",
-                    reads=(*_HYBRID_WORK, _K.INTEGRATED_SOLUTION),
-                ),
+        },
+        "integrate_solution": {
+            "id": "integrate_solution",
+            "description": "Integrate insights from all reasoning approaches into comprehensive solution",
+            "purpose": f"Create '{ContextKeys.INTEGRATED_SOLUTION}' with '{ContextKeys.REASONING_SYNTHESIS_NOTES}'",
+            "required_context_keys": [
+                ContextKeys.INTEGRATED_SOLUTION,
+                ContextKeys.REASONING_SYNTHESIS_NOTES,
             ],
-            _then("finalize_hybrid", "Solution comprehensively integrated"),
-        ),
-        "finalize_hybrid": _state(
-            "finalize_hybrid",
-            "Present final hybrid solution with complete reasoning synthesis",
-            f"Finalize '{_K.FINAL_HYBRID_SOLUTION}' and '{_K.REASONING_SYNTHESIS}'",
-            [
-                _field(
-                    _K.FINAL_HYBRID_SOLUTION,
-                    "any",
-                    f"{_C}Your final, complete answer to problem_statement, "
-                    "stated plainly first, then the reasoning behind it.",
-                    reads=(
-                        _K.INTEGRATED_SOLUTION,
-                        _K.REASONING_SYNTHESIS_NOTES,
-                        _K.EVALUATION_RESULTS,
-                    ),
-                ),
-                _field(
-                    _K.REASONING_SYNTHESIS,
-                    "any",
-                    f"{_C}How each reasoning type contributed to the final answer.",
-                    reads=(_K.FINAL_HYBRID_SOLUTION, _K.REASONING_SYNTHESIS_NOTES),
-                ),
+            "extraction_instructions": """
+            Systematically integrate all reasoning approaches into a comprehensive, unified solution:
+
+            - How do analytical insights, logical conclusions, and creative innovations combine synergistically?
+            - What is the most complete and nuanced understanding of the problem that emerges?
+            - How do different reasoning types reinforce, complement, or constructively challenge each other?
+            - What is the best integrated approach to solving or addressing the problem?
+            - How does the combination create understanding that is greater than the sum of individual parts?
+
+            Synthesize rather than merely summarize—create genuine integration that leverages the strengths of each approach.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Integrate systematically based on your comprehensive multi-approach analysis.
+            """,
+            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "transitions": [
+                {
+                    "target_state": "finalize_hybrid",
+                    "description": "Solution comprehensively integrated",
+                }
             ],
-            [],
-            response_instructions=ANSWER_RESPONSE_INSTRUCTIONS,
-        ),
+        },
+        "finalize_hybrid": {
+            "id": "finalize_hybrid",
+            "description": "Present final hybrid solution with complete reasoning synthesis",
+            "purpose": f"Finalize '{ContextKeys.FINAL_HYBRID_SOLUTION}' and '{ContextKeys.REASONING_SYNTHESIS}'",
+            "required_context_keys": [
+                ContextKeys.FINAL_HYBRID_SOLUTION,
+                ContextKeys.REASONING_SYNTHESIS,
+            ],
+            "extraction_instructions": """
+            Present the final comprehensive hybrid solution with complete synthesis:
+
+            - What is your final, most comprehensive and well-reasoned solution?
+            - How did each reasoning type (analytical, logical, creative, critical) contribute uniquely?
+            - What is the particular strength and advantage of this multi-faceted reasoning approach?
+            - How confident are you in this hybrid solution and why?
+            - What would be the most logical next steps for implementation, testing, or further development?
+
+            Provide a complete synthesis that demonstrates and showcases the power of systematically combined reasoning approaches.
+
+            IMPORTANT: Do not ask questions or request additional input from the user. Present your final integrated solution based on the complete hybrid reasoning process.
+            """,
+            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "transitions": [],
+        },
     },
 }
 
