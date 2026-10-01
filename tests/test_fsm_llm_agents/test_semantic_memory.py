@@ -5,6 +5,8 @@ Embeddings are injected via embed_fn so tests are deterministic and need no LLM.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from fsm_llm.agents import (
@@ -149,3 +151,85 @@ class TestSemanticMemoryTools:
             ToolCall(tool_name="recall", parameters={"query": "anything"})
         )
         assert "No memories" in recall.result
+
+
+class _EmbeddingProvider:
+    """A fake provider for both embedding bindings (core's and litellm's).
+
+    Answers one ``_fake_embed`` vector per input text in a real
+    ``EmbeddingResponse``, or raises when ``fail``. ``requests`` holds the
+    keyword arguments of every request.
+    """
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.requests: list[dict[str, Any]] = []
+
+    def __call__(self, **params: Any) -> Any:
+        from litellm.types.utils import EmbeddingResponse
+
+        self.requests.append(params)
+        if self.fail:
+            raise ConnectionError("embedding provider down")
+        return EmbeddingResponse(
+            model=params["model"],
+            data=[
+                {"object": "embedding", "index": i, "embedding": _fake_embed(t)}
+                for i, t in enumerate(params["input"])
+            ],
+        )
+
+
+@pytest.fixture
+def provider(monkeypatch) -> _EmbeddingProvider:
+    """Route core's embedding binding and litellm's module function to a fake."""
+    import litellm
+
+    import fsm_llm.llm
+
+    fake = _EmbeddingProvider()
+    monkeypatch.setattr(fsm_llm.llm, "embedding", fake)
+    monkeypatch.setattr(litellm, "embedding", fake)
+    return fake
+
+
+class TestDefaultEmbedder:
+    """Plan 944e2692 step 8 (D-005): with no ``embed_fn`` the store embeds
+    through core's ``LiteLLMEmbedder`` (its meter counts every request)."""
+
+    def test_add_and_search_send_through_core_embedder(self, provider):
+        store = SemanticMemoryStore(embedding_model="ollama/qwen3-embedding:0.6b")
+        store.add("My cat sleeps all day")
+        store.add("Paris is my favourite travel spot")
+        hits = store.search("tell me about my pet", k=1)
+
+        assert hits[0][0] == "My cat sleeps all day"
+        assert [r["input"] for r in provider.requests] == [
+            ["My cat sleeps all day"],
+            ["Paris is my favourite travel spot"],
+            ["tell me about my pet"],
+        ]
+        assert {r["model"] for r in provider.requests} == {
+            "ollama/qwen3-embedding:0.6b"
+        }
+        usage = store._embed_texts.__self__.usage()  # the store's LiteLLMEmbedder
+        assert usage.calls == 3
+        assert usage.errors == 0
+
+    def test_provider_outage_stores_unembedded_and_recalls_by_substring(self, provider):
+        provider.fail = True
+        store = SemanticMemoryStore()
+        store.add("Remember the dentist on Friday")
+
+        assert store.all_entries()[0].embedding is None
+        hits = store.search("dentist")
+        assert [h[0] for h in hits] == ["Remember the dentist on Friday"]
+        assert hits[0][1] == 1.0
+        assert len(provider.requests) == 2
+
+    def test_embed_fn_bypasses_the_provider(self, provider):
+        store = SemanticMemoryStore(embed_fn=_fake_embed)
+        store.add("I write Python code")
+        store.search("python")
+
+        assert provider.requests == []

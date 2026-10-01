@@ -2,19 +2,66 @@
 Semantic Tool Retrieval.
 
 Extends ToolRegistry with embedding-based retrieval for scalable tool
-selection. Uses litellm's embedding() API (no new dependencies).
+selection. Embeds through core's :class:`fsm_llm.llm.LiteLLMEmbedder` (no
+new dependencies) or a caller-supplied ``embed_fn``.
 """
 
 from __future__ import annotations
 
 import math
 import threading
-from typing import cast
+from collections.abc import Callable, Sequence
 
+from fsm_llm.llm import LiteLLMEmbedder
 from fsm_llm.logging import logger
 
 from .definitions import ToolDefinition
 from .tools import ToolRegistry
+
+EmbedFn = Callable[[str], list[float]]
+"""A custom embedding backend: one text in, its vector out."""
+
+EmbedTextsFn = Callable[[Sequence[str]], list[list[float]]]
+
+
+# DECISION plan-2026-10-01T093600-944e2692/D-005: the default backend is core's
+# LiteLLMEmbedder; a custom backend plugs in as a callable ``embed_fn``. Do NOT
+# import litellm or call an embedding API here, and do NOT add an Embedder ABC
+# or per-class embedding code: the memory store and the tool registry share
+# this one function. See D-005.
+def _embedding_backend(embedding_model: str, embed_fn: EmbedFn | None) -> EmbedTextsFn:
+    """The batch embedding function of a semantic store or registry.
+
+    Shared by :class:`SemanticToolRegistry` and
+    :class:`fsm_llm.agents.semantic_memory.SemanticMemoryStore`.
+
+    Args:
+        embedding_model: Model of the default :class:`LiteLLMEmbedder`, used
+            when ``embed_fn`` is ``None``.
+        embed_fn: Optional custom backend, called once per text.
+
+    Returns:
+        ``texts -> vectors``, one vector per text, in order. The default
+        backend sends all texts in one provider request.
+
+    Raises:
+        ValueError: ``embed_fn`` is ``None`` and ``embedding_model`` is empty.
+        The returned function raises whatever the backend raises; callers
+        own the degrade path.
+    """
+    if embed_fn is None:
+        return LiteLLMEmbedder(embedding_model).embed
+    custom = embed_fn
+
+    def embed_each(texts: Sequence[str]) -> list[list[float]]:
+        return [list(custom(text)) for text in texts]
+
+    return embed_each
+
+
+def _tool_text(tool: ToolDefinition) -> str:
+    """The text embedded for a tool."""
+    return f"{tool.name}: {tool.description}"
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -46,8 +93,10 @@ class SemanticToolRegistry(ToolRegistry):
     Falls back to the full tool list for small registries (fewer than
     ``FALLBACK_THRESHOLD`` tools, currently 10) or when embedding fails.
 
-    Uses litellm's embedding() API, so any supported embedding provider
-    works (OpenAI, Ollama, Cohere, etc.).
+    Embeds through a :class:`fsm_llm.llm.LiteLLMEmbedder` built from
+    ``embedding_model``, so any LiteLLM embedding provider works (OpenAI,
+    Ollama, Cohere, etc.), or through ``embed_fn`` when given (a custom
+    backend; ``embedding_model`` is then only a label).
 
     Example::
 
@@ -71,9 +120,12 @@ class SemanticToolRegistry(ToolRegistry):
         embedding_model: str = "ollama/qwen3-embedding:0.6b",
         top_k: int = 5,
         auto_embed: bool = True,
+        *,
+        embed_fn: EmbedFn | None = None,
     ) -> None:
         super().__init__()
         self._embedding_model = embedding_model
+        self._embed_texts = _embedding_backend(embedding_model, embed_fn)
         self._default_top_k = top_k
         self._auto_embed = auto_embed
         # DECISION plan-2026-07-20T040150-876e7164/D-005 [STALE]: `_embeddings` gets its OWN
@@ -99,7 +151,7 @@ class SemanticToolRegistry(ToolRegistry):
 
     def _embed_tool(self, tool: ToolDefinition) -> None:
         """Compute and cache embedding for a tool's description."""
-        text = f"{tool.name}: {tool.description}"
+        text = _tool_text(tool)
         try:
             # `_get_embedding` is a network call — it runs OUTSIDE the lock; only
             # the dict write below is guarded.
@@ -111,14 +163,8 @@ class SemanticToolRegistry(ToolRegistry):
             self._embeddings[tool.name] = embedding
 
     def _get_embedding(self, text: str) -> list[float]:
-        """Get embedding vector for text using litellm."""
-        import litellm
-
-        response = litellm.embedding(
-            model=self._embedding_model,
-            input=[text],
-        )
-        return cast("list[float]", response.data[0]["embedding"])
+        """The embedding vector of one text (one backend request)."""
+        return self._embed_texts([text])[0]
 
     def retrieve(
         self,
@@ -203,18 +249,26 @@ class SemanticToolRegistry(ToolRegistry):
         return result
 
     def rebuild_embeddings(self) -> int:
-        """Rebuild all tool embeddings. Returns count of successful embeddings."""
+        """Rebuild all tool embeddings in one batch request.
+
+        Returns the number of tools embedded: all of them, or 0 when the
+        batch fails (logged at WARNING; ``retrieve`` then re-embeds lazily or
+        falls back to the full list).
+        """
         with self._embeddings_lock:
             self._embeddings.clear()
-        count = 0
-        for tool in self.list_tools():
-            self._embed_tool(tool)
-            with self._embeddings_lock:
-                embedded = tool.name in self._embeddings
-            if embedded:
-                count += 1
-        logger.info(f"Rebuilt embeddings for {count}/{len(self)} tools")
-        return count
+        tools = self.list_tools()
+        try:
+            # Network call: runs OUTSIDE the lock, like `_embed_tool`.
+            vectors = self._embed_texts([_tool_text(tool) for tool in tools])
+        except Exception as e:  # provider down / bad reply: degrade, logged
+            logger.warning(f"Failed to embed {len(tools)} tools: {e}")
+            return 0
+        with self._embeddings_lock:
+            for tool, vector in zip(tools, vectors, strict=True):
+                self._embeddings[tool.name] = vector
+        logger.info(f"Rebuilt embeddings for {len(tools)}/{len(self)} tools")
+        return len(tools)
 
     def to_prompt_description(
         self, query: str | None = None, top_k: int | None = None

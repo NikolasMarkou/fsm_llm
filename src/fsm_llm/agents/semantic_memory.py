@@ -2,8 +2,8 @@
 Long-term semantic memory for agents.
 
 ``SemanticMemoryStore`` is an embedding-backed fact store: text entries are
-embedded once (via litellm, the same infra ``SemanticToolRegistry`` already
-uses — no new dependencies) and recalled by cosine similarity rather than
+embedded once (through core's ``LiteLLMEmbedder``, the same backend
+``SemanticToolRegistry`` uses — no new dependencies) and recalled by cosine similarity rather than
 substring match. Unlike :class:`fsm_llm.memory.WorkingMemory` (ephemeral,
 substring search), it is JSON-persistable so memories survive process restarts
 — the missing piece for "Claude-like" cross-session recall.
@@ -35,16 +35,13 @@ import json
 import os
 import tempfile
 import threading
-from collections.abc import Callable
 from typing import Annotated, Any
 
 from fsm_llm.logging import logger
 
 from .definitions import ToolDefinition
-from .semantic_tools import _cosine_similarity
+from .semantic_tools import EmbedFn, _cosine_similarity, _embedding_backend
 from .tools import _infer_schema_from_hints
-
-EmbedFn = Callable[[str], list[float]]
 
 
 class MemoryEntry:
@@ -86,7 +83,8 @@ class SemanticMemoryStore:
     """Embedding-backed, persistable long-term memory.
 
     Args:
-        embedding_model: litellm embedding model id. Any litellm-supported
+        embedding_model: Embedding model id of the default
+            :class:`fsm_llm.llm.LiteLLMEmbedder`. Any LiteLLM embedding
             provider works (OpenAI, Ollama, Cohere, ...).
         persist_path: If set, :meth:`add` / :meth:`forget` auto-save to this
             JSON file. Also used as the default path for :meth:`save`. When the
@@ -96,7 +94,8 @@ class SemanticMemoryStore:
             that is not a store written by :meth:`save` raises ``ValueError``
             naming the path, and is left untouched.
         embed_fn: Optional override ``(text) -> list[float]`` used instead of
-            litellm. Primarily for tests and custom embedding backends.
+            the default embedder. Primarily for tests and custom embedding
+            backends.
         max_entries: Optional cap on stored entries. When set, :meth:`add`
             evicts the oldest entries (FIFO by insertion order) after appending
             until ``len <= max_entries``. Default ``None`` → unbounded, or
@@ -113,7 +112,7 @@ class SemanticMemoryStore:
     ) -> None:
         self._embedding_model = embedding_model
         self._persist_path = os.path.expanduser(persist_path) if persist_path else None
-        self._embed_fn = embed_fn
+        self._embed_texts = _embedding_backend(embedding_model, embed_fn)
         self._max_entries = max_entries
         self._entries: list[MemoryEntry] = []
         self._counter = 0
@@ -132,12 +131,7 @@ class SemanticMemoryStore:
     # ------------------------------------------------------------------
     def _embed(self, text: str) -> list[float] | None:
         try:
-            if self._embed_fn is not None:
-                return list(self._embed_fn(text))
-            import litellm
-
-            response = litellm.embedding(model=self._embedding_model, input=[text])
-            return list(response.data[0]["embedding"])
+            return self._embed_texts([text])[0]
         except Exception as e:  # provider down / unsupported → graceful degrade
             logger.warning(f"Memory embedding failed (will store unembedded): {e}")
             return None

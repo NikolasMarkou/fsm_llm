@@ -703,13 +703,11 @@ class TestToolRegistryConcurrency:
 _EMBEDDING_DIMS = 256
 
 
-def _stub_embedding(self, text):
-    """Deterministic offline stand-in for the litellm embedding call.
+def _stub_embedding(text):
+    """Deterministic offline embedding backend, injected as ``embed_fn``.
 
-    Module-level (not a `staticmethod`/`classmethod` on the test class) so that
-    `monkeypatch.setattr(SemanticToolRegistry, "_get_embedding", ...)` installs a
-    plain function, which the descriptor protocol re-binds to the registry
-    instance as `self`.
+    Every embedding path (`register`, `retrieve`, the batched
+    `rebuild_embeddings`) goes through it, so no test here reaches a provider.
     """
     seed = sum(map(ord, text))
     return [float((seed + i) % 13) + 1.0 for i in range(_EMBEDDING_DIMS)]
@@ -724,14 +722,12 @@ class TestSemanticToolRegistryConcurrency:
     def _registry(self, monkeypatch):
         from fsm_llm.agents.semantic_tools import SemanticToolRegistry
 
-        monkeypatch.setattr(SemanticToolRegistry, "_get_embedding", _stub_embedding)
-        registry = SemanticToolRegistry(top_k=5)
+        registry = SemanticToolRegistry(top_k=5, embed_fn=_stub_embedding)
         # Guard the stub itself. `_embed_tool` swallows every exception from
-        # `_get_embedding`, so a stub that fails to bind as a descriptor (e.g. a
-        # `classmethod`/bound method, which is NOT re-bound when set as a class
-        # attribute) leaves `_embeddings` permanently empty — `retrieve` then
-        # short-circuits to the all-tools fallback and every concurrency assertion
-        # below becomes vacuous while still going red for the wrong reason.
+        # the backend, so a stub that fails leaves `_embeddings` permanently
+        # empty — `retrieve` then short-circuits to the all-tools fallback and
+        # every concurrency assertion below becomes vacuous while still going
+        # red for the wrong reason.
         assert len(registry._get_embedding("probe")) == _EMBEDDING_DIMS
         return registry
 
@@ -815,6 +811,118 @@ class TestSemanticToolRegistryConcurrency:
             worker.join(timeout=10)
             assert not worker.is_alive(), f"deadlock in {call!r}"
             assert errors == [], f"{call!r} raised {errors!r}"
+
+
+class _EmbeddingProvider:
+    """A fake provider for both embedding bindings (core's and litellm's).
+
+    Answers one ``_stub_embedding`` vector per input text in a real
+    ``EmbeddingResponse``, or raises when ``fail``. ``requests`` holds the
+    keyword arguments of every request.
+    """
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.requests: list[dict[str, Any]] = []
+
+    @property
+    def inputs(self) -> list[list[str]]:
+        return [list(r["input"]) for r in self.requests]
+
+    def __call__(self, **params: Any) -> Any:
+        from litellm.types.utils import EmbeddingResponse
+
+        self.requests.append(params)
+        if self.fail:
+            raise ConnectionError("embedding provider down")
+        return EmbeddingResponse(
+            model=params["model"],
+            data=[
+                {"object": "embedding", "index": i, "embedding": _stub_embedding(t)}
+                for i, t in enumerate(params["input"])
+            ],
+        )
+
+
+def _patch_embedding(monkeypatch, provider: _EmbeddingProvider) -> None:
+    """Route core's binding and litellm's module function to ``provider``."""
+    import litellm
+
+    import fsm_llm.llm
+
+    monkeypatch.setattr(fsm_llm.llm, "embedding", provider)
+    monkeypatch.setattr(litellm, "embedding", provider)
+
+
+class TestSemanticToolRegistryEmbedding:
+    """Plan 944e2692 step 8 (D-005): the registry embeds through core's
+    ``LiteLLMEmbedder`` or an injected ``embed_fn``; a rebuild is one batch."""
+
+    def test_embed_fn_seam_is_accepted_and_used(self):
+        from fsm_llm.agents.semantic_tools import SemanticToolRegistry
+
+        seen: list[str] = []
+
+        def embed_fn(text: str) -> list[float]:
+            seen.append(text)
+            return _stub_embedding(text)
+
+        registry = SemanticToolRegistry(embed_fn=embed_fn)
+        registry.register(_make_tool(0))
+
+        assert seen == ["tool_0: Concurrency probe tool 0"]
+        assert registry.embedded_tool_count == 1
+
+    def test_rebuild_embeddings_is_one_provider_request(self, monkeypatch):
+        from fsm_llm.agents.semantic_tools import SemanticToolRegistry
+
+        provider = _EmbeddingProvider()
+        _patch_embedding(monkeypatch, provider)
+        registry = SemanticToolRegistry(
+            embedding_model="ollama/qwen3-embedding:0.6b", auto_embed=False
+        )
+        for i in range(3):
+            registry.register(_make_tool(i))
+
+        assert registry.rebuild_embeddings() == 3
+        assert provider.inputs == [
+            [f"tool_{i}: Concurrency probe tool {i}" for i in range(3)]
+        ]
+        assert registry.embedded_tool_count == 3
+
+    def test_default_backend_sends_the_registry_model(self, monkeypatch):
+        from fsm_llm.agents.semantic_tools import SemanticToolRegistry
+
+        provider = _EmbeddingProvider()
+        _patch_embedding(monkeypatch, provider)
+        registry = SemanticToolRegistry(embedding_model="text-embedding-3-small")
+        registry.register(_make_tool(0))
+
+        assert [r["model"] for r in provider.requests] == ["text-embedding-3-small"]
+        assert provider.inputs == [["tool_0: Concurrency probe tool 0"]]
+
+    def test_failed_rebuild_degrades_to_the_full_list(self, monkeypatch):
+        from fsm_llm.agents.semantic_tools import SemanticToolRegistry
+        from fsm_llm.logging import logger
+
+        provider = _EmbeddingProvider(fail=True)
+        _patch_embedding(monkeypatch, provider)
+        registry = SemanticToolRegistry(auto_embed=False)
+        for i in range(registry.FALLBACK_THRESHOLD):
+            registry.register(_make_tool(i))
+
+        messages: list[str] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+        try:
+            assert registry.rebuild_embeddings() == 0
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+
+        assert registry.embedded_tool_count == 0
+        assert any("Failed to embed 10 tools" in m for m in messages)
+        assert len(registry.retrieve("anything")) == registry.FALLBACK_THRESHOLD
 
 
 class TestNormalizeToolInput:
