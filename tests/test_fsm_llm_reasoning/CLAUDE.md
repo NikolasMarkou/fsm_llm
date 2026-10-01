@@ -19,15 +19,15 @@ Tests call static methods and model constructors directly with small context dic
 
 | File | Role | Notes |
 | --- | --- | --- |
-| `test_audit_fixes.py` | 28 regression tests for audit findings F-003, F-005, F-011 and senior-review fixes | Many assertions match literal source strings |
+| `test_audit_fixes.py` | 27 regression tests for audit findings F-003, F-005, F-011 and senior-review fixes | Many assertions match literal source strings |
 | `test_cli_logging.py` | 2 parametrized cases: `["--verbose"]` gives 1 `I-PROBE` line in stderr, `[]` gives 0; `D-PROBE` never appears | Subprocess, `timeout=60`, deletes `FSM_LLM_LOG_LEVEL` |
 | `test_cli_output.py` | 3 tests: `_format_json_output` and `_save_as_json` fed a real `ReasoningTrace(...).model_dump()` write `reasoning_types_used` as a sorted list, never redacted | Uses `tmp_path` |
-| `test_constants.py` | 19 tests on constant values | Pins literal strings and numbers |
+| `test_constants.py` | 26 tests on constant values | Pins literal strings and numbers |
 | `test_definitions.py` | 28 tests on Pydantic models | Validators, computed properties, thresholds |
 | `test_engine.py` | 10 tests: models, handlers, `map_reasoning_type`, ANALYTICAL-only fallback (D-009) | Uses loguru sink for the warning |
-| `test_engine_scripted.py` | Whole solves through core on `_ScriptedLLM` (also imported by `tests/test_fsm_llm_regression/test_engine_integration.py`) | Asserts calls, history, stack, retries, budget and failure details |
+| `test_engine_scripted.py` | 48 tests: whole solves through core on `_ScriptedLLM` (also imported by `tests/test_fsm_llm_regression/test_engine_integration.py`) | Asserts calls, history, stack, retries, budget and failure details |
 | `test_exceptions.py` | 8 tests on the exception hierarchy | `details`, `reasoning_type` attributes |
-| `test_handlers.py` | 28 tests on `ReasoningHandlers`, `ContextManager`, `OutputFormatter` | Validation, trace, pruning, merge, final solution |
+| `test_handlers.py` | 39 tests on `ReasoningHandlers`, `ContextManager`, `OutputFormatter` | Validation, trace, pruning, merge, final solution |
 | `__init__.py` | Empty package marker | |
 
 ## Public interface under test
@@ -92,7 +92,7 @@ Model behaviour pinned in `test_definitions.py`:
 
 ## Working here
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_reasoning/` (126 tests: audit_fixes 28, cli_logging 2, cli_output 3, constants 19, definitions 28, engine 10, exceptions 8, handlers 28).
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_reasoning/` (191 tests: audit_fixes 27, cli_logging 2, cli_output 3, constants 26, definitions 28, engine 10, engine_scripted 48, exceptions 8, handlers 39).
 - Conventions: files `test_<module>.py`, classes `Test<Feature>`, local helpers prefixed `_` (for example `_make_engine`, `_PROBE`).
 - When changing a pinned constant, state name, or source string in `src/fsm_llm/reasoning/`, update the matching assertion here in the same change, and read any `# DECISION` anchors near the edited code first (D-009 fallback, D-016 verbose logging, D-004 logging off by default are referenced in these tests).
 - Keep tests offline: build engines with `object.__new__` and hand-set attributes rather than constructing `ReasoningEngine` with a model.

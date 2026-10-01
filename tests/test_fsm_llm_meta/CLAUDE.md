@@ -1,7 +1,7 @@
 # test_fsm_llm_meta
 
 Path: `tests/test_fsm_llm_meta`
-Purpose: Pytest suite (220 tests) for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, the meta FSM (`build_meta_builder_fsm`) and `MetaBuilderAgent`, which drives that FSM through core.
+Purpose: Pytest suite (408 tests) for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, the meta FSM (`build_meta_builder_fsm`) and `MetaBuilderAgent`, which drives that FSM through core.
 
 ## Scope
 
@@ -41,16 +41,16 @@ LLM isolation methods used:
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | Fixtures | `fsm_builder`, `workflow_builder`, `agent_builder`, `populated_fsm_builder`, `meta_config`, `offline_llm` |
-| `test_agent.py` | `MetaBuilderAgent` behavior | 46 tests; carries DECISION references |
+| `test_agent.py` | `MetaBuilderAgent` behavior | 47 tests; carries DECISION references |
 | `test_builders.py` | Builder core behavior | 71 tests |
 | `test_builders_elaborate.py` | Builder edge cases, exceptions, config validators | 44 tests |
 | `test_tools.py` | Tool registries | 26 tests; `_make_call(tool_name, **kwargs)` helper at file bottom |
 | `test_integration.py` | Cross-piece checks | 11 tests |
-| `test_definitions.py` | Pydantic models and enum | 12 tests |
+| `test_definitions.py` | Pydantic models and enum | 16 tests |
 | `test_prompts.py` | Prompt text builders | 8 tests |
-| `test_meta_fsm.py` | `build_meta_builder_fsm` structure, gates, build request, run through core | |
-| `test_meta_conversation.py` | Conversations by behaviour with `ScriptedMetaLLM`: each artifact kind, type switch, build retry, outages, lifecycle, monitor state, collect-reply build prompt | |
-| `test_review_fixes_meta.py` | Review fixes: malformed build reply, no Python session state, reclassification keeps the type, `start` never builds, prompt never doubled, keyword hints, negation | |
+| `test_meta_fsm.py` | `build_meta_builder_fsm` structure, gates, build request, run through core | 52 tests |
+| `test_meta_conversation.py` | Conversations by behaviour with `ScriptedMetaLLM`: each artifact kind, type switch, build retry, outages, lifecycle, monitor state, collect-reply build prompt | 41 tests |
+| `test_review_fixes_meta.py` | Review fixes: malformed build reply, no Python session state, reclassification keeps the type, `start` never builds, prompt never doubled, keyword hints, negation | 90 tests |
 | `test_handlers.py`, `test_handlers_elaborate.py` | Import smoke test | 1 test each; handlers module was removed, only the `fsm_llm.agents.meta_builder` import is checked |
 | `__init__.py` | Package marker | empty |
 
