@@ -290,9 +290,26 @@ def build_plan_steps_instructions(
         )
     else:
         ask = "Break the task into a list of concrete, actionable step descriptions"
+    # DECISION plan-2026-09-30T062855-07ad3f8c/D-055
+    # Without these two rules qwen3.5:4b added plan steps that need no tool
+    # ("Combine", "Compare", "Synthesize", "Draft") and steps that confirm or
+    # wait, each costing extra execute turns (compare task 30 calls vs 22 at
+    # d4b1626). Do NOT add "one tool call per step" (it split every item into
+    # its own step) or "plan exactly the task's listed steps" (the planner then
+    # copied the task and dropped work), and do NOT name a loop, a signal or a
+    # message to go on (D-031). See decisions.md D-055.
+    no_tool_rule = ""
+    if registry is not None and len(registry) > 0:
+        no_tool_rule = (
+            " Add no step that needs no tool (such as combining, comparing, "
+            "synthesizing, drafting or reviewing results already gathered) "
+            "unless the task asks for one: the final answer is written from "
+            "the step results after the last step."
+        )
     return (
         f"{ask}: a JSON list of strings, in order, at most {limit} steps. Each "
-        "step is self-contained and produces a clear result."
+        f"step is self-contained and produces a clear result.{no_tool_rule} "
+        "Add no step that confirms, waits for or asks for anything."
         f"{_tool_section(registry, task_description)}"
     )
 
