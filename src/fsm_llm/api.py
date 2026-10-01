@@ -303,8 +303,12 @@ def _run_rounds(
     """Yield 1, 2, ... once for each step a bounded run is allowed to take.
 
     Contract: the caller runs exactly one step of ``conversation_id`` per
-    yielded number and then asks for the next. Each round, in order: stop
-    (normal return) when the top of the FSM stack has ended; raise
+    yielded number and then asks for the next. Each round, in order: when
+    the top of the FSM stack has ended, stop (normal return) unless it is a
+    pushed frame (stack depth above 1) and ``before_step(n)``, called once
+    for it, pops it (``_hook_popped_ended_frame``), in which case the round
+    starts again on the new top (that call is not a step and is not gated
+    by the budgets); raise
     ``RunBudgetExceededError`` when ``max_seconds`` have passed since the first
     round began, or when ``max_steps`` steps were already taken (the seconds
     budget is reported when both are spent); call ``before_step(n)``, then ask
@@ -336,7 +340,22 @@ def _run_rounds(
             return
         raise RunBudgetExceededError("seconds", max_seconds, steps_done)
 
-    while not api.has_conversation_ended(conversation_id):
+    while True:
+        # DECISION plan-2026-10-01T093600-944e2692/D-052: an ended PUSHED
+        # frame is offered to ``before_step`` once (same number as the next
+        # step) so the hook can pop it; the run goes on only when the top is
+        # no longer ended or the stack got shallower, so a hook that does not
+        # pop (or pops and re-pushes an ended frame) ends the run as before.
+        # Do NOT count this call as a step or gate it on the budgets (it runs
+        # no step; the budgets are checked right after, on the new top). Do
+        # NOT add this loop in a subpackage (the reasoning engine's outer
+        # pop-and-rerun loop is what D-013 replaced). See D-052.
+        if api.has_conversation_ended(conversation_id):
+            if before_step is None or not _hook_popped_ended_frame(
+                api, conversation_id, before_step, steps_done + 1
+            ):
+                return
+            continue
         check_seconds()
         if steps_done >= max_steps:
             raise RunBudgetExceededError("steps", max_steps, steps_done)
@@ -347,6 +366,40 @@ def _run_rounds(
             check_seconds()
         yield steps_done + 1
         steps_done += 1
+
+
+def _stack_depth(api: API, conversation_id: str) -> int:
+    """Frames on the stack of ``conversation_id``; 0 once it is closed.
+
+    Contract: reads ``api.conversation_stacks`` under ``api._stack_lock``
+    (held for that read only); never raises and refreshes no idle timer.
+    """
+    with api._stack_lock:
+        return len(api.conversation_stacks.get(conversation_id, ()))
+
+
+def _hook_popped_ended_frame(
+    api: API,
+    conversation_id: str,
+    before_step: Callable[[int], None],
+    step: int,
+) -> bool:
+    """Offer an ended pushed frame to ``before_step``; True if the run goes on.
+
+    Contract: called by ``_run_rounds`` only when the top of the stack has
+    ended. Returns False without calling the hook when the stack depth is 1
+    or less (the root ended, or the conversation was closed). Otherwise calls
+    ``before_step(step)`` once (what it raises propagates unchanged) and
+    returns True when the top is no longer ended or the stack is shallower
+    than before the call (the hook popped), False otherwise.
+    """
+    depth = _stack_depth(api, conversation_id)
+    if depth <= 1:
+        return False
+    before_step(step)
+    if not api.has_conversation_ended(conversation_id):
+        return True
+    return _stack_depth(api, conversation_id) < depth
 
 
 def _require_classifier_interface(
@@ -406,17 +459,23 @@ def llm_settings_for(api_kwargs: Mapping[str, Any], **settings: Any) -> dict[str
     return dict(settings)
 
 
-def _check_exempt_states(exempt: frozenset[str], fsm_def: FSMDefinition) -> None:
-    """Refuse ``seconds_exempt_states`` ids that are not states of ``fsm_def``.
+def _check_exempt_states(
+    exempt: frozenset[str], fsm_defs: Collection[FSMDefinition]
+) -> None:
+    """Refuse ``seconds_exempt_states`` ids that are states of none of ``fsm_defs``.
 
-    Contract: ``fsm_def`` is the definition at the top of the conversation's
-    stack when the run is called; raises ``ValueError`` naming the unknown
-    ids (sorted) and the definition; returns ``None`` otherwise.
+    Contract: ``fsm_defs`` are the definitions the run can step first: the
+    one at the top of the conversation's stack when the run is called, or,
+    when that top is an ended pushed frame the hook may pop, every frame
+    below it. Raises ``ValueError`` naming the unknown ids (sorted) and the
+    definitions; returns ``None`` otherwise.
     """
-    unknown = sorted(exempt - set(fsm_def.states))
+    known = {state for fsm_def in fsm_defs for state in fsm_def.states}
+    unknown = sorted(exempt - known)
     if unknown:
+        names = ", ".join(f"'{fsm_def.name}'" for fsm_def in fsm_defs)
         raise ValueError(
-            f"seconds_exempt_states {unknown} are not states of FSM '{fsm_def.name}'"
+            f"seconds_exempt_states {unknown} are not states of FSM {names}"
         )
 
 
@@ -945,16 +1004,26 @@ class API:
         FSM pushed or popped during the run is followed), checks both budgets,
         calls ``before_step`` and then runs one ``advance``. Budgets are
         checked only between steps: a step that has started is never cut short.
+        When the top that has ended is a pushed FSM (stack depth above 1),
+        ``before_step`` is called once for it first: if the hook pops it, the
+        run continues on the new top; if not, the run returns as for any
+        ended top.
 
         Args:
             conversation_id: Existing conversation ID.
             max_steps: Most steps the run may take (at least 1).
             max_seconds: Wall-clock budget for the whole run, measured from
                 this call; ``None`` for no time budget.
-            before_step: Called once before each step with its number
-                (1, 2, ...), after the budget checks. It may write context
-                (``update_context``); that step sees it. What it raises
-                propagates unchanged and the step does not run.
+            before_step: Called before each step, and once when a pushed
+                frame has ended, with the number of the next step (1, 2,
+                ...). Before a step it runs after the budget checks; it may
+                write context (``update_context``) and that step sees it.
+                For an ended pushed frame (top of the stack terminal, depth
+                above 1) it runs before the budget checks and may pop the
+                frame (``pop_fsm``): the run then continues on the new top
+                (the call is not a step; the same number is passed again
+                before the next step); if it does not pop, the run returns.
+                What it raises propagates unchanged and no step runs.
             seconds_exempt_states: State ids in which a spent ``max_seconds``
                 does not stop the run (a wind-down that must finish once
                 reached); ``max_steps`` still applies, so in an exempt state
@@ -963,6 +1032,9 @@ class API:
                 be a state of the definition at the top of the stack when
                 the run is called (``ValueError`` otherwise; not checked for
                 a conversation that has already ended, which runs nothing).
+                When that top is an ended pushed frame and ``before_step``
+                is given, each id must be a state of some frame below it
+                (the hook may pop down to any of them).
                 Each round matches the CURRENT top of the stack by state id
                 only: when a handler pushes a child FSM during the run, a
                 child state whose id is in the set is exempt too, and the
@@ -991,7 +1063,9 @@ class API:
                 kept), or a turn is already running for the conversation.
         """
         _check_run_budgets(max_steps, max_seconds)
-        exempt = self._checked_exempt_states(conversation_id, seconds_exempt_states)
+        exempt = self._checked_exempt_states(
+            conversation_id, seconds_exempt_states, before_step
+        )
         results: list[AdvanceResult] = []
         for _ in _run_rounds(
             self, conversation_id, max_steps, max_seconds, before_step, exempt
@@ -1026,8 +1100,9 @@ class API:
             max_steps: Most steps the run may take (at least 1).
             max_seconds: Wall-clock budget for the whole run; ``None`` for no
                 time budget.
-            before_step: Called once before each step with its number
-                (1, 2, ...), after the budget checks.
+            before_step: Called before each step, and once when a pushed
+                frame has ended, as in ``run_until_terminal`` (a hook that
+                pops the ended frame lets the run continue on the new top).
             seconds_exempt_states: As in ``run_until_terminal`` (checked
                 against the running definition at call time).
 
@@ -1050,7 +1125,9 @@ class API:
         # Existence check at call time, holding no lock afterwards. An ended
         # conversation (terminal, or already closed and remembered) is valid
         # and streams nothing; an unknown ID raises ``ValueError`` here.
-        exempt = self._checked_exempt_states(conversation_id, seconds_exempt_states)
+        exempt = self._checked_exempt_states(
+            conversation_id, seconds_exempt_states, before_step
+        )
 
         # Lazy nested closure, as in ``converse_stream`` (anchor
         # plan-2026-07-21T082818-4c63deac/D-002 there).
@@ -1064,27 +1141,35 @@ class API:
         return _stream()
 
     def _checked_exempt_states(
-        self, conversation_id: str, seconds_exempt_states: Collection[str]
+        self,
+        conversation_id: str,
+        seconds_exempt_states: Collection[str],
+        before_step: Callable[[int], None] | None,
     ) -> frozenset[str]:
         """Validate a run's ``seconds_exempt_states`` at call time.
 
         Contract: shape-checks the collection (``_seconds_exempt_set``); for a
         live conversation, checks every id against the definition at the top
-        of its stack (``_check_exempt_states``). An unknown conversation ID
-        raises ``ValueError`` (from ``has_conversation_ended``); an ended one
-        is not checked against any definition. Returns the frozen set.
+        of its stack (``_check_exempt_states``). When that top has ended, the
+        ids are checked only if it is a pushed frame and ``before_step`` is
+        given (the hook may pop it, D-052), against the frames below it; an
+        ended run that steps nothing is not checked. An unknown conversation
+        ID raises ``ValueError`` (from ``has_conversation_ended``). Returns
+        the frozen set.
         """
         exempt = _seconds_exempt_set(seconds_exempt_states)
-        if self.has_conversation_ended(conversation_id):
+        ended = self.has_conversation_ended(conversation_id)
+        if ended and before_step is None:
             return exempt
-        # Raises ValueError for an unknown ID or an empty (corrupted) stack.
-        self._get_current_fsm_conversation_id(conversation_id)
+        if not ended:
+            # Raises ValueError for an unknown ID or an empty (corrupted) stack.
+            self._get_current_fsm_conversation_id(conversation_id)
         if exempt:
             with self._stack_lock:
-                stack = self.conversation_stacks.get(conversation_id)
-                fsm_def = stack[-1].fsm_definition if stack else None
-            if fsm_def is not None:
-                _check_exempt_states(exempt, fsm_def)
+                stack = list(self.conversation_stacks.get(conversation_id, ()))
+            frames = stack[:-1] if ended else stack[-1:]
+            if frames:
+                _check_exempt_states(exempt, [frame.fsm_definition for frame in frames])
         return exempt
 
     # ==========================================

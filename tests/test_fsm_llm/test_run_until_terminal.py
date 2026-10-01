@@ -428,15 +428,14 @@ class TestRunStack:
 
         def _hook(step: int) -> None:
             states.append(api.get_current_state(conv_id))
-            if states[-1] == "sub_done":  # never reached: the run stops there
-                raise AssertionError("a step was offered on an ended sub-FSM")
 
         chunks = list(
             api.run_until_terminal_stream(conv_id, max_steps=10, before_step=_hook)
         )
 
-        # Nobody pops: the run ends when the FSM on top of the stack ends.
-        assert states == ["collect", "sub_work"]
+        # Nobody pops: the hook is offered the ended sub-FSM once (D-052) and
+        # the run ends when the FSM on top of the stack ends.
+        assert states == ["collect", "sub_work", "sub_done"]
         assert chunks == []
         assert api.get_stack_depth(conv_id) == 2
         assert api.get_current_state(conv_id) == "sub_done"
@@ -455,6 +454,204 @@ class TestRunStack:
         results = api.run_until_terminal(conv_id, max_steps=10, before_step=_hook)
 
         assert _path(results) == [("collect", "plan"), ("sub_work", "sub_done")]
+
+
+def _push_sub_on_entry(api: API, conv_id: str, target: str) -> None:
+    """Register a handler that pushes ``_sub_fsm`` when the root enters
+    ``target`` (nobody pops it on the sub's terminal)."""
+
+    def _push(context: dict[str, Any]) -> dict[str, Any]:
+        api.push_fsm(conv_id, _sub_fsm())
+        return {}
+
+    api.register_handler(
+        create_handler(f"push_sub_on_{target}")
+        .at(HandlerTiming.POST_TRANSITION)
+        .on_target_state(target)
+        .do(_push)
+    )
+
+
+class _PopEndedSub:
+    """``before_step`` hook: records ``(n, state, depth)`` and pops the top
+    frame when it is an ended pushed frame."""
+
+    def __init__(self, api: API, conv_id: str, *, pops: bool = True) -> None:
+        self.api = api
+        self.conv_id = conv_id
+        self.pops = pops
+        self.calls: list[tuple[int, str, int]] = []
+
+    def __call__(self, step: int) -> None:
+        depth = self.api.get_stack_depth(self.conv_id)
+        self.calls.append((step, self.api.get_current_state(self.conv_id), depth))
+        if self.pops and depth > 1 and self.api.has_conversation_ended(self.conv_id):
+            self.api.pop_fsm(self.conv_id)
+
+
+class TestBeforeStepPopsEndedFrame:
+    """D-052 of plan 944e2692: when the top of the stack is an ended pushed
+    frame, the round offers it to ``before_step`` once; a pop lets the run go
+    on to the parent's terminal. RED on the parent: the run returned at the
+    sub-FSM's terminal without calling the hook."""
+
+    def _api(self, target: str = "plan", llm: Any = None) -> tuple[API, str]:
+        api, conv_id = _start(_trip_fsm(), llm or _ScriptedLLM({"city": "Paris"}))
+        _push_sub_on_entry(api, conv_id, target)
+        return api, conv_id
+
+    def test_a_pop_lets_the_run_continue_to_the_root_terminal(self):
+        api, conv_id = self._api()
+        hook = _PopEndedSub(api, conv_id)
+
+        results = api.run_until_terminal(conv_id, max_steps=10, before_step=hook)
+
+        assert _path(results) == [
+            ("collect", "plan"),
+            ("sub_work", "sub_done"),
+            ("plan", "done"),
+        ]
+        # The ended-frame call carries the next step's number, which the
+        # step's own call repeats after the pop.
+        assert hook.calls == [
+            (1, "collect", 1),
+            (2, "sub_work", 2),
+            (3, "sub_done", 2),
+            (3, "plan", 1),
+        ]
+        assert api.get_stack_depth(conv_id) == 1
+        assert api.has_conversation_ended(conv_id)
+
+    def test_the_pop_round_is_not_a_step(self):
+        api, conv_id = self._api()
+
+        results = api.run_until_terminal(
+            conv_id, max_steps=3, before_step=_PopEndedSub(api, conv_id)
+        )
+
+        assert len(results) == 3
+        assert api.get_current_state(conv_id) == "done"
+
+    def test_a_spent_steps_budget_still_lets_the_hook_pop_then_raises(self):
+        api, conv_id = self._api()
+        hook = _PopEndedSub(api, conv_id)
+
+        with pytest.raises(RunBudgetExceededError) as excinfo:
+            api.run_until_terminal(conv_id, max_steps=2, before_step=hook)
+
+        assert (excinfo.value.budget, excinfo.value.steps_done) == ("steps", 2)
+        assert hook.calls[-1] == (3, "sub_done", 2)
+        assert api.get_stack_depth(conv_id) == 1
+        assert api.get_current_state(conv_id) == "plan"
+
+    def test_a_hook_that_does_not_pop_returns_at_the_sub_terminal(self):
+        api, conv_id = self._api()
+        hook = _PopEndedSub(api, conv_id, pops=False)
+
+        results = api.run_until_terminal(conv_id, max_steps=10, before_step=hook)
+
+        assert _path(results) == [("collect", "plan"), ("sub_work", "sub_done")]
+        assert hook.calls[-1] == (3, "sub_done", 2)
+        assert len(hook.calls) == 3
+        assert api.get_stack_depth(conv_id) == 2
+        assert api.get_current_state(conv_id) == "sub_done"
+
+    def test_without_a_hook_the_run_returns_at_the_sub_terminal(self):
+        api, conv_id = self._api()
+
+        results = api.run_until_terminal(conv_id, max_steps=10)
+
+        assert _path(results) == [("collect", "plan"), ("sub_work", "sub_done")]
+        assert api.get_stack_depth(conv_id) == 2
+
+    def test_stream_form_pops_and_continues(self):
+        api, conv_id = self._api(llm=_StreamingLLM({"city": "Paris"}))
+        hook = _PopEndedSub(api, conv_id)
+
+        chunks = list(
+            api.run_until_terminal_stream(conv_id, max_steps=10, before_step=hook)
+        )
+
+        assert "".join(chunks) == "".join(_CHUNKS)
+        assert [state for _, state, _ in hook.calls] == [
+            "collect",
+            "sub_work",
+            "sub_done",
+            "plan",
+        ]
+        assert api.get_stack_depth(conv_id) == 1
+        assert api.has_conversation_ended(conv_id)
+
+    def test_what_the_hook_raises_on_the_ended_frame_propagates(self):
+        llm = _ScriptedLLM({"city": "Paris"})
+        api, conv_id = self._api(llm=llm)
+
+        def _hook(step: int) -> None:
+            if api.has_conversation_ended(conv_id):
+                raise RuntimeError("merge failed")
+
+        with pytest.raises(RuntimeError, match="merge failed"):
+            api.run_until_terminal(conv_id, max_steps=10, before_step=_hook)
+
+        assert api.get_stack_depth(conv_id) == 2
+        assert api.get_current_state(conv_id) == "sub_done"
+        assert conv_id not in api.fsm_manager._active_turns
+
+    def test_a_pop_onto_an_ended_root_returns(self):
+        # The sub-FSM is pushed as the root enters its terminal ``done``.
+        api, conv_id = self._api(target="done")
+        hook = _PopEndedSub(api, conv_id)
+
+        results = api.run_until_terminal(conv_id, max_steps=10, before_step=hook)
+
+        assert _path(results) == [
+            ("collect", "plan"),
+            ("plan", "done"),
+            ("sub_work", "sub_done"),
+        ]
+        assert hook.calls[-1] == (4, "sub_done", 2)
+        assert api.get_stack_depth(conv_id) == 1
+        assert api.get_current_state(conv_id) == "done"
+
+    def test_closing_the_conversation_from_the_hook_ends_the_run(self):
+        api, conv_id = self._api()
+
+        def _hook(step: int) -> None:
+            if api.has_conversation_ended(conv_id):
+                api.end_conversation(conv_id)
+
+        results = api.run_until_terminal(conv_id, max_steps=10, before_step=_hook)
+
+        assert _path(results) == [("collect", "plan"), ("sub_work", "sub_done")]
+
+    def test_a_run_called_on_an_ended_sub_frame_checks_exempt_ids_below_it(self):
+        api, conv_id = self._api()
+        api.run_until_terminal(conv_id, max_steps=10)  # stops at sub_done
+        assert api.get_stack_depth(conv_id) == 2
+
+        with pytest.raises(ValueError, match="seconds_exempt_states"):
+            api.run_until_terminal(
+                conv_id,
+                max_steps=10,
+                before_step=_PopEndedSub(api, conv_id),
+                seconds_exempt_states={"sub_work"},
+            )
+        # No hook: nothing would run, so nothing is checked.
+        assert (
+            api.run_until_terminal(
+                conv_id, max_steps=10, seconds_exempt_states={"sub_work"}
+            )
+            == ()
+        )
+
+        results = api.run_until_terminal(
+            conv_id,
+            max_steps=10,
+            before_step=_PopEndedSub(api, conv_id),
+            seconds_exempt_states={"plan"},
+        )
+
+        assert _path(results) == [("plan", "done")]
 
 
 class TestRunEnded:
