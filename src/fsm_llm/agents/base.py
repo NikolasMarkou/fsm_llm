@@ -837,7 +837,7 @@ class BaseAgent(ABC):
         (ReactAgent, ReflexionAgent, ReasoningReactAgent).  Subclasses must
         set ``self.hitl`` to a :class:`HumanInTheLoop` instance (or ``None``).
         """
-        from .handlers import approval_grant
+        from .handlers import approval_grant, refusal_record
         from .tools import normalize_tool_input, redact_secret_entries
 
         hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
@@ -906,11 +906,10 @@ class BaseAgent(ABC):
             # no tool result. The input shown is the redacted copy (D-016).
             shown = redact_secret_entries(tool_input)
             # D-034 (plan 07ad3f8c): the feedback is gone after the next think
-            # turn, so the refusal is also kept as a final fact for conclude.
-            record = (
-                f"{tool_name}({shown}): NOT performed. The human approver "
-                "refused this action; the refusal is final for this run."
-            )
+            # turn, so the refusal is also kept as a fact for conclude. The
+            # executor drops the entry if this call is approved later and runs
+            # (D-045, `AgentHandlers.spend_grant`).
+            record = refusal_record(tool_name, tool_input)
             refused = list(full.get(ContextKeys.REFUSED_ACTIONS) or [])
             if record not in refused:
                 refused.append(record)
@@ -995,23 +994,24 @@ class BaseAgent(ABC):
     ) -> str:
         """Extract answer with a fallback chain.
 
-        1. Try ``ContextKeys.FINAL_ANSWER``
-        2. Try each key in *extra_keys* (e.g. ``DRAFT_OUTPUT``)
-        3. Try responses in reverse order
-        4. Return default message
+        1. Try each key in *extra_keys* (e.g. ``DRAFT_OUTPUT``)
+        2. Try responses in reverse order
+        3. Return default message
         """
-        # Primary: final_answer
-        answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if answer and isinstance(answer, str) and answer.strip():
-            return str(answer)
-
-        # Secondary: extra context keys (pattern-specific)
+        # DECISION plan-2026-09-30T062855-07ad3f8c/D-046: no ``final_answer``
+        # read here or in a pattern override. No pattern writes that key; the
+        # only writer was a model bulk reply (React `think` under
+        # use_classification=True), which then replaced the conclude reply and
+        # its refused-action report. Do NOT add a context key the model can
+        # fill ahead of the speaking state's reply. See decisions.md D-046.
+        # Primary: pattern-specific answer keys (artifacts written by a
+        # typed field of the pattern's own states)
         for key in extra_keys or []:
             val = artifact_text(final_context.get(key)).strip()
             if val:
                 return val
 
-        # Tertiary: last non-empty response
+        # Secondary: last non-empty response
         for response in reversed(responses):
             if response and response.strip():
                 return response.strip()
@@ -1062,9 +1062,9 @@ class BaseAgent(ABC):
     ) -> bool:
         """True if the run produced a genuine result.
 
-        A real completion has either a designated answer key
-        (``FINAL_ANSWER`` or a pattern-specific ``extra_answer_key``) or at
-        least one executed tool call. When BOTH are absent the ``answer``
+        A real completion has either a designated answer key (a
+        pattern-specific ``extra_answer_key``) or at least one executed tool
+        call. When BOTH are absent the ``answer``
         can only have come from the prose-fallback in ``_extract_answer``
         (a planner state's Pass-2 text leaking as the result) — that is a
         degenerate completion, not a success.
@@ -1072,7 +1072,7 @@ class BaseAgent(ABC):
         # DECISION plan_2026-05-31_cb91a9d5/D-001 [STALE]: when ``execution_evidence_keys``
         # is supplied (planner patterns: orchestrator/rewoo/plan_execute), the
         # answer-key/tool-call test above is NOT sufficient. A planner can reach
-        # a synthesis state that sets ``final_answer`` (and record a ``delegate``
+        # a synthesis state that writes an answer (and record a ``delegate``
         # control action that _build_trace turns into a fake ToolCall) while
         # having executed ZERO real work — weak 4b decomposition routes straight
         # to synthesis via the fallback transitions. That filler must report
@@ -1087,9 +1087,7 @@ class BaseAgent(ABC):
             return BaseAgent._has_execution_evidence(
                 final_context, execution_evidence_keys
             )
-        has_answer_key = bool(
-            str(final_context.get(ContextKeys.FINAL_ANSWER) or "").strip()
-        ) or any(
+        has_answer_key = any(
             artifact_text(final_context.get(k)).strip()
             for k in (extra_answer_keys or [])
         )
@@ -1453,7 +1451,7 @@ class BaseAgent(ABC):
             structured = self._try_parse_structured_output(answer, final_context)
 
             # DECISION plan_2026-05-30_26c9510a/D-001 [STALE]: a run that produced
-            # neither a designated answer key (FINAL_ANSWER or a pattern-specific
+            # neither a designated answer key (a pattern-specific
             # extra_answer_key) NOR any tool call is degenerate — the `answer`
             # came from the prose-fallback in _extract_answer (a planner state's
             # Pass-2 text leaking as the result). Report success=False rather

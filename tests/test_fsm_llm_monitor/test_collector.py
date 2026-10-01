@@ -317,7 +317,7 @@ class TestLogSinkNoEventDouble:
             ]
             assert len(log_msgs) >= 1
 
-            # Events should NOT contain EVENT_LOG entries from the sink
+            # Log records go to the log channel, never into the event stream
             events = collector.get_events()
             log_events = [e for e in events if e.event_type == "log"]
             assert len(log_events) == 0

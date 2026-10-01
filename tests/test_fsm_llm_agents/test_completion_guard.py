@@ -21,9 +21,14 @@ class TestCompletionGuard:
         # The planner/orchestrator leak: prose only, nothing executed.
         assert BaseAgent._completion_is_real({}, _trace(), None) is False
 
-    def test_final_answer_key_is_real(self):
-        assert BaseAgent._completion_is_real(
-            {ContextKeys.FINAL_ANSWER: "the result"}, _trace(), None
+    def test_final_answer_key_alone_is_not_real(self):
+        # D-046 (plan 07ad3f8c): final_answer is no answer key (no pattern
+        # writes it; only a model bulk reply could).
+        assert (
+            BaseAgent._completion_is_real(
+                {ContextKeys.FINAL_ANSWER: "the result"}, _trace(), None
+            )
+            is False
         )
 
     def test_blank_final_answer_is_not_real(self):

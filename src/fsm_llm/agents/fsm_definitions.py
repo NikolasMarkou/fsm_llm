@@ -9,7 +9,23 @@ from typing import Any, Literal, get_args
 
 from fsm_llm.constants import has_internal_prefix
 
-from .constants import FRAMEWORK_ONLY_KEYS, ContextKeys, Defaults, StopReason
+from .constants import (
+    FRAMEWORK_ONLY_KEYS,
+    ADaPTStates,
+    AgentStates,
+    ContextKeys,
+    DebateStates,
+    Defaults,
+    EvalOptStates,
+    MakerCheckerStates,
+    OrchestratorStates,
+    PlanExecuteStates,
+    PromptChainStates,
+    ReflexionStates,
+    REWOOStates,
+    SelfConsistencyStates,
+    StopReason,
+)
 from .definitions import ChainStep
 from .tools import ToolRegistry
 
@@ -93,8 +109,8 @@ def build_orchestrator_fsm(
     judged = (ContextKeys.WORKER_RESULTS, *context_keys)
 
     states: dict[str, Any] = {
-        "orchestrate": {
-            "id": "orchestrate",
+        OrchestratorStates.ORCHESTRATE: {
+            "id": OrchestratorStates.ORCHESTRATE,
             "description": "Decompose the task into subtasks for delegation",
             "purpose": "Analyze the task and create a delegation plan",
             "required_context_keys": [ContextKeys.SUBTASKS],
@@ -110,7 +126,7 @@ def build_orchestrator_fsm(
             "response_instructions": build_orchestrate_response_instructions(),
             "transitions": [
                 {
-                    "target_state": "delegate",
+                    "target_state": OrchestratorStates.DELEGATE,
                     "description": "Subtasks are ready for delegation",
                     "priority": 100,
                     "conditions": [
@@ -121,28 +137,28 @@ def build_orchestrator_fsm(
                     ],
                 },
                 {
-                    "target_state": "synthesize",
+                    "target_state": OrchestratorStates.SYNTHESIZE,
                     "description": "Fallback: skip to synthesis if decomposition stalls",
                     "priority": 900,
                     "conditions": [],
                 },
             ],
         },
-        "delegate": {
-            "id": "delegate",
+        OrchestratorStates.DELEGATE: {
+            "id": OrchestratorStates.DELEGATE,
             "description": "Delegate subtasks to workers and collect results",
             "purpose": "Execute worker_factory for each subtask",
             "response_instructions": build_delegate_response_instructions(),
             "transitions": [
                 {
-                    "target_state": "collect",
+                    "target_state": OrchestratorStates.COLLECT,
                     "description": "Workers have finished, review results",
                     "priority": 100,
                 }
             ],
         },
-        "collect": {
-            "id": "collect",
+        OrchestratorStates.COLLECT: {
+            "id": OrchestratorStates.COLLECT,
             "description": "Review worker results and decide if more work is needed",
             "purpose": "Assess completeness of gathered results",
             "extraction_instructions": "",
@@ -157,7 +173,7 @@ def build_orchestrator_fsm(
             "response_instructions": build_collect_response_instructions(),
             "transitions": [
                 {
-                    "target_state": "synthesize",
+                    "target_state": OrchestratorStates.SYNTHESIZE,
                     "description": "All results collected, produce final answer",
                     "priority": 10,
                     "conditions": [
@@ -168,7 +184,7 @@ def build_orchestrator_fsm(
                     ],
                 },
                 {
-                    "target_state": "orchestrate",
+                    "target_state": OrchestratorStates.ORCHESTRATE,
                     "description": "More work needed, decompose further",
                     "priority": 300,
                     "conditions": [
@@ -181,15 +197,15 @@ def build_orchestrator_fsm(
                     ],
                 },
                 {
-                    "target_state": "synthesize",
+                    "target_state": OrchestratorStates.SYNTHESIZE,
                     "description": "Fallback: synthesize with available results if decision stalls",
                     "priority": 900,
                     "conditions": [],
                 },
             ],
         },
-        "synthesize": {
-            "id": "synthesize",
+        OrchestratorStates.SYNTHESIZE: {
+            "id": OrchestratorStates.SYNTHESIZE,
             "description": "Synthesize all worker results into a final answer",
             "purpose": "Produce a comprehensive answer from all worker results",
             "response_instructions": build_orchestrator_synthesize_response_instructions(),
@@ -201,7 +217,7 @@ def build_orchestrator_fsm(
         "orchestrator_agent",
         task_description,
         "Orchestrator-Workers agent",
-        "orchestrate",
+        OrchestratorStates.ORCHESTRATE,
         persona,
         states,
     )
@@ -264,8 +280,8 @@ def build_adapt_fsm(
     judged = (ContextKeys.ATTEMPT_RESULT, *context_keys)
 
     states: dict[str, Any] = {
-        "attempt": {
-            "id": "attempt",
+        ADaPTStates.ATTEMPT: {
+            "id": ADaPTStates.ATTEMPT,
             "description": "Attempt to solve the task directly",
             "purpose": "Give a direct attempt at solving the task",
             "required_context_keys": [ContextKeys.ATTEMPT_RESULT],
@@ -286,7 +302,7 @@ def build_adapt_fsm(
             "response_instructions": build_attempt_response_instructions(),
             "transitions": [
                 {
-                    "target_state": "combine",
+                    "target_state": ADaPTStates.COMBINE,
                     "description": "Iteration limit reached, produce best-effort answer",
                     "priority": 1,
                     "conditions": [
@@ -299,14 +315,14 @@ def build_adapt_fsm(
                     ],
                 },
                 {
-                    "target_state": "assess",
+                    "target_state": ADaPTStates.ASSESS,
                     "description": "Evaluate the attempt quality",
                     "priority": 100,
                 },
             ],
         },
-        "assess": {
-            "id": "assess",
+        ADaPTStates.ASSESS: {
+            "id": ADaPTStates.ASSESS,
             "description": "Assess whether the attempt succeeded",
             "purpose": "Determine if the attempt is satisfactory or needs decomposition",
             "required_context_keys": [ContextKeys.ATTEMPT_SUCCEEDED],
@@ -322,7 +338,7 @@ def build_adapt_fsm(
             "response_instructions": build_assess_response_instructions(),
             "transitions": [
                 {
-                    "target_state": "combine",
+                    "target_state": ADaPTStates.COMBINE,
                     "description": "Iteration limit reached, produce best-effort answer",
                     "priority": 1,
                     "conditions": [
@@ -335,7 +351,7 @@ def build_adapt_fsm(
                     ],
                 },
                 {
-                    "target_state": "combine",
+                    "target_state": ADaPTStates.COMBINE,
                     "description": "Attempt succeeded, produce final answer",
                     "priority": 10,
                     "conditions": [
@@ -348,7 +364,7 @@ def build_adapt_fsm(
                     ],
                 },
                 {
-                    "target_state": "decompose",
+                    "target_state": ADaPTStates.DECOMPOSE,
                     "description": "Attempt failed, decompose into subtasks",
                     "priority": 150,
                     "conditions": [
@@ -374,7 +390,7 @@ def build_adapt_fsm(
                     ],
                 },
                 {
-                    "target_state": "combine",
+                    "target_state": ADaPTStates.COMBINE,
                     "description": "Attempt failed but depth limit reached, use best effort",
                     "priority": 200,
                     "conditions": [
@@ -392,14 +408,14 @@ def build_adapt_fsm(
                 # PRE_TRANSITION limiter runs on a BLOCKED turn, so the run burns the
                 # 3x loop ceiling. An unjudged attempt takes the best-effort path.
                 {
-                    "target_state": "combine",
+                    "target_state": ADaPTStates.COMBINE,
                     "description": "Fallback: use best effort if the assessment is unclear",
                     "priority": 900,
                 },
             ],
         },
-        "decompose": {
-            "id": "decompose",
+        ADaPTStates.DECOMPOSE: {
+            "id": ADaPTStates.DECOMPOSE,
             "description": "Decompose the task into simpler subtasks",
             "purpose": "Break the task down for recursive solving",
             "required_context_keys": [ContextKeys.SUBTASKS],
@@ -422,7 +438,7 @@ def build_adapt_fsm(
             "response_instructions": build_decompose_response_instructions(),
             "transitions": [
                 {
-                    "target_state": "combine",
+                    "target_state": ADaPTStates.COMBINE,
                     "description": "Iteration limit reached, produce best-effort answer",
                     "priority": 1,
                     "conditions": [
@@ -435,7 +451,7 @@ def build_adapt_fsm(
                     ],
                 },
                 {
-                    "target_state": "combine",
+                    "target_state": ADaPTStates.COMBINE,
                     "description": "Subtasks defined, combine after recursive solving",
                     "priority": 100,
                     "conditions": [
@@ -451,17 +467,16 @@ def build_adapt_fsm(
                 # limiter runs on a BLOCKED turn). The subtask executor returns {}
                 # without subtasks, so `combine` synthesizes the attempt alone.
                 {
-                    "target_state": "combine",
+                    "target_state": ADaPTStates.COMBINE,
                     "description": "Fallback: combine without subtasks if none were produced",
                     "priority": 900,
                 },
             ],
         },
-        "combine": {
-            "id": "combine",
+        ADaPTStates.COMBINE: {
+            "id": ADaPTStates.COMBINE,
             "description": "Combine all results into the final answer",
             "purpose": "Synthesize attempt results and subtask results",
-            "required_context_keys": [ContextKeys.FINAL_ANSWER],
             "response_instructions": build_combine_response_instructions(),
             "transitions": [],
         },
@@ -471,7 +486,7 @@ def build_adapt_fsm(
         "adapt_agent",
         task_description,
         "ADaPT agent with recursive decomposition",
-        "attempt",
+        ADaPTStates.ATTEMPT,
         persona,
         states,
     )
@@ -705,7 +720,7 @@ def _approval_think_transition() -> dict[str, Any]:
     (10). Never raises.
     """
     return {
-        "target_state": "await_approval",
+        "target_state": AgentStates.AWAIT_APPROVAL,
         "description": "Action requires human approval before execution",
         "priority": 150,
         "conditions": [
@@ -736,7 +751,7 @@ def _await_approval_state() -> dict[str, Any]:
     # LLM call per visit and let the reply fill an empty `tool_input` after
     # the ask and add keys of its own, live: `denied_tool_call`).
     return {
-        "id": "await_approval",
+        "id": AgentStates.AWAIT_APPROVAL,
         "description": "Waiting for human approval before executing action",
         "purpose": "Hold the selected action until the approval decision is set",
         # LOOP-09: an intermediate state; the driver asks the approver, so no
@@ -744,7 +759,7 @@ def _await_approval_state() -> dict[str, Any]:
         "response_instructions": "",
         "transitions": [
             {
-                "target_state": "conclude",
+                "target_state": AgentStates.CONCLUDE,
                 "description": "Terminate when framework signals completion",
                 "priority": 1,
                 "conditions": [
@@ -755,7 +770,7 @@ def _await_approval_state() -> dict[str, Any]:
                 ],
             },
             {
-                "target_state": "act",
+                "target_state": AgentStates.ACT,
                 "description": "Approval granted, proceed with action",
                 "priority": 10,
                 "conditions": [
@@ -766,7 +781,7 @@ def _await_approval_state() -> dict[str, Any]:
                 ],
             },
             {
-                "target_state": "think",
+                "target_state": AgentStates.THINK,
                 "description": "Approval denied, reconsider approach",
                 "priority": 300,
                 "conditions": [
@@ -831,8 +846,8 @@ def build_reflexion_fsm(
     )
 
     states: dict[str, Any] = {
-        "think": {
-            "id": "think",
+        ReflexionStates.THINK: {
+            "id": ReflexionStates.THINK,
             "description": "Reason about the task and select the next tool to use",
             "purpose": "Analyze the task, episodic memory, and previous observations",
             "required_context_keys": [
@@ -850,7 +865,7 @@ def build_reflexion_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "conclude",
+                    "target_state": ReflexionStates.CONCLUDE,
                     "description": "Agent decided to terminate",
                     "priority": 10,
                     "conditions": [
@@ -878,20 +893,20 @@ def build_reflexion_fsm(
                 # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
                 # run burns the 3x loop ceiling. `act` handles a missing/unknown tool.
                 {
-                    "target_state": "act",
+                    "target_state": ReflexionStates.ACT,
                     "description": "Execute the selected tool",
                     "priority": 300,
                 },
             ],
         },
-        "act": {
-            "id": "act",
+        ReflexionStates.ACT: {
+            "id": ReflexionStates.ACT,
             "description": "Execute the selected tool and observe the result",
             "purpose": "Run the tool and record the observation",
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "conclude",
+                    "target_state": ReflexionStates.CONCLUDE,
                     "description": "Terminate when framework signals completion",
                     "priority": 1,
                     "conditions": [
@@ -905,14 +920,14 @@ def build_reflexion_fsm(
                     ],
                 },
                 {
-                    "target_state": "evaluate",
+                    "target_state": ReflexionStates.EVALUATE,
                     "description": "Evaluate the result quality",
                     "priority": 900,
                 },
             ],
         },
-        "evaluate": {
-            "id": "evaluate",
+        ReflexionStates.EVALUATE: {
+            "id": ReflexionStates.EVALUATE,
             "description": "Assess whether gathered information is sufficient",
             "purpose": "Evaluate answer quality and decide whether to reflect or conclude",
             "required_context_keys": [
@@ -946,7 +961,7 @@ def build_reflexion_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "conclude",
+                    "target_state": ReflexionStates.CONCLUDE,
                     "description": "Evaluation passed, produce final answer",
                     "priority": 10,
                     # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008: a pass
@@ -977,7 +992,7 @@ def build_reflexion_fsm(
                     ],
                 },
                 {
-                    "target_state": "reflect",
+                    "target_state": ReflexionStates.REFLECT,
                     "description": "Evaluation failed, reflect on approach",
                     "priority": 300,
                     "conditions": [
@@ -990,15 +1005,15 @@ def build_reflexion_fsm(
                     ],
                 },
                 {
-                    "target_state": "reflect",
+                    "target_state": ReflexionStates.REFLECT,
                     "description": "Fallback: reflect if evaluation result unclear",
                     "priority": 900,
                     "conditions": [],
                 },
             ],
         },
-        "reflect": {
-            "id": "reflect",
+        ReflexionStates.REFLECT: {
+            "id": ReflexionStates.REFLECT,
             "description": "Self-critique and plan a revised approach",
             "purpose": "Analyze what went wrong and generate lessons for next attempt",
             "required_context_keys": [ContextKeys.REFLECTION],
@@ -1021,17 +1036,16 @@ def build_reflexion_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "think",
+                    "target_state": ReflexionStates.THINK,
                     "description": "Return to thinking with updated memory",
                     "priority": 100,
                 }
             ],
         },
-        "conclude": {
-            "id": "conclude",
+        ReflexionStates.CONCLUDE: {
+            "id": ReflexionStates.CONCLUDE,
             "description": "Formulate and present the final answer",
             "purpose": "Synthesize all observations into a complete answer",
-            "required_context_keys": [ContextKeys.FINAL_ANSWER],
             "response_instructions": build_conclude_response_instructions(
                 refused_actions=include_approval_state
             ),
@@ -1039,13 +1053,13 @@ def build_reflexion_fsm(
         },
     }
     if include_approval_state:
-        states["await_approval"] = _await_approval_state()
+        states[ReflexionStates.AWAIT_APPROVAL] = _await_approval_state()
 
     return _finalize_fsm(
         "reflexion_agent",
         task_description,
         "Reflexion agent with self-evaluation",
-        "think",
+        ReflexionStates.THINK,
         persona,
         states,
     )
@@ -1114,8 +1128,8 @@ def build_plan_execute_fsm(
         ]
 
     states: dict[str, Any] = {
-        "plan": {
-            "id": "plan",
+        PlanExecuteStates.PLAN: {
+            "id": PlanExecuteStates.PLAN,
             "description": "Decompose the task into a sequence of steps",
             "purpose": "Create an actionable plan to solve the task",
             "required_context_keys": [ContextKeys.PLAN_STEPS],
@@ -1132,7 +1146,7 @@ def build_plan_execute_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "execute_step",
+                    "target_state": PlanExecuteStates.EXECUTE_STEP,
                     "description": "Plan is ready, begin executing steps",
                     "priority": 100,
                     "conditions": [
@@ -1144,8 +1158,8 @@ def build_plan_execute_fsm(
                 }
             ],
         },
-        "execute_step": {
-            "id": "execute_step",
+        PlanExecuteStates.EXECUTE_STEP: {
+            "id": PlanExecuteStates.EXECUTE_STEP,
             "description": "Execute the current plan step",
             "purpose": "Produce a result for the current step using tools or LLM",
             "extraction_instructions": "",
@@ -1153,21 +1167,21 @@ def build_plan_execute_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "check_result",
+                    "target_state": PlanExecuteStates.CHECK_RESULT,
                     "description": "Step executed, check the result",
                     "priority": 100,
                 }
             ],
         },
-        "check_result": {
-            "id": "check_result",
+        PlanExecuteStates.CHECK_RESULT: {
+            "id": PlanExecuteStates.CHECK_RESULT,
             "description": "Assess the step result and decide next action",
             "purpose": "Determine if step succeeded and whether to continue, replan, or synthesize",
             "extraction_instructions": "",
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "synthesize",
+                    "target_state": PlanExecuteStates.SYNTHESIZE,
                     "description": "All steps complete, synthesize final answer",
                     "priority": 10,
                     "conditions": [
@@ -1180,7 +1194,7 @@ def build_plan_execute_fsm(
                     ],
                 },
                 {
-                    "target_state": "replan",
+                    "target_state": PlanExecuteStates.REPLAN,
                     "description": "Step failed, revise the plan",
                     "priority": 150,
                     "conditions": [
@@ -1191,14 +1205,14 @@ def build_plan_execute_fsm(
                     ],
                 },
                 {
-                    "target_state": "execute_step",
+                    "target_state": PlanExecuteStates.EXECUTE_STEP,
                     "description": "Proceed to the next plan step",
                     "priority": 300,
                 },
             ],
         },
-        "replan": {
-            "id": "replan",
+        PlanExecuteStates.REPLAN: {
+            "id": PlanExecuteStates.REPLAN,
             "description": "Revise the remaining plan after a step failure",
             "purpose": "Incorporate lessons from the failure into a revised plan",
             "extraction_instructions": "",
@@ -1215,14 +1229,14 @@ def build_plan_execute_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "execute_step",
+                    "target_state": PlanExecuteStates.EXECUTE_STEP,
                     "description": "Resume execution with revised plan",
                     "priority": 100,
                 }
             ],
         },
-        "synthesize": {
-            "id": "synthesize",
+        PlanExecuteStates.SYNTHESIZE: {
+            "id": PlanExecuteStates.SYNTHESIZE,
             "description": "Combine all step results into a final answer",
             "purpose": "Produce a comprehensive answer from all step results",
             "response_instructions": build_synthesize_response_instructions(),
@@ -1234,7 +1248,7 @@ def build_plan_execute_fsm(
         "plan_execute_agent",
         task_description,
         "Plan-and-Execute agent",
-        "plan",
+        PlanExecuteStates.PLAN,
         persona,
         states,
     )
@@ -1284,7 +1298,7 @@ def build_react_fsm(
     # Terminal transitions (conclude) get lowest priority numbers.
     think_transitions: list[dict[str, Any]] = [
         {
-            "target_state": "conclude",
+            "target_state": AgentStates.CONCLUDE,
             "description": "Task can be answered (a tool has run, or termination is forced)",
             "priority": 10,
             "conditions": [
@@ -1319,7 +1333,7 @@ def build_react_fsm(
     # run burns the 3x loop ceiling. `act` handles a missing/unknown tool.
     think_transitions.append(
         {
-            "target_state": "act",
+            "target_state": AgentStates.ACT,
             "description": "Execute the selected tool",
             "priority": 300,
         }
@@ -1329,7 +1343,7 @@ def build_react_fsm(
         registry, task_description=task_description
     )
     think_state: dict[str, Any] = {
-        "id": "think",
+        "id": AgentStates.THINK,
         "description": "Reason about the task and select the next tool to use",
         "purpose": "Analyze the task and previous observations to decide the next action",
         "required_context_keys": [
@@ -1364,15 +1378,15 @@ def build_react_fsm(
         ]
 
     states: dict[str, Any] = {
-        "think": think_state,
-        "act": {
-            "id": "act",
+        AgentStates.THINK: think_state,
+        AgentStates.ACT: {
+            "id": AgentStates.ACT,
             "description": "Execute the selected tool and observe the result",
             "purpose": "Run the tool and record the observation",
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "conclude",
+                    "target_state": AgentStates.CONCLUDE,
                     "description": "Terminate when framework signals completion",
                     "priority": 1,
                     "conditions": [
@@ -1393,23 +1407,20 @@ def build_react_fsm(
                     ],
                 },
                 {
-                    "target_state": "think",
+                    "target_state": AgentStates.THINK,
                     "description": "Return to thinking with new observation",
                     "priority": 900,
                 },
             ],
         },
-        "conclude": {
-            "id": "conclude",
+        AgentStates.CONCLUDE: {
+            "id": AgentStates.CONCLUDE,
             "description": "Formulate and present the final answer",
             "purpose": "Synthesize all observations into a complete answer",
             "required_context_keys": (
-                [ContextKeys.FINAL_ANSWER]
-                + (
-                    list(output_schema.model_fields.keys())
-                    if output_schema and hasattr(output_schema, "model_fields")
-                    else []
-                )
+                list(output_schema.model_fields.keys())
+                if output_schema and hasattr(output_schema, "model_fields")
+                else []
             ),
             "response_instructions": build_conclude_response_instructions(
                 refused_actions=include_approval_state
@@ -1419,13 +1430,13 @@ def build_react_fsm(
     }
 
     if include_approval_state:
-        states["await_approval"] = _await_approval_state()
+        states[AgentStates.AWAIT_APPROVAL] = _await_approval_state()
 
     return _finalize_fsm(
         "react_agent",
         task_description,
         "ReAct agent with tool use",
-        "think",
+        AgentStates.THINK,
         persona,
         states,
     )
@@ -1464,16 +1475,20 @@ def build_prompt_chain_fsm(
     states: dict[str, Any] = {}
 
     for i, step in enumerate(chain):
-        state_id = f"step_{i}"
+        state_id = f"{PromptChainStates.STEP_PREFIX}{i}"
         is_last = i == len(chain) - 1
-        next_state = "output" if is_last else f"step_{i + 1}"
+        next_state = (
+            PromptChainStates.OUTPUT
+            if is_last
+            else f"{PromptChainStates.STEP_PREFIX}{i + 1}"
+        )
 
         transitions: list[dict[str, Any]] = []
         if i > 0 and chain[i - 1].validation_fn is not None:
             # The gate of step i-1 runs on entry here (PromptChainAgent).
             transitions.append(
                 {
-                    "target_state": "output",
+                    "target_state": PromptChainStates.OUTPUT,
                     "description": f"Stop: the gate of {chain[i - 1].name} failed",
                     "priority": 50,
                     "conditions": [
@@ -1520,8 +1535,8 @@ def build_prompt_chain_fsm(
         }
 
     # Output (terminal) state
-    states["output"] = {
-        "id": "output",
+    states[PromptChainStates.OUTPUT] = {
+        "id": PromptChainStates.OUTPUT,
         "description": "Produce the final output from the chain",
         "purpose": "Synthesize all step results into a final answer",
         "response_instructions": build_chain_output_response_instructions(),
@@ -1532,7 +1547,7 @@ def build_prompt_chain_fsm(
         "prompt_chain_agent",
         task_description,
         "Prompt chain agent",
-        "step_0",
+        f"{PromptChainStates.STEP_PREFIX}0",
         persona,
         states,
     )
@@ -1562,8 +1577,8 @@ def build_self_consistency_fsm(
     )
 
     states: dict[str, Any] = {
-        "generate": {
-            "id": "generate",
+        SelfConsistencyStates.GENERATE: {
+            "id": SelfConsistencyStates.GENERATE,
             "description": "Generate an answer to the task",
             "purpose": "Produce a direct, complete answer to the task",
             "extraction_instructions": "",
@@ -1576,7 +1591,7 @@ def build_self_consistency_fsm(
         "self_consistency_sample",
         task_description,
         "Self-consistency single sample",
-        "generate",
+        SelfConsistencyStates.GENERATE,
         persona,
         states,
     )
@@ -1637,8 +1652,8 @@ def build_debate_fsm(
         )
 
     states: dict[str, Any] = {
-        "propose": {
-            "id": "propose",
+        DebateStates.PROPOSE: {
+            "id": DebateStates.PROPOSE,
             "description": "Generate or refine a proposition for the task",
             "purpose": "Present a well-reasoned argument or answer",
             "extraction_instructions": "",
@@ -1648,14 +1663,14 @@ def build_debate_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "critique",
+                    "target_state": DebateStates.CRITIQUE,
                     "description": "Proposition ready for critique",
                     "priority": 100,
                 }
             ],
         },
-        "critique": {
-            "id": "critique",
+        DebateStates.CRITIQUE: {
+            "id": DebateStates.CRITIQUE,
             "description": "Critically analyze the current proposition",
             "purpose": "Identify weaknesses, gaps, and counterpoints",
             "extraction_instructions": "",
@@ -1665,14 +1680,14 @@ def build_debate_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "counter",
+                    "target_state": DebateStates.COUNTER,
                     "description": "Critique complete, allow counter-argument",
                     "priority": 100,
                 }
             ],
         },
-        "counter": {
-            "id": "counter",
+        DebateStates.COUNTER: {
+            "id": DebateStates.COUNTER,
             "description": "Address the critique with counter-arguments",
             "purpose": "Strengthen the proposition by addressing criticisms",
             "extraction_instructions": "",
@@ -1682,14 +1697,14 @@ def build_debate_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "judge",
+                    "target_state": DebateStates.JUDGE,
                     "description": "Counter-argument ready for judgment",
                     "priority": 100,
                 }
             ],
         },
-        "judge": {
-            "id": "judge",
+        DebateStates.JUDGE: {
+            "id": DebateStates.JUDGE,
             "description": "Evaluate the debate exchange and decide next action",
             "purpose": "Determine whether consensus has been reached",
             "extraction_instructions": "",
@@ -1719,7 +1734,7 @@ def build_debate_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "conclude",
+                    "target_state": DebateStates.CONCLUDE,
                     "description": "Consensus reached or max rounds hit",
                     "priority": 10,
                     "conditions": [
@@ -1752,14 +1767,14 @@ def build_debate_fsm(
                     ],
                 },
                 {
-                    "target_state": "propose",
+                    "target_state": DebateStates.PROPOSE,
                     "description": "Another round of debate needed",
                     "priority": 300,
                 },
             ],
         },
-        "conclude": {
-            "id": "conclude",
+        DebateStates.CONCLUDE: {
+            "id": DebateStates.CONCLUDE,
             "description": "Produce the final answer from the debate",
             "purpose": "Synthesize the debate into a definitive answer",
             # Terminal: core never extracts here; the reply is the answer.
@@ -1770,7 +1785,12 @@ def build_debate_fsm(
     }
 
     return _finalize_fsm(
-        "debate_agent", task_description, "Debate agent", "propose", persona, states
+        "debate_agent",
+        task_description,
+        "Debate agent",
+        DebateStates.PROPOSE,
+        persona,
+        states,
     )
 
 
@@ -1811,8 +1831,8 @@ def build_rewoo_fsm(
     )
 
     states: dict[str, Any] = {
-        "plan_all": {
-            "id": "plan_all",
+        REWOOStates.PLAN_ALL: {
+            "id": REWOOStates.PLAN_ALL,
             "description": "Create a complete plan of all tool calls needed",
             "purpose": "Generate a full plan with tool calls and variable references",
             "required_context_keys": [ContextKeys.PLAN_BLUEPRINT],
@@ -1832,27 +1852,27 @@ def build_rewoo_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "execute_plans",
+                    "target_state": REWOOStates.EXECUTE_PLANS,
                     "description": "Plan is complete, proceed to execution",
                     "priority": 100,
                 }
             ],
         },
-        "execute_plans": {
-            "id": "execute_plans",
+        REWOOStates.EXECUTE_PLANS: {
+            "id": REWOOStates.EXECUTE_PLANS,
             "description": "Execute all planned tool calls sequentially",
             "purpose": "Run every tool call from the plan, substituting variable references",
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "solve",
+                    "target_state": REWOOStates.SOLVE,
                     "description": "All plans executed, proceed to synthesize answer",
                     "priority": 100,
                 }
             ],
         },
-        "solve": {
-            "id": "solve",
+        REWOOStates.SOLVE: {
+            "id": REWOOStates.SOLVE,
             "description": "Synthesize the final answer from all evidence",
             "purpose": "Combine the task, plan, and all tool results into a final answer",
             "response_instructions": build_rewoo_solve_response_instructions(),
@@ -1864,7 +1884,7 @@ def build_rewoo_fsm(
         "rewoo_agent",
         task_description,
         "REWOO agent with upfront planning",
-        "plan_all",
+        REWOOStates.PLAN_ALL,
         persona,
         states,
     )
@@ -1905,20 +1925,20 @@ def build_evalopt_fsm(
     )
 
     states: dict[str, Any] = {
-        "generate": {
-            "id": "generate",
+        EvalOptStates.GENERATE: {
+            "id": EvalOptStates.GENERATE,
             "description": "Generate an initial output for the task",
             "purpose": "Produce the best possible first attempt at the task",
             "extraction_instructions": "",
             "field_extractions": [
                 _typed_field_extraction(
-                    ContextKeys.GENERATED_OUTPUT, "any", fields["generate"]
+                    ContextKeys.GENERATED_OUTPUT, "any", fields[EvalOptStates.GENERATE]
                 )
             ],
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "evaluate",
+                    "target_state": EvalOptStates.EVALUATE,
                     "description": "Output generated, proceed to evaluation",
                     "priority": 100,
                     "conditions": [
@@ -1934,20 +1954,20 @@ def build_evalopt_fsm(
                 # limiter runs on a BLOCKED turn). `evaluate` judges the empty output,
                 # then `refine` retries and the refinement cap / limiter end the loop.
                 {
-                    "target_state": "evaluate",
+                    "target_state": EvalOptStates.EVALUATE,
                     "description": "Fallback: evaluate even if no output was extracted",
                     "priority": 900,
                 },
             ],
         },
-        "evaluate": {
-            "id": "evaluate",
+        EvalOptStates.EVALUATE: {
+            "id": EvalOptStates.EVALUATE,
             "description": "Evaluate the generated output",
             "purpose": "Run the external evaluation function on the current output",
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "output",
+                    "target_state": EvalOptStates.OUTPUT,
                     "description": "Evaluation passed, produce final output",
                     "priority": 10,
                     "conditions": [
@@ -1960,7 +1980,7 @@ def build_evalopt_fsm(
                     ],
                 },
                 {
-                    "target_state": "refine",
+                    "target_state": EvalOptStates.REFINE,
                     "description": "Evaluation failed, refine the output",
                     "priority": 300,
                     "conditions": [
@@ -1973,15 +1993,15 @@ def build_evalopt_fsm(
                     ],
                 },
                 {
-                    "target_state": "output",
+                    "target_state": EvalOptStates.OUTPUT,
                     "description": "Fallback: produce output if evaluation stalls",
                     "priority": 900,
                     "conditions": [],
                 },
             ],
         },
-        "refine": {
-            "id": "refine",
+        EvalOptStates.REFINE: {
+            "id": EvalOptStates.REFINE,
             "description": "Refine the output based on evaluation feedback",
             "purpose": "Improve the output by addressing specific feedback points",
             "extraction_instructions": "",
@@ -1989,7 +2009,7 @@ def build_evalopt_fsm(
                 _typed_field_extraction(
                     ContextKeys.GENERATED_OUTPUT,
                     "any",
-                    fields["refine"],
+                    fields[EvalOptStates.REFINE],
                     extra_context_keys=(
                         ContextKeys.PREVIOUS_OUTPUT,
                         ContextKeys.REFINEMENT_FEEDBACK,
@@ -1999,14 +2019,14 @@ def build_evalopt_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "evaluate",
+                    "target_state": EvalOptStates.EVALUATE,
                     "description": "Refined output ready for re-evaluation",
                     "priority": 100,
                 }
             ],
         },
-        "output": {
-            "id": "output",
+        EvalOptStates.OUTPUT: {
+            "id": EvalOptStates.OUTPUT,
             "description": "Present the final evaluated output",
             "purpose": "Extract and present the final answer",
             "response_instructions": build_evalopt_output_response_instructions(),
@@ -2018,7 +2038,7 @@ def build_evalopt_fsm(
         "evalopt_agent",
         task_description,
         "Evaluator-Optimizer agent",
-        "generate",
+        EvalOptStates.GENERATE,
         persona,
         states,
     )
@@ -2062,25 +2082,25 @@ def build_maker_checker_fsm(
     )
 
     states: dict[str, Any] = {
-        "make": {
-            "id": "make",
+        MakerCheckerStates.MAKE: {
+            "id": MakerCheckerStates.MAKE,
             "description": "Maker generates a draft output",
             "purpose": "Produce a high-quality draft following the maker instructions",
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(draft, "any", fields["make"])
+                _typed_field_extraction(draft, "any", fields[MakerCheckerStates.MAKE])
             ],
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "check",
+                    "target_state": MakerCheckerStates.CHECK,
                     "description": "Draft complete, proceed to checker review",
                     "priority": 100,
                 }
             ],
         },
-        "check": {
-            "id": "check",
+        MakerCheckerStates.CHECK: {
+            "id": MakerCheckerStates.CHECK,
             "description": "Checker evaluates the draft",
             "purpose": "Critically evaluate the draft against quality criteria",
             "extraction_instructions": "",
@@ -2115,7 +2135,7 @@ def build_maker_checker_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "output",
+                    "target_state": MakerCheckerStates.OUTPUT,
                     "description": "Draft passed review, produce final output",
                     "priority": 10,
                     # DECISION plan-2026-09-24T091842-c1d5bfbc/D-007: a check
@@ -2141,7 +2161,7 @@ def build_maker_checker_fsm(
                     ],
                 },
                 {
-                    "target_state": "revise",
+                    "target_state": MakerCheckerStates.REVISE,
                     "description": "Draft needs revision based on feedback",
                     "priority": 300,
                     "conditions": [
@@ -2159,15 +2179,15 @@ def build_maker_checker_fsm(
                 # limiter runs on a BLOCKED turn (FB-01), so the run burns the 3x
                 # loop ceiling. An unjudged draft is revised and re-checked.
                 {
-                    "target_state": "revise",
+                    "target_state": MakerCheckerStates.REVISE,
                     "description": "Fallback: revise if checker result unclear",
                     "priority": 900,
                     "conditions": [],
                 },
             ],
         },
-        "revise": {
-            "id": "revise",
+        MakerCheckerStates.REVISE: {
+            "id": MakerCheckerStates.REVISE,
             "description": "Maker revises the draft based on checker feedback",
             "purpose": "Address all checker feedback and produce an improved draft",
             "extraction_instructions": "",
@@ -2175,7 +2195,7 @@ def build_maker_checker_fsm(
                 _typed_field_extraction(
                     draft,
                     "any",
-                    fields["revise"],
+                    fields[MakerCheckerStates.REVISE],
                     extra_context_keys=(
                         ContextKeys.PREVIOUS_DRAFT,
                         ContextKeys.CHECKER_FEEDBACK,
@@ -2185,14 +2205,14 @@ def build_maker_checker_fsm(
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "check",
+                    "target_state": MakerCheckerStates.CHECK,
                     "description": "Revised draft ready for re-evaluation",
                     "priority": 100,
                 }
             ],
         },
-        "output": {
-            "id": "output",
+        MakerCheckerStates.OUTPUT: {
+            "id": MakerCheckerStates.OUTPUT,
             "description": "Present the final reviewed output",
             "purpose": "Extract and present the final answer",
             "response_instructions": build_maker_checker_output_response_instructions(),
@@ -2204,7 +2224,7 @@ def build_maker_checker_fsm(
         "maker_checker_agent",
         task_description,
         "Maker-Checker agent",
-        "make",
+        MakerCheckerStates.MAKE,
         persona,
         states,
     )

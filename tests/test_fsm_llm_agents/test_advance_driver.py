@@ -1022,9 +1022,11 @@ class TestAwaitApprovalExtractsNothing:
 # Literal on purpose: the tests below must fail on the parent for what the
 # run does, not for a missing constant.
 _REFUSED_KEY = "refused_actions"
+# Worded as a fact, never as final or pending (step 22.2, D-045): the
+# approver may approve the same call on a later ask, which removes it.
 _REFUSED_RECORD = (
-    "transfer({'account': 'A-17', 'amount': 250}): NOT performed. The human "
-    "approver refused this action; the refusal is final for this run."
+    "transfer({'account': 'A-17', 'amount': 250}): was refused by the human "
+    "approver and was not performed."
 )
 _REFUSED_SENTENCE = (
     " If the context has a 'refused_actions' list, every action in it was "
@@ -1121,7 +1123,11 @@ class TestRefusedActionReachesConclude:
         assert feedback[:2] == [None, _DENIAL]
         assert set(feedback[2:]) <= {None}
         assert final[ContextKeys.OBSERVATION_COUNT] == 1
-        assert "NOT performed" not in str(final[ContextKeys.OBSERVATIONS])
+        assert "not performed" not in str(final[ContextKeys.OBSERVATIONS])
+        # (True, "answered") although the requested action was refused: the
+        # run executed the ungated check_balance and the react-family success
+        # rule counts any executed tool. Pinned as the CURRENT semantics, not
+        # endorsed: deferred to iteration 2 / CHANGELOG Known open (D-044).
         assert (result.success, result.stop_reason) == (True, "answered")
 
     @pytest.mark.parametrize("build", _HITL_BUILDERS)
@@ -1246,7 +1252,7 @@ class TestRefusedActionReachesConclude:
         prompt = _conclude_prompt(probe.llm)
         assert _REFUSED_SENTENCE in prompt
         assert '"refused_actions"' not in prompt
-        assert "refusal is final" not in prompt
+        assert "was refused by the human approver" not in prompt
 
     @pytest.mark.parametrize(
         "build_fsm", [build_react_fsm, build_reflexion_fsm], ids=["react", "reflexion"]

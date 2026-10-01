@@ -519,6 +519,17 @@ class TestRemovedWorkflowLegacy:
             WorkflowEngine(handler_system=object())
         assert not hasattr(WorkflowEngine(), "handler_system")
 
+    @pytest.mark.parametrize("first", [object(), None, 5])
+    def test_engine_takes_no_positional_argument(self, first):
+        # Plan 07ad3f8c step 22.2. RED on the parent: the old positional
+        # handler_system bound to max_concurrent_workflows and failed only
+        # inside start_workflow ("'>=' not supported").
+        args = (first,)
+        with pytest.raises(TypeError):
+            WorkflowEngine(*args)
+        engine = WorkflowEngine(max_concurrent_workflows=3, max_completed_instances=1)
+        assert engine.max_concurrent_workflows == 3
+
     @pytest.mark.parametrize(
         "module",
         [

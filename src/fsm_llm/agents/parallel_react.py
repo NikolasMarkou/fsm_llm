@@ -35,6 +35,7 @@ from .base import BaseAgent, caller_prompt_keys
 from .constants import (
     FRAMEWORK_ONLY_KEYS,
     REACT_THINK_FRESH_KEYS,
+    AgentStates,
     ContextKeys,
     Defaults,
 )
@@ -97,7 +98,7 @@ def build_parallel_react_fsm(
     )
 
     think_state: dict[str, Any] = {
-        "id": "think",
+        "id": AgentStates.THINK,
         "description": "Reason about the task and select one or more tools to run",
         "purpose": "Decide the next (possibly parallel) batch of tool calls",
         "required_context_keys": [TOOL_CALLS_KEY, "should_terminate"],
@@ -120,7 +121,7 @@ def build_parallel_react_fsm(
         "response_instructions": "",
         "transitions": [
             {
-                "target_state": "conclude",
+                "target_state": AgentStates.CONCLUDE,
                 "description": "Task can be answered with current observations",
                 "priority": 10,
                 "conditions": [
@@ -143,7 +144,7 @@ def build_parallel_react_fsm(
             # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
             # run burns the 3x loop ceiling. `act` handles an empty batch.
             {
-                "target_state": "act",
+                "target_state": AgentStates.ACT,
                 "description": "Execute the selected tool batch",
                 "priority": 300,
             },
@@ -151,15 +152,15 @@ def build_parallel_react_fsm(
     }
 
     states: dict[str, Any] = {
-        "think": think_state,
-        "act": {
-            "id": "act",
+        AgentStates.THINK: think_state,
+        AgentStates.ACT: {
+            "id": AgentStates.ACT,
             "description": "Execute the selected tools concurrently and observe",
             "purpose": "Run the tool batch and record observations",
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "conclude",
+                    "target_state": AgentStates.CONCLUDE,
                     "description": "Terminate when framework signals completion",
                     "priority": 1,
                     "conditions": [
@@ -173,23 +174,20 @@ def build_parallel_react_fsm(
                     ],
                 },
                 {
-                    "target_state": "think",
+                    "target_state": AgentStates.THINK,
                     "description": "Return to thinking with new observations",
                     "priority": 900,
                 },
             ],
         },
-        "conclude": {
-            "id": "conclude",
+        AgentStates.CONCLUDE: {
+            "id": AgentStates.CONCLUDE,
             "description": "Formulate and present the final answer",
             "purpose": "Synthesize all observations into a complete answer",
             "required_context_keys": (
-                ["final_answer"]
-                + (
-                    list(output_schema.model_fields.keys())
-                    if output_schema and hasattr(output_schema, "model_fields")
-                    else []
-                )
+                list(output_schema.model_fields.keys())
+                if output_schema and hasattr(output_schema, "model_fields")
+                else []
             ),
             "response_instructions": build_conclude_response_instructions(),
             "transitions": [],
@@ -199,7 +197,7 @@ def build_parallel_react_fsm(
     return {
         "name": "ParallelReactAgent",
         "description": "ReAct agent with parallel tool dispatch",
-        "initial_state": "think",
+        "initial_state": AgentStates.THINK,
         "persona": persona,
         "states": states,
         # D-051 of plan 06a5ec0a, as every _finalize_fsm builder.
@@ -281,7 +279,7 @@ class ParallelReactAgent(BaseAgent):
                 "handlers instance — this is a programming error, not a "
                 "runtime condition; run() must always pass one."
             )
-        self._register_tool_executor(api, "act", self._dispatch_parallel)
+        self._register_tool_executor(api, AgentStates.ACT, self._dispatch_parallel)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
         self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)
 

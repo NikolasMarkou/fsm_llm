@@ -589,21 +589,51 @@ class TestFSMVisualizeReadsTheCoreGraph:
         assert [e["to"] for e in resp.json()["edges"]] == ["end"]
 
     @pytest.mark.parametrize(
-        "broken",
+        ("broken", "reason"),
         [
-            {"initial_state": "missing", "states": {"a": {"id": "a"}}},
-            {
-                "initial_state": "a",
-                "states": {"a": {"transitions": [{"target_state": "nowhere"}]}},
-            },
+            (
+                {"initial_state": "missing", "states": {"a": {"id": "a"}}},
+                "initial_state 'missing' is not present in 'states' "
+                "(defined states: 'a')",
+            ),
+            (
+                {
+                    "initial_state": "a",
+                    "states": {"a": {"transitions": [{"target_state": "nowhere"}]}},
+                },
+                "Transition from 'a' to non-existent state 'nowhere' "
+                "(defined states: 'a')",
+            ),
         ],
         ids=["unknown-initial-state", "dangling-target"],
     )
-    def test_a_definition_core_cannot_graph_is_400(self, broken):
-        """Core refuses these; the old monitor-built graph drew them anyway."""
+    def test_a_definition_core_cannot_graph_is_400_naming_the_reason(
+        self, broken, reason
+    ):
+        """Core refuses these; the old monitor-built graph drew them anyway.
+        The detail names core's reason (plan 07ad3f8c step 22.2), with no
+        pydantic URL or echoed input."""
         resp = self.client.post("/api/fsm/visualize", json=broken)
         assert resp.status_code == 400
-        assert resp.json()["detail"] == "failed to parse FSM definition"
+        detail = resp.json()["detail"]
+        assert detail == f"failed to parse FSM definition: {reason}"
+
+    def test_graph_error_reason_hides_pydantic_internals_and_other_errors(self):
+        from pydantic import BaseModel
+
+        from fsm_llm.monitor.server import _graph_error_reason
+
+        class _Node(BaseModel):
+            description: str
+
+        try:
+            _Node.model_validate({"description": 5})
+        except ValueError as error:
+            reason = _graph_error_reason(error)
+        assert reason == "description: Input should be a valid string"
+        assert _graph_error_reason(TypeError("unhashable type: 'list'")) == (
+            "the definition has an unexpected shape"
+        )
 
 
 class TestRemovedMonitorLegacy:

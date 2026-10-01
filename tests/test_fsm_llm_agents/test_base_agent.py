@@ -96,10 +96,11 @@ class TestBaseAgentBudgets:
 class TestBaseAgentAnswerExtraction:
     """Tests for answer extraction."""
 
-    def test_extract_from_final_answer(self):
+    def test_final_answer_key_is_not_an_answer_source(self):
+        # D-046 (plan 07ad3f8c): no pattern writes final_answer.
         agent = ConcreteAgent()
-        ctx = {"final_answer": "The answer is 42."}
-        assert agent._extract_answer(ctx, []) == "The answer is 42."
+        ctx = {"final_answer": "A planted answer."}
+        assert agent._extract_answer(ctx, ["The reply."]) == "The reply."
 
     def test_extract_from_extra_keys(self):
         agent = ConcreteAgent()
@@ -117,14 +118,14 @@ class TestBaseAgentAnswerExtraction:
         agent = ConcreteAgent()
         assert "could not" in agent._extract_answer({}, [])
 
-    def test_final_answer_priority(self):
+    def test_extra_key_wins_over_a_final_answer_key(self):
         agent = ConcreteAgent()
         ctx = {
-            "final_answer": "Primary answer text.",
+            "final_answer": "A planted answer.",
             "judge_verdict": "Verdict text here.",
         }
         answer = agent._extract_answer(ctx, ["response"], extra_keys=["judge_verdict"])
-        assert answer == "Primary answer text."
+        assert answer == "Verdict text here."
 
 
 class TestBaseAgentTraceBuilding:

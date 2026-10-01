@@ -127,10 +127,11 @@ class TestPlanExecuteEvidenceGuard:
 
     def test_none_mode_unchanged(self):
         # Regression: execution_evidence_keys=None keeps the original
-        # has_answer_key-OR-tools_executed behavior, byte-identical.
+        # has_answer_key-OR-tools_executed behavior (answer keys are the
+        # pattern's extra_answer_keys; final_answer is none, D-046).
         assert BaseAgent._completion_is_real({}, _trace(), None) is False
         assert BaseAgent._completion_is_real(
-            {ContextKeys.FINAL_ANSWER: "answer"}, _trace(), None
+            {ContextKeys.DRAFT_OUTPUT: "answer"}, _trace(), [ContextKeys.DRAFT_OUTPUT]
         )
 
 

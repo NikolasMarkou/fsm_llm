@@ -298,11 +298,13 @@ class TestADaPTJSONLeakFix:
         answer = agent._extract_answer({}, ["Paris is the capital of France."])
         assert answer == "Paris is the capital of France."
 
-    def test_extract_answer_prefers_final_answer(self):
+    def test_extract_answer_ignores_a_final_answer_key(self):
+        # D-046 (plan 07ad3f8c): no pattern writes final_answer; it is no
+        # answer source, so the combine reply wins over a planted key.
         agent = ADaPTAgent()
         answer = agent._extract_answer(
-            {ContextKeys.FINAL_ANSWER: "The capital names are equal length."},
-            ['{"extracted_data": {}}'],
+            {ContextKeys.FINAL_ANSWER: "A planted final answer."},
+            ["The capital names are equal length.", '{"extracted_data": {}}'],
         )
         assert answer == "The capital names are equal length."
 
@@ -321,12 +323,28 @@ class TestADaPTJSONLeakFix:
         )
 
     def test_real_completion_is_success(self):
-        from fsm_llm.agents.definitions import AgentTrace
+        from fsm_llm.agents.definitions import AgentTrace, ToolCall
 
         assert ADaPTAgent._completion_is_real(
-            {ContextKeys.FINAL_ANSWER: "Paris vs Tokyo: equal length."},
-            AgentTrace(tool_calls=[], total_iterations=2),
+            {},
+            AgentTrace(
+                tool_calls=[ToolCall(tool_name="search", parameters={})],
+                total_iterations=2,
+            ),
             None,
+        )
+
+    def test_final_answer_key_alone_is_not_a_completion(self):
+        from fsm_llm.agents.definitions import AgentTrace
+
+        # D-046 (plan 07ad3f8c): final_answer is no answer key.
+        assert (
+            ADaPTAgent._completion_is_real(
+                {ContextKeys.FINAL_ANSWER: "Paris vs Tokyo: equal length."},
+                AgentTrace(tool_calls=[], total_iterations=2),
+                None,
+            )
+            is False
         )
 
     def test_succeeded_attempt_result_is_success(self):

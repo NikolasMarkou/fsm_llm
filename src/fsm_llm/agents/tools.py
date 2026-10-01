@@ -444,7 +444,7 @@ class ToolRegistry:
             return fn()
         first_param = next(iter(sig.parameters.values()))  # param_count >= 1 here
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-024: a lone ``**kwargs``
-        # is not the legacy dict param. Do NOT pass it the dict positionally:
+        # is not the dict-style param. Do NOT pass it the dict positionally:
         # every zero-argument MCP tool and monitor stub tool failed that way.
         var_kw = first_param.kind is inspect.Parameter.VAR_KEYWORD
         if param_count == 1 and not schema_props and not var_kw:
@@ -453,9 +453,10 @@ class ToolRegistry:
         # Detect the dict-style pattern: fn(params: dict) with schema
         ann = first_param.annotation
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-024
-        # A dict[...] generic or a string annotation (__future__) is the legacy
-        # form only when the schema does not name the parameter; do NOT widen
-        # the bare-`dict` rule, a schema-named dict param is called by keyword.
+        # A dict[...] generic or a string annotation (__future__) is the
+        # dict-style form only when the schema does not name the parameter; do
+        # NOT widen the bare-`dict` rule, a schema-named dict param is called
+        # by keyword.
         if param_count == 1 and (
             ann is dict
             or (_is_dict_annotation(ann) and first_param.name not in schema_props)

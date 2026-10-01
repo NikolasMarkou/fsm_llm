@@ -87,6 +87,23 @@ def approval_grant(tool_name: Any, tool_input: Any) -> dict[str, Any]:
     }
 
 
+def refusal_record(tool_name: Any, tool_input: Any) -> str:
+    """The ``refused_actions`` entry for one call a human approver refused.
+
+    Shared by the approval driver (``BaseAgent._handle_hitl_approval``, which
+    appends it on a denial) and :meth:`AgentHandlers.spend_grant` (which
+    removes it when the same call is later approved and runs), so both build
+    the same text. The parameters are the :func:`redact_secret_entries` copy
+    of the :func:`normalize_tool_input` form (secret-looking keys at any depth,
+    in nested mappings and in lists, show ``<redacted>``). Never raises.
+    """
+    shown = redact_secret_entries(normalize_tool_input(tool_input))
+    return (
+        f"{tool_name}({shown}): was refused by the human approver and was "
+        "not performed."
+    )
+
+
 def forced_stop_skip(context: Mapping[str, Any]) -> dict[str, Any] | None:
     """The executor delta for a turn after a forced stop, else None.
 
@@ -393,19 +410,34 @@ class AgentHandlers:
         Call it after :meth:`approval_refusal` returned None and before the tool
         runs (``execute_tool``, ReasoningReact's ``reason`` path); merge the
         returned delta into the executor's delta. The record lives on this
-        call-local instance, so it survives a delta core discards. Never raises.
+        call-local instance, so it survives a delta core discards. A spent
+        grant also removes the call's ``refused_actions`` entry
+        (:func:`refusal_record`), if an earlier ask refused it; the key is
+        deleted when no entry is left. Never raises.
         """
         spent: dict[str, Any] = {
             ContextKeys.TOOL_NAME: None,
             ContextKeys.TOOL_INPUT: None,
         }
         if context.get(ContextKeys.DRIVER_APPROVAL) is not None:
+            tool_name = context.get(ContextKeys.TOOL_NAME)
+            tool_input = context.get(ContextKeys.TOOL_INPUT)
             self._grants_spent += 1
-            self._spent_grant = approval_grant(
-                context.get(ContextKeys.TOOL_NAME), context.get(ContextKeys.TOOL_INPUT)
-            )
+            self._spent_grant = approval_grant(tool_name, tool_input)
             spent[ContextKeys.DRIVER_APPROVAL] = None
             spent[ContextKeys.APPROVALS_SPENT] = self._grants_spent
+            # DECISION plan-2026-09-30T062855-07ad3f8c/D-045
+            # An approved call that runs is no longer a refused action: drop
+            # its record here, where the grant is spent. Do NOT refuse a
+            # re-asked identical call without asking (the approver stays in
+            # control and may change their mind), and do NOT leave the record
+            # (the conclude prompt then tells the model to deny an action
+            # that ran). See decisions.md D-045.
+            refused = context.get(ContextKeys.REFUSED_ACTIONS)
+            record = refusal_record(tool_name, tool_input)
+            if isinstance(refused, list) and record in refused:
+                kept = [entry for entry in refused if entry != record]
+                spent[ContextKeys.REFUSED_ACTIONS] = kept or None
         return spent
 
     def execute_tool(self, context: dict[str, Any]) -> dict[str, Any]:

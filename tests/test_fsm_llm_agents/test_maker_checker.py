@@ -411,14 +411,16 @@ class TestMakerCheckerHandlers:
             ContextKeys.FORCED_STOP_REASON: "forced_pass",
         }
 
-    def test_extract_answer_from_final_answer(self):
+    # D-046 (plan 07ad3f8c): ``final_answer`` is no answer source; only a
+    # model bulk reply ever wrote it.
+    def test_extract_answer_ignores_a_final_answer_key(self):
         agent = MakerCheckerAgent(
             maker_instructions="draft",
             checker_instructions="review",
         )
-        context = {ContextKeys.FINAL_ANSWER: "This is the final answer"}
-        answer = agent._extract_answer(context, ["response1"])
-        assert answer == "This is the final answer"
+        context = {ContextKeys.FINAL_ANSWER: "A planted final answer"}
+        answer = agent._extract_answer(context, ["The reply of the final state."])
+        assert answer == "The reply of the final state."
 
     def test_extract_answer_from_draft_output(self):
         agent = MakerCheckerAgent(

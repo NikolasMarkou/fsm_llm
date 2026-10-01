@@ -266,15 +266,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         extra_keys: list[str] | None = None,
     ) -> str:
         """Extract the final answer from context or responses."""
-        # Priority: final_answer > generated_output > last response
-        answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if (
-            answer
-            and isinstance(answer, str)
-            and len(answer) > Defaults.MIN_ANSWER_LENGTH
-        ):
-            return str(answer)
-
+        # Priority: generated_output > last response
         # A native JSON artifact (`any` field, D-050) ships as JSON text.
         output = artifact_text(final_context.get(ContextKeys.GENERATED_OUTPUT))
         if len(output) > Defaults.MIN_ANSWER_LENGTH:

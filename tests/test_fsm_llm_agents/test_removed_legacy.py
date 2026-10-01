@@ -44,20 +44,11 @@ def _registry() -> ToolRegistry:
     return registry
 
 
+# The state members removed in step 20 came back in step 22.2 (D-047: the
+# builders read every state name from its class); these two name no state.
 _REMOVED_CONSTANTS = [
-    ("AgentStates", "CONCLUDE"),
-    ("EvalOptStates", "GENERATE"),
-    ("EvalOptStates", "OUTPUT"),
-    ("MakerCheckerStates", "MAKE"),
-    ("MakerCheckerStates", "OUTPUT"),
     ("PromptChainStates", "GATE_PREFIX"),
     ("SelfConsistencyStates", "AGGREGATE"),
-    ("OrchestratorStates", "SYNTHESIZE"),
-    ("DebateStates", "CRITIQUE"),
-    ("DebateStates", "COUNTER"),
-    ("DebateStates", "CONCLUDE"),
-    ("ADaPTStates", "ATTEMPT"),
-    ("ADaPTStates", "ASSESS"),
     ("Defaults", "EVALUATION_THRESHOLD"),
     ("ErrorMessages", "BUDGET_EXHAUSTED"),
 ]

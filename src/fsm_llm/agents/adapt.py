@@ -52,6 +52,8 @@ class ADaPTAgent(BaseAgent):
             ContextKeys.SUBTASKS,
             ContextKeys.SUBTASK_RESULTS,
             ContextKeys.CURRENT_DEPTH,
+            # Decides how subtasks run and whether the run succeeds (AND/OR).
+            ContextKeys.OPERATOR,
         }
     )
 
@@ -132,11 +134,11 @@ class ADaPTAgent(BaseAgent):
 
             # DECISION plan_2026-05-31_03830272/D-001 [STALE]: do NOT hard-code
             # success=True. A run that looped to the iteration limit without
-            # setting final_answer and without executing a tool is degenerate —
+            # an answer key and without executing a tool is degenerate —
             # the answer is _extract_answer's prose/JSON fallback. Apply the
             # _completion_is_real guard (final answer key OR a real tool call) so
             # leaked filler is success=False. ADaPT also legitimately completes
-            # via a SUCCEEDED attempt (attempt_result, no separate final_answer)
+            # via a SUCCEEDED attempt (attempt_result, no separate answer key)
             # — mirror _extract_answer's secondary source by counting
             # attempt_result as an answer key ONLY when attempt_succeeded is true
             # (a FAILED attempt's attempt_result is partial/garbage, not a real
@@ -174,7 +176,7 @@ class ADaPTAgent(BaseAgent):
                 )
             if not success and not subtask_results and forced is None:
                 logger.warning(
-                    "ADaPT completed with no final_answer and no tool calls — "
+                    "ADaPT completed with no answer key and no tool calls — "
                     "answer is fallback-only; marking success=False."
                 )
 
@@ -401,14 +403,6 @@ class ADaPTAgent(BaseAgent):
         extra_keys: list[str] | None = None,
     ) -> str:
         """Extract the final answer from context or responses."""
-        answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if (
-            answer
-            and isinstance(answer, str)
-            and len(answer) > Defaults.MIN_ANSWER_LENGTH
-        ):
-            return str(answer)
-
         # A decomposed run answers from its subtasks, never the failed attempt
         # that caused the decomposition.
         subtask_results = self._subtask_entries(final_context)

@@ -98,6 +98,10 @@ class WorkflowEngine:
     steps back to back until one pauses (event or timer wait), ends, or
     fails. Everything is in memory.
 
+    Every argument is keyword-only: the first positional slot held the
+    removed ``handler_system`` (plan 07ad3f8c step 18), so an old positional
+    call must fail at construction, not later inside ``start_workflow``.
+
     Args:
         max_concurrent_workflows: Maximum number of active (RUNNING/WAITING)
             instances.
@@ -112,6 +116,7 @@ class WorkflowEngine:
 
     def __init__(
         self,
+        *,
         max_concurrent_workflows: int = 100,
         max_completed_instances: int | None = DEFAULT_MAX_COMPLETED_INSTANCES,
         max_steps_per_run: int = MAX_STEPS_PER_RUN,

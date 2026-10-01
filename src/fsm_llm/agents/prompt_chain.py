@@ -222,15 +222,7 @@ class PromptChainAgent(BaseAgent):
         extra_keys: list[str] | None = None,
     ) -> str:
         """Extract the final answer from context or responses."""
-        answer = final_context.get(ContextKeys.FINAL_ANSWER)
-        if (
-            answer
-            and isinstance(answer, str)
-            and len(answer) > Defaults.MIN_ANSWER_LENGTH
-        ):
-            return str(answer)
-
-        # Fall back to last chain step result
+        # The last chain step result
         chain_results = final_context.get(ContextKeys.CHAIN_RESULTS, [])
         if chain_results:
             last = artifact_text(chain_results[-1]).strip()

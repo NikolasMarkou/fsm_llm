@@ -7,16 +7,26 @@ from __future__ import annotations
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 
 # ---------------------------------------------------------------------------
-# ReAct states (original)
+# Agent FSM state names
 # ---------------------------------------------------------------------------
+# DECISION plan-2026-09-30T062855-07ad3f8c/D-047: each class names every state
+# of its pattern's FSM, and the builders (`fsm_definitions.py`,
+# `parallel_react.py`), the per-state prompt maps and the handler
+# registrations all read these names. Do NOT write a state id as a string
+# literal in a builder or a handler registration, and do NOT drop a member
+# because only the builder reads it: the same literal in a builder and in a
+# handler registration is a lockstep invariant nothing checks (a rename in one
+# place leaves a handler that never fires). See decisions.md D-047.
 
 
 class AgentStates:
-    """States in the ReAct agent FSM."""
+    """States in the ReAct agent FSM (also ParallelReact, ReasoningReact,
+    VerifiedReact, AutoMemory) and the shared ``await_approval`` state."""
 
     THINK = "think"
     ACT = "act"
     AWAIT_APPROVAL = "await_approval"
+    CONCLUDE = "conclude"
 
 
 # ---------------------------------------------------------------------------
@@ -32,6 +42,8 @@ class ReflexionStates:
     EVALUATE = "evaluate"
     REFLECT = "reflect"
     CONCLUDE = "conclude"
+    # With HITL, the shared approval state (`_await_approval_state`).
+    AWAIT_APPROVAL = AgentStates.AWAIT_APPROVAL
 
 
 class PlanExecuteStates:
@@ -55,15 +67,19 @@ class REWOOStates:
 class EvalOptStates:
     """States in the Evaluator-Optimizer agent FSM."""
 
+    GENERATE = "generate"
     EVALUATE = "evaluate"
     REFINE = "refine"
+    OUTPUT = "output"
 
 
 class MakerCheckerStates:
     """States in the Maker-Checker agent FSM."""
 
+    MAKE = "make"
     CHECK = "check"
     REVISE = "revise"
+    OUTPUT = "output"
 
 
 class PromptChainStates:
@@ -85,18 +101,24 @@ class OrchestratorStates:
     ORCHESTRATE = "orchestrate"
     DELEGATE = "delegate"
     COLLECT = "collect"
+    SYNTHESIZE = "synthesize"
 
 
 class DebateStates:
     """States in the Debate agent FSM."""
 
     PROPOSE = "propose"
+    CRITIQUE = "critique"
+    COUNTER = "counter"
     JUDGE = "judge"
+    CONCLUDE = "conclude"
 
 
 class ADaPTStates:
     """States in the ADaPT agent FSM."""
 
+    ATTEMPT = "attempt"
+    ASSESS = "assess"
     DECOMPOSE = "decompose"
     COMBINE = "combine"
 
@@ -130,7 +152,10 @@ class ContextKeys:
     OBSERVATIONS = "observations"
     OBSERVATION_COUNT = "observation_count"
 
-    # Final answer
+    # No pattern writes or reads it and no state extracts it (D-046): the
+    # answer is the speaking state's reply or a pattern answer key. Kept in
+    # RUN_OUTPUT_KEYS, so a caller cannot put a ready-made answer into the
+    # context the final state's prompt shows.
     FINAL_ANSWER = "final_answer"
     CONFIDENCE = "confidence"
 
@@ -151,9 +176,11 @@ class ContextKeys:
     # for the next think turn's prompt. Not a transient key: the compactor
     # would delete it before think reads it (LOOP-06, D-021 of plan 06a5ec0a).
     AGENT_FEEDBACK = "agent_feedback"
-    # Gated calls a human approver refused in this run: a list of sentences
-    # (tool, redacted parameters, "NOT performed"), written only by the HITL
-    # driver. Kept to the end of the run and read by the conclude prompt.
+    # Gated calls a human approver refused in this run and that did not run: a
+    # list of sentences (tool, redacted parameters, "was refused ... and was
+    # not performed", `handlers.refusal_record`), appended only by the HITL
+    # driver and removed only when the same call is approved later and runs
+    # (D-045). Kept to the end of the run and read by the conclude prompt.
     # DECISION plan-2026-09-30T062855-07ad3f8c/D-034: do NOT report a denial to conclude through
     # `agent_feedback` (cleared on think exit, so the answer then claimed the
     # refused action happened) and do NOT record it as an observation (it

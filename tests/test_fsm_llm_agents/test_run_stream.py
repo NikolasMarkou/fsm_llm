@@ -1,8 +1,9 @@
 """Tests for streaming agent output via run_stream / _standard_run_stream.
 
 Every test drives the real ``API`` with ``PromptGroundedLLM`` (no ``API``
-stand-in): the ``[think]``/``[act]`` skip markers come from core's Pass-2
-fast path, so only a real ``API`` shows whether they leak.
+stand-in): whether the silent ``think``/``act`` states yield any text is
+decided by core (a silent state says nothing, plan 07ad3f8c D-029/D-037), so
+only a real ``API`` shows it.
 """
 
 from __future__ import annotations
@@ -50,7 +51,8 @@ def _react(runs, response=_ANSWER, facts=None, cls=ReactAgent, **kwargs):
 
 class TestRunStream:
     def test_react_stream_yields_only_model_text(self):
-        # LOOP-13: the think/act skip markers are core's, not the model's.
+        # LOOP-13: the silent think/act states yield nothing; the stream is
+        # the conclude reply only.
         runs: list[str] = []
         out = list(_react(runs).run_stream("What is the capital of France?"))
 
@@ -59,8 +61,8 @@ class TestRunStream:
         assert "".join(out) == _ANSWER
 
     def test_marker_text_from_a_speaking_state_is_kept(self):
-        # Only a chunk that IS the skip marker of the state the turn ended in
-        # is dropped; the conclude state speaks, so its text always ships.
+        # A reply that looks like a state marker is model text: the stream
+        # filters nothing (no marker exists since D-029), so it ships as is.
         runs: list[str] = []
         out = list(_react(runs, response="[think]").run_stream("capital of France?"))
 

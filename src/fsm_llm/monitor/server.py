@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 from starlette.requests import Request
 
 from fsm_llm.definitions import ConversationBusyError
@@ -1095,6 +1096,25 @@ def _fsm_dict_to_snapshot(data: dict[str, Any]) -> FSMSnapshot:
     )
 
 
+def _graph_error_reason(error: Exception) -> str:
+    """Why core could not graph a definition, for the 400 detail.
+
+    ``build_fsm_graph`` documents ``ValueError`` for a malformed shape; its
+    message names the state, transition or field. A pydantic error is reduced
+    to ``field: message`` pairs (no documentation URL, no input echo). Any
+    other exception type is not part of that contract and gets a fixed text,
+    so no internal message reaches the client.
+    """
+    if isinstance(error, ValidationError):
+        return "; ".join(
+            f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+            for item in error.errors(include_url=False, include_input=False)
+        )
+    if isinstance(error, ValueError):
+        return str(error)
+    return "the definition has an unexpected shape"
+
+
 def _fsm_viz_or_400(data: Any) -> dict[str, Any]:
     """The visualize payload of an FSM definition dict, or raise 400.
 
@@ -1115,7 +1135,8 @@ def _fsm_viz_or_400(data: Any) -> dict[str, Any]:
     except Exception as e:
         logger.debug(f"Failed to build the FSM graph: {e}")
         raise HTTPException(
-            status_code=400, detail="failed to parse FSM definition"
+            status_code=400,
+            detail=f"failed to parse FSM definition: {_graph_error_reason(e)}",
         ) from e
     nodes = [
         {

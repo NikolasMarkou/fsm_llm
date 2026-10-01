@@ -176,7 +176,7 @@ class DebateAgent(BaseAgent):
         responses: list[str],
         extra_keys: list[str] | None = None,
     ) -> str:
-        """The conclude reply (``final_answer`` first, never set by this FSM)."""
+        """The conclude reply (no pattern answer key; ``extra_keys`` ignored)."""
         return super()._extract_answer(final_context, responses, None)
 
     def _register_handlers(self, api: API) -> None:

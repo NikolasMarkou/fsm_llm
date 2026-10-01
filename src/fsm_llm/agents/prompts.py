@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from .constants import ContextKeys, Defaults
+from .constants import ContextKeys, Defaults, EvalOptStates, MakerCheckerStates
 from .tools import ToolRegistry
 
 if TYPE_CHECKING:
@@ -405,12 +405,12 @@ def build_evalopt_field_instructions() -> dict[str, str]:
     refine prompt shows ``previous_output`` and ``refinement_feedback``.
     """
     return {
-        "generate": (
+        EvalOptStates.GENERATE: (
             f"{_COMPOSE}Your complete output for the task: the full "
             "deliverable itself, exactly as it should be delivered, with no "
             "commentary before or after it."
         ),
-        "refine": (
+        EvalOptStates.REFINE: (
             f"{_COMPOSE}Your complete refined output for the task: rewrite "
             "previous_output so that it fixes every point of "
             "refinement_feedback. Give the full deliverable, not only the "
@@ -447,8 +447,8 @@ def build_maker_checker_field_instructions(
     )
     criteria = f"Evaluation criteria: {checker_instructions}"
     return {
-        "make": f"{_COMPOSE}Your complete draft for the task. {draft}",
-        "revise": (
+        MakerCheckerStates.MAKE: f"{_COMPOSE}Your complete draft for the task. {draft}",
+        MakerCheckerStates.REVISE: (
             f"{_COMPOSE}Your complete revised draft for the task: rewrite "
             "previous_draft so that it fixes every point of checker_feedback "
             f"(the whole draft, not only the changes). {draft}"
