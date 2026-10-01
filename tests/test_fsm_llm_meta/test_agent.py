@@ -19,6 +19,7 @@ from fsm_llm.agents.exceptions import (
     MetaValidationError,
 )
 from fsm_llm.agents.meta_builder import MetaBuilderAgent
+from fsm_llm.agents.meta_prompts import artifact_schema
 
 
 class TestOfflineNetworkGuard:
@@ -517,7 +518,7 @@ class TestWorkflowStepTypeEnum:
     def test_schema_step_type_is_the_valid_set(self):
         from fsm_llm.agents.meta_builders import WorkflowBuilder
 
-        prop = self._step_type_prop(MetaBuilderAgent._ARTIFACT_SCHEMAS["workflow"])
+        prop = self._step_type_prop(artifact_schema(ArtifactType.WORKFLOW))
         assert prop["type"] == "string"
         assert prop["enum"] == sorted(WorkflowBuilder.VALID_STEP_TYPES)
 

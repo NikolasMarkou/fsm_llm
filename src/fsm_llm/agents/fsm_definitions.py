@@ -2228,3 +2228,242 @@ def build_maker_checker_fsm(
         persona,
         states,
     )
+
+
+# ---------------------------------------------------------------------------
+# Meta-builder FSM
+# ---------------------------------------------------------------------------
+
+
+def _flag_condition(key: str, description: str) -> dict[str, Any]:
+    """Condition that passes only when ``key`` holds the boolean ``True``.
+
+    Strict ``===``: core's ``==`` also passes ``1``, ``1.0``, ``"true"`` and
+    ``"True"`` against ``True``.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-022: the meta gates compare
+    # with `===`. Do NOT relax them to `==`: core's `==` treats "true", "True",
+    # 1 and 1.0 as True, so any non-bool value that reached a gate key would
+    # start a build or a type switch. See decisions.md D-022.
+    return {
+        "description": description,
+        "requires_context_keys": [key],
+        "logic": {"===": [{"var": key}, True]},
+    }
+
+
+def build_meta_builder_fsm() -> dict[str, Any]:
+    """Build the meta-builder FSM: classify, collect, build, build_failed, done.
+
+    Contract: returns a v4.1 FSM definition dict that loads as
+    ``FSMDefinition`` (no arguments; the artifact type, requirements and
+    build request live in context, never in the definition). States
+    (``MetaBuilderStates``):
+
+    - ``classify`` (initial, silent): ``classification_extractions`` writes
+      ``artifact_type`` (fsm, workflow, agent; fallback fsm), reading
+      ``latest_request`` as its context so a message-free step classifies
+      too. ``-> build`` p10 when ``build_requested`` is True, else
+      ``-> collect`` p900.
+    - ``collect`` (speaking, no extraction): the reply asks for details and
+      ends with the build prompt; it sees only ``artifact_type``,
+      ``requirements`` and ``validation_errors``. ``-> build`` p10 on
+      ``build_requested``, ``-> classify`` p20 on ``type_switch``, otherwise
+      BLOCKED (stay).
+    - ``build`` (silent completion state): one structured completion over
+      ``_build_messages`` with the response format in
+      ``_build_response_format``, result in ``build_reply``. ``-> done`` p10
+      when ``build_outcome == "valid"``, else ``-> build_failed`` p900.
+    - ``build_failed`` (silent): ``-> build`` p10 on ``build_requested``,
+      ``-> classify`` p20 on ``type_switch``, ``-> collect`` p900.
+    - ``done`` (terminal, silent).
+
+    The driver writes ``requirements``, ``latest_request``,
+    ``build_requested``, ``type_switch`` and ``keyword_type`` before each
+    turn; handlers write the build request on ``build`` entry and
+    ``build_outcome``, ``artifact``, ``validation_errors`` and
+    ``review_presentation`` from ``build_reply``. All of those are
+    ``handler_only_keys`` (``META_HANDLER_ONLY_KEYS``). Never raises.
+    """
+    from .constants import (
+        META_ARTIFACT_TYPE_INTENTS,
+        META_HANDLER_ONLY_KEYS,
+        MetaBuilderStates,
+        MetaBuildOutcome,
+        MetaContextKeys,
+        MetaDefaults,
+    )
+    from .definitions import ArtifactType
+    from .meta_prompts import build_collect_response_instructions
+
+    # DECISION plan-2026-10-01T093600-944e2692/D-011: five states with the
+    # artifact type in context, and the build as a core completion state.
+    # Do NOT split this into per-artifact-type states (three copies of the
+    # same transitions), do NOT make the build an LLM call inside a handler
+    # (a second call path beside Pass 1, outside rollback and the meter), and
+    # do NOT replace the driver-computed gate keys (build_requested,
+    # type_switch) with a per-turn classifier: JsonLogic has no phrase
+    # predicate and a classifier per turn adds the calls A-ISSUE-011 removed.
+    # The gate keys and the build verdict stay handler-only so the model
+    # cannot forge them. See decisions.md D-011.
+    states_ = MetaBuilderStates
+    keys = MetaContextKeys
+    build_requested = _flag_condition(
+        keys.BUILD_REQUESTED, "The user asked to build the artifact now"
+    )
+    type_switch = _flag_condition(
+        keys.TYPE_SWITCH, "The user asked for a different artifact type"
+    )
+    states: dict[str, Any] = {
+        states_.CLASSIFY: {
+            "id": states_.CLASSIFY,
+            "description": "Decide which kind of artifact the user wants",
+            "purpose": ("Classify the request as an FSM, a workflow or an agent"),
+            "extraction_instructions": "",
+            "response_instructions": "",
+            "classification_extractions": [
+                {
+                    "field_name": keys.ARTIFACT_TYPE,
+                    "intents": [
+                        {"name": name, "description": description}
+                        for name, description in META_ARTIFACT_TYPE_INTENTS
+                    ],
+                    "fallback_intent": ArtifactType.FSM.value,
+                    "confidence_threshold": MetaDefaults.TYPE_CONFIDENCE_THRESHOLD,
+                    "context_keys": [keys.LATEST_REQUEST],
+                }
+            ],
+            "transitions": [
+                {
+                    "target_state": states_.BUILD,
+                    "description": "The user asked to build right away",
+                    "priority": 10,
+                    "conditions": [build_requested],
+                },
+                {
+                    "target_state": states_.COLLECT,
+                    "description": "Collect the artifact's requirements",
+                    "priority": 900,
+                },
+            ],
+        },
+        states_.COLLECT: {
+            "id": states_.COLLECT,
+            "description": "Gather the artifact's requirements from the user",
+            "purpose": (
+                "Acknowledge each detail, ask about what is unclear and "
+                "invite the user to say 'build it'"
+            ),
+            "extraction_instructions": "",
+            "response_instructions": build_collect_response_instructions(),
+            "context_scope": {
+                "read_keys": [
+                    keys.ARTIFACT_TYPE,
+                    keys.REQUIREMENTS,
+                    keys.VALIDATION_ERRORS,
+                ]
+            },
+            "transitions": [
+                {
+                    "target_state": states_.BUILD,
+                    "description": "The user asked to build the artifact",
+                    "priority": 10,
+                    "conditions": [build_requested],
+                },
+                {
+                    "target_state": states_.CLASSIFY,
+                    "description": "The user switched to another artifact type",
+                    "priority": 20,
+                    "conditions": [type_switch],
+                },
+            ],
+        },
+        states_.BUILD: {
+            "id": states_.BUILD,
+            "description": "Generate the artifact spec in one structured call",
+            "purpose": (
+                "Ask the model for the whole artifact spec as JSON matching "
+                "the per-type schema"
+            ),
+            "response_instructions": "",
+            "completion": {
+                "response_format_key": keys.BUILD_RESPONSE_FORMAT,
+                "messages_key": keys.BUILD_MESSAGES,
+                "result_key": keys.BUILD_REPLY,
+            },
+            "transitions": [
+                {
+                    "target_state": states_.DONE,
+                    "description": "The assembled artifact validated",
+                    "priority": 10,
+                    "conditions": [
+                        {
+                            "description": "The build produced a valid artifact",
+                            "requires_context_keys": [keys.BUILD_OUTCOME],
+                            "logic": {
+                                "===": [
+                                    {"var": keys.BUILD_OUTCOME},
+                                    MetaBuildOutcome.VALID,
+                                ]
+                            },
+                        }
+                    ],
+                },
+                {
+                    "target_state": states_.BUILD_FAILED,
+                    "description": "The build did not produce a valid artifact",
+                    "priority": 900,
+                },
+            ],
+        },
+        states_.BUILD_FAILED: {
+            "id": states_.BUILD_FAILED,
+            "description": "The last build failed validation",
+            "purpose": (
+                "Route the user's next message: build again, switch the "
+                "artifact type, or collect more details"
+            ),
+            "extraction_instructions": "",
+            "response_instructions": "",
+            "transitions": [
+                {
+                    "target_state": states_.BUILD,
+                    "description": "The user asked to build again",
+                    "priority": 10,
+                    "conditions": [build_requested],
+                },
+                {
+                    "target_state": states_.CLASSIFY,
+                    "description": "The user switched to another artifact type",
+                    "priority": 20,
+                    "conditions": [type_switch],
+                },
+                {
+                    "target_state": states_.COLLECT,
+                    "description": "Collect more details before the next build",
+                    "priority": 900,
+                },
+            ],
+        },
+        states_.DONE: {
+            "id": states_.DONE,
+            "description": "The artifact is built and valid",
+            "purpose": "End the session with the valid artifact",
+            "response_instructions": "",
+            "transitions": [],
+        },
+    }
+    return {
+        "name": "meta_builder",
+        "description": (
+            "Meta-builder: classify the artifact type, collect requirements, "
+            "build the artifact with one structured completion"
+        ),
+        "initial_state": states_.CLASSIFY,
+        "persona": (
+            "A concise assistant that helps users design FSM-LLM artifacts: "
+            "FSMs, workflows and agents"
+        ),
+        "states": states,
+        "handler_only_keys": list(META_HANDLER_ONLY_KEYS),
+    }

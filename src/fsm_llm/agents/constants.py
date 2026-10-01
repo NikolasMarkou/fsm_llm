@@ -568,6 +568,9 @@ class MetaDefaults:
     DEFAULT_PRIORITY = 100
     SUMMARY_TRUNCATE_WIDTH = 80
 
+    # Artifact-type classification (the ``classify`` state of the meta FSM)
+    TYPE_CONFIDENCE_THRESHOLD = 0.4
+
     # ReactAgent configuration for the build phase
     BUILD_MAX_ITERATIONS = 25
     BUILD_TIMEOUT_SECONDS = 120.0
@@ -579,6 +582,154 @@ class MetaDefaults:
     AGENT_TIMEOUT_SECONDS = 300.0
     AGENT_TEMPERATURE = 0.5
     AGENT_MAX_TOKENS = 1000
+
+
+class MetaBuilderStates:
+    """States in the meta-builder FSM (``build_meta_builder_fsm``)."""
+
+    CLASSIFY = "classify"
+    COLLECT = "collect"
+    BUILD = "build"
+    BUILD_FAILED = "build_failed"
+    DONE = "done"
+
+
+class MetaContextKeys:
+    """Context keys of the meta-builder FSM.
+
+    ``ARTIFACT_TYPE`` is the one key the model writes (the ``classify``
+    state's classification). ``BUILD_REPLY`` is the ``build`` state's
+    completion result. ``BUILD_MESSAGES`` and ``BUILD_RESPONSE_FORMAT`` are
+    the build request's transcript and response format (internal: no prompt,
+    extraction or ``get_data`` reaches them). Every other key is written only
+    by the driver or its handlers (``META_HANDLER_ONLY_KEYS``).
+    """
+
+    ARTIFACT_TYPE = "artifact_type"
+    # Driver hints, recomputed from each user message before the turn.
+    REQUIREMENTS = "requirements"
+    LATEST_REQUEST = "latest_request"
+    BUILD_REQUESTED = "build_requested"
+    TYPE_SWITCH = "type_switch"
+    KEYWORD_TYPE = "keyword_type"
+    # Build state: request, raw reply and the handler-assembled outcome.
+    BUILD_MESSAGES = "_build_messages"
+    BUILD_RESPONSE_FORMAT = "_build_response_format"
+    BUILD_REPLY = "build_reply"
+    BUILD_OUTCOME = "build_outcome"
+    ARTIFACT = "artifact"
+    VALIDATION_ERRORS = "validation_errors"
+    REVIEW_PRESENTATION = "review_presentation"
+
+
+class MetaBuildOutcome:
+    """Values of ``MetaContextKeys.BUILD_OUTCOME``."""
+
+    VALID = "valid"
+    INVALID = "invalid"
+
+
+# Keys of the meta-builder FSM that only the driver and its handlers write:
+# listed as core ``handler_only_keys``, so no extraction channel can plant a
+# build trigger, a type switch or a build verdict. The two internal-prefixed
+# build keys need no entry (core never extracts an internal key, see the
+# FRAMEWORK_ONLY_KEYS anchor); ``ARTIFACT_TYPE`` is a classification field,
+# which the list does not cover (core's validator warns on it).
+META_HANDLER_ONLY_KEYS: tuple[str, ...] = (
+    MetaContextKeys.REQUIREMENTS,
+    MetaContextKeys.LATEST_REQUEST,
+    MetaContextKeys.BUILD_REQUESTED,
+    MetaContextKeys.TYPE_SWITCH,
+    MetaContextKeys.KEYWORD_TYPE,
+    MetaContextKeys.BUILD_OUTCOME,
+    MetaContextKeys.ARTIFACT,
+    MetaContextKeys.VALIDATION_ERRORS,
+    MetaContextKeys.REVIEW_PRESENTATION,
+    MetaContextKeys.BUILD_REPLY,
+)
+
+
+# Artifact types the meta-builder classifies, with the intent descriptions the
+# classifier sees (names are ``ArtifactType`` values; fallback ``fsm``).
+META_ARTIFACT_TYPE_INTENTS: tuple[tuple[str, str], ...] = (
+    (
+        "fsm",
+        "A finite state machine, chatbot, dialogue system, "
+        "conversational flow, survey, quiz, FAQ bot, help desk, "
+        "interview, or onboarding flow",
+    ),
+    (
+        "workflow",
+        "A multi-step workflow, data pipeline, automation, "
+        "ETL process, batch job, sequential process, or "
+        "async task orchestration",
+    ),
+    (
+        "agent",
+        "An AI agent that uses tools, a ReAct agent, "
+        "plan-and-execute agent, research agent, browsing "
+        "agent, or any agentic pattern with tool use",
+    ),
+)
+
+# Agent patterns an agent artifact may use, with their descriptions (names are
+# ``AgentBuilder.VALID_AGENT_TYPES``; ``react`` is the default).
+META_AGENT_PATTERN_INTENTS: tuple[tuple[str, str], ...] = (
+    (
+        "react",
+        "A ReAct agent: think-act-observe loop, tool-using "
+        "agent, search agent, general-purpose agent. "
+        "This is the default and most common pattern.",
+    ),
+    (
+        "plan_execute",
+        "A plan-and-execute agent: first creates a plan "
+        "then executes steps sequentially, with replanning",
+    ),
+    (
+        "reflexion",
+        "A reflexion agent: attempts a task, reflects on "
+        "failures, retries with improved approach",
+    ),
+    (
+        "rewoo",
+        "A REWOO agent: plans all tool calls upfront "
+        "then executes them sequentially without interleaving",
+    ),
+    (
+        "evaluator_optimizer",
+        "An evaluator-optimizer agent: generates output, "
+        "evaluates quality, optimizes iteratively",
+    ),
+    (
+        "maker_checker",
+        "A maker-checker agent: one agent drafts, "
+        "another reviews and approves or sends back",
+    ),
+    (
+        "debate",
+        "A debate agent: multiple perspectives argue, "
+        "a judge synthesizes the best answer",
+    ),
+    (
+        "orchestrator",
+        "An orchestrator agent: delegates subtasks to "
+        "specialized worker agents and synthesizes results",
+    ),
+    (
+        "adapt",
+        "An ADaPT agent: estimates task complexity, "
+        "decomposes if too complex, adapts strategy",
+    ),
+    (
+        "prompt_chain",
+        "A prompt chain agent: sequential prompts with quality gates between each step",
+    ),
+    (
+        "self_consistency",
+        "A self-consistency agent: generates multiple samples and uses majority voting",
+    ),
+)
 
 
 class MetaLogMessages:

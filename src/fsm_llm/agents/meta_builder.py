@@ -26,7 +26,13 @@ from fsm_llm.classification import Classifier
 from fsm_llm.definitions import ClassificationSchema, IntentDefinition
 from fsm_llm.logging import logger
 
-from .constants import MetaErrorMessages, MetaLogMessages
+from .constants import (
+    META_AGENT_PATTERN_INTENTS,
+    META_ARTIFACT_TYPE_INTENTS,
+    MetaDefaults,
+    MetaErrorMessages,
+    MetaLogMessages,
+)
 from .definitions import (
     ArtifactType,
     MetaBuilderConfig,
@@ -40,7 +46,11 @@ from .meta_builders import (
     WorkflowBuilder,
 )
 from .meta_output import format_artifact_json
-from .meta_prompts import build_review_presentation
+from .meta_prompts import (
+    artifact_schema,
+    build_artifact_prompt,
+    build_review_presentation,
+)
 
 
 class MetaBuilderAgent:
@@ -182,99 +192,6 @@ class MetaBuilderAgent:
     # Deterministic build pipeline
     # ------------------------------------------------------------------
 
-    # JSON schemas for single-call artifact extraction
-    _FSM_SCHEMA: ClassVar[dict] = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string"},
-            "description": {"type": "string"},
-            "persona": {"type": "string"},
-            "states": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "state_id": {"type": "string"},
-                        "description": {"type": "string"},
-                        "purpose": {"type": "string"},
-                    },
-                    "required": ["state_id", "description", "purpose"],
-                },
-            },
-            "transitions": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "from_state": {"type": "string"},
-                        "target_state": {"type": "string"},
-                        "description": {"type": "string"},
-                    },
-                    "required": ["from_state", "target_state", "description"],
-                },
-            },
-        },
-        "required": ["name", "description", "states"],
-    }
-
-    _WORKFLOW_SCHEMA: ClassVar[dict] = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string"},
-            "description": {"type": "string"},
-            "workflow_id": {"type": "string"},
-            "steps": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "step_id": {"type": "string"},
-                        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-010: the
-                        # enum is the grammar that steers the model (ollama's
-                        # ``format`` is this schema verbatim). Do NOT drop it
-                        # back to a free string or hand-copy the list: a free
-                        # string lets the model invent a type that only fails
-                        # later in ``validate_complete``.
-                        "step_type": {
-                            "type": "string",
-                            "enum": sorted(WorkflowBuilder.VALID_STEP_TYPES),
-                        },
-                        "name": {"type": "string"},
-                        "description": {"type": "string"},
-                    },
-                    "required": ["step_id", "step_type", "name"],
-                },
-            },
-        },
-        "required": ["name", "description", "steps"],
-    }
-
-    _AGENT_SCHEMA: ClassVar[dict] = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string"},
-            "description": {"type": "string"},
-            "tools": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "description": {"type": "string"},
-                    },
-                    "required": ["name", "description"],
-                },
-            },
-        },
-        "required": ["name", "description", "tools"],
-    }
-
-    _ARTIFACT_SCHEMAS: ClassVar[dict[str, dict]] = {
-        "fsm": _FSM_SCHEMA,
-        "workflow": _WORKFLOW_SCHEMA,
-        "agent": _AGENT_SCHEMA,
-    }
-
     def _run_deterministic_pipeline(
         self,
         task: str,
@@ -282,44 +199,9 @@ class MetaBuilderAgent:
         builder: ArtifactBuilder,
     ) -> None:
         """Extract the complete artifact spec in one LLM call, then build deterministically."""
-        schema = self._ARTIFACT_SCHEMAS.get(artifact_type.value)
-        if schema is None:
-            logger.error(f"No extraction schema for {artifact_type.value}")
-            return
-
+        schema = artifact_schema(artifact_type)
         type_label = artifact_type.value.upper()
-        type_examples = {
-            "fsm": (
-                "Create states with unique state_ids, descriptions, and purposes. "
-                "Add transitions between states. The first state is the initial state.\n"
-                "Example:\n"
-                '{"name":"MyBot","description":"A bot","persona":"friendly",'
-                '"states":[{"state_id":"start","description":"Welcome","purpose":"Greet user"},'
-                '{"state_id":"end","description":"Goodbye","purpose":"Close the conversation"}],'
-                '"transitions":[{"from_state":"start","target_state":"end","description":"Done"}]}'
-            ),
-            "workflow": (
-                "Create steps with unique step_ids, step types (auto_transition, "
-                "llm_processing, api_call, condition), names, and descriptions.\n"
-                "Example:\n"
-                '{"name":"MyFlow","description":"A flow","workflow_id":"wf1",'
-                '"steps":[{"step_id":"s1","step_type":"auto_transition","name":"Start","description":"Begin"}]}'
-            ),
-            "agent": (
-                "Create tool definitions with clear names and descriptions.\n"
-                "Example:\n"
-                '{"name":"MyAgent","description":"An agent",'
-                '"tools":[{"name":"search","description":"Search the web"}]}'
-            ),
-        }
-        hint = type_examples.get(artifact_type.value, "")
-        prompt = (
-            f"<task>Design a {type_label} based on the user requirement below.</task>\n"
-            f"<requirement>{task}</requirement>\n"
-            f"<instructions>{hint}\n"
-            f"Output ONLY a JSON object with actual values (not a schema). "
-            f"Do NOT output type definitions.</instructions>"
-        )
+        prompt = build_artifact_prompt(artifact_type, task)
 
         response = self._llm_call(prompt, response_schema=schema)
         spec = self._parse_extraction_response(response)
@@ -869,33 +751,11 @@ class MetaBuilderAgent:
         if self._type_classifier is None:
             schema = ClassificationSchema(
                 intents=[
-                    IntentDefinition(
-                        name="fsm",
-                        description=(
-                            "A finite state machine, chatbot, dialogue system, "
-                            "conversational flow, survey, quiz, FAQ bot, help desk, "
-                            "interview, or onboarding flow"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="workflow",
-                        description=(
-                            "A multi-step workflow, data pipeline, automation, "
-                            "ETL process, batch job, sequential process, or "
-                            "async task orchestration"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="agent",
-                        description=(
-                            "An AI agent that uses tools, a ReAct agent, "
-                            "plan-and-execute agent, research agent, browsing "
-                            "agent, or any agentic pattern with tool use"
-                        ),
-                    ),
+                    IntentDefinition(name=name, description=description)
+                    for name, description in META_ARTIFACT_TYPE_INTENTS
                 ],
                 fallback_intent="fsm",
-                confidence_threshold=0.4,
+                confidence_threshold=MetaDefaults.TYPE_CONFIDENCE_THRESHOLD,
             )
             self._type_classifier = Classifier(
                 schema,
@@ -909,84 +769,8 @@ class MetaBuilderAgent:
         if self._agent_type_classifier is None:
             schema = ClassificationSchema(
                 intents=[
-                    IntentDefinition(
-                        name="react",
-                        description=(
-                            "A ReAct agent: think-act-observe loop, tool-using "
-                            "agent, search agent, general-purpose agent. "
-                            "This is the default and most common pattern."
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="plan_execute",
-                        description=(
-                            "A plan-and-execute agent: first creates a plan "
-                            "then executes steps sequentially, with replanning"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="reflexion",
-                        description=(
-                            "A reflexion agent: attempts a task, reflects on "
-                            "failures, retries with improved approach"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="rewoo",
-                        description=(
-                            "A REWOO agent: plans all tool calls upfront "
-                            "then executes them sequentially without interleaving"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="evaluator_optimizer",
-                        description=(
-                            "An evaluator-optimizer agent: generates output, "
-                            "evaluates quality, optimizes iteratively"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="maker_checker",
-                        description=(
-                            "A maker-checker agent: one agent drafts, "
-                            "another reviews and approves or sends back"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="debate",
-                        description=(
-                            "A debate agent: multiple perspectives argue, "
-                            "a judge synthesizes the best answer"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="orchestrator",
-                        description=(
-                            "An orchestrator agent: delegates subtasks to "
-                            "specialized worker agents and synthesizes results"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="adapt",
-                        description=(
-                            "An ADaPT agent: estimates task complexity, "
-                            "decomposes if too complex, adapts strategy"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="prompt_chain",
-                        description=(
-                            "A prompt chain agent: sequential prompts with "
-                            "quality gates between each step"
-                        ),
-                    ),
-                    IntentDefinition(
-                        name="self_consistency",
-                        description=(
-                            "A self-consistency agent: generates multiple "
-                            "samples and uses majority voting"
-                        ),
-                    ),
+                    IntentDefinition(name=name, description=description)
+                    for name, description in META_AGENT_PATTERN_INTENTS
                 ],
                 fallback_intent="react",
                 confidence_threshold=0.3,
