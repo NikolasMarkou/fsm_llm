@@ -259,10 +259,10 @@ class TestTasksSha256:
         assert len(h1) == 64 and int(h1, 16) >= 0
 
     def test_registering_an_arm_does_not_change_the_hash(self, monkeypatch):
-        """Defect guarded: adding the runtime arms later (G2) changing the
-        task hash, so B1 could never be compared with B0."""
+        """Defect guarded: adding an arm later changing the task hash, so B1
+        could never be compared with B0."""
         before = ab.tasks_sha256()
-        monkeypatch.setitem(ab.ARMS, "runtime_native", lambda tools, model: None)
+        monkeypatch.setitem(ab.ARMS, "new_arm", lambda tools, model: None)
         monkeypatch.setattr(ab, "LIMITS", {**ab.LIMITS, "max_iterations": 99})
         assert ab.tasks_sha256() == before
 
@@ -273,7 +273,7 @@ class TestTasksSha256:
         region = text[text.index("# --- BEGIN TASKS") : text.index("# --- END TASKS")]
         for needle in ("def make_tools", "TASKS: tuple", "def grade", "COUNTRIES"):
             assert needle in region
-        for needle in ("ARMS", "_legacy_arm", "_native_fc_arm", "LIMITS"):
+        for needle in ("ARMS", "_fsm_advance_arm", "LIMITS"):
             assert needle not in region
 
 
@@ -408,9 +408,10 @@ class TestManifestGate:
             hb, "_model_digest", lambda tag: {"tag": tag, "digest": "x"}
         )
         manifest = ab.build_manifest(
-            bench_id="x", block="B0", arm_name="legacy", trials=3, model=ab.MODEL
+            bench_id="x", block="B1", arm_name="fsm_advance", trials=3, model=ab.MODEL
         )
         assert all(field in manifest for field in ab.MANIFEST_FIELDS)
+        assert manifest["arm"]["factory"].startswith('create_agent("react"')
         assert manifest["tasks_sha256"] == ab.tasks_sha256()
         assert manifest["n_preregistered"] == len(ab.TASKS) * 3
         assert manifest["model_digest"]["tag"] == "qwen3.5:4b"
@@ -721,10 +722,7 @@ class TestRunEndToEnd:
 class TestArms:
     """The registered arms build their agents without an LLM call."""
 
-    @pytest.mark.parametrize(
-        ("arm", "cls"),
-        [("legacy", "ReactAgent"), ("native_fc", "NativeFunctionCallingReactAgent")],
-    )
+    @pytest.mark.parametrize(("arm", "cls"), [("fsm_advance", "ReactAgent")])
     def test_arm_builds_its_agent_class(self, arm, cls):
         """Defect guarded: an arm factory broken by a signature change,
         found only after the live block has started."""
@@ -733,6 +731,36 @@ class TestArms:
         assert type(agent).__name__ == cls
         assert agent.config.max_iterations == ab.LIMITS["max_iterations"]
         assert agent.config.timeout_seconds == ab.LIMITS["timeout_seconds"]
+        assert agent.config.temperature == ab.LIMITS["temperature"]
+        assert agent.config.max_tokens == ab.LIMITS["max_tokens"]
+
+    def test_b1_comparison_limits_equal_b0(self):
+        """Defect guarded: B1 registered with limits or a task set that differ
+        from B0's committed manifest, so the B1/B0 pair compares two things."""
+        b0 = json.loads(
+            (ab.BENCH_DATA / "agents-react" / "B0" / "manifest_legacy.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert ab.tasks_sha256() == b0["tasks_sha256"]
+        assert ab.LIMITS == b0["limits"]
+        assert ab.TRIALS == b0["trials"]
+        assert ab.MODEL == b0["model"]
+        assert ab.WRAPPER_VERSION == b0["wrapper_version"]
+
+    @pytest.mark.parametrize("label", ["legacy", "native_fc"])
+    def test_b0_labels_are_never_reused_for_new_rows(
+        self, label, tmp_path, monkeypatch
+    ):
+        """Defect guarded: new rows of changed code written under a B0 arm
+        label, so `--pair` compares a label with itself across code."""
+        monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
+        assert label not in ab.ARMS
+        with pytest.raises(ab.BenchDataError, match="unknown arm"):
+            ab.register_block("agents-react", "B9", label)
+        with pytest.raises(ab.BenchDataError, match="unknown arm"):
+            ab.run_block("agents-react", "B9", label)
+        assert not any(tmp_path.iterdir())
 
 
 class TestCLI:

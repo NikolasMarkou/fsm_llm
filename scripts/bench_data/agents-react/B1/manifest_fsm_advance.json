@@ -1,0 +1,236 @@
+{
+  "arm": {
+    "factory": "create_agent(\"react\", tools, config=...): ReactAgent on core steps.",
+    "name": "fsm_advance"
+  },
+  "bench_id": "agents-react",
+  "block": "B1",
+  "created_at": "2026-10-01T05:48:39Z",
+  "fixture_hash": "831a7cd5ed83f3e317b6e7b21b0bd1229d79d8ebea959a043629ef90a705144c",
+  "git_commit": "1c8572e1dda702b48944aa12006d73fb29747fff",
+  "limits": {
+    "max_iterations": 8,
+    "max_tokens": 1000,
+    "temperature": 0.5,
+    "timeout_seconds": 180.0
+  },
+  "model": "ollama_chat/qwen3.5:4b",
+  "model_digest": {
+    "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+    "tag": "qwen3.5:4b"
+  },
+  "n_preregistered": 114,
+  "n_tasks": 38,
+  "order": "trial-major: every task once per trial, tasks in file order",
+  "prompt_bytes_sha256": "ceebedb1126f4b81733ecf08d0d2f78b668800f9f73aa15d0e545e89b236a464",
+  "seed": null,
+  "tasks_sha256": "831a7cd5ed83f3e317b6e7b21b0bd1229d79d8ebea959a043629ef90a705144c",
+  "temperature": 0.5,
+  "tool_surface": {
+    "arm_factory": "fsm_advance",
+    "limits": {
+      "max_iterations": 8,
+      "max_tokens": 1000,
+      "temperature": 0.5,
+      "timeout_seconds": 180.0
+    },
+    "tools_per_task": {
+      "ch-currency": [
+        "calculator",
+        "exchange_rate"
+      ],
+      "ch-density": [
+        "calculator",
+        "lookup_country"
+      ],
+      "ch-fahrenheit": [
+        "convert_units",
+        "station_reading"
+      ],
+      "ch-manager-budget": [
+        "get_department",
+        "get_employee"
+      ],
+      "ch-order-local": [
+        "calculator",
+        "exchange_rate",
+        "lookup_country",
+        "order_total"
+      ],
+      "ch-salaries": [
+        "calculator",
+        "get_employee"
+      ],
+      "di-currency": [
+        "book_flight",
+        "get_horoscope",
+        "get_stock_price",
+        "get_weather",
+        "lookup_country",
+        "play_music",
+        "random_fact",
+        "search_news",
+        "send_email",
+        "set_reminder",
+        "translate_text"
+      ],
+      "di-days": [
+        "book_flight",
+        "days_between",
+        "get_horoscope",
+        "get_stock_price",
+        "get_weather",
+        "play_music",
+        "random_fact",
+        "search_news",
+        "send_email",
+        "set_reminder",
+        "translate_text"
+      ],
+      "di-floor": [
+        "book_flight",
+        "get_department",
+        "get_horoscope",
+        "get_stock_price",
+        "get_weather",
+        "play_music",
+        "random_fact",
+        "search_news",
+        "send_email",
+        "set_reminder",
+        "translate_text"
+      ],
+      "di-name": [
+        "book_flight",
+        "get_employee",
+        "get_horoscope",
+        "get_stock_price",
+        "get_weather",
+        "play_music",
+        "random_fact",
+        "search_news",
+        "send_email",
+        "set_reminder",
+        "translate_text"
+      ],
+      "di-rate": [
+        "book_flight",
+        "exchange_rate",
+        "get_horoscope",
+        "get_stock_price",
+        "get_weather",
+        "play_music",
+        "random_fact",
+        "search_news",
+        "send_email",
+        "set_reminder",
+        "translate_text"
+      ],
+      "di-stock": [
+        "book_flight",
+        "check_inventory",
+        "get_horoscope",
+        "get_stock_price",
+        "get_weather",
+        "play_music",
+        "random_fact",
+        "search_news",
+        "send_email",
+        "set_reminder",
+        "translate_text"
+      ],
+      "er-calc-separators": [
+        "calculator"
+      ],
+      "er-date-format": [
+        "days_between"
+      ],
+      "er-flaky": [
+        "station_reading"
+      ],
+      "er-sku-case": [
+        "check_inventory"
+      ],
+      "er-unit-name": [
+        "convert_units"
+      ],
+      "nt-paint": [
+        "calculator",
+        "get_employee",
+        "lookup_country"
+      ],
+      "nt-ready": [
+        "calculator",
+        "get_employee",
+        "lookup_country"
+      ],
+      "nt-reverse": [
+        "calculator",
+        "get_employee",
+        "lookup_country"
+      ],
+      "nt-rgb": [
+        "calculator",
+        "get_employee",
+        "lookup_country"
+      ],
+      "nt-sum": [
+        "calculator",
+        "get_employee",
+        "lookup_country"
+      ],
+      "st-capital": [
+        "lookup_country"
+      ],
+      "st-convert": [
+        "convert_units"
+      ],
+      "st-days": [
+        "days_between"
+      ],
+      "st-letter": [
+        "count_letter"
+      ],
+      "st-multiply": [
+        "calculator"
+      ],
+      "st-stock": [
+        "check_inventory"
+      ],
+      "ty-mean": [
+        "list_stats"
+      ],
+      "ty-order": [
+        "order_total"
+      ],
+      "ty-range": [
+        "calculator",
+        "list_stats"
+      ],
+      "ty-repeat": [
+        "repeat_text"
+      ],
+      "ty-two-conversions": [
+        "convert_units"
+      ],
+      "un-country": [
+        "lookup_country"
+      ],
+      "un-employee": [
+        "get_department",
+        "get_employee"
+      ],
+      "un-founder": [
+        "archive_search"
+      ],
+      "un-sku": [
+        "check_inventory"
+      ],
+      "un-station": [
+        "station_reading"
+      ]
+    }
+  },
+  "trials": 3,
+  "wrapper_version": "1"
+}

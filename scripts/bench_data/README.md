@@ -39,11 +39,18 @@ read as the same axis:
   `PlanDirectory.seed_protocol_skeleton()`) -- these are PLAN-DIRECTORY shapes,
   and BOTH run `native_function_calling=True`. The independent variable is the
   on-disk population, not the agent.
-- `agents-react`: agent engines on the same task set. `legacy` is
-  `create_agent("react", tools, config=...)` (the FSM-driven ReactAgent),
-  `native_fc` is `NativeFunctionCallingReactAgent`; a later block uses a new
-  arm label for changed code, never an old one. `report` reads arm labels from the `rows_<arm>.jsonl` file names, so
-  rows of an arm whose code was deleted still recount.
+- `agents-react`: agent engines on the same task set. A later block uses a
+  new arm label for changed code, never an old one; `report` reads arm labels
+  from the `rows_<arm>.jsonl` file names, so rows of an arm retired from
+  `ARMS` (or whose code was deleted) still recount.
+  - B0 (d4b1626 agents code; arms retired from `ARMS`): `legacy` is
+    `create_agent("react", tools, config=...)` (the FSM-driven ReactAgent),
+    `native_fc` is `NativeFunctionCallingReactAgent`.
+  - B1 (plan 07ad3f8c D-052): `fsm_advance` is the same
+    `create_agent("react", tools, config=...)` construction on the migrated
+    code, where core's `advance`/`run_until_terminal` steps the agent FSM.
+    Same tasks, trials, limits, model digest and meter as B0; paired with
+    `B0/legacy` under the pass rule written in D-052 before the run.
 
 ## Pre-registration rule (D-002)
 
@@ -106,8 +113,10 @@ Row schema (rows_<arm>.jsonl): `task_id`, `category`, `arm`, `trial`,
 when the run raised), `iterations`, `tool_calls`, `tools_used`, `llm_calls`,
 `llm_errors`, `usage_missing`, `prompt_tokens`, `completion_tokens`,
 `total_tokens` (a bench-local wrapper on `litellm.completion`,
-`litellm.acompletion`, `fsm_llm.llm.completion`,
-`fsm_llm.classification.completion`), `latency_s`, `error`, `answer`
+`litellm.acompletion` and `fsm_llm.llm.completion`; B0 also wrapped
+`fsm_llm.classification.completion`, which no longer exists because the
+classifier sends through `fsm_llm.llm.completion`: one count per provider
+call either way, `wrapper_version` "1"), `latency_s`, `error`, `answer`
 (first 500 chars), `bench_id`, `block`, `ts`.
 
 Summary `metrics` (all recounted by `report`): first-trial pass@1 (primary,
@@ -118,7 +127,7 @@ per-category table.
 
 ```
 .venv/bin/python scripts/agents_bench.py report agents-react \
-    --blocks B0 B1 --pair B1/<new-arm>:B0/legacy
+    --blocks B0 B1 --pair B1/fsm_advance:B0/legacy
 ```
 
 `--pair A:B` (each side `ARM` or `BLOCK/ARM`) prints Fisher two-sided on

@@ -14,11 +14,16 @@ shows runs that claim success on a wrong answer (E5 at bench level).
 Usage (always the venv; see scripts/bench_data/README.md):
     .venv/bin/python scripts/agents_bench.py list-tasks --verify
     .venv/bin/python scripts/agents_bench.py register \\
-        --bench-id agents-react --block B0 --arm legacy
+        --bench-id agents-react --block B1 --arm fsm_advance
     .venv/bin/python scripts/agents_bench.py run \\
-        --bench-id agents-react --block B0 --arm legacy --trials 3
+        --bench-id agents-react --block B1 --arm fsm_advance --trials 3
     .venv/bin/python scripts/agents_bench.py report agents-react \\
-        --blocks B0 B1 --pair B1/runtime_native:B0/legacy
+        --blocks B0 B1 --pair B1/fsm_advance:B0/legacy
+
+Arm labels name the code an arm ran, so a label is never reused for rows of
+changed code: ``legacy`` and ``native_fc`` are B0's arms (d4b1626), retired
+from ``ARMS``; their rows still recount (``report`` reads labels from file
+names).
 
 Import hygiene: the module top level is stdlib only (pinned by an AST test
 and a socket-disabled subprocess import). ``fsm_llm``, ``litellm`` and the
@@ -793,28 +798,22 @@ def build_registry(tools: dict[str, Callable[..., Any]]) -> Any:
     return registry
 
 
-def _legacy_arm(tools: dict[str, Callable[..., Any]], model: str) -> Any:
-    """create_agent("react", tools, config=...): the FSM-driven ReactAgent."""
+def _fsm_advance_arm(tools: dict[str, Callable[..., Any]], model: str) -> Any:
+    """create_agent("react", tools, config=...): ReactAgent on core steps."""
+    # B0's `legacy` construction, run on the code that drives the FSM through
+    # core's advance/run_until_terminal; the docstring is the manifest's
+    # `arm.factory` text.
     from fsm_llm.agents import create_agent
 
     return create_agent("react", build_registry(tools), config=_agent_config(model))
 
 
-def _native_fc_arm(tools: dict[str, Callable[..., Any]], model: str) -> Any:
-    """NativeFunctionCallingReactAgent(tools, config): provider tool calls."""
-    from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
-
-    return NativeFunctionCallingReactAgent(
-        build_registry(tools), config=_agent_config(model)
-    )
-
-
 #: Arm label -> factory ``(tools, model) -> agent with .run(task)``. Recorded
 #: rows stay recountable after an arm is removed: ``report`` reads arm labels
-#: from the ``rows_<arm>.jsonl`` file names, never from this table.
+#: from the ``rows_<arm>.jsonl`` file names, never from this table. A label
+#: names the code it ran: changed code gets a NEW label, never an old one.
 ARMS: dict[str, Callable[[dict[str, Callable[..., Any]], str], Any]] = {
-    "legacy": _legacy_arm,
-    "native_fc": _native_fc_arm,
+    "fsm_advance": _fsm_advance_arm,
 }
 
 
