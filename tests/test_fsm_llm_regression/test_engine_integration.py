@@ -97,29 +97,50 @@ class TestReasoningEngineIntegration:
         assert result[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
         assert llm.field_requests(ContextKeys.RECOMMENDED_REASONING_TYPE)
 
-    def test_fsm_definitions_have_extraction_instructions(self):
-        """All reasoning FSM states must have extraction_instructions populated."""
+    def test_fsm_definitions_extract_through_typed_fields_only(self):
+        """Every model-written key is a typed field on a narrowed context; no
+        state has state-level extraction_instructions (no bulk call) (D-055)."""
+        from fsm_llm.constants import EXTRACTION_ENVELOPE_KEYS
+        from fsm_llm.reasoning.constants import (
+            ORCHESTRATOR_HANDLER_ONLY_KEYS,
+            ContextKeys,
+        )
+        from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+
+        handler_only = {*ORCHESTRATOR_HANDLER_ONLY_KEYS, ContextKeys.HYBRID_LOOP_COUNT}
+        typed = 0
+        for fsm_name, fsm_dict in ALL_REASONING_FSMS.items():
+            fsm_def = FSMDefinition(**fsm_dict)
+            for state_id, state in fsm_def.states.items():
+                where = f"FSM '{fsm_name}' state '{state_id}'"
+                assert not state.extraction_instructions, where
+                assert not state.required_context_keys, where
+                for field in state.field_extractions or []:
+                    typed += 1
+                    assert field.field_type in {"str", "float", "list", "bool", "any"}
+                    assert field.field_name not in EXTRACTION_ENVELOPE_KEYS, where
+                    assert field.field_name not in handler_only, where
+                    keys = field.context_keys or []
+                    assert keys and keys[0] == ContextKeys.PROBLEM_STATEMENT, where
+                    assert ContextKeys.REASONING_TRACE not in keys, where
+                    assert field.extraction_instructions.strip(), where
+        assert typed > 90
+
+    def test_only_answer_states_reply(self):
+        """A state keeps response_instructions only if its reply is kept: the
+        orchestrator's final_answer and each strategy FSM's terminal state."""
         from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
 
         for fsm_name, fsm_dict in ALL_REASONING_FSMS.items():
             fsm_def = FSMDefinition(**fsm_dict)
             for state_id, state in fsm_def.states.items():
-                assert state.extraction_instructions is not None, (
-                    f"FSM '{fsm_name}' state '{state_id}' has no extraction_instructions"
+                answers = (
+                    not state.transitions
+                    if fsm_name not in ("orchestrator", "classifier")
+                    else (fsm_name, state_id) == ("orchestrator", "final_answer")
                 )
-                assert len(state.extraction_instructions.strip()) > 0, (
-                    f"FSM '{fsm_name}' state '{state_id}' has empty extraction_instructions"
-                )
-
-    def test_fsm_definitions_have_response_instructions(self):
-        """All reasoning FSM states must have response_instructions populated."""
-        from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
-
-        for fsm_name, fsm_dict in ALL_REASONING_FSMS.items():
-            fsm_def = FSMDefinition(**fsm_dict)
-            for state_id, state in fsm_def.states.items():
-                assert state.response_instructions is not None, (
-                    f"FSM '{fsm_name}' state '{state_id}' has no response_instructions"
+                assert bool(state.response_instructions) is answers, (
+                    f"FSM '{fsm_name}' state '{state_id}'"
                 )
 
     def test_no_bare_instructions_field(self):

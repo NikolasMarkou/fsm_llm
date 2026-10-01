@@ -641,19 +641,27 @@ def _ordered_responses(
 
     Contract: ``hook_responses`` holds ``(step, reply)`` pairs in call order,
     each produced before step ``step`` ran; ``results[i]`` is step ``i + 1``.
-    Returns ``initial_response``, then the replies interleaved by step; a
-    silent step (``response is None``) adds nothing. Never raises.
+    Returns ``initial_response``, then the replies interleaved by step. A
+    silent state writes no reply: a silent step (``response is None``) and
+    the ``""`` greeting of a silent initial state (the orchestrator's start,
+    a strategy FSM's push) add nothing. Never raises.
     """
-    ordered = [initial_response]
+    # DECISION plan-2026-10-01T093600-944e2692/D-055: every non-answer
+    # reasoning state is silent, so start and push return "". Do NOT keep
+    # those "" entries in all_responses: it lists replies, and a silent
+    # state wrote none (as for a silent step since D-053).
+    ordered = [initial_response] if initial_response else []
     pending = iter(hook_responses)
     upcoming = next(pending, None)
     for step, result in enumerate(results, start=1):
         while upcoming is not None and upcoming[0] <= step:
-            ordered.append(upcoming[1])
+            if upcoming[1]:
+                ordered.append(upcoming[1])
             upcoming = next(pending, None)
         if result.response is not None:
             ordered.append(result.response)
     while upcoming is not None:
-        ordered.append(upcoming[1])
+        if upcoming[1]:
+            ordered.append(upcoming[1])
         upcoming = next(pending, None)
     return ordered

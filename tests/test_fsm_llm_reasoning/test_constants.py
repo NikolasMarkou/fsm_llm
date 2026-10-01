@@ -5,6 +5,7 @@ Unit tests for reasoning engine constants.
 import pytest
 
 from fsm_llm.reasoning.constants import (
+    MERGED_RESULT_KEYS,
     ORCHESTRATOR_HANDLER_ONLY_KEYS,
     ClassifierStates,
     ContextKeys,
@@ -174,6 +175,28 @@ class TestHandlerOnlyKeys:
         assert ALL_REASONING_FSMS["hybrid"]["handler_only_keys"] == [
             ContextKeys.HYBRID_LOOP_COUNT
         ]
+
+
+class TestMergedResultKeys:
+    """D-055: synthesize_solution reads every key a strategy pop merges back."""
+
+    @pytest.mark.parametrize("reasoning_type", list(ReasoningType))
+    def test_covers_every_merged_key(self, reasoning_type):
+        from fsm_llm.reasoning.handlers import ContextManager
+
+        everything = {
+            value: f"v-{value}"
+            for name, value in vars(ContextKeys).items()
+            if name.isupper()
+        }
+        merged = ContextManager.merge_reasoning_results(
+            {}, everything, reasoning_type.value
+        )
+        merged.pop(f"{reasoning_type.value}_reasoning_completed")
+        # The calculator also proposes its result as the solution directly.
+        merged.pop(ContextKeys.PROPOSED_SOLUTION, None)
+        assert merged
+        assert set(merged) <= set(MERGED_RESULT_KEYS)
 
 
 class TestErrorMessages:

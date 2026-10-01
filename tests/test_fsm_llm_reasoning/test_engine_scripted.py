@@ -21,6 +21,7 @@ from fsm_llm.definitions import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
+from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LLMInterface
 from fsm_llm.reasoning import ReasoningEngine, ReasoningExecutionError
 from fsm_llm.reasoning.constants import (
@@ -44,7 +45,7 @@ _VALID_SCRIPT: dict[str, Any] = {
     "problem_structure": "two premises",
     "structural_elements": ["major premise", "minor premise"],
     "reasoning_requirements": "deduction",
-    "key_challenges": "validity",
+    "key_challenges": ["validity"],
     "recommended_reasoning_type": "deductive",
     "strategy_justification": "a syllogism",
     "alternative_approaches": ["analytical"],
@@ -184,8 +185,10 @@ class TestScriptedSolve:
         assert llm.requests
         assert all(request.user_message is None for request in llm.requests)
         assert len(histories) == 2  # orchestrator and classifier
+        # Only answer states reply: the orchestrator's history holds them, the
+        # classifier (every state silent) has none.
+        assert sorted(len(h) > 0 for h in histories.values()) == [False, True]
         for history in histories.values():
-            assert history
             assert all("user" not in exchange for exchange in history)
         texts = [r.system_prompt for r in llm.requests]
         texts += [m for h in histories.values() for e in h for m in e.values()]
@@ -206,6 +209,71 @@ class TestScriptedSolve:
             assert "reasoning_fsm_to_push" not in request.system_prompt
             assert '"initial_state"' not in request.system_prompt
             assert '"transitions"' not in request.system_prompt
+
+
+def _reply_states(llm: _ScriptedLLM) -> list[str]:
+    """The state of each Pass-2 call, in call order."""
+    states = []
+    for request in llm.requests:
+        if isinstance(request, ResponseGenerationRequest):
+            prompt = request.system_prompt
+            start = prompt.index("<current_state>") + len("<current_state>")
+            states.append(prompt[start : prompt.index("</current_state>", start)])
+    return states
+
+
+class TestAgentStyleCalls:
+    """Typed per-key fields, no bulk call, Pass 2 only from answer states (D-055)."""
+
+    def test_no_bulk_extraction_call(self):
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        _engine(llm).solve_problem(_PROBLEM)
+
+        bulk = [r for r in llm.requests if isinstance(r, BulkExtractionRequest)]
+        assert bulk == []
+
+    def test_pass_two_only_from_the_answer_states(self):
+        """Non-terminal states and the classifier are silent: only the
+        strategy terminal and final_answer reply."""
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        _engine(llm).solve_problem(_PROBLEM)
+
+        assert _reply_states(llm) == [
+            "derive_conclusion",
+            OrchestratorStates.FINAL_ANSWER,
+        ]
+
+    def test_every_field_prompt_reads_a_narrowed_context(self):
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        _engine(llm).solve_problem(_PROBLEM)
+
+        fields = [r for r in llm.requests if isinstance(r, FieldExtractionRequest)]
+        assert fields
+        for request in fields:
+            assert ContextKeys.PROBLEM_STATEMENT in request.context
+            assert ContextKeys.REASONING_TRACE not in request.context
+            assert ContextKeys.RETRY_COUNT not in request.context
+
+    def test_a_valid_solve_makes_one_call_per_key_and_two_replies(self):
+        """45 calls before (22 per-field, 10 bulk, 13 Pass 2); 24 now."""
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        _engine(llm).solve_problem(_PROBLEM)
+
+        fields = [r for r in llm.requests if isinstance(r, FieldExtractionRequest)]
+        names = [r.field_name for r in fields]
+        assert len(names) == len(set(names)) == 22
+        assert len(llm.requests) == 24
+
+    def test_all_responses_holds_only_written_replies(self):
+        _solution, trace_info = _engine(_ScriptedLLM(_VALID_SCRIPT)).solve_problem(
+            _PROBLEM
+        )
+        responses = trace_info["all_responses"]
+
+        # strategy terminal reply, the pop's resume note, the final answer
+        assert len(responses) == 3
+        assert responses[0] == responses[2] == "ok"
+        assert responses[1].startswith("Resumed previous conversation.")
 
 
 class TestRetryLoop:
@@ -328,6 +396,23 @@ def _replies_from(llm: _ScriptedLLM, state_id: str) -> int:
     )
 
 
+def _record_entries(engine: ReasoningEngine) -> list[str]:
+    """Record every state the orchestrator API transitions into (strategy
+    FSMs run on the same API), in order."""
+    entered: list[str] = []
+
+    def spy(context: dict[str, Any]) -> dict[str, Any]:
+        entered.append(context["_current_state"])
+        return {}
+
+    engine.orchestrator.register_handler(
+        engine.orchestrator.create_handler("EntrySpy")
+        .at(HandlerTiming.POST_TRANSITION)
+        .do(spy)
+    )
+    return entered
+
+
 # The model never synthesizes a solution but claims it is valid.
 _CLAIMED_VALID_SCRIPT: dict[str, Any] = {
     key: value
@@ -416,25 +501,29 @@ class TestHybridLoopCounter:
     """The hybrid back edge runs at most MAX_HYBRID_LOOPS times (D-054)."""
 
     def test_the_back_edge_runs_at_most_twice(self):
-        # The model always asks for refinement and keeps resetting the count.
+        # The model always asks for refinement through its typed bool field
+        # and claims a reset count wherever a bulk call would let it.
         llm = _ClaimingLLM(
-            _HYBRID_SCRIPT,
-            claims={
-                ContextKeys.NEEDS_REFINEMENT: True,
-                ContextKeys.HYBRID_LOOP_COUNT: 0,
-            },
+            {**_HYBRID_SCRIPT, ContextKeys.NEEDS_REFINEMENT: True},
+            claims={ContextKeys.HYBRID_LOOP_COUNT: 0},
         )
-        _solution, trace_info = _engine(llm).solve_problem(
+        engine = _engine(llm)
+        entered = _record_entries(engine)
+        _solution, trace_info = engine.solve_problem(
             _PROBLEM,
             {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.HYBRID.value},
         )
         context = trace_info["final_context"]
 
-        # One pass plus MAX_HYBRID_LOOPS refinements, then on to the terminal.
+        # One pass plus MAX_HYBRID_LOOPS refinements, then on to the terminal
+        # (identify_components is the initial state: only the back edge
+        # transitions into it).
         passes = 1 + Defaults.MAX_HYBRID_LOOPS
-        assert _replies_from(llm, "identify_components") == passes
-        assert _replies_from(llm, HYBRID_EVALUATION_STATE) == passes
-        assert _replies_from(llm, "finalize_hybrid") == 1
+        assert entered.count("identify_components") == Defaults.MAX_HYBRID_LOOPS
+        assert entered.count(HYBRID_EVALUATION_STATE) == passes
+        assert entered.count("finalize_hybrid") == 1
+        assert llm.field_requests(ContextKeys.HYBRID_LOOP_COUNT) == []
+        assert len(llm.field_requests(ContextKeys.NEEDS_REFINEMENT)) == 1
         assert context["hybrid_reasoning_completed"] is True
         assert context[ContextKeys.FINAL_HYBRID_SOLUTION] == "Socrates is mortal"
 
