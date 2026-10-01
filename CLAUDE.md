@@ -148,7 +148,7 @@ FSM definition (JSON, v4.1):
 ## Working here
 
 ```bash
-make test           # pytest -v (8,124 tests)
+make test           # pytest -v (8,862 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
@@ -160,20 +160,20 @@ make audit          # python scripts/audit_pth.py
 ```
 
 ```bash
-pytest                                 # Run all tests (8,124 collected)
-pytest tests/test_fsm_llm/            # Core package tests (2,736 tests)
-pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (126 tests)
-pytest tests/test_fsm_llm_workflows/  # Workflows tests (231 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (1,784 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (388 tests)
-pytest tests/test_fsm_llm_meta/       # Meta-builder tests (220 tests)
-pytest tests/test_fsm_llm_harness/    # Harness tests (1,986 tests)
+pytest                                 # Run all tests (8,862 collected)
+pytest tests/test_fsm_llm/            # Core package tests (3,038 tests)
+pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (129 tests)
+pytest tests/test_fsm_llm_workflows/  # Workflows tests (255 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (2,050 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (391 tests)
+pytest tests/test_fsm_llm_meta/       # Meta-builder tests (219 tests)
+pytest tests/test_fsm_llm_harness/    # Harness tests (2,005 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (264 tests)
-pytest tests/test_examples/           # Example validation tests (43 tests)
+pytest tests/test_examples/           # Example validation tests (67 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (261 tests)
-# The 10 suites above sum to 8,039. The remaining 85 are three root-level files:
-#   tests/test_integration_ollama.py (12), tests/test_packaging.py (39)
-#   and tests/test_harness_bench.py (34)
+# The 10 suites above sum to 8,679. The remaining 183 are four root-level files:
+#   tests/test_integration_ollama.py (12), tests/test_packaging.py (33),
+#   tests/test_harness_bench.py (34) and tests/test_agents_bench.py (104)
 pytest -m "not slow"                  # Skip slow tests
 ```
 

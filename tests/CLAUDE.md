@@ -1,11 +1,11 @@
 # tests
 
 Path: `tests`
-Purpose: The full pytest tree of FSM-LLM (8,124 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, three repo-wide root test files, and the shared `conftest.py`.
+Purpose: The full pytest tree of FSM-LLM (8,862 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, four repo-wide root test files, and the shared `conftest.py`.
 
 ## Scope
 
-- In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_harness_bench.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `test_examples/`, and the nine `test_fsm_llm*` suite folders.
+- In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_harness_bench.py`, `test_agents_bench.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `test_examples/`, and the nine `test_fsm_llm*` suite folders.
 - Package under test: one top-level package `fsm_llm` (`src/fsm_llm/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `harness`, `eval`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
 - Out: the bench data under `scripts/bench_data/`, the examples themselves (`examples/`, evaluation baselines, never edit unless asked).
 
@@ -31,20 +31,20 @@ Suite folders (test counts from full collection) and root files at this level.
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | Shared fixtures, fakes and marker registration (see Public interface) | 0 tests |
-| `test_packaging.py` | Repo-wide wiring and doc-count pins | 39 tests; classes listed below |
+| `test_packaging.py` | Repo-wide wiring and doc-count pins | 33 tests; classes listed below |
 | `test_harness_bench.py` | Offline checks of `scripts/harness_bench.py` | 34 tests |
 | `test_integration_ollama.py` | Live end-to-end on `ollama_chat/qwen3.5:9b-q8_0`, plus 4 model-free workflow checks | 12 tests |
 | `fixtures/test_fsm_definitions/minimal_fsm.json` | v3.0 one-state FSM behind the `sample_fsm_definition` fixture | Written by `conftest.py` if missing |
-| `test_fsm_llm/` | Core: `API`, `FSMManager`, `MessagePipeline`, `TransitionEvaluator`, `expressions`, classification, context, prompts, `LiteLLMInterface`, `ollama`, handlers, `WorkingMemory`, session, validator, visualizer, runner, logging | 2,736 tests. Local `conftest.py` (`minimal_fsm_dict`); `fixtures/` holds labelled secret-filter corpora for `test_context_unit.py`; seam files import `_` helpers from each other; `test_docs_snippets.py` loads FSM JSON from root docs; 14 `slow` |
-| `test_fsm_llm_agents/` | All agent patterns, `ToolRegistry`, HITL grant security, memory, MCP (real stdio fixture server), `AgentServer`, `fsm-llm-meta` and `python -m fsm_llm.agents` CLIs | 1,784 tests. Local `conftest.py` autouses `block_network`; most files define their own fake `LLMInterface`, pattern loops use `PromptGroundedLLM` (`test_grounded_patterns.py`); skips without `mcp`, `fastapi`/`httpx`, OTEL SDK |
-| `test_fsm_llm_meta/` | Meta-builder in `fsm_llm.agents`: `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder`, `create_*_tools`, `meta_prompts`, `MetaBuilderAgent` | 220 tests. Autouse `block_network`; `offline_llm` fixture makes LLM calls raise so agent tests assert the keyword fallback without a network call |
-| `test_fsm_llm_reasoning/` | `fsm_llm.reasoning` constants, models, exceptions, handlers, ANALYTICAL-only fallback, CLI `--verbose` and JSON output | 126 tests. Engine built with `object.__new__`; source-string pins |
-| `test_fsm_llm_workflows/` | `fsm_llm.workflows` steps, DSL, `WorkflowEngine`, timeouts, audit fixes | 231 tests. Real short sleeps; 8 `slow` |
-| `test_fsm_llm_monitor/` | `fsm_llm.monitor` server via `TestClient`, security, `InstanceManager`, `EventCollector`, `OTELExporter` | 388 tests. Local autouse fixture deletes `FSM_LLM_MONITOR_API_KEY`; audit file skips whole when workflows missing |
-| `test_fsm_llm_harness/` | `fsm_llm.harness`: artifacts, hardening, 6-state FSM gates, `HarnessAgent`, plan validator, roles and tools, storage, CLI | 1,986 tests. Local `conftest.py` (`make_harness`, `RecordingWorker`, `ApprovalRecorder`, `captured_logs`); 17 live tests gated on `FSM_LLM_HARNESS_LIVE=1` then Ollama |
+| `test_fsm_llm/` | Core: `API`, `FSMManager`, `MessagePipeline`, `TransitionEvaluator`, `expressions`, classification, context, prompts, `LiteLLMInterface`, `ollama`, handlers, `WorkingMemory`, session, validator, visualizer, runner, logging | 3,038 tests. Local `conftest.py` (`minimal_fsm_dict`); `fixtures/` holds labelled secret-filter corpora for `test_context_unit.py`; seam files import `_` helpers from each other; `test_docs_snippets.py` loads FSM JSON from root docs; 14 `slow` |
+| `test_fsm_llm_agents/` | All agent patterns, `ToolRegistry`, HITL grant security, memory, MCP (real stdio fixture server), `AgentServer`, `fsm-llm-meta` and `python -m fsm_llm.agents` CLIs | 2,050 tests. Local `conftest.py` autouses `block_network`; most files define their own fake `LLMInterface`, pattern loops use `PromptGroundedLLM` (`test_grounded_patterns.py`); skips without `mcp`, `fastapi`/`httpx`, OTEL SDK |
+| `test_fsm_llm_meta/` | Meta-builder in `fsm_llm.agents`: `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder`, `create_*_tools`, `meta_prompts`, `MetaBuilderAgent` | 219 tests. Autouse `block_network`; `offline_llm` fixture makes LLM calls raise so agent tests assert the keyword fallback without a network call |
+| `test_fsm_llm_reasoning/` | `fsm_llm.reasoning` constants, models, exceptions, handlers, ANALYTICAL-only fallback, CLI `--verbose` and JSON output | 129 tests. Engine built with `object.__new__`; source-string pins |
+| `test_fsm_llm_workflows/` | `fsm_llm.workflows` steps, DSL, `WorkflowEngine`, timeouts, audit fixes | 255 tests. Real short sleeps; 8 `slow` |
+| `test_fsm_llm_monitor/` | `fsm_llm.monitor` server via `TestClient`, security, `InstanceManager`, `EventCollector`, `OTELExporter` | 391 tests. Local autouse fixture deletes `FSM_LLM_MONITOR_API_KEY`; audit file skips whole when workflows missing |
+| `test_fsm_llm_harness/` | `fsm_llm.harness`: artifacts, hardening, 6-state FSM gates, `HarnessAgent`, plan validator, roles and tools, storage, CLI | 2,005 tests. Local `conftest.py` (`make_harness`, `RecordingWorker`, `ApprovalRecorder`, `captured_logs`); 17 live tests gated on `FSM_LLM_HARNESS_LIVE=1` then Ollama |
 | `test_fsm_llm_eval/` | `fsm_llm.eval` and `fsm-llm-eval`: config, records, stats, scoring golden table, examples mode, cases mode, exit codes; parity with `scripts/harness_bench.py` | 261 tests. Reads `evaluation/` files and needs a git checkout |
 | `test_fsm_llm_regression/` | One class per fixed bug id across core, reasoning, workflows, CLI, packaging text | 264 tests. Many private-method and source-text pins |
-| `test_examples/` | Every `examples/**/*.json` loads as JSON with `name`/`initial_state`/`states`, parses as `FSMDefinition`, passes `FSMValidator.validate()`; at least 5 files exist | 43 tests. Marker `examples`; 14 JSON files today |
+| `test_examples/` | Every `examples/**/*.json` loads as JSON with `name`/`initial_state`/`states`, parses as `FSMDefinition`, passes `FSMValidator.validate()`; at least 5 files exist | 67 tests. Marker `examples`; 14 JSON files today |
 
 `test_packaging.py` classes:
 
