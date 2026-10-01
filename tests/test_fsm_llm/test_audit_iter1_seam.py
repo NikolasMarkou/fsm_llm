@@ -1299,26 +1299,46 @@ class TestClassifierInheritsConnection:
         assert "api_key" not in call
         assert "api_base" not in call
 
-    def test_helper_tolerates_interfaces_without_attributes(self):
-        from fsm_llm.llm import LLMInterface
+    def test_interfaces_without_attributes_are_used_as_is(self):
+        """An interface with no ``model``, ``kwargs`` or ``timeout`` attribute
+        (a bare ``LLMInterface`` subclass, a spec'd mock, a plain mock) is the
+        interface the classifier sends through; nothing is read off it. A
+        config ``model`` then always differs from the interface's (absent)
+        model and gets its own interface with no inherited settings (D-006 of
+        plan 944e2692; the deleted ``_classifier_connection_kwargs`` helper
+        used to read those attributes)."""
+        import threading
+
+        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.llm import LiteLLMInterface, LLMInterface
         from fsm_llm.pipeline import MessagePipeline
 
-        def _helper(llm, model=None):
+        schema = ClassificationSchema(
+            intents=[
+                IntentDefinition(name="a", description="a"),
+                IntentDefinition(name="b", description="b"),
+            ],
+            fallback_intent="b",
+        )
+
+        def _classifier(llm, model=None):
             pipe = MessagePipeline.__new__(MessagePipeline)
             pipe.llm_interface = llm
-            return pipe._classifier_connection_kwargs(model)
+            pipe._classifier_cache = {}
+            pipe._classifier_cache_lock = threading.Lock()
+            return pipe._get_classifier(schema, None, model=model)
 
-        class _Bare:
-            pass
+        class _Bare(LLMInterface):
+            def generate_response(self, request):
+                raise NotImplementedError
 
-        assert _helper(_Bare()) == {}
-        assert _helper(MagicMock(spec=LLMInterface)) == {}
-        # a MagicMock (non-dict kwargs, non-number timeout) contributes nothing
-        assert _helper(MagicMock()) == {}
-        # bool is not a timeout
-        bare = _Bare()
-        bare.timeout = True  # type: ignore[attr-defined]
-        assert _helper(bare) == {}
+        for llm in (_Bare(), MagicMock(spec=LLMInterface), MagicMock()):
+            assert _classifier(llm)._llm is llm
+        own = _classifier(_Bare(), model="gpt-4o")._llm
+        assert isinstance(own, LiteLLMInterface)
+        assert own.model == "gpt-4o"
+        assert own.kwargs == {}
+        assert own.timeout == 120.0
 
 
 # ══════════════════════════════════════════════════════════════

@@ -8,13 +8,13 @@ AMBIGUOUS transitions instead of the raw LLM prompt.
 
 from __future__ import annotations
 
+import json
 import sys
 import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic import SecretStr
 
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
@@ -38,7 +38,9 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 
 from fsm_llm.api import API
+from fsm_llm.classification import Classifier
 from fsm_llm.constants import (
+    DEFAULT_LLM_MODEL,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     MAX_CLASSIFIER_CACHE_SIZE,
     METADATA_KEY_TRANSITION_CLASSIFICATION,
@@ -49,20 +51,26 @@ from fsm_llm.definitions import (
     ClassificationExtractionConfig,
     ClassificationResult,
     ClassificationSchema,
+    CompletionRequest,
+    CompletionResponse,
     DataExtractionResponse,
+    FieldExtractionRequest,
+    FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMError,
     FSMInstance,
     IntentDefinition,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
     State,
     Transition,
     TransitionEvaluation,
     TransitionEvaluationResult,
     TransitionOption,
 )
-from fsm_llm.handlers import HandlerSystem
-from fsm_llm.llm import LLMInterface
+from fsm_llm.handlers import HandlerSystem, HandlerTiming
+from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
     ClassificationPromptConfig,
@@ -699,9 +707,11 @@ def _schema(*names: str) -> ClassificationSchema:
 
 
 class TestClassifierCache:
-    """``MessagePipeline._get_classifier`` reuses one ``Classifier`` per content
-    key (schema + model + prompt config + connection kwargs), bounded at
-    ``MAX_CLASSIFIER_CACHE_SIZE``. Pins plan-2026-09-20T165703-0d9c218e D-001.
+    """``MessagePipeline._get_classifier`` reuses one ``Classifier`` per key
+    (schema + prompt config + override model + the identity of the injected
+    conversation interface), bounded at ``MAX_CLASSIFIER_CACHE_SIZE``. Pins
+    plan-2026-09-20T165703-0d9c218e D-001 as amended by D-006 of plan
+    944e2692 (connection kwargs left the key with the private interface).
     """
 
     def test_same_state_over_two_turns_constructs_once(self):
@@ -770,10 +780,12 @@ class TestClassifierCache:
             pipeline._execute_classification_extractions(state, "yes", instance, "c")
 
         assert mock_cls.call_count == 2
-        assert {c.kwargs["model"] for c in mock_cls.call_args_list} == {
-            "gpt-4",
-            "gpt-4o",
-        }
+        # The entry without an override sends through the conversation's
+        # interface; the other model gets its own, built from the name only.
+        assert [
+            (c.kwargs.get("model"), c.kwargs.get("llm"))
+            for c in mock_cls.call_args_list
+        ] == [(None, mock_llm), ("gpt-4o", None)]
         assert mock_cls.return_value.classify.call_count == 4
 
     def test_cache_is_bounded_and_evicts_oldest(self):
@@ -784,10 +796,10 @@ class TestClassifierCache:
 
         with patch("fsm_llm.pipeline.Classifier") as mock_cls:
             mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
-            first = pipeline._get_classifier(_schema("i0", "j0"), "gpt-4", None, {})
+            first = pipeline._get_classifier(_schema("i0", "j0"), None)
             first_key = next(iter(pipeline._classifier_cache))
             for n in range(1, MAX_CLASSIFIER_CACHE_SIZE + 1):
-                pipeline._get_classifier(_schema(f"i{n}", f"j{n}"), "gpt-4", None, {})
+                pipeline._get_classifier(_schema(f"i{n}", f"j{n}"), None)
 
         assert mock_cls.call_count == MAX_CLASSIFIER_CACHE_SIZE + 1
         assert len(pipeline._classifier_cache) == MAX_CLASSIFIER_CACHE_SIZE
@@ -810,7 +822,7 @@ class TestClassifierCache:
             try:
                 for n in range(n_calls):
                     pipeline._get_classifier(
-                        _schema(f"t{tid}_i{n}", f"t{tid}_j{n}"), "gpt-4", None, {}
+                        _schema(f"t{tid}_i{n}", f"t{tid}_j{n}"), None
                     )
             except BaseException as e:  # collected for the assert below
                 errors.append(e)
@@ -820,9 +832,7 @@ class TestClassifierCache:
             with patch("fsm_llm.pipeline.Classifier") as mock_cls:
                 mock_cls.side_effect = lambda **kwargs: object()
                 for n in range(MAX_CLASSIFIER_CACHE_SIZE):
-                    pipeline._get_classifier(
-                        _schema(f"p{n}", f"q{n}"), "gpt-4", None, {}
-                    )
+                    pipeline._get_classifier(_schema(f"p{n}", f"q{n}"), None)
                 assert len(pipeline._classifier_cache) == MAX_CLASSIFIER_CACHE_SIZE
                 sys.setswitchinterval(1e-6)
                 threads = [
@@ -874,13 +884,9 @@ class TestClassifierCache:
         assert mock_cls.call_count == 1
         assert len(api.fsm_manager._pipeline._classifier_cache) == 1
 
-    def test_non_json_native_connection_kwarg_bypasses_cache(self):
-        """Two distinct ``SecretStr`` api keys must yield two constructions and
-        insert nothing. RED on the pre-step-3 code: ``json.dumps(...,
-        default=str)`` digested both as ``'**********'`` so the second key hit
-        the first key's classifier (review W1). Pins the JSON-native
-        cacheability guard: a non-native value bypasses the cache entirely.
-        """
+    def test_same_interface_caches(self):
+        """Two lookups over the same conversation interface: one
+        construction, one entry, the classifier holds that interface."""
         mock_llm = MagicMock(spec=LLMInterface)
         mock_llm.model = "gpt-4"
         pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
@@ -888,35 +894,12 @@ class TestClassifierCache:
 
         with patch("fsm_llm.pipeline.Classifier") as mock_cls:
             mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
-            first = pipeline._get_classifier(
-                schema, "gpt-4", None, {"api_key": SecretStr("A")}
-            )
-            second = pipeline._get_classifier(
-                schema, "gpt-4", None, {"api_key": SecretStr("B")}
-            )
-
-        assert mock_cls.call_count == 2
-        assert first is not second
-        assert [
-            c.kwargs["api_key"].get_secret_value() for c in mock_cls.call_args_list
-        ] == ["A", "B"]
-        assert len(pipeline._classifier_cache) == 0
-
-    def test_json_native_connection_kwarg_still_caches(self):
-        """The guard fires only on non-JSON-native values: a plain-string
-        ``api_key`` still yields one construction over two calls and one entry."""
-        mock_llm = MagicMock(spec=LLMInterface)
-        mock_llm.model = "gpt-4"
-        pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
-        schema = _schema("a", "b")
-
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
-            mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
-            first = pipeline._get_classifier(schema, "gpt-4", None, {"api_key": "k"})
-            second = pipeline._get_classifier(schema, "gpt-4", None, {"api_key": "k"})
+            first = pipeline._get_classifier(schema, None)
+            second = pipeline._get_classifier(schema, None)
 
         assert mock_cls.call_count == 1
         assert first is second
+        assert mock_cls.call_args.kwargs["llm"] is mock_llm
         assert len(pipeline._classifier_cache) == 1
 
     def test_prompt_config_change_constructs_again(self):
@@ -935,10 +918,10 @@ class TestClassifierCache:
         with patch("fsm_llm.pipeline.Classifier") as mock_cls:
             mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
             first = pipeline._get_classifier(
-                schema, "gpt-4", ClassificationPromptConfig(temperature=0.1), {}
+                schema, ClassificationPromptConfig(temperature=0.1)
             )
             second = pipeline._get_classifier(
-                schema, "gpt-4", ClassificationPromptConfig(temperature=0.2), {}
+                schema, ClassificationPromptConfig(temperature=0.2)
             )
 
         assert mock_cls.call_count == 2
@@ -949,15 +932,38 @@ class TestClassifierCache:
         ]
         assert len(pipeline._classifier_cache) == 2
 
-    def test_connection_kwargs_change_constructs_again(self):
-        """Same schema, model and config, ``api_key="k1"`` vs ``api_key="k2"``
-        -> two constructions and two entries. Both values are JSON-native, so
-        both calls go THROUGH the cache (the complement of
-        ``test_json_native_connection_kwarg_still_caches``: different key ->
-        different instance). PASSES by design today (the key already hashes
-        ``connection_kwargs``, D-001); this pin guards a future key
-        simplification that drops the connection kwargs (review W4).
-        """
+    def test_rebound_interface_constructs_again(self):
+        """Same schema and config, ``pipeline.llm_interface`` rebound to another
+        interface -> a second construction over the NEW interface, never the
+        classifier cached over the old one. A per-entry other model is keyed
+        on its name only, so it survives the rebinding."""
+        old_llm = MagicMock(spec=LLMInterface)
+        old_llm.model = "gpt-4"
+        new_llm = MagicMock(spec=LLMInterface)
+        new_llm.model = "gpt-4"
+        pipeline = _make_pipeline(old_llm, _ambiguous_fsm())
+        schema = _schema("a", "b")
+
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
+            first = pipeline._get_classifier(schema, None)
+            other_first = pipeline._get_classifier(schema, None, model="gpt-4o")
+            pipeline.llm_interface = new_llm
+            second = pipeline._get_classifier(schema, None)
+            other_second = pipeline._get_classifier(schema, None, model="gpt-4o")
+
+        assert first is not second
+        assert other_first is other_second
+        assert [c.kwargs.get("llm") for c in mock_cls.call_args_list] == [
+            old_llm,
+            None,
+            new_llm,
+        ]
+        assert len(pipeline._classifier_cache) == 3
+
+    def test_same_model_override_uses_the_conversation_interface(self):
+        """An entry ``model`` equal to the interface's is no override: the
+        classifier sends through the conversation's interface, one entry."""
         mock_llm = MagicMock(spec=LLMInterface)
         mock_llm.model = "gpt-4"
         pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
@@ -965,13 +971,16 @@ class TestClassifierCache:
 
         with patch("fsm_llm.pipeline.Classifier") as mock_cls:
             mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
-            first = pipeline._get_classifier(schema, "gpt-4", None, {"api_key": "k1"})
-            second = pipeline._get_classifier(schema, "gpt-4", None, {"api_key": "k2"})
+            first = pipeline._get_classifier(schema, None, model="gpt-4")
+            second = pipeline._get_classifier(schema, None)
 
-        assert mock_cls.call_count == 2
-        assert first is not second
-        assert [c.kwargs["api_key"] for c in mock_cls.call_args_list] == ["k1", "k2"]
-        assert len(pipeline._classifier_cache) == 2
+        assert first is second
+        assert mock_cls.call_count == 1
+        assert mock_cls.call_args.kwargs == {
+            "schema": schema,
+            "llm": mock_llm,
+            "config": None,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -1026,6 +1035,17 @@ class _StructuredProvider:
     def __exit__(self, *exc: object) -> None:
         for p in reversed(self._patches):
             p.stop()
+
+
+def _provider_backed_mock(model: str) -> MagicMock:
+    """A spec'd mock conversation interface whose ``complete`` is a real
+    ``LiteLLMInterface``'s for ``model``: the classifier sends through the
+    conversation's interface (D-006 of plan 944e2692), so this is how its
+    request reaches the binding ``_StructuredProvider`` scripts."""
+    mock_llm = MagicMock(spec=LLMInterface)
+    mock_llm.model = model
+    mock_llm.complete.side_effect = LiteLLMInterface(model=model).complete
+    return mock_llm
 
 
 class TestAmbiguousTransitionWithoutUserMessage:
@@ -1083,8 +1103,7 @@ class TestAmbiguousTransitionWithoutUserMessage:
         from fsm_llm.constants import NEUTRAL_USER_TURN
 
         fsm_def, _ = _route_fsm()
-        mock_llm = MagicMock(spec=LLMInterface)
-        mock_llm.model = "gpt-4o"
+        mock_llm = _provider_backed_mock("gpt-4o")
         pipeline = _make_pipeline(mock_llm, fsm_def)
         instance = self._instance()
 
@@ -1114,11 +1133,10 @@ class TestAmbiguousTransitionWithoutUserMessage:
 
     def test_fallback_intent_means_stay(self):
         fsm_def, _ = _route_fsm()
-        mock_llm = MagicMock(spec=LLMInterface)
-        mock_llm.model = "gpt-4o"
+        mock_llm = _provider_backed_mock("gpt-4o")
         pipeline = _make_pipeline(mock_llm, fsm_def)
 
-        with _StructuredProvider(TRANSITION_CLASSIFICATION_FALLBACK_INTENT):
+        with _StructuredProvider(TRANSITION_CLASSIFICATION_FALLBACK_INTENT) as provider:
             result = pipeline._resolve_ambiguous_transition(
                 _make_ambiguous_evaluation("billing", "support"),
                 None,
@@ -1128,6 +1146,7 @@ class TestAmbiguousTransitionWithoutUserMessage:
             )
 
         assert result is None
+        assert len(provider.calls) == 1  # the classifier really answered
 
 
 class TestClassificationExtractionWithoutUserMessage:
@@ -1170,8 +1189,7 @@ class TestClassificationExtractionWithoutUserMessage:
         )
         start = _make_state("start", transitions=[_make_transition("route")])
         fsm_def = _make_fsm_definition({"start": start, "route": state})
-        mock_llm = MagicMock(spec=LLMInterface)
-        mock_llm.model = "gpt-4o"
+        mock_llm = _provider_backed_mock("gpt-4o")
         pipeline = _make_pipeline(mock_llm, fsm_def)
         instance = _make_instance(current_state="route")
         instance.context.data["task"] = "sum 2 and 3"
@@ -1185,3 +1203,250 @@ class TestClassificationExtractionWithoutUserMessage:
         (call,) = provider.calls
         assert "there is no user message" in call["messages"][0]["content"]
         assert "sum 2 and 3" in call["messages"][0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Plan 944e2692 step 5 (D-006): the classifier uses the conversation's own
+# LLM interface
+# ---------------------------------------------------------------------------
+
+
+class _RecordingInterface(LLMInterface):
+    """A custom conversation interface (not a ``LiteLLMInterface``): Pass 1
+    finds nothing, Pass 2 says "ok", ``complete`` answers classifier
+    requests by schema (``mood`` intents -> ``angry``, transition intents ->
+    ``billing``) and records every request."""
+
+    model = "custom/model"
+
+    def __init__(self) -> None:
+        self.requests: list[CompletionRequest] = []
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="ok", message_type="response", reasoning="r"
+        )
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        return FieldExtractionResponse(
+            field_name=request.field_name, value=None, confidence=0.0, is_valid=False
+        )
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        import json
+
+        self.requests.append(request)
+        schema = json.dumps(request.response_format)
+        intent = "angry" if '"angry"' in schema else "billing"
+        return CompletionResponse(
+            kind="final",
+            text=json.dumps({"reasoning": "r", "intent": intent, "confidence": 0.95}),
+        )
+
+
+def _injected_fsm(mood_model: str | None = None) -> dict[str, Any]:
+    """``start`` (initial) moves to ``route`` deterministically; ``route``
+    owns a ``mood`` classification field and two tied, unconditioned exits
+    (AMBIGUOUS on every turn)."""
+    mood: dict[str, Any] = {
+        "field_name": "mood",
+        "intents": [
+            {"name": "calm", "description": "The user is calm"},
+            {"name": "angry", "description": "The user is upset"},
+        ],
+        "fallback_intent": "calm",
+        "confidence_threshold": 0.5,
+    }
+    if mood_model is not None:
+        mood["model"] = mood_model
+    return {
+        "name": "injected",
+        "description": "Classifier injection",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "Start",
+                "purpose": "Greet",
+                "response_instructions": "Greet",
+                "transitions": [{"target_state": "route", "description": "Begin"}],
+            },
+            "route": {
+                "id": "route",
+                "description": "Route",
+                "purpose": "Route the request",
+                "response_instructions": "Respond",
+                "classification_extractions": [mood],
+                "transitions": [
+                    {"target_state": "billing", "description": "A billing issue"},
+                    {"target_state": "support", "description": "A device fault"},
+                ],
+            },
+            "billing": {"id": "billing", "description": "Billing", "purpose": "End"},
+            "support": {"id": "support", "description": "Support", "purpose": "End"},
+        },
+    }
+
+
+def _injected_run(
+    llm: Any, fsm: dict[str, Any], provider: Any
+) -> tuple[API, str, list]:
+    """Two turns on ``fsm``: into ``route``, then one turn in ``route``. A
+    POST_TRANSITION handler records each transition; ``provider`` is the
+    side effect of the patched ``fsm_llm.llm.completion``."""
+    transitions: list[tuple[str, str]] = []
+    api = API.from_definition(fsm, llm_interface=llm)
+    api.register_handler(
+        api.create_handler("record_transitions")
+        .at(HandlerTiming.POST_TRANSITION)
+        .do(
+            lambda ctx: (
+                transitions.append(
+                    (ctx.get("_previous_state"), ctx.get("_current_state"))
+                )
+                or {}
+            )
+        )
+    )
+    with (
+        patch("fsm_llm.llm.completion", side_effect=provider),
+        patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            return_value=["response_format"],
+        ),
+    ):
+        conv_id, _ = api.start_conversation()
+        api.converse("hello", conv_id)
+        api.converse("I was charged twice and I am furious", conv_id)
+    return api, conv_id, transitions
+
+
+def _provider_must_not_be_called(**kwargs: Any) -> Any:
+    raise AssertionError(f"provider binding reached for {kwargs.get('model')!r}")
+
+
+class TestClassifierUsesConversationInterface:
+    """A custom ``llm_interface`` given to ``API`` receives every classifier
+    request (AMBIGUOUS transitions and ``classification_extractions``); only
+    an entry naming another model gets its own interface, which inherits
+    nothing. RED on the parent: the classifier built a private
+    ``LiteLLMInterface`` and called the provider binding."""
+
+    def test_ambiguous_transition_goes_to_the_custom_interface(self):
+        llm = _RecordingInterface()
+        api, conv_id, transitions = _injected_run(
+            llm, _injected_fsm(), _provider_must_not_be_called
+        )
+
+        assert api.get_current_state(conv_id) == "billing"
+        assert transitions == [("start", "route"), ("route", "billing")]
+        transition_requests = [
+            r for r in llm.requests if '"billing"' in json.dumps(r.response_format)
+        ]
+        assert len(transition_requests) == 1
+        assert transition_requests[0].call_type == "classification"
+
+    def test_classification_extraction_goes_to_the_custom_interface(self):
+        llm = _RecordingInterface()
+        api, conv_id, _ = _injected_run(
+            llm, _injected_fsm(), _provider_must_not_be_called
+        )
+
+        assert api.get_data(conv_id)["mood"] == "angry"
+        mood_requests = [
+            r for r in llm.requests if '"angry"' in json.dumps(r.response_format)
+        ]
+        assert mood_requests
+        assert all(r.call_type == "classification" for r in llm.requests)
+
+    def test_entry_with_another_model_gets_its_own_interface_and_no_settings(self):
+        provider_calls: list[dict[str, Any]] = []
+
+        def provider(**kwargs: Any) -> Any:
+            provider_calls.append(kwargs)
+            response = MagicMock()
+            response.choices = [MagicMock()]
+            response.choices[0].message.content = json.dumps(
+                {"reasoning": "r", "intent": "angry", "confidence": 0.9}
+            )
+            response.choices[0].message.reasoning_content = None
+            response.choices[0].message.tool_calls = None
+            return response
+
+        llm = _RecordingInterface()
+        llm.kwargs = {"api_key": "sk-conversation-secret", "api_base": "http://p"}
+        llm.timeout = 7
+        api, conv_id, _ = _injected_run(
+            llm, _injected_fsm("anthropic/claude-3-haiku"), provider
+        )
+
+        # The tie still goes to the conversation's interface ...
+        assert api.get_current_state(conv_id) == "billing"
+        assert all('"angry"' not in json.dumps(r.response_format) for r in llm.requests)
+        # ... the other model's entry to its own interface, settings not inherited.
+        assert api.get_data(conv_id)["mood"] == "angry"
+        assert provider_calls
+        for call in provider_calls:
+            assert call["model"] == "anthropic/claude-3-haiku"
+            assert "api_key" not in call
+            assert "api_base" not in call
+            assert call["timeout"] == 120.0
+
+    def test_usage_is_counted_on_the_conversation_interface(self):
+        provider_calls: list[dict[str, Any]] = []
+
+        def provider(**kwargs: Any) -> Any:
+            provider_calls.append(kwargs)
+            response = MagicMock()
+            response.choices = [MagicMock()]
+            if kwargs.get("response_format") is not None and '"intent"' in json.dumps(
+                kwargs["response_format"]
+            ):
+                intents = json.dumps(kwargs["response_format"])
+                intent = "angry" if '"angry"' in intents else "billing"
+                content = {"reasoning": "r", "intent": intent, "confidence": 0.95}
+            else:
+                content = {"message": "ok", "reasoning": ""}
+            response.choices[0].message.content = json.dumps(content)
+            response.choices[0].message.reasoning_content = None
+            response.choices[0].message.tool_calls = None
+            response.usage = None
+            return response
+
+        llm = LiteLLMInterface(model="gpt-4o")
+        api, conv_id, _ = _injected_run(llm, _injected_fsm(), provider)
+
+        assert api.get_current_state(conv_id) == "billing"
+        classifier_calls = [
+            c
+            for c in provider_calls
+            if c.get("response_format") is not None
+            and '"intent"' in json.dumps(c["response_format"])
+        ]
+        assert classifier_calls
+        usage = llm.usage()
+        assert usage.by_kind["classify"].calls == len(classifier_calls)
+        assert usage.calls == len(provider_calls)
+
+    def test_direct_classifier_with_llm_refuses_connection_settings(self):
+        llm = _RecordingInterface()
+        schema = _schema("a", "b")
+        with pytest.raises(ValueError, match="connection"):
+            Classifier(schema, llm=llm, api_key="k")
+        with pytest.raises(ValueError, match="connection"):
+            Classifier(schema, llm=llm, timeout=5)
+        with pytest.raises(ValueError, match="different model"):
+            Classifier(schema, model="gpt-4o", llm=llm)
+        classifier = Classifier(schema, llm=llm)
+        assert classifier.model == "custom/model"
+        assert classifier.classify("hi").intent == "a"  # "billing" is unknown
+        (request,) = llm.requests
+        assert request.messages[1] == {"role": "user", "content": "hi"}
+
+    def test_direct_classifier_without_llm_is_unchanged(self):
+        classifier = Classifier(_schema("a", "b"))
+        assert classifier.model == DEFAULT_LLM_MODEL
+        assert isinstance(classifier._llm, LiteLLMInterface)
+        assert classifier._llm.timeout == 120.0

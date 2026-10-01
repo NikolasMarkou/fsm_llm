@@ -44,7 +44,7 @@ from fsm_llm.handlers import (
     HandlerTiming,
     create_handler,
 )
-from fsm_llm.llm import LLMInterface
+from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.prompts import build_classification_system_prompt
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
@@ -72,6 +72,11 @@ def _mock_llm() -> MagicMock:
         message="ok", message_type="response", reasoning="mock"
     )
     llm.generate_response_stream.side_effect = lambda request: iter(["o", "k"])
+    # The classifier sends through the conversation's own interface (D-006 of
+    # plan 944e2692): forward `complete` to a real LiteLLMInterface for the
+    # same model, so a patched `fsm_llm.llm.completion` still receives the
+    # classifier's provider request.
+    llm.complete.side_effect = LiteLLMInterface(model="gpt-4").complete
     return llm
 
 

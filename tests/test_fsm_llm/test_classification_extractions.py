@@ -33,7 +33,7 @@ from fsm_llm.definitions import (
     Transition,
 )
 from fsm_llm.handlers import HandlerSystem
-from fsm_llm.llm import _completion_response
+from fsm_llm.llm import LiteLLMInterface, _completion_response
 from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
@@ -379,17 +379,26 @@ class TestExecuteClassificationExtractions:
 
         assert data == {}
 
-    def test_no_model_available(self):
+    def test_interface_without_complete_fails_soft(self):
+        """The classifier sends through the conversation's interface (D-006
+        of plan 944e2692); one that has no ``complete`` (nor a ``model``)
+        makes the extraction fail soft, the key stays unset. It used to be
+        skipped for the missing ``model``; no private interface is built."""
         config = _make_config()
         state = _make_state(classification_extractions=[config])
         pipeline = _make_pipeline()
-        pipeline.llm_interface = MagicMock(spec=[])  # no .model attribute
+        pipeline.llm_interface = MagicMock(spec=[])  # no .model, no .complete
         instance = _make_instance()
 
-        data = pipeline._execute_classification_extractions(
-            state, "test", instance, "conv1"
-        )
+        with patch("fsm_llm.llm.completion") as provider:
+            data = pipeline._execute_classification_extractions(
+                state, "test", instance, "conv1"
+            )
         assert data == {}
+        provider.assert_not_called()
+        assert len(pipeline._classifier_cache) == 1
+        (classifier,) = pipeline._classifier_cache.values()
+        assert classifier._llm is pipeline.llm_interface
 
     def test_model_override(self):
         config = _make_config(model="gpt-4o")
@@ -621,10 +630,14 @@ class TestClassifierLLMBoundary:
                 "end": _terminal_state("end"),
             }
         )
-        # MockLLM2Interface carries no .model, and without one the pipeline
-        # skips classification entirely (see test_no_model_available) -- the
-        # turn would then complete for a reason unrelated to this fix.
+        # The classifier sends through the conversation's interface (D-006 of
+        # plan 944e2692). MockLLM2Interface has no `complete`, and without one
+        # every classifier call fails soft before the provider boundary (see
+        # test_interface_without_complete_fails_soft) -- the turn would then
+        # complete for a reason unrelated to this fix. Forward `complete` to a
+        # real LiteLLMInterface so the patched binding below is reached.
         mock_llm2_interface.model = "gpt-4o"
+        mock_llm2_interface.complete = LiteLLMInterface(model="gpt-4o").complete
         api = API.from_definition(fsm, llm_interface=mock_llm2_interface)
         conv_id, _ = api.start_conversation()
 

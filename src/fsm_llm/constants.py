@@ -208,8 +208,8 @@ MAX_MULTI_INTENTS = 5
 
 # Upper bound on cached `Classifier` instances per `MessagePipeline`
 # (`MessagePipeline._get_classifier`), keyed on a content hash of schema +
-# model + prompt config + connection kwargs; the oldest entry is evicted at
-# the bound. Matches `DEFAULT_MAX_FSM_CACHE_SIZE`.
+# prompt config + override model + the identity of the injected conversation
+# interface; the oldest entry is evicted at the bound. Matches `DEFAULT_MAX_FSM_CACHE_SIZE`.
 MAX_CLASSIFIER_CACHE_SIZE = 64
 
 # Default bound of `FSMManager`'s FSM definition LRU cache (`max_fsm_cache_size`,

@@ -161,10 +161,6 @@ _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
     # "any" — no coercion, not in dispatch dict
 }
 
-# Keyword names `Classifier.__init__` binds itself; an interface kwarg with one
-# of these names must never be spread into `Classifier(...)`.
-_CLASSIFIER_BOUND_NAMES = frozenset({"schema", "model", "config"})
-
 # DECISION plan-2026-09-20T165703-0d9c218e/D-001
 # The ONE exception tuple both classifier call sites degrade on (D-004 of
 # plan-2026-07-19T191147-4b664252 chose it for
@@ -2265,69 +2261,32 @@ class MessagePipeline:
     # Classification-based extraction
     # ----------------------------------------------------------
 
-    def _classifier_connection_kwargs(
-        self, config_model: str | None = None
-    ) -> dict[str, Any]:
-        """Connection settings the classifier must inherit from the LLM interface.
-
-        Contract: ``config_model`` is a per-config model override (or ``None``).
-        Returns ``dict(interface.kwargs)`` (``api_key``, ``api_base``, ...) plus
-        ``timeout``, to be spread into ``Classifier(...)``, minus the names
-        ``Classifier.__init__`` binds itself (``schema``, ``model``,
-        ``config``). An interface lacking the attributes
-        (``Mock(spec=LLMInterface)``, a custom interface) contributes ``{}``.
-        Returns ``{}`` when ``config_model`` differs from the interface's
-        model, so a key is never sent to another provider. The key is never
-        logged.
-        """
-        # DECISION plan-2026-09-19T175721-21cd7f8e/D-008: guarded getattr, NOT
-        # passing the interface to Classifier (it builds its own
-        # LiteLLMInterface) and NOT unconditional attribute access (the pipeline is
-        # LLM-interface-agnostic; a bare interface must yield {}). Do NOT
-        # inherit for a config `model` that differs from the interface's: that
-        # would send the interface's api_key/api_base to a different provider.
-        llm = self.llm_interface
-        if config_model and config_model != getattr(llm, "model", None):
-            return {}
-        connection: dict[str, Any] = {}
-        kwargs = getattr(llm, "kwargs", None)
-        if isinstance(kwargs, dict):
-            # DECISION plan-2026-09-19T175721-21cd7f8e/D-021: drop the names
-            # Classifier binds itself; spreading them is a TypeError that the
-            # extraction path swallows (silent classification skip). Do NOT
-            # widen this to a filter on "known good" keys: litellm accepts
-            # arbitrary provider kwargs.
-            connection.update(
-                {k: v for k, v in kwargs.items() if k not in _CLASSIFIER_BOUND_NAMES}
-            )
-        timeout = getattr(llm, "timeout", None)
-        if isinstance(timeout, int | float) and not isinstance(timeout, bool):
-            connection["timeout"] = timeout
-        return connection
-
     def _get_classifier(
         self,
         schema: ClassificationSchema,
-        model: str,
         prompt_config: ClassificationPromptConfig | None,
-        connection_kwargs: dict[str, Any],
+        *,
+        model: str | None = None,
     ) -> Classifier:
         """Return the cached ``Classifier`` for this exact configuration, or build it.
 
-        Contract: ``schema`` is the intent schema, ``model`` the resolved model
-        name, ``prompt_config`` the per-entry prompt override (or ``None``) and
-        ``connection_kwargs`` the output of ``_classifier_connection_kwargs``.
-        Returns a ``Classifier`` whose four inputs are content-equal to the
-        arguments; it never returns a classifier built for a different
-        schema/model/config/connection. Cache misses construct via the
-        module-level ``Classifier`` symbol (so ``patch("fsm_llm.pipeline.
-        Classifier")`` keeps observing construction) and evict the oldest entry
-        when the cache holds ``MAX_CLASSIFIER_CACHE_SIZE`` entries. When
-        ``connection_kwargs`` holds a value ``json.dumps`` cannot serialise
-        (e.g. a pydantic ``SecretStr``), the call bypasses the cache: a fresh
-        ``Classifier`` is built and returned without a lookup, an insert or
-        the lock. Never raises on its own; construction errors propagate to
-        the caller unchanged.
+        Contract: ``schema`` is the intent schema, ``prompt_config`` the
+        per-entry prompt override (or ``None``) and ``model`` a per-entry model
+        override (or ``None``). A ``model`` that is ``None`` or equal to the
+        conversation interface's ``model`` gives a classifier that sends
+        through ``self.llm_interface`` (a custom interface is honoured, its
+        meter counts the call). A ``model`` that differs gives a classifier
+        with its own interface for that model, built from the model name only
+        (no api_key, api_base or timeout of the conversation's interface is
+        inherited). Returns a classifier whose inputs are content-equal to the
+        arguments and, when it sends through the conversation's interface,
+        built over the interface object bound now; it never returns one built
+        for another schema, prompt config, model or interface. Cache misses
+        construct via the module-level ``Classifier`` symbol (so
+        ``patch("fsm_llm.pipeline.Classifier")`` keeps observing construction)
+        and evict the oldest entry when the cache holds
+        ``MAX_CLASSIFIER_CACHE_SIZE`` entries. Never raises on its own;
+        construction errors propagate to the caller unchanged.
 
         Thread safety: a ``MessagePipeline`` is shared across conversations,
         so the hit check, the construction, the eviction and the insert run
@@ -2340,62 +2299,52 @@ class MessagePipeline:
         schema building, no network call), and it also removes the
         double-construct on a shared miss.
         """
-        # DECISION plan-2026-09-20T165703-0d9c218e/D-001: the key is a content
-        # hash of schema + model + prompt config + connection kwargs, NOT
-        # `(state_id, field_name)`. A per-entry `model` override, a changed
-        # `api_base`/`timeout`, or an edited prompt_config would otherwise reuse
-        # a stale instance built for the old settings. The content hash makes
-        # staleness impossible ONLY when every connection-kwarg value is
-        # JSON-native (schema and prompt_config always are); a non-native
-        # value (e.g. pydantic `SecretStr`, whose `str()` elides its state so
-        # two different keys would collide, review W1) BYPASSES the cache:
-        # construct fresh, never insert. Do NOT reintroduce a `str()` default
-        # or a custom encoder: a redacting `__str__` cannot be made unique, so
-        # bypassing is the only honest key. Do NOT key on identity or on the
-        # state/field names. Cached instances retain `api_key`/connection
-        # credentials for the pipeline's lifetime (up to
-        # `MAX_CLASSIFIER_CACHE_SIZE` copies) by design (review N11). The
-        # check/construct/evict/insert sequence below is ONE critical section
+        # DECISION plan-2026-10-01T093600-944e2692/D-006 (supersedes
+        # 21cd7f8e/D-008 and the identity rule of 0d9c218e/D-001): the
+        # classifier sends through the conversation's own `llm_interface`
+        # unless the entry names a different model. Do NOT rebuild a private
+        # interface from the conversation interface's kwargs (that bypassed a
+        # custom `llm_interface` and its meter), and do NOT pass that
+        # interface's api_key/api_base/timeout to a classifier for another
+        # model (credentials would reach another provider). The key is the
+        # content (schema, prompt config, override model) plus `id()` of the
+        # injected interface: the cached Classifier holds that interface, so
+        # its id cannot be reused by another object while the entry lives,
+        # and rebinding `self.llm_interface` misses the cache instead of
+        # returning a classifier over the old interface. Do NOT put per-call
+        # prompt or context in the key (8a03483a/D-004) or key on the
+        # state/field names, and do NOT put connection settings in it (none
+        # reach the classifier, and secrets must stay out of keys and logs).
+        # The check/construct/evict/insert sequence is ONE critical section
         # under `_classifier_cache_lock`: do NOT narrow the lock to the dict
-        # writes only, the FIFO `next(iter())` eviction is what raced (review
-        # W2). See decisions.md D-001.
-        try:
-            payload = json.dumps(
-                {
-                    "schema": schema.model_dump(),
-                    "model": model,
-                    "config": (
-                        dataclasses.asdict(prompt_config) if prompt_config else None
-                    ),
-                    "conn": connection_kwargs,
-                },
-                sort_keys=True,
-            )
-        except (TypeError, ValueError):
-            # Names only, never the values: a connection kwarg may be a secret.
-            logger.debug(
-                "Classifier cache bypassed: a connection kwarg is not "
-                "JSON-native (kwargs: {}); constructing a fresh instance",
-                sorted(connection_kwargs),
-            )
-            return Classifier(
-                schema=schema,
-                model=model,
-                config=prompt_config,
-                **connection_kwargs,
-            )
+        # writes, the FIFO `next(iter())` eviction is what raced (review W2).
+        # See decisions.md D-006.
+        llm = self.llm_interface
+        interface_model = getattr(llm, "model", None)
+        own_model = model if model and model != interface_model else None
+        payload = json.dumps(
+            {
+                "schema": schema.model_dump(),
+                "config": (
+                    dataclasses.asdict(prompt_config) if prompt_config else None
+                ),
+                "model": own_model,
+                "interface": None if own_model else id(llm),
+            },
+            sort_keys=True,
+        )
         key = hashlib.sha256(payload.encode()).hexdigest()
         cache = self._classifier_cache
         with self._classifier_cache_lock:
             hit = cache.get(key)
             if hit is not None:
                 return hit
-            classifier = Classifier(
-                schema=schema,
-                model=model,
-                config=prompt_config,
-                **connection_kwargs,
-            )
+            if own_model:
+                classifier = Classifier(
+                    schema=schema, model=own_model, config=prompt_config
+                )
+            else:
+                classifier = Classifier(schema=schema, llm=llm, config=prompt_config)
             if len(cache) >= MAX_CLASSIFIER_CACHE_SIZE:
                 cache.pop(next(iter(cache)), None)
             cache[key] = classifier
@@ -2432,7 +2381,7 @@ class MessagePipeline:
             user_message: User input to classify, or ``None`` when the turn
                 has no user message (the classifier then decides from the
                 per-call context alone).
-            instance: FSM instance (for model fallback).
+            instance: FSM instance (per-call context and the result record).
             conversation_id: Logging context.
             configs_override: If provided, run only these configs
                 (used during retry).
@@ -2445,23 +2394,9 @@ class MessagePipeline:
         if not configs:
             return {}
 
-        model = getattr(self.llm_interface, "model", None)
         extracted: dict[str, Any] = {}
 
         for config in configs:
-            effective_model = config.model or model
-            if not effective_model:
-                if config.required:
-                    raise ClassificationError(
-                        f"Required classification extraction '{config.field_name}': "
-                        "no LLM model available"
-                    )
-                log.warning(
-                    f"Classification extraction '{config.field_name}': "
-                    "no LLM model available, skipping"
-                )
-                continue
-
             try:
                 schema = ClassificationSchema(
                     intents=config.intents,
@@ -2474,10 +2409,7 @@ class MessagePipeline:
                     prompt_config = ClassificationPromptConfig(**config.prompt_config)
 
                 classifier = self._get_classifier(
-                    schema,
-                    effective_model,
-                    prompt_config,
-                    self._classifier_connection_kwargs(config.model),
+                    schema, prompt_config, model=config.model
                 )
 
                 result: ClassificationResult = classifier.classify(
@@ -2591,19 +2523,10 @@ class MessagePipeline:
             evaluation.available_options,
         )
 
-        model = getattr(self.llm_interface, "model", None)
-        if model is None:
-            raise InvalidTransitionError(
-                "Cannot determine LLM model for classification-based "
-                "transition resolution"
-            )
-
         try:
             # Inside the try, as at the extraction site: a construction
             # failure degrades to "stay" like a classify() failure (review W2).
-            classifier = self._get_classifier(
-                schema, model, None, self._classifier_connection_kwargs()
-            )
+            classifier = self._get_classifier(schema, None)
             result: ClassificationResult = classifier.classify(
                 user_message,
                 context=self._build_classifier_context(

@@ -20,6 +20,7 @@ import pytest
 from fsm_llm import RunBudgetExceededError, build_fsm_graph, constants
 from fsm_llm.classification import Classifier
 from fsm_llm.definitions import FieldExtractionRequest, FieldExtractionResponse
+from fsm_llm.llm import LiteLLMInterface
 from tests.test_fsm_llm.test_advance import (
     _always,
     _ScriptedLLM,
@@ -65,8 +66,18 @@ class _NullThenValueLLM(_ScriptedLLM):
         return super().extract_field(request)
 
 
+def _classifying_scripted_llm() -> _ScriptedLLM:
+    """A ``_ScriptedLLM`` whose ``complete`` is a real ``LiteLLMInterface``'s
+    for the same model: the classifier sends through the conversation's
+    interface (D-006 of plan 944e2692), so this is how its request reaches
+    the provider binding ``_ClassifierProvider`` scripts."""
+    llm = _ScriptedLLM()
+    llm.complete = LiteLLMInterface(model=llm.model).complete
+    return llm
+
+
 class _ClassifierProvider:
-    """Scripted provider for the classifier's own LLM interface: replies with
+    """Scripted provider for the classifier's LLM interface: replies with
     the queued ``(intent, confidence)`` pairs and records every request."""
 
     def __init__(self, *replies: tuple[str, float]) -> None:
@@ -206,7 +217,7 @@ class TestNoMessageSiblingSites:
                 "done": _state("done", speaks=True),
             },
         }
-        api, conv_id = _start(fsm, _ScriptedLLM())
+        api, conv_id = _start(fsm, _classifying_scripted_llm())
 
         with _ClassifierProvider(("buy", 0.95)) as provider:
             result = api.advance(conv_id)
@@ -229,7 +240,7 @@ class TestNoMessageSiblingSites:
                 "done": _state("done", speaks=True),
             },
         }
-        api, conv_id = _start(fsm, _ScriptedLLM())
+        api, conv_id = _start(fsm, _classifying_scripted_llm())
 
         # A non-fallback intent below the threshold is discarded, so the key
         # is still missing and the retry pass classifies again.

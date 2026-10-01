@@ -29,7 +29,7 @@ from .definitions import (
     IntentScore,
     MultiClassificationResult,
 )
-from .llm import LiteLLMInterface
+from .llm import LiteLLMInterface, LLMInterface
 from .logging import logger
 from .prompts import (
     ClassificationPromptConfig,
@@ -65,31 +65,38 @@ class Classifier:
     """
     LLM-backed intent classifier.
 
-    Wraps a ClassificationSchema and an LLM model to provide a simple
+    Wraps a ClassificationSchema and an LLM interface to provide a simple
     ``classify()`` / ``classify_multi()`` interface. Every request is one
     ``complete`` call (a ``json_schema`` response format, the prompt config's
-    ``temperature`` and ``max_tokens``) on a ``fsm_llm.LiteLLMInterface``
-    constructed here from
-    ``model``, ``api_key`` and ``llm_kwargs`` (``timeout`` defaults to
-    120 seconds; ``retries`` has that interface's meaning; names in
-    ``RESERVED_LLM_CALL_KWARGS`` are ignored, the prompt config owns
-    ``temperature`` and ``max_tokens``).
+    ``temperature`` and ``max_tokens``) on one ``LLMInterface``:
+
+    - ``llm`` given: that interface (its model, connection settings, timeout
+      and usage meter). ``model`` defaults to the interface's ``model``
+      attribute; a ``model`` that differs from it, an ``api_key`` or any
+      ``llm_kwargs`` are refused (``ValueError``): the interface owns the
+      model and the connection. An interface that does not implement
+      ``complete`` makes every call fail with ``ClassificationError``.
+    - ``llm`` omitted: a ``fsm_llm.LiteLLMInterface`` constructed here from
+      ``model`` (default ``DEFAULT_LLM_MODEL``), ``api_key`` and
+      ``llm_kwargs`` (``timeout`` defaults to 120 seconds; ``retries`` has
+      that interface's meaning; names in ``RESERVED_LLM_CALL_KWARGS`` are
+      ignored, the prompt config owns ``temperature`` and ``max_tokens``).
     """
 
     def __init__(
         self,
         schema: ClassificationSchema,
-        model: str = DEFAULT_LLM_MODEL,
+        model: str | None = None,
         *,
+        llm: LLMInterface | None = None,
         api_key: str | None = None,
         config: ClassificationPromptConfig | None = None,
         **llm_kwargs,
     ) -> None:
-        if not model or not model.strip():
+        if model is not None and not model.strip():
             raise ValueError("model must be a non-empty string")
 
         self.schema = schema
-        self.model = model
         self.config = config or ClassificationPromptConfig()
         # DECISION plan-2026-10-01T093600-944e2692/D-002 (supersedes
         # 07ad3f8c/D-022): the classifier sends one `LLMInterface.complete`
@@ -100,19 +107,46 @@ class Classifier:
         # reader. The 120s default bounds a stalled provider so it cannot hold
         # the conversation thread and its conv_lock (CA3-003). See decisions.md
         # D-002.
-        connection: dict[str, Any] = {
-            "timeout": 120.0,
-            **{
-                k: v for k, v in llm_kwargs.items() if k not in RESERVED_LLM_CALL_KWARGS
-            },
-        }
-        self._llm = LiteLLMInterface(
-            model,
-            api_key=api_key,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            **connection,
-        )
+        # DECISION plan-2026-10-01T093600-944e2692/D-020: an injected `llm` is
+        # used as is. Do NOT merge `api_key`/`llm_kwargs` into it or build a
+        # second interface beside it (two LLM paths for one classifier), and
+        # do NOT fall back to a private LiteLLMInterface when the injected one
+        # lacks `complete`: that is the bypass D-006 closes. See D-020.
+        self._llm: LLMInterface
+        if llm is not None:
+            if api_key is not None or llm_kwargs:
+                raise ValueError(
+                    "Classifier(llm=...) takes no api_key or connection kwargs: "
+                    "the injected interface owns its connection settings"
+                )
+            interface_model = getattr(llm, "model", None)
+            if not isinstance(interface_model, str):
+                interface_model = None
+            if model is not None and interface_model not in (None, model):
+                raise ValueError(
+                    f"Classifier(model={model!r}, llm=...) names a different "
+                    f"model than the injected interface ({interface_model!r}); "
+                    "omit llm to classify with another model"
+                )
+            self._llm = llm
+            self.model: str | None = model if model is not None else interface_model
+        else:
+            self.model = model if model is not None else DEFAULT_LLM_MODEL
+            connection: dict[str, Any] = {
+                "timeout": 120.0,
+                **{
+                    k: v
+                    for k, v in llm_kwargs.items()
+                    if k not in RESERVED_LLM_CALL_KWARGS
+                },
+            }
+            self._llm = LiteLLMInterface(
+                self.model,
+                api_key=api_key,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+                **connection,
+            )
 
         # Pre-build prompts so they're not reconstructed on every call.
         single_config = replace(self.config, multi_intent=False)
@@ -138,7 +172,8 @@ class Classifier:
         )
 
         logger.bind(package="fsm_llm.classification").info(
-            f"Classifier initialized: model={model}, "
+            f"Classifier initialized: model={self.model}, "
+            f"interface={type(self._llm).__name__}, "
             f"intents={len(schema.intents)}, "
             f"threshold={schema.confidence_threshold}"
         )

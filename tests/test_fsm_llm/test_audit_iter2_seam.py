@@ -8,6 +8,7 @@ step; harness helpers are reused from the iteration-1 seam file.
 from __future__ import annotations
 
 import json
+import threading
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -114,7 +115,11 @@ class TestClassifierIgnoresReservedInterfaceKwargs:
         call = h.classifier_calls[0]
         assert call["api_key"] == "sk-x"
         assert call["timeout"] == 9
-        assert reserved not in call
+        # D-006 of plan 944e2692: the classifier sends through the
+        # conversation's interface, which passes its own kwargs on every
+        # request (as on Pass 1 and Pass 2). The old name filter existed only
+        # because Classifier(...) bound these names; it gets no kwargs now.
+        assert call[reserved] == {"user_thing": 1}
 
     @pytest.mark.parametrize("reserved", ["config", "schema"])
     def test_ambiguous_transition_survives_reserved_kwarg(self, reserved):
@@ -132,11 +137,17 @@ class TestClassifierIgnoresReservedInterfaceKwargs:
         call = h.classifier_calls[0]
         assert call["api_key"] == "sk-x"
         assert call["timeout"] == 9
-        assert reserved not in call
+        # As above: the conversation interface's kwargs, unfiltered.
+        assert call[reserved] == {"user_thing": 1}
 
-    def test_helper_drops_reserved_names_only(self):
+    def test_bound_names_in_interface_kwargs_cannot_break_construction(self):
+        """An interface whose kwargs use the names Classifier binds
+        (``schema``, ``model``, ``config``) still yields a classifier over
+        that very interface: the pipeline spreads no kwargs into
+        ``Classifier(...)`` (D-006 of plan 944e2692)."""
         from unittest.mock import MagicMock
 
+        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
         from fsm_llm.pipeline import MessagePipeline
 
         llm = MagicMock()
@@ -151,11 +162,18 @@ class TestClassifierIgnoresReservedInterfaceKwargs:
         }
         pipe = MessagePipeline.__new__(MessagePipeline)
         pipe.llm_interface = llm
-        assert pipe._classifier_connection_kwargs() == {
-            "api_key": "k",
-            "api_base": "b",
-            "timeout": 5,
-        }
+        pipe._classifier_cache = {}
+        pipe._classifier_cache_lock = threading.Lock()
+        schema = ClassificationSchema(
+            intents=[
+                IntentDefinition(name="a", description="a"),
+                IntentDefinition(name="b", description="b"),
+            ],
+            fallback_intent="b",
+        )
+        classifier = pipe._get_classifier(schema, None)
+        assert classifier._llm is llm
+        assert classifier.model == "gpt-4o"
 
 
 # ══════════════════════════════════════════════════════════════
