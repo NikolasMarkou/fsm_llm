@@ -89,7 +89,8 @@ class TestContextKeys:
         assert ContextKeys.SOLUTION_CONFIDENCE == "solution_confidence"
 
     def test_execution_control_keys(self):
-        assert ContextKeys.REASONING_FSM_TO_PUSH == "reasoning_fsm_to_push"
+        assert ContextKeys.REASONING_PUSH_PENDING == "reasoning_push_pending"
+        assert not hasattr(ContextKeys, "REASONING_FSM_TO_PUSH")
         assert ContextKeys.REASONING_TYPE_SELECTED == "reasoning_type_selected"
         assert ContextKeys.RETRY_COUNT == "retry_count"
         assert ContextKeys.MAX_RETRIES_REACHED == "max_retries_reached"
@@ -121,6 +122,7 @@ class TestHandlerNames:
         assert HandlerNames.REASONING_TRACER == "ReasoningTracer"
         assert HandlerNames.CONTEXT_PRUNER == "ContextPruner"
         assert HandlerNames.RETRY_LIMITER == "RetryLimiter"
+        assert HandlerNames.RETRY_KEY_CLEARER == "RetryKeyClearer"
 
 
 class TestDefaults:
@@ -133,6 +135,14 @@ class TestDefaults:
         assert Defaults.MAX_RETRIES == 3
         assert Defaults.MAX_TRACE_STEPS == 50
         assert Defaults.CONTEXT_PRUNE_THRESHOLD == 8000
+
+    def test_solve_steps_budget_is_cumulative(self):
+        """D-013: orchestrator steps plus one full strategy run per attempt."""
+        assert Defaults.MAX_SOLVE_STEPS == (
+            Defaults.MAX_TOTAL_ITERATIONS
+            + (Defaults.MAX_RETRIES + 1) * Defaults.MAX_SUB_FSM_ITERATIONS
+        )
+        assert Defaults.MAX_SOLVE_STEPS == 170
 
 
 class TestErrorMessages:

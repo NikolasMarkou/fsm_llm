@@ -22,9 +22,9 @@ flowchart TD
     V -- invalid and retries left --> E
 ```
 
-- The engine starts an orchestrator conversation and keeps sending it "Continue reasoning" messages until it reaches `final_answer`, for at most 50 rounds.
-- As soon as the orchestrator extracts `problem_type`, a handler (a Python function the FSM runs at a set point) runs a second FSM, the classifier, which looks at domain, structure and needs and recommends one of the nine strategies. It gets at most 10 turns.
-- When the orchestrator enters `execute_reasoning`, a handler chooses the strategy FSM. The engine pushes it on top of the orchestrator (FSM stacking), drives it with "Continue reasoning." for at most 30 turns, then pops it and copies its results back into the orchestrator.
+- The engine starts an orchestrator conversation with the problem in its context and runs it with message-free steps (core `run_until_terminal`, no user message) until it reaches `final_answer`, for at most 170 steps in total (50 for the orchestrator plus 30 per strategy run, one run per attempt).
+- As soon as the orchestrator extracts `problem_type`, a handler (a Python function the FSM runs at a set point) runs a second FSM, the classifier, which looks at domain, structure and needs and recommends one of the nine strategies. It gets at most 10 steps.
+- When the orchestrator enters `execute_reasoning`, a handler chooses the strategy FSM. The same run pushes it on top of the orchestrator (FSM stacking) by type, steps it for at most 30 steps, then pops it and copies its results back into the orchestrator. Each entry to `execute_reasoning` also clears `proposed_solution`, `key_insights` and `validation_result`, so a retry produces and validates a new answer.
 - When a `proposed_solution` appears, a validator runs four checks: there is an answer, there are key insights (not needed for arithmetic), the answer is longer than 20 characters (not needed for arithmetic), and it shares at least one non-trivial word with the question (not checked for arithmetic).
 
 The nine strategies and their number of states:
@@ -78,7 +78,7 @@ print(trace["summary"])
 ## Things to know
 
 - One engine solves one problem at a time. Calls to `solve_problem` on the same engine wait for each other.
-- Every step is an LLM call, so one problem can take dozens of calls. Small models may loop until a limit (50 orchestrator rounds, 30 strategy turns) stops them. Hitting the 50-round limit is not an error: you get whatever answer is in the context, or a fallback message.
+- Every step is an LLM call, so one problem can take dozens of calls. Small models may loop until a limit stops them: a strategy FSM still running after 30 steps is popped and the solve goes on; a solve that spends its 170 steps raises `ReasoningExecutionError`.
 - `--type` (or `preferred_reasoning_type` in the starting context) overrides the automatic choice when it names a valid strategy.
 - If a strategy FSM cannot be loaded, the engine falls back to `analytical` only, never to another style.
 - Unknown words passed to `map_reasoning_type` fall back to `analytical` with a warning.

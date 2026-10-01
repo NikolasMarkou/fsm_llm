@@ -93,7 +93,10 @@ class ContextKeys:
     REASONING_TRACE = "reasoning_trace"
 
     # Execution control
-    REASONING_FSM_TO_PUSH = "reasoning_fsm_to_push"
+    # Set (True) by the execute_reasoning entry handler; the engine's
+    # before_step hook clears it and pushes the strategy FSM of
+    # REASONING_TYPE_SELECTED. Only a flag: never an FSM dict in context.
+    REASONING_PUSH_PENDING = "reasoning_push_pending"
     REASONING_TYPE_SELECTED = "reasoning_type_selected"
     CLASSIFICATION_JUSTIFICATION = "classification_justification"
     RETRY_COUNT = "retry_count"
@@ -228,6 +231,16 @@ class ContextKeys:
     PREFERRED_REASONING_TYPE = "preferred_reasoning_type"
 
 
+# Keys cleared on every entry to execute_reasoning. Core extracts a key only
+# while it is unset, so without the clear a retry would keep the rejected
+# solution and never re-run synthesis or validation (the retry loop stalls).
+RETRY_CLEARED_KEYS: tuple[str, ...] = (
+    ContextKeys.PROPOSED_SOLUTION,
+    ContextKeys.KEY_INSIGHTS,
+    ContextKeys.VALIDATION_RESULT,
+)
+
+
 class HandlerNames:
     """Handler names for registration."""
 
@@ -237,6 +250,7 @@ class HandlerNames:
     REASONING_TRACER = "ReasoningTracer"
     CONTEXT_PRUNER = "ContextPruner"
     RETRY_LIMITER = "RetryLimiter"
+    RETRY_KEY_CLEARER = "RetryKeyClearer"
 
 
 class Defaults:
@@ -251,9 +265,13 @@ class Defaults:
     MIN_SOLUTION_LENGTH = 20  # Minimum chars for a substantive solution
     PRUNE_LIST_MAX_LENGTH = 10  # Keep last N items when pruning lists
     PRUNE_STRING_MAX_LENGTH = 1000  # Truncate strings beyond this length
-    MAX_SUB_FSM_ITERATIONS = 30  # Limit iterations when executing a sub-FSM
-    MAX_CLASSIFICATION_ITERATIONS = 10  # Limit classification retry attempts
-    MAX_TOTAL_ITERATIONS = 50  # Hard ceiling on solve_problem() loop
+    MAX_SUB_FSM_ITERATIONS = 30  # Steps of a strategy FSM before a forced pop
+    MAX_CLASSIFICATION_ITERATIONS = 10  # Steps budget of the classifier FSM run
+    MAX_TOTAL_ITERATIONS = 50  # Orchestrator steps of one solve
+    # Steps budget of the one orchestrator run of a solve (D-013): the
+    # orchestrator's own steps plus a full strategy run for the first attempt
+    # and each retry. A pop of an ended strategy FSM is not a step (D-052).
+    MAX_SOLVE_STEPS = MAX_TOTAL_ITERATIONS + (MAX_RETRIES + 1) * MAX_SUB_FSM_ITERATIONS
 
 
 class ErrorMessages:

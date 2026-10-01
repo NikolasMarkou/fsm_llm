@@ -181,7 +181,9 @@ class TestReasoningTypeFallback:
         assert result[ContextKeys.REASONING_TYPE_SELECTED] == (
             ReasoningType.ANALYTICAL.value
         )
-        assert result[ContextKeys.REASONING_FSM_TO_PUSH] == {"name": "analytical_fsm"}
+        # Push by type: only the type and the pending flag go into context.
+        assert result[ContextKeys.REASONING_PUSH_PENDING] is True
+        assert {"name": "analytical_fsm"} not in result.values()
         assert "Falling back to analytical reasoning" in buf.getvalue()
 
     def test_missing_type_and_missing_analytical_raises(self):

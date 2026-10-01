@@ -7,17 +7,22 @@ Enhanced with loop prevention, context management, and standardized handling.
 
 from __future__ import annotations
 
-import json
 import threading
 from typing import Any
 
-from fsm_llm import API, ContextMergeStrategy
+from fsm_llm import (
+    API,
+    AdvanceResult,
+    ContextMergeStrategy,
+    RunBudgetExceededError,
+    clear_keys_on_entry,
+)
 from fsm_llm.api import llm_settings_for
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
-from fsm_llm.utilities import redacting_json_default
 
 from .constants import (
+    RETRY_CLEARED_KEYS,
     ContextKeys,
     Defaults,
     ErrorMessages,
@@ -120,6 +125,19 @@ class ReasoningEngine:
             .do(self._classify_problem)
         )
 
+        # DECISION plan-2026-10-01T093600-944e2692/D-053: clear the rejected
+        # solution on EVERY entry to execute_reasoning so a retry re-runs
+        # synthesis and validation (core extracts only unset keys). Do NOT
+        # move the clear to synthesize_solution entry: that wipes the
+        # proposed_solution the calculator strategy merged back on pop.
+        self.orchestrator.register_handler(
+            clear_keys_on_entry(
+                RETRY_CLEARED_KEYS,
+                state=OrchestratorStates.EXECUTE_REASONING,
+                name=HandlerNames.RETRY_KEY_CLEARER,
+            )
+        )
+
         # Strategy executor
         self.orchestrator.register_handler(
             self.orchestrator.create_handler(HandlerNames.ORCHESTRATOR_EXECUTOR)
@@ -194,29 +212,22 @@ class ReasoningEngine:
                 initial_context=classification_context
             )
 
-            iteration_count = 0
-            while not self.classifier.has_conversation_ended(conv_id):
-                iteration_count += 1
-                if iteration_count > Defaults.MAX_CLASSIFICATION_ITERATIONS:
-                    raise ReasoningClassificationError(
-                        f"Classification did not converge after {Defaults.MAX_CLASSIFICATION_ITERATIONS} iterations",
-                        details={"context_keys": list(classification_context.keys())},
-                    )
-                rendered_context = json.dumps(
-                    classification_context, indent=2, default=redacting_json_default
-                )
-                self.classifier.converse(
-                    user_message=f"Continue:\n{rendered_context}",
-                    conversation_id=conv_id,
-                )
+            # Message-free steps: the problem reaches the model through the
+            # conversation context, never through a synthetic user message.
+            self.classifier.run_until_terminal(
+                conv_id, max_steps=Defaults.MAX_CLASSIFICATION_ITERATIONS
+            )
 
             # Get results
             result = self.classifier.get_data(conv_id)
             self.classifier.end_conversation(conv_id)
             conv_id = None  # Mark as cleaned up
-        except ReasoningClassificationError:
-            # Already the right type — don't double-wrap
-            raise
+        except RunBudgetExceededError as e:
+            raise ReasoningClassificationError(
+                "Classification did not converge after "
+                f"{Defaults.MAX_CLASSIFICATION_ITERATIONS} steps",
+                details={"context_keys": list(classification_context.keys())},
+            ) from e
         except Exception as e:
             raise ReasoningClassificationError(
                 f"Problem classification failed: {e}",
@@ -304,7 +315,8 @@ class ReasoningEngine:
             )
             reasoning_type = ReasoningType.ANALYTICAL
 
-        # Get FSM definition
+        # The strategy FSM is pushed by type from the before_step hook
+        # (``_StrategyStack``); only the type and a flag go into context.
         fsm_def = self.reasoning_fsms.get(reasoning_type)
 
         if not fsm_def:
@@ -329,7 +341,7 @@ class ReasoningEngine:
         logger.info(LogMessages.STRATEGY_EXECUTING.format(type=reasoning_type.value))
 
         return {
-            ContextKeys.REASONING_FSM_TO_PUSH: fsm_def,
+            ContextKeys.REASONING_PUSH_PENDING: True,
             ContextKeys.REASONING_TYPE_SELECTED: reasoning_type.value,
             ContextKeys.CLASSIFICATION_JUSTIFICATION: context.get(
                 ContextKeys.CLASSIFICATION_JUSTIFICATION, ""
@@ -383,145 +395,13 @@ class ReasoningEngine:
         log = logger.bind(conversation_id=conv_id, package="fsm_llm.reasoning")
         log.info(f"Started reasoning process: {conv_id}")
 
-        responses = [initial_response]
-
+        stack = _StrategyStack(self, conv_id)
         try:
-            # Process until complete
-            iteration_count = 0
-            while not self.orchestrator.has_conversation_ended(conv_id):
-                iteration_count += 1
-                if iteration_count > Defaults.MAX_TOTAL_ITERATIONS:
-                    log.error(
-                        f"Reasoning exceeded {Defaults.MAX_TOTAL_ITERATIONS} iterations; "
-                        "forcing completion"
-                    )
-                    break
-
-                current_context = self.orchestrator.get_data(conv_id)
-                if current_context is None:
-                    log.error(
-                        "Context returned None — conversation may have ended abnormally"
-                    )
-                    break
-
-                # Check for FSM to push
-                fsm_to_push = current_context.get(ContextKeys.REASONING_FSM_TO_PUSH)
-
-                if fsm_to_push and isinstance(fsm_to_push, dict):
-                    # Clear the flag using public API
-                    self.orchestrator.update_context(
-                        conv_id, {ContextKeys.REASONING_FSM_TO_PUSH: None}
-                    )
-
-                    # Prepare context for sub-FSM
-                    sub_context = self.context_manager.extract_relevant_context(
-                        current_context,
-                        [
-                            ContextKeys.PROBLEM_STATEMENT,
-                            ContextKeys.PROBLEM_COMPONENTS,
-                            ContextKeys.CONSTRAINTS,
-                            ContextKeys.PROBLEM_TYPE,
-                        ],
-                    )
-
-                    # Push sub-FSM
-                    log.info(
-                        LogMessages.FSM_PUSHED.format(
-                            name=fsm_to_push.get("name"),
-                            depth=self.orchestrator.get_stack_depth(conv_id) + 1,
-                        )
-                    )
-
-                    sub_response = self.orchestrator.push_fsm(
-                        conv_id,
-                        fsm_to_push,
-                        inherit_context=False,
-                        context_to_pass=sub_context,
-                    )
-                    responses.append(sub_response)
-
-                    # Execute sub-FSM with iteration limit
-                    force_popped = False
-                    # DECISION plan_2026-05-29_73c30922/D-001 [STALE] (FA-001): init here so the
-                    # force-pop path cannot raise UnboundLocalError if get_data() below
-                    # raises before assigning it. The MR-NEW-005 fix sets force_popped=True
-                    # before get_data(), which skips the normal-completion assignment.
-                    sub_final_context = None
-                    for _ in range(Defaults.MAX_SUB_FSM_ITERATIONS):
-                        if self.orchestrator.get_stack_depth(conv_id) <= 1:
-                            break
-                        if self.orchestrator.has_conversation_ended(conv_id):
-                            break
-
-                        response = self.orchestrator.converse(
-                            user_message="Continue reasoning.", conversation_id=conv_id
-                        )
-                        responses.append(response)
-                    else:
-                        log.error(
-                            f"Sub-FSM exceeded {Defaults.MAX_SUB_FSM_ITERATIONS} iterations; "
-                            "forcing completion"
-                        )
-                        # Capture sub-FSM context BEFORE popping — after pop,
-                        # get_data() returns the orchestrator's context instead.
-                        if self.orchestrator.get_stack_depth(conv_id) > 1:
-                            # Mark as handled BEFORE any pop attempt so a
-                            # partially-successful pop is never re-attempted by
-                            # the normal-completion block below (double-pop guard).
-                            force_popped = True
-                            try:
-                                sub_final_context = self.orchestrator.get_data(conv_id)
-                                self.orchestrator.pop_fsm(conv_id)
-                            except Exception as pop_err:
-                                log.warning(f"Failed to pop stuck sub-FSM: {pop_err}")
-
-                    # For normal completion, sub-FSM is still on stack — read its context
-                    if not force_popped:
-                        # NOTE (R-ISSUE-001): get_data falls back to _ended_conversations
-                        # cache for ended conversations (api.py:907-912), so
-                        # sub_final_context is correctly populated even when the sub-FSM
-                        # terminates naturally without a force-pop. The fallback was added
-                        # in Step 1 (ISSUE-007 fix). No explicit guard needed here.
-                        sub_final_context = self.orchestrator.get_data(conv_id)
-                    # Defensive: if get_data returned None (abnormal end), use empty dict
-                    if sub_final_context is None:
-                        sub_final_context = {}
-
-                    reasoning_type = current_context.get(
-                        ContextKeys.REASONING_TYPE_SELECTED
-                    )
-
-                    # Map results back
-                    results = self.context_manager.merge_reasoning_results(
-                        current_context, sub_final_context, reasoning_type
-                    )
-
-                    if force_popped:
-                        # Sub-FSM already popped — apply results directly to orchestrator
-                        self.orchestrator.update_context(conv_id, results)
-                    elif self.orchestrator.get_stack_depth(conv_id) > 1:
-                        # Normal path: pop sub-FSM, merging results into orchestrator
-                        pop_response = self.orchestrator.pop_fsm(
-                            conv_id,
-                            context_to_return=results,
-                            merge_strategy=ContextMergeStrategy.UPDATE,
-                        )
-                        responses.append(pop_response)
-
-                    log.info(
-                        LogMessages.FSM_POPPED.format(
-                            name=fsm_to_push.get("name"),
-                            depth=self.orchestrator.get_stack_depth(conv_id),
-                        )
-                    )
-                else:
-                    # Normal orchestrator progression
-                    response = self.orchestrator.converse(
-                        user_message=f"Continue reasoning: {json.dumps(current_context, indent=2, default=redacting_json_default)}",
-                        conversation_id=conv_id,
-                    )
-                    responses.append(response)
-
+            # One message-free run drives the orchestrator, every pushed
+            # strategy FSM and every retry; the hook pushes and pops.
+            results = self.orchestrator.run_until_terminal(
+                conv_id, max_steps=Defaults.MAX_SOLVE_STEPS, before_step=stack
+            )
         except Exception as e:
             # Clean up conversation before re-raising
             try:
@@ -532,9 +412,10 @@ class ReasoningEngine:
                 f"Reasoning execution failed: {e}",
                 details={
                     "conversation_id": conv_id,
-                    "responses_so_far": len(responses),
+                    "responses_so_far": 1 + len(stack.responses),
                 },
             ) from e
+        responses = _ordered_responses(initial_response, stack.responses, results)
 
         # Get final context BEFORE ending the conversation (end_conversation
         # removes the instance, making get_data fail).
@@ -587,3 +468,131 @@ class ReasoningEngine:
                 types.add(snapshot[ContextKeys.REASONING_TYPE_SELECTED])
 
         return list(types) if types else ["unknown"]
+
+
+class _StrategyStack:
+    """The ``before_step`` hook of one solve's orchestrator run.
+
+    Contract: called by core ``run_until_terminal`` with the number of the
+    next step (and once more, with the same number, when a pushed frame has
+    ended, D-052). Per call, on conversation ``conversation_id`` of
+    ``engine.orchestrator``:
+
+    - a pushed strategy FSM that has ended is popped, its results merged into
+      the orchestrator with ``ContextManager.merge_reasoning_results``;
+    - a pushed strategy FSM still running after ``MAX_SUB_FSM_ITERATIONS``
+      steps is force-popped the same way;
+    - with only the orchestrator on the stack and ``reasoning_push_pending``
+      set, the flag is cleared and the strategy FSM of
+      ``reasoning_type_selected`` is pushed with the problem keys.
+
+    ``responses`` collects ``(step, reply)`` for each push and pop. What a
+    core call raises propagates unchanged (the run stops, no step runs).
+    """
+
+    def __init__(self, engine: ReasoningEngine, conversation_id: str) -> None:
+        self._engine = engine
+        self._api = engine.orchestrator
+        self._conversation_id = conversation_id
+        self._log = logger.bind(
+            conversation_id=conversation_id, package="fsm_llm.reasoning"
+        )
+        self.responses: list[tuple[int, str]] = []
+        self._pushed_at = 0
+        self._reasoning_type = ""
+        self._orchestrator_context: dict[str, Any] = {}
+
+    def __call__(self, step: int) -> None:
+        conv_id = self._conversation_id
+        if self._api.get_stack_depth(conv_id) > 1:
+            if self._api.has_conversation_ended(conv_id):
+                self._pop(step)
+            # DECISION plan-2026-10-01T093600-944e2692/D-053: the sub-FSM
+            # step count is arithmetic on core's step number (pushed before
+            # step `_pushed_at`, so `step - _pushed_at` sub steps have run).
+            # Do NOT count steps in a loop of the engine's own (D-013).
+            elif step - self._pushed_at >= Defaults.MAX_SUB_FSM_ITERATIONS:
+                self._log.error(
+                    f"Sub-FSM exceeded {Defaults.MAX_SUB_FSM_ITERATIONS} steps; "
+                    "forcing completion"
+                )
+                self._pop(step)
+            return
+        context = self._api.get_data(conv_id)
+        if context.get(ContextKeys.REASONING_PUSH_PENDING):
+            self._push(step, context)
+
+    def _push(self, step: int, context: dict[str, Any]) -> None:
+        conv_id = self._conversation_id
+        reasoning_type = ReasoningType(context[ContextKeys.REASONING_TYPE_SELECTED])
+        fsm_def = self._engine.reasoning_fsms[reasoning_type]
+        self._api.update_context(conv_id, {ContextKeys.REASONING_PUSH_PENDING: None})
+        sub_context = self._engine.context_manager.extract_relevant_context(
+            context,
+            [
+                ContextKeys.PROBLEM_STATEMENT,
+                ContextKeys.PROBLEM_COMPONENTS,
+                ContextKeys.CONSTRAINTS,
+                ContextKeys.PROBLEM_TYPE,
+            ],
+        )
+        self._log.info(
+            LogMessages.FSM_PUSHED.format(
+                name=fsm_def.get("name"),
+                depth=self._api.get_stack_depth(conv_id) + 1,
+            )
+        )
+        response = self._api.push_fsm(
+            conv_id, fsm_def, inherit_context=False, context_to_pass=sub_context
+        )
+        self.responses.append((step, response))
+        self._pushed_at = step
+        self._reasoning_type = reasoning_type.value
+        self._orchestrator_context = context
+
+    def _pop(self, step: int) -> None:
+        conv_id = self._conversation_id
+        # Read the strategy FSM's context while it is still on top.
+        sub_context = self._api.get_data(conv_id)
+        results = self._engine.context_manager.merge_reasoning_results(
+            self._orchestrator_context, sub_context, self._reasoning_type
+        )
+        response = self._api.pop_fsm(
+            conv_id,
+            context_to_return=results,
+            merge_strategy=ContextMergeStrategy.UPDATE,
+        )
+        self.responses.append((step, response))
+        self._log.info(
+            LogMessages.FSM_POPPED.format(
+                name=self._reasoning_type,
+                depth=self._api.get_stack_depth(conv_id),
+            )
+        )
+
+
+def _ordered_responses(
+    initial_response: str,
+    hook_responses: list[tuple[int, str]],
+    results: tuple[AdvanceResult, ...],
+) -> list[str]:
+    """Every reply of a solve, in the order it was produced.
+
+    Contract: ``hook_responses`` holds ``(step, reply)`` pairs in call order,
+    each produced before step ``step`` ran; ``results[i]`` is step ``i + 1``.
+    Returns ``initial_response``, then the replies interleaved by step; a
+    silent step (``response is None``) adds nothing. Never raises.
+    """
+    ordered = [initial_response]
+    pending = iter(hook_responses)
+    upcoming = next(pending, None)
+    for step, result in enumerate(results, start=1):
+        while upcoming is not None and upcoming[0] <= step:
+            ordered.append(upcoming[1])
+            upcoming = next(pending, None)
+        if result.response is not None:
+            ordered.append(result.response)
+    while upcoming is not None:
+        ordered.append(upcoming[1])
+        upcoming = next(pending, None)
+    return ordered

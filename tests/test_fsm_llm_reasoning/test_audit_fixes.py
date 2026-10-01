@@ -22,20 +22,23 @@ from fsm_llm.reasoning.handlers import (
 
 
 class TestMalformedUserMessage:
-    """F-003: The sub-FSM continuation message must not contain ':{' artifact."""
+    """F-003, superseded by plan 944e2692 step 23: the engine sends no message.
 
-    def test_continue_reasoning_message_is_clean(self):
-        """Verify the malformed string was fixed in engine.py."""
+    The engine drives every FSM with message-free core runs
+    (``run_until_terminal``), so no synthetic continuation string exists to
+    be malformed.
+    """
+
+    def test_engine_sends_no_synthetic_message(self):
+        """No ``converse(`` call and no "Continue reasoning" text in the engine."""
         import inspect
 
-        from fsm_llm.reasoning.engine import ReasoningEngine
+        from fsm_llm.reasoning import engine
 
-        source = inspect.getsource(ReasoningEngine)
-        # The old malformed string should NOT be present
-        assert ":\\n:{" not in source
-        assert "Continue reasoning:\\n:{" not in source
-        # The fixed string should be present
-        assert "Continue reasoning." in source
+        source = inspect.getsource(engine)
+        assert "converse(" not in source
+        assert "Continue reasoning" not in source
+        assert "Continue:" not in source
 
 
 # ---------------------------------------------------------------------------
@@ -198,22 +201,19 @@ class TestExtractFinalSolutionKeys:
 
 
 class TestClassificationExceptionHandling:
-    """The except block in _classify_problem must not double-wrap
-    ReasoningClassificationError."""
+    """_classify_problem maps a spent classifier budget to
+    ReasoningClassificationError once, before the generic wrap."""
 
-    def test_no_double_wrap_in_source(self):
-        """Verify the except block re-raises ReasoningClassificationError directly."""
+    def test_budget_error_is_mapped_before_the_generic_wrap(self):
+        """The RunBudgetExceededError branch precedes ``except Exception``."""
         import inspect
 
         from fsm_llm.reasoning.engine import ReasoningEngine
 
         source = inspect.getsource(ReasoningEngine._classify_problem)
-        # Must have a bare re-raise for our own exception type
-        assert "except ReasoningClassificationError:" in source
-        # The re-raise must come before the generic except
-        rce_pos = source.index("except ReasoningClassificationError:")
+        budget_pos = source.index("except RunBudgetExceededError as e:")
         generic_pos = source.index("except Exception as e:")
-        assert rce_pos < generic_pos
+        assert budget_pos < generic_pos
 
 
 # ---------------------------------------------------------------------------
@@ -280,26 +280,16 @@ class TestJsonDumpsSafety:
     redacting hook, never `default=str`.
     """
 
-    def test_continue_reasoning_uses_the_redacting_hook(self):
+    def test_engine_renders_no_context_into_a_message(self):
+        """Plan 944e2692 step 23 removed both prompt sites: the engine sends no
+        message, so it serializes no context at all."""
         import inspect
-
-        from fsm_llm.reasoning.engine import ReasoningEngine
-
-        source = inspect.getsource(ReasoningEngine._solve_problem_locked)
-        assert "default=redacting_json_default" in source
-        assert "default=str" not in source
-
-    def test_classification_prompt_uses_the_redacting_hook(self):
-        import inspect
-        import re
 
         from fsm_llm.reasoning import engine as engine_mod
 
         source = inspect.getsource(engine_mod)
-        # The two prompt sites are the only json.dumps calls in this module
-        # that render context into a user_message.
-        assert re.search(r"default=str[,)\s]", source) is None
-        assert source.count("default=redacting_json_default") >= 2
+        assert "json.dumps" not in source
+        assert "default=str" not in source
 
     def test_size_measurements_may_still_use_default_str(self):
         """`handlers.py` only measures `len()` of the serialized text and never

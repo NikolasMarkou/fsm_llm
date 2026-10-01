@@ -8,95 +8,75 @@ the interaction between extensions and core.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import pytest
 
-from fsm_llm.definitions import (
-    FSMDefinition,
-    ResponseGenerationRequest,
-    ResponseGenerationResponse,
+from fsm_llm.definitions import FSMDefinition
+from tests.test_fsm_llm_reasoning.test_engine_scripted import (
+    _PROBLEM,
+    _VALID_SCRIPT,
+    _ScriptedLLM,
 )
-from fsm_llm.llm import LLMInterface
 
 # ============================================================================
 # Reasoning Engine Integration Tests
 # ============================================================================
 
 
-def _extract_state_from_prompt(system_prompt: str) -> str:
-    """Extract current state ID from the system prompt XML tags."""
-    match = re.search(r"<current_state>(\w+)</current_state>", system_prompt)
-    return match.group(1) if match else ""
+class TestReasoningEngineIntegration:
+    """Integration tests for the reasoning engine end-to-end.
 
-
-class ReasoningMockLLM(LLMInterface):
-    """Mock LLM that drives the reasoning engine through its full state machine.
-
-    Provides state-aware responses so the orchestrator progresses through
-    PROBLEM_ANALYSIS -> STRATEGY_SELECTION -> EXECUTE_REASONING ->
-    SYNTHESIZE_SOLUTION -> VALIDATE_REFINE -> FINAL_ANSWER.
+    Driven by a scripted LLM that answers every extraction, so the solve
+    really walks the orchestrator, the classifier and a pushed strategy FSM
+    to ``final_answer`` (the old mock answered no extraction, so the solve
+    only ever stopped on the iteration cap and asserted nothing).
     """
 
-    def __init__(self):
-        self.call_count = 0
-
-    def generate_response(
-        self, request: ResponseGenerationRequest
-    ) -> ResponseGenerationResponse:
-        return ResponseGenerationResponse(
-            message="Processing...",
-            message_type="response",
-            reasoning="Mock response",
-        )
-
-
-class TestReasoningEngineIntegration:
-    """Integration tests for the reasoning engine end-to-end."""
-
     def test_solve_problem_returns_solution(self):
-        """solve_problem() should return a (solution, trace) tuple."""
+        """solve_problem() returns the solution the script wrote."""
         from fsm_llm.reasoning import ReasoningEngine
 
-        mock_llm = ReasoningMockLLM()
-        engine = ReasoningEngine(model="mock", llm_interface=mock_llm)
-        solution, trace_info = engine.solve_problem("What is 2 + 2?")
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        engine = ReasoningEngine(model="mock", llm_interface=llm)
+        solution, trace_info = engine.solve_problem(_PROBLEM)
 
-        assert isinstance(solution, str)
-        assert len(solution) > 0
+        assert solution == _VALID_SCRIPT["final_solution"]
         assert isinstance(trace_info, dict)
         assert "reasoning_trace" in trace_info
         assert "summary" in trace_info
+        assert llm.requests, "the scripted LLM must have been called"
 
     def test_solve_problem_completes_within_iteration_limit(self):
-        """solve_problem() must not loop forever."""
+        """solve_problem() finishes, message-free, in a bounded number of calls."""
         from fsm_llm.reasoning import ReasoningEngine
 
-        mock_llm = ReasoningMockLLM()
-        engine = ReasoningEngine(model="mock", llm_interface=mock_llm)
-        _solution, _trace_info = engine.solve_problem("What is 2 + 2?")
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        engine = ReasoningEngine(model="mock", llm_interface=llm)
+        engine.solve_problem(_PROBLEM)
 
-        # Should complete well under the 50-iteration limit
-        assert mock_llm.call_count < 100
+        assert 0 < len(llm.requests) < 100
+        assert all(request.user_message is None for request in llm.requests)
 
     def test_solve_problem_does_not_mutate_initial_context(self):
         """F-002 (iter-2): solve_problem() copies the caller's initial_context."""
         from fsm_llm.reasoning import ReasoningEngine
 
-        engine = ReasoningEngine(model="mock", llm_interface=ReasoningMockLLM())
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        engine = ReasoningEngine(model="mock", llm_interface=llm)
         initial_context = {"domain": "math", "difficulty": "easy"}
-        engine.solve_problem("What is 2 + 2?", initial_context)
+        engine.solve_problem(_PROBLEM, initial_context)
 
         assert initial_context == {"domain": "math", "difficulty": "easy"}
+        assert llm.requests
 
     def test_classification_guard_prevents_reclassification(self):
         """Classification should skip if already classified."""
         from fsm_llm.reasoning import ReasoningEngine
         from fsm_llm.reasoning.constants import ContextKeys
 
-        mock_llm = ReasoningMockLLM()
-        engine = ReasoningEngine(model="mock", llm_interface=mock_llm)
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        engine = ReasoningEngine(model="mock", llm_interface=llm)
 
         # If already classified, _classify_problem should return empty dict
         context_with_classification = {
@@ -106,14 +86,16 @@ class TestReasoningEngineIntegration:
         }
         result = engine._classify_problem(context_with_classification)
         assert result == {}
+        assert llm.requests == []
 
-        # Without classification, it should return classification results
+        # Without classification, the classifier FSM runs and recommends.
         context_without_classification = {
-            ContextKeys.PROBLEM_STATEMENT: "What is 2 + 2?",
-            ContextKeys.PROBLEM_TYPE: "arithmetic",
+            ContextKeys.PROBLEM_STATEMENT: _PROBLEM,
+            ContextKeys.PROBLEM_TYPE: "logic puzzle",
         }
         result = engine._classify_problem(context_without_classification)
-        assert ContextKeys.CLASSIFIED_PROBLEM_TYPE in result
+        assert result[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
+        assert llm.field_requests(ContextKeys.RECOMMENDED_REASONING_TYPE)
 
     def test_fsm_definitions_have_extraction_instructions(self):
         """All reasoning FSM states must have extraction_instructions populated."""
