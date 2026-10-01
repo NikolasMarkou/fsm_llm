@@ -161,9 +161,29 @@ class TestStructure:
             assert fsm.states[state_id].response_instructions == "", state_id
         collect = fsm.states[S.COLLECT].response_instructions
         assert collect == build_collect_response_instructions()
-        assert "say 'build it' when you're ready" in collect
+        assert "Say 'build it' when you're ready" in collect
         for key in (K.ARTIFACT_TYPE, K.REQUIREMENTS, K.VALIDATION_ERRORS):
             assert key in collect
+
+    def test_collect_instructions_end_with_the_build_prompt_sentence(self):
+        """The instructions END with the exact build-prompt sentence.
+
+        Step 13 live probe (qwen3.5:4b): with "End with: say 'build it' ..."
+        followed by a length rule, 13 of 15 collect replies omitted the
+        prompt, and the first reply talked about the classify -> collect
+        transition (core's transition note). The sentence is the last thing
+        the model reads, it carries a phrase the driver's build trigger
+        accepts, and the internals are named as off limits. Fails on the
+        parent (4f04617): its instructions end with the length rule.
+        """
+        from fsm_llm.agents.meta_builder import MetaBuilderAgent
+
+        collect = build_collect_response_instructions()
+        sentence = "Say 'build it' when you're ready."
+        assert collect.endswith(f"this exact sentence: {sentence}")
+        assert MetaBuilderAgent._is_build_trigger(sentence.lower())
+        assert "Never mention states, transitions, classification" in collect
+        assert "2-3 sentences" in collect
 
     def test_no_state_extracts_free_text(self, fsm):
         for state_id, state in fsm.states.items():

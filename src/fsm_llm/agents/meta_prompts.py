@@ -210,7 +210,11 @@ def build_collect_response_instructions() -> str:
 
     The reply reads the artifact type and the requirements gathered so far
     from context (and the last build's validation errors, if any) and ends
-    with the build prompt the driver's keyword trigger listens for.
+    with the build prompt the driver's keyword trigger listens for. The
+    instructions end with that exact sentence: live on qwen3.5:4b, an "End
+    with" clause followed by a length rule was dropped in 13 of 15 replies,
+    and core's transition note made the first reply talk about the
+    classify state, hence the no-internals rule.
     """
     return (
         "You are helping the user design an FSM-LLM artifact. The context "
@@ -218,10 +222,12 @@ def build_collect_response_instructions() -> str:
         f"or agent) and {MetaContextKeys.REQUIREMENTS} lists everything the "
         "user has asked for so far; when "
         f"{MetaContextKeys.VALIDATION_ERRORS} is present, the last build "
-        "failed for those reasons. Acknowledge what the user just said. Note "
-        "what you will include in the artifact. Ask a short follow-up "
-        "question about anything still unclear. End with: say 'build it' "
-        "when you're ready. Keep your response to 2-3 sentences."
+        "failed for those reasons. In 2-3 sentences: acknowledge what the "
+        "user just said, note what you will include in the artifact, and "
+        "ask one short follow-up question about anything still unclear. "
+        "Never mention states, transitions, classification or any other "
+        "internals of this assistant. End your message with this exact "
+        "sentence: Say 'build it' when you're ready."
     )
 
 
