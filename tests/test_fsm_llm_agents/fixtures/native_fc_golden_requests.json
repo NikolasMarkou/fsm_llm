@@ -1,0 +1,2265 @@
+{
+  "_comment": "Golden provider requests of NativeFunctionCallingReactAgent, captured at e1f63a9 (plan 944e2692 step 1). Every key except the transport keys timeout, max_retries, api_key, api_base. Do not regenerate: a difference is STOP IF 1 of plan 944e2692.",
+  "captured_at": "e1f63a9",
+  "excluded_keys": [
+    "api_base",
+    "api_key",
+    "max_retries",
+    "timeout"
+  ],
+  "scenarios": {
+    "direct_answer/ollama": {
+      "outcome": {
+        "answer": "Paris is the capital of France.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": []
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nWhat is the capital of France?",
+              "role": "user"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "direct_answer/openai": {
+      "outcome": {
+        "answer": "Paris is the capital of France.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": []
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "What is the capital of France?",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "forced_final_tool/ollama": {
+      "outcome": {
+        "answer": "Paris is sunny.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ],
+          [
+            "write_note",
+            {
+              "text": "Paris: sunny, 21 C"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nCheck the weather in Paris and record it.",
+              "role": "user"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nCheck the weather in Paris and record it.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Check the weather in Paris and record it.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            },
+            {
+              "content": "/nothink\nYou have gathered enough context. Stop reading now and record your findings by calling the required tool with your final content.",
+              "role": "user"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": {
+            "function": {
+              "name": "write_note"
+            },
+            "type": "function"
+          },
+          "tools": [
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "forced_final_tool/openai": {
+      "outcome": {
+        "answer": "Paris is sunny.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ],
+          [
+            "write_note",
+            {
+              "text": "Paris: sunny, 21 C"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Check the weather in Paris and record it.",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Check the weather in Paris and record it.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Check the weather in Paris and record it.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            },
+            {
+              "content": "You have gathered enough context. Stop reading now and record your findings by calling the required tool with your final content.",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": {
+            "function": {
+              "name": "write_note"
+            },
+            "type": "function"
+          },
+          "tools": [
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "one_tool_call/ollama": {
+      "outcome": {
+        "answer": "It is sunny in Paris.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nWhat is the weather in Paris?",
+              "role": "user"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nWhat is the weather in Paris?",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "one_tool_call/openai": {
+      "outcome": {
+        "answer": "It is sunny in Paris.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "What is the weather in Paris?",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "What is the weather in Paris?",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "repair_turn/ollama": {
+      "outcome": {
+        "answer": "{\"city\": \"Paris\", \"conditions\": \"sunny\"}",
+        "stop_reason": "answered",
+        "structured_output": {
+          "city": "Paris",
+          "conditions": "sunny"
+        },
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nReport the weather in Paris.",
+              "role": "user"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nReport the weather in Paris.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Report the weather in Paris.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            },
+            {
+              "content": "/nothink\nStop calling tools now. Using everything established above, give the final answer as a single JSON object matching the required schema, and nothing else.\n\nRespond in JSON matching this schema:\n{\"description\": \"The ``output_schema`` of the repair-turn scenario.\", \"properties\": {\"city\": {\"title\": \"City\", \"type\": \"string\"}, \"conditions\": {\"title\": \"Conditions\", \"type\": \"string\"}}, \"required\": [\"city\", \"conditions\"], \"title\": \"_WeatherReport\", \"type\": \"object\"}",
+              "role": "user"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "response_format": {
+            "json_schema": {
+              "name": "_WeatherReport",
+              "schema": {
+                "description": "The ``output_schema`` of the repair-turn scenario.",
+                "properties": {
+                  "city": {
+                    "title": "City",
+                    "type": "string"
+                  },
+                  "conditions": {
+                    "title": "Conditions",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "city",
+                  "conditions"
+                ],
+                "title": "_WeatherReport",
+                "type": "object"
+              }
+            },
+            "type": "json_schema"
+          },
+          "temperature": 0
+        }
+      ]
+    },
+    "repair_turn/openai": {
+      "outcome": {
+        "answer": "{\"city\": \"Paris\", \"conditions\": \"sunny\"}",
+        "stop_reason": "answered",
+        "structured_output": {
+          "city": "Paris",
+          "conditions": "sunny"
+        },
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Report the weather in Paris.",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Report the weather in Paris.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Report the weather in Paris.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            },
+            {
+              "content": "Stop calling tools now. Using everything established above, give the final answer as a single JSON object matching the required schema, and nothing else.",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "response_format": {
+            "json_schema": {
+              "name": "_WeatherReport",
+              "schema": {
+                "description": "The ``output_schema`` of the repair-turn scenario.",
+                "properties": {
+                  "city": {
+                    "title": "City",
+                    "type": "string"
+                  },
+                  "conditions": {
+                    "title": "Conditions",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "city",
+                  "conditions"
+                ],
+                "title": "_WeatherReport",
+                "type": "object"
+              }
+            },
+            "type": "json_schema"
+          },
+          "temperature": 0.5
+        }
+      ]
+    },
+    "seed_7/ollama": {
+      "outcome": {
+        "answer": "It is sunny in Paris.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nWhat is the weather in Paris?",
+              "role": "user"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "seed": 7,
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nWhat is the weather in Paris?",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "seed": 7,
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "seed_7/openai": {
+      "outcome": {
+        "answer": "It is sunny in Paris.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "What is the weather in Paris?",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "seed": 7,
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "What is the weather in Paris?",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "seed": 7,
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "system_policy/ollama": {
+      "outcome": {
+        "answer": "It is sunny in Paris.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.\n\nAnswer in one sentence. Never guess a temperature.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nWhat is the weather in Paris?",
+              "role": "user"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.\n\nAnswer in one sentence. Never guess a temperature.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nWhat is the weather in Paris?",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "system_policy/openai": {
+      "outcome": {
+        "answer": "It is sunny in Paris.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.\n\nAnswer in one sentence. Never guess a temperature.",
+              "role": "system"
+            },
+            {
+              "content": "What is the weather in Paris?",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.\n\nAnswer in one sentence. Never guess a temperature.",
+              "role": "system"
+            },
+            {
+              "content": "What is the weather in Paris?",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "two_calls_one_turn/ollama": {
+      "outcome": {
+        "answer": "Both cities are sunny.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ],
+          [
+            "weather",
+            {
+              "city": "Rome"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nCompare the weather in Paris and Rome.",
+              "role": "user"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "/nothink\nCompare the weather in Paris and Rome.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                },
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Rome\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_2",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            },
+            {
+              "content": "sunny, 21 C in Rome",
+              "role": "tool",
+              "tool_call_id": "call_2"
+            }
+          ],
+          "model": "ollama_chat/qwen3.5:4b",
+          "reasoning_effort": "none",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    },
+    "two_calls_one_turn/openai": {
+      "outcome": {
+        "answer": "Both cities are sunny.",
+        "stop_reason": "answered",
+        "structured_output": null,
+        "success": true,
+        "tool_calls": [
+          [
+            "weather",
+            {
+              "city": "Paris"
+            }
+          ],
+          [
+            "weather",
+            {
+              "city": "Rome"
+            }
+          ]
+        ]
+      },
+      "requests": [
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Compare the weather in Paris and Rome.",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        {
+          "max_tokens": 1000,
+          "messages": [
+            {
+              "content": "You are a capable AI agent. Use the provided tools to gather information and complete the task. Call tools when you need external data; when you have enough information, reply with the final answer and no further tool calls.",
+              "role": "system"
+            },
+            {
+              "content": "Compare the weather in Paris and Rome.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Paris\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                },
+                {
+                  "function": {
+                    "arguments": "{\"city\": \"Rome\"}",
+                    "name": "weather"
+                  },
+                  "id": "call_2",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "sunny, 21 C in Paris",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            },
+            {
+              "content": "sunny, 21 C in Rome",
+              "role": "tool",
+              "tool_call_id": "call_2"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "temperature": 0.5,
+          "tool_choice": "auto",
+          "tools": [
+            {
+              "function": {
+                "description": "Get the current weather for a city.",
+                "name": "weather",
+                "parameters": {
+                  "properties": {
+                    "city": {
+                      "description": "City",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "city"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Save a note with the final findings.",
+                "name": "write_note",
+                "parameters": {
+                  "properties": {
+                    "text": {
+                      "description": "Note",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
