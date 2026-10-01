@@ -400,27 +400,35 @@ class TestExecuteClassificationExtractions:
                 state, "test", instance, "conv1"
             )
 
-    def test_interface_without_complete_builds_no_classifier(self):
+    @pytest.mark.parametrize("required", [False, True])
+    def test_interface_without_complete_builds_no_classifier(self, required):
         """The classifier sends through the conversation's interface (D-006
         of plan 944e2692). One that is not an ``LLMInterface`` implementing
-        ``complete`` is refused when the classifier is built (D-029; ``API``
-        refuses the pair at construction, see test_review_fixes_core.py), so
-        a pipeline reached without that check builds and caches nothing, and
-        the extraction fails loudly: a configuration error is not an outage
-        (D-037 of plan 944e2692)."""
-        config = _make_config()
+        ``complete`` cannot classify (``API`` refuses the pair at
+        construction, see test_review_fixes_core.py); a pipeline reached
+        without that check builds and caches nothing, and the field fails
+        with ``ClassificationError`` as D-020 states: skipped, or raised when
+        required (D-046 of plan 944e2692; it raised ``ValueError`` at
+        f85e07a)."""
+        config = _make_config(required=required)
         state = _make_state(classification_extractions=[config])
         pipeline = _make_pipeline()
         pipeline.llm_interface = MagicMock(spec=[])  # no .model, no .complete
         instance = _make_instance()
 
-        with (
-            patch("fsm_llm.llm.completion") as provider,
-            pytest.raises(ValueError, match="implements complete"),
-        ):
-            pipeline._execute_classification_extractions(
-                state, "test", instance, "conv1"
-            )
+        with patch("fsm_llm.llm.completion") as provider:
+            if required:
+                with pytest.raises(ClassificationError, match="complete"):
+                    pipeline._execute_classification_extractions(
+                        state, "test", instance, "conv1"
+                    )
+            else:
+                assert (
+                    pipeline._execute_classification_extractions(
+                        state, "test", instance, "conv1"
+                    )
+                    == {}
+                )
         provider.assert_not_called()
         assert pipeline._classifier_cache == {}
 

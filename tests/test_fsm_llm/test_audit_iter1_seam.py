@@ -1338,8 +1338,9 @@ class TestClassifierInheritsConnection:
 
         for llm in (_Bare(), MagicMock(spec=LLMInterface)):
             assert _classifier(llm)._llm is llm
-        # Not an LLMInterface at all: refused (D-029 of plan 944e2692).
-        with pytest.raises(ValueError, match="implements complete"):
+        # Not an LLMInterface at all: cannot classify, a soft
+        # ClassificationError (D-046 of plan 944e2692).
+        with pytest.raises(ClassificationError, match="does not implement complete"):
             _classifier(MagicMock())
         own = _classifier(_Bare(), model="gpt-4o")._llm
         assert isinstance(own, LiteLLMInterface)

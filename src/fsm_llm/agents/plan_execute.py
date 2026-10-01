@@ -23,6 +23,7 @@ from .constants import (
     HandlerPriorities,
     LogMessages,
     PlanExecuteStates,
+    StopReason,
     ToolRunStatus,
 )
 from .definitions import AgentConfig, AgentResult
@@ -329,12 +330,18 @@ class PlanExecuteAgent(BaseAgent):
             # plan and goes to synthesis. Do NOT treat it as failed (a replan
             # would run the same side effect again) nor as done (the next
             # step would build on an outcome nobody knows).
+            # DECISION plan-2026-10-01T093600-944e2692/D-047: the plan was cut
+            # short, so the run did not reach its goal: record NO_RESULT (read
+            # by `_run_outcome`, success=False). Do NOT leave it unrecorded
+            # (an earlier successful step read as evidence, success=True) and
+            # do NOT record MAX_ITERATIONS or STALLED (no budget ran out).
             if status == ToolRunStatus.UNKNOWN:
                 logger.warning(
                     f"Step {current_index + 1} timed out with an unknown "
                     "outcome: synthesizing the results so far"
                 )
                 updates[ContextKeys.ALL_STEPS_COMPLETE] = True
+                updates[ContextKeys.FORCED_STOP_REASON] = StopReason.NO_RESULT
             elif step_failed:
                 if context.get("_replan_count", 0) >= max_replans:
                     logger.warning(

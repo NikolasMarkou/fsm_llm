@@ -71,7 +71,7 @@ from .definitions import (
     TransitionOption,
 )
 from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
-from .llm import LLMInterface, check_tool_transcript
+from .llm import LLMInterface, check_tool_transcript, implements_complete
 from .logging import logger
 from .ollama import is_ollama_model
 from .prompts import (
@@ -187,6 +187,8 @@ _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
 # RuntimeError or OSError back: a bug in a custom `complete`, a broken
 # prompt_config or a classifier refused at construction (no `complete`, a
 # model mismatch) became a silent "stay" or a skipped field. See D-039.
+# A missing `complete` is soft: `_get_classifier` raises ClassificationError
+# for it (plan-2026-10-01T093600-944e2692/D-046).
 _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS: tuple[type[Exception], ...] = (
     ClassificationError,
 )
@@ -2458,7 +2460,9 @@ class MessagePipeline:
         construct via the module-level ``Classifier`` symbol (so
         ``patch("fsm_llm.pipeline.Classifier")`` keeps observing construction)
         and evict the oldest entry when the cache holds
-        ``MAX_CLASSIFIER_CACHE_SIZE`` entries. Never raises on its own;
+        ``MAX_CLASSIFIER_CACHE_SIZE`` entries. Raises ``ClassificationError``
+        (soft at both call sites) when the classifier would send through a
+        conversation interface that does not implement ``complete``; other
         construction errors propagate to the caller unchanged.
 
         Thread safety: a ``MessagePipeline`` is shared across conversations,
@@ -2495,6 +2499,12 @@ class MessagePipeline:
         llm = self.llm_interface
         interface_model = getattr(llm, "model", None)
         own_model = model if model and model != interface_model else None
+        # DECISION plan-2026-10-01T093600-944e2692/D-046: an interface without
+        # `complete` cannot classify, which is an outage of this turn's
+        # classification, not a bug: ClassificationError (a tie stays, a field
+        # is skipped, WARNING). Do NOT let Classifier's ValueError escape (a
+        # tie state became a dead end, review pass 11 W1) and do NOT widen the
+        # soft-fail tuple (D-039: a bug inside a real `complete` propagates).
         payload = json.dumps(
             {
                 "schema": schema.model_dump(),
@@ -2517,7 +2527,17 @@ class MessagePipeline:
                     schema=schema, model=own_model, config=prompt_config
                 )
             else:
-                classifier = Classifier(schema=schema, llm=llm, config=prompt_config)
+                try:
+                    classifier = Classifier(
+                        schema=schema, llm=llm, config=prompt_config
+                    )
+                except ValueError as e:
+                    if implements_complete(llm):
+                        raise
+                    raise ClassificationError(
+                        f"{type(llm).__name__} does not implement complete "
+                        "(LLMInterface.complete), so it cannot classify"
+                    ) from e
             if len(cache) >= MAX_CLASSIFIER_CACHE_SIZE:
                 cache.pop(next(iter(cache)), None)
             cache[key] = classifier

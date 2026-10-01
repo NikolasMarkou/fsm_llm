@@ -809,6 +809,51 @@ class TestClassifierNeedsAnInterfaceWithComplete:
         assert Classifier(_INTENTS, llm=_NoModel(_outage)).model is None
 
 
+def _gated_tie_fsm() -> dict[str, Any]:
+    """``route`` ties ``a``/``b`` until ``skip_a`` is set, then ``b`` wins."""
+    fsm = _tie_fsm()
+    fsm["states"]["route"]["transitions"][0]["conditions"] = [
+        {"description": "a is not skipped", "logic": {"!": [{"var": "skip_a"}]}}
+    ]
+    return fsm
+
+
+class TestTieWithAnInterfaceWithoutCompleteStays:
+    """Review round 3, pass 11 W1 (D-045, D-046): an interface without
+    ``complete`` made every tie turn raise, so the conversation could never
+    leave the state. D-020: the classification fails with
+    ``ClassificationError``, the tie stays, and a later turn that is not a tie
+    still transitions. Fails on the parent f85e07a (``FSMError``)."""
+
+    @pytest.mark.parametrize("mode", ["converse", "stream", "advance"])
+    def test_tie_stays_then_a_deterministic_turn_leaves(self, mode: str):
+        api = API.from_definition(_gated_tie_fsm(), llm_interface=MockLLM2Interface())
+        conv_id, _ = api.start_conversation()
+
+        def turn() -> None:
+            if mode == "converse":
+                api.converse("go", conv_id)
+            elif mode == "stream":
+                list(api.converse_stream("go", conv_id))
+            else:
+                api.advance(conv_id)
+
+        turn()
+        assert api.get_current_state(conv_id) == "route"
+        record = api.fsm_manager.instances[conv_id].context.metadata[
+            "transition_classification"
+        ]
+        assert record["fallback"] is True
+        assert "does not implement complete" in record["error"]
+
+        api.update_context(conv_id, {"skip_a": True})
+        turn()
+        assert api.get_current_state(conv_id) == "b"
+
+    # A bug inside a real `complete` still fails the turn (D-039):
+    # TestClassifierErrorContract above.
+
+
 class TestHierarchicalClassifierTakesAnInterface:
     """Review area 3, concern 5: ``HierarchicalClassifier`` had no ``llm=``
     and built one private interface per stage."""

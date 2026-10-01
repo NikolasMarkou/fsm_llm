@@ -26,7 +26,12 @@ from fsm_llm.agents import (
     ReactAgent,
     REWOOAgent,
 )
-from fsm_llm.agents.constants import ContextKeys, NativeFCStates, ToolRunStatus
+from fsm_llm.agents.constants import (
+    ContextKeys,
+    NativeFCStates,
+    StopReason,
+    ToolRunStatus,
+)
 from fsm_llm.agents.definitions import ToolCall, ToolResult
 from fsm_llm.agents.exceptions import AgentError, AgentTimeoutError
 from fsm_llm.agents.handlers import AgentHandlers
@@ -384,6 +389,7 @@ class TestPlanExecuteNeverReRunsAnUnknownStep:
         )
         assert delta[ContextKeys.STEP_FAILED] is False
         assert delta[ContextKeys.ALL_STEPS_COMPLETE] is True
+        assert delta[ContextKeys.FORCED_STOP_REASON] == StopReason.NO_RESULT
         assert ContextKeys.CURRENT_STEP_INDEX not in delta
         entry = delta[ContextKeys.STEP_RESULTS][-1]
         assert entry["success"] is False
@@ -401,15 +407,32 @@ class TestPlanExecuteNeverReRunsAnUnknownStep:
         assert delta[ContextKeys.STEP_RESULTS][-1]["success"] is True
 
     def test_end_to_end_a_timed_out_step_runs_once(self, release):
+        """Step 1 succeeds, step 2 times out, step 3 never runs. Review round
+        3 (pass 13 W1, D-047): the cut-short plan reported ``success=True``
+        on step 1's evidence at f85e07a; it is ``no_result`` now."""
         ran: list[str] = []
-        registry = _hanging_registry(release, ran, gated=False)
+        registry = ToolRegistry()
+
+        def pay(amount: str) -> str:
+            ran.append(amount)
+            if len(ran) >= 2:
+                release.wait(5.0)
+            return "paid " + amount
+
+        registry.register_function(
+            pay, name="pay", description="Pay an amount.", timeout_s=0.1
+        )
         llm = PromptGroundedLLM(
             facts={
-                "plan_steps": (["pay the invoice", "email the receipt"], "invoice"),
-                "tool_name": ("pay", "pay the invoice"),
-                "tool_input": ({"amount": "9"}, "pay the invoice"),
-                "step_result": ("paying", "pay the invoice"),
-            }
+                "plan_steps": (
+                    ["pay the invoice", "pay the second invoice", "email it"],
+                    "invoice",
+                ),
+                "tool_name": ("pay", "invoice"),
+                "tool_input": ({"amount": "9"}, "invoice"),
+                "step_result": ("paying", "invoice"),
+            },
+            default_response="All three steps completed.",
         )
         agent = PlanExecuteAgent(
             registry,
@@ -425,10 +448,16 @@ class TestPlanExecuteNeverReRunsAnUnknownStep:
             return original(tool_call, gated=gated)
 
         registry.execute = counting  # type: ignore[method-assign]
-        result = agent.run("pay the invoice and email the receipt")
-        assert calls == ["pay"], "the unknown-outcome step was run again"
+        result = agent.run("pay the invoice, pay the second invoice and email it")
+        assert calls == ["pay", "pay"], "the unknown-outcome step was run again"
         assert result.final_context.get("_replan_count", 0) == 0
         assert result.final_context[ContextKeys.STEP_FAILED] is False
+        assert [e["success"] for e in result.final_context["step_results"]] == [
+            True,
+            False,
+        ]
+        assert result.success is False
+        assert result.stop_reason == StopReason.NO_RESULT
 
 
 # ---------------------------------------------------------------------------

@@ -79,16 +79,42 @@ class TestMetaCli:
         assert exc.value.code == 1
         assert "Error: boom" in capsys.readouterr().out
 
-    def test_keyboard_interrupt_exits_130(self, monkeypatch, capsys):
-        """Ctrl-C exits 130 like every project CLI (plan 944e2692 step 18.6;
-        it exited 1 before)."""
-        _install_fake_agent(monkeypatch, KeyboardInterrupt())
+    def test_keyboard_interrupt_at_the_prompt_exits_130(self, monkeypatch, capsys):
+        """Ctrl-C at the ``> `` prompt exits 130 like every project CLI. The
+        real ``MetaBuilderAgent.run_interactive`` runs (only its session
+        start is stubbed, no LLM call); at f85e07a it swallowed the interrupt
+        and the CLI exited 1 with "Artifact has validation errors" (review
+        round 3, pass 13 concern 5, D-045)."""
+        agent_cls = meta_cli.MetaBuilderAgent
+        monkeypatch.setattr(agent_cls, "start", lambda self: "What to build?")
+
+        def interrupted(prompt: str = "") -> str:
+            assert prompt == "> "
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("builtins.input", interrupted)
 
         with pytest.raises(SystemExit) as exc:
             _run_meta_cli(monkeypatch)
 
+        out = capsys.readouterr().out
         assert exc.value.code == 130
-        assert "Aborted." in capsys.readouterr().out
+        assert "Aborted." in out
+        assert "validation errors" not in out
+
+    def test_eof_at_the_prompt_still_ends_the_session(self, monkeypatch, capsys):
+        """EOF (Ctrl-D) stays a normal end of the session."""
+        agent_cls = meta_cli.MetaBuilderAgent
+        monkeypatch.setattr(agent_cls, "start", lambda self: "What to build?")
+
+        def eof(prompt: str = "") -> str:
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", eof)
+        result = agent_cls().run_interactive()
+
+        assert "Session ended by user." in capsys.readouterr().out
+        assert result.is_valid is False
 
     def test_invalid_result_exits_1_and_writes_nothing(self, monkeypatch, tmp_path):
         result = _valid_result()

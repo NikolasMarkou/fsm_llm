@@ -1027,14 +1027,18 @@ class MetaBuilderAgent:
         return result
 
     def run_interactive(self) -> MetaBuilderResult:
-        """Run a session on stdin/stdout until the build completes or EOF."""
+        """Run a session on stdin/stdout until the build completes or EOF.
+
+        Ctrl-C (``KeyboardInterrupt``) propagates to the caller, at the
+        prompt as during a model call; EOF ends the session normally.
+        """
         response = self.start()
         print(f"\n{response}\n")
 
         while not self.is_complete():
             try:
                 user_input = input("> ")
-            except (EOFError, KeyboardInterrupt):
+            except EOFError:
                 print("\nSession ended by user.")
                 break
             if not user_input.strip():
