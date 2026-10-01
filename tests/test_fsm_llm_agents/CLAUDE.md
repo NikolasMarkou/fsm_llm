@@ -68,7 +68,12 @@ Observation hooks used by loop tests:
 | `test_completion_guard.py`, `test_plan_execute_evidence.py` | `_completion_is_real`, `_has_execution_evidence` | Evidence keys `WORKER_RESULTS`, `EVIDENCE`, `STEP_RESULTS`; step success tied to `TOOL_STATUS == "success"` |
 | `test_handlers.py` | `AgentHandlers`, `make_iteration_limiter`, `make_fresh_keys_handler` | ReAct-family limiter counts think exits (`max_iterations=N` gives N think turns for N >= 2; N = 1 behaves like 2); factory limiter forces at count `max - 1`; empty-input recovery only for string-compatible or single list params |
 | `test_tools.py` | `ToolRegistry`, `@tool`, `normalize_tool_input` | Thread-safety with `fine_grained_gil` fixture (`sys.setswitchinterval(1e-6)`), 256-dim stub embeddings, dict/list/kwargs calling conventions |
-| `test_native_fc.py` | `NativeFunctionCallingReactAgent` | `complete_fn` injection or `litellm.completion` patch; repair turn has `response_format` and no `tools`; forced final tool; malformed tool-call degrade |
+| `test_native_fc.py` | `NativeFunctionCallingReactAgent` (an FSM on core) | Scripted `LLMInterface` via `llm_interface=` (no `complete_fn`), or a stub on `fsm_llm.llm.completion` under the agent's own interface; repair turn has `response_format` and no `tools`; forced final tool; malformed turn runs none of its calls; success through `forced_stop_reason` |
+| `test_native_fc_golden.py` + `fixtures/native_fc_golden_requests.json` | Request bytes of native_fc | Recording stub on `fsm_llm.llm.completion` and `litellm.completion`; every payload key except `timeout`, `max_retries`, `api_key`, `api_base` equals the fixture captured from the old private loop (24 scenarios); a byte change here is a model-visible change |
+| `test_native_fc_fsm.py` | `build_native_fc_fsm` and `NativeFCHandlers` | Structure (states built only when due, distinct priorities, fallback edges), handler units (whole-turn check, execution order, redaction, `tool_exchange` pairing, turn counting) |
+| `test_one_engine.py` | One engine (W2) | Every `create_agent` pattern except `swarm` runs on an injected scripted interface while the provider bindings raise; the interface receives every model call |
+| `test_toolspec.py` | ToolSpec | `ToolAnnotations`, `args_model` exact schemas (`Optional[int]` is `integer or null`), MCP annotations, `timeout_s` enforcement (a 2 s tool with `timeout_s=0.2` returns in under 1 s), `gated` on every `execute`, `RetryingToolRegistry` retries only `retry_safe` and never `gated` |
+| `test_review_fixes_tools_native.py`, `test_review_round2_callers.py`, `test_review_fixes_round2_agents.py` | Plan 944e2692 review fixes | Timeout outcome `unknown`, caching bypass for `gated`, refusal of `execute` without `gated`, `system_policy` type, prompt-cache with an injected interface, SelfConsistency per-sample temperature, `ToolRunStatus` in traces, ParallelReact limiter, Enum/`$ref` prompt types, meta negation, `fsm-llm-meta` exit 130 |
 | `test_maker_checker.py` | MakerCheckerAgent | Limiter at `max` (not `max - 1`), pass forced by `_force_pass_at_limit` only on check turns |
 | `test_evaluator_optimizer.py` | EvaluatorOptimizerAgent | Refine re-extracts `generated_output`; `PREVIOUS_OUTPUT` absent from `final_context` but present in prompts |
 | `test_reflexion.py` | ReflexionAgent | Conclude from think/act/evaluate needs evidence; every budget 1..5 terminates |
@@ -95,7 +100,7 @@ Nothing is exported. Entry points are pytest node ids, for example:
 - Successful `execute_tool` delta: `TOOL_STATUS == "success"`, `TOOL_RESULT`, `OBSERVATIONS` (pruned to `Defaults.MAX_OBSERVATIONS`), `OBSERVATION_COUNT`, `AGENT_TRACE`, and `TOOL_NAME`/`TOOL_INPUT` cleared to `None`.
 - Unknown tool name: `TOOL_STATUS == "skipped"`, feedback naming the bad and valid tools in `TOOL_RESULT`, no observation, selection cleared; third repeat sets `should_terminate` and `max_iterations_reached` to `True`.
 - Plan-execute step entry: `{"step_index": int, "result": str, "success": bool}`.
-- Native FC normalized response (fake `complete_fn(model, messages, schemas)` return): `{"content": str | None, "tool_calls": [{"id", "name", "arguments": dict}]}`.
+- Native FC model turn: a scripted interface's `complete(request)` returns core `CompletionResponse(kind="calls"|"final"|"malformed", text, calls=[ModelToolCall(id, name, arguments: dict)])`; the transcript the agent sends is `request.messages` (system message plus `_native_messages`).
 - Orchestrator worker result: `{"subtask", "answer", "success"}`; placeholder answer contains `Pending LLM processing`.
 - `SemanticMemoryStore.search` returns `(text, score, metadata)` tuples.
 
@@ -103,7 +108,7 @@ Nothing is exported. Entry points are pytest node ids, for example:
 
 Behaviour these tests pin; changing agents code that breaks them is a regression unless the owning DECISION is revised:
 
-- Budget hard ceiling is `max_iterations * Defaults.FSM_BUDGET_MULTIPLIER` (3), passed to core `run_until_terminal` as `max_steps` with the seconds left as `max_seconds`; `BaseAgent._budget_error` maps core's `RunBudgetExceededError` to `BudgetExhaustedError` / `AgentTimeoutError`. `_check_budgets(start_time)` keeps only the wall-clock check (SelfConsistency samples, native_fc).
+- Budget hard ceiling is `max_iterations * Defaults.FSM_BUDGET_MULTIPLIER` (3), passed to core `run_until_terminal` as `max_steps` with the seconds left as `max_seconds`; `BaseAgent._budget_error` maps core's `RunBudgetExceededError` to `BudgetExhaustedError` / `AgentTimeoutError`. `_check_budgets(start_time)` keeps only the wall-clock check (SelfConsistency samples). native_fc's ceiling is `2 * max_iterations + 4` (`_step_ceiling`) and its post-loop states are seconds-exempt.
 - `think -> act` is an unconditional lowest-priority fallback; approval edge beats it. Loop states in ADaPT (`assess`, `decompose`), EvalOpt (`generate`) and MakerChecker (`check`) each have exactly one unconditional fallback with the highest priority number.
 - `max_iterations_reached` is seeded `False` in `_init_context`; it, `forced_stop_reason`, `iteration_count` and `observation_count` are core `handler_only_keys` on every agent FSM, so no extraction can set them (D-051 of plan 06a5ec0a).
 - A forced stop, forced pass, stall, rejected verification or failed gate gives `success=False` with the matching `stop_reason`; the answer still ships.
@@ -126,7 +131,7 @@ Test-writing constraints:
 - Internal: `fsm_llm.agents` (all modules), `fsm_llm.definitions` (request/response models, `FSMDefinition`, `State`, `FSMError`), `fsm_llm.llm.LLMInterface`, `fsm_llm.pipeline.MessagePipeline` (`_build_field_configs_from_state`, patched `Classifier`), `fsm_llm.ollama`, `fsm_llm.expressions`, `fsm_llm.memory`, `fsm_llm.session`, `fsm_llm.constants`, `fsm_llm.logging`, `fsm_llm.fsm`, `fsm_llm.monitor`, `fsm_llm.workflows`.
 - Optional, skip-gated: `mcp` (`importorskip`), `fastapi` + `httpx` (`importorskip` or `find_spec` skipif), opentelemetry SDK (`_has_otel()` checks `fsm_llm.monitor.otel._HAS_OTEL`), `fsm_llm.reasoning` (`importorskip` or try/skip), `fsm_llm.workflows` (`importorskip` in one test).
 - Not gated: `test_strands_phase2.py::TestDependencyResolver` and `TestPhase2Exports` import `fsm_llm.workflows` and `fsm_llm.monitor` directly.
-- `litellm.completion` is monkeypatched in `test_composition.py` and `test_native_fc.py`; no network call happens.
+- No agents module imports litellm; tests stub core's send binding `fsm_llm.llm.completion` (also `litellm.completion` where a test proves it is never reached: `test_one_engine.py`, `test_native_fc.py`, `test_composition.py`) or inject a scripted `LLMInterface`. No network call happens.
 
 ## Failure modes
 

@@ -26,7 +26,7 @@ EmbedTextsFn = Callable[[Sequence[str]], list[list[float]]]
 
 # DECISION plan-2026-10-01T093600-944e2692/D-005: the default backend is core's
 # LiteLLMEmbedder; a custom backend plugs in as a callable ``embed_fn``. Do NOT
-# import litellm or call an embedding API here, and do NOT add an Embedder ABC
+# import the provider SDK or call an embedding API here, and do NOT add an Embedder ABC
 # or per-class embedding code: the memory store and the tool registry share
 # this one function. See D-005.
 def _embedding_backend(embedding_model: str, embed_fn: EmbedFn | None) -> EmbedTextsFn:

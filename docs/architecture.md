@@ -67,8 +67,10 @@ Plugin architecture with 8 timing points. Handlers self-determine execution via 
 - `generate_response(request)` -- Generate user-facing response (Pass 2)
 - `extract_field(request)` -- Extract a targeted field from input (Pass 1)
 - `generate_response_stream(request)` -- Stream the Pass-2 response token-by-token
+- `extract_bulk_data(request)` -- Bulk extraction for states with `extraction_instructions`
+- `complete(request: CompletionRequest) -> CompletionResponse` -- The one primitive for tool calling, plain and structured completion (classifier, completion states, the agents' LLM judge). Not abstract: the base method raises `NotImplementedError`
 
-`LiteLLMInterface` provides the built-in implementation supporting 100+ providers. It is the one place a provider request is built (`_build_call_params`), also for the `Classifier` (through `complete_structured`): `litellm` is imported only in `llm.py`. Request models carry `user_message: str | None`; the request builder sends `None` (no user message) as the fixed `NEUTRAL_USER_TURN` and an empty or whitespace message as `EMPTY_USER_MESSAGE_TURN`, so the provider never sees an empty user turn and never reads an empty message as an instruction.
+`LiteLLMInterface` provides the built-in implementation supporting 100+ providers. It is the one place a provider request is built (`_build_call_params`) and sent (one send path that counts every call on the instance: `usage()`), for every call kind; `LiteLLMEmbedder` is the one embedding path. `litellm` is imported only in `llm.py`; nothing else in the package (agents, reasoning, meta-builder) calls a provider by itself. The classifier of a conversation sends its `complete` requests through the conversation's own `llm_interface`. Request models carry `user_message: str | None`; the request builder sends `None` (no user message) as the fixed `NEUTRAL_USER_TURN` and an empty or whitespace message as `EMPTY_USER_MESSAGE_TURN`, so the provider never sees an empty user turn and never reads an empty message as an instruction.
 
 ### TransitionEvaluator (`transition_evaluator.py`)
 
@@ -110,12 +112,28 @@ API.advance(conversation_id)
       → transition evaluation and Pass 2 exactly as for a message
     → Return AdvanceResult(state_before, state_after, transition_outcome, response, ended)
 
-API.run_until_terminal(conversation_id, *, max_steps, max_seconds=None, before_step=None)
+API.run_until_terminal(conversation_id, *, max_steps, max_seconds=None, before_step=None,
+                       seconds_exempt_states=())
   → per round: ended? → seconds budget → steps budget → before_step(n) → advance()
+  → an ended PUSHED FSM on top: before_step(n) once (not a step) so the hook can pop it;
+    the run then continues on the parent, or returns if nothing was popped
   → RunBudgetExceededError when a budget is spent; a conversation closed mid-run ends it normally
 ```
 
-This is how the agents, the harness and any program that drives an FSM by itself run a conversation: no synthetic user message is ever sent. `advance_stream` and `run_until_terminal_stream` are the streaming forms (reply text only).
+This is how the agents, the harness, the reasoning engine and any program that drives an FSM by itself run a conversation: no synthetic user message is ever sent. The reasoning engine runs one orchestrator run whose `before_step` hook pushes and pops the strategy FSMs. `advance_stream` and `run_until_terminal_stream` are the streaming forms (reply text only).
+
+### Completion States (tool calling and structured output)
+
+```
+State with "completion": {tools | response_format_key, tool_choice, instructions,
+                          messages_key, result_key}
+  Pass 1 → one LLMInterface.complete() over [system(instructions)] + context[messages_key]
+         → context[result_key] = {kind: calls | final | malformed, text, calls: [{id, name, arguments}]}
+  transitions read <result_key>.kind; a handler runs the calls, appends
+  tool_exchange(content, calls, results) to the transcript and clears result_key
+```
+
+The transcript is a context list the consumer owns (an internal key), never the conversation history. Core runs no tool, adds no prompt text and no history, and refuses an unpaired transcript with `LLMResponseError` before sending (the turn rolls back). `NativeFunctionCallingReactAgent` (tool loop, forced final tool, repair turn) and the meta-builder's build call are completion states.
 
 ### Conversation Start
 
@@ -191,10 +209,10 @@ Priority ordering (lower first). Error modes: `"continue"` (log + skip) or `"rai
 
 ```
 fsm_llm (core, includes classification)
-├── fsm_llm.reasoning  -- Uses API (push/pop FSM stacking) + classification
+├── fsm_llm.reasoning  -- Uses API run_until_terminal; its before_step hook pushes/pops strategy FSMs
 ├── fsm_llm.workflows  -- Uses API (via ConversationStep); lifecycle hooks via add_hook
 ├── fsm_llm.agents     -- Uses API (auto-generates FSMs, drives them with run_until_terminal)
-│                          + handlers for tool execution
+│                          + handlers for tool execution; native_fc and the meta-builder use completion states
 ├── fsm_llm.monitor    -- Uses API + handlers (observer callbacks at priority 9999)
 ├── fsm_llm.harness    -- Uses API (hand-written FSM) + handlers at state entry; dispatches
 │                          fsm_llm.agents workers as protocol roles
@@ -207,10 +225,10 @@ import time; each one imports core (`from fsm_llm import API`).
 
 | Package | Integration | Key Mechanism |
 |---------|------------|---------------|
-| Classification | Built into core | Structured call through `LiteLLMInterface.complete_structured` |
-| Reasoning | FSM stacking via push/pop | Orchestrator pushes strategy FSMs onto stack |
+| Classification | Built into core | Structured `complete` call through the conversation's `llm_interface` |
+| Reasoning | One message-free run + FSM stacking | `run_until_terminal` on the orchestrator; the `before_step` hook pushes a strategy FSM by type and pops it when it ends (or after 30 steps); a spent 170-step budget raises `ReasoningExecutionError` |
 | Workflows | Async engine + ConversationStep | ConversationStep creates API instance for FSM conversations |
-| Agents | Auto-generated FSMs + handlers, driven by core `run_until_terminal` | `build_react_fsm()` generates FSM; handlers execute tools on state entry; core owns the step and time budgets; no synthetic message is sent. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
+| Agents | Auto-generated FSMs + handlers, driven by core `run_until_terminal` | `build_react_fsm()` generates FSM; handlers execute tools on state entry; core owns the step and time budgets; no synthetic message is sent. `native_fc` runs on core completion states (native tool calls); the meta-builder is an FSM driven with `converse`/`advance`. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
 | Monitor | Observer handlers + loguru sink + core graph data | Registers observer handlers (priority 9999; not POST_TRANSITION), never modifies state; FSM graphs come from `build_fsm_graph` |
 | Harness | Hand-written FSM + state-entry handlers | `build_harness_fsm()` returns a 6-state definition whose gates are JsonLogic conditions; a handler per state entry dispatches one agent worker, and the gate values it writes are derived from the filesystem |
 | Eval | Subprocesses + public API only | `fsm-llm-eval examples` scores example output with a 0-4 heuristic; `fsm-llm-eval run` sends each case's turns through a fresh `API`, reads `get_current_state`/`get_data`/`has_conversation_ended`, and checks declared expectations over N trials. No handlers, no core changes |
@@ -332,6 +350,10 @@ class CustomLLM(LLMInterface):
 
     def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse:
         ...  # needed by states with extraction_instructions; the base class raises NotImplementedError
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        ...  # needed by classification and completion states; API refuses a definition with
+             # classification_extractions when this is not implemented
 ```
 
 ### Custom Handlers

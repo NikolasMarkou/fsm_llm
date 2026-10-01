@@ -32,6 +32,7 @@ flowchart TD
 - **Steps without a user message**: `api.advance(conv_id)` runs the same two passes with no user message and returns an `AdvanceResult` (state before and after, transition outcome, reply, ended). `api.run_until_terminal(conv_id, max_steps=N)` repeats it until a terminal state and raises `RunBudgetExceededError` when `max_steps` or `max_seconds` runs out. The agents and the harness are driven this way.
 - **Handlers** are your own Python functions that run at 8 fixed points in this flow (start, before and after processing, before and after a transition, on context update, at the end, on error).
 - **FSM stacking** lets one conversation temporarily hand control to a second FSM (for example an address form) and come back with its results.
+- **Tool calling and structured output**: a state with the optional `completion` field makes its Pass 1 a single native tool-calling or JSON-schema call over a message list your handlers keep in the context. The reply (`{kind, text, calls}`) is stored under a key the transitions read; your handler runs the tools and appends the results with `tool_exchange`. The core never runs a tool itself. The `native_fc` agent and the meta-builder are built this way.
 
 How the subpackages sit on the core:
 
@@ -71,9 +72,9 @@ flowchart TD
 - `definitions.py` - Pydantic data models (states, transitions, FSM definition, context, classification results) and the error classes.
 - `transition_evaluator.py` - decides whether a transition is certain, ambiguous, or blocked.
 - `expressions.py` - the JsonLogic rule evaluator.
-- `classification.py` - intent classification with an LLM (`Classifier`, `HierarchicalClassifier`, `IntentRouter`).
+- `classification.py` - intent classification with an LLM (`Classifier`, `HierarchicalClassifier`, `IntentRouter`). Inside a conversation the classifier uses the conversation's own LLM interface, so a custom `llm_interface` is honoured.
 - `handlers.py` - the handler system and its fluent builder.
-- `llm.py` - talks to LLM providers through litellm (OpenAI, Anthropic, Ollama, and many more).
+- `llm.py` - the one place that talks to LLM providers, through litellm (OpenAI, Anthropic, Ollama, and many more): replies, extraction, the `complete()` call for tool calling and structured output, embeddings (`LiteLLMEmbedder`), and per-interface call and token counters (`usage()`). No other module imports litellm.
 - `ollama.py` - Ollama-specific tweaks (JSON schema output, turning off "thinking").
 - `prompts.py` - builds the prompts for extraction, reply, field, and classification calls.
 - `context.py` - context cleaning and `ContextCompactor` for trimming context.
@@ -172,6 +173,7 @@ fsm-llm-harness new "add a retry to the uploader" --create-only
 ## Things to know
 
 - Any provider litellm supports works. The default model is `ollama_chat/qwen3.5:4b`, or whatever `LLM_MODEL` is set to. API keys come from the usual provider environment variables.
+- To use your own LLM client, pass `llm_interface=` to `API`. Do not pass `model`, `temperature`, `max_tokens` or other LLM settings beside it: `API` refuses them, because the interface owns them.
 - Extras: `reasoning`, `workflows`, `agents` and `eval` add no packages; `harness` pulls in `agents`; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
 - A state with no transitions is terminal: once reached, `converse` and `advance` raise an error.
 - `required_context_keys` only says what to extract. To block a transition until data exists, add a condition with `logic`.

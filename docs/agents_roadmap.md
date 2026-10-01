@@ -97,7 +97,7 @@ Tools:
 | TOOL-01 | TRUE (reproduced) | Fixed, step 7 |
 | TOOL-02 | TRUE (reproduced) | Fixed, step 7 |
 | TOOL-03 | TRUE (reproduced) | Fixed, step 7; fix 3.1: partials, callable objects, async callables and positional-only parameters |
-| TOOL-04 to TOOL-13 | NOT VERIFIED | Deferred to Track B (ToolSpec) |
+| TOOL-04 to TOOL-13 | NOT VERIFIED | ToolSpec code subset ported in plan 944e2692: TOOL-04 (exact schemas from `args_model`) and TOOL-07 (no retry of a granted call) fixed; tool annotations and an enforced `timeout_s` added; the rest stays in Track B |
 | TOOL-14 | TRUE | Fixed, step 8 |
 
 ReAct family:
@@ -114,7 +114,7 @@ ReAct family:
 | REACT-08 | TRUE | Fixed, step 5 (construction warning); fix 3.1 (D-052): a flagged tool nobody can approve raises `AgentError` at construction and `run()` |
 | REACT-09 | NOT VERIFIED | Deferred to Track B |
 | REACT-10 | NOT VERIFIED | Deferred to Track B |
-| REACT-11 | TRUE (thinking blocks not verified) | Malformed arguments fixed, step 8. Ignored `initial_context`/`api_kwargs` and `response_format` for a custom `complete_fn` are open |
+| REACT-11 | TRUE (thinking blocks not verified) | Malformed arguments fixed, step 8. The rest closed by plan 944e2692: native_fc is an FSM on core, `initial_context` goes through `_init_context`, `api_kwargs` reach `API`, and `complete_fn` is gone (the seam is `llm_interface=`) |
 
 Patterns:
 
@@ -225,8 +225,7 @@ Plan scale: 7 files added (tests and docs only, 0 source files); source net +3,1
 - LOOP-16: the per-turn thought is not extracted, so `AgentStep.thought`, `ToolCall.reasoning` and `ApprovalRequest.reasoning` are empty unless `use_classification=True`.
 - Typed per-field extraction costs one LLM call per field per turn, plus one retry per null required field.
 - The ReAct-family success rule counts a failed tool call as success evidence. ParallelReact's empty batch loops until the limiter.
-- HITL: the policy sees the call before empty-input recovery and a shallow context; a forced stop reached in `await_approval` skips the approved call (fails closed). REWOO, PlanExecute, ParallelReact and native_fc refuse gated tools instead of asking. With a policy set, a flagged tool the policy does not gate runs unasked (the policy owns the decision). `RetryingToolRegistry` still retries a tool that only a policy gates.
-- native_fc ignores `initial_context` and `api_kwargs`, and a custom `complete_fn` never gets `response_format`.
+- HITL: the policy sees the call before empty-input recovery and a shallow context; a forced stop reached in `await_approval` skips the approved call (fails closed). REWOO, PlanExecute, ParallelReact and native_fc refuse gated tools instead of asking. With a policy set, a flagged tool the policy does not gate runs unasked (the policy owns the decision). (`RetryingToolRegistry` no longer retries a granted call, and retries only tools annotated `idempotent` or `read_only`: plan 944e2692.)
 - Swarm never hands off by itself: nothing shipped writes `next_agent`.
 - SEC-11: D-030 recovery can pass the task text to a side-effecting single-parameter tool.
 - REACT-05: reasoning-engine input is not length-capped. MEM-03/04: O(n^2) rewrite per `add` and embedding under the store lock.
@@ -256,8 +255,8 @@ E5 (the examples scorer reads `result.success`) lands with E1.
 
 Work deferred to Phases 2-6 of the original roadmap:
 
-- Runtime and accounting: usage and cost capture (OBS-01), monitor event bursts (OBS-02), timeouts inside a turn (OBS-03), `arun` and checkpoints (OBS-04), a richer `AgentTrace` (OBS-05), `Budget`/`RunState`/events, a partial result on budget errors (LOOP-17), LOOP-15.
-- ToolSpec: TOOL-04 to TOOL-13, including side-effect and read-only hints that SEC-11 (roadmap D7) needs.
+- Runtime and accounting: cost capture (OBS-01; per-interface call and token counters exist since plan 944e2692), monitor event bursts (OBS-02), timeouts inside a turn (OBS-03), `arun` and checkpoints (OBS-04), a richer `AgentTrace` (OBS-05), `Budget`/`RunState`/events, a partial result on budget errors (LOOP-17), LOOP-15.
+- ToolSpec: the rest of TOOL-05 to TOOL-13 (plan 944e2692 ported annotations, exact schemas and an enforced timeout; SEC-11 (roadmap D7) can now read the read-only and side-effect hints).
 - Async core (roadmap D3) with a per-model executor (D6); parallel Orchestrator workers (PAT-10); ParallelReact stall detection (REACT-06); real HITL for REWOO, PlanExecute, ParallelReact and native_fc (lifts the SEC-04 refusal).
 - Integrations: MCP v2 (INT-01 to INT-05), A2A v1.0 on the official SDK (INT-06, roadmap D4), AG-UI, OTEL.
 - Guardrails: SEC-07, SEC-08, SEC-10, SEC-12.

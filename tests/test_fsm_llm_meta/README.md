@@ -8,7 +8,7 @@ The meta-builder (`MetaBuilderAgent`, CLI `fsm-llm-meta`) helps a user build one
 
 ## How it works
 
-Most tests work on plain builder objects with no LLM at all. Tests that touch the LLM either replace `litellm.completion` with `monkeypatch`, replace `agent._llm_call` with a lambda, or rely on the agent falling back to keywords and canned text when the LLM call fails.
+Most tests work on plain builder objects with no LLM at all. The meta-builder itself is an FSM run by the core engine (classify the artifact type, collect requirements, build), so tests that touch the LLM give the agent a scripted LLM interface (`ScriptedMetaLLM` in `conftest.py`, passed as `llm_interface=`) that answers the classifier, the build call and the replies from prepared lists, or make core's one LLM call (`fsm_llm.llm.completion`) fail and check the agent's keyword and canned-text fallback.
 
 ```mermaid
 flowchart LR
@@ -16,14 +16,18 @@ flowchart LR
     conftest --> tools[test_tools.py]
     builders --> B[FSMBuilder / WorkflowBuilder / AgentBuilder]
     tools --> T[create_*_tools registries]
-    agent[test_agent.py, test_integration.py] --> M[MetaBuilderAgent]
+    agent[test_agent.py, test_meta_conversation.py, test_review_fixes_meta.py, test_integration.py] --> M[MetaBuilderAgent on the meta FSM]
+    fsm[test_meta_fsm.py] --> F[build_meta_builder_fsm]
     prompts[test_prompts.py] --> P[meta_prompts]
     defs[test_definitions.py] --> D[ArtifactType, BuildProgress, MetaBuilderConfig, MetaBuilderResult]
 ```
 
 ## Files
 
-- `conftest.py` - fixtures: empty `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder`, a 3-state `populated_fsm_builder` ("GreetingBot"), and a `meta_config`, and `offline_llm`, which makes every LLM call fail at once.
+- `conftest.py` - fixtures: empty `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder`, a 3-state `populated_fsm_builder` ("GreetingBot"), a `meta_config`, and `offline_llm`, which makes every LLM call fail at once; the scripted interface `ScriptedMetaLLM`.
+- `test_meta_fsm.py` - the meta FSM: structure, gates, the build request and its schemas, a run through the core engine.
+- `test_meta_conversation.py` - whole conversations by behaviour: each artifact kind, a type switch, a failed then fixed build, outages, `max_turns`, what the monitor reads.
+- `test_review_fixes_meta.py` - review fixes: malformed build replies, keyword hints and negation, the build prompt sentence.
 - `test_agent.py` - `MetaBuilderAgent`: config, start/send lifecycle, type detection, build triggers, result building, output helpers, schema-echo rejection, provider-failure handling, workflow `step_type` enum (44 tests).
 - `test_builders.py` - core behavior of the three builders: add, remove, update, transitions, `to_dict`, validation, summaries at three detail levels (71 tests).
 - `test_builders_elaborate.py` - builder edge cases, config type checks, `VALID_STEP_TYPES`, exception attributes and hierarchy, `MetaBuilderConfig` range checks, summary content (44 tests).
@@ -44,6 +48,6 @@ flowchart LR
 ## Things to know
 
 - Run from the repo root with the project virtualenv.
-- No test needs a live model or API key. `TestTypeDetection` and `TestStartSendFlow` in `test_agent.py` use the `offline_llm` fixture: every LLM call raises at once, so the agent uses its keyword or canned-text fallback, which is what the assertions expect, and no network call is made.
+- No test needs a live model or API key. `TestTypeDetection` and `TestStartSendFlow` in `test_agent.py` use the `offline_llm` fixture: every LLM call raises at once, so the agent uses its keyword or canned-text fallback, which is what the assertions expect, and no network call is made. The other agent tests use `ScriptedMetaLLM`.
 - `test_enum_reaches_response_format_and_ollama_format` imports `OllamaChatConfig` from `litellm.llms.ollama.chat.transformation`, so it depends on that litellm internal path.
 - `test_save_artifact*` write only under pytest's `tmp_path`.

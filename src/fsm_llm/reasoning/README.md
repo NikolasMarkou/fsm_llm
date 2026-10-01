@@ -78,7 +78,9 @@ print(trace["summary"])
 ## Things to know
 
 - One engine solves one problem at a time. Calls to `solve_problem` on the same engine wait for each other.
-- Every step is an LLM call, so one problem can take dozens of calls. Small models may loop until a limit stops them: a strategy FSM still running after 30 steps is popped and the solve goes on; a solve that spends its 170 steps raises `ReasoningExecutionError`.
+- Every step is an LLM call, so one problem can take dozens of calls. Small models may loop until a limit stops them: a strategy FSM still running after 30 steps is popped and the solve goes on; a solve that spends its 170 steps raises `ReasoningExecutionError`. Any failed solve raises that error, and its `details["partial_context"]` holds what the solve had collected (for example a validated `proposed_solution`).
+- The model cannot mark its own answer as valid or change the retry counters: those keys are written only by the engine's handlers. An attempt that produces no answer counts as a failed attempt.
+- `ReasoningEngine(llm_interface=my_interface)` sends every call to your interface (its `model` argument is then not used).
 - `--type` (or `preferred_reasoning_type` in the starting context) overrides the automatic choice when it names a valid strategy.
 - If a strategy FSM cannot be loaded, the engine falls back to `analytical` only, never to another style.
 - Unknown words passed to `map_reasoning_type` fall back to `analytical` with a warning.

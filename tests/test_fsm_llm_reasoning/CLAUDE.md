@@ -5,11 +5,11 @@ Purpose: Offline unit tests (126) for the reasoning engine subpackage `fsm_llm.r
 
 ## Scope
 
-Covers `constants.py`, `definitions.py`, `exceptions.py`, `handlers.py`, `utilities.map_reasoning_type`, `reasoning_modes.py` (absence of removed functions), selected `engine.py` internals, and `__main__.py` (JSON output helpers and `--verbose`). No test calls an LLM, loads a reasoning FSM from disk, or needs network or env keys. End-to-end `ReasoningEngine.solve_problem` runs are not tested here.
+Covers `constants.py`, `definitions.py`, `exceptions.py`, `handlers.py`, `utilities.map_reasoning_type`, `reasoning_modes.py` (absence of removed functions), selected `engine.py` internals, and `__main__.py` (JSON output helpers and `--verbose`). No test calls a real LLM or needs network or env keys. `test_engine_scripted.py` runs whole `ReasoningEngine.solve_problem` solves through core with a scripted `LLMInterface` (`_ScriptedLLM`, injected as `llm_interface=`) and asserts every call: no user exchange and no "Continue reasoning" in history, push and pop of the strategy FSM, the retry loop reaching `max_retries_reached`, the hybrid back edge bounded, handler-only verdict keys, the budget error with `partial_context`, critical handlers, classifier value normalisation.
 
 ## Architecture
 
-Tests call static methods and model constructors directly with small context dicts keyed by `ContextKeys` constants. Three techniques recur:
+Tests call static methods and model constructors directly with small context dicts keyed by `ContextKeys` constants, or drive whole solves on a scripted interface (`test_engine_scripted.py`). Three further techniques recur:
 
 - Bare engine: `object.__new__(ReasoningEngine)` plus a hand-set `engine.reasoning_fsms` dict, then call `engine._prepare_reasoning_execution(context)` (`test_engine.py::TestReasoningTypeFallback`).
 - Source assertions: `inspect.getsource(...)` on `ReasoningEngine`, `ReasoningEngine._classify_problem`, `ReasoningEngine._solve_problem_locked`, the `engine` module, and the `handlers` module, then string checks (`test_audit_fixes.py`).
@@ -25,6 +25,7 @@ Tests call static methods and model constructors directly with small context dic
 | `test_constants.py` | 19 tests on constant values | Pins literal strings and numbers |
 | `test_definitions.py` | 28 tests on Pydantic models | Validators, computed properties, thresholds |
 | `test_engine.py` | 10 tests: models, handlers, `map_reasoning_type`, ANALYTICAL-only fallback (D-009) | Uses loguru sink for the warning |
+| `test_engine_scripted.py` | Whole solves through core on `_ScriptedLLM` (also imported by `tests/test_fsm_llm_regression/test_engine_integration.py`) | Asserts calls, history, stack, retries, budget and failure details |
 | `test_exceptions.py` | 8 tests on the exception hierarchy | `details`, `reasoning_type` attributes |
 | `test_handlers.py` | 28 tests on `ReasoningHandlers`, `ContextManager`, `OutputFormatter` | Validation, trace, pruning, merge, final solution |
 | `__init__.py` | Empty package marker | |
@@ -34,7 +35,7 @@ Tests call static methods and model constructors directly with small context dic
 - `ReasoningType` (str enum), exactly 9 values: `simple_calculator`, `analytical`, `deductive`, `inductive`, `abductive`, `analogical`, `creative`, `critical`, `hybrid`. Unknown value raises `ValueError`.
 - `OrchestratorStates`: `problem_analysis`, `strategy_selection`, `execute_reasoning`, `synthesize_solution`, `validate_refine`, `final_answer`.
 - `ClassifierStates`: `analyze_domain`, `analyze_structure`, `identify_reasoning_needs`, `recommend_strategy`.
-- `HandlerNames`: `OrchestratorProblemClassifier`, `OrchestratorStrategyExecutor`, `OrchestratorSolutionValidator`, `ReasoningTracer`, `ContextPruner`, `RetryLimiter`.
+- `HandlerNames`: `OrchestratorProblemClassifier`, `OrchestratorStrategyExecutor`, `OrchestratorSolutionValidator`, `ReasoningTracer`, `ContextPruner`, `RetryLimiter`, `RetryKeyClearer`, `HybridLoopCounter`.
 - `ErrorMessages` placeholders: `INVALID_REASONING_TYPE` `{type}`, `FSM_NOT_FOUND` `{name}`; `MAX_RETRIES_EXCEEDED` non-empty. `CALCULATION_ERROR`, `VALIDATION_FAILED`, `CONTEXT_TOO_LARGE` and `Defaults.MAX_CONTEXT_SIZE` are pinned absent (removed in plan 07ad3f8c).
 - `LogMessages` placeholders: `ENGINE_INITIALIZED` `{model}`, `CLASSIFICATION_STARTED` `{context}`, `CLASSIFICATION_COMPLETE` `{type}`, `FSM_PUSHED` `{name}`, `PROBLEM_SOLVED` `{steps}`.
 - `ReasoningHandlers.validate_solution(context) -> dict`: sets `VALIDATION_RESULT`, `SOLUTION_CONFIDENCE`, `VALIDATION_CHECKS` (`has_solution`, `has_insights`, `sufficient_detail`, `addresses_problem`), `RETRY_COUNT`, `MAX_RETRIES_REACHED`. Callable on the class or an instance.
@@ -43,14 +44,14 @@ Tests call static methods and model constructors directly with small context dic
 - `ContextManager.extract_relevant_context(source_context, target_keys, max_size=None) -> dict` and `ContextManager.merge_reasoning_results(orchestrator_context, sub_fsm_context, reasoning_type) -> dict`.
 - `OutputFormatter.extract_final_solution(context) -> str` and `OutputFormatter.format_reasoning_summary(trace_info) -> str`.
 - `map_reasoning_type(str) -> str`: case-insensitive, unknown maps to `"analytical"`.
-- `ReasoningEngine._prepare_reasoning_execution(context)` reads `ContextKeys.PREFERRED_REASONING_TYPE`, writes `REASONING_TYPE_SELECTED` and `REASONING_FSM_TO_PUSH`.
+- `ReasoningEngine._prepare_reasoning_execution(context)` reads `ContextKeys.PREFERRED_REASONING_TYPE`, writes `REASONING_TYPE_SELECTED` and `REASONING_PUSH_PENDING` (`ContextKeys.REASONING_FSM_TO_PUSH` is pinned absent).
 - `fsm_llm.reasoning.__main__._format_json_output(solution, trace_info)` and `_save_as_json(save_path, problem, solution, trace_info)`.
 
 ## Data shapes
 
-Pinned `Defaults`: `TEMPERATURE == 0.7`, `MAX_TOKENS == 2000`, `MAX_RETRIES == 3`, `MAX_TRACE_STEPS == 50`, `CONTEXT_PRUNE_THRESHOLD == 8000`, `MIN_SOLUTION_LENGTH == 20`, `PRUNE_LIST_MAX_LENGTH == 10`, `PRUNE_STRING_MAX_LENGTH == 1000`. `MODEL` is only checked to be a `str`.
+Pinned `Defaults`: `TEMPERATURE == 0.7`, `MAX_TOKENS == 2000`, `MAX_RETRIES == 3`, `MAX_SOLVE_STEPS == 170`, `MAX_HYBRID_LOOPS == 2`, `MAX_TRACE_STEPS == 50`, `CONTEXT_PRUNE_THRESHOLD == 8000`, `MIN_SOLUTION_LENGTH == 20`, `PRUNE_LIST_MAX_LENGTH == 10`, `PRUNE_STRING_MAX_LENGTH == 1000`. `MODEL` is only checked to be a `str`.
 
-Pinned `ContextKeys` strings include `problem_statement`, `problem_type`, `problem_components`, `proposed_solution`, `final_solution`, `key_insights`, `validation_result`, `solution_confidence`, `reasoning_fsm_to_push`, `reasoning_type_selected`, `retry_count`, `max_retries_reached`, `operand1`, `operand2`, `operator`, `calculation_result`, `deductive_conclusion`, `inductive_hypothesis`, `best_creative_solution`, `critical_assessment`, `final_hybrid_solution`, `best_explanation`, `analogical_solution`.
+Pinned `ContextKeys` strings include `problem_statement`, `problem_type`, `problem_components`, `proposed_solution`, `final_solution`, `key_insights`, `validation_result`, `solution_confidence`, `reasoning_push_pending`, `reasoning_type_selected`, `retry_count`, `max_retries_reached`, `operand1`, `operand2`, `operator`, `calculation_result`, `deductive_conclusion`, `inductive_hypothesis`, `best_creative_solution`, `critical_assessment`, `final_hybrid_solution`, `best_explanation`, `analogical_solution`.
 
 Model behaviour pinned in `test_definitions.py`:
 
@@ -71,7 +72,7 @@ Model behaviour pinned in `test_definitions.py`:
 - `validate_solution`: `simple_calculator` strategy accepts short answers and relaxes `has_insights`; a solution shorter than `MIN_SOLUTION_LENGTH` fails; failure increments `RETRY_COUNT`; `RETRY_COUNT == MAX_RETRIES` sets `MAX_RETRIES_REACHED`; empty `PROBLEM_STATEMENT` makes `addresses_problem` follow `has_solution`.
 - `update_reasoning_trace` adds nothing without both state keys, snapshots only specific `ContextKeys` (never `_`-prefixed or arbitrary keys), and keeps length at most `MAX_TRACE_STEPS + 1`.
 - `prune_context` never returns `PROBLEM_STATEMENT` or `PROPOSED_SOLUTION` (preserved keys).
-- Source-level pins: `ReasoningEngine` contains `"Continue reasoning."` and not `"Continue reasoning:\n:{"`; `_classify_problem` has `except ReasoningClassificationError:` before `except Exception as e:`, uses `ContextKeys.PROBLEM_DOMAIN` and `ContextKeys.ALTERNATIVE_APPROACHES`, and has no `problem_domain_classified`; `_solve_problem_locked` uses `default=redacting_json_default` and no `default=str`; the `engine` module has no `default=str` and at least 2 `default=redacting_json_default`; the `handlers` module contains the phrase `never emitted`.
+- Source-level pins: the `engine` module contains no `converse(` and no `"Continue reasoning"` (the engine sends no user message); `_classify_problem` has `except ReasoningClassificationError:` before `except Exception as e:`, uses `ContextKeys.PROBLEM_DOMAIN` and `ContextKeys.ALTERNATIVE_APPROACHES`, and has no `problem_domain_classified`; `_solve_problem_locked` uses `default=redacting_json_default` and no `default=str`; the `engine` module has no `default=str` and at least 2 `default=redacting_json_default`; the `handlers` module contains the phrase `never emitted`.
 - `reasoning_modes` must not define `get_fsm_by_name`, `list_available_fsms`, `get_reasoning_fsms_only`.
 - CLI JSON output and saved results replace an object's `__str__` with `<redacted:ClassName>`.
 - Exceptions: `ReasoningEngineError(msg, details=None)` has `details == {}` by default; `ReasoningExecutionError(msg, reasoning_type=None)`; both subclasses catchable as `ReasoningEngineError`.

@@ -32,6 +32,8 @@ API(
 
 `handler_timeout` (seconds, `None` disables it) goes to the API's single `HandlerSystem`, so the cap of 4 still-running timed-out handler threads (`constants.MAX_TIMED_HANDLER_STRAGGLERS`) is shared by every conversation of that `API`. `max_fsm_cache_size` bounds `FSMManager`'s FSM definition cache and must be at least 1 (`ValueError` otherwise). The prompt builders and the FSM loader are not configurable through `API`; construct `FSMManager` directly for those.
 
+With `llm_interface`, the interface owns every LLM setting: `API` raises `ValueError` when `api_key`, a non-None `temperature` or `max_tokens`, a `model` other than the interface's own, or any `**llm_kwargs` are given beside it. It also raises `ValueError` (in `__init__` and `push_fsm`) when a definition's `classification_extractions` would classify through an interface that does not implement `complete`. `fsm_id` is `fsm_<name>_<8 hex>` from a sha256 of `model_dump(exclude_defaults=True)`, so only a change of the definition document changes it.
+
 ### Factory Methods
 
 ```python
@@ -70,6 +72,7 @@ for chunk in api.advance_stream(conv_id):  # same step, reply streamed
 results = api.run_until_terminal(        # -> tuple[AdvanceResult, ...]
     conv_id, max_steps=20, max_seconds=60.0,
     before_step=lambda n: None,          # called before step n (1, 2, ...)
+    seconds_exempt_states=(),            # state ids that may run past max_seconds
 )
 for chunk in api.run_until_terminal_stream(conv_id, max_steps=20):
     print(chunk, end="")
@@ -77,7 +80,7 @@ for chunk in api.run_until_terminal_stream(conv_id, max_steps=20):
 
 `advance` runs the same turn as `converse` (one turn at a time, rollback on failure, every handler timing, extraction, transition evaluation, Pass 2 from the post-transition state, session auto-save) with no user message: nothing is added to the history for a user, and the extraction, classification and reply prompts use their no-message wording. The bulk extraction prompt is built from the state's scoped, security-filtered context and fills only unset keys. The LLM layer sends the fixed `NEUTRAL_USER_TURN` as the provider user turn; an empty `converse("")` message is a different fact and goes out as `EMPTY_USER_MESSAGE_TURN` (`"(empty message)"`). `advance` on a terminal state raises `FSMError`.
 
-`run_until_terminal` checks, before each step: has the conversation (top of the FSM stack) ended, is the `max_seconds` budget spent, is the `max_steps` budget spent, then calls `before_step(n)` and runs one `advance`. Budgets are checked only between steps. A spent budget raises `RunBudgetExceededError` (`budget` `"steps"` or `"seconds"`, `limit`, `steps_done`); the steps already run are kept, read them from `get_conversation_history` and `get_current_state`. A conversation closed during the run (from `before_step` or another thread) ends the run normally. `max_steps` must be an int of at least 1 and `max_seconds` `None` or a positive number (`ValueError` otherwise). The agents, the harness and workflow `AgentStep`s run on these loops.
+`run_until_terminal` checks, before each step: has the conversation (top of the FSM stack) ended, is the `max_seconds` budget spent, is the `max_steps` budget spent, then calls `before_step(n)` and runs one `advance`. Budgets are checked only between steps. A spent budget raises `RunBudgetExceededError` (`budget` `"steps"` or `"seconds"`, `limit`, `steps_done`); the steps already run are kept, read them from `get_conversation_history` and `get_current_state`. A conversation closed during the run (from `before_step` or another thread) ends the run normally. When the top of the stack is an ended pushed FSM (stack depth above 1), `before_step(n)` is called once first: that call is not a step and is not budget-gated, `n` is the next step's number (the step itself calls it again with the same `n`; tell the two apart with `has_conversation_ended`), and if the hook pops the frame the run continues on the parent, otherwise it returns. `seconds_exempt_states` lets a round whose current state id is in the set run after `max_seconds` is spent (the steps budget still applies); ids are checked against the running definition (`ValueError`). `max_steps` must be an int of at least 1 and `max_seconds` `None` or a positive number (`ValueError` otherwise). The agents, the harness and workflow `AgentStep`s run on these loops.
 
 ### Session Persistence
 
@@ -176,7 +179,58 @@ class LLMInterface(ABC):
     def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse: ...
 
     def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]: ...
+
+    # Same default (NotImplementedError). Needed for classification and completion states.
+    def complete(self, request: CompletionRequest) -> CompletionResponse: ...
 ```
+
+`CompletionRequest{messages, tools=None, tool_choice=None, response_format=None, temperature=None, max_tokens=None, call_type="completion"}` (frozen, unknown fields refused): `tools` (OpenAI function schemas) and `response_format` never together, `tool_choice` only with `tools`; `None` temperature/max_tokens keep the interface's. `CompletionResponse{kind, text, calls}` (frozen): `kind` is `"calls"`, `"final"` or `"malformed"`, `calls` a tuple of `ModelToolCall{id, name, arguments: dict}`. A tool call without an id or name, or whose arguments are not a JSON object, and a provider "malformed tool call" error, give `kind="malformed"` with no calls. Every other failure raises `LLMResponseError`.
+
+```python
+from fsm_llm import CompletionRequest, LiteLLMInterface, LiteLLMEmbedder, tool_exchange
+
+llm = LiteLLMInterface("ollama_chat/qwen3.5:4b")
+reply = llm.complete(CompletionRequest(
+    messages=[{"role": "user", "content": "What is the weather in Paris?"}],
+    tools=[{"type": "function", "function": {"name": "get_weather", "parameters": {
+        "type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}],
+))
+if reply.kind == "calls":
+    results = [str(run_tool(c.name, c.arguments)) for c in reply.calls]
+    messages_to_append = tool_exchange(reply.text, reply.calls, results)
+llm.usage()          # LLMUsage{calls, errors, usage_missing, prompt/completion/total_tokens, by_kind}
+llm.reset_usage()    # returns the snapshot it cleared
+
+vectors = LiteLLMEmbedder("ollama/qwen3-embedding:0.6b").embed(["a", "b"])  # one request
+```
+
+Usage counters count every provider call of that instance once, per kind (`generate`, `extract`, `classify`, `stream`, `complete`; `embed` for the embedder): a raising call counts as a call and an error, a streamed call with usage missing. `LiteLLMEmbedder(model, *, api_key=None, timeout=120.0, retries=0, **kwargs)` has its own model, credentials and counters; no texts means no request and `[]`; a missing, uneven or non-finite vector raises `LLMResponseError`.
+
+### Completion state
+
+A state may declare one optional `completion` field (`CompletionStateConfig`; the definition stays v4.1):
+
+```json
+"call_model": {
+  "id": "call_model",
+  "description": "One tool-calling model turn",
+  "purpose": "Let the model call a tool or answer",
+  "completion": {
+    "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}}],
+    "tool_choice": "auto",
+    "instructions": "You are a weather assistant.",
+    "messages_key": "_completion_messages",
+    "result_key": "completion_result"
+  },
+  "transitions": [
+    {"target_state": "run_tools", "description": "The model called tools", "priority": 10,
+     "conditions": [{"description": "Calls", "logic": {"==": [{"var": "completion_result.kind"}, "calls"]}}]},
+    {"target_state": "done", "description": "Anything else", "priority": 900}
+  ]
+}
+```
+
+Its Pass 1 is one `complete` call over `[system(instructions)] + context[messages_key]`: a tool-calling turn with `tools`, or a structured turn with `response_format_key` (an internal context key holding the response format), exactly one of them. Core adds no prompt text, no history and no neutral user turn, and runs no tool. The result `{kind, text, calls}` is written to `result_key` (public, handler-only for extraction) and the call is made only while that key is unset, so the handler that acts on it clears it. The transcript under `messages_key` (internal) is the consumer's: handlers append `tool_exchange(...)` to it; it never enters `get_conversation_history`. A transcript with an unpaired tool call, or a tool-calling turn whose transcript has no `user` message, raises `LLMResponseError` before sending and rolls the turn back. A completion state declares no `field_extractions`, `classification_extractions`, `required_context_keys` or `extraction_instructions` and is not terminal; `fsm-llm-validate` warns when its transitions do not cover every result kind.
 
 A state with empty `response_instructions` is never sent to the interface: no `generate_response` call is made for it. `ResponseGenerationRequest` carries `system_prompt`, `user_message`, `transition_occurred` and `response_format`; the prompt is the only context channel. All three request models (`ResponseGenerationRequest`, `FieldExtractionRequest`, `BulkExtractionRequest`) refuse unknown fields (`extra="forbid"`) and carry `user_message: str | None`: `None` means there is no user message (a message-free step, the greeting, a context-only classifier call), a string (including `""`) is what the user sent. `LiteLLMInterface` fills the provider user turn for both cases (`NEUTRAL_USER_TURN`, `EMPTY_USER_MESSAGE_TURN`); a custom interface must accept `None`. `FieldExtractionRequest.context` and `.validation_rules` are filled for third-party interfaces even though `LiteLLMInterface` does not read them.
 
@@ -184,7 +238,7 @@ A state with empty `response_instructions` is never sent to the interface: no `g
 
 `FSMDefinition.handler_only_keys: list[str]` (default `[]`, opt-in): keys a user message can never write. They are dropped from the bulk return, the per-field configs and the post-transition configs; a handler write, `update_context` and `initial_context` still work. Only listed keys are covered: an unlisted gate key stays writable and a classification-owned key is not covered. A stacked child FSM uses its own list. `fsm-llm-validate` reports a listed key that no state references as INFO and warns (never errors) when a listed key is a `classification_extractions` field name.
 
-`LiteLLMInterface` is the built-in implementation supporting 100+ providers via litellm; it implements `generate_response_stream` (the Pass-2 streaming path behind `API.converse_stream`).
+`LiteLLMInterface` is the built-in implementation supporting 100+ providers via litellm; it implements `generate_response_stream` (the Pass-2 streaming path behind `API.converse_stream`) and `complete`. It is the only place the package calls litellm. Constructor kwargs named in `constants.RESERVED_LLM_CALL_KWARGS` (`model`, `messages`, `temperature`, `max_tokens`, `stream`, `response_format`, `tools`, `tool_choice`, `functions`, `function_call`, `n`) are ignored with a WARNING. Every Pass-2 request carries `ResponseGenerationRequest.temperature` (the conversation's internal `_response_temperature`, else `None` for the interface's own); a custom interface should honour it.
 
 ## WorkingMemory (`fsm_llm`)
 
@@ -234,7 +288,7 @@ if classifier.is_low_confidence(result):  # compares against schema.confidence_t
 
 The `ClassificationResult.is_below_default_threshold` property compares against a fixed default of 0.6 (`DEFAULT_CONFIDENCE_THRESHOLD`), not the schema's `confidence_threshold`; use `classifier.is_low_confidence(result)` for the schema-aware check. `ClassificationResult` has no `is_low_confidence`.
 
-`Classifier(schema, model, *, api_key=None, config=None, **llm_kwargs)` builds its own `LiteLLMInterface` and sends through its `complete_structured` method, the one provider request path of core (timeout default 120 s; `retries` is the SDK's `max_retries`; a model without `response_format` support logs a WARNING per call). `classify`/`classify_multi` accept `None` for a context-only call. The ambiguous-transition record is stored only in `context.metadata["transition_classification"]` (read it with `api.fsm_manager.get_complete_conversation(conv_id)["metadata"]`).
+`Classifier(schema, model=None, *, llm=None, api_key=None, config=None, **llm_kwargs)` sends one `complete` request per call. With `llm=` every request goes to that interface (`model` defaults to its model; an `api_key`, extra kwargs, a different `model` or an object that is not an `LLMInterface` implementing `complete` raise `ValueError`). Without it, it builds its own `LiteLLMInterface` for `model` (default `DEFAULT_LLM_MODEL`; timeout default 120 s; `retries` is the SDK's `max_retries`; a model without `response_format` support logs a WARNING per call). Inside a conversation, the AMBIGUOUS-transition classifier and every `classification_extractions` entry use the conversation's own `llm_interface`; only an entry that names a different `model` gets a private interface, which inherits no connection kwargs. Every failure of the classifier's call is `ClassificationError` (a reply text that does not parse: `ClassificationResponseError`), and only those make a turn stay with a WARNING; any other exception fails the turn. `HierarchicalClassifier(..., llm=None)` takes the same `llm=`. `classify`/`classify_multi` accept `None` for a context-only call. The ambiguous-transition record is stored only in `context.metadata["transition_classification"]` (read it with `api.fsm_manager.get_complete_conversation(conv_id)["metadata"]`).
 
 ```python
 # Multi-intent
@@ -283,6 +337,8 @@ solution, trace = engine.solve_problem("problem text", initial_context={})
 # solution: str, trace: dict (run metadata: steps, reasoning_types_used, final_confidence, execution_time_seconds)
 ```
 
+The engine sends no user message: the classifier FSM and the orchestrator run on core `run_until_terminal`, and one orchestrator run (at most 170 steps, `Defaults.MAX_SOLVE_STEPS`) pushes and pops the strategy FSMs from its `before_step` hook. A failed solve, a spent budget included, raises `ReasoningExecutionError` with `details={"conversation_id", "responses_so_far", "partial_context"}`. `ReasoningEngine(llm_interface=...)` sends every call to that interface (`model` is then not used).
+
 9 strategies: `SIMPLE_CALCULATOR`, `ANALYTICAL`, `DEDUCTIVE`, `INDUCTIVE`, `CREATIVE`, `CRITICAL`, `HYBRID`, `ABDUCTIVE`, `ANALOGICAL`.
 
 ## Agents (`fsm_llm.agents`)
@@ -320,13 +376,16 @@ agent = ReactAgent(tools=registry, config=AgentConfig(model="gpt-4o-mini"), hitl
 - `AgentResult{answer, success, trace, final_context, structured_output, stop_reason=None}`. `success` is `True` only when the run reached its goal. A forced stop still returns its last answer, with `success=False`. `stop_reason` is one of the `StopReason` values (exported from `fsm_llm.agents`): `answered`, `evidence` (planner patterns with real executed work), `max_iterations`, `forced_pass` (a failing evaluator/checker/debate verdict overridden at its limit, or Reflexion's `max_reflections` reached without a pass; a genuine pass on the last round is `answered`), `stalled` (three turns with no tool), `verification_failed`, `no_result`, `gate_failed` (a PromptChain gate failed), `ended` (the conversation was closed from outside before a terminal state). `AgentServer` responses carry it too. The answer is the reply of the last speaking state or a pattern's own answer key; `final_answer` in the context is never read.
 - `AgentConfig{model, max_iterations=10, timeout_seconds=300.0, temperature=0.5, max_tokens=1000, output_schema, instructions=None, ...}` rejects unknown fields. `model` defaults to env `LLM_MODEL` (read when the config is built), then `DEFAULT_LLM_MODEL`. `instructions` (max 2,000 chars) is prefixed to every non-empty state and per-field instruction of FSM patterns (not `classification_extractions`, the transition classifier or the reasoning engine; a slot overflowing core's 5,000-character limit raises `AgentError` at `run()`) and is `NativeFunctionCallingReactAgent`'s default `system_policy`; Swarm and meta_builder do not use it.
 - ReAct family: `max_iterations=N` counts think turns; for N >= 2 a run that never concludes gets N think turns and N - 1 tool calls, and N = 1 behaves like N = 2. A conclusion the model makes itself on the last think turn, backed by a tool result, is `success=True`; the loop ceiling `N * 3` FSM steps raises `BudgetExhaustedError`, `timeout_seconds` raises `AgentTimeoutError` (both budgets are enforced by core `API.run_until_terminal`; the agent error's `__cause__` is core's `RunBudgetExceededError`; a slow approver uses up the timeout). Both also propagate from ADaPT subtasks and Orchestrator workers.
-- Constructors raise `TypeError` for `hitl=`, `tools=`, `evaluation_fn=` or any `HumanInTheLoop` argument (`approval_policy=`, `approval_callback=`, `on_escalation=`, `confidence_threshold=`, `approval_timeout=`) on a pattern that does not take them, and for `model=`, `temperature=`, `max_tokens=` (set them on `AgentConfig`). Other keyword arguments (`seed=`, `timeout=`, `llm_interface=`, `handlers=`, ...) go to `API` and litellm. `REWOOAgent`, `PlanExecuteAgent`, `ParallelReactAgent` and `NativeFunctionCallingReactAgent` have no approval step and raise `AgentError` when their registry holds a `requires_approval` tool. `ReactAgent`, `ReflexionAgent` and `ReasoningReactAgent` raise `AgentError` for such a tool when `hitl` has neither an approval callback nor a policy.
+- Constructors raise `TypeError` for `hitl=`, `tools=`, `evaluation_fn=` or any `HumanInTheLoop` argument (`approval_policy=`, `approval_callback=`, `on_escalation=`, `confidence_threshold=`, `approval_timeout=`) on a pattern that does not take them, and for `model=`, `temperature=`, `max_tokens=` (set them on `AgentConfig`). Other keyword arguments (`seed=`, `timeout=`, `llm_interface=`, `handlers=`, ...) go to `API`. With `llm_interface=` the interface owns the model settings: `AgentConfig.model/temperature/max_tokens` are not applied, any LLM setting beside it is refused by core, and `enable_prompt_cache=True` raises `AgentError`. `REWOOAgent`, `PlanExecuteAgent`, `ParallelReactAgent` and `NativeFunctionCallingReactAgent` have no approval step and raise `AgentError` when their registry holds a `requires_approval` tool. `ReactAgent`, `ReflexionAgent` and `ReasoningReactAgent` raise `AgentError` for such a tool when `hitl` has neither an approval callback nor a policy.
 - `initial_context` cannot set run-owned keys (`final_answer`, `should_terminate`, `observation_count`, tool and approval keys, `refused_actions`, a pattern's own outputs such as ADaPT `operator`) or the driver grant `_approval_granted`: they are dropped with a warning.
+- Tools: `@tool(name=, description=, parameter_schema=, requires_approval=, annotations=ToolAnnotations(read_only=, destructive=, idempotent=, open_world=), timeout_s=)`. Native tool schemas and prompt descriptions come from the function's own pydantic model (exact types: `Optional[int]` is `integer or null`). `ToolRegistry.execute(call, *, gated=False)` never raises; a `timeout_s` call runs in a worker thread and a timeout returns a failed `ToolResult` with `timed_out=True` and `status` `unknown` (the tool keeps running). `RetryingToolRegistry` re-runs only tools annotated `idempotent` or `read_only`, never a granted (`gated`) call. A custom registry's `execute` must accept `gated`.
+- `NativeFunctionCallingReactAgent(tools, config=None, system_policy=None, *, seed=None, **api_kwargs)` uses the provider's native tool calls as an FSM on core completion states (`build_native_fc_fsm`); inject an interface with `llm_interface=` (there is no `complete_fn`). `config.force_final_tool` adds one forced tool turn and `output_schema` one repair turn.
+- `MetaBuilderAgent(config=MetaBuilderConfig(model, temperature=0.7, max_tokens=4096, max_turns=50, timeout_seconds=...), **api_kwargs)`: `run(task)`, `start(message="")`, `send(message)`, `is_complete()`, `get_result()`, `get_internal_state()`, `run_interactive()`. It is an FSM run by core (type classification, collect replies, one structured build call); a malformed build raises `MetaValidationError` from `run`, a build-call outage `BuilderError`.
 - Agents drive their FSM with core's `run_until_terminal` / `run_until_terminal_stream`: no synthetic user message, and silent intermediate states make no reply call. On a HITL denial the driver writes one sentence per refused call that did not run to `final_context["refused_actions"]` (`ContextKeys.REFUSED_ACTIONS`, built by `handlers.refusal_record` from `handlers.call_label`), and approval-gated conclude prompts tell the model those actions were not performed; a call approved and run later loses its entry, and a denied repeat of a call that already ran (`handlers.call_ran`) adds none.
 
 18 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm`, `parallel_react`, `native_fc`, `verified_react`, `auto_memory`, `reasoning_react`. The source of truth is `_PATTERNS` in `src/fsm_llm/agents/__init__.py`; an unknown pattern raises `ValueError` listing the available names. `tools=` for a pattern that takes none (`debate`, `prompt_chain`, `self_consistency`, `evaluator_optimizer`, `maker_checker`, `meta_builder`, `swarm`) raises `TypeError`. Pattern names are matched after `strip().lower()`; any other first argument (including the removed `create_agent("You are ...", tools)` form) raises `ValueError`. Pass instructions as `system_prompt=`.
 
-Multi-agent coordination and integrations (constructed directly, not via the factory): `SwarmAgent`, `AgentGraph` / `AgentGraphBuilder` (DAG orchestration), `MCPToolProvider` (MCP tools), `AgentServer` / `RemoteAgentTool` (A2A), `SemanticToolRegistry` (embedding-based tool retrieval), `SOPRegistry` / `load_builtin_sops` (reusable agent templates).
+Multi-agent coordination and integrations (constructed directly, not via the factory): `SwarmAgent`, `AgentGraph` / `AgentGraphBuilder` (DAG orchestration), `MCPToolProvider` (MCP tools), `AgentServer` / `RemoteAgentTool` (A2A), `SemanticToolRegistry` (embedding-based tool retrieval through core's `LiteLLMEmbedder`, or `embed_fn=`), `SOPRegistry` / `load_builtin_sops` (reusable agent templates).
 
 User guide: `src/fsm_llm/agents/README.md`. Audit record, adjusted decisions and deferred work: `docs/agents_roadmap.md`.
 

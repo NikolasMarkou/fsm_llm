@@ -56,7 +56,8 @@ Features of the core:
 - **Diagrams**: `build_fsm_graph()` gives the graph as data, `to_mermaid()` and `to_dot()` render it, and `fsm-llm-visualize --format mermaid|dot` prints it.
 - **Sessions**: save and restore a conversation with `FileSessionStore`.
 - **Working memory**: named buffers for agent-style scratch data.
-- **Many LLM providers** through litellm (OpenAI, Anthropic, Ollama and others).
+- **Tool calling and structured output**: a state with the optional `completion` field makes one native tool-calling or JSON-schema call; your handlers run the tools.
+- **Many LLM providers** through litellm (OpenAI, Anthropic, Ollama and others), all through one LLM layer (`src/fsm_llm/llm.py`) with per-interface call and token counters (`usage()`) and an embedder (`LiteLLMEmbedder`). A custom `llm_interface` is used for every call of a conversation, classification included.
 - **Security**: internal context keys are hidden and secret-looking keys are kept out of prompts. The compromised litellm 1.82.7 and 1.82.8 are below the required version, and `make audit` scans installed packages for malicious `.pth` files.
 
 ## Files
@@ -66,7 +67,7 @@ Features of the core:
 - `examples/` - 100 runnable examples in 8 categories, each a folder with `run.py` and its FSM JSON.
 - `docs/` - long guides: `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md`, plus three dated Strands design records.
 - `scripts/audit_pth.py` - scans installed packages for malicious or code-bearing `.pth` files (used by `make audit` and CI).
-- `scripts/harness_bench.py` and `scripts/bench_data/` - pre-registered benchmarks of the harness on a local model, with their raw result rows.
+- `scripts/harness_bench.py`, `scripts/agents_bench.py` and `scripts/bench_data/` - pre-registered benchmarks of the harness and the agents on a local model, with their raw result rows.
 - `evaluation/datasets/` - sample conversation datasets for `fsm-llm-eval run`. Evaluation runs are written next to it in dated folders.
 - `images/` - the logo and diagram used by this file.
 - `.github/workflows/python-package.yml` - CI on GitHub Actions.

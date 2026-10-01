@@ -27,7 +27,7 @@ flowchart LR
 | File | Round and ids | Tests | Notes |
 | --- | --- | --- | --- |
 | `test_bugs.py` | B1-B8, B-NEW-1..6, CR3, plan 3 P3-B1..B11, C1 | 34 | Many source checks; `importlib.reload(fsm_llm.logging)` in a temp cwd; mutates and restores `OPENAI_API_KEY` |
-| `test_engine_integration.py` | reasoning + workflow engine integration, iter-2 F-002 (`solve_problem` leaves the caller's context unchanged) | 16 | `ReasoningMockLLM` returns `"Processing..."` for every call; workflow tests use `@pytest.mark.asyncio` |
+| `test_engine_integration.py` | reasoning + workflow engine integration, iter-2 F-002 (`solve_problem` leaves the caller's context unchanged) | 16 | Reasoning solves run through core on `_ScriptedLLM` and `_VALID_SCRIPT` imported from `tests/test_fsm_llm_reasoning/test_engine_scripted.py` (the calls are asserted, not a vacuous `"Processing..."` stub); workflow tests use `@pytest.mark.asyncio` |
 | `test_epistemic_fixes.py` | ED-001, ED-002, ED-003 | 30 | Unmarked `async def` tests (need `asyncio_mode = "auto"`); timer test sleeps 0.1 s |
 | `test_functional.py` | functional lifecycle | 24 | Uses `mock_llm2_interface`, `sample_fsm_definition_v2`; local fixtures `greeting_fsm_dict`, `sub_fsm_dict` |
 | `test_regression_cli_and_exports.py` | plan 13: H-1..3, M-1..3, M-5, L-3 | 15 | Reads `README.md`, `docs/quickstart.md`, `src/fsm_llm/py.typed` |

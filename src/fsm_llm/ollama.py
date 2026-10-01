@@ -128,8 +128,8 @@ def apply_ollama_params(
     Mutates *call_params* in place.
 
     Args:
-        call_params: The parameter dict that will be passed to
-            ``litellm.completion()``.
+        call_params: The parameter dict that ``llm.py``'s one send path
+            passes to the provider completion call.
         model: The model identifier string.
         structured: When ``True`` (the default), also forces
             ``temperature=0`` for deterministic structured output.
@@ -177,8 +177,8 @@ def prepare_ollama_messages(
     Args:
         messages: The message list for the LLM call.
         model: The model identifier string.
-        response_format: The ``response_format`` dict (if any) that will
-            be passed to ``litellm.completion()``.
+        response_format: The ``response_format`` dict (if any) that
+            ``llm.py`` sends with the provider completion call.
     """
     if not is_ollama_model(model):
         return messages

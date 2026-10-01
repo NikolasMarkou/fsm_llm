@@ -56,7 +56,12 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_mcp_stdio.py` - `MCPToolProvider` against the real fixture server (skipped without `mcp`).
 - `test_memory_persistence.py` - `save_working_memory`/`load_working_memory`, `MemorySessionStore`, atomic saves.
 - `test_memory_tools.py` - `create_memory_tools` over `WorkingMemory`.
-- `test_native_fc.py` - `NativeFunctionCallingReactAgent`: loop, success signal, repair turn, forced final tool, Ollama gating.
+- `test_native_fc.py` - `NativeFunctionCallingReactAgent` (an FSM run by core): loop, success signal, repair turn, forced final tool, Ollama gating, through a scripted `llm_interface=`.
+- `test_native_fc_golden.py` - the exact requests native_fc sends, compared with a recorded fixture (`fixtures/native_fc_golden_requests.json`).
+- `test_native_fc_fsm.py` - the native_fc FSM definition and its handlers.
+- `test_one_engine.py` - every pattern sends all its model calls to an injected `LLMInterface`; nothing reaches litellm directly.
+- `test_toolspec.py` - tool annotations, exact schemas, enforced tool timeouts, the `gated` keyword and retry rules.
+- `test_review_fixes_tools_native.py`, `test_review_round2_callers.py`, `test_review_fixes_round2_agents.py` - regression tests from the reviews of that work.
 - `test_orchestrator.py` - OrchestratorAgent, its FSM, delegation, typed `all_collected`.
 - `test_parallel_react.py` - ParallelReactAgent dispatch, concurrency, conclude needs evidence.
 - `test_plan_execute.py` - PlanExecuteAgent, its FSM, `PlanStep`, plan extraction, unplannable task.

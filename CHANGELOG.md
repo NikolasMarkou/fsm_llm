@@ -16,6 +16,33 @@ agents entries come from the 2026-09-29 audit of `fsm_llm.agents` (Track A); its
 record, with each finding's status and the deferred Track B work, is
 `docs/agents_roadmap.md`.
 
+The entries marked "One LLM layer" come from plan `944e2692` (2026-10-01 to
+2026-10-02), the second half of the step driver work. Core gained one request
+primitive for tool calling, plain and structured completion
+(`LLMInterface.complete`), per-instance usage counters, an embedder
+(`LiteLLMEmbedder`) and a general tool-calling and structured-output state (the
+optional `completion` state field). Every caller that used to talk to litellm by
+itself now goes through that layer: the classifier (on the conversation's own
+interface), the LLM judge, semantic memory and semantic tool retrieval, the
+meta-builder and `native_fc`; `litellm` is imported only in `src/fsm_llm/llm.py`.
+`NativeFunctionCallingReactAgent` and `MetaBuilderAgent` are FSM definitions run by
+core, ToolSpec (tool annotations, exact schemas, an enforced timeout) is ported, and
+the reasoning engine runs on core's message-free run loop with no synthetic message.
+
+Measured for One LLM layer on `ollama_chat/qwen3.5:4b` (Ollama digest `2a654d98`,
+2026-10-01 and 2026-10-02, pre-registered fixed-n blocks): agent bench block
+`agents-react/B2`, arm `fsm_toolcall` (`native_fc` on core), 37/38 first-trial
+pass@1 at 2.39 LLM calls per task with 0 envelope leaks, against B0 `native_fc`
+37/38 at 2.39 (counted by a different meter; every difference is listed in
+`scripts/bench_data/README.md`); harness block `l4-execute-write/B2`, arm
+`native_fsm`, 40/40 verified writes against B1 `native` 40/40. Reasoning probe (12
+pre-registered problems, 2 trials each): the `e1f63a9` baseline passed 22/24 at
+63.17 LLM calls per solve with 2 null solutions; the engine on core's run loop that
+ships passed 24/24 at 49.71 calls with none; a further variant with typed per-key
+fields and silent states passed 18/24 at 28.50 calls, failed its pre-registered rule
+(logic problems answered with a bare "True"/"False", an open-ended answer with one
+item) and was reverted.
+
 Measured on `ollama_chat/qwen3.5:4b` (2026-10-01, `docs/agents_roadmap.md`,
 `EVALUATE.md` Runs 007 and 008): agent bench block `agents-react/B1` 32/38 first-trial
 pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
@@ -24,6 +51,124 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 
 ### Added
 
+- One LLM layer, core: `LLMInterface.complete(request: CompletionRequest) ->
+  CompletionResponse`, the one request primitive for tool calling, plain completion
+  and structured output. It is not abstract: the base method raises
+  `NotImplementedError`, so existing `LLMInterface` subclasses keep working;
+  `LiteLLMInterface.complete` builds the request with the same builder as every other
+  call and sends it through the one send path. Every failure is `LLMResponseError`
+  (provider error chained, empty reply, unreadable reply shape); a provider
+  "malformed tool call" error on a request with tools is data, not an error.
+- One LLM layer, core: `CompletionRequest{messages, tools, tool_choice,
+  response_format, temperature, max_tokens, call_type}` (frozen, unknown fields
+  refused; `tools` and `response_format` never together, `tool_choice` only with
+  `tools`), `CompletionResponse{kind, text, calls}` (frozen; `kind` is `"calls"`,
+  `"final"` or `"malformed"`) and `ModelToolCall{id, name, arguments: dict}`, all
+  exported from `fsm_llm`. A reply whose tool call has no id, no name, or arguments
+  that are not a JSON object is `kind="malformed"` with no calls, so none of that
+  turn's calls runs; a reply with text and calls is `kind="calls"` with the text kept.
+- One LLM layer, core: tool-transcript helpers in `fsm_llm.llm`: `tool_exchange(content,
+  calls, results)` (exported from `fsm_llm`; the paired assistant tool-call message
+  and one `tool` message per call), `check_tool_transcript(messages)` (refuses an
+  unpaired or malformed transcript), `is_malformed_tool_call_error`,
+  `decode_tool_arguments`, `implements_complete`, `interface_model`, and
+  `constants.MALFORMED_TOOL_CALL_MARKERS`.
+- One LLM layer, core: usage counters. `LiteLLMInterface.usage() -> LLMUsage` and
+  `reset_usage()` (returns the snapshot it cleared). Every provider call of an instance
+  is counted once on that instance, per kind (`generate`, `extract`, `classify`,
+  `stream`, `complete`; `constants.USAGE_KIND_*` and `USAGE_KIND_BY_CALL_TYPE`): calls,
+  errors, replies without usage, and
+  prompt, completion and total tokens. A call that raises counts as a call and an
+  error; a streamed call counts with usage missing (also when it fails mid-way).
+  `LLMUsage(LLMCallCounts)` adds `by_kind`; both are frozen and exported from
+  `fsm_llm`. There is no process-wide counter: a reader meters the interface it owns
+  (inject it with `llm_interface=`).
+- One LLM layer, core: `LiteLLMEmbedder(model, *, api_key=None, timeout=120.0,
+  retries=0, **kwargs)` with `embed(texts) -> list[list[float]]` (one provider request
+  for all texts, `[]` and no request for no texts), `usage()` and `reset_usage()`
+  (kind `embed`), exported from `fsm_llm`. It has its own model and connection
+  settings, never the chat model's. A reply with a missing, uneven, empty or
+  non-finite vector raises `LLMResponseError`. Reserved call kwargs
+  (`constants.RESERVED_EMBEDDING_CALL_KWARGS`) are ignored with a WARNING.
+- One LLM layer, core: the optional `completion` state field
+  (`CompletionStateConfig{tools, tool_choice, response_format_key, instructions,
+  messages_key="_completion_messages", result_key="completion_result"}`, exported from
+  `fsm_llm`; FSM definition format stays v4.1). A completion state's Pass 1 is one
+  `complete` call over `[system(instructions)] + context[messages_key]`: a tool-calling
+  turn (`tools`) or a structured turn (`response_format_key` names the internal context
+  key holding the response format), never both. No prompt builder text, no history and
+  no neutral user turn are added. The result `{kind, text, calls}` is written to the
+  public `result_key` (handler-only for extraction) and transitions read
+  `<result_key>.kind`; the call is made only while that key is unset. The transcript
+  is a consumer-owned internal context list, never the conversation history; core runs
+  no tool. A transcript that `check_tool_transcript` refuses, or a tool-calling turn
+  whose transcript holds no user message, raises `LLMResponseError` before anything is
+  sent and the turn rolls back. A completion state may not also declare extraction
+  fields, `classification_extractions`, `required_context_keys` or
+  `extraction_instructions`, nor be terminal; `fsm-llm-validate` warns when its
+  transitions do not cover every result kind. New constants
+  `DEFAULT_COMPLETION_MESSAGES_KEY`, `DEFAULT_COMPLETION_RESULT_KEY`,
+  `COMPLETION_TOOL_CHOICE_KEYWORDS`.
+- One LLM layer, core: `Classifier(schema, model=None, *, llm=None, api_key=None,
+  config=None, **llm_kwargs)` and `HierarchicalClassifier(..., llm=None)`: with `llm`
+  every classifier request goes to that interface (an `api_key`, extra kwargs, a
+  different `model`, or an object that is not an `LLMInterface` implementing
+  `complete` raise `ValueError`); without it the classifier builds its own interface
+  as before.
+- One LLM layer, core: `API.run_until_terminal(..., seconds_exempt_states=())` and the
+  stream form: a round whose current state is in the set runs even when the seconds
+  budget is spent (the steps budget still applies). Ids are checked against the
+  running definition (`ValueError` for an unknown id or a bare `str`).
+- One LLM layer, core: `ResponseGenerationRequest.temperature: float | None` (a
+  per-call Pass-2 temperature, set by the pipeline from the internal context key
+  `constants.CONTEXT_KEY_RESPONSE_TEMPERATURE`, `"_response_temperature"`; a custom
+  interface should honour it) and `fsm_llm.api.llm_settings_for(api_kwargs,
+  **settings)` (a subpackage's own LLM settings, only when no interface is injected).
+- One LLM layer, core: `typed_field_extraction(field_name, field_type, instructions,
+  *, context_keys, required=True)` and `clear_keys_on_entry(keys, *, state, name=None,
+  priority=100)`, exported from `fsm_llm` (moved from agents); also
+  `definitions.TypedFieldType`, `handlers.clear_keys_delta(keys, context)`,
+  `definitions.checked_key_names(keys, *, argument)` (refuses `None`, a bare `str` and
+  non-`str` members), `constants.EXTRACTION_ENVELOPE_KEYS` and
+  `constants.FIELD_PROMPT_CONTEXT_LABEL`.
+- One LLM layer, agents: ToolSpec. `ToolAnnotations{read_only, destructive,
+  idempotent, open_world}` (exported; `retry_safe` is True for an explicit
+  `idempotent` or `read_only`), `ToolDefinition.annotations`, `.timeout_s` (finite, up
+  to `Defaults.MAX_TOOL_TIMEOUT_S`) and `.args_model` (the pydantic model of the
+  function's parameters, giving exact JSON schemas); `@tool(annotations=,
+  timeout_s=)` and `register_function(..., *, annotations=, timeout_s=)`; MCP tool
+  annotations are mapped onto `ToolAnnotations`. `tools.tool_parameters_schema(tool)`
+  is the one schema source for native tool schemas and prompt descriptions;
+  `tools.schema_types(prop, *, root=None)` renders `anyOf`, type lists and local
+  `$ref`s (an `Optional[int]` parameter reads `integer or null`, a `str` Enum
+  `string`; an unresolvable reference reads `any`).
+- One LLM layer, agents: `ToolResult.timed_out`, `ToolResult.status` and
+  `ToolResult.observation` (the one place the model-facing text is built:
+  `[TOOL FAILED]`, `[TOOL OUTCOME UNKNOWN]` for a timed-out call, or the summary);
+  `constants.ToolRunStatus` (`success`, `failed`, `unknown`); every executor trace
+  entry carries `tool_status` (AgentHandlers, ParallelReact, `native_fc`, REWOO; REWOO
+  `evidence_status` entries too); `tools.refuse_execute_without_gated(registry)`;
+  `ErrorMessages.PROMPT_CACHE_WITH_INTERFACE`.
+- One LLM layer, agents: `SemanticToolRegistry(..., *, embed_fn=None)`, the same
+  per-text callable seam `SemanticMemoryStore` has.
+- One LLM layer, agents: the FSM definitions behind the two rebuilt agents and their
+  constants: `fsm_definitions.build_native_fc_fsm`, `NativeFCStates`,
+  `NativeFCContextKeys`, `NativeFCHandlerNames`; `fsm_definitions.build_meta_builder_fsm`,
+  `MetaBuilderStates`, `MetaContextKeys`, `MetaBuildOutcome`, `MetaHandlerNames` and the
+  `META_*` constants (`META_BUILD_PROMPT`, the keyword tables, intents and key lists).
+  `BaseAgent._step_ceiling(max_iterations)` is the overridable step-ceiling hook.
+- One LLM layer, reasoning: `ContextKeys.REASONING_PUSH_PENDING`, `NEEDS_REFINEMENT`,
+  `HYBRID_LOOP_COUNT`; `Defaults.MAX_SOLVE_STEPS` (170) and `MAX_HYBRID_LOOPS` (2);
+  `HandlerNames.RETRY_KEY_CLEARER` and `HYBRID_LOOP_COUNTER`;
+  `ReasoningHandlers.count_hybrid_loop`; constants `RETRY_CLEARED_KEYS`,
+  `ORCHESTRATOR_HANDLER_ONLY_KEYS`, `HYBRID_EVALUATION_STATE`, `SOLVE_DRIVER_KEYS`.
+- One LLM layer, bench: `scripts/agents_bench.py` meter `wrapper_version` "2" (reads
+  the injected interface's `usage()`; "1" stays for recounting B0/B1), arm
+  `fsm_toolcall`, manifest disclosures (`llm_request`, `agent_class`, `run_cap`,
+  `tool_schemas_sha256`, `first_request`) and the recorded block `agents-react/B2`.
+  `scripts/harness_bench.py`: `register`, arm `native_fsm`, `report --blocks` and
+  `--pair BLOCK/ARM:BLOCK/ARM`, the shared request-capture and digest helpers, and the
+  recorded block `l4-execute-write/B2`.
 - Step driver, core: `API.advance(conversation_id) -> AdvanceResult` runs one turn of
   the current state with no user message: the same turn body as `converse` (one turn
   at a time per conversation, rollback on failure, every handler timing, extraction,
@@ -66,7 +211,8 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   place, the request builder of `LiteLLMInterface`.
 - Step driver, core: `LiteLLMInterface.complete_structured(system_prompt,
   user_message, *, json_schema, schema_name)`, the structured call the `Classifier`
-  now sends through; `DataExtractionPromptBuilder.build_extraction_source_sections(
+  sent through (removed again in this cycle: One LLM layer replaced it with
+  `LLMInterface.complete`, see Removed); `DataExtractionPromptBuilder.build_extraction_source_sections(
   instance, scoped_context)`, the context and history sections of the no-message bulk
   extraction prompt.
 - Step driver, agents: `StopReason.ENDED` (`"ended"`, a forced stop): the run's
@@ -114,6 +260,140 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 
 ### Changed
 
+- One LLM layer, core: the classifier of an AMBIGUOUS transition and of a
+  `classification_extractions` entry sends its request to the conversation's own
+  `LLMInterface` (`complete`), so a custom `llm_interface` given to `API` is used and
+  its timeout, retries and kwargs apply (the 120 s classifier bound now comes from the
+  interface's timeout). A private interface is built only when the entry names a
+  different `model`, and it inherits no connection kwargs. The classifier cache key is
+  the content plus the interface's identity. The pipeline's "no model available"
+  skip and the `InvalidTransitionError` at a tie are gone.
+- One LLM layer, core: classifier failures. Every failure of the classifier's call is
+  `ClassificationError` (an unreadable reply was `ClassificationResponseError`, a dict
+  `choices` leaked `KeyError`); a reply text that does not parse stays
+  `ClassificationResponseError`. The turn soft-fails (stays, WARNING) only on
+  `ClassificationError`: any other exception raised by a custom interface's
+  `complete`, and a classifier that cannot be built (a bad `prompt_config`), now fail
+  the turn instead of a silent stay. `API` (and `push_fsm`) raise `ValueError` when a
+  definition's `classification_extractions` classify through an interface that does
+  not implement `complete`; a tie with such an interface still soft-fails each turn.
+- One LLM layer, core: `API(llm_interface=...)` raises `ValueError` when it is given any
+  other LLM setting beside the interface (`api_key`, a non-None `temperature` or
+  `max_tokens`, a `model` other than the interface's own, `seed`, `caching` or any
+  other kwarg); they used to be dropped silently.
+- One LLM layer, core: request building. `tools`, `tool_choice`, `functions`,
+  `function_call` and `n` join `constants.RESERVED_LLM_CALL_KWARGS` (ignored with a
+  WARNING when given to a constructor). The empty-turn filler touches only `user`
+  messages, so an assistant tool-call message keeps `content: None`. On Ollama a
+  `complete` call that sends a `response_format` runs at temperature 0 unless its call
+  type is `response_generation`. Every Pass-2 request carries the conversation's
+  temperature (`ResponseGenerationRequest.temperature`).
+- One LLM layer, core: `fsm_id` hashes `model_dump(exclude_defaults=True)`, so adding an
+  optional field to the models no longer changes every id and an explicit default
+  hashes like its omission. Every FSM's id changes once against 0.11.0 (restoring a
+  session saved under 0.11.0 logs the existing `fsm_id` mismatch WARNING).
+- One LLM layer, core: `run_until_terminal` and its stream form call `before_step` once
+  when the top of the stack is an ended pushed FSM (stack depth above 1), so the hook
+  can pop it and the run continues on the parent; if it does not pop, the run returns
+  as before. That call is not a step and is not gated by the budgets; a hook tells it
+  from a normal call with `has_conversation_ended`. A pushed child FSM does not
+  inherit a completion result key.
+- One LLM layer, agents: the LLM judge (`default_llm_judge`) sends through a core
+  `LiteLLMInterface` (temperature 0): on Ollama thinking is off; requests carry a
+  120 s timeout and `max_tokens` 1000; a provider failure is still `EvaluationError`,
+  now chained from core's `LLMResponseError`. `complete_fn=` stays its extension point.
+- One LLM layer, agents: `SemanticMemoryStore` and `SemanticToolRegistry` embed through
+  a `LiteLLMEmbedder` by default; `rebuild_embeddings` makes one batch request
+  (all-or-nothing on failure, one WARNING); a registry with an empty
+  `embedding_model` and no `embed_fn` raises `ValueError` at construction.
+- One LLM layer, agents: `execute(tool_call, *, gated=False)` on `ToolRegistry`,
+  `CachingToolRegistry`, `RetryingToolRegistry` and ReasoningReact's registry view;
+  the HITL executor passes `gated=True` for a granted call. A third-party `execute`
+  override must accept `gated`: the ReAct family, Reflexion and PlanExecute refuse one
+  without it at the start of `run()`, ReasoningReact at construction (`AgentError`);
+  REWOO, ParallelReact and `native_fc` never pass it. `RetryingToolRegistry` retries
+  only a `retry_safe` tool (annotated `idempotent` or `read_only`) and never a gated
+  call or a `requires_approval` tool, so unannotated tools are no longer retried.
+  `CachingToolRegistry` neither serves nor stores a gated call.
+- One LLM layer, agents: `ToolDefinition.timeout_s` is enforced by `ToolRegistry.execute`
+  (a worker thread; the registry lock is never held across the call). A timed-out call
+  returns a failed `ToolResult` with `timed_out=True` and `tool_status` `unknown`; the
+  Python tool keeps running and its late result is discarded with a WARNING. PlanExecute
+  sends an unknown-outcome step to synthesis (no replan, no next step) and reports
+  `success=False, stop_reason="no_result"`; a ParallelReact batch with a timed-out call
+  is `unknown`.
+- One LLM layer, agents: prompt-mode tool descriptions read the same exact schema as
+  native tool schemas (`Optional[int]` is `integer or null`, an Enum its value type);
+  tools with a `dict` parameter gain `additionalProperties: true`, and harness tools
+  with a defaulted path gain `"default": "."` in their schemas.
+- One LLM layer, agents: `enable_prompt_cache=True` with an injected `llm_interface`
+  raises `AgentError` at construction. `AgentConfig.model`, `temperature` and
+  `max_tokens` configure the interface core builds and are not applied to an injected
+  one. SelfConsistency sets each sample's temperature on the request, so it works with
+  an injected interface.
+- One LLM layer, agents: `NativeFunctionCallingReactAgent` runs as an FSM on core
+  (`build_native_fc_fsm`: `call_model` and the optional `force_final` and `repair`
+  completion states, `run_tools`, `conclude`) through `BaseAgent._standard_run`. The
+  model-visible requests are byte-identical to the old loop on 24 recorded scenarios
+  (transport keys aside). Changes: each request carries the interface timeout (120 s
+  by default, none before); `initial_context` goes through `_init_context` (run-output
+  keys and the approval grant stripped; the model still sees only the system message
+  and transcript) and `final_context` is filtered like the other patterns; other
+  `api_kwargs` reach `API`; `iterations_used` counts loop model turns; a
+  whitespace-only answer is `no_result`; the third positional constructor argument is
+  `system_policy` (it was `complete_fn`), and `system_policy` must be a `str` or `None`
+  (`TypeError`); a forced turn with an unrunnable call runs none of its calls; an empty
+  task is sent as `EMPTY_USER_MESSAGE_TURN`; a call with an empty tool name makes the
+  turn malformed (it ran as an unknown tool); a provider outage is `AgentError` chained
+  from core's `LLMResponseError`. The wall clock is checked only before each loop model
+  turn, so the forced and repair turns still run after the deadline, as before. The
+  test and caller seam is `llm_interface=`.
+- One LLM layer, agents: `MetaBuilderAgent` runs an FSM through core (`classify`,
+  `collect`, `build`, `build_failed`, `done`): the artifact type is a
+  `classification_extractions` field (intents fsm, workflow, agent and a fallback
+  `unknown`), collect replies are core Pass 2, and the build is a structured
+  completion state (temperature 0 and core's Ollama preparation). Every model call
+  goes to the conversation interface, so `llm_interface=` reaches all of them. Public
+  API unchanged; behaviour shifts: the reply of `start(message)` is written by the
+  model (canned only for `start("")`), and every collect reply ends with "Say 'build
+  it' when you're ready." (appended to the returned reply when the model drops it;
+  the stored history keeps the model's text); the agent pattern comes from an
+  `agent_type` enum in the build schema (no second classifier; keyword fallback); a
+  low-confidence or failed reclassification keeps the previous type; `start` never
+  builds; keyword hints match whole words, a negation that governs the build phrase
+  ("don't build it yet") blocks it, and a switch word plus a build phrase reclassifies
+  before building. A malformed build reply (a JSON schema echo, or a field of the wrong
+  type) is a failed build with one validation error per field in `send` and raises
+  `MetaValidationError(errors=...)` from `run`; a build-call outage raises
+  `BuilderError` (chained from `LLMResponseError`) from `run` and keeps the session
+  open with the failed-build reply in `send`. `MetaBuilderConfig.timeout_seconds` is
+  the per-request timeout; misplaced constructor kwargs (`model=`, `temperature=`,
+  `hitl=`, ...) raise `TypeError`. `fsm-llm-meta` exits 130 on Ctrl-C (it exited 1).
+  Prompt tokens per session rose about 43% (core's Pass-2 prompt).
+- One LLM layer, reasoning: the engine sends no user message (no "Continue reasoning"
+  turns). The classifier FSM runs on core `run_until_terminal` (10 steps; a spent
+  budget is `ReasoningClassificationError` chained from `RunBudgetExceededError`). One
+  orchestrator run (170 steps, `Defaults.MAX_SOLVE_STEPS`) drives every strategy FSM
+  through its `before_step` hook: pushed by type (no FSM dict in context, so none in a
+  prompt), popped when it ends or after 30 steps; a failing pop stops the solve.
+  `execute_reasoning` entry clears `proposed_solution`, `key_insights` and
+  `validation_result`, so a retry produces and validates a new answer. The validation
+  verdict, counters, chosen strategy and confidence are handler-only (the model cannot
+  open the validation gate); an attempt with no solution counts as a failed one; the
+  hybrid back edge runs at most twice. The classifier, strategy executor, validator,
+  retry limiter and hybrid counter are critical handlers: their failure stops the
+  solve. A spent budget, and any other failed solve, raises `ReasoningExecutionError`
+  with `details={conversation_id, responses_so_far, partial_context}` (it used to
+  return the fallback string as the solution); ReasoningReact's `reason` tool reports
+  a failed call. Malformed classifier values are normalised (a bad recommended type
+  becomes `analytical` with a WARNING); a `0` or `False` answer is a solution; the
+  driver keys `reasoning_push_pending`, `reasoning_type_selected` and
+  `classified_problem_type` are dropped from `initial_context` with a WARNING;
+  `all_responses` leaves out silent steps. Prompts reworded where they asked the model
+  for handler-owned keys.
+- One LLM layer, bench: `scripts/harness_bench.py probe-seed` sends through core's
+  LLM layer (Ollama preparation now applies, so a new seed-probe record is not
+  byte-comparable with an old one).
 - Step driver, core: a silent state (empty `response_instructions`) says nothing on
   every entry. It makes no Pass-2 LLM call and no `LLMInterface` call at all;
   `start_conversation` and `converse` return `""` (they returned a `[<state>]`
@@ -156,7 +436,9 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   `response_format` support logs a WARNING on every classifier call, whitespace-only
   user content counts as empty, and the extra keyword arguments are `**llm_kwargs`.
   Tests that patched `fsm_llm.classification.completion` must patch
-  `fsm_llm.llm.completion`.
+  `fsm_llm.llm.completion`. (Superseded in this cycle by One LLM layer: the classifier
+  sends `LLMInterface.complete` requests, inside a conversation through the
+  conversation's own interface.)
 - Step driver, core: `API.from_definition(fsm_definition=None, *, definition=None,
   **kwargs)`: the definition is given positionally or under either keyword, exactly
   once.
@@ -178,7 +460,8 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   `timeout_seconds`; the agents map core's `RunBudgetExceededError` to
   `BudgetExhaustedError` / `AgentTimeoutError` with the same messages, and the agent
   error's `__cause__` is now the core error. `_check_budgets(start_time)` keeps only
-  the wall-clock check (SelfConsistency samples, `native_fc`).
+  the wall-clock check (SelfConsistency samples; `native_fc` used it too until One
+  LLM layer moved it onto core's run loop).
 - Step driver, agents: the HITL driver runs in the run loop's `before_step` hook and
   the seconds budget is checked again after it, so a slow approver uses up the
   timeout before an approved call runs (`AgentTimeoutError`; before, the call ran).
@@ -355,7 +638,9 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   `functools.partial` objects, callable instances and async callables. A
   positional-only parameter is bound by position from its named value.
 - Agents: `RetryingToolRegistry` never retries a `requires_approval` tool: one approval
-  covers one execution. A tool gated only by an approval policy is still retried.
+  covers one execution. A tool gated only by an approval policy is still retried
+  (closed later in this cycle by One LLM layer: a granted call is never retried, and
+  only `retry_safe` tools are).
 - Agents: `ReasoningReactAgent`'s tool view follows the caller's registry live, so a
   tool re-registered there with `requires_approval=True` after construction is gated.
 - Core: in an envelope-shaped single-field reply (one carrying `value` or
@@ -367,6 +652,21 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 
 ### Fixed
 
+- One LLM layer, core: a custom `llm_interface` given to `API` was bypassed by the
+  classifier (AMBIGUOUS transitions and `classification_extractions` ran on a private
+  litellm interface).
+- One LLM layer, agents (TOOL-04): typed tool parameters had coarse schemas
+  (`Optional[int]` was `string`); schemas now come from the function's own model.
+- One LLM layer, agents (TOOL-07): `RetryingToolRegistry` could re-run a call an
+  approver granted when the tool was gated only by an approval policy.
+- One LLM layer, agents: the default LLM judge ran with thinking on for `ollama_chat`
+  models (live: 8.3 s per verdict, 0.43 s now, same 8/8 verdicts).
+- One LLM layer, reasoning: a solve whose validation kept failing never reached its
+  retry limit (the rejected solution stayed set and was never re-extracted; the
+  baseline ran until core's prompt cap), the model could write the validation verdict
+  and retry counters itself, the hybrid strategy's loop counter never moved, the whole
+  strategy FSM dict reached a reply prompt through context, a spent budget returned a
+  placeholder sentence as the solution, and a failing pop was logged and swallowed.
 - Core: a single-field extraction reply that opens with this field's
   `{"field_name": ..., "value": ` envelope but does not parse now yields the
   envelope's `value` on the `str`/`any` rung, never the envelope text. Prose that
@@ -455,6 +755,46 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 
 ### Removed
 
+- One LLM layer, core: `LiteLLMInterface.complete_structured`; use
+  `LiteLLMInterface.complete(CompletionRequest(..., response_format=...))`.
+- One LLM layer, core: the private classifier connection-kwargs path of the pipeline
+  (`MessagePipeline._classifier_connection_kwargs`, `pipeline._CLASSIFIER_BOUND_NAMES`).
+  `Classifier._extract_response` now takes the `CompletionResponse` alone (it took
+  `(content, response)`).
+- One LLM layer, agents: the `complete_fn` constructor parameter of
+  `NativeFunctionCallingReactAgent` and the `CompleteFn` type alias in
+  `fsm_llm.agents.native_fc`; inject an `LLMInterface` with `llm_interface=`.
+- One LLM layer, agents: the private `native_fc` loop and its helpers
+  (`NativeFunctionCallingReactAgent._litellm_complete`, `_complete`,
+  `_assistant_message`, module `_degrades_turn`, `_is_malformed_tool_call`,
+  `_call_arguments`, `_MALFORMED_TOOL_CALL_MARKERS`; use core
+  `llm.is_malformed_tool_call_error`, `llm.decode_tool_arguments`,
+  `constants.MALFORMED_TOOL_CALL_MARKERS`), and the `details["malformed_tool_call"]`
+  label of its `AgentError` (a malformed tool turn is now data, not an error).
+- One LLM layer, agents: `MetaBuilderConfig.build_max_iterations`,
+  `MetaBuilderConfig.build_timeout_seconds` and `MetaBuilderConfig.build_temperature`
+  (passing one now raises `ValidationError`); use `timeout_seconds` for the request
+  timeout.
+- One LLM layer, agents: the `max_iterations` default override of `MetaBuilderConfig`
+  (25); the field is the inherited `AgentConfig.max_iterations` (default 10), accepted
+  and not read by the meta-builder.
+- One LLM layer, agents: `MetaDefaults.BUILD_MAX_ITERATIONS`,
+  `MetaDefaults.BUILD_TIMEOUT_SECONDS`, `MetaDefaults.BUILD_TEMPERATURE`.
+- One LLM layer, agents: the meta-builder's own LLM path and Python state machine
+  (`MetaBuilderAgent._llm_call`, `_get_type_classifier`, `_get_agent_type_classifier`,
+  `_generate_collect_response`, `_detect_type`, `_execute_build`,
+  `_run_deterministic_pipeline`, `_preseed_agent_type`, `_build_result`, the
+  `_FSM_SCHEMA`/`_WORKFLOW_SCHEMA`/`_AGENT_SCHEMA`/`_ARTIFACT_SCHEMAS` class attributes
+  (the schemas are `meta_prompts.artifact_schema`), and the private fields `_builder`,
+  `_artifact_type`, `_complete`, `_build_error`, `_started`, `_messages`).
+- One LLM layer, agents: `fsm_definitions._typed_field_extraction`,
+  `fsm_definitions._EXTRACTION_ENVELOPE_KEYS` and `fsm_definitions.TypedFieldType`;
+  import `typed_field_extraction` and `TypedFieldType` from core (`fsm_llm`,
+  `fsm_llm.definitions`) and `EXTRACTION_ENVELOPE_KEYS` from `fsm_llm.constants`. No
+  re-export from agents.
+- One LLM layer, reasoning: `ContextKeys.REASONING_FSM_TO_PUSH`
+  (`"reasoning_fsm_to_push"`); the strategy FSM is pushed by type
+  (`ContextKeys.REASONING_PUSH_PENDING`).
 - Step driver, core: `FSMManager.cleanup_stale_conversations()`; use
   `FSMManager.prune_orphaned_locks()` (drops orphaned locks) or
   `API.cleanup_stale_conversations()` (ends idle conversations; kept).
@@ -493,7 +833,9 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   `create_agent(pattern, tools, system_prompt=...)`.
 - Step driver, agents: `DecompositionError` and `ToolValidationError` (never raised).
 - Step driver, agents: the module `fsm_llm.agents.meta_fsm` (`build_meta_builder_fsm`,
-  an unused placeholder; the meta-builder never called it).
+  an unused placeholder; the meta-builder never called it). One LLM layer later added
+  a real `build_meta_builder_fsm` in `fsm_llm.agents.fsm_definitions`, which the
+  meta-builder runs.
 - Step driver, agents: `PromptChainStates.GATE_PREFIX` and
   `SelfConsistencyStates.AGGREGATE` (no state of that name), `Defaults.EVALUATION_THRESHOLD`,
   `ErrorMessages.BUDGET_EXHAUSTED`, `ContextKeys.DELEGATION_PLAN`.
@@ -546,7 +888,8 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   a context key nothing wrote, so it never did anything (`AgentHandlers` is not
   exported).
 - Agents: unused constants in `fsm_llm.agents.constants`: the classes
-  `MetaBuilderStates` and `DecisionWords`; `MetaDefaults.BUILD_MAX_TOKENS`;
+  `MetaBuilderStates` (back, with new states, for the meta FSM of One LLM layer) and
+  `DecisionWords`; `MetaDefaults.BUILD_MAX_TOKENS`;
   `MetaLogMessages.ARTIFACT_CLASSIFIED`, `BUILD_COMPLETE`, `REVIEW_STARTED`,
   `REVISION_STARTED`; `MetaErrorMessages.BUILDER_NOT_INITIALIZED`,
   `INVALID_ARTIFACT_TYPE`; `ErrorMessages.APPROVAL_DENIED`, `TIMEOUT`, `NO_TOOLS`,
@@ -556,25 +899,91 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 
 ### Known open
 
+From One LLM layer (plan `944e2692`; review leftovers and work kept out of scope):
+
+- Out of scope: the ReAct family still extracts `tool_name`/`tool_input` as typed
+  fields (about 11 LLM calls per task against 2.4 for native tool calling) and is not
+  on the completion state; the reasoning classifier FSM is not a
+  `classification_extractions` field; no `parallel_tool_calls` control, no streamed
+  tool calls, no per-conversation usage counters; nothing was checked live on a
+  non-Ollama provider.
+- Reasoning: typed per-key reasoning fields with silent intermediate states cut calls
+  by a further 43% but lost answers on the pre-registered probe (18/24 against 24/24:
+  logic problems answered with a bare "True"/"False", an open-ended answer with one
+  item), so they were reverted; a new attempt needs its own pre-registered probe. A
+  final step that fails (for example over core's 30,000-character prompt cap) loses
+  that turn's `final_solution` (`partial_context` keeps the validated
+  `proposed_solution`). `ReasoningClassificationError` reaches the caller only as the
+  `__cause__` chain of `ReasoningExecutionError`. A `final_context` passed back as
+  `initial_context` still carries the previous problem's analysis (`problem_type`,
+  `reasoning_strategy`). A malformed recommended type falls back to `analytical`
+  (63 scripted calls against 45 for the model's own strategy; the cost was not
+  measured live). The classifier's unused final reply can approach the prompt cap with
+  very long fields (live peak 8.8k of 30k characters). A stuck orchestrator state costs
+  up to the 170-step budget in calls. `responses_so_far` in the error details leaves
+  out step replies.
+- Core run loop: the ended-frame `before_step` call repeats the next step number
+  (tell the two calls apart with `has_conversation_ended`), and `seconds_exempt_states`
+  ids are matched per round against the current top of the stack, so a pushed child
+  state with an exempt id is exempt too. `clear_keys_on_entry` fires only on a
+  transition into the state, never on start, push, pop or restore.
+  `typed_field_extraction` accepts underscore field names and its preamble says "from
+  the task" (the agents wording, kept byte for byte).
+- Core classification: a tie between transitions with a custom interface that has no
+  `complete` soft-fails every turn, so two unconditional transitions at one priority
+  never resolve; a direct `Classifier(llm=...)` refuses such an interface with
+  `ValueError` while the pipeline reports `ClassificationError`. Classifier calls to an
+  entry's own `model` are not counted on the conversation interface's `usage()`. A
+  classifier reply carrying a huge integer fails the turn (`ValueError` in parsing)
+  instead of soft-failing.
+- Core LLM layer: a custom `LLMInterface` may ignore
+  `ResponseGenerationRequest.temperature` (SelfConsistency samples then share one
+  temperature); `_response_temperature` is not saved in sessions and not passed to a
+  pushed child; the apology retry's temperature is untested; `deepcopy` or pickling of
+  a `LiteLLMInterface` after its first call raises `TypeError` (its meter holds a
+  lock); constructor kwargs such as `parallel_tool_calls` or `logprobs` reach every
+  call, classification included; list-shaped message content is sent to
+  Ollama as a Python repr; a provider that omits tool-call ids makes every such turn
+  `malformed` (Ollama sends ids); the validator's result-kind coverage warning misreads
+  `!=` and variable comparisons.
+- Core JsonLogic: `==` against `true` also passes for `"true"`, `"True"`, `1` and `1.0`
+  (documented; behaviour unchanged; the meta-builder's gates use `===`).
+- Core prompts: the conversational Pass-2 prompt tells the model to acknowledge a
+  transition, so replies can name internal phases (meta-builder: "moving into the
+  collection phase").
+- Tools: a pydantic-model parameter still receives a plain dict (the schema is exact,
+  the binder is unchanged); a tool that keeps hanging past its timeout keeps its thread
+  (a Python thread cannot be killed), so repeated timeouts pile up threads; the MCP
+  annotation mapping is untested against the real `mcp` package, MCP `$defs` are
+  dropped (an Enum parameter reads `any`) and an MCP timeout reads `failed`, not
+  `unknown`; `allOf`-wrapped and pathological hand-written `$ref`s read `any` or recurse
+  deeply in `schema_types`; an `IntEnum` think-state example shows `0`; REWOO,
+  ParallelReact and `native_fc` do not check that a registry's `execute` accepts
+  `gated`; PlanExecute's `no_result` for a timed-out step does not name the timeout.
+- `native_fc`: with an interface built with `timeout=None` the forced and repair turns
+  after the deadline are unbounded; an agent given `seed=` beside `llm_interface=` is
+  refused only when `run()` builds its `API`; `reasoning_model=` of
+  `ReasoningReactAgent` is dropped beside an injected interface. The harness anchor in
+  `roles.py` still names the old `native_fc` block (harness source unchanged here).
+- Meta-builder: an explicit `null` in a build reply field is a malformed build; a
+  one-word trigger with punctuation ("go.") is not a trigger; the negation guard lets
+  some negated requests build ("don't you dare build it"); the reply returned to the
+  user and the reply stored in core's history differ by the appended build sentence;
+  prompt tokens per session are about 43% higher than before.
+- Bench: `agents-react/B2` calls (meter "2") and B0 calls (meter "1") come from
+  different meters, bridged by an offline and a live parity check; only the first
+  request of each task is digested in a manifest; harness rows carry no LLM-call
+  count; the L4 react control arm makes few tool calls (as in B0/B1);
+  `agents_bench register`/`run` still import litellm (cost-map fetch).
+
 From the step driver work (plan `07ad3f8c`), open until its iteration 2 or later:
 
-- Not yet on core's LLM layer: `NativeFunctionCallingReactAgent` runs its own
-  `litellm.completion` loop (no FSM, no pipeline); `meta_builder.py` and
-  `composition.py` (the LLM judge) call `litellm.completion` directly, and
-  `semantic_memory.py` / `semantic_tools.py` call `litellm.embedding`. Planned: a core
-  tool-calling state, plain completion and embedding calls, then `native_fc` rebuilt
-  as an FSM definition.
-- `Classifier` builds its own private `LiteLLMInterface`, so an AMBIGUOUS transition
-  or a `classification_extractions` call bypasses a custom `llm_interface` given to
-  `API`.
-- The reasoning engine still drives its FSMs with synthetic `converse("Continue
-  reasoning...")` messages, and a message-free step of a non-agent FSM can repeat the
-  same extraction prompt on every step. Both move to `advance` in iteration 2.
-- ToolSpec (exact tool schemas, tool annotations, an enforced tool timeout) is not
-  ported; the coarse tool schemas (TOOL-04) and the retry of a tool gated only by an
-  approval policy (TOOL-07) stay open.
-- No usage counters in the LLM layer: the agent bench still counts calls by patching
-  litellm from outside.
+- Closed by One LLM layer: every LLM caller is on core's LLM layer (`native_fc` and
+  the meta-builder are FSMs on core); the classifier uses the conversation's
+  `llm_interface`; the reasoning engine sends no synthetic message; ToolSpec is ported
+  (TOOL-04 and TOOL-07 fixed); usage counters exist and the agent bench reads them.
+- A message-free step of a non-agent FSM can repeat the same extraction prompt on
+  every step.
 - `RunBudgetExceededError` does not carry the results of the steps already run (read
   the history and the current state).
 - `agents/plan_execute_recovery` times out at 180 s under 4 eval workers (score 1;

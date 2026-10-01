@@ -193,6 +193,28 @@ api.pop_fsm(conv_id,
 
 Classification is built into the core (`fsm_llm.Classifier`). Use it with `classification_extractions` on states for automatic intent-based routing, or use a lightweight classifier layer that pushes the appropriate FSM via stacking.
 
+Inside a conversation the classifier uses the conversation's own LLM interface, so a custom `llm_interface` given to `API` also answers the classification calls. An entry that sets its own `model` gets a separate interface for that model (no connection settings are copied to it).
+
+## Tool Calling and Structured Turns (`completion`)
+
+A state may declare the optional `completion` field. Its Pass 1 is then one native tool-calling call (`tools`) or one JSON-schema call (`response_format_key`, an internal context key holding the response format), never both, over `[system(instructions)] + context[messages_key]`. The result `{kind, text, calls}` lands in `result_key` (default `completion_result`), and transitions route on `<result_key>.kind`:
+
+```json
+"transitions": [
+  {"target_state": "run_tools", "description": "The model called tools", "priority": 10,
+   "conditions": [{"description": "Calls", "logic": {"==": [{"var": "completion_result.kind"}, "calls"]}}]},
+  {"target_state": "conclude", "description": "Final answer or malformed turn", "priority": 900}
+]
+```
+
+Design rules:
+
+- Give every result kind (`calls`, `final`, `malformed`; no `calls` without `tools`) a route, or end on an unconditional fallback edge; `fsm-llm-validate` warns otherwise.
+- The transcript (`messages_key`, default `_completion_messages`) belongs to you: seed it with the task as a `user` message, and after running the calls append `fsm_llm.tool_exchange(text, calls, results)`. Core refuses an unpaired transcript and a tool-calling turn with no user message.
+- The call runs only while `result_key` is unset: the handler that acts on a result clears it, otherwise the state makes no new call.
+- A completion state has no other extraction (`field_extractions`, `classification_extractions`, `required_context_keys`, `extraction_instructions`) and cannot be terminal. Leave its `response_instructions` empty unless it should also speak.
+- Core runs no tool. Run tools in a handler on the next state (the `native_fc` agent does exactly this).
+
 ## Designing for Agents
 
 Agent patterns (`fsm_llm.agents`) auto-generate FSMs from tool registries. The core ReAct loop is a 3-4 state FSM: **Think -> Act -> Observe -> Conclude**. Tool execution happens via handlers, not state instructions.
