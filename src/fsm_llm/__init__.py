@@ -46,6 +46,9 @@ from .definitions import (
     ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
+    # Completion models (LLMInterface.complete)
+    CompletionRequest,
+    CompletionResponse,
     # Context and conversation management
     ContextScope,
     Conversation,
@@ -68,6 +71,7 @@ from .definitions import (
     IntentScore,
     InvalidTransitionError,
     LLMResponseError,
+    ModelToolCall,
     MultiClassificationResult,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
@@ -228,6 +232,9 @@ __all__ = [
     # LLM interfaces
     "LLMInterface",
     "LiteLLMInterface",
+    "CompletionRequest",
+    "CompletionResponse",
+    "ModelToolCall",
     # Enhanced prompt builders
     "DataExtractionPromptBuilder",
     "ResponseGenerationPromptBuilder",

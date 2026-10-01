@@ -52,9 +52,33 @@ DEFAULT_TEMPERATURE = 0.5
 # pass-through ``**kwargs`` may not set them: ``stream`` would hand a
 # non-streaming parser a stream object, and ``response_format`` would force (or
 # silently lose) structured output the parser does not expect (audit D12).
-# Shared by ``LiteLLMInterface`` and ``Classifier``.
+# ``tools``/``tool_choice`` are per-request (``CompletionRequest``): set on the
+# constructor they would reach every extraction call. Shared by
+# ``LiteLLMInterface`` and ``Classifier``.
 RESERVED_LLM_CALL_KWARGS = frozenset(
-    {"model", "messages", "temperature", "max_tokens", "stream", "response_format"}
+    {
+        "model",
+        "messages",
+        "temperature",
+        "max_tokens",
+        "stream",
+        "response_format",
+        "tools",
+        "tool_choice",
+    }
+)
+
+# Provider error texts that mean "this turn's TOOL CALL did not render", as
+# opposed to "the provider is unreachable" (lower-case substrings). The first
+# two are the measured shape (1 dispatch in 35 on ``ollama_chat/qwen3.5:4b``):
+# Ollama's tool-call template emitted invalid XML and litellm surfaced it as an
+# ``APIConnectionError``, so the exception class carries no information and
+# the message is all there is. Kept deliberately NARROW: a broad marker such as
+# "tool" would swallow real outages.
+MALFORMED_TOOL_CALL_MARKERS: tuple[str, ...] = (
+    "xml syntax error",
+    "element <function>",
+    "invalid tool call",
 )
 
 # DECISION plan-2026-09-30T062855-07ad3f8c/D-044: two provider user turns for

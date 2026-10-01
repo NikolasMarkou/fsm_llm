@@ -445,6 +445,121 @@ class FieldExtractionResponse(BaseModel):
 
 
 # --------------------------------------------------------------
+# Completion Models (LLMInterface.complete)
+# --------------------------------------------------------------
+
+
+class CompletionRequest(BaseModel):
+    """One provider completion: tool calling, plain text or structured output.
+
+    The request primitive of ``LLMInterface.complete``. ``messages`` are sent
+    as given, in OpenAI chat format: a ``user`` content of ``None`` means no
+    user message and a ``""`` one an empty message (the LLM layer fills each
+    with its own turn); an ``assistant`` message may carry ``tool_calls`` with
+    ``content: None``, and ``tool`` messages carry ``tool_call_id``.
+
+    Fields:
+      - ``tools``: OpenAI function schemas (at least one when given).
+      - ``tool_choice``: ``"auto"`` (the default when ``None``), ``"required"``,
+        ``"none"`` or a named-function dict; only with ``tools``.
+      - ``response_format``: a provider response format (structured output).
+        A request carries ``tools`` or ``response_format``, never both.
+      - ``temperature`` / ``max_tokens``: per-call values; ``None`` keeps the
+        interface's own.
+      - ``call_type``: the call's label (``"completion"`` unless the caller
+        names its call path, e.g. ``"classification"``).
+
+    Frozen, and unknown fields are refused.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    messages: list[dict[str, Any]] = Field(
+        ..., min_length=1, description="Provider messages, sent in order"
+    )
+    tools: list[dict[str, Any]] | None = Field(
+        default=None, min_length=1, description="OpenAI function schemas"
+    )
+    tool_choice: str | dict[str, Any] | None = Field(
+        default=None, description="Tool choice; None means 'auto'"
+    )
+    response_format: dict[str, Any] | None = Field(
+        default=None, description="Provider response format (structured output)"
+    )
+    temperature: float | None = Field(
+        default=None, ge=0.0, le=2.0, description="Per-call sampling temperature"
+    )
+    max_tokens: int | None = Field(
+        default=None, ge=1, description="Per-call completion token limit"
+    )
+    call_type: str = Field(
+        default="completion", min_length=1, description="Label of the call path"
+    )
+
+    @model_validator(mode="after")
+    def _tools_xor_response_format(self) -> CompletionRequest:
+        """Refuse ``tools`` with ``response_format``, and ``tool_choice`` alone."""
+        if self.tools is not None and self.response_format is not None:
+            raise ValueError(
+                "a completion request carries tools or response_format, not both"
+            )
+        if self.tool_choice is not None and self.tools is None:
+            raise ValueError("tool_choice requires tools")
+        return self
+
+
+class ModelToolCall(BaseModel):
+    """One tool call a model asked for, with its arguments decoded.
+
+    ``arguments`` is always a JSON object: a call whose arguments do not
+    decode to one never becomes a ``ModelToolCall`` (the whole turn is
+    ``malformed`` instead). Frozen.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str = Field(..., description="Provider id of the call ('' when none)")
+    name: str = Field(..., min_length=1, description="Name of the called tool")
+    arguments: dict[str, Any] = Field(
+        default_factory=dict, description="Decoded call arguments"
+    )
+
+
+class CompletionResponse(BaseModel):
+    """What one ``LLMInterface.complete`` call returned.
+
+    ``kind``:
+      - ``"calls"``: the model asked for one or more tools (``calls``); any
+        text it wrote beside them is kept in ``text``.
+      - ``"final"``: a reply with no tool call; ``text`` is the reply, or
+        ``None`` when the model returned no text at all.
+      - ``"malformed"``: a tool-call turn that cannot be run (a call whose
+        arguments are not a JSON object or that names no tool, or the
+        provider's own malformed-tool-call error). It carries no calls, so
+        none of the turn's calls runs, the valid ones included.
+
+    A provider outage is not a response: ``complete`` raises. Frozen.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["calls", "final", "malformed"] = Field(
+        ..., description="calls, final or malformed"
+    )
+    text: str | None = Field(default=None, description="Reply text, if any")
+    calls: tuple[ModelToolCall, ...] = Field(
+        default=(), description="Requested tool calls (only for kind='calls')"
+    )
+
+    @model_validator(mode="after")
+    def _calls_match_kind(self) -> CompletionResponse:
+        """``calls`` is non-empty exactly when ``kind`` is ``"calls"``."""
+        if (self.kind == "calls") != bool(self.calls):
+            raise ValueError("calls must be non-empty exactly when kind is 'calls'")
+        return self
+
+
+# --------------------------------------------------------------
 # Classification Extraction Models
 # --------------------------------------------------------------
 

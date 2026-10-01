@@ -27,11 +27,13 @@ from fsm_llm.definitions import (
     FSMInstance,
     HierarchicalSchema,
     IntentDefinition,
+    LLMResponseError,
     MultiClassificationResult,
     State,
     Transition,
 )
 from fsm_llm.handlers import HandlerSystem
+from fsm_llm.llm import _completion_response
 from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
@@ -643,7 +645,10 @@ class TestClassifierLLMBoundary:
                 _classifier().classify("hello")
 
         assert isinstance(exc.value, FSMError)
-        assert isinstance(exc.value.__cause__, RateLimitError)
+        # The LLM layer wraps the provider error (LLMResponseError from
+        # `complete`, plan 944e2692 D-002); the provider error stays chained.
+        assert isinstance(exc.value.__cause__, LLMResponseError)
+        assert isinstance(exc.value.__cause__.__cause__, RateLimitError)
 
     def test_wrapped_error_is_caught_by_the_pipelines_existing_except_tuple(self):
         """A-3: wrapping at the source is enough; the tuple is NOT widened."""
@@ -701,9 +706,13 @@ class TestClassifierMalformedResponseShape:
     so a `completion()` return that does not raise but carries a malformed
     shape leaked `AttributeError` -- a type NOT in the pipeline's
     `_CLASSIFICATION_SOFT_FAIL_EXCEPTIONS`, so a `required=False` field
-    would crash the turn instead of failing soft. The post-call parse is now
-    wrapped into `ClassificationResponseError` (already a member of that
-    tuple) WITHOUT widening the tuple.
+    would crash the turn instead of failing soft.
+
+    Since plan 944e2692 (D-002) the reply is read by the LLM layer's
+    `complete`, which raises `LLMResponseError` for every unreadable shape,
+    and the classifier turns every failure of that call into
+    `ClassificationError` (a member of the soft-fail tuple, WITHOUT widening
+    it). The shape error stays chained under the `LLMResponseError`.
 
     Not reachable through genuine litellm 1.x objects (`Choices`/`Message`
     always carry `.message`/`.content`); reachable via a patched/mocked
@@ -712,33 +721,34 @@ class TestClassifierMalformedResponseShape:
     attribute and can never exercise the missing-attribute path.
     """
 
-    def test_choice_without_message_raises_classification_response_error(self):
-        """RED on old code: AttributeError('... no attribute message')."""
+    def test_choice_without_message_raises_classification_error(self):
+        """RED on the N10 code: AttributeError('... no attribute message')."""
         response = types.SimpleNamespace(choices=[types.SimpleNamespace()])
         with patch("fsm_llm.llm.completion", return_value=response):
-            with pytest.raises(ClassificationResponseError, match="Malformed") as exc:
+            with pytest.raises(ClassificationError, match="Malformed") as exc:
                 _classifier().classify("x")
 
-        assert isinstance(exc.value.__cause__, AttributeError)
+        assert isinstance(exc.value.__cause__, LLMResponseError)
+        assert isinstance(exc.value.__cause__.__cause__, AttributeError)
 
-    def test_message_without_content_raises_classification_response_error(self):
+    def test_message_without_content_raises_classification_error(self):
         response = types.SimpleNamespace(
             choices=[types.SimpleNamespace(message=types.SimpleNamespace())]
         )
         with patch("fsm_llm.llm.completion", return_value=response):
-            with pytest.raises(ClassificationResponseError, match="Malformed"):
+            with pytest.raises(ClassificationError, match="Malformed"):
                 _classifier().classify("x")
 
     def test_empty_choices_guard_keeps_its_original_message(self):
-        """The pre-existing guard sits BEFORE the wrap and is not re-worded."""
+        """The empty-reply guard keeps its wording, now in the LLM layer."""
         response = types.SimpleNamespace(choices=[])
         with patch("fsm_llm.llm.completion", return_value=response):
-            with pytest.raises(ClassificationResponseError, match="Empty response"):
+            with pytest.raises(ClassificationError, match="Empty response"):
                 _classifier().classify("x")
 
     def test_parse_failure_inside_extract_response_passes_through_unchanged(self):
-        """`ClassificationResponseError` is not in the wrap tuple, so a parse
-        failure raised inside `_extract_response` keeps its own message."""
+        """A parse failure raised inside `_extract_response` keeps its own
+        type and message (it is not a failure of the call)."""
         response = types.SimpleNamespace(
             choices=[
                 types.SimpleNamespace(message=types.SimpleNamespace(content="not json"))
@@ -748,21 +758,17 @@ class TestClassifierMalformedResponseShape:
             with pytest.raises(ClassificationResponseError, match="Failed to parse"):
                 _classifier().classify("x")
 
-    def test_choices_as_dict_raises_keyerror_which_the_pipeline_tuple_covers(self):
-        """Measured behaviour, documented rather than wrapped.
-
-        `choices` as a non-empty dict makes `choices[0]` a `KeyError`. It is
-        deliberately NOT added to the classifier wrap: `KeyError` is already
-        in the pipeline's soft-fail tuple, so this shape never escaped, and
-        widening the wrap would hide a genuinely different failure class.
-        """
-        from fsm_llm.pipeline import _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS
-
-        assert KeyError in _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS
+    def test_choices_as_dict_is_a_classification_error(self):
+        """`choices` as a non-empty dict makes `choices[0]` a `KeyError`. The
+        LLM layer reads it as an unreadable shape like the others (it used to
+        escape the classifier bare and was caught only because `KeyError` is
+        in the pipeline's soft-fail tuple)."""
         response = types.SimpleNamespace(choices={"a": 1})
         with patch("fsm_llm.llm.completion", return_value=response):
-            with pytest.raises(KeyError):
+            with pytest.raises(ClassificationError, match="Malformed") as exc:
                 _classifier().classify("x")
+
+        assert isinstance(exc.value.__cause__.__cause__, KeyError)
 
 
 # ----------------------------------------------------------
@@ -1049,7 +1055,7 @@ class TestClassifierReasoningContentRecovery:
         assert result.confidence == pytest.approx(0.9)
 
     def test_extract_response_recovers_from_reasoning_content(self):
-        """SC-1 (unit): drive `_extract_response` directly at the seam."""
+        """SC-1 (unit): the LLM layer's reply reader feeds `_extract_response`."""
         from litellm.types.utils import Message
 
         msg = Message(content="", reasoning_content='{"intent": "negative"}')
@@ -1059,7 +1065,7 @@ class TestClassifierReasoningContentRecovery:
         response = MagicMock()
         response.choices = [choice]
 
-        data = Classifier._extract_response("", response)
+        data = Classifier._extract_response(_completion_response(response))
         assert data == {"intent": "negative"}
 
 

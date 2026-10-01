@@ -62,16 +62,20 @@ from litellm import completion, get_supported_openai_params
 from .constants import (
     DEFAULT_TEMPERATURE,
     EMPTY_USER_MESSAGE_TURN,
+    MALFORMED_TOOL_CALL_MARKERS,
     NEUTRAL_USER_TURN,
     RESERVED_LLM_CALL_KWARGS,
     TRUNCATED_SALVAGE_CONFIDENCE,
 )
 from .definitions import (
     BulkExtractionRequest,
+    CompletionRequest,
+    CompletionResponse,
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     LLMResponseError,
+    ModelToolCall,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
@@ -273,10 +277,14 @@ _STRUCTURED_CALL_TYPES = frozenset(
     {"data_extraction", "field_extraction", "classification"}
 )
 
+# Call types whose reply is free text even when a response_format is sent (the
+# Pass-2 ``output_schema`` case keeps the user's temperature on Ollama).
+_FREE_TEXT_CALL_TYPES = frozenset({"response_generation"})
+
 
 def _fill_empty_user_turns(
-    messages: list[dict[str, str | None]],
-) -> list[dict[str, str]]:
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Give every user turn without text a provider-safe content.
 
     Args:
@@ -287,9 +295,9 @@ def _fill_empty_user_turns(
     Returns:
         A new list of new dicts. A ``user`` content of ``None`` becomes
         ``NEUTRAL_USER_TURN``, a ``""`` or whitespace-only one becomes
-        ``EMPTY_USER_MESSAGE_TURN``; any other content is sent unchanged (a
-        ``None`` content of another role becomes ``""``). The input is not
-        mutated.
+        ``EMPTY_USER_MESSAGE_TURN``; every other message is copied unchanged
+        (an ``assistant`` tool-call message keeps ``content: None`` and its
+        ``tool_calls``). The input is not mutated.
 
     Failure mode: none, never raises for a list of dicts.
     """
@@ -298,18 +306,125 @@ def _fill_empty_user_turns(
     # constant for both): an instruction-shaped turn sent for a real empty
     # message is read by the model as the user's utterance. See decisions.md
     # D-044.
-    filled: list[dict[str, str]] = []
+    filled: list[dict[str, Any]] = []
     for message in messages:
-        content = message.get("content")
+        copy = dict(message)
         if message.get("role") == "user":
+            content = message.get("content")
             if content is None:
-                content = NEUTRAL_USER_TURN
-            elif not content.strip():
-                content = EMPTY_USER_MESSAGE_TURN
-        copy = {key: value or "" for key, value in message.items()}
-        copy["content"] = content or ""
+                copy["content"] = NEUTRAL_USER_TURN
+            elif isinstance(content, str) and not content.strip():
+                copy["content"] = EMPTY_USER_MESSAGE_TURN
         filled.append(copy)
     return filled
+
+
+def is_malformed_tool_call_error(exc: BaseException, *, tools_sent: bool) -> bool:
+    """Whether a provider error is a garbled TOOL CALL rather than an outage.
+
+    Interface contract (callers: ``LiteLLMInterface.complete``, and native_fc's
+    own loop until it runs on ``complete``):
+        - ``tools_sent``: whether the failed request carried tools. A request
+          without tools cannot garble a tool call, so it is never one.
+        - Returns ``True`` only when the error text contains one of
+          ``MALFORMED_TOOL_CALL_MARKERS`` (case-insensitive); everything not
+          positively identified is ``False`` (fail closed: an unrecognised
+          failure stays a failure).
+        - Never raises.
+    """
+    if not tools_sent:
+        return False
+    text = str(exc).lower()
+    return any(marker in text for marker in MALFORMED_TOOL_CALL_MARKERS)
+
+
+def decode_tool_arguments(raw: Any) -> dict[str, Any] | None:
+    """The arguments of one tool call as a dict, or ``None`` when malformed.
+
+    Interface contract (callers: the ``complete`` reply normaliser, and
+    native_fc's own loop until it runs on ``complete``):
+        - A dict is returned as-is. A JSON string is decoded and must decode
+          to an object. ``None`` or blank text means "no arguments": ``{}``.
+        - Anything else (undecodable text; a JSON array, number, string or
+          ``null``; any other type) returns ``None``: the call must not run.
+        - Never raises.
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        if not raw.strip():
+            return {}
+        try:
+            raw = json.loads(raw)
+        except (ValueError, RecursionError):
+            return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _completion_response(response: Any) -> CompletionResponse:
+    """Normalise one provider reply into a ``CompletionResponse``.
+
+    Contract:
+        - No reply or no ``choices``: ``LLMResponseError("Empty response from
+          LLM")``. A choice without ``message`` or a message without
+          ``content`` (or another unreadable shape): ``LLMResponseError``
+          ("Malformed LLM response shape: ...") chained from the error.
+        - ``content`` is the text when it is a non-empty ``str``; a ``dict``
+          content is sent back as its JSON text; empty content is ``None``.
+          With no tool call, an empty content is recovered from the reasoning
+          trace (``_resolve_reasoning_trace``); with tool calls it is not
+          (``content: None`` is their normal shape).
+        - Tool calls: every call needs a function name and arguments that
+          decode to a JSON object (``decode_tool_arguments``); if ANY call
+          fails that, the turn is ``malformed`` with no calls, the valid ones
+          included, and its text kept.
+    """
+    choices = getattr(response, "choices", None) if response else None
+    if not choices:
+        raise LLMResponseError("Empty response from LLM")
+    try:
+        message = choices[0].message
+        content = message.content
+        raw_calls = getattr(message, "tool_calls", None) or []
+    except (AttributeError, IndexError, KeyError, TypeError) as e:
+        raise LLMResponseError(f"Malformed LLM response shape: {e}") from e
+
+    if isinstance(content, dict):
+        text: str | None = json.dumps(content)
+    elif isinstance(content, str):
+        text = content or None
+    elif content is None:
+        text = None
+    else:
+        raise LLMResponseError(
+            f"Malformed LLM response shape: content is {type(content).__name__}"
+        )
+
+    calls: list[ModelToolCall] = []
+    for raw_call in raw_calls:
+        function = getattr(raw_call, "function", None)
+        name = getattr(function, "name", None)
+        arguments = decode_tool_arguments(getattr(function, "arguments", None))
+        if not isinstance(name, str) or not name or arguments is None:
+            logger.warning(
+                "Model tool-call turn is malformed (a call with no tool name or "
+                "with arguments that are not a JSON object); none of its "
+                "calls is returned"
+            )
+            return CompletionResponse(kind="malformed", text=text)
+        call_id = getattr(raw_call, "id", None)
+        calls.append(
+            ModelToolCall(
+                id=call_id if isinstance(call_id, str) else "",
+                name=name,
+                arguments=arguments,
+            )
+        )
+    if calls:
+        return CompletionResponse(kind="calls", text=text, calls=tuple(calls))
+    if text is None:
+        text = _resolve_reasoning_trace(message) or None
+    return CompletionResponse(kind="final", text=text)
 
 
 def _safe_str(value: Any) -> str | None:
@@ -446,6 +561,35 @@ class LLMInterface(abc.ABC):
         raise NotImplementedError(
             f"{type(self).__name__} does not implement extract_bulk_data. "
             "Override this method to support bulk data extraction."
+        )
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        """
+        Send one completion: tool calling, plain text or structured output.
+
+        The one request primitive besides the Pass-1/Pass-2 methods: a caller
+        hands over the whole message list (``request.messages``) and reads a
+        typed reply. The default implementation raises ``NotImplementedError``
+        so existing subclasses that do not need it remain compatible.
+
+        Args:
+            request: The messages plus either ``tools`` (with ``tool_choice``)
+                or a ``response_format``, and optional per-call
+                ``temperature``/``max_tokens``.
+
+        Returns:
+            ``kind="calls"`` with decoded calls, ``"final"`` with the reply
+            text, or ``"malformed"`` (a tool-call turn that cannot be run;
+            no calls).
+
+        Raises:
+            LLMResponseError: If the provider call fails (an outage is not a
+                reply) or the reply cannot be read.
+            NotImplementedError: If the subclass does not implement this
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement complete. "
+            "Override this method to support completion requests."
         )
 
 
@@ -654,7 +798,7 @@ class LiteLLMInterface(LLMInterface):
                 stream=True,
             )
 
-            response = completion(**call_params)
+            response = self._send(call_params)
 
             accumulated: list[str] = []
             reasoning_parts: list[str] = []
@@ -860,56 +1004,65 @@ class LiteLLMInterface(LLMInterface):
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def complete_structured(
-        self,
-        system_prompt: str,
-        user_message: str | None,
-        *,
-        json_schema: dict[str, Any],
-        schema_name: str,
-    ) -> Any:
-        """Issue one JSON-schema-constrained completion and return the raw reply.
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        """Send one completion through the shared builder and read the reply.
 
         The request is built by ``_build_call_params`` like every other call:
-        connection kwargs, timeout, the filled user turn when ``user_message``
-        has no text, and Ollama preparation (thinking off, temperature 0,
-        ``/nothink`` and the schema in the user turn). The schema is sent as a
-        ``json_schema`` response format when the model supports it; otherwise
-        the call goes out without one and a WARNING is logged.
-
-        Args:
-            system_prompt: the system turn.
-            user_message: the user turn. ``None`` means there is no user
-                message (sent as the neutral instruction); an empty string is
-                an empty user message (sent as the empty-message placeholder).
-            json_schema: JSON schema the reply must match.
-            schema_name: name sent with the schema.
+        connection kwargs, timeout, the filled user turns, ``tools`` (never
+        gated on litellm's supported-params list) or a ``response_format``
+        (sent only when the model supports it, else a WARNING), per-call
+        temperature and max_tokens, and Ollama preparation (thinking off,
+        ``/nothink`` on the last user turn, the schema echoed into it; a
+        ``response_format`` call runs at temperature 0). A ``seed`` is sent
+        only when this interface was built with one.
 
         Returns:
-            The provider response object, unvalidated: the caller owns parsing
-            and shape checks (``Classifier`` maps them to its own errors).
+            The normalised reply (see ``CompletionResponse``). A provider error
+            that names a garbled tool call, on a request with tools, is a
+            ``malformed`` reply rather than an error.
 
         Raises:
-            Exception: whatever the provider call raises, unwrapped.
+            LLMResponseError: the provider call failed, chained from its
+                error, or the reply could not be read.
         """
-        # DECISION plan-2026-09-30T062855-07ad3f8c/D-022: returns the raw
-        # reply and does NOT reuse _make_llm_call's validation, which rewrites
-        # an empty content from the reasoning trace and raises
-        # LLMResponseError; the classifier's own reader and its
-        # ClassificationResponseError contract must see the reply as sent.
-        # Do NOT add a second `completion` binding or a request builder in
-        # classification.py for this. See decisions.md D-022.
+        # DECISION plan-2026-10-01T093600-944e2692/D-002: one request primitive
+        # (supersedes 07ad3f8c/D-022's classifier-only method). Do NOT add a
+        # second builder, a second `completion` binding or a per-kind method
+        # (one for tools, one for text, one for schemas): every request
+        # rule (tools XOR response_format, the Ollama gate, seed absent unless
+        # set, user-turn filling) lives once in _build_call_params, and every
+        # send goes through _send. A malformed tool turn is data
+        # (kind="malformed", no calls), an outage raises. See decisions.md D-002.
         call_params = self._build_call_params(
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            "classification",
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": schema_name, "schema": json_schema},
-            },
+            request.messages,
+            request.call_type,
+            response_format=request.response_format,
+            tools=request.tools,
+            tool_choice=request.tool_choice,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
         )
+        try:
+            response = self._send(call_params)
+        except Exception as e:
+            # Broad catch is intentional: the provider boundary. A garbled
+            # tool call is a model behaviour, every other failure an outage.
+            if is_malformed_tool_call_error(e, tools_sent=request.tools is not None):
+                logger.warning(f"Provider rejected a garbled tool call: {e!s}")
+                return CompletionResponse(kind="malformed")
+            error_msg = f"Completion call failed: {e!s}"
+            logger.error(error_msg)
+            raise LLMResponseError(error_msg) from e
+        return _completion_response(response)
+
+    def _send(self, call_params: dict[str, Any]) -> Any:
+        """Send one built request to the provider: the one ``completion`` call.
+
+        Every provider request of this interface (Pass 1, Pass 2, stream,
+        ``complete``) goes through here; the raw provider reply (a stream
+        iterator when ``call_params["stream"]``) is returned and errors
+        propagate unchanged.
+        """
         return completion(**call_params)
 
     def _supported_openai_params(self) -> list[str] | None:
@@ -928,19 +1081,23 @@ class LiteLLMInterface(LLMInterface):
 
     def _build_call_params(
         self,
-        messages: list[dict[str, str | None]],
+        messages: list[dict[str, Any]],
         call_type: str,
         *,
         response_format: dict[str, Any] | None = None,
         stream: bool = False,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         """
         Build the ``litellm.completion(**call_params)`` kwargs shared by
         ``_make_llm_call`` (non-streaming), ``generate_response_stream`` and
-        ``complete_structured``. A user turn without text is filled by
+        ``complete``. A user turn without text is filled by
         ``_fill_empty_user_turns`` (``None``: the neutral instruction; empty
-        string: the empty-message placeholder); the caller's list is not
-        mutated.
+        string: the empty-message placeholder); no other message is touched
+        and the caller's list is not mutated.
 
         # DECISION plan-2026-09-12T135914-45a654de/D-015
         # Extracted from two independently-maintained ~40-line builders
@@ -971,6 +1128,15 @@ class LiteLLMInterface(LLMInterface):
                 ``"stream": True``; never applies the forced-structured-output
                 branch, though that branch's own ``call_type`` gate already
                 makes it a no-op for the streaming caller's call_type).
+            tools: OpenAI function schemas (``complete`` only). Sent as given,
+                with ``tool_choice`` (``"auto"`` when ``None``), and never
+                gated on litellm's supported-params list: it omits tools for
+                models that call them natively (``ollama/``). The caller never
+                passes ``response_format`` with tools (``CompletionRequest``
+                refuses it).
+            tool_choice: see ``tools``.
+            temperature: per-call temperature; ``None`` keeps the interface's.
+            max_tokens: per-call max tokens; ``None`` keeps the interface's.
 
         Returns:
             The kwargs dict ready to pass to ``litellm.completion(**...)``.
@@ -987,11 +1153,14 @@ class LiteLLMInterface(LLMInterface):
             **safe_kwargs,
             "model": self.model,
             "messages": _fill_empty_user_turns(messages),
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "temperature": self.temperature if temperature is None else temperature,
+            "max_tokens": self.max_tokens if max_tokens is None else max_tokens,
         }
         if stream:
             call_params["stream"] = True
+        if tools is not None:
+            call_params["tools"] = tools
+            call_params["tool_choice"] = "auto" if tool_choice is None else tool_choice
 
         if self.timeout is not None:
             call_params["timeout"] = self.timeout
@@ -1044,7 +1213,9 @@ class LiteLLMInterface(LLMInterface):
                 f"model '{self.model}'; output may not match schema"
             )
 
-        self._apply_model_specific_params(call_params, call_type)
+        self._apply_model_specific_params(
+            call_params, call_type, response_format=response_format
+        )
 
         # Ollama: prepend /nothink and embed schema in prompt
         call_params["messages"] = prepare_ollama_messages(
@@ -1078,7 +1249,7 @@ class LiteLLMInterface(LLMInterface):
         )
 
         # Make the API call
-        response = completion(**call_params)
+        response = self._send(call_params)
 
         # Validate response structure. D-022: `getattr(response, "choices", None)`
         # replaces `hasattr(response, "choices") and response.choices` -- see the
@@ -1128,15 +1299,27 @@ class LiteLLMInterface(LLMInterface):
 
         return response
 
-    def _apply_model_specific_params(self, call_params: dict, call_type: str) -> None:
+    def _apply_model_specific_params(
+        self,
+        call_params: dict,
+        call_type: str,
+        *,
+        response_format: dict[str, Any] | None = None,
+    ) -> None:
         """Apply model-specific parameters to the LLM call.
 
         Handles quirks of specific model providers (e.g. Ollama's thinking
-        mode) by mutating *call_params* in place.
+        mode) by mutating *call_params* in place. A call is structured
+        (temperature 0 on Ollama) when its call type parses JSON, or when it
+        sends a ``response_format`` and its call type is not free text (Pass
+        2 keeps the user's temperature with an ``output_schema``).
         """
         # Ollama: disable thinking mode and force deterministic output
-        # for structured calls (data extraction, transition decisions).
-        is_structured = call_type in _STRUCTURED_CALL_TYPES
+        # for structured calls (data extraction, classification, a
+        # response_format completion).
+        is_structured = call_type in _STRUCTURED_CALL_TYPES or (
+            response_format is not None and call_type not in _FREE_TEXT_CALL_TYPES
+        )
         apply_ollama_params(call_params, self.model, structured=is_structured)
 
     @staticmethod

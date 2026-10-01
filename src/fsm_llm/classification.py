@@ -22,6 +22,8 @@ from .definitions import (
     ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
+    CompletionRequest,
+    CompletionResponse,
     HierarchicalResult,
     HierarchicalSchema,
     IntentScore,
@@ -36,7 +38,6 @@ from .prompts import (
     build_classification_system_prompt,
 )
 from .utilities import (
-    _resolve_reasoning_trace,
     coerce_confidence,
     extract_json_from_text,
 )
@@ -65,8 +66,10 @@ class Classifier:
     LLM-backed intent classifier.
 
     Wraps a ClassificationSchema and an LLM model to provide a simple
-    ``classify()`` / ``classify_multi()`` interface. Every request is built
-    and sent by a ``fsm_llm.LiteLLMInterface`` constructed here from
+    ``classify()`` / ``classify_multi()`` interface. Every request is one
+    ``complete`` call (a ``json_schema`` response format, the prompt config's
+    ``temperature`` and ``max_tokens``) on a ``fsm_llm.LiteLLMInterface``
+    constructed here from
     ``model``, ``api_key`` and ``llm_kwargs`` (``timeout`` defaults to
     120 seconds; ``retries`` has that interface's meaning; names in
     ``RESERVED_LLM_CALL_KWARGS`` are ignored, the prompt config owns
@@ -88,13 +91,15 @@ class Classifier:
         self.schema = schema
         self.model = model
         self.config = config or ClassificationPromptConfig()
-        # DECISION plan-2026-09-30T062855-07ad3f8c/D-022: the classifier owns
-        # a LiteLLMInterface and sends through it. Do NOT import the provider
-        # SDK here or rebuild call params (model kwargs, timeout,
-        # response_format, Ollama preparation, the neutral user turn): llm.py
-        # is the one request path. The 120s default bounds a stalled provider
-        # so it cannot hold the conversation thread and its conv_lock
-        # (CA3-003). See decisions.md D-022.
+        # DECISION plan-2026-10-01T093600-944e2692/D-002 (supersedes
+        # 07ad3f8c/D-022): the classifier sends one `LLMInterface.complete`
+        # request per call and reads the typed reply. Do NOT import the
+        # provider SDK here, rebuild call params (model kwargs, timeout,
+        # response_format, Ollama preparation, the neutral user turn) or read
+        # provider objects: llm.py is the one request path and the one reply
+        # reader. The 120s default bounds a stalled provider so it cannot hold
+        # the conversation thread and its conv_lock (CA3-003). See decisions.md
+        # D-002.
         connection: dict[str, Any] = {
             "timeout": 120.0,
             **{
@@ -227,87 +232,58 @@ class Classifier:
         system_prompt = base_prompt + build_classification_context_block(
             context, user_message=user_message
         )
+        request = CompletionRequest(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "intent_classification",
+                    "schema": (
+                        self._multi_json_schema if multi_intent else self._json_schema
+                    ),
+                },
+            },
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+            call_type="classification",
+        )
+        # Every failure of the call (an outage, an unreadable reply: both
+        # LLMResponseError from `complete`) is a ClassificationError, a member
+        # of the pipeline's soft-fail tuple, never a bare AttributeError
+        # (review N10, plan-2026-09-20T165703-0d9c218e).
         try:
-            response = self._llm.complete_structured(
-                system_prompt,
-                user_message,
-                json_schema=(
-                    self._multi_json_schema if multi_intent else self._json_schema
-                ),
-                schema_name="intent_classification",
-            )
+            response = self._llm.complete(request)
         except Exception as e:
             raise ClassificationError(f"Classification LLM call failed: {e!s}") from e
-        elapsed = time.time() - start
-
-        if not response or not getattr(response, "choices", None):
-            raise ClassificationResponseError("Empty response from LLM")
-
-        # A non-raising completion() return with a malformed shape (choice
-        # without .message, message without .content, non-indexable choices)
-        # must surface as ClassificationResponseError -- already a member of
-        # the pipeline's soft-fail tuple -- instead of leaking AttributeError,
-        # which is not, and would crash the turn for a required=False field.
-        # ClassificationResponseError raised by _extract_response (parse
-        # failure) is not in this tuple and passes through unchanged. KeyError
-        # (choices as a dict) is left bare: the pipeline tuple already lists
-        # it. See review N10, plan-2026-09-20T165703-0d9c218e.
-        try:
-            content = response.choices[0].message.content
-            logger.debug(f"Classification call completed in {elapsed:.2f}s")
-            return self._extract_response(content, response)
-        except (AttributeError, IndexError, TypeError) as e:
-            raise ClassificationResponseError(
-                f"Malformed LLM response shape: {e}"
-            ) from e
+        logger.debug(f"Classification call completed in {time.time() - start:.2f}s")
+        return self._extract_response(response)
 
     # ----------------------------------------------------------
     # Response Extraction
     # ----------------------------------------------------------
 
     @staticmethod
-    def _extract_response(content: Any, response: Any) -> dict:
+    def _extract_response(response: CompletionResponse) -> dict:
         """
-        Extract a JSON dict from the LLM response content.
+        Extract a JSON dict from a classification reply.
 
-        Handles three scenarios:
-        1. Normal response -- content is a string or dict with JSON.
-        2. Thinking model -- content is empty but the thinking field
-           contains the answer (e.g., some Ollama models with qwen3).
-        3. Structured output -- content is already a dict.
+        ``response.text`` is the reply content, or the model's reasoning trace
+        when the content was empty (recovered by the LLM layer for a reply
+        with no tool call). Raises ``ClassificationResponseError`` when there
+        is no text or no JSON object in it.
         """
-        # Already a dict (some providers return parsed JSON directly)
-        if isinstance(content, dict):
-            return content
-
-        # Normal case -- content is a non-empty string
-        if content:
-            data = extract_json_from_text(content)
-            if data is not None:
-                return data
-            raise ClassificationResponseError(
-                f"Failed to parse LLM JSON.\nResponse: {content[:200]}"
-            )
-
-        # Thinking model fallback -- content is empty/None, recover the answer
-        # from the model's reasoning trace. Routes through the SINGLE shared
-        # `_resolve_reasoning_trace` (utilities.py) rather than a private
-        # `getattr(msg, "thinking", None)`: the installed provider SDK renames
-        # `thinking` to `reasoning_content` and deletes `thinking`, so a
-        # `.thinking`-only read was dead code here for the default Ollama model
-        # (NL1). See utilities.py D-002.
-        msg = response.choices[0].message
-        thinking = _resolve_reasoning_trace(msg)
-        if thinking:
-            logger.warning(
-                "LLM returned empty content with non-empty thinking field; "
-                "extracting classification from thinking content"
-            )
-            data = extract_json_from_text(thinking)
-            if data is not None:
-                return data
-
-        raise ClassificationResponseError("LLM returned empty content")
+        text = response.text
+        if response.kind != "final" or not text:
+            raise ClassificationResponseError("LLM returned empty content")
+        data = extract_json_from_text(text)
+        if data is not None:
+            return data
+        raise ClassificationResponseError(
+            f"Failed to parse LLM JSON.\nResponse: {text[:200]}"
+        )
 
     # ----------------------------------------------------------
     # Response Parsing

@@ -45,6 +45,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.llm import decode_tool_arguments, is_malformed_tool_call_error
 from fsm_llm.logging import logger
 from fsm_llm.ollama import (
     apply_ollama_params,
@@ -87,40 +88,6 @@ _FORCE_WRITE_PROMPT = (
     "findings by calling the required tool with your final content."
 )
 
-#: Provider messages that mean "this turn's TOOL CALL did not render", as
-#: opposed to "the provider is unreachable".
-#:
-#: The first two are the measured shape (1 dispatch in 35 on
-#: ``ollama_chat/qwen3.5:4b``): Ollama's tool-call template emitted invalid XML
-#: and litellm surfaced it as an ``APIConnectionError``, so the class of the
-#: exception carries no information and the message is all there is.  Kept
-#: deliberately NARROW -- a broad marker such as "tool" would swallow real
-#: outages, which is the thing this classification exists to keep separate.
-_MALFORMED_TOOL_CALL_MARKERS: tuple[str, ...] = (
-    "xml syntax error",
-    "element <function>",
-    "invalid tool call",
-)
-
-
-def _is_malformed_tool_call(exc: BaseException, tools_declared: bool) -> bool:
-    """Whether *exc* is a garbled TOOL CALL rather than a provider failure.
-
-    Interface contract (2 call sites: the ``_litellm_complete`` boundary, which
-    labels the error, and :meth:`NativeFunctionCallingReactAgent.run`, which
-    reads the label back off ``AgentError.details``):
-        - ``tools_declared``: whether THIS completion carried a tool surface at
-          all.  A completion with no ``tools=`` cannot garble a tool call, so it
-          is never classified as one however its message reads.
-        - Returns ``False`` for everything not positively identified.  Fail
-          closed: an unrecognised failure stays a failure.
-        - Never raises.
-    """
-    if not tools_declared:
-        return False
-    text = str(exc).lower()
-    return any(marker in text for marker in _MALFORMED_TOOL_CALL_MARKERS)
-
 
 def _shown_call(call: ToolCall) -> ToolCall:
     """The trace copy of an executed call, secret-looking arguments redacted.
@@ -131,34 +98,6 @@ def _shown_call(call: ToolCall) -> ToolCall:
     return call.model_copy(
         update={"parameters": redact_secret_entries(call.parameters)}
     )
-
-
-def _call_arguments(tool_call: dict[str, Any]) -> dict[str, Any] | None:
-    """The arguments of one normalized tool call, or ``None`` when malformed.
-
-    Interface contract (3 call sites: ``_litellm_complete``, which decodes a
-    provider's string arguments, and :meth:`NativeFunctionCallingReactAgent.run`
-    for the loop and the forced final turn, which also see ``complete_fn``
-    output):
-        - A dict is returned as-is. A JSON string is decoded; it must decode
-          to an object. Missing, ``None`` or blank arguments mean "no
-          arguments" and return ``{}``.
-        - Anything else (undecodable text, a JSON array/number/string/null, a
-          non-dict value from a custom ``complete_fn``) returns ``None``: the
-          caller must not execute that call.
-        - Never raises.
-    """
-    raw = tool_call.get("arguments")
-    if raw is None:
-        return {}
-    if isinstance(raw, str):
-        if not raw.strip():
-            return {}
-        try:
-            raw = json.loads(raw)
-        except (ValueError, RecursionError):
-            return None
-    return raw if isinstance(raw, dict) else None
 
 
 def _degrades_turn(exc: BaseException) -> bool:
@@ -354,8 +293,8 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             raise AgentError(
                 f"Native function-calling LLM call failed: {e!s}",
                 details={
-                    "malformed_tool_call": _is_malformed_tool_call(
-                        e, bool(call_params.get("tools"))
+                    "malformed_tool_call": is_malformed_tool_call_error(
+                        e, tools_sent=bool(call_params.get("tools"))
                     )
                 },
             ) from e
@@ -363,10 +302,10 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         tool_calls: list[dict[str, Any]] = []
         for tc in getattr(msg, "tool_calls", None) or []:
             # A call whose arguments are not a JSON object keeps its RAW
-            # arguments so `run()` can refuse it (`_call_arguments` returns
+            # arguments so `run()` can refuse it (`decode_tool_arguments` returns
             # None there; D-025 of plan 06a5ec0a). Do NOT map them to `{}`.
             raw_args = tc.function.arguments
-            args = _call_arguments({"arguments": raw_args})
+            args = decode_tool_arguments(raw_args)
             tool_calls.append(
                 {
                     "id": tc.id,
@@ -454,7 +393,9 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                 # `continue` (D-016). The whole turn is checked before any
                 # call runs so the history never holds an assistant tool-call
                 # message without its tool results.
-                parsed = [_call_arguments(tc) for tc in tool_calls]
+                parsed = [
+                    decode_tool_arguments(tc.get("arguments")) for tc in tool_calls
+                ]
                 if any(args is None for args in parsed):
                     logger.warning(
                         f"Native function-calling tool turn {iteration} sent "
@@ -543,7 +484,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
                         forced = {"tool_calls": []}
                     for tc in forced.get("tool_calls") or []:
                         name = tc.get("name", "")
-                        args = _call_arguments(tc)
+                        args = decode_tool_arguments(tc.get("arguments"))
                         if args is None:
                             # Malformed like the loop's turn (D-025): never
                             # run a write with arguments the model did not send.

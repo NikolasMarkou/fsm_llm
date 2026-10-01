@@ -17,7 +17,6 @@ from fsm_llm.classification import Classifier
 from fsm_llm.definitions import (
     BulkExtractionRequest,
     ClassificationError,
-    ClassificationResponseError,
     ClassificationSchema,
     FieldExtractionRequest,
     IntentDefinition,
@@ -237,13 +236,16 @@ class TestClassifierUsesTheLLMLayer:
         ):
             Classifier(_schema(), model="gpt-4o").classify("hi")
 
-    def test_malformed_shape_is_a_classification_response_error(self):
+    def test_malformed_shape_is_a_classification_error(self):
+        """The LLM layer reads the reply (plan 944e2692 D-002): an unreadable
+        shape is its ``LLMResponseError``, which the classifier reports as a
+        ``ClassificationError`` (soft-fail tuple), never a bare AttributeError."""
         response = MagicMock()
         response.choices = [object()]  # a choice without .message
         with (
             patch("fsm_llm.llm.completion", return_value=response),
             patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
-            pytest.raises(ClassificationResponseError, match="Malformed"),
+            pytest.raises(ClassificationError, match="Malformed"),
         ):
             Classifier(_schema(), model="gpt-4o").classify("hi")
 
