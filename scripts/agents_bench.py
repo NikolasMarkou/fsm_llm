@@ -25,6 +25,13 @@ changed code: ``legacy`` and ``native_fc`` are B0's arms (d4b1626), retired
 from ``ARMS``; their rows still recount (``report`` reads labels from file
 names).
 
+Call meter (``wrapper_version`` in every manifest): "2" for new blocks, core's
+own counters: each trial gets one ``LiteLLMInterface`` built from the arm's
+config, injected as ``llm_interface=``, and its ``usage()`` fills the row.
+B0 and B1 rows were counted by "1", ``CallMeter`` patching the litellm
+bindings; it stays only as the reference ``meter_parity`` checks "2" against,
+so a "2" block is comparable with B0/B1. ``report`` never needs either meter.
+
 Import hygiene: the module top level is stdlib only (pinned by an AST test
 and a socket-disabled subprocess import). ``fsm_llm``, ``litellm`` and the
 agents load lazily inside ``run``; ``report`` and ``list-tasks`` never load
@@ -55,7 +62,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BENCH_DATA = ROOT / "scripts" / "bench_data"
 MODEL = "ollama_chat/qwen3.5:4b"
 TRIALS = 3
-WRAPPER_VERSION = "1"
+WRAPPER_VERSION = "2"
 ANSWER_CHARS = 500
 ERROR_CHARS = 300
 
@@ -798,32 +805,84 @@ def build_registry(tools: dict[str, Callable[..., Any]]) -> Any:
     return registry
 
 
-def _fsm_advance_arm(tools: dict[str, Callable[..., Any]], model: str) -> Any:
+def _fsm_advance_arm(
+    tools: dict[str, Callable[..., Any]], model: str, llm_interface: Any
+) -> Any:
     """create_agent("react", tools, config=...): ReactAgent on core steps."""
     # B0's `legacy` construction, run on the code that drives the FSM through
     # core's advance/run_until_terminal; the docstring is the manifest's
-    # `arm.factory` text.
+    # `arm.factory` text. `llm_interface` is the trial's metered interface.
     from fsm_llm.agents import create_agent
 
-    return create_agent("react", build_registry(tools), config=_agent_config(model))
+    return create_agent(
+        "react",
+        build_registry(tools),
+        config=_agent_config(model),
+        llm_interface=llm_interface,
+    )
 
 
-#: Arm label -> factory ``(tools, model) -> agent with .run(task)``. Recorded
-#: rows stay recountable after an arm is removed: ``report`` reads arm labels
-#: from the ``rows_<arm>.jsonl`` file names, never from this table. A label
-#: names the code it ran: changed code gets a NEW label, never an old one.
-ARMS: dict[str, Callable[[dict[str, Callable[..., Any]], str], Any]] = {
+#: Arm label -> factory ``(tools, model, llm_interface) -> agent with
+#: .run(task)``; the factory must hand ``llm_interface`` to the agent, or the
+#: row counts no call (``meter_parity`` shows it). Recorded rows stay
+#: recountable after an arm is removed: ``report`` reads arm labels from the
+#: ``rows_<arm>.jsonl`` file names, never from this table. A label names the
+#: code it ran: changed code gets a NEW label, never an old one.
+ARMS: dict[str, Callable[[dict[str, Callable[..., Any]], str, Any], Any]] = {
     "fsm_advance": _fsm_advance_arm,
 }
 
 
-# --- Completion meter --------------------------------------------------------
+# --- Call meters -------------------------------------------------------------
+
+
+def metered_interface(model: str) -> Any:
+    """The trial's ``LiteLLMInterface``: the meter of ``wrapper_version`` "2".
+
+    Built from the same ``AgentConfig`` the arm uses (model, temperature,
+    max_tokens; every other setting the default ``API`` would use), so
+    injecting it changes no request. One per trial: its ``usage()`` is the
+    trial's count, no delta or reset needed.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-004: wrapper_version "2" reads
+    # core's per-instance counters off an interface the bench builds and
+    # injects. Do NOT meter a new block by patching litellm bindings (that is
+    # "1", kept only for meter_parity), and do NOT share one interface across
+    # trials (its count would no longer be one trial's). See D-004.
+    from fsm_llm import LiteLLMInterface
+
+    config = _agent_config(model)
+    return LiteLLMInterface(
+        model=config.model,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+    )
+
+
+def usage_fields(usage: Any) -> dict[str, int]:
+    """The row's meter fields from a core ``LLMUsage`` snapshot.
+
+    Same keys and meanings as ``CallMeter.snapshot`` (the "1" rows), so
+    ``report`` recounts "1" and "2" rows alike.
+    """
+    return {
+        "llm_calls": usage.calls,
+        "llm_errors": usage.errors,
+        "usage_missing": usage.usage_missing,
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "total_tokens": usage.total_tokens,
+    }
 
 
 class CallMeter:
-    """Counts completion calls and token usage between two ``reset`` calls.
+    """``wrapper_version`` "1": counts completion calls and token usage
+    between two ``reset`` calls by wrapping litellm bindings.
 
-    Sequential use only: one trial at a time, so the counters are unambiguous.
+    B0 and B1 rows were counted by it. New blocks are metered by "2"
+    (``metered_interface``); this class is kept only as the independent
+    reference ``meter_parity`` checks "2" against. Sequential use only: one
+    trial at a time, so the counters are unambiguous.
     """
 
     def __init__(self) -> None:
@@ -938,12 +997,14 @@ def install_meter(
 
 
 def _completion_targets() -> list[tuple[Any, str]]:
-    """Every binding an agent can reach litellm's completion through.
+    """Every binding an agent can reach litellm's completion through (the
+    "1" meter's targets).
 
-    ``fsm_llm.llm`` binds ``completion`` by name at import (the classifier
-    sends through it too, so a classifier call is one count there); native_fc
-    and composition look ``litellm.completion`` up at call time. Loaded here,
-    BEFORE any arm imports ``fsm_llm.agents``.
+    ``fsm_llm.llm`` binds ``completion`` by name at import (every
+    ``LiteLLMInterface`` request, the classifier's included, is one count
+    there); a caller still on its own path (native_fc until it runs on core)
+    looks ``litellm.completion`` up at call time. Loaded here, BEFORE any arm
+    imports ``fsm_llm.agents``.
     """
     import litellm
 
@@ -1049,20 +1110,21 @@ def _checked_manifest(
     return manifest
 
 
-def _trial_row(
-    task: Task, trial: int, arm_name: str, model: str, meter: CallMeter
-) -> dict[str, Any]:
-    """Run one fresh agent on one task; any exception is an incorrect row."""
+def _trial_row(task: Task, trial: int, arm_name: str, model: str) -> dict[str, Any]:
+    """Run one fresh agent on one task; any exception is an incorrect row.
+
+    The meter fields come from the trial's own ``metered_interface``.
+    """
     tools = make_tools()
     selected = {name: tools[name] for name in task.tools}
-    meter.reset()
+    llm_interface = metered_interface(model)
     answer, error = "", None
     success, stop_reason = False, None
     iterations = tool_calls = 0
     tools_used: list[str] = []
     started = time.perf_counter()
     try:
-        agent = ARMS[arm_name](selected, model)
+        agent = ARMS[arm_name](selected, model, llm_interface)
         result = agent.run(task.prompt)
         answer = str(getattr(result, "answer", "") or "")
         success = bool(getattr(result, "success", False))
@@ -1088,7 +1150,7 @@ def _trial_row(
         "iterations": iterations,
         "tool_calls": tool_calls,
         "tools_used": tools_used,
-        **meter.snapshot(),
+        **usage_fields(llm_interface.usage()),
         "latency_s": round(latency, 3),
         "error": error,
         "answer": answer[:ANSWER_CHARS],
@@ -1133,15 +1195,13 @@ def run_block(
         )
         hb._write_json(manifest_path, manifest)
     print(f"pre-registered {manifest_path} (digest {manifest['model_digest']})")
-    meter = CallMeter()
-    restore = install_meter(meter, _completion_targets())
     started, status = hb._utc_now(), "aborted"
     try:
         total = len(TASKS) * trials
         done = 0
         for trial in range(1, trials + 1):
             for task in TASKS:
-                row = _trial_row(task, trial, arm_name, model, meter)
+                row = _trial_row(task, trial, arm_name, model)
                 row.update(bench_id=bench_id, block=block, ts=hb._utc_now())
                 append_row(rows_path, row)
                 done += 1
@@ -1154,10 +1214,58 @@ def run_block(
                 )
         status = "complete"
     finally:
-        restore()
         summary = write_summary(bdir, arm_name, status=status, started_at=started)
         print(f"wrote {summary_path} (status: {status})")
     return summary
+
+
+def meter_parity(
+    task_ids: list[str], arm_name: str, model: str = MODEL
+) -> list[dict[str, Any]]:
+    """Run each task once with both meters; their counts side by side.
+
+    Interface contract (callers: the offline parity test, the live smoke
+    before a "2" block is registered):
+        - Each task runs once through ``_trial_row`` (the "2" meter: the
+          trial's injected interface) while the "1" ``CallMeter`` wraps
+          ``_completion_targets()``; the bindings are restored on return.
+        - Returns, in the given order, ``{"task_id", "v1", "v2", "equal",
+          "error"}``: ``v1``/``v2`` hold the six row meter fields, ``equal``
+          is True when all six agree, ``error`` is the trial's row error
+          (``None`` when it ran). A call the arm sends outside the injected
+          interface shows as ``v1`` above ``v2``.
+        - Writes no rows and no manifest. Raises ``BenchDataError`` for an
+          unknown arm or task id, before any task runs.
+    """
+    if arm_name not in ARMS:
+        raise BenchDataError(
+            f"unknown arm {arm_name!r}; expected one of {sorted(ARMS)}"
+        )
+    by_id = tasks_by_id()
+    unknown = [task_id for task_id in task_ids if task_id not in by_id]
+    if unknown:
+        raise BenchDataError(f"unknown task ids {unknown}")
+    meter = CallMeter()
+    restore = install_meter(meter, _completion_targets())
+    results: list[dict[str, Any]] = []
+    try:
+        for task_id in task_ids:
+            meter.reset()
+            row = _trial_row(by_id[task_id], 1, arm_name, model)
+            v1 = meter.snapshot()
+            v2 = {key: row[key] for key in v1}
+            results.append(
+                {
+                    "task_id": task_id,
+                    "v1": v1,
+                    "v2": v2,
+                    "equal": v1 == v2,
+                    "error": row["error"],
+                }
+            )
+    finally:
+        restore()
+    return results
 
 
 # --- Metrics -----------------------------------------------------------------

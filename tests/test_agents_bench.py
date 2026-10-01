@@ -262,7 +262,7 @@ class TestTasksSha256:
         """Defect guarded: adding an arm later changing the task hash, so B1
         could never be compared with B0."""
         before = ab.tasks_sha256()
-        monkeypatch.setitem(ab.ARMS, "new_arm", lambda tools, model: None)
+        monkeypatch.setitem(ab.ARMS, "new_arm", lambda tools, model, llm: None)
         monkeypatch.setattr(ab, "LIMITS", {**ab.LIMITS, "max_iterations": 99})
         assert ab.tasks_sha256() == before
 
@@ -621,34 +621,56 @@ class _FakeResult:
         )
 
 
+def _provider_reply(text: str, usage: dict | None) -> SimpleNamespace:
+    """A litellm-shaped completion reply; ``usage=None`` leaves it out."""
+    message = SimpleNamespace(content=text, tool_calls=None)
+    reply = SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    if usage is not None:
+        reply.usage = usage
+    return reply
+
+
+def _one_call(llm_interface) -> None:
+    """One plain request through the trial's injected interface."""
+    from fsm_llm import CompletionRequest
+
+    llm_interface.complete(
+        CompletionRequest(messages=[{"role": "user", "content": "hi"}])
+    )
+
+
 class TestRunEndToEnd:
     """run_block with a mock arm: rows, manifest, summary, refusals."""
 
     @pytest.fixture
     def offline(self, tmp_path, monkeypatch):
-        """BENCH_DATA in tmp, a stub digest/commit, a fake completion module."""
+        """BENCH_DATA in tmp, a stub digest/commit, a scripted provider
+        behind core's one send binding."""
+        import fsm_llm.llm
+
         monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
         monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
         monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
-        fake = SimpleNamespace(
-            completion=lambda **kw: {
-                "usage": {"prompt_tokens": 10, "completion_tokens": 2}
-            }
+        monkeypatch.setattr(
+            fsm_llm.llm,
+            "completion",
+            lambda **kw: _provider_reply(
+                "ok", {"prompt_tokens": 10, "completion_tokens": 2}
+            ),
         )
-        monkeypatch.setattr(ab, "_completion_targets", lambda: [(fake, "completion")])
         two = tuple(t for t in ab.TASKS if t.id in ("st-capital", "er-flaky"))
         monkeypatch.setattr(ab, "TASKS", two)
-        return fake
 
-    def _arm(self, fake):
-        """A mock agent: solves with the reference, calls the fake LLM once;
-        crashes on er-flaky's first trial to exercise the error path."""
+    def _arm(self):
+        """A mock agent: solves with the reference, sends one request through
+        the injected interface; crashes on er-flaky's first trial to exercise
+        the error path."""
         seen: list[str] = []
 
-        def factory(tools, model):
+        def factory(tools, model, llm_interface):
             def run(prompt):
                 task = next(t for t in ab.TASKS if t.prompt == prompt)
-                fake.completion(model=model)
+                _one_call(llm_interface)
                 seen.append(task.id)
                 if task.id == "er-flaky" and seen.count("er-flaky") == 1:
                     raise TimeoutError("AgentTimeoutError stand-in")
@@ -661,7 +683,7 @@ class TestRunEndToEnd:
     def test_rows_manifest_and_summary(self, offline, tmp_path, monkeypatch):
         """Defect guarded: the live path writing rows that the offline recount
         cannot reproduce, or losing the per-row facts the plan lists."""
-        monkeypatch.setitem(ab.ARMS, "mock", self._arm(offline))
+        monkeypatch.setitem(ab.ARMS, "mock", self._arm())
         summary = ab.run_block("agents-react", "B9", "mock", trials=2)
         bdir = tmp_path / "agents-react" / "B9"
         rows = ab.read_rows(bdir / "rows_mock.jsonl")
@@ -689,7 +711,7 @@ class TestRunEndToEnd:
     def test_existing_rows_refuse_a_second_run(self, offline, tmp_path, monkeypatch):
         """Defect guarded (D-002): re-sampling a block until a number looks
         good. The refusal fires before the meter or any arm loads."""
-        monkeypatch.setitem(ab.ARMS, "mock", self._arm(offline))
+        monkeypatch.setitem(ab.ARMS, "mock", self._arm())
         bdir = tmp_path / "agents-react" / "B0"
         bdir.mkdir(parents=True)
         (bdir / "rows_mock.jsonl").write_text("{}\n", encoding="utf-8")
@@ -701,7 +723,7 @@ class TestRunEndToEnd:
     ):
         """Defect guarded: `run` silently overwriting the committed
         pre-registration, or running against a changed task set."""
-        monkeypatch.setitem(ab.ARMS, "mock", self._arm(offline))
+        monkeypatch.setitem(ab.ARMS, "mock", self._arm())
         path = ab.register_block("agents-react", "B0", "mock", trials=1)
         created = json.loads(path.read_text())["created_at"]
         with pytest.raises(ab.BenchDataError, match="registered ONCE"):
@@ -719,6 +741,172 @@ class TestRunEndToEnd:
             ab.register_block("x", "B0", "legacyy")
 
 
+def _scripted_react_provider():
+    """A scripted provider for a ReactAgent run on the bench tools.
+
+    Answers each typed field by name (one lookup, then conclude), writes the
+    Pass-2 reply, varies the usage shape (object fields, a dict, absent) and
+    raises for st-convert's requests, so parity covers tokens, usage-missing
+    and errors. Returns ``(completion, calls)``.
+    """
+    calls: list[int] = []
+
+    def completion(**kw):
+        calls.append(1)
+        system = kw["messages"][0]["content"]
+        if "26.2 miles" in system:
+            raise RuntimeError("provider down")
+        seen = "Result:" in system
+        if "field 'tool_name'" in system:
+            value = "none" if seen else "lookup_country"
+        elif "field 'tool_input'" in system:
+            value = {"name": "Veloria"}
+        elif "field 'should_terminate'" in system:
+            value = seen
+        else:
+            return _provider_reply("Maskett", None)
+        text = json.dumps({"value": value, "confidence": 0.9})
+        n = len(calls)
+        usage = (
+            SimpleNamespace(
+                prompt_tokens=10 + n, completion_tokens=3, total_tokens=None
+            )
+            if n % 2
+            else {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}
+        )
+        return _provider_reply(text, usage)
+
+    return completion, calls
+
+
+class TestMeterV2:
+    """wrapper_version "2": core counters on the trial's injected interface,
+    and their parity with the "1" patching meter (D-004)."""
+
+    @pytest.fixture
+    def provider(self, monkeypatch):
+        """The scripted react provider behind core's one send binding."""
+        import fsm_llm.llm
+
+        completion, calls = _scripted_react_provider()
+        monkeypatch.setattr(fsm_llm.llm, "completion", completion)
+        monkeypatch.setattr(
+            fsm_llm.llm, "get_supported_openai_params", lambda model: []
+        )
+        return calls
+
+    def test_metered_interface_equals_the_one_the_agent_builds(self):
+        """Defect guarded: the injected interface differing from the one the
+        agent builds itself (temperature, max_tokens, timeout, kwargs), so a
+        "2" block sends different requests than B0/B1 did."""
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
+
+        tools = ab.make_tools()
+        agent = ab.ARMS["fsm_advance"](
+            {"calculator": tools["calculator"]}, ab.MODEL, None
+        )
+        own = agent._create_api(build_react_fsm(agent.tools)).llm_interface
+        assert vars(ab.metered_interface(ab.MODEL)) == vars(own)
+
+    def test_usage_fields_are_the_v1_row_fields(self):
+        """Defect guarded: "2" rows carrying other keys than "1" rows, so
+        `report` cannot recount B0/B1 and a "2" block alike."""
+        from fsm_llm import LLMUsage
+
+        usage = LLMUsage(
+            calls=3,
+            errors=1,
+            usage_missing=1,
+            prompt_tokens=20,
+            completion_tokens=4,
+            total_tokens=24,
+        )
+        fields = ab.usage_fields(usage)
+        assert set(fields) == set(ab.CallMeter().snapshot())
+        assert fields == {
+            "llm_calls": 3,
+            "llm_errors": 1,
+            "usage_missing": 1,
+            "prompt_tokens": 20,
+            "completion_tokens": 4,
+            "total_tokens": 24,
+        }
+
+    def test_each_trial_counts_only_its_own_calls(self, provider, monkeypatch):
+        """Defect guarded: one interface (or one counter) shared across
+        trials, so a row carries the calls of the trials before it."""
+        two = tuple(t for t in ab.TASKS if t.id == "st-capital")
+        monkeypatch.setattr(ab, "TASKS", two)
+        first = ab._trial_row(ab.TASKS[0], 1, "fsm_advance", "gpt-4o-mini")
+        after_first = len(provider)
+        second = ab._trial_row(ab.TASKS[0], 2, "fsm_advance", "gpt-4o-mini")
+        assert first["correct"] is True and second["correct"] is True
+        assert first["llm_calls"] == after_first > 0
+        assert second["llm_calls"] == len(provider) - after_first
+        assert first["total_tokens"] > 0
+
+    def test_parity_with_the_patching_meter_on_a_scripted_react_run(self, provider):
+        """Defect guarded: the "2" meter counting a different number of calls,
+        tokens, usage-missing replies or errors than the "1" meter B0/B1 were
+        counted with, so a "2" block is not comparable with them (D-004)."""
+        results = ab.meter_parity(
+            ["st-capital", "st-convert"], "fsm_advance", "gpt-4o-mini"
+        )
+        by_id = {r["task_id"]: r for r in results}
+        assert [r["task_id"] for r in results] == ["st-capital", "st-convert"]
+        assert all(r["equal"] for r in results), results
+        ran = by_id["st-capital"]
+        assert ran["error"] is None
+        assert ran["v2"]["llm_calls"] >= 4
+        assert ran["v2"]["usage_missing"] >= 1
+        assert ran["v2"]["prompt_tokens"] > 0
+        failed = by_id["st-convert"]
+        assert failed["v2"]["llm_errors"] >= 1
+        assert sum(r["v1"]["llm_calls"] for r in results) == len(provider)
+
+    def test_parity_flags_an_arm_that_bypasses_the_injected_interface(
+        self, provider, monkeypatch
+    ):
+        """Defect guarded (anti-vacuity): a parity check that passes whatever
+        the arm does. An arm that lets the agent build its own interface
+        sends real calls the "2" meter never sees."""
+
+        def bypass(tools, model, llm_interface):
+            return ab._fsm_advance_arm(tools, model, None)
+
+        monkeypatch.setitem(ab.ARMS, "bypass", bypass)
+        (result,) = ab.meter_parity(["st-capital"], "bypass", "gpt-4o-mini")
+        assert result["equal"] is False
+        assert result["v2"]["llm_calls"] == 0
+        assert result["v1"]["llm_calls"] == len(provider) > 0
+
+    def test_parity_refuses_unknown_arm_or_task_before_running(self, provider):
+        """Defect guarded: a typo'd smoke running nothing and reporting an
+        empty, vacuous parity."""
+        with pytest.raises(ab.BenchDataError, match="unknown arm"):
+            ab.meter_parity(["st-capital"], "fsm_advanc")
+        with pytest.raises(ab.BenchDataError, match="unknown task"):
+            ab.meter_parity(["st-capital", "st-nope"], "fsm_advance")
+        assert provider == []
+
+    def test_recorded_b0_b1_blocks_recount_unchanged(self, capsys):
+        """Defect guarded: the meter switch altering how recorded "1" rows
+        recount (B0 legacy 28/38 and native_fc 37/38, B1 fsm_advance 32/38
+        at 10.97 calls), or a summary no longer matching its rows."""
+        assert ab.report("agents-react", blocks=["B0", "B1"]) == 0
+        out = capsys.readouterr().out
+        assert "MISMATCH" not in out
+        sections = out.split("agents-react ")
+        legacy = next(s for s in sections if s.startswith("B0 [legacy]"))
+        native = next(s for s in sections if s.startswith("B0 [native_fc]"))
+        advance = next(s for s in sections if s.startswith("B1 [fsm_advance]"))
+        assert "pass@1 first trial: 28/38" in legacy
+        assert "pass@1 first trial: 37/38" in native
+        assert "llm calls mean/median: 2.3947/" in native
+        assert "pass@1 first trial: 32/38" in advance
+        assert "llm calls mean/median: 10.9737/" in advance
+
+
 class TestArms:
     """The registered arms build their agents without an LLM call."""
 
@@ -727,26 +915,36 @@ class TestArms:
         """Defect guarded: an arm factory broken by a signature change,
         found only after the live block has started."""
         tools = ab.make_tools()
-        agent = ab.ARMS[arm]({"calculator": tools["calculator"]}, ab.MODEL)
+        llm_interface = ab.metered_interface(ab.MODEL)
+        agent = ab.ARMS[arm](
+            {"calculator": tools["calculator"]}, ab.MODEL, llm_interface
+        )
         assert type(agent).__name__ == cls
         assert agent.config.max_iterations == ab.LIMITS["max_iterations"]
         assert agent.config.timeout_seconds == ab.LIMITS["timeout_seconds"]
         assert agent.config.temperature == ab.LIMITS["temperature"]
         assert agent.config.max_tokens == ab.LIMITS["max_tokens"]
+        assert agent._api_kwargs["llm_interface"] is llm_interface
 
-    def test_b1_comparison_limits_equal_b0(self):
-        """Defect guarded: B1 registered with limits or a task set that differ
-        from B0's committed manifest, so the B1/B0 pair compares two things."""
+    def test_new_blocks_keep_b0_limits_and_switch_the_meter(self):
+        """Defect guarded: a new block registered with limits or a task set
+        that differ from B0's committed manifest, so a pair with B0/B1
+        compares two things; or the meter switch left unrecorded, so a "2"
+        block's manifest claims B0's patching meter (D-004)."""
+        block_dir = ab.BENCH_DATA / "agents-react"
         b0 = json.loads(
-            (ab.BENCH_DATA / "agents-react" / "B0" / "manifest_legacy.json").read_text(
-                encoding="utf-8"
-            )
+            (block_dir / "B0" / "manifest_legacy.json").read_text(encoding="utf-8")
         )
         assert ab.tasks_sha256() == b0["tasks_sha256"]
         assert ab.LIMITS == b0["limits"]
         assert ab.TRIALS == b0["trials"]
         assert ab.MODEL == b0["model"]
-        assert ab.WRAPPER_VERSION == b0["wrapper_version"]
+        recorded = sorted(block_dir.glob("B[01]/manifest_*.json"))
+        assert len(recorded) == 3
+        for path in recorded:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            assert manifest["wrapper_version"] == "1", path
+        assert ab.WRAPPER_VERSION == "2"
 
     @pytest.mark.parametrize("label", ["legacy", "native_fc"])
     def test_b0_labels_are_never_reused_for_new_rows(
