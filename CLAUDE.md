@@ -27,7 +27,9 @@ flowchart TD
     eval[fsm_llm.eval] --> core
 ```
 
-2-pass flow per `converse` (`src/fsm_llm/pipeline.py`): Pass 1 extracts data (LLM), context update, classification extractions, rule-based transition evaluation (an LLM classifier only on AMBIGUOUS), state transition, then Pass 2 writes the reply (LLM) from the post-transition state. Pass 2 is skipped when `response_instructions` is empty. Transition outcomes: one winner is DETERMINISTIC, a tie at the lowest priority is AMBIGUOUS, none passing is BLOCKED (stay).
+2-pass flow per `converse` (`src/fsm_llm/pipeline.py`): Pass 1 extracts data (LLM), context update, classification extractions, rule-based transition evaluation (an LLM classifier only on AMBIGUOUS), state transition, then Pass 2 writes the reply (LLM) from the post-transition state. Pass 2 is skipped when `response_instructions` is empty: a silent state makes no LLM call, returns `""` and adds nothing to history. Transition outcomes: one winner is DETERMINISTIC, a tie at the lowest priority is AMBIGUOUS, none passing is BLOCKED (stay).
+
+Message-free step: `API.advance(conv_id)` runs the same turn with no user message (nothing added to history for a user, no-message prompt variants, the LLM layer sends a neutral user turn) and returns a frozen `AdvanceResult`; `run_until_terminal(conv_id, *, max_steps, max_seconds=None, before_step=None)` loops it until a terminal state and raises `RunBudgetExceededError` on a spent budget. Agents, the harness and workflow agent steps run on these loops; they never send a synthetic message.
 
 `import fsm_llm` loads only the core; `fsm_llm/__init__.py` never imports a subpackage. Import one by name (`from fsm_llm.agents import create_agent`). Every subpackage ships in every install; an extra only adds third-party deps.
 
@@ -55,13 +57,13 @@ flowchart TD
 
 ## Public interface
 
-Core: `API` (`from_file`, `from_definition`, `start_conversation`, `converse`, `converse_stream`, `get_data`, `push_fsm`/`pop_fsm`, `save_session`/`restore_session`), `FSMManager`, `MessagePipeline`, `HandlerTiming` (8 points), `create_handler`, `Classifier`, `LiteLLMInterface`, `WorkingMemory`, `FileSessionStore`.
+Core: `API` (`from_file`, `from_definition`, `start_conversation`, `converse`, `converse_stream`, `advance`, `advance_stream`, `run_until_terminal`, `run_until_terminal_stream`, `get_data`, `push_fsm`/`pop_fsm`, `save_session`/`restore_session`), `AdvanceResult`, `FSMManager`, `MessagePipeline`, `HandlerTiming` (8 points), `create_handler`, `Classifier`, `LiteLLMInterface`, `WorkingMemory`, `FileSessionStore`, graph export `build_fsm_graph`, `to_mermaid`, `to_dot`.
 
 Model resolution: `model=` argument, then env `LLM_MODEL`, then `DEFAULT_LLM_MODEL` (`ollama_chat/qwen3.5:4b`). `.env.example` lists `OPENAI_API_KEY`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`.
 
 ```bash
 fsm-llm --fsm <path.json>            # Run FSM interactively (needs env LLM_MODEL)
-fsm-llm-visualize --fsm <path.json>  # ASCII visualization
+fsm-llm-visualize --fsm <path.json> [--format ascii|mermaid|dot]  # Diagram
 fsm-llm-validate --fsm <path.json>   # Validate FSM definition
 fsm-llm-monitor                      # Web dashboard at http://127.0.0.1:8420
 fsm-llm-meta                         # Interactive artifact builder (fsm_llm.agents.meta_cli)
@@ -72,7 +74,7 @@ fsm-llm-eval run <dataset.json|.jsonl> [--trials N]     # Scripted conversation 
 .venv/bin/python scripts/harness_bench.py report <bench-id>  # Recount a bench from rows
 ```
 
-CLI exit codes: 0 ok, 1 failure or usage error, 130 Ctrl-C. `fsm-llm-eval` exits 2 only below `--fail-under PCT`; `fsm-llm-harness` exits 2 on a hard `pre_step_gate` failure. `fsm-llm-eval examples` writes `scorecard.md`, `results.json`, `logs/` to a new `evaluation/<stamp>_<hash>_<model>[_N]/`; settings precedence is defaults < dataset `config` < `--config FILE` < flags.
+CLI exit codes: 0 ok, 1 failure, 130 Ctrl-C; a usage error exits 2 (argparse) except in `fsm-llm-eval` and `fsm-llm-harness`, which exit 1 for it. `fsm-llm-eval` exits 2 only below `--fail-under PCT`; `fsm-llm-harness` exits 2 on a hard `pre_step_gate` failure. `fsm-llm-eval examples` writes `scorecard.md`, `results.json`, `logs/` to a new `evaluation/<stamp>_<hash>_<model>[_N]/`; settings precedence is defaults < dataset `config` < `--config FILE` < flags.
 
 ## Data shapes
 
@@ -138,10 +140,10 @@ FSM definition (JSON, v4.1):
 
 ## Failure modes
 
-- Core `FSMError` -> `ConversationBusyError`, `FSMDefinitionNotFoundError` (also `ValueError`), `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` -> (`SchemaValidationError`, `ClassificationResponseError`); `HandlerSystemError(FSMError)` -> `HandlerExecutionError`.
+- Core `FSMError` -> `ConversationBusyError`, `FSMDefinitionNotFoundError` (also `ValueError`), `StateNotFoundError`, `InvalidTransitionError`, `LLMResponseError`, `TransitionEvaluationError`, `ClassificationError` -> `ClassificationResponseError`, `RunBudgetExceededError` (a bounded run spent `max_steps` or `max_seconds`); `HandlerSystemError(FSMError)` -> `HandlerExecutionError`.
 - Subpackage roots subclass `FSMError`: `ReasoningEngineError`, `WorkflowError`, `AgentError` (incl. `MetaBuilderError`), `HarnessError`, `EvalError` (`EvalConfigError`, `EvalDatasetError`). `MonitorError` subclasses `Exception` only.
-- `test_packaging.py` fails on count drift, a leftover `src/fsm_llm_<sub>/` dir (imports as a namespace package; fix with `make clean` then `pip install -e .`), or a subpackage missing from a build/CI slot.
-- Eval baselines: Run 006 in `EVALUATE.md` is 95.3% (N=3 median, 101 examples, `ollama_chat/qwen3.5:4b`, commit `2df048f`); a later 9b run was 80.9% (N=1, `CHANGELOG.md`). Runs from before and after the 2026-09-29 restructure are not comparable. The heuristic overstates; the mocked test suite says nothing about model quality.
+- `test_packaging.py` fails on count drift or a subpackage missing from a build/CI slot. A clone from before the 2026-09-29 restructure must delete its old `src/fsm_llm_<sub>/` dirs by hand (`make clean` no longer does), then `pip install -e .`.
+- Eval baselines: Run 006 in `EVALUATE.md` is 95.3% (N=3 median, 101 examples, `ollama_chat/qwen3.5:4b`, commit `2df048f`); Run 007 (N=1, 2026-10-01) is 96.0% on the core step driver vs 96.8% for `d4b1626` run the same day; a later 9b run was 80.9% (N=1, `CHANGELOG.md`). Runs from before and after the 2026-09-29 restructure are not comparable. The heuristic overstates; the mocked test suite says nothing about model quality.
 
 ## Working here
 
@@ -151,7 +153,7 @@ make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
 make build          # python -m build (wheel + sdist)
-make clean          # remove build artifacts, caches, logs/, old src/fsm_llm_<sub> dirs
+make clean          # remove build artifacts, caches, logs/
 make coverage       # pytest with --cov=fsm_llm
 make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness,eval]" + pre-commit install
 make audit          # python scripts/audit_pth.py

@@ -4,11 +4,11 @@ The pytest suite for `fsm_llm.monitor`, the web dashboard package of FSM-LLM (so
 
 ## What it is for
 
-The monitor is a FastAPI server (a Python web framework) with a browser dashboard. It watches FSM conversations, agents and workflows, lets you launch them, and streams metrics over a WebSocket. These tests check that the pieces behind it behave correctly: the event collector, the data models, the bridge to a running FSM, the instance manager that launches and tracks FSMs, agents and workflows, the optional OpenTelemetry exporter, and the HTTP server itself, including its security checks. No test calls a real LLM.
+The monitor is a FastAPI server (a Python web framework) with a browser dashboard. It watches FSM conversations, agents and workflows, lets you launch them, and streams metrics over a WebSocket. These tests check that the pieces behind it behave correctly: the event collector, the data models, the instance manager (including `attach_api` for an `API` you created) that launches and tracks FSMs, agents and workflows, the optional OpenTelemetry exporter, and the HTTP server itself, including its security checks. No test calls a real LLM.
 
 ## How it works
 
-Each test file targets one source module in `src/fsm_llm/monitor/`. Server tests call `configure(...)` to install a fresh `MonitorBridge` or `InstanceManager`, then drive the FastAPI `app` through `fastapi.testclient.TestClient`. The other tests build objects directly and replace the FSM `API` with `unittest.mock.MagicMock` or small fake classes.
+Each test file targets one source module in `src/fsm_llm/monitor/`. Server tests call `configure(...)` to install a fresh `InstanceManager`, then drive the FastAPI `app` through `fastapi.testclient.TestClient`. The other tests build objects directly and replace the FSM `API` with `unittest.mock.MagicMock` or small fake classes.
 
 ```mermaid
 flowchart LR
@@ -17,11 +17,9 @@ flowchart LR
     im[test_instance_manager.py] --> manager[instance_manager.py]
     col[test_collector.py] --> collector[collector.py]
     defs[test_definitions.py] --> definitions[definitions.py]
-    br[test_bridge.py] --> bridge[bridge.py]
     ot[test_otel.py] --> otel[otel.py with mocked opentelemetry]
     audit[test_audit_2026_09_28.py] --> manager
     audit --> collector
-    audit --> bridge
 ```
 
 ## Files
@@ -33,7 +31,6 @@ flowchart LR
 - `test_instance_manager.py` - `ManagedFSM`/`ManagedWorkflow`/`ManagedAgent`, `InstanceManager` lookups, destroy, activity, workflow presets, disabled agent types, agent status resolution, stub tools (60 tests).
 - `test_collector.py` - `EventCollector` buffers, metrics, log filtering, handler callbacks, loguru sink, cursors, thread safety (45 tests).
 - `test_definitions.py` - Pydantic models and helpers in `definitions.py` (50 tests).
-- `test_bridge.py` - `MonitorBridge` and `_fsm_dict_to_snapshot` (25 tests).
 - `test_otel.py` - `OTELExporter` enable, disable, shutdown and event routing (22 tests).
 - `test_audit_2026_09_28.py` - one class per finding of the 2026-09-28 monitor audit (non-HTTP parts) (36 tests).
 

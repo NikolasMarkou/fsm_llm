@@ -55,7 +55,7 @@ sequenceDiagram
 - `setApiKey(key)` - trims; empty calls `clearApiKey()`; otherwise stores, resets the dismissed flag, notifies listeners.
 - `clearApiKey()` - removes from storage and memory, notifies listeners.
 - `onApiKeyChange(fn) -> unsubscribe` - listeners run on save and clear; a throwing listener is logged and skipped.
-- `checkAuthRequired(): Promise<true|false|null>` - `fetch('/api/auth')` (the server never gates it), reads `auth_required`; `null` on network error or non-OK. `isAuthRequired()` returns the last answer (initially `null`).
+- `checkAuthRequired(): Promise<true|false|null>` - `fetch('/api/auth')` (the server never gates it), reads `auth_required`; `null` on network error or non-OK.
 - `requestApiKey({force = false, message = ''} = {}): Promise<boolean>` - opens `#apikey-modal` via `openDialog(modal, 'flex', input)`, clears `#apikey-status` and `#apikey-input`, sets `#apikey-modal-msg`. Concurrent callers share one pending promise. After a cancel, non-forced calls resolve `false` without opening until a key is saved. Resolves `false` if `#apikey-modal` is missing.
 - `submitApiKeyModal()` - empty input shows "Enter a key, or Cancel." in `#apikey-status`; otherwise `setApiKey` and resolve `true`.
 - `cancelApiKeyModal()` - sets the dismissed flag and resolves `false` (or just closes the dialog if nothing is pending).

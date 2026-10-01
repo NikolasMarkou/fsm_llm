@@ -54,8 +54,9 @@ flowchart LR
 | `test_harness_agent.py` | `HarnessAgent` behaviour end to end | 354 tests; class-to-decision map in module docstring |
 | `test_live_ollama.py` | L1-L8 live criteria and their offline guards | 94 tests; 17 gated |
 | `test_plan_validator.py` | `pre_step_gate`, `audit`, anchor scan | 191 tests; base fixture is audit-clean |
+| `test_removed_legacy.py` | Removed harness names stay gone (`storage.PLAN_ID_RE`, unread `Defaults`, the legacy plan-id read path) | 11 tests |
 | `test_roles_and_tools.py` | Role specs, prompts, tool scope, `PlanMemory`, `Workspace`, write evidence | 484 tests; D-057 says keep separate from agent tests |
-| `test_storage.py` | `mint_plan_id`, `_atomic_write_text`, `evict_lessons`, `apply_sliding_window`, `PlanDirectory`, `RunState` | 115 tests |
+| `test_storage.py` | `mint_plan_id`, `atomic_write_text` (imported from `fsm_llm.harness._atomic`), `evict_lessons`, `apply_sliding_window`, `PlanDirectory`, `RunState` | 115 tests |
 
 ## Public interface (fixtures and helpers)
 
@@ -96,7 +97,7 @@ Reusable helpers in test modules:
 - `test_plan_validator.py`'s base fixture must stay audit-clean (`test_a_healthy_plan_directory_reports_nothing`); each audit test mutates exactly one thing. `test_live_ollama.py` imports this corpus.
 - `ANCHOR_WORD` in `test_plan_validator.py` spells the anchor marker indirectly on purpose; never inline a literal anchor comment there.
 - `_normalized_ws_path` and `_verified_execute_workspace_write` in `test_live_ollama.py` are frozen floor objects; `test_roles_and_tools.py` imports them. Do not re-implement or loosen (D-008, D-010, D-002).
-- Write-nothing checks spy on `storage._atomic_write_text` rather than comparing bytes (`test_status_writes_nothing`, `test_dry_run_writes_nothing`).
+- Write-nothing checks spy on `storage.atomic_write_text` rather than comparing bytes (`test_status_writes_nothing`, `test_dry_run_writes_nothing`).
 - Driver-owned counters (`_explore_redispatches`, `_plan_redispatches`, `_reflect_redispatches`, `_close_denials`, `_assigned_topics`) must never become context keys; tests assert their spellings are absent from `ContextKeys` and `final_context`.
 - Live gate order: env var checked first, Ollama probe second, joined with `or` so a default run never opens a socket.
 

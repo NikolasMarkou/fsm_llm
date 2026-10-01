@@ -14,6 +14,11 @@ def my_handler(context: dict) -> dict:
 
 ## Handler Timing Points
 
+The timings fire in the same order on a `converse` turn and on a message-free step
+(`API.advance`, and each step of `API.run_until_terminal`); a step only has no user message.
+`run_until_terminal(..., before_step=fn)` also calls `fn(step_number)` before each step,
+outside the turn: it may write context with `api.update_context`, and that step sees it.
+
 ### START_CONVERSATION -- Conversation begins
 ```python
 def welcome(context):

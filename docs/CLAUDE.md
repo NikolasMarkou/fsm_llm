@@ -26,8 +26,8 @@ Links between the docs: `fsm_design.md` ends with `**Next:** [Handler Developmen
 | `quickstart.md` | First-run tutorial | Env var table (`LLM_MODEL`, `LLM_TEMPERATURE` default `0.5`, `LLM_MAX_TOKENS` default `1000`, `FSM_PATH`). Full FSM `friendly_greeter` in a Python block. Handler example at `CONTEXT_UPDATE`. `converse_stream`, `FileSessionStore`. Example commands point at `examples/basic/form_filling`, `examples/basic/story_time`, `examples/intermediate/book_recommendation` |
 | `fsm_design.md` | Design guide | Only state-level JSON fragments, no full FSM. Covers the priority rule, `evaluation_priority` (default 100, range 0-1000), `llm_description` (max 300 chars), `context_scope.read_keys`/`write_keys`, `handler_only_keys`, correction provenance with `<rejected_corrections>`, stacking merge strategies, WorkingMemory reach |
 | `handlers.md` | Handler guide | 8 timings, `HandlerBuilder` table including `.critical()`, `error_mode`, `HandlerSystem.handlers_at` fast path, ERROR-handler rules (return dict not merged, re-entry raises `FSMError`) |
-| `architecture.md` | System design | Layer diagram, component list, message, start and stream flows, `FSMContext` fields, special `_` keys, stacked-FSM merge, extension table, a long harness section (gates read from disk, driver vs worker, safety bounds table), extension points |
-| `api_reference.md` | Reference | `API(...)` signature, session, query, stacking methods, `LLMInterface`, `WorkingMemory`, `TransitionEvaluatorConfig`, classification, reasoning, agents, workflows, harness, eval (CLI flags, exit codes, `EvalConfig` table, dataset schema, output layout), monitor, exception tree, constants |
+| `architecture.md` | System design | Layer diagram, component list, message, message-free step, start and stream flows, `FSMContext` fields, special `_` keys, stacked-FSM merge, extension table, a long harness section (gates read from disk, driver vs worker, safety bounds table), extension points |
+| `api_reference.md` | Reference | `API(...)` signature, steps without a user message (`advance`, `run_until_terminal`), session, query, stacking methods, visualization, `LLMInterface`, `WorkingMemory`, `TransitionEvaluatorConfig`, classification, reasoning, agents, workflows, harness, eval (CLI flags, exit codes, `EvalConfig` table, dataset schema, output layout), monitor, exception tree, constants |
 | `strands_features.md` | Historical | 12 features to adapt, plus "Features NOT Recommended" |
 | `strands_features_phase_1.md` | Historical | 4 delivered features, commit `a7e3d88`, test counts from that time |
 | `strands_features_phase_2.md` | Historical | 8 features with estimated LOC and "Not yet implemented" notes from that time |
@@ -48,7 +48,8 @@ Facts the guides state that must stay in step with the code:
 
 - `API.__init__` parameters and defaults: `max_history_size=5`, `max_message_length=1000`, `handler_error_mode="continue"`, `max_fsm_cache_size=64`, `**llm_kwargs`.
 - `DEFAULT_LLM_MODEL = "ollama_chat/qwen3.5:4b"`, `DEFAULT_MAX_STACK_DEPTH = 10`.
-- `TransitionEvaluatorConfig` fields: `ambiguity_threshold`, `minimum_confidence`, `strict_condition_matching`, `evidence_conditions_normalizer`, `detailed_logging`.
+- `TransitionEvaluatorConfig` fields: `strict_condition_matching`, `detailed_logging` (the three no-op confidence fields were removed).
+- Core step driver: `API.advance`, `advance_stream`, `run_until_terminal(conv_id, *, max_steps, max_seconds=None, before_step=None)`, `run_until_terminal_stream`, `AdvanceResult`, `RunBudgetExceededError`; a silent state makes no call, returns `""` and adds nothing to history. Graph export: `build_fsm_graph`, `to_mermaid`, `to_dot`, `fsm-llm-visualize --format`.
 - `fsm_llm.harness.CHECKS` has 30 entries.
 - Console scripts (`pyproject.toml`): `fsm-llm`, `fsm-llm-visualize`, `fsm-llm-validate`, `fsm-llm-monitor`, `fsm-llm-meta`, `fsm-llm-harness`, `fsm-llm-eval`.
 

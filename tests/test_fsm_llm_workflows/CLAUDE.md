@@ -68,7 +68,7 @@ Assertions read `WorkflowStepResult` fields `success`, `next_state`, `data`, `er
 
 ## Invariants and constraints
 
-- Internal context keys (prefixes `_`, `system_`, `internal_`, `__`, case-insensitive) are stripped from step results; `_waiting_info` survives via `_STEP_INTERNAL_WHITELIST` in `src/fsm_llm/workflows/engine.py`. `TestStepDataInternalKeyFilter` asserts both directions.
+- Internal context keys (prefixes `_`, `system_`, `internal_`, `__`, case-insensitive) are stripped from step results; `_waiting_info` survives via `STEP_INTERNAL_WHITELIST` in `src/fsm_llm/workflows/constants.py`. `TestStepDataInternalKeyFilter` asserts both directions.
 - `next_state == ""` on any successful result means terminal (D-013, D-020), including when a `RetryStep` returns an inner `SwitchStep` result. `TimerStep`/`WaitForEventStep` return `next_state=None` and go `WAITING`.
 - Concurrency tests loop 5 or 20 times and accept either race winner but require: step body ran at most once, no call raised, final status consistent (`COMPLETED` implies `cancel_workflow` returned `False`).
 - Cancelling an already `COMPLETED`, `CANCELLED` or `FAILED` instance returns `False` without raising.

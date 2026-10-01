@@ -33,7 +33,8 @@ flowchart TD
 
 - The context is a dictionary of everything collected so far in one conversation.
 - Transition rules use JsonLogic, a small JSON rule language (for example `{">=": [{"var": "age"}, 18]}`). If several transitions pass, the lowest `priority` number wins; the LLM is asked only when two or more tie at that lowest priority.
-- Pass 2 is skipped when a state has empty `response_instructions`.
+- Pass 2 is skipped when a state has empty `response_instructions`: the state says nothing (no LLM call, empty reply, nothing added to the history).
+- `API.advance` runs the same turn with no user message, and `API.run_until_terminal` repeats it until a terminal state within a step and time budget. The agents are driven this way.
 - Handlers are your own Python functions that run at 8 fixed points in the flow.
 - FSM stacking lets a conversation hand control to a second FSM and come back with its results.
 
@@ -101,4 +102,4 @@ fsm-llm-eval examples
 - Extras: `reasoning`, `workflows`, `agents` and `eval` add nothing; `harness` pulls in `agents`; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations.
 - The default model is `ollama_chat/qwen3.5:4b`, or whatever `LLM_MODEL` is set to.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`.
-- `make clean` also deletes `src/fsm_llm_agents`, `src/fsm_llm_reasoning`, `src/fsm_llm_workflows`, `src/fsm_llm_monitor` and `src/fsm_llm_harness` if they exist. These are leftovers from an older layout with separate top-level packages; they are not part of the current source.
+- `src/fsm_llm_agents`, `src/fsm_llm_reasoning`, `src/fsm_llm_workflows`, `src/fsm_llm_monitor` and `src/fsm_llm_harness` are leftovers from the layout before 2026-09-29 with separate top-level packages. They are not part of the current source and `make clean` does not remove them: delete them by hand in an old clone.

@@ -48,7 +48,7 @@ Exports called by `app.js` or `ws.js`, grouped by file:
 - `launch.js`: `setDeps({showPage, refreshInstances, showConversationInDrawer})`, `showLaunchModal`, `closeLaunchModal`, `toggleLaunchFSMSource`, `renderLaunchPresets(presets)`, `filterPresets(cat)`, `selectPreset(card)`, `doLaunchFSM(btn)`, `doLaunchWorkflow(btn)`, `populateToolTemplates`, `addToolFromTemplate`, `addStubTool`, `onAgentTypeChange`, `doLaunchAgent(btn)`.
 - `visualizer.js`: `visualizeGraph(type, typeValue)` (returns `true` on success, `false` on failure with a toast, `null` when there was nothing to render), `visualizeFSM`, `switchVizDetail(tab, btn)`, `loadFSMPresets`, `useFSMPreset(id)`, `initVizDivider`.
 - `builder.js`: `setDeps({showPage, refreshInstances})`, `builderJumpToLatest`, `onBuilderScroll`, `startBuilderSession`, `sendBuilderMessage`, `copyBuilderResult`, `downloadBuilderResult` (file `artifact.json`), `launchBuilderResult`, `resetBuilder`.
-- `logs.js`: `toggleLogPill(btn)`, `onLogSearchInput`, `updateJumpButton`, `logJumpToLatest`, `onLogScroll`, `toggleLogPause`, `isLogPaused`, `clearLogs`, `appendLogs(logs)`, `onShowLogs` (page-show hook; skipped while paused and the stream is non-empty), `syncLogs` (called by the 10 s timer in app.js; append-only catch-up), `refreshLogs` (full rebuild).
+- `logs.js`: `toggleLogPill(btn)`, `onLogSearchInput`, `updateJumpButton`, `logJumpToLatest`, `onLogScroll`, `toggleLogPause`, `clearLogs`, `appendLogs(logs)`, `onShowLogs` (page-show hook; skipped while paused and the stream is non-empty), `syncLogs` (called by the 10 s timer in app.js; append-only catch-up), `refreshLogs` (full rebuild).
 - `settings.js`: `loadSettings`, `saveSettings`, `resetSettings`, `saveApiKeySetting`, `clearApiKeySetting`.
 
 ## REST endpoints used

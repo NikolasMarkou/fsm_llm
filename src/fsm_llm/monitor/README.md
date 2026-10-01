@@ -35,12 +35,11 @@ flowchart LR
 
 - `__main__.py` - the `fsm-llm-monitor` command: `--host`, `--port`, `--api-key`, `--otel`, `--no-browser`, `--version`, `--info`; then runs uvicorn.
 - `server.py` - FastAPI app: HTML page, REST API, WebSocket, security checks, optional API key, meta-builder chat sessions.
-- `instance_manager.py` - creates, runs, queries, and destroys FSM, agent, and workflow instances; attaches the observer hooks.
+- `instance_manager.py` - creates, runs, queries, and destroys FSM, agent, and workflow instances; attaches the observer hooks; `attach_api` shows an `API` object you already have.
 - `collector.py` - `EventCollector` (thread-safe bounded store of events and logs, metric counters, hook callbacks) and `redact_context`.
-- `bridge.py` - `MonitorBridge`: attach the monitor to an `API` object you already have; also turns FSM JSON into display snapshots.
 - `otel.py` - `OTELExporter`: mirrors collector events as OpenTelemetry spans.
 - `definitions.py` - Pydantic models for events, logs, metrics, snapshots, config, and request bodies.
-- `constants.py` - event type names, defaults and limits, theme color constants, hook name and priority.
+- `constants.py` - event type names, defaults and limits, hook name and priority.
 - `exceptions.py` - `MonitorError` and its subclasses.
 - `__init__.py`, `__version__.py` - public exports, version (shared with `fsm_llm`).
 - `static/` - the browser app: `app.js` (boot, navigation, click routing), `style.css` (dark theme), `flows.json` (hand-drawn graphs of 12 agent patterns and 5 workflows for the Visualizer), and the `pages/`, `services/`, `utils/` module folders.
@@ -57,18 +56,20 @@ fsm-llm-monitor --port 9000 --no-browser
 python -m fsm_llm.monitor --info
 ```
 
-Screens: Dashboard (metrics, events, instances, activity), Control Center (instance table with a detail drawer and chat), Visualizer (FSM, agent, and workflow graphs), Logs, Builder (design an FSM or agent by chatting with a meta-builder agent), Settings. Keys `1` to `6` switch screens, `?` shows the shortcuts.
+Screens: Dashboard (metrics, events, instances, activity), Control Center (instance table with a detail drawer and chat), Visualizer (FSM graphs from core `build_fsm_graph`; agent and workflow graphs from `flows.json`), Logs, Builder (design an FSM or agent by chatting with a meta-builder agent), Settings. Keys `1` to `6` switch screens, `?` shows the shortcuts.
 
 Watch an `API` object from your own program:
 
 ```python
 import uvicorn
 from fsm_llm import API, setup_logging
-from fsm_llm.monitor import MonitorBridge, app, configure
+from fsm_llm.monitor import InstanceManager, app, configure
 
 setup_logging()  # library logging is off by default; the Logs page stays empty without this
 api = API.from_file("examples/basic/simple_greeting/fsm.json", model="ollama_chat/qwen3.5:4b")
-configure(bridge=MonitorBridge(api=api))
+manager = InstanceManager()
+manager.attach_api(api)
+configure(manager=manager)
 uvicorn.run(app, host="127.0.0.1", port=8420)
 ```
 

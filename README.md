@@ -44,7 +44,7 @@ flowchart LR
 
 - The context is a dictionary of everything collected so far in one conversation.
 - Transition rules use JsonLogic, a small JSON rule language, for example `{">=": [{"var": "age"}, 18]}`. If several transitions pass, the lowest `priority` number wins. The LLM is asked only when two or more tie at that lowest priority.
-- Pass 2 runs after the transition, so the reply comes from the state the conversation is actually in. A state with empty `response_instructions` skips Pass 2.
+- Pass 2 runs after the transition, so the reply comes from the state the conversation is actually in. A state with empty `response_instructions` skips Pass 2: it makes no LLM call, replies with the empty string and adds nothing to the history.
 
 Features of the core:
 
@@ -52,6 +52,8 @@ Features of the core:
 - **Intent classification**: single, multi-intent and hierarchical classifiers, plus an intent router.
 - **FSM stacking**: hand a conversation to a sub-FSM and come back with its results.
 - **Streaming**: `converse_stream()` yields reply tokens as they arrive.
+- **Steps without a user message**: `advance()` runs one turn of the current state with no user message and returns an `AdvanceResult`; `run_until_terminal()` repeats it until a terminal state, within a step and wall-clock budget (`RunBudgetExceededError`). The agents run on these loops. Stream forms: `advance_stream()`, `run_until_terminal_stream()`.
+- **Diagrams**: `build_fsm_graph()` gives the graph as data, `to_mermaid()` and `to_dot()` render it, and `fsm-llm-visualize --format mermaid|dot` prints it.
 - **Sessions**: save and restore a conversation with `FileSessionStore`.
 - **Working memory**: named buffers for agent-style scratch data.
 - **Many LLM providers** through litellm (OpenAI, Anthropic, Ollama and others).
@@ -254,7 +256,7 @@ fsm-llm-eval run evaluation/datasets/simple_greeting_cases.json --trials 3
 | Command | Description |
 |---------|-------------|
 | `fsm-llm --fsm <path.json>` | Chat with an FSM interactively |
-| `fsm-llm-visualize --fsm <path.json>` | Draw an FSM as ASCII art |
+| `fsm-llm-visualize --fsm <path.json> [--format ascii\|mermaid\|dot]` | Draw an FSM as ASCII art, Mermaid or DOT |
 | `fsm-llm-validate --fsm <path.json>` | Check an FSM definition for problems |
 | `fsm-llm-monitor` | Launch the web dashboard |
 | `fsm-llm-meta` | Build FSMs, workflows or agents by chatting |
@@ -309,7 +311,7 @@ To contribute (details in `CONTRIBUTING.md`): fork, branch, run `make install-de
 - The harness is experimental and not production-ready.
 - Evaluation scores are a heuristic and overstate quality; read the logs as well. Runs from before and after the 2026-09-29 restructure are not comparable.
 - `constraints.txt` pins litellm and the dev tools to exact versions so CI and local runs match. The compromised litellm 1.82.7 and 1.82.8 are below the required version.
-- Upgrading a clone from before the 2026-09-29 restructure: run `make clean`, then `pip install -e .`. A leftover `src/fsm_llm_<sub>/` folder breaks imports and tests.
+- Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` no longer removes them), then `pip install -e .`. A leftover folder breaks imports.
 
 ## License
 

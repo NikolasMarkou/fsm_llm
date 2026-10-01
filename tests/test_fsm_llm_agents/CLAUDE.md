@@ -35,7 +35,7 @@ Fake LLM conventions:
 
 - Subclass `fsm_llm.llm.LLMInterface`, set `self.model`, implement `extract_field(FieldExtractionRequest) -> FieldExtractionResponse`, `generate_response(...) -> ResponseGenerationResponse`, and optionally `extract_bulk_data(...) -> DataExtractionResponse`.
 - Field-name keyed (safe under concurrency): `_DeterministicMockLLM` (`test_react.py`), `_FieldMapLLM`, `_ScriptedBehaviourLLM`, `_NoSelectionLLM`, `_ForgingLLM`.
-- Call-order keyed: `SequenceMockLLM` (`test_bug_fixes.py`) advances once per converse cycle; not thread safe.
+- Call-order keyed: `SequenceMockLLM` (`test_bug_fixes.py`) advances once per core step; not thread safe.
 - Turn detection: `_RespondLLM` counts a new turn when a field name repeats; `_BatchLLM` and `_ToolThenTerminateLLM` count on the `tool_calls` / `tool_name` request.
 - Invalid field: return `value=None, is_valid=False, confidence=0.0`.
 - Bulk-prompt fakes parse requested keys with `re.findall(r'- "(\w+)"', request.system_prompt)` (`_DecisionLLM` in debate/orchestrator).
@@ -55,7 +55,10 @@ Observation hooks used by loop tests:
 | `test_grounded_patterns.py` | Phase-1 pattern loops on `PromptGroundedLLM` | Classes per pattern (`TestReactLoop`, `TestReflexionLoop`, `TestPlanExecuteLoop`, `TestDebateLoop`, `TestSelfConsistencyVote`, `TestPromptChainLoop`, `TestMakerCheckerLoop`, `TestEvaluatorOptimizerLoop`, `TestREWOOOutcome`, `TestOrchestratorWorkers`, `TestAgentGraphOrder`, `TestSwarmHandoff`) plus the fake's self-tests, `TestOfflineNetworkGuard`, `TestSuccessContract`, `TestSuccessReflectsWhoConcluded` (fix 13.1), `TestTypedFieldExtraction`, `TestGeneratedFieldsAreComposed`, `TestAgentInstructions`; written to fail on the parent commit of each fix |
 | `test_trust_boundary.py` | Caller context and constructor boundary | Forged `_approval_granted`/run-output keys via `initial_context`, `AgentServer` `/invoke` and `/stream`, SelfConsistency, AgentGraph; misplaced constructor kwargs; gated-tool refusal in REWOO/PlanExecute/ParallelReact/native_fc; callback-only HITL with flagged tools |
 | `test_security_review_fixes.py` | Security review fix 3.1 (D-052 of plan 06a5ec0a) | Pattern run outputs unforgeable via `initial_context`, `AgentServer`, AgentGraph, Swarm; flagged tools with no approver raise on the ReAct family; HITL kwargs denylist; `register_function` shapes; redacted fallback DEBUG lines; `RetryingToolRegistry` never retries a flagged tool |
-| `test_public_api.py` | `create_agent`, `AgentConfig`, `__all__` | Pattern-first factory and legacy prompt shim, `extra="forbid"`, `LLM_MODEL`, `instructions` reach field prompts, static `__all__` |
+| `test_public_api.py` | `create_agent`, `AgentConfig`, `__all__` | Pattern-first factory (a non-pattern first argument raises `ValueError`; the legacy prompt shim is gone), `extra="forbid"`, `LLM_MODEL`, `instructions` reach field prompts, static `__all__` |
+| `test_advance_driver.py` | Agent loops on core `run_until_terminal` | No synthetic user message, no `[state]` marker, budgets mapped from `RunBudgetExceededError`, hook timing parity, HITL refusal record (`refused_actions`), `await_approval` extracts nothing |
+| `test_review_round1_agents.py`, `test_review_round2_agents.py` | Plan 07ad3f8c review fixes | Refusal record true in every order, `final_answer` never read, ADaPT `operator` stripped, `*States` classes equal their FSM's state set, conversation ended from outside -> `(False, "ended")` |
+| `test_removed_legacy.py` | Removed agents names stay gone | Positional prompt shim, `DecompositionError`, `ToolValidationError`, `meta_fsm`, unread constants and builders |
 | `test_secret_hygiene.py` | Secret redaction | Memory tools skip hidden buffers; secret-shaped tool args absent from observations, trace, logs, `context_summary` |
 | `test_hitl_security.py` | Gated tool needs call-bound driver grant | Forged `approval_granted`/`_approval_granted`, swapped call, empty-then-filled input, non-bool approval, forged `approval_required`, internal-key policy; parametrized over React, Reflexion, ReasoningReact |
 | `test_react.py` | ReactAgent | `_hitl_active`, policy-only builds `await_approval`, concurrent `run()` isolation (barrier in `build_react_fsm`), single-use approval |
@@ -100,7 +103,7 @@ Nothing is exported. Entry points are pytest node ids, for example:
 
 Behaviour these tests pin; changing agents code that breaks them is a regression unless the owning DECISION is revised:
 
-- Budget hard ceiling is `max_iterations * Defaults.FSM_BUDGET_MULTIPLIER` (3); `_check_budgets` raises `BudgetExhaustedError` past it and `AgentTimeoutError` past `timeout_seconds`.
+- Budget hard ceiling is `max_iterations * Defaults.FSM_BUDGET_MULTIPLIER` (3), passed to core `run_until_terminal` as `max_steps` with the seconds left as `max_seconds`; `BaseAgent._budget_error` maps core's `RunBudgetExceededError` to `BudgetExhaustedError` / `AgentTimeoutError`. `_check_budgets(start_time)` keeps only the wall-clock check (SelfConsistency samples, native_fc).
 - `think -> act` is an unconditional lowest-priority fallback; approval edge beats it. Loop states in ADaPT (`assess`, `decompose`), EvalOpt (`generate`) and MakerChecker (`check`) each have exactly one unconditional fallback with the highest priority number.
 - `max_iterations_reached` is seeded `False` in `_init_context`; it, `forced_stop_reason`, `iteration_count` and `observation_count` are core `handler_only_keys` on every agent FSM, so no extraction can set them (D-051 of plan 06a5ec0a).
 - A forced stop, forced pass, stall, rejected verification or failed gate gives `success=False` with the matching `stop_reason`; the answer still ships.

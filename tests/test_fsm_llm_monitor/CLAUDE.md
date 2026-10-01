@@ -5,7 +5,7 @@ Purpose: pytest suite (388 collected tests) for `fsm_llm.monitor`, the FastAPI d
 
 ## Scope
 
-- Unit and HTTP-level tests for `server.py`, `instance_manager.py`, `collector.py`, `definitions.py`, `bridge.py`, `otel.py`, `__main__.py` (`_browser_url` only) and the package `__init__.py` exports.
+- Unit and HTTP-level tests for `server.py`, `instance_manager.py`, `collector.py`, `definitions.py`, `otel.py`, `__main__.py` (`_browser_url` only) and the package `__init__.py` exports.
 - No real LLM calls, no network, no browser. The FSM `API` is a `MagicMock` or a small fake; HTTP goes through `fastapi.testclient.TestClient`.
 - Not here: the monitor source itself (`src/fsm_llm/monitor/`) and the JS SPA logic (only static file presence, HTTP 200, and the HTML/CSS limits in `TestUiMatchesServerLimits` are checked).
 
@@ -16,12 +16,12 @@ flowchart TD
     conftest["conftest.py autouse: delenv FSM_LLM_MONITOR_API_KEY"]
     conftest --> tests[all test files]
     tests --> http["test_app.py / test_server_security.py: configure(...) + TestClient(app)"]
-    tests --> unit["test_instance_manager / test_collector / test_definitions / test_bridge"]
+    tests --> unit["test_instance_manager / test_collector / test_definitions"]
     tests --> otel["test_otel.py: fake opentelemetry in sys.modules"]
     tests --> audit["test_audit_2026_09_28.py: one class per audit finding"]
 ```
 
-Server test pattern: `configure(MonitorBridge())` or `configure(manager=InstanceManager(), api_key=...)` then `TestClient(app)`. `test_server_security.py` wraps this in `_client(api_key=None)` using `InstanceManager(config=MonitorConfig(refresh_interval=0.5))`.
+Server test pattern: `configure(manager=InstanceManager(), api_key=...)` (keyword-only) then `TestClient(app)`. `test_server_security.py` wraps this in `_client(api_key=None)` using `InstanceManager(config=MonitorConfig(refresh_interval=0.5))`.
 
 Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.global_collector.cleanup()` to drop its loguru sink, then inject instances directly into `mgr._instances` / `mgr._collectors` (under `mgr._lock` in most tests).
 
@@ -35,7 +35,6 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools | 61 tests; contains unmarked `async def` tests |
 | `test_collector.py` | `EventCollector` | 45 tests |
 | `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | 50 tests |
-| `test_bridge.py` | `MonitorBridge`, `_fsm_dict_to_snapshot` | 25 tests |
 | `test_otel.py` | `OTELExporter` | 22 tests; autouse `_mock_otel` fixture |
 | `test_audit_2026_09_28.py` | regression tests for the 2026-09-28 audit (non-HTTP) | 36 tests; module-level `pytest.importorskip("fsm_llm.workflows")` (line 436) skips all 36 when workflows is missing |
 
@@ -44,7 +43,7 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 Suite entry points (what a new test uses):
 
 - Fixtures: `_clear_monitor_api_key_env` (autouse, `conftest.py`), `_reset_key` (autouse, `test_server_security.py`), `_mock_otel` (autouse, `test_otel.py`).
-- Helpers: `_client(api_key=None) -> TestClient` (`test_server_security.py`); `_minimal_fsm_dict()` (separate copies in `test_app.py` and `test_bridge.py`); `_manager() -> InstanceManager`, `_fsm(mgr, iid, api=None) -> ManagedFSM`, `_fire(api, timing, current, target)`, `_snapshot_api(collected, extraction=None) -> MagicMock`, fakes `_FakeAPI`, `_FakeHandlerSystem`, `_Secretive` (`test_audit_2026_09_28.py`); `_build_otel_mocks()`, `_import_otel()`, `_make_event(event_type="conversation_start", conv_id="conv-1", **kwargs)` (`test_otel.py`).
+- Helpers: `_client(api_key=None) -> TestClient` (`test_server_security.py`); `_minimal_fsm_dict()` (in `test_app.py`); `_manager() -> InstanceManager`, `_fsm(mgr, iid, api=None) -> ManagedFSM`, `_fire(api, timing, current, target)`, `_snapshot_api(collected, extraction=None) -> MagicMock`, fakes `_FakeAPI`, `_FakeHandlerSystem`, `_Secretive` (`test_audit_2026_09_28.py`); `_build_otel_mocks()`, `_import_otel()`, `_make_event(event_type="conversation_start", conv_id="conv-1", **kwargs)` (`test_otel.py`).
 - Test classes per file:
   - `test_app.py`: `TestWebServer`, `TestMonitorImports`, `TestUiMatchesServerLimits`, `TestServerFSMEndpoints`, `TestServerInstanceEndpoints`, `TestServerConfigEndpoints`, `TestDashboardConfigEndpoints`, `TestServerPresetEndpoints`, `TestServerErrorHandling`, `TestActivityEndpoint`, `TestServerHygieneAndWorkflow`, `TestApiKeyGate`, `TestDashboardWebsocketRedaction`.
   - `test_server_security.py`: `TestOriginAndHost`, `TestApiKeyGating`, `TestWebSocket`, `TestErrorMapping`, `TestRequestBounds`, `TestDashboardConfig`, `TestBuilderGuards`, `TestPresetValidation`.
@@ -83,15 +82,15 @@ Collector (`test_collector.py`, audit file):
 - Metrics: `total_errors`, `total_transitions`, `states_visited`, `active_conversations`, `total_agent_iterations`, `total_tool_calls`, `total_workflow_steps`; `clear()` resets all; timestamps are UTC.
 - `get_logs(level=...)` is case-insensitive, `SUCCESS` ranks above INFO, unknown level returns all.
 - `get_events_since(after_total, limit)`; `events_after(cursor, limit)` / `logs_after(cursor, limit)` return `(items, cursor)` oldest first, skip dropped items and restart after `clear()`.
-- `create_handler_callbacks()` returns 8 callbacks, all returning `{}`; `POST_TRANSITION` records nothing. `handler_name == "fsm_llm.monitor"`, `handler_priority == 9999`.
+- `create_handler_callbacks()` returns 7 callbacks (no `POST_TRANSITION`), all returning `{}`. `handler_name == "fsm_llm.monitor"`, `handler_priority == 9999`.
 - The loguru sink records `LogRecord`s only (no `"log"` events), with tz-aware timestamps. `cleanup()` is idempotent and sets `_log_sink_id` to `None`.
 - `snapshot_context` and `redact_context(data, drop_internal=True)` drop secret-looking keys (including nested) and replace objects with `"<redacted:ClassName>"` without calling `__str__`.
 
-Instance manager and bridge:
+Instance manager:
 - `register_monitor_handlers(api, collector)` registers 7 handlers (no POST_TRANSITION), is idempotent; `unregister_monitor_handlers` returns 7. `_MonitorHandler.execute` returns `{}`.
 - Transition events carry the core's `current`/`target` states; END event `data["state"]` is the final state.
 - `snapshot_from_api(api, conv_id, show_internal_keys=...)`: internal prefixes `_`, `system_`, `internal_`, `__` (case-insensitive) hidden when False; secret-looking keys hidden either way; `last_extraction` is redacted.
-- `MonitorBridge(api=...)` registers 7 handlers; `connect(None)` leaves `connected` False; API exceptions yield `[]` or `None`; `get_conversation_snapshot` honours `config.show_internal_keys`. `_fsm_dict_to_snapshot` defaults transition priority to 100.
+- `attach_api(api)` (`TestAttachApi`) registers the monitor handlers; nothing attached shows nothing; the attached API's conversations are listed and snapshotted; its listing or snapshot failures yield `[]` or `None`; snapshots honour `config.show_internal_keys`.
 - `destroy_instance`: agent -> `cancelled` with `cancel_event` set, bounded join (under 5 s) and one `logger.warning` naming the id if the thread is still alive; workflow -> `completed`; unknown id -> `KeyError`.
 - `_get_fsm`/`_get_workflow`/`_get_agent`: `KeyError` if missing, `TypeError` on wrong type. `launch_fsm()` without data: `ValueError` "Must provide". `_HAS_AGENTS`/`_HAS_WORKFLOWS` False: `RuntimeError` "not installed".
 - `get_agent_status`: dead thread in `cancelling` -> `cancelled`; dead `running` without result -> `failed`. `cancel_agent` returns False on finished agents and emits `agent_cancelled` once.
@@ -142,12 +141,11 @@ Payloads and records pinned elsewhere in the suite:
 - Static file tests fail if a JS module under `src/fsm_llm/monitor/static/` is renamed or removed.
 - `test_examples_dir_resolves_to_repo_examples` fails if `instance_manager.py` moves to another depth.
 - Preset tests only assert when `/api/presets` finds FSM presets; they pass vacuously if none exist.
-- `test_bridge.py::test_connect` has a stale comment saying 8 handlers; the assertion (7) is correct.
 
 ## Working here
 
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_monitor/`.
 - Put tests for a source module in the matching `test_<module>.py`; audit regressions go in a dated file, one class per finding.
-- Use the local `_minimal_fsm_dict()` helpers (defined separately in `test_app.py` and `test_bridge.py`) for FSM payloads.
+- Use the local `_minimal_fsm_dict()` helpers (defined in `test_app.py`) for FSM payloads.
 - After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_monitor --collect-only -q | tail -1` and update the monitor per-suite count in the repo-root `CLAUDE.md` Testing block and the totals there and in `README.md`; `tests/test_packaging.py` checks them against `--collect-only`.
 - Do not change files under `examples/`; preset tests read them.

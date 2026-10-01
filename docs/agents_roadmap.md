@@ -157,7 +157,7 @@ API, observability, tests:
 | API-03 | TRUE | Fixed, step 24 |
 | API-04 | TRUE | Fixed, step 13 |
 | API-05 | TRUE | Fixed, step 25 |
-| API-06 | TRUE | Fixed, step 25 (constants). `DecompositionError`/`ToolValidationError` kept (exported, no raise site): Track B deprecation |
+| API-06 | TRUE | Fixed, step 25 (constants). `DecompositionError`/`ToolValidationError` removed in plan 07ad3f8c (no raise site) |
 | API-07 | TRUE | Fixed, steps 4 and 26 |
 | OBS-01 to OBS-05 | NOT VERIFIED | Deferred to Track B |
 | TEST-01 | TRUE | Fixed, step 1 (`PromptGroundedLLM`); used by every Phase-1 step |
@@ -185,7 +185,7 @@ Where verification or a consumer contradicted the proposed fix, the fix was chan
 - LOOP-08 (D-017): `agent_trace` is not capped or renamed (a data path, and core reads it); it is kept out of prompts instead.
 - REACT-03 (D-010): the dead override is deleted, not repaired (a repair needs a core channel).
 - API-04 (D-011, D-027): additive `stop_reason`; a public `forced_stop_reason` context key tells forced passes apart, because `API.get_data` drops internal keys. Fix 13.1 (D-051): a forced reason only when a handler overrode the verdict (EvalOpt, MakerChecker read only the recorded reason, not the bare limiter flag); Reflexion's reflection cap and Debate's forced consensus are forced; framework keys are core `handler_only_keys` on every agent FSM; an AgentGraph node with `success=False` takes no edge; a Swarm handoff to an unknown agent is `no_result`.
-- API-01 (D-012, D-047): `create_agent` keeps a legacy positional prompt with a `DeprecationWarning`. `AgentConfig.instructions` is prefixed as an `Agent instructions:` block to every non-empty state and field instruction, not written into `persona` (persona reaches only Pass 2).
+- API-01 (D-012, D-047): `create_agent` kept a legacy positional prompt with a `DeprecationWarning`; plan 07ad3f8c removed it (D-041 there): a first argument that names no pattern raises `ValueError`. `AgentConfig.instructions` is prefixed as an `Agent instructions:` block to every non-empty state and field instruction, not written into `persona` (persona reaches only Pass 2).
 - D-048: the core persona cap is now 4,000 characters (`MAX_PERSONA_LENGTH`), but `AgentConfig.instructions` still uses the instructions block (D-047): a longer persona still never reaches the Pass-1 field prompts.
 - PAT-13 (D-013): `AgentConfig.model` stays a `str` with an env-reading default factory; more than 20 readers use it directly.
 - PAT-04, PAT-10 (D-014, D-042): budget errors from sub-runs go into a call-local `RunEndingErrorHolder` and are re-raised after the loop; core's handler `continue` mode would swallow a plain raise.
@@ -230,7 +230,6 @@ Plan scale: 7 files added (tests and docs only, 0 source files); source net +3,1
 - Swarm never hands off by itself: nothing shipped writes `next_agent`.
 - SEC-11: D-030 recovery can pass the task text to a side-effecting single-parameter tool.
 - REACT-05: reasoning-engine input is not length-capped. MEM-03/04: O(n^2) rewrite per `add` and embedding under the store lock.
-- `DecompositionError` and `ToolValidationError` are exported but never raised.
 - Examples to re-check in the final G3 (D-040): adapt, hierarchical_orchestrator, maker_checker_code.
 - Review pass 2 residue (D-056), shipped as known limits:
   - A long generated artifact can still be cut off by the per-field `max_tokens` budget; it ships truncated, marked only by a WARNING and confidence 0.3, and an unjudged PromptChain run can report `success=True`. Needs an output-budget change (Track B).
@@ -267,7 +266,7 @@ Work deferred to Phases 2-6 of the original roadmap:
 - Swarm transfer tools (PAT-08), AutoMemory `respond` tool without mutating the caller's registry (REACT-07), REACT-09, REACT-10.
 - Harness migration to the new runtime after Phase 4 (roadmap D8).
 
-Deprecations (roadmap D5), deferred to Track B: ParallelReact, Debate and SelfConsistency, once the runtime offers replacements (D-020). Also candidates: the positional `create_agent(system_prompt, ...)` shim (warns since this change), `DecompositionError`, `ToolValidationError`.
+Deprecations (roadmap D5), deferred to Track B: ParallelReact, Debate and SelfConsistency, once the runtime offers replacements (D-020). The positional `create_agent(system_prompt, ...)` shim, `DecompositionError` and `ToolValidationError` were removed in plan 07ad3f8c.
 
 ## Recorded baselines at `d4b1626`
 

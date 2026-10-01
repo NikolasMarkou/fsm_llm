@@ -35,7 +35,7 @@ Tests call static methods and model constructors directly with small context dic
 - `OrchestratorStates`: `problem_analysis`, `strategy_selection`, `execute_reasoning`, `synthesize_solution`, `validate_refine`, `final_answer`.
 - `ClassifierStates`: `analyze_domain`, `analyze_structure`, `identify_reasoning_needs`, `recommend_strategy`.
 - `HandlerNames`: `OrchestratorProblemClassifier`, `OrchestratorStrategyExecutor`, `OrchestratorSolutionValidator`, `ReasoningTracer`, `ContextPruner`, `RetryLimiter`.
-- `ErrorMessages` placeholders: `INVALID_REASONING_TYPE` `{type}`, `FSM_NOT_FOUND` `{name}`, `CALCULATION_ERROR` `{error}`, `VALIDATION_FAILED` `{reason}`; `MAX_RETRIES_EXCEEDED` and `CONTEXT_TOO_LARGE` non-empty.
+- `ErrorMessages` placeholders: `INVALID_REASONING_TYPE` `{type}`, `FSM_NOT_FOUND` `{name}`; `MAX_RETRIES_EXCEEDED` non-empty. `CALCULATION_ERROR`, `VALIDATION_FAILED`, `CONTEXT_TOO_LARGE` and `Defaults.MAX_CONTEXT_SIZE` are pinned absent (removed in plan 07ad3f8c).
 - `LogMessages` placeholders: `ENGINE_INITIALIZED` `{model}`, `CLASSIFICATION_STARTED` `{context}`, `CLASSIFICATION_COMPLETE` `{type}`, `FSM_PUSHED` `{name}`, `PROBLEM_SOLVED` `{steps}`.
 - `ReasoningHandlers.validate_solution(context) -> dict`: sets `VALIDATION_RESULT`, `SOLUTION_CONFIDENCE`, `VALIDATION_CHECKS` (`has_solution`, `has_insights`, `sufficient_detail`, `addresses_problem`), `RETRY_COUNT`, `MAX_RETRIES_REACHED`. Callable on the class or an instance.
 - `ReasoningHandlers.update_reasoning_trace(context) -> dict`: appends `{"from", "to", "context_snapshot", ...}` from `_previous_state`/`_current_state`.
@@ -48,7 +48,7 @@ Tests call static methods and model constructors directly with small context dic
 
 ## Data shapes
 
-Pinned `Defaults`: `TEMPERATURE == 0.7`, `MAX_TOKENS == 2000`, `MAX_RETRIES == 3`, `MAX_CONTEXT_SIZE == 10000`, `MAX_TRACE_STEPS == 50`, `CONTEXT_PRUNE_THRESHOLD == 8000` (must stay below `MAX_CONTEXT_SIZE`), `MIN_SOLUTION_LENGTH == 20`, `PRUNE_LIST_MAX_LENGTH == 10`, `PRUNE_STRING_MAX_LENGTH == 1000`. `MODEL` is only checked to be a `str`.
+Pinned `Defaults`: `TEMPERATURE == 0.7`, `MAX_TOKENS == 2000`, `MAX_RETRIES == 3`, `MAX_TRACE_STEPS == 50`, `CONTEXT_PRUNE_THRESHOLD == 8000`, `MIN_SOLUTION_LENGTH == 20`, `PRUNE_LIST_MAX_LENGTH == 10`, `PRUNE_STRING_MAX_LENGTH == 1000`. `MODEL` is only checked to be a `str`.
 
 Pinned `ContextKeys` strings include `problem_statement`, `problem_type`, `problem_components`, `proposed_solution`, `final_solution`, `key_insights`, `validation_result`, `solution_confidence`, `reasoning_fsm_to_push`, `reasoning_type_selected`, `retry_count`, `max_retries_reached`, `operand1`, `operand2`, `operator`, `calculation_result`, `deductive_conclusion`, `inductive_hypothesis`, `best_creative_solution`, `critical_assessment`, `final_hybrid_solution`, `best_explanation`, `analogical_solution`.
 

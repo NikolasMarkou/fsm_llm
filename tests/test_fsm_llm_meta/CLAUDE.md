@@ -12,7 +12,6 @@ Covers these source modules (all under `src/fsm_llm/agents/`):
 - `meta_tools.py` (`create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools`)
 - `meta_prompts.py` (`build_welcome_message`, `build_followup_message`, `build_review_presentation`, `build_output_message`)
 - `meta_output.py` (`format_artifact_json`, `format_summary`, `save_artifact`)
-- `meta_fsm.py` (`build_meta_builder_fsm`, legacy FSM dict)
 - `definitions.py` (`ArtifactType`, `BuildProgress`, `MetaBuilderConfig`, `MetaBuilderResult`, `ToolCall`)
 - `exceptions.py` (`MetaBuilderError`, `BuilderError`, `MetaValidationError`, `OutputError`, `AgentError`)
 - `constants.py` (`MetaDefaults`)
@@ -33,7 +32,7 @@ LLM isolation methods used:
 | --- | --- |
 | `monkeypatch.setattr("litellm.completion", ...)` raising `RuntimeError` or returning a fake response | `TestLlmCallProviderFailure`, `TestWorkflowStepTypeEnum` |
 | `agent._llm_call = lambda *a, **k: ...` | `TestSchemaEchoRejection.test_pipeline_raises_on_schema_echo` |
-| `offline_llm` fixture (conftest): `litellm.completion` and `fsm_llm.classification.completion` raise `RuntimeError("offline")`, so the fallback path is asserted with no network call | `TestTypeDetection`, `TestStartSendFlow` (`_detect_type` falls back to keyword matching; `_generate_collect_response` falls back to canned text) |
+| `offline_llm` fixture (conftest): `litellm.completion` and `fsm_llm.llm.completion` raise `RuntimeError("offline")`, so the fallback path is asserted with no network call | `TestTypeDetection`, `TestStartSendFlow` (`_detect_type` falls back to keyword matching; `_generate_collect_response` falls back to canned text) |
 
 ## Key files
 
@@ -63,7 +62,7 @@ Fixtures in `conftest.py` (all function-scoped):
 | `agent_builder` | `AgentBuilder()` (empty) |
 | `populated_fsm_builder` | `FSMBuilder` with 3 states and 2 transitions (shape below) |
 | `meta_config` | `MetaBuilderConfig` with test values (shape below) |
-| `offline_llm` | `None`; monkeypatches `litellm.completion` and the classifier's import-bound `fsm_llm.classification.completion` to raise at once. Apply with `@pytest.mark.usefixtures("offline_llm")` |
+| `offline_llm` | `None`; monkeypatches `litellm.completion` and the import-bound `fsm_llm.llm.completion` the classifier sends through to raise at once. Apply with `@pytest.mark.usefixtures("offline_llm")` |
 
 Helper in `test_tools.py`:
 
@@ -119,7 +118,7 @@ Agent:
 ## Failure modes
 
 - A litellm upgrade that moves `OllamaChatConfig` or changes `map_openai_params` breaks `test_enum_reaches_response_format_and_ollama_format`.
-- The type classifier calls `fsm_llm.classification.completion`, a name bound at import, so patching only `litellm.completion` leaves `_detect_type` reaching a real model (slow, and a reachable provider changes the answer). `offline_llm` patches both.
+- The type classifier calls `fsm_llm.llm.completion`, a name bound at import, so patching only `litellm.completion` leaves `_detect_type` reaching a real model (slow, and a reachable provider changes the answer). `offline_llm` patches both.
 - Changing `populated_fsm_builder` breaks many exact-string assertions.
 
 ## Working here

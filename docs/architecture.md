@@ -68,7 +68,7 @@ Plugin architecture with 8 timing points. Handlers self-determine execution via 
 - `extract_field(request)` -- Extract a targeted field from input (Pass 1)
 - `generate_response_stream(request)` -- Stream the Pass-2 response token-by-token
 
-`LiteLLMInterface` provides the built-in implementation supporting 100+ providers.
+`LiteLLMInterface` provides the built-in implementation supporting 100+ providers. It is the one place a provider request is built (`_build_call_params`), also for the `Classifier` (through `complete_structured`): `litellm` is imported only in `llm.py`. Request models carry `user_message: str | None`; the request builder sends `None` (no user message) as the fixed `NEUTRAL_USER_TURN` and an empty or whitespace message as `EMPTY_USER_MESSAGE_TURN`, so the provider never sees an empty user turn and never reads an empty message as an instruction.
 
 ### TransitionEvaluator (`transition_evaluator.py`)
 
@@ -98,6 +98,25 @@ User Message → API.converse()
     → Return response
 ```
 
+### Steps Without a User Message (`API.advance`, `API.run_until_terminal`)
+
+```
+API.advance(conversation_id)
+  → FSMManager.advance() [same per-conversation lock and turn guard]
+    → MessagePipeline.advance() → the same turn body as process(), user_message=None
+      → no user exchange appended to history
+      → Pass 1 prompts in their no-message wording (bulk prompt built from the
+        scoped, security-filtered context; fills unset keys only)
+      → transition evaluation and Pass 2 exactly as for a message
+    → Return AdvanceResult(state_before, state_after, transition_outcome, response, ended)
+
+API.run_until_terminal(conversation_id, *, max_steps, max_seconds=None, before_step=None)
+  → per round: ended? → seconds budget → steps budget → before_step(n) → advance()
+  → RunBudgetExceededError when a budget is spent; a conversation closed mid-run ends it normally
+```
+
+This is how the agents, the harness and any program that drives an FSM by itself run a conversation: no synthetic user message is ever sent. `advance_stream` and `run_until_terminal_stream` are the streaming forms (reply text only).
+
 ### Conversation Start
 
 ```
@@ -117,8 +136,10 @@ API.converse_stream() → MessagePipeline.process_stream()
   → yields str chunks to the caller
 ```
 
-States with an empty `response_instructions` skip Pass 2 entirely (no response LLM call),
-which is the common shape for intermediate agent/tool-dispatch states.
+States with an empty `response_instructions` skip Pass 2 entirely: no LLM call, the empty
+reply (`""` from `start_conversation`/`converse`, no chunk from a stream, `response=None`
+from `advance`) and nothing added to the history. This is the common shape for
+intermediate agent/tool-dispatch states.
 
 ## Context Handling
 
@@ -170,14 +191,15 @@ Priority ordering (lower first). Error modes: `"continue"` (log + skip) or `"rai
 
 ```
 fsm_llm (core, includes classification)
-├── fsm_llm.reasoning  — Uses API (push/pop FSM stacking) + classification
-├── fsm_llm.workflows  — Uses API (via ConversationStep); lifecycle hooks via add_hook
-├── fsm_llm.agents     — Uses API (auto-generates FSMs) + handlers for tool execution
-├── fsm_llm.monitor    — Uses API + handlers (observer callbacks at priority 9999)
-├── fsm_llm.harness    — Uses API (hand-written FSM) + handlers at state entry; dispatches
-│                         fsm_llm.agents workers as protocol roles
-└── fsm_llm.eval       — Runs example scripts as subprocesses; drives scripted conversations
-                          through API (one instance per trial) and checks the outcome
+├── fsm_llm.reasoning  -- Uses API (push/pop FSM stacking) + classification
+├── fsm_llm.workflows  -- Uses API (via ConversationStep); lifecycle hooks via add_hook
+├── fsm_llm.agents     -- Uses API (auto-generates FSMs, drives them with run_until_terminal)
+│                          + handlers for tool execution
+├── fsm_llm.monitor    -- Uses API + handlers (observer callbacks at priority 9999)
+├── fsm_llm.harness    -- Uses API (hand-written FSM) + handlers at state entry; dispatches
+│                          fsm_llm.agents workers as protocol roles
+└── fsm_llm.eval       -- Runs example scripts as subprocesses; drives scripted conversations
+                           through API (one instance per trial) and checks the outcome
 ```
 
 The six extensions are subpackages of `fsm_llm`. Core never imports them at package
@@ -185,11 +207,11 @@ import time; each one imports core (`from fsm_llm import API`).
 
 | Package | Integration | Key Mechanism |
 |---------|------------|---------------|
-| Classification | Built into core | LLM-backed via litellm |
+| Classification | Built into core | Structured call through `LiteLLMInterface.complete_structured` |
 | Reasoning | FSM stacking via push/pop | Orchestrator pushes strategy FSMs onto stack |
 | Workflows | Async engine + ConversationStep | ConversationStep creates API instance for FSM conversations |
-| Agents | Auto-generated FSMs + handlers | `build_react_fsm()` generates FSM; handlers execute tools at POST_TRANSITION. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
-| Monitor | Observer handlers + loguru sink | Registers at all 8 timing points (priority 9999), never modifies state |
+| Agents | Auto-generated FSMs + handlers, driven by core `run_until_terminal` | `build_react_fsm()` generates FSM; handlers execute tools on state entry; core owns the step and time budgets; no synthetic message is sent. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
+| Monitor | Observer handlers + loguru sink + core graph data | Registers observer handlers (priority 9999; not POST_TRANSITION), never modifies state; FSM graphs come from `build_fsm_graph` |
 | Harness | Hand-written FSM + state-entry handlers | `build_harness_fsm()` returns a 6-state definition whose gates are JsonLogic conditions; a handler per state entry dispatches one agent worker, and the gate values it writes are derived from the filesystem |
 | Eval | Subprocesses + public API only | `fsm-llm-eval examples` scores example output with a 0-4 heuristic; `fsm-llm-eval run` sends each case's turns through a fresh `API`, reads `get_current_state`/`get_data`/`has_conversation_ended`, and checks declared expectations over N trials. No handlers, no core changes |
 
@@ -201,7 +223,7 @@ core: it is a definition, a set of handlers, and a filesystem layer.
 
 ### Where it sits in the 2-pass flow
 
-Each protocol turn is one `converse()` call, so it runs both passes. Two
+Each protocol turn is one message-free `advance()` step of core's `run_until_terminal`, so it runs both passes. Two
 deliberate choices reduce that to exactly ONE core LLM call per turn -- Pass 2's
 response generation -- with Pass 1 issuing none at all:
 
@@ -294,9 +316,15 @@ command allowlist, so the driver never shells out to it.
 ### Custom LLM Interface
 
 ```python
+from fsm_llm.constants import NEUTRAL_USER_TURN
+
 class CustomLLM(LLMInterface):
     def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse:
-        response = your_api(request.system_prompt, request.user_message)
+        # user_message is None when there is no user message (a message-free
+        # step, a greeting); "" or any string is what the user sent. A silent
+        # state (empty response_instructions) never reaches this method.
+        user_turn = request.user_message if request.user_message is not None else NEUTRAL_USER_TURN
+        response = your_api(request.system_prompt, user_turn)
         return ResponseGenerationResponse(message=response)
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:

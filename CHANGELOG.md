@@ -7,12 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The agents entries below come from the 2026-09-29 audit of `fsm_llm.agents`
-(Track A). The audit record, with each finding's status and the deferred Track B
-work, is `docs/agents_roadmap.md`.
+Two sets of changes. The entries marked "Step driver" come from plan `07ad3f8c`
+(2026-09-30 to 2026-10-01): core gained a message-free step (`API.advance`) and a
+bounded run loop (`API.run_until_terminal`), every agent pattern and the harness now
+run on them with no synthetic "Continue." message, a silent state says nothing, and
+the legacy names listed under Removed are gone with no deprecation period. The other
+agents entries come from the 2026-09-29 audit of `fsm_llm.agents` (Track A); its
+record, with each finding's status and the deferred Track B work, is
+`docs/agents_roadmap.md`.
+
+Measured on `ollama_chat/qwen3.5:4b` (2026-10-01, `docs/agents_roadmap.md`,
+`EVALUATE.md` Runs 007 and 008): agent bench block `agents-react/B1` 32/38 first-trial
+pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
+0 "Continue." in answers; full examples evaluation 388/404 against 391/404 for
+`d4b1626` on the same day; agents category 177/192 after the PlanExecute planner fix.
 
 ### Added
 
+- Step driver, core: `API.advance(conversation_id) -> AdvanceResult` runs one turn of
+  the current state with no user message: the same turn body as `converse` (one turn
+  at a time per conversation, rollback on failure, every handler timing, extraction,
+  transition evaluation, Pass 2 from the post-transition state, session auto-save),
+  resolved on the top of the FSM stack. Nothing is added to the history for a user.
+  It raises `FSMError` on a terminal state. Also `FSMManager.advance` and
+  `MessagePipeline.advance`.
+- Step driver, core: `API.advance_stream(conversation_id) -> Iterator[str]`, the
+  streamed form (reply text only; read the outcome afterwards with
+  `get_current_state` / `has_conversation_ended`). Also `FSMManager.advance_stream`
+  and `MessagePipeline.advance_stream`.
+- Step driver, core: `API.run_until_terminal(conversation_id, *, max_steps,
+  max_seconds=None, before_step=None) -> tuple[AdvanceResult, ...]` and
+  `API.run_until_terminal_stream(...) -> Iterator[str]`. Each round asks whether the
+  conversation (top of the stack) has ended, checks the seconds and steps budgets,
+  calls `before_step(n)`, asks again whether the conversation ended and re-checks the
+  seconds budget (the hook may end it or use up the time), then runs one step. Budgets are checked only between steps. `max_steps` must be an int of at
+  least 1 and `max_seconds` `None` or a positive number (`ValueError` for a bool, a
+  non-number, NaN or a value out of range).
+- Step driver, core: `AdvanceResult{state_before, state_after, transition_outcome,
+  response, ended}` (frozen; `response` is `None` for a silent state), exported from
+  `fsm_llm`.
+- Step driver, core: `RunBudgetExceededError(FSMError)` with `budget` (`"steps"` or
+  `"seconds"`), `limit` and `steps_done`, exported from `fsm_llm`. The steps already
+  run are kept; the error does not carry their results (read the history and the
+  current state).
+- Step driver, core: FSM graph data and export, exported from `fsm_llm`:
+  `build_fsm_graph(fsm) -> FSMGraph{name, initial_state, nodes, edges}` (frozen
+  `FSMGraphNode`, `FSMGraphEdge`; `ValueError` for a definition whose initial state or
+  a transition target is missing or whose shape is malformed), `to_mermaid(graph)`
+  (Mermaid `stateDiagram-v2`) and `to_dot(graph)` (Graphviz DOT).
+  `fsm-llm-visualize --format ascii|mermaid|dot` (default `ascii`; `--style` applies
+  to ASCII only) and `visualize_fsm_from_file(..., *, output_format="ascii")`. The
+  monitor's FSM visualizer reads the same graph data.
+- Step driver, core: `constants.NEUTRAL_USER_TURN` ("Proceed according to the
+  instructions above.") is the provider user turn sent when there is no user message
+  (a step, the greeting, a context-only classifier call); `constants.EMPTY_USER_MESSAGE_TURN`
+  ("(empty message)") is sent when the user's message is empty or whitespace, so an
+  empty message is never read as an instruction to proceed. Both are filled in one
+  place, the request builder of `LiteLLMInterface`.
+- Step driver, core: `LiteLLMInterface.complete_structured(system_prompt,
+  user_message, *, json_schema, schema_name)`, the structured call the `Classifier`
+  now sends through; `DataExtractionPromptBuilder.build_extraction_source_sections(
+  instance, scoped_context)`, the context and history sections of the no-message bulk
+  extraction prompt.
+- Step driver, agents: `StopReason.ENDED` (`"ended"`, a forced stop): the run's
+  conversation was closed from outside before a terminal state; the run returns
+  `success=False` with its last output.
+- Step driver, agents: `ContextKeys.REFUSED_ACTIONS` (`refused_actions`): one sentence
+  per gated call the human approver refused and that did not run ("`<tool>(<redacted
+  params>)`: was refused by the human approver and was not performed."). It is a run
+  output (caller context cannot set it), framework-only (no extraction writes it),
+  shown to the conclude prompt of approval-gated FSMs and returned in
+  `final_context`. `build_conclude_response_instructions(*, refused_actions=False)`
+  adds the sentence that tells the model to report those actions as not performed.
+- Step driver, agents: `handlers.call_label(tool_name, tool_input)` (the one
+  `<tool>(<redacted normalised params>)` label shared by the trace `action`, the
+  refusal record and the ran-check), `handlers.call_ran(trace, tool_name,
+  tool_input)` and `handlers.refusal_record(tool_name, tool_input)`.
+- Step driver, agents: `ContextKeys.OPERATOR` (`operator`), the ADaPT `decompose`
+  typed field (AND/OR; null or other text is AND), and `ReflexionStates.AWAIT_APPROVAL`
+  (the shared approval state). Every `*States` class now names every state of its
+  FSM and the FSM builders read the constants.
+- Step driver, monitor: `InstanceManager.attach_api(api)` shows an `API` you created
+  (events and conversations). One API is attached at a time; attaching another
+  switches the previous one's handlers off; a failed handler registration raises
+  `MonitorConnectionError` and keeps the previous API attached.
+- Step driver, bench: `scripts/agents_bench.py` (`register`, `run`, `report`,
+  `list-tasks`; 38 deterministic tool tasks in 7 categories with non-LLM graders) and
+  `tests/test_agents_bench.py`. Recorded blocks under `scripts/bench_data/agents-react/`:
+  `B0` (arms `legacy` and `native_fc`, the agents code of `d4b1626`, copied byte for
+  byte) and `B1` (arm `fsm_advance`, the code of this release, pre-registered pass
+  rule met). The B0 arm labels are retired: new rows cannot carry them.
 - Agents: `AgentResult.stop_reason` (default `None`) and the `StopReason` constants
   (exported from `fsm_llm.agents`): `answered`, `evidence`, `max_iterations`,
   `forced_pass`, `stalled`, `verification_failed`, `no_result`, `gate_failed`.
@@ -30,22 +114,137 @@ work, is `docs/agents_roadmap.md`.
 
 ### Changed
 
+- Step driver, core: a silent state (empty `response_instructions`) says nothing on
+  every entry. It makes no Pass-2 LLM call and no `LLMInterface` call at all;
+  `start_conversation` and `converse` return `""` (they returned a `[<state>]`
+  marker), `converse_stream`, `advance_stream` and the stream run loop yield nothing,
+  `advance` returns `response=None`, and nothing is added to the history (no marker;
+  a `converse` turn still records the user message). `MessagePipeline.process`
+  returns `""` for it instead of raising. A custom `LLMInterface` is no longer called
+  for silent states.
+- Step driver, core: conversation history holds no synthetic entries: no `[state]`
+  marker, and a message-free step adds no user exchange.
+- Step driver, core: the LLM request models `ResponseGenerationRequest`,
+  `FieldExtractionRequest` and `BulkExtractionRequest` carry `user_message: str |
+  None` and refuse unknown fields (`extra="forbid"`). `None` means there is no user
+  message; a string, `""` included, is what the user sent. A custom `LLMInterface`
+  must accept `None` (it gets `None` for message-free steps, the greeting and
+  context-only classifier calls).
+- Step driver, core: the provider user turn is never empty. No user message is sent
+  as `NEUTRAL_USER_TURN`; an empty or whitespace user message as
+  `EMPTY_USER_MESSAGE_TURN` (`"(empty message)"`), which a model does not read as
+  "proceed" (live: an empty message no longer fires a payment transition or leaves the
+  classifier's fallback). This changes the user turn of every greeting (it was
+  empty) and of every `converse("")`.
+- Step driver, core: prompts have a no-message wording selected by `user_message=None`
+  (a string keeps the old prompt byte for byte). Per-field extraction: "Determine the
+  value of the field ..." from the instructions, context and conversation, composed
+  when the instructions ask for something to be written or decided, null only when
+  they cannot be followed. Bulk extraction: built from the state's `read_keys`-scoped,
+  security-filtered context and history; on a message-free step it fills only unset
+  keys and reports no rejected correction. Classification and ambiguity resolution:
+  a context-only system prompt (`build_classification_system_prompt` and
+  `build_classification_context_block` take keyword-only `user_message`, default
+  `""`; `Classifier.classify`, `classify_multi` and `HierarchicalClassifier.classify`
+  accept `None`). Pass 2: `build_response_prompt(user_message: str | None)`; with
+  `None` the reply is the state's output, opens with its content (no greeting,
+  thanks or remark about the step) and the `<transition_info>` block is dropped.
+- Step driver, core: `Classifier` sends its request through its own
+  `LiteLLMInterface.complete_structured` (the one request builder; `classification.py`
+  no longer imports litellm). Its constructor and `classify` signatures are
+  unchanged, but `retries=N` now means the SDK's `max_retries`, a model without
+  `response_format` support logs a WARNING on every classifier call, whitespace-only
+  user content counts as empty, and the extra keyword arguments are `**llm_kwargs`.
+  Tests that patched `fsm_llm.classification.completion` must patch
+  `fsm_llm.llm.completion`.
+- Step driver, core: `API.from_definition(fsm_definition=None, *, definition=None,
+  **kwargs)`: the definition is given positionally or under either keyword, exactly
+  once.
+- Step driver, core: the transition-classification record of an AMBIGUOUS turn lives
+  only in `context.metadata["transition_classification"]` (read it with
+  `fsm_manager.get_complete_conversation(conv_id)["metadata"]`); handlers no longer
+  see it in their context dict.
+- Step driver, core: `fsm-llm-validate` reports a `handler_only_keys` entry that no
+  state references as INFO, not WARNING (so exported agent FSMs no longer raise a
+  false alarm). The `fsm-llm` runner prints no `System:` line for a silent reply.
+- Step driver, core: error and log wording on the turn path: "Processing turn in
+  state ...", "Failed to process message: ...", and for a step "Failed to advance
+  conversation: ..." (manager) and "Failed to advance without a message: ..." (API).
+- Step driver, agents: every FSM pattern runs on core's `run_until_terminal` /
+  `run_until_terminal_stream` (`BaseAgent._run_conversation_loop` and
+  `_standard_run_stream` are thin callers). No agent sends a synthetic "Continue."
+  message, counts steps or filters markers. Core holds both budgets: `max_steps =
+  max_iterations * FSM_BUDGET_MULTIPLIER` and `max_seconds` = what is left of
+  `timeout_seconds`; the agents map core's `RunBudgetExceededError` to
+  `BudgetExhaustedError` / `AgentTimeoutError` with the same messages, and the agent
+  error's `__cause__` is now the core error. `_check_budgets(start_time)` keeps only
+  the wall-clock check (SelfConsistency samples, `native_fc`).
+- Step driver, agents: the HITL driver runs in the run loop's `before_step` hook and
+  the seconds budget is checked again after it, so a slow approver uses up the
+  timeout before an approved call runs (`AgentTimeoutError`; before, the call ran).
+- Step driver, agents: a run whose conversation is closed from outside (by a hook or
+  another thread) ends normally and reports `success=False, stop_reason="ended"` with
+  its last output, instead of failing with `AgentError` "Conversation ... not found".
+  Core's run loops end normally when the conversation is closed mid-run.
+- Step driver, agents: a refused gated call is reported as not performed. On a denial
+  the driver appends `refusal_record(tool, input)` to `refused_actions`, unless the
+  same call (`call_label`) already ran in this run; `spend_grant` removes the matching
+  entry when the same call is later approved and runs, and the key is dropped when no
+  entry is left. The conclude prompt of approval-gated FSMs tells the model to say
+  those actions were not performed (live: 8 of 8 denied runs that reached the gated
+  tool answered so). A re-asked identical call is still asked again.
+- Step driver, agents: `await_approval` extracts nothing (one LLM call less per visit,
+  and no model channel in the state that guards the approval).
+  `plan_all`, `orchestrate`, `collect` and ADaPT `attempt`, `assess`, `decompose` have
+  no state-level bulk extraction (one call less per visit; their typed fields are
+  every key the run reads; ADaPT `operator` is a typed `decompose` field).
+  `delegation_plan`, ADaPT `confidence`, `reasoning` and `evaluation_feedback` no
+  longer appear in the final context. Ten terminal states lost their dead
+  `extraction_instructions`, and four (`conclude` of React, Reflexion and
+  ParallelReact, ADaPT `combine`) their `required_context_keys: ["final_answer"]`, so
+  the conclude prompt no longer asks to collect a "Final answer".
+- Step driver, agents: `final_context["final_answer"]` is no longer an answer source.
+  `BaseAgent._extract_answer`, `_completion_is_real` and the ADaPT, EvalOpt and
+  PromptChain overrides read the pattern's own answer keys and the last spoken reply;
+  a model-written `final_answer` is inert. `final_answer` stays a run output that
+  `initial_context` cannot set.
+- Step driver, agents: prompt wording without loop-signal text. The conclude
+  instructions describe the reply (the run's last output from the observations, no
+  further tool, no progress report, a plain statement of what could not be
+  determined); the typed-field prompts drop "The user message is only a loop signal".
+  PlanExecute's `plan_steps` and replan instructions add no step that needs no tool
+  unless the task asks for one, and no step that confirms, waits for or asks for
+  anything.
+- Step driver, agents: ADaPT `operator` is stripped from caller context like the
+  other run outputs. `run_stream` yields only model text from speaking states.
+  `ReactAgent.run_stream` on a conversation ended from outside ends without an error
+  (Known open).
+- Step driver, monitor: `configure(*, manager=None, cors_origins=None, api_key=None,
+  trusted_hosts=None)` is keyword-only (a positional call is a `TypeError`). The FSM
+  visualize routes draw core's `build_fsm_graph` and answer 400 `failed to parse FSM
+  definition: <reason>` for a definition core cannot graph (an empty `{}` or a
+  dangling target used to draw a partial graph); every valid definition gives the
+  same payload as before. The control page no longer labels `final_answer`.
+- Step driver, workflows: `WorkflowEngine(*, max_concurrent_workflows=100,
+  max_completed_instances=1000, max_steps_per_run=1000, executor=None)` takes keyword
+  arguments only. `ConversationStep` publishes `last_response` / `final_answer` as the
+  last reply that was actually spoken and adds neither key when nothing was spoken
+  (it published `""` when the last turn ended on a silent state).
+- Step driver, harness: the harness runs on core's run loop through `BaseAgent`; its
+  step ceiling is unchanged (`MAX_TURNS` 60 x 3 = 180 core steps).
 - Core: `FSMDefinition.persona` and `FSMInstance.persona` accept up to 4,000
   characters (was 500), one constant `fsm_llm.constants.MAX_PERSONA_LENGTH`. Persona
   is still rendered only in the Pass-2 response prompt, sanitized; a longer persona
   makes every reply call's prompt larger.
 - Agents: `create_agent(pattern="react", tools=None, *, config=None, system_prompt=None,
   **kwargs)` takes the pattern first, so `create_agent("debate")` builds a
-  `DebateAgent`. The old `create_agent(system_prompt, tools)` call still works with a
-  `DeprecationWarning` when the first argument names no pattern and contains whitespace
-  or is longer than 32 characters; a short unknown name raises `ValueError`. Pattern
-  names are matched after `strip().lower()` (`"Debate "` is the debate pattern). The
-  legacy prompt is now applied (before, it was ignored), so it counts against the
-  prompt limits: over 2,000 characters raises `ValidationError`, and one that makes an
-  FSM instruction slot exceed core's 5,000-character limit together with the tool
-  catalogue raises `AgentError` at `run()` (naming the slot, the instructions length
-  and the tool count). A third
-  positional argument, or a positional prompt together with `pattern=`, is now a
+  `DebateAgent`. Pattern names are matched after `strip().lower()` (`"Debate "` is the
+  debate pattern); any other first argument raises `ValueError` listing the patterns
+  (the positional system prompt is removed, see Removed). `system_prompt` counts
+  against the prompt limits: over 2,000 characters raises `ValidationError`, and one
+  that makes an FSM instruction slot exceed core's 5,000-character limit together with
+  the tool catalogue raises `AgentError` at `run()` (naming the slot, the
+  instructions length and the tool count). A third positional argument is a
   `TypeError`.
 - Agents: `system_prompt` (new `AgentConfig.instructions`, at most 2,000 characters)
   now reaches the model. FSM patterns prefix it to every non-empty state and per-field
@@ -131,8 +330,8 @@ work, is `docs/agents_roadmap.md`.
   `agent_trace` is kept out of these prompts. Each typed field is one LLM call.
   PromptChain no longer bulk-extracts the keys a step's `extraction_instructions`
   name; each step extracts one `chain_step_result`.
-- Agents: `ReactAgent.run_stream` yields only model text (the `[think]`/`[act]` skip
-  markers are dropped) and wraps errors as `AgentError` like `run()`.
+- Agents: `ReactAgent.run_stream` yields only model text and wraps errors as
+  `AgentError` like `run()`.
   `VerifiedReactAgent` and `AutoMemoryReactAgent` stream by running `run()` and
   yielding the answer once, so verification and memory are kept.
 - Agents: the Debate answer is the conclusion written after the last round, not the
@@ -165,12 +364,6 @@ work, is `docs/agents_roadmap.md`.
   envelope's own explanation, score or echoed name, so with a null `value` the
   fallback returned it as the field's value. A flat reply without `value` or
   `field_name` (`{"confidence": 0.8}` for a field named `confidence`) keeps its value.
-
-### Deprecated
-
-- Agents: the positional system prompt `create_agent("You are ...", tools)`. It emits a
-  `DeprecationWarning` and is now applied as `AgentConfig.instructions` (see Changed);
-  use `create_agent(pattern, tools, system_prompt=...)`.
 
 ### Fixed
 
@@ -262,6 +455,86 @@ work, is `docs/agents_roadmap.md`.
 
 ### Removed
 
+- Step driver, core: `FSMManager.cleanup_stale_conversations()`; use
+  `FSMManager.prune_orphaned_locks()` (drops orphaned locks) or
+  `API.cleanup_stale_conversations()` (ends idle conversations; kept).
+- Step driver, core: `ClassificationResult.is_low_confidence`; use
+  `is_below_default_threshold` (fixed 0.6) or `Classifier.is_low_confidence(result)`
+  (schema threshold; kept).
+- Step driver, core: `SchemaValidationError` (nothing raised it); catch
+  `ClassificationError`.
+- Step driver, core: the no-op `TransitionEvaluatorConfig` fields
+  `ambiguity_threshold`, `minimum_confidence` and `evidence_conditions_normalizer`
+  (passing one is now a `TypeError`); transitions are ranked by `priority` alone.
+- Step driver, core: `HandlerSystem.close()` (it did nothing).
+- Step driver, core: the `IntentDefinition` re-export from `fsm_llm.classification`;
+  import it from `fsm_llm` (or `fsm_llm.definitions`).
+- Step driver, core: `constants.CONTEXT_KEY_CLASSIFICATION_RESULT` and the
+  `context.data["_transition_classification_result"]` copy; read
+  `context.metadata["transition_classification"]`.
+- Step driver, core: the underscore-private `security` names re-exported from
+  `fsm_llm.constants`, and the private `pipeline._PROVENANCE_KEY`. The public security
+  names stay importable from `constants`.
+- Step driver, core: `ResponseGenerationRequest.skip_generation` and the `"."`
+  system-prompt sentinel: a silent state makes no interface call (passing
+  `skip_generation=` is now a validation error).
+- Step driver, core: the `[<state>]` marker that `start_conversation`, `converse` and
+  streams returned and recorded for a silent state; they return `""` and record
+  nothing.
+- Step driver, core: the "Continue." de-anchor branch of the per-field extraction
+  prompt (it told the model to ignore a "Continue." message); message-free steps use
+  the no-message prompt instead.
+- Step driver, agents: `Defaults.CONTINUE_MESSAGE` and the synthetic "Continue."
+  turns of the agent loops; the private `BaseAgent._skip_marker_states`,
+  `_drop_skip_marker` and `_start_conversation`. Use core's run loop.
+- Step driver, agents: the positional system prompt of `create_agent`
+  (`create_agent("You are ...", tools)`, deprecated in this release by Track A); any
+  first argument that names no pattern raises `ValueError`. Use
+  `create_agent(pattern, tools, system_prompt=...)`.
+- Step driver, agents: `DecompositionError` and `ToolValidationError` (never raised).
+- Step driver, agents: the module `fsm_llm.agents.meta_fsm` (`build_meta_builder_fsm`,
+  an unused placeholder; the meta-builder never called it).
+- Step driver, agents: `PromptChainStates.GATE_PREFIX` and
+  `SelfConsistencyStates.AGGREGATE` (no state of that name), `Defaults.EVALUATION_THRESHOLD`,
+  `ErrorMessages.BUDGET_EXHAUSTED`, `ContextKeys.DELEGATION_PLAN`.
+- Step driver, agents: prompt builders whose text no run sends any more:
+  `build_approval_extraction_instructions`, `build_orchestrate_extraction_instructions`,
+  `build_collect_extraction_instructions`, `build_attempt_extraction_instructions`,
+  `build_assess_extraction_instructions`, `build_decompose_extraction_instructions`,
+  and the terminal-state builders `build_conclude_extraction_instructions`,
+  `build_synthesize_extraction_instructions`, `build_rewoo_solve_extraction_instructions`,
+  `build_evalopt_output_extraction_instructions`,
+  `build_maker_checker_output_extraction_instructions`,
+  `build_orchestrator_synthesize_extraction_instructions`,
+  `build_combine_extraction_instructions`, `build_chain_output_extraction_instructions`.
+- Step driver, monitor: `MonitorBridge` and the module `fsm_llm.monitor.bridge`;
+  `configure(bridge=)`; `server.get_bridge` (use `server.get_manager`);
+  `InstanceManager.connect_bridge` (use `InstanceManager.attach_api`). To show your own
+  `API`: `manager = InstanceManager(); manager.attach_api(api);
+  configure(manager=manager)`.
+- Step driver, monitor: `THEME_NAME` and the `COLOR_*` constants (`COLOR_PRIMARY`,
+  `COLOR_SECONDARY`, `COLOR_BACKGROUND`, `COLOR_SURFACE`, `COLOR_FOREGROUND`,
+  `COLOR_ACCENT`, `COLOR_WARNING`, `COLOR_ERROR`, `COLOR_SUCCESS`, `COLOR_MUTED`,
+  `COLOR_BORDER`; the colors live in `static/style.css`), `EVENT_LOG` (no event of
+  that type is emitted), the no-op POST_TRANSITION entry of
+  `EventCollector.create_handler_callbacks()` (7 callbacks now), and the unused
+  front-end accessors `isLogPaused` and `isAuthRequired`.
+- Step driver, workflows: `MAX_STEP_DEPTH` (use `MAX_STEPS_PER_RUN`),
+  `WorkflowEngine(handler_system=)` and its `handler_system` attribute (never called;
+  use `add_hook`), and the private `_KEY_*` / `_STEP_INTERNAL_WHITELIST` aliases in
+  `engine.py`.
+- Step driver, reasoning: `Defaults.MAX_CONTEXT_SIZE`, `ErrorMessages.CONTEXT_TOO_LARGE`,
+  `ErrorMessages.VALIDATION_FAILED`, `ErrorMessages.CALCULATION_ERROR` (no reader).
+- Step driver, harness: `Defaults.CONTINUE_MESSAGE`, `Defaults.DECISIONS_COMPRESS_LINES`,
+  `CHANGELOG_COMPRESS_LINES`, `LESSONS_IMPORTANCE_MIN`, `LESSONS_IMPORTANCE_MAX`;
+  `fsm_llm.harness.storage.PLAN_ID_RE` (use `fsm_llm.harness.PLAN_ID_RE`, defined once
+  in `artifacts`); the private `storage._atomic_write_text` alias (use
+  `fsm_llm.harness._atomic.atomic_write_text`); the read path for legacy
+  `plan_YYYY-MM-DD_<hex8>` plan ids (a cross-plan section headed by one is no longer
+  counted as a plan section).
+- Step driver, build: `make clean` no longer deletes the pre-2026-09-29
+  `src/fsm_llm_<sub>/` directories, and `tests/test_packaging.py` no longer checks for
+  them; delete them by hand in an old clone.
 - `fsm_llm.harness.constants.HandlerPriorities` and `HandlerNames` no longer define
   `PRE_STEP_GATE`, `END_CONVERSATION` or `ERROR`. Nothing registered them: the pre-step
   gate runs inside the EXECUTE dispatch, and end and error handlers come from
@@ -283,6 +556,70 @@ work, is `docs/agents_roadmap.md`.
 
 ### Known open
 
+From the step driver work (plan `07ad3f8c`), open until its iteration 2 or later:
+
+- Not yet on core's LLM layer: `NativeFunctionCallingReactAgent` runs its own
+  `litellm.completion` loop (no FSM, no pipeline); `meta_builder.py` and
+  `composition.py` (the LLM judge) call `litellm.completion` directly, and
+  `semantic_memory.py` / `semantic_tools.py` call `litellm.embedding`. Planned: a core
+  tool-calling state, plain completion and embedding calls, then `native_fc` rebuilt
+  as an FSM definition.
+- `Classifier` builds its own private `LiteLLMInterface`, so an AMBIGUOUS transition
+  or a `classification_extractions` call bypasses a custom `llm_interface` given to
+  `API`.
+- The reasoning engine still drives its FSMs with synthetic `converse("Continue
+  reasoning...")` messages, and a message-free step of a non-agent FSM can repeat the
+  same extraction prompt on every step. Both move to `advance` in iteration 2.
+- ToolSpec (exact tool schemas, tool annotations, an enforced tool timeout) is not
+  ported; the coarse tool schemas (TOOL-04) and the retry of a tool gated only by an
+  approval policy (TOOL-07) stay open.
+- No usage counters in the LLM layer: the agent bench still counts calls by patching
+  litellm from outside.
+- `RunBudgetExceededError` does not carry the results of the steps already run (read
+  the history and the current state).
+- `agents/plan_execute_recovery` times out at 180 s under 4 eval workers (score 1;
+  4 at `d4b1626`): the planner now writes a complete 6-step plan (one fetch per
+  category per tool) that costs 20 LLM calls against 16 for `d4b1626`'s copied 4-step
+  plan, which collected one category only. Run alone it succeeds in about 28 s. The
+  pre-registered full-evaluation rule D-044 (b) is recorded as FAILED.
+  `hierarchical_orchestrator` timed out once at 300 s in the agents-only re-run (also
+  a timeout in the 2026-09-29 `d4b1626` baseline; one run, load or noise).
+- PlanExecute costs more calls per task than at `d4b1626` (16.7 vs 15.3 in the live
+  probe), a run that completes every plan step can still report `success=False,
+  max_iterations` at small limits (also REWOO; pre-existing), and a plan step that
+  needs no tool costs a wasted retry call.
+- React-family success gap: a run can answer that it did something it never
+  attempted and report `success=True` (`hitl_search_publish` answers "published"
+  though the gated tool was never selected); a refused run that then answers through
+  an ungated tool reports `(True, "answered")`. Forced Reflexion answers can cite
+  numbers that are in no observation (also at `d4b1626`).
+- Refusal record (`refused_actions`) limits; enforcement is unaffected, only the
+  conclude wording can be wrong: the same call is matched by its redacted label text,
+  so dict key order or `5` vs `5.0` makes an approved-then-denied repeat look new
+  (also for the removal in `spend_grant`), and two calls that differ only in a
+  secret-looking value share one record; ReasoningReact's built-in `reason` tool
+  builds its own trace label, so the ran-check does not cover it; a failed earlier
+  call counts as "ran", so a refused retry gets no record; a call whose empty input
+  the executor filled from the task is traced under the filled label. Repeated asks
+  of a denied call are not reduced (3 per denied React run).
+- An agent `run_stream` whose conversation is ended from outside ends silently (it
+  raised before), and no test pins an outside end that lands after the last step.
+- Secrets inside free-text string values are not redacted (only secret-looking keys
+  and value shapes are).
+- The no-message Pass-2 prompt: 4 of 94 live replies were not a clean JSON envelope
+  (2 salvaged, 2 accepted as plain text). Greetings of speaking initial states keep
+  the conversational Pass-2 prompt. ADaPT `attempt`, `assess` and `decompose` still
+  make a Pass-2 call whose text is only a last-resort answer. With the bulk calls
+  gone, a typed field that comes back null in REWOO `plan_all` or the orchestrator
+  has no second chance (the state takes its fallback edge). `evaluator_optimizer`
+  strict runs scored lower in one live probe (5/6 vs 6/6).
+- `build_fsm_graph` raises `TypeError`, not `ValueError`, for an unhashable
+  `initial_state`.
+- The examples binding guard (`tests/test_examples/test_example_calls_bind.py`) does
+  not check calls on names whose type it cannot infer.
+- The message-free `classification_extractions` path has offline test coverage only.
+- Harness live L3 runs took 19.9 to 26.5 s against 15.1 to 17.9 s at `d4b1626`.
+
 From the agents audit reviews (`docs/agents_roadmap.md`, Known open items):
 
 - A long generated artifact (EvalOpt, MakerChecker, PromptChain) can still be cut off
@@ -294,9 +631,6 @@ From the agents audit reviews (`docs/agents_roadmap.md`, Known open items):
 - AgentGraph: a node with `success=False` (a forced pass, a Debate without agreement,
   a budget stop) takes no outgoing edge and no edge can route on failure, so a
   fallback branch cannot be built.
-- `fsm-llm-validate` on an exported agent FSM warns that the framework
-  `handler_only_keys` (`forced_stop_reason`, `iteration_count`, ...) protect nothing
-  and may be typos; the warning is a false alarm.
 - The `TypeError` denylist of agent constructors includes every `HumanInTheLoop`
   constructor parameter, derived from its signature: a new HITL parameter with a
   generic name would start rejecting a litellm passthrough kwarg of that name.
