@@ -94,6 +94,17 @@ _STOP_WORDS: frozenset[str] = frozenset(
 )
 
 
+def _is_solution(value: Any) -> bool:
+    """True when ``value`` is a solution: anything but ``None`` or ``""``.
+
+    Contract (callers: ``ReasoningHandlers.validate_solution`` and
+    ``OutputFormatter.extract_final_solution``): a numeric ``0``, ``False``
+    or an empty list IS a solution (an answer can be zero or false). Never
+    raises for a JSON value.
+    """
+    return value is not None and value != ""
+
+
 class ReasoningHandlers:
     """Collection of handlers for the reasoning engine."""
 
@@ -122,7 +133,7 @@ class ReasoningHandlers:
         )
 
         # Validation checks
-        has_solution = bool(solution)
+        has_solution = _is_solution(solution)
         has_insights = (
             bool(insights) or is_simple_problem
         )  # Simple problems may not need insights
@@ -523,7 +534,7 @@ class OutputFormatter:
 
         for key in solution_keys:
             solution = context.get(key)
-            if solution is not None and solution != "":
+            if _is_solution(solution):
                 logger.debug(f"Extracted final solution from context key '{key}'")
                 return str(solution)
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from collections import deque
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
@@ -379,6 +379,28 @@ class FieldExtractionConfig(BaseModel):
                 ) from e
 
 
+def checked_key_names(keys: object, *, argument: str) -> tuple[str, ...]:
+    """The names in ``keys``, checked to be a collection of ``str`` names.
+
+    Contract (callers: :func:`typed_field_extraction`, ``handlers``
+    ``clear_keys_delta``/``clear_keys_on_entry``, ``API`` bounded runs'
+    ``seconds_exempt_states``): ``keys`` must be an iterable of ``str`` that
+    is not itself a ``str`` or ``bytes`` (whose characters would be taken as
+    names). Returns the names in order, duplicates dropped (``()`` for an
+    empty iterable; emptiness is the caller's rule). Raises ``ValueError``
+    naming ``argument`` for ``None``, a ``str``/``bytes``, a non-iterable, or
+    a non-``str`` member.
+    """
+    if isinstance(keys, (str, bytes)) or not isinstance(keys, Iterable):
+        raise ValueError(
+            f"{argument} must be a collection of names (str), not {keys!r}"
+        )
+    names = tuple(keys)
+    if not all(isinstance(name, str) for name in names):
+        raise ValueError(f"{argument} must hold names (str), got {names!r}")
+    return tuple(dict.fromkeys(names))
+
+
 #: Field types :func:`typed_field_extraction` declares: ``str``, ``float``,
 #: ``list``, ``bool``, or ``any`` for a whole generated artifact (core coerces
 #: and rejects mismatches). A subset of ``FieldExtractionConfig.field_type``.
@@ -406,12 +428,14 @@ def typed_field_extraction(
           ``instructions``.
         - ``context_keys`` must be non-empty: ``None`` (all visible context)
           is the unnarrowed prompt this builder exists to avoid (D-017 of plan
-          06a5ec0a). Core reads a listed key from RAW context, with no
-          internal-key filter, so an internal-prefixed key is refused.
+          06a5ec0a). An internal-prefixed key is refused (it names framework
+          state, never a value the model should read).
         - Raises ``ValueError`` for a ``field_type`` outside
           :data:`TypedFieldType`, a ``field_name`` in
-          ``constants.EXTRACTION_ENVELOPE_KEYS`` (D-035 of plan 06a5ec0a), an
-          empty ``context_keys``, or an internal-prefixed context key.
+          ``constants.EXTRACTION_ENVELOPE_KEYS`` (D-035 of plan 06a5ec0a), a
+          ``context_keys`` that is ``None``, a bare ``str`` or not a
+          collection of ``str`` (:func:`checked_key_names`), an empty
+          ``context_keys``, or an internal-prefixed context key.
 
     Pair it with an empty state-level ``extraction_instructions`` (D-009 of
     plan 06a5ec0a): core then runs only these per-field calls, each on its own
@@ -424,7 +448,7 @@ def typed_field_extraction(
             f"typed field name {field_name!r} is an extraction envelope key; "
             "pick another name"
         )
-    keys = list(dict.fromkeys(context_keys))
+    keys = list(checked_key_names(context_keys, argument="context_keys"))
     if not keys:
         raise ValueError("typed_field_extraction needs at least one context key")
     internal = [key for key in keys if has_internal_prefix(key)]

@@ -25,6 +25,7 @@ from fsm_llm.logging import logger
 from .constants import (
     HYBRID_EVALUATION_STATE,
     RETRY_CLEARED_KEYS,
+    SOLVE_DRIVER_KEYS,
     ContextKeys,
     Defaults,
     ErrorMessages,
@@ -119,11 +120,23 @@ class ReasoningEngine:
 
     def _register_handlers(self):
         """Register all handlers with proper configuration."""
+        # DECISION plan-2026-10-01T093600-944e2692/D-058: the classifier,
+        # strategy executor, validator, retry limiter and hybrid loop counter
+        # are critical: their failure stops the solve (core raises it through
+        # the step, solve_problem wraps it as ReasoningExecutionError,
+        # chained). Do NOT drop `.critical()`: core's default
+        # handler_error_mode="continue" would log and skip the failure, so a
+        # spent classifier budget would fall back to the model's strategy, a
+        # missing strategy FSM would return a solve that ran no strategy, and
+        # a validator crash would stall validate_refine until the step budget.
+        # Do NOT set handler_error_mode="raise" on the APIs instead: the
+        # pruner and tracer are best-effort and must not stop a solve.
         # Problem classifier
         self.orchestrator.register_handler(
             self.orchestrator.create_handler(HandlerNames.ORCHESTRATOR_CLASSIFIER)
             .at(HandlerTiming.CONTEXT_UPDATE)
             .when_keys_updated(ContextKeys.PROBLEM_TYPE)
+            .critical()
             .do(self._classify_problem)
         )
 
@@ -144,6 +157,7 @@ class ReasoningEngine:
         self.orchestrator.register_handler(
             self.orchestrator.create_handler(HandlerNames.ORCHESTRATOR_EXECUTOR)
             .on_state_entry(OrchestratorStates.EXECUTE_REASONING)
+            .critical()
             .do(self._prepare_reasoning_execution)
         )
 
@@ -152,6 +166,7 @@ class ReasoningEngine:
             self.orchestrator.create_handler(HandlerNames.ORCHESTRATOR_VALIDATOR)
             .at(HandlerTiming.CONTEXT_UPDATE)
             .when_keys_updated(ContextKeys.PROPOSED_SOLUTION)
+            .critical()
             .do(self.handlers.validate_solution)
         )
 
@@ -176,6 +191,7 @@ class ReasoningEngine:
         self.orchestrator.register_handler(
             self.orchestrator.create_handler(HandlerNames.RETRY_LIMITER)
             .on_state_entry(OrchestratorStates.VALIDATE_REFINE)
+            .critical()
             .do(self._check_retry_limit)
         )
 
@@ -184,6 +200,7 @@ class ReasoningEngine:
         self.orchestrator.register_handler(
             self.orchestrator.create_handler(HandlerNames.HYBRID_LOOP_COUNTER)
             .on_state_exit(HYBRID_EVALUATION_STATE)
+            .critical()
             .do(self.handlers.count_hybrid_loop)
         )
 
@@ -408,6 +425,14 @@ class ReasoningEngine:
         """Internal solve logic, must be called while holding ``_solve_lock``."""
         # Initialize context (copy to avoid mutating caller's dict)
         context = dict(initial_context) if initial_context else {}
+        # The push hook's driver keys are the engine's own (D-058).
+        dropped = [
+            key for key in SOLVE_DRIVER_KEYS if context.pop(key, None) is not None
+        ]
+        if dropped:
+            logger.warning(
+                f"initial_context keys set by the engine only, ignored: {dropped}"
+            )
         context[ContextKeys.PROBLEM_STATEMENT] = problem
         context[ContextKeys.REASONING_TRACE] = []
         context[ContextKeys.RETRY_COUNT] = 0
@@ -427,28 +452,13 @@ class ReasoningEngine:
         except RunBudgetExceededError as e:
             # DECISION plan-2026-10-01T093600-944e2692/D-054 (D-014): an
             # unfinished solve raises, never returns a fallback string as the
-            # solution. Do NOT end the conversation before reading the partial
-            # context (get_data of an ended solve has nothing to give), and do
-            # NOT fold this into the generic wrap below (it carries no context).
-            partial_context = self._read_partial_context(conv_id)
-            self._end_quietly(conv_id)
-            raise ReasoningExecutionError(
-                f"Reasoning did not finish within {e.limit} {e.budget}",
-                details={
-                    "conversation_id": conv_id,
-                    "responses_so_far": 1 + len(stack.responses),
-                    "partial_context": partial_context,
-                },
+            # solution.
+            raise self._failed_solve(
+                conv_id, stack, f"Reasoning did not finish within {e.limit} {e.budget}"
             ) from e
         except Exception as e:
-            # Clean up conversation before re-raising
-            self._end_quietly(conv_id)
-            raise ReasoningExecutionError(
-                f"Reasoning execution failed: {e}",
-                details={
-                    "conversation_id": conv_id,
-                    "responses_so_far": 1 + len(stack.responses),
-                },
+            raise self._failed_solve(
+                conv_id, stack, f"Reasoning execution failed: {e}"
             ) from e
         responses = _ordered_responses(initial_response, stack.responses, results)
 
@@ -482,6 +492,34 @@ class ReasoningEngine:
         finally:
             # Always clean up the conversation, even if post-processing raises
             self._end_quietly(conv_id)
+
+    def _failed_solve(
+        self, conv_id: str, stack: _StrategyStack, message: str
+    ) -> ReasoningExecutionError:
+        """End a solve whose run raised; return the error to raise.
+
+        Contract: reads the partial context, ends the conversation (a failure
+        to end is logged), and returns ``ReasoningExecutionError(message)``
+        with ``details={conversation_id, responses_so_far, partial_context}``
+        for the caller to raise ``from`` the run's error; ``partial_context``
+        is ``None`` when core cannot read it (``_read_partial_context``).
+        """
+        # DECISION plan-2026-10-01T093600-944e2692/D-058: every failed solve
+        # (spent budget or any error, e.g. a prompt over core's cap on the
+        # final step) carries what it had. Do NOT end the conversation before
+        # reading it: the live read is the documented one, while after
+        # end_conversation core answers get_data only from its bounded
+        # ended-conversation cache, which may already have evicted it.
+        partial_context = self._read_partial_context(conv_id)
+        self._end_quietly(conv_id)
+        return ReasoningExecutionError(
+            message,
+            details={
+                "conversation_id": conv_id,
+                "responses_so_far": 1 + len(stack.responses),
+                "partial_context": partial_context,
+            },
+        )
 
     def _read_partial_context(self, conv_id: str) -> dict[str, Any] | None:
         """The context of the frame on top of a solve that did not finish.

@@ -1242,6 +1242,13 @@ class TestClearKeysDelta:
     def test_order_follows_keys(self):
         assert list(clear_keys_delta(["b", "a"], {"a": 1, "b": 2})) == ["b", "a"]
 
+    @pytest.mark.parametrize("keys", ["draft", None, ["draft", 1]])
+    def test_a_non_collection_of_names_is_refused(self, keys):
+        # A bare str was iterated as characters: "draft" cleared "d" and "r"
+        # and left "draft" set.
+        with pytest.raises(ValueError, match="keys"):
+            clear_keys_delta(keys, {"draft": "x", "d": 1, "r": 2})
+
 
 class TestClearKeysOnEntry:
     def test_returns_a_handler_with_name_and_priority(self):
@@ -1250,6 +1257,11 @@ class TestClearKeysOnEntry:
         )
         assert isinstance(handler, BaseHandler)
         assert (handler.name, handler.priority) == ("fresh_draft", 7)
+
+    @pytest.mark.parametrize("keys", ["draft", None, ["draft", 1]])
+    def test_a_non_collection_of_names_is_refused_at_build_time(self, keys):
+        with pytest.raises(ValueError, match="keys"):
+            clear_keys_on_entry(keys, state="produce")
 
     def test_default_name_and_priority(self):
         handler = clear_keys_on_entry(["draft"], state="produce")

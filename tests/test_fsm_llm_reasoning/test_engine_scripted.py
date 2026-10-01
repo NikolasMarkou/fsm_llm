@@ -18,11 +18,16 @@ from fsm_llm.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
+    LLMResponseError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm.reasoning import ReasoningEngine, ReasoningExecutionError
+from fsm_llm.reasoning import (
+    ReasoningClassificationError,
+    ReasoningEngine,
+    ReasoningExecutionError,
+)
 from fsm_llm.reasoning.constants import (
     HYBRID_EVALUATION_STATE,
     ORCHESTRATOR_HANDLER_ONLY_KEYS,
@@ -472,3 +477,181 @@ class TestSpentBudget:
         assert ContextKeys.PROBLEM_COMPONENTS not in partial
         # The conversation was ended after the context was read.
         assert engine.orchestrator.list_active_conversations() == []
+
+
+def _causes(error: BaseException) -> list[BaseException]:
+    """``error`` and every exception it was raised from, outermost first."""
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None:
+        chain.append(current)
+        current = current.__cause__
+    return chain
+
+
+class _FinalReplyFailsLLM(_ScriptedLLM):
+    """The final_answer reply fails (as a prompt over core's cap does)."""
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        tag = f"<current_state>{OrchestratorStates.FINAL_ANSWER}</current_state>"
+        if tag in request.system_prompt:
+            self.requests.append(request)
+            raise LLMResponseError("system_prompt over the 30000-character cap")
+        return super().generate_response(request)
+
+
+class TestFailedSolveKeepsWhatItHad:
+    """Review pass 15 W1 (D-058): any failed solve, not only a spent budget,
+    reports the context it reached, so an answer validated before a failing
+    last step is not lost."""
+
+    def test_a_failing_final_step_carries_the_partial_context(self):
+        llm = _FinalReplyFailsLLM(_VALID_SCRIPT)
+        engine = _engine(llm)
+
+        with pytest.raises(ReasoningExecutionError, match="execution failed") as info:
+            engine.solve_problem(_PROBLEM)
+
+        error = info.value
+        assert any(isinstance(e, LLMResponseError) for e in _causes(error))
+        assert set(error.details) == {
+            "conversation_id",
+            "responses_so_far",
+            "partial_context",
+        }
+        partial = error.details["partial_context"]
+        assert (
+            partial[ContextKeys.PROPOSED_SOLUTION]
+            == _VALID_SCRIPT[ContextKeys.PROPOSED_SOLUTION]
+        )
+        assert partial[ContextKeys.VALIDATION_RESULT] is True
+        assert engine.orchestrator.list_active_conversations() == []
+
+
+class TestHandlerFailuresStopTheSolve:
+    """Review pass 15 W2 (D-058): the engine's critical handlers raise through
+    the step instead of being logged and skipped by core's "continue" mode."""
+
+    def test_a_spent_classifier_budget_fails_the_solve(self, monkeypatch):
+        monkeypatch.setattr(Defaults, "MAX_CLASSIFICATION_ITERATIONS", 1)
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+
+        with pytest.raises(ReasoningExecutionError) as info:
+            engine.solve_problem(_PROBLEM)
+
+        chain = _causes(info.value)
+        classification = [
+            e for e in chain if isinstance(e, ReasoningClassificationError)
+        ]
+        assert classification, chain
+        assert isinstance(classification[0].__cause__, RunBudgetExceededError)
+        assert engine.orchestrator.list_active_conversations() == []
+        assert engine.classifier.list_active_conversations() == []
+
+    def test_no_strategy_definitions_fails_the_solve(self):
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+        del engine.reasoning_fsms[ReasoningType.DEDUCTIVE]
+        del engine.reasoning_fsms[ReasoningType.ANALYTICAL]
+
+        with pytest.raises(ReasoningExecutionError) as info:
+            engine.solve_problem(_PROBLEM)
+
+        assert any(
+            isinstance(e, ReasoningExecutionError)
+            and "No reasoning FSM definitions available" in str(e)
+            for e in _causes(info.value)[1:]
+        )
+        assert engine.orchestrator.list_active_conversations() == []
+
+    def test_a_validator_crash_fails_the_solve_at_once(self):
+        # A non-str problem_type crashes validate_solution (`.lower()`).
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        engine = _engine(llm)
+
+        with pytest.raises(ReasoningExecutionError) as info:
+            engine.solve_problem(_PROBLEM, {ContextKeys.PROBLEM_TYPE: 7})
+
+        chain = _causes(info.value)
+        assert any(isinstance(e, AttributeError) for e in chain), chain
+        # Not the step budget hiding the real error after 170 free steps.
+        assert not any(isinstance(e, RunBudgetExceededError) for e in chain)
+        assert engine.orchestrator.list_active_conversations() == []
+
+
+class TestFailingPop:
+    """Review pass 15 W3 (D-053(3)): a pop that fails stops the solve; it is
+    not swallowed into a "successful" solve on the strategy's context."""
+
+    def test_a_failing_pop_raises_and_leaves_nothing_live(self, monkeypatch):
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+
+        def _explode(*args: Any, **kwargs: Any) -> str:
+            raise RuntimeError("pop exploded")
+
+        monkeypatch.setattr(engine.orchestrator, "pop_fsm", _explode)
+
+        with pytest.raises(ReasoningExecutionError, match="pop exploded") as info:
+            engine.solve_problem(_PROBLEM)
+
+        assert isinstance(info.value.__cause__, RuntimeError)
+        assert engine.orchestrator.list_active_conversations() == []
+
+
+class TestNumericZeroAnswer:
+    """Review pass 15 W4: a calculator result of 0 is an answer."""
+
+    def test_a_zero_result_validates_on_the_first_attempt(self):
+        script = {
+            "problem_type": "arithmetic",
+            "problem_components": ["5", "-", "5"],
+            "problem_domain": "math",
+            "recommended_reasoning_type": "simple_calculator",
+            "reasoning_strategy": "simple_calculator",
+            "strategy_rationale": "plain subtraction",
+            "operand1": 5,
+            "operand2": 5,
+            "operator": "-",
+            "calculation_result": 0,
+            "key_insights": ["subtraction"],
+            "final_solution": "0",
+        }
+        solution, trace_info = _engine(_ScriptedLLM(script)).solve_problem(
+            "What is 5 - 5?"
+        )
+        context = trace_info["final_context"]
+
+        assert solution == "0"
+        assert context[ContextKeys.PROPOSED_SOLUTION] == 0
+        assert context[ContextKeys.VALIDATION_RESULT] is True
+        assert context[ContextKeys.RETRY_COUNT] == 0
+
+
+class TestCallerCannotDriveThePush:
+    """Review pass 15 note 9: the push hook's driver keys are dropped from a
+    caller's initial_context."""
+
+    def test_a_caller_push_flag_alone_does_not_break_the_solve(self):
+        solution, trace_info = _engine(_ScriptedLLM(_VALID_SCRIPT)).solve_problem(
+            _PROBLEM, {ContextKeys.REASONING_PUSH_PENDING: True}
+        )
+
+        assert solution == _VALID_SCRIPT["final_solution"]
+        assert trace_info["final_context"][ContextKeys.VALIDATION_RESULT] is True
+
+    def test_a_caller_cannot_push_a_strategy_before_the_analysis(self):
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        _solution, trace_info = _engine(llm).solve_problem(
+            _PROBLEM,
+            {
+                ContextKeys.REASONING_PUSH_PENDING: True,
+                ContextKeys.REASONING_TYPE_SELECTED: ReasoningType.CREATIVE.value,
+            },
+        )
+        context = trace_info["final_context"]
+
+        # Only the strategy the orchestrator chose ran.
+        assert context[ContextKeys.REASONING_TYPE_SELECTED] == "deductive"
+        assert "creative_reasoning_completed" not in context
+        assert context["deductive_reasoning_completed"] is True

@@ -83,7 +83,7 @@ from typing import Any, Protocol
 # Local imports
 # --------------------------------------------------------------
 from .constants import MAX_TIMED_HANDLER_STRAGGLERS
-from .definitions import FSMError
+from .definitions import FSMError, checked_key_names
 from .logging import logger
 
 # --------------------------------------------------------------
@@ -1008,9 +1008,12 @@ def clear_keys_delta(keys: Iterable[str], context: Mapping[str, Any]) -> dict[st
     ``make_fresh_keys_handler`` and the meta-builder): returns ``{key: None}``
     (core deletes the key) for each key in ``keys``, in order, whose value in
     ``context`` is not None; a key that is absent or None is left out, so
-    nothing to clear gives ``{}``. Never raises.
+    nothing to clear gives ``{}``. Raises ``ValueError`` when ``keys`` is not
+    a collection of ``str`` names (``None`` or a bare ``str``,
+    ``definitions.checked_key_names``).
     """
-    return {key: None for key in keys if context.get(key) is not None}
+    names = checked_key_names(keys, argument="keys")
+    return {key: None for key in names if context.get(key) is not None}
 
 
 def clear_keys_on_entry(
@@ -1035,9 +1038,11 @@ def clear_keys_on_entry(
         - ``priority``: handler priority (lower runs first), default 100.
         - Returns a :class:`BaseHandler` to pass to ``API.register_handler``;
           its delta is :func:`clear_keys_delta` of ``keys``.
-        - Raises ``ValueError`` at build time for empty ``keys``.
+        - Raises ``ValueError`` at build time for empty ``keys`` or ``keys``
+          that is not a collection of ``str`` names (``None`` or a bare
+          ``str``, ``definitions.checked_key_names``).
     """
-    cleared = tuple(dict.fromkeys(keys))
+    cleared = checked_key_names(keys, argument="keys")
     if not cleared:
         raise ValueError("clear_keys_on_entry needs at least one key")
 

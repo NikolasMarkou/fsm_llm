@@ -61,6 +61,32 @@ class TestValidateSolution:
             result[ContextKeys.VALIDATION_CHECKS]["has_insights"] is True
         )  # relaxed for simple
 
+    @pytest.mark.parametrize("answer", [0, 0.0, False])
+    def test_a_zero_or_false_answer_is_a_solution(self, answer):
+        """Review pass 15 W4: `bool(solution)` took 0 and False for "no
+        solution", so "5 - 5 = 0" burned every retry."""
+        ctx = {
+            ContextKeys.PROPOSED_SOLUTION: answer,
+            ContextKeys.PROBLEM_TYPE: "arithmetic",
+            ContextKeys.RETRY_COUNT: 0,
+        }
+        result = ReasoningHandlers.validate_solution(ctx)
+
+        assert result[ContextKeys.VALIDATION_CHECKS]["has_solution"] is True
+        assert result[ContextKeys.VALIDATION_RESULT] is True
+        assert result[ContextKeys.RETRY_COUNT] == 0
+
+    @pytest.mark.parametrize("missing", [None, ""])
+    def test_only_none_or_an_empty_string_is_no_solution(self, missing):
+        ctx = {
+            ContextKeys.PROPOSED_SOLUTION: missing,
+            ContextKeys.PROBLEM_TYPE: "arithmetic",
+        }
+        result = ReasoningHandlers.validate_solution(ctx)
+
+        assert result[ContextKeys.VALIDATION_CHECKS]["has_solution"] is False
+        assert result[ContextKeys.VALIDATION_RESULT] is False
+
     def test_retry_count_incremented_on_failure(self):
         ctx = {
             ContextKeys.PROPOSED_SOLUTION: "",

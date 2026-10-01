@@ -95,6 +95,13 @@ class TestRefusals:
         with pytest.raises(ValueError, match="at least one context key"):
             typed_field_extraction("city", "str", "x", context_keys=keys)
 
+    @pytest.mark.parametrize("keys", ["task", b"task", None, ["task", 1]])
+    def test_non_collection_context_keys_rejected(self, keys):
+        # A bare str was taken as its characters ('t', 'a', 's', 'k'), and
+        # None raised TypeError instead of the documented ValueError.
+        with pytest.raises(ValueError, match="context_keys"):
+            typed_field_extraction("city", "str", "x", context_keys=keys)
+
     @pytest.mark.parametrize("key", ["_secret", "system_x", "internal_y", "__z"])
     def test_internal_context_key_rejected(self, key):
         with pytest.raises(ValueError, match="not allowed"):

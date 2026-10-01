@@ -112,6 +112,7 @@ from .definitions import (
     FSMDefinition,
     FSMError,
     RunBudgetExceededError,
+    checked_key_names,
 )
 
 # --------------------------------------------------------------
@@ -264,18 +265,10 @@ def _seconds_exempt_set(states: Collection[str]) -> frozenset[str]:
 
     Contract: ``states`` must be a collection of state ids (``str``), not a
     single ``str`` (whose characters would be taken as ids); ``ValueError``
-    otherwise. Returns a ``frozenset`` (empty for ``()``).
+    otherwise (``definitions.checked_key_names``). Returns a ``frozenset``
+    (empty for ``()``).
     """
-    if isinstance(states, (str, bytes)) or not isinstance(states, Collection):
-        raise ValueError(
-            f"seconds_exempt_states must be a collection of state ids, got {states!r}"
-        )
-    exempt = frozenset(states)
-    if not all(isinstance(state, str) for state in exempt):
-        raise ValueError(
-            f"seconds_exempt_states must hold state ids (str), got {states!r}"
-        )
-    return exempt
+    return frozenset(checked_key_names(states, argument="seconds_exempt_states"))
 
 
 # DECISION plan-2026-09-30T062855-07ad3f8c/D-027
@@ -391,7 +384,11 @@ def _hook_popped_ended_frame(
     or less (the root ended, or the conversation was closed). Otherwise calls
     ``before_step(step)`` once (what it raises propagates unchanged) and
     returns True when the top is no longer ended or the stack is shallower
-    than before the call (the hook popped), False otherwise.
+    than before the call (the hook popped), False otherwise. So a hook that
+    pushes a live FSM on the ended frame continues the run on that FSM, while
+    one that pushes an FSM that has already ended (a terminal initial state),
+    with or without a pop first, ends the run: a run never loops through
+    hook calls without a step.
     """
     depth = _stack_depth(api, conversation_id)
     if depth <= 1:
@@ -1005,9 +1002,9 @@ class API:
         calls ``before_step`` and then runs one ``advance``. Budgets are
         checked only between steps: a step that has started is never cut short.
         When the top that has ended is a pushed FSM (stack depth above 1),
-        ``before_step`` is called once for it first: if the hook pops it, the
-        run continues on the new top; if not, the run returns as for any
-        ended top.
+        ``before_step`` is called once for it first: if the hook pops it (or
+        pushes an FSM that has not ended), the run continues on the new top;
+        if not, the run returns as for any ended top.
 
         Args:
             conversation_id: Existing conversation ID.
@@ -1022,7 +1019,10 @@ class API:
                 above 1) it runs before the budget checks and may pop the
                 frame (``pop_fsm``): the run then continues on the new top
                 (the call is not a step; the same number is passed again
-                before the next step); if it does not pop, the run returns.
+                before the next step). The run also continues when the hook
+                pushes an FSM that has not ended (it runs on top of the
+                ended frame); otherwise (no pop, or a pushed FSM whose
+                initial state is terminal) the run returns.
                 What it raises propagates unchanged and no step runs.
             seconds_exempt_states: State ids in which a spent ``max_seconds``
                 does not stop the run (a wind-down that must finish once
@@ -1102,7 +1102,8 @@ class API:
                 time budget.
             before_step: Called before each step, and once when a pushed
                 frame has ended, as in ``run_until_terminal`` (a hook that
-                pops the ended frame lets the run continue on the new top).
+                pops the ended frame, or pushes an FSM that has not ended,
+                lets the run continue on the new top; otherwise it returns).
             seconds_exempt_states: As in ``run_until_terminal`` (checked
                 against the running definition at call time).
 

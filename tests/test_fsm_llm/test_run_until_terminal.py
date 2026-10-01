@@ -654,6 +654,107 @@ class TestBeforeStepPopsEndedFrame:
         assert _path(results) == [("plan", "done")]
 
 
+def _leaf_fsm() -> dict[str, Any]:
+    """One state, terminal from the start: it has ended as soon as pushed."""
+    return {
+        "name": "leaf",
+        "description": "Ended on push",
+        "initial_state": "leaf_done",
+        "states": {"leaf_done": _state("leaf_done")},
+    }
+
+
+class _PushOnEndedFrame:
+    """``before_step`` hook: on the FIRST ended-frame call only, optionally
+    pops, then pushes ``fsm``; records ``(n, state, depth)`` of every call."""
+
+    def __init__(
+        self, api: API, conv_id: str, fsm: dict[str, Any], *, pop_first: bool
+    ) -> None:
+        self.api = api
+        self.conv_id = conv_id
+        self.fsm = fsm
+        self.pop_first = pop_first
+        self.pushed = False
+        self.calls: list[tuple[int, str, int]] = []
+
+    def __call__(self, step: int) -> None:
+        depth = self.api.get_stack_depth(self.conv_id)
+        self.calls.append((step, self.api.get_current_state(self.conv_id), depth))
+        if self.pushed or not self.api.has_conversation_ended(self.conv_id):
+            return
+        self.pushed = True
+        if self.pop_first:
+            self.api.pop_fsm(self.conv_id)
+        self.api.push_fsm(self.conv_id, self.fsm)
+
+
+def _run_sync(api: API, conv_id: str, hook: Any) -> None:
+    api.run_until_terminal(conv_id, max_steps=10, before_step=hook)
+
+
+def _run_stream(api: API, conv_id: str, hook: Any) -> None:
+    list(api.run_until_terminal_stream(conv_id, max_steps=10, before_step=hook))
+
+
+class TestEndedFrameHookPushes:
+    """D-052 termination (review pass 14 W2): what a PUSH on the ended-frame
+    call does. The run goes on only when the top is no longer ended or the
+    stack got shallower; a push of an already-ended FSM must end the run
+    after one hook call (no loop to the stack limit), and a push of a live
+    FSM continues on it. Sync and stream share the rounds."""
+
+    _RUNNERS = pytest.mark.parametrize("run", [_run_sync, _run_stream])
+
+    def _api(self) -> tuple[API, str]:
+        api, conv_id = _start(_trip_fsm(), _StreamingLLM({"city": "Paris"}))
+        _push_sub_on_entry(api, conv_id, "plan")
+        return api, conv_id
+
+    @_RUNNERS
+    def test_pushing_an_ended_fsm_without_a_pop_returns(self, run):
+        api, conv_id = self._api()
+        hook = _PushOnEndedFrame(api, conv_id, _leaf_fsm(), pop_first=False)
+
+        run(api, conv_id, hook)
+
+        # One ended-frame call (n=3), no step after it, the leaf left on top.
+        assert hook.calls == [(1, "collect", 1), (2, "sub_work", 2), (3, "sub_done", 2)]
+        assert api.get_stack_depth(conv_id) == 3
+        assert api.get_current_state(conv_id) == "leaf_done"
+
+    @_RUNNERS
+    def test_popping_then_pushing_an_ended_fsm_returns(self, run):
+        api, conv_id = self._api()
+        hook = _PushOnEndedFrame(api, conv_id, _leaf_fsm(), pop_first=True)
+
+        run(api, conv_id, hook)
+
+        assert hook.calls == [(1, "collect", 1), (2, "sub_work", 2), (3, "sub_done", 2)]
+        assert api.get_stack_depth(conv_id) == 2
+        assert api.get_current_state(conv_id) == "leaf_done"
+
+    @_RUNNERS
+    def test_pushing_a_live_fsm_continues_on_it(self, run):
+        api, conv_id = self._api()
+        hook = _PushOnEndedFrame(api, conv_id, _sub_fsm(), pop_first=False)
+
+        run(api, conv_id, hook)
+
+        # The pushed sub runs one step on top of the ended one; at its own
+        # terminal the hook (pushing nothing more) is offered it and the run
+        # returns.
+        assert hook.calls == [
+            (1, "collect", 1),
+            (2, "sub_work", 2),
+            (3, "sub_done", 2),
+            (3, "sub_work", 3),
+            (4, "sub_done", 3),
+        ]
+        assert api.get_stack_depth(conv_id) == 3
+        assert api.get_current_state(conv_id) == "sub_done"
+
+
 class TestRunEnded:
     def test_terminal_conversation_returns_an_empty_tuple(self):
         llm = _ScriptedLLM({"city": "Paris"})
