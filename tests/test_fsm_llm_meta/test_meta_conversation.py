@@ -741,3 +741,99 @@ class TestWorkflowStepTypeEnumInSession:
         # A model that ignores the enum gets an invalid build, not a crash.
         assert "teleport" in reply
         assert not agent.is_complete()
+
+
+# ---------------------------------------------------------------------------
+# The build prompt closes every collect reply (D-024, D-025 of plan 944e2692)
+# ---------------------------------------------------------------------------
+
+_SENTENCE = "Say 'build it' when you're ready."
+_NO_PROMPT = "A support bot with three states. Should it escalate to a human?"
+
+
+class TestCollectReplyEndsWithTheBuildPrompt:
+    """Step 13 live probe (qwen3.5:4b): 6 of 18 collect replies ended with the
+    build prompt even with the sentence last in the instructions; the old
+    driver's canned collect text always did. The driver now appends it."""
+
+    def test_a_reply_without_the_sentence_gets_it_once_as_a_final_line(self):
+        llm = ScriptedMetaLLM(intents=["fsm"], replies=[_NO_PROMPT, _NO_PROMPT])
+        agent = MetaBuilderAgent(llm_interface=llm)
+        first = agent.start("I want a support chatbot")
+        second = agent.send("it should greet the user first")
+        for reply in (first, second):
+            assert reply == f"{_NO_PROMPT}\n{_SENTENCE}"
+            assert reply.count("build it") == 1
+        assert _state(agent) == S.COLLECT
+
+    def test_the_reply_after_a_type_switch_gets_it_too(self):
+        # collect -> classify, then the message-free step's collect reply.
+        llm = ScriptedMetaLLM(intents=["fsm", "agent"], replies=[_NO_PROMPT] * 2)
+        agent = MetaBuilderAgent(llm_interface=llm)
+        agent.start("I want a support chatbot")
+        reply = agent.send("actually make it a research agent with web search")
+        assert reply == f"{_NO_PROMPT}\n{_SENTENCE}"
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            f"Noted. {_SENTENCE}",
+            f"Noted. {_SENTENCE}  \n",
+            "Noted. Say 'build it' when you're ready!",
+            "Noted. Say ‘build it’ when you’re ready.",
+            "Noted. **Say 'build it' when you're ready.**",
+            "Noted. say 'build it' when you're  ready",
+        ],
+    )
+    def test_a_reply_that_already_ends_with_it_is_unchanged(self, reply):
+        llm = ScriptedMetaLLM(intents=["fsm"], replies=[reply])
+        agent = MetaBuilderAgent(llm_interface=llm)
+        assert agent.start("I want a support chatbot") == reply
+
+    def test_never_doubled_over_a_session(self):
+        llm = ScriptedMetaLLM(
+            intents=["fsm"], replies=[_NO_PROMPT, f"Noted. {_SENTENCE}", _NO_PROMPT]
+        )
+        agent = MetaBuilderAgent(llm_interface=llm)
+        replies = [
+            agent.start("I want a support chatbot"),
+            agent.send("it should greet the user first"),
+            agent.send("and record the issue"),
+        ]
+        for reply in replies:
+            assert reply.endswith(_SENTENCE)
+            assert reply.count(_SENTENCE) == 1
+
+    def test_build_failed_and_done_replies_are_untouched(self):
+        llm = ScriptedMetaLLM(
+            intents=["fsm"],
+            builds=[_spec(_FSM_SPEC, name=""), json.dumps(_FSM_SPEC)],
+            replies=[_NO_PROMPT],
+        )
+        agent = MetaBuilderAgent(llm_interface=llm)
+        agent.start("I want a support chatbot")
+        failed = agent.send("build it")
+        assert _state(agent) == S.BUILD_FAILED
+        assert failed.startswith("I couldn't complete the build yet:")
+        assert failed.endswith("then say 'build it' again.")
+        assert _SENTENCE not in failed
+        done = agent.send("build it")
+        assert _state(agent) == S.DONE
+        assert done.startswith("Build complete!")
+        assert done.endswith("The artifact JSON has been generated.")
+        assert _SENTENCE not in done
+
+    def test_history_keeps_the_model_reply(self):
+        """D-025: the appended line is driver UI text; core's history holds
+        what the model wrote (no core API rewrites a stored reply)."""
+        llm = ScriptedMetaLLM(intents=["fsm"], replies=[_NO_PROMPT, _NO_PROMPT])
+        agent = MetaBuilderAgent(llm_interface=llm)
+        agent.start("I want a support chatbot")
+        agent.send("it should greet the user first")
+        api, conversation_id = agent._session()
+        system = [
+            e["system"]
+            for e in api.get_conversation_history(conversation_id)
+            if "system" in e
+        ]
+        assert system == [_NO_PROMPT, _NO_PROMPT]

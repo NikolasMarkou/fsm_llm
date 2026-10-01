@@ -14,7 +14,8 @@ writes before the turn, the handlers that write the build request and
 assemble the returned spec deterministically on an ``ArtifactBuilder``
 (``_assemble_fsm`` / ``_assemble_workflow`` / ``_assemble_agent``) and
 validate it, the session lifecycle (``start``/``send``/``max_turns``) and the
-canned texts (welcome, build complete, build failed, collect fallback).
+canned texts (welcome, build complete, build failed, collect fallback, and
+the build prompt that closes every collect reply when the model dropped it).
 
 The tool registries in ``meta_tools.py`` (``create_fsm_tools`` and friends)
 are a separate public API for driving a builder programmatically; this agent
@@ -33,6 +34,7 @@ from fsm_llm.logging import logger
 from .base import _reject_misplaced_kwargs
 from .constants import (
     META_BUILD_CALL_FAILED,
+    META_BUILD_PROMPT,
     MetaBuilderStates,
     MetaBuildOutcome,
     MetaContextKeys,
@@ -99,6 +101,33 @@ _BUILD_TRIGGERS: frozenset[str] = frozenset(
     }
 )
 _BUILD_PHRASES: tuple[str, ...] = ("build it", "create it", "generate it")
+
+# Variance a model's own build-prompt ending may carry and still count as the
+# sentence: typographic quotes, closing punctuation, markdown emphasis, case
+# and whitespace (seen in collect replies; none changes what the user reads).
+_TYPOGRAPHIC_QUOTES = str.maketrans({"‘": "'", "’": "'"})
+_TRAILING_DECORATION = " \t\r\n.!*_"
+
+
+def _prompt_ending(text: str) -> str:
+    """``text`` normalized for comparing its ending with the build prompt."""
+    collapsed = " ".join(text.translate(_TYPOGRAPHIC_QUOTES).split())
+    return collapsed.rstrip(_TRAILING_DECORATION).casefold()
+
+
+_BUILD_PROMPT_ENDING = _prompt_ending(META_BUILD_PROMPT)
+
+
+def _with_build_prompt(reply: str) -> str:
+    """A collect reply that ends with ``META_BUILD_PROMPT`` exactly once.
+
+    A reply already ending with it (up to the variance above) is returned
+    unchanged; otherwise the sentence is appended as a new final line.
+    """
+    if _prompt_ending(reply).endswith(_BUILD_PROMPT_ENDING):
+        return reply
+    body = reply.rstrip()
+    return f"{body}\n{META_BUILD_PROMPT}" if body else META_BUILD_PROMPT
 
 
 class MetaBuilderAgent:
@@ -722,6 +751,15 @@ class MetaBuilderAgent:
             return self._collect_fallback(message)
         finally:
             self._sync_artifact_type(api, conversation_id)
+        if state == _S.COLLECT:
+            # DECISION plan-2026-10-01T093600-944e2692/D-025: the build prompt
+            # is appended to the reply the user gets, not to core's stored
+            # reply. Do NOT rewrite `Conversation.exchanges` from here (no
+            # public core API does it; reaching into the instance would be a
+            # driver-side history editor) and do NOT add more prompt wording
+            # instead (the 4b model drops the sentence regardless, D-024).
+            # History keeps what the model wrote. See decisions.md D-025.
+            return _with_build_prompt(reply)
         if state != _S.BUILD:
             return reply
         return self._build_turn(api, conversation_id)

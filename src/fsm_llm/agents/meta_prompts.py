@@ -14,7 +14,11 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from .constants import META_AGENT_PATTERN_INTENTS, MetaContextKeys
+from .constants import (
+    META_AGENT_PATTERN_INTENTS,
+    META_BUILD_PROMPT,
+    MetaContextKeys,
+)
 from .definitions import ArtifactType
 from .meta_builders import AgentBuilder, ArtifactBuilder, WorkflowBuilder
 
@@ -227,7 +231,7 @@ def build_collect_response_instructions() -> str:
         "ask one short follow-up question about anything still unclear. "
         "Never mention states, transitions, classification or any other "
         "internals of this assistant. End your message with this exact "
-        "sentence: Say 'build it' when you're ready."
+        f"sentence: {META_BUILD_PROMPT}"
     )
 
 

@@ -630,6 +630,12 @@ class MetaBuildOutcome:
 # Never a ``CompletionResponse`` kind (``calls``, ``final``, ``malformed``).
 META_BUILD_CALL_FAILED = "call_failed"
 
+# The build prompt that closes every ``collect`` reply: the last sentence of
+# the collect instructions (``meta_prompts``) and the line the driver appends
+# when the model dropped it (``MetaBuilderAgent``, D-024). It carries a phrase
+# the driver's build trigger accepts ("build it").
+META_BUILD_PROMPT = "Say 'build it' when you're ready."
+
 
 class MetaHandlerNames:
     """Names of the handlers ``MetaBuilderAgent`` registers on its API."""
