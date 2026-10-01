@@ -37,7 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 from fsm_llm import API
 from fsm_llm.api import llm_settings_for
 from fsm_llm.definitions import LLMResponseError
-from fsm_llm.handlers import HandlerExecutionError
+from fsm_llm.handlers import HandlerExecutionError, clear_keys_delta
 from fsm_llm.logging import logger
 
 from .base import _reject_misplaced_kwargs
@@ -64,7 +64,6 @@ from .definitions import (
 )
 from .exceptions import BuilderError, MetaBuilderError, MetaValidationError
 from .fsm_definitions import build_meta_builder_fsm
-from .handlers import make_fresh_keys_handler
 from .meta_builders import (
     AgentBuilder,
     ArtifactBuilder,
@@ -116,8 +115,6 @@ _GOVERNING_NEGATION = re.compile(
 )
 _CLAUSE_BREAK = re.compile(r"[.,;:!?\n]+")
 
-# Every output of the last build; cleared on ``build`` and ``classify`` entry.
-_clear_build_outputs = make_fresh_keys_handler(META_BUILD_OUTPUT_KEYS)
 
 # ---------------------------------------------------------------------------
 # The build prompt that closes a collect reply (D-024, D-025)
@@ -451,7 +448,7 @@ class MetaBuilderAgent:
         its value is stashed so the exit can restore it.
         """
         return {
-            **_clear_build_outputs(context),
+            **clear_keys_delta(META_BUILD_OUTPUT_KEYS, context),
             _K.PREVIOUS_ARTIFACT_TYPE: context.get(_K.ARTIFACT_TYPE),
         }
 
@@ -504,7 +501,7 @@ class MetaBuilderAgent:
             MetaLogMessages.BUILD_STARTED.format(artifact_type=artifact_type.value)
         )
         return {
-            **_clear_build_outputs(context),
+            **clear_keys_delta(META_BUILD_OUTPUT_KEYS, context),
             _K.BUILD_MESSAGES: [
                 {
                     "role": "user",

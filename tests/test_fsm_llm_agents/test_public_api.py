@@ -315,3 +315,43 @@ class TestStaticAll:
         assert type(create_agent("reasoning_react", [_search])).__name__ == (
             "ReasoningReactAgent"
         )
+
+
+class TestCoreOwnsTypedFieldsAndKeyClearing:
+    """Step 21 of plan 944e2692: the typed field builder and the key-clearing
+    handler live in core; agents import them and keep no copy or alias."""
+
+    @pytest.mark.parametrize(
+        "name",
+        ["_typed_field_extraction", "_EXTRACTION_ENVELOPE_KEYS", "TypedFieldType"],
+    )
+    def test_agents_definitions_are_gone(self, name):
+        import fsm_llm.agents as agents
+        import fsm_llm.agents.fsm_definitions as fsm_definitions
+
+        assert not hasattr(fsm_definitions, name)
+        assert not hasattr(agents, name)
+
+    def test_core_names_exported(self):
+        import fsm_llm
+        from fsm_llm import definitions, handlers
+
+        assert fsm_llm.typed_field_extraction is definitions.typed_field_extraction
+        assert fsm_llm.clear_keys_on_entry is handlers.clear_keys_on_entry
+        assert {"typed_field_extraction", "clear_keys_on_entry"} <= set(fsm_llm.__all__)
+
+    def test_agents_build_with_the_core_builder(self):
+        import fsm_llm
+        import fsm_llm.agents as agents
+        import fsm_llm.agents.fsm_definitions as fsm_definitions
+
+        assert fsm_definitions.typed_field_extraction is fsm_llm.typed_field_extraction
+        assert "typed_field_extraction" not in agents.__all__
+        assert "clear_keys_on_entry" not in agents.__all__
+
+    def test_no_agents_module_defines_a_key_clearing_copy(self):
+        # make_fresh_keys_handler and the meta-builder build their plain clear
+        # with core clear_keys_delta (D-051); no agents module re-implements it.
+        src = Path(__file__).resolve().parents[2] / "src" / "fsm_llm" / "agents"
+        for path in ("handlers.py", "meta_builder.py"):
+            assert "clear_keys_delta(" in (src / path).read_text(), path

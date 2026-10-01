@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import re
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -29,6 +29,8 @@ from .constants import (
     DEFAULT_COMPLETION_RESULT_KEY,
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
+    EXTRACTION_ENVELOPE_KEYS,
+    FIELD_PROMPT_CONTEXT_LABEL,
     JSONLOGIC_RAW_ARGUMENT_OPERATIONS,
     MAX_JSONLOGIC_DEPTH,
     MAX_MULTI_INTENTS,
@@ -375,6 +377,70 @@ class FieldExtractionConfig(BaseModel):
                 raise ValueError(
                     f"validation_rules 'pattern' must be a valid regex string: {e}"
                 ) from e
+
+
+#: Field types :func:`typed_field_extraction` declares: ``str``, ``float``,
+#: ``list``, ``bool``, or ``any`` for a whole generated artifact (core coerces
+#: and rejects mismatches). A subset of ``FieldExtractionConfig.field_type``.
+TypedFieldType = Literal["str", "float", "list", "bool", "any"]
+
+
+def typed_field_extraction(
+    field_name: str,
+    field_type: TypedFieldType,
+    instructions: str,
+    *,
+    context_keys: Sequence[str],
+    required: bool = True,
+) -> dict[str, Any]:
+    """Build one typed ``field_extractions`` entry with a narrowed prompt context.
+
+    Contract (callers: the agents FSM builders, the reasoning FSMs):
+        - Returns a raw dict for ``State(field_extractions=[...])`` that
+          :class:`FieldExtractionConfig` accepts: ``field_name`` declared as
+          ``field_type``, ``context_keys`` as given (order kept, duplicates
+          dropped), ``required`` as given (a null required field costs one
+          retry call), and instructions that tell the model to read the value
+          from the task and the listed keys in the per-field prompt's
+          ``FIELD_PROMPT_CONTEXT_LABEL`` section, followed by
+          ``instructions``.
+        - ``context_keys`` must be non-empty: ``None`` (all visible context)
+          is the unnarrowed prompt this builder exists to avoid (D-017 of plan
+          06a5ec0a). Core reads a listed key from RAW context, with no
+          internal-key filter, so an internal-prefixed key is refused.
+        - Raises ``ValueError`` for a ``field_type`` outside
+          :data:`TypedFieldType`, a ``field_name`` in
+          ``constants.EXTRACTION_ENVELOPE_KEYS`` (D-035 of plan 06a5ec0a), an
+          empty ``context_keys``, or an internal-prefixed context key.
+
+    Pair it with an empty state-level ``extraction_instructions`` (D-009 of
+    plan 06a5ec0a): core then runs only these per-field calls, each on its own
+    narrowed context, and makes no bulk call for the state.
+    """
+    if field_type not in get_args(TypedFieldType):
+        raise ValueError(f"unsupported typed field type: {field_type!r}")
+    if field_name in EXTRACTION_ENVELOPE_KEYS:
+        raise ValueError(
+            f"typed field name {field_name!r} is an extraction envelope key; "
+            "pick another name"
+        )
+    keys = list(dict.fromkeys(context_keys))
+    if not keys:
+        raise ValueError("typed_field_extraction needs at least one context key")
+    internal = [key for key in keys if has_internal_prefix(key)]
+    if internal:
+        raise ValueError(f"context keys not allowed in a field prompt: {internal}")
+    return {
+        "field_name": field_name,
+        "field_type": field_type,
+        "extraction_instructions": (
+            f"Extract the '{field_name}' field ({field_type}) from the task and "
+            f"the {', '.join(repr(k) for k in keys)} values in the "
+            f"'{FIELD_PROMPT_CONTEXT_LABEL}' context. {instructions}"
+        ),
+        "context_keys": keys,
+        "required": required,
+    }
 
 
 class FieldExtractionRequest(BaseModel):

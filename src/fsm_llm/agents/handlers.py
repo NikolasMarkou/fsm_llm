@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from fsm_llm.handlers import clear_keys_delta
 from fsm_llm.logging import logger
 
 from .constants import (
@@ -864,8 +865,9 @@ def make_fresh_keys_handler(
           value the producing prompt must still see. Every ``key`` must be in
           ``keys`` and every ``stash_key`` in ``RESULT_DROPPED_CONTEXT_KEYS``
           (visible to prompts, dropped from results).
-        - Returns a handler whose delta sets each listed key that holds a
-          value to ``None`` (core deletes it); a stashed key's value is also
+        - Returns a handler whose delta is core ``clear_keys_delta`` (each
+          listed key that holds a value set to ``None``, which core deletes)
+          minus the kept keys below; a stashed key's value is also
           copied to its stash key. Unset keys are left out of the delta, so an
           older stash survives a round that produced nothing. A key holding a
           forced ``True`` (:func:`is_forced_verdict`) is left untouched. The
@@ -897,14 +899,14 @@ def make_fresh_keys_handler(
         return value is True and recorded_forced_reason(context) is not None
 
     def refresh_keys(context: dict[str, Any]) -> dict[str, Any]:
+        cleared = clear_keys_delta(
+            [key for key in fresh if not kept(context.get(key), context)], context
+        )
         delta: dict[str, Any] = {}
-        for key in fresh:
-            value = context.get(key)
-            if value is None or kept(value, context):
-                continue
+        for key in cleared:
             delta[key] = None
             if key in stash_map:
-                delta[stash_map[key]] = value
+                delta[stash_map[key]] = context[key]
         return delta
 
     return refresh_keys

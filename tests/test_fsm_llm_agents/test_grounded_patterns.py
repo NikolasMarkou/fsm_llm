@@ -14,9 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from fsm_llm import typed_field_extraction
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.debate import DebateAgent
-from fsm_llm.agents.fsm_definitions import _typed_field_extraction
+from fsm_llm.agents.fsm_definitions import _loop_field_context_keys
 from fsm_llm.agents.handlers import make_fresh_keys_handler
 from fsm_llm.api import API
 from fsm_llm.definitions import (
@@ -298,11 +299,13 @@ class TestTypedFieldExtraction:
     """Step 14 helpers, and Pre-Mortem check 2: typed fields ride the per-field path."""
 
     def test_helper_shape_is_a_valid_core_config(self):
-        field = _typed_field_extraction(
+        field = typed_field_extraction(
             "critique",
             "str",
             "Name the weakest point.",
-            extra_context_keys=[ContextKeys.PROPOSITION, ContextKeys.TASK],
+            context_keys=_loop_field_context_keys(
+                [ContextKeys.PROPOSITION, ContextKeys.TASK]
+            ),
             required=False,
         )
         config = FieldExtractionConfig.model_validate(field)
@@ -319,18 +322,27 @@ class TestTypedFieldExtraction:
 
     @pytest.mark.parametrize("field_type", ["str", "float", "list", "bool", "any"])
     def test_supported_types(self, field_type):
-        field = _typed_field_extraction("item", field_type, "x")
+        field = typed_field_extraction(
+            "item", field_type, "x", context_keys=_loop_field_context_keys()
+        )
         assert FieldExtractionConfig.model_validate(field).field_type == field_type
 
     @pytest.mark.parametrize("field_type", ["dict", "int"])
     def test_other_types_rejected(self, field_type):
         with pytest.raises(ValueError, match="unsupported"):
-            _typed_field_extraction("item", field_type, "x")  # type: ignore[arg-type]
+            typed_field_extraction(
+                "item",
+                field_type,  # type: ignore[arg-type]
+                "x",
+                context_keys=_loop_field_context_keys(),
+            )
 
     @pytest.mark.parametrize("key", [ContextKeys.AGENT_TRACE, "_max_iterations"])
     def test_trace_and_internal_context_keys_rejected(self, key):
         with pytest.raises(ValueError, match="not allowed"):
-            _typed_field_extraction("item", "str", "x", extra_context_keys=[key])
+            typed_field_extraction(
+                "item", "str", "x", context_keys=_loop_field_context_keys([key])
+            )
 
     @pytest.mark.parametrize(
         "name", ["reasoning", "confidence", "value", "field_name", "extracted_data"]
@@ -339,20 +351,37 @@ class TestTypedFieldExtraction:
         # D-034/D-035: an envelope-named field was filled with the model's own
         # meta-commentary (the envelope's `reasoning`), so it is refused.
         with pytest.raises(ValueError, match="envelope"):
-            _typed_field_extraction(name, "str", "x")
+            typed_field_extraction(
+                name, "str", "x", context_keys=_loop_field_context_keys()
+            )
 
     def test_envelope_named_field_never_reaches_the_model(self):
         # The grounded fake would answer `reasoning` (its evidence is in the
         # prompt); the helper refuses the config before any state is built.
         llm = PromptGroundedLLM(facts={"reasoning": ("meta text", "TASK-7731")})
         with pytest.raises(ValueError, match="envelope"):
-            _start_loop(llm, [_typed_field_extraction("reasoning", "str", "x")])
+            _start_loop(
+                llm,
+                [
+                    typed_field_extraction(
+                        "reasoning", "str", "x", context_keys=_loop_field_context_keys()
+                    )
+                ],
+            )
         assert llm.requests == []
 
     def test_typed_only_state_makes_no_bulk_call(self):
         llm = PromptGroundedLLM(facts={"critique": ("Too few samples.", "TASK-7731")})
         api, conv_id = _start_loop(
-            llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
+            llm,
+            [
+                typed_field_extraction(
+                    "critique",
+                    "str",
+                    "Name the flaw.",
+                    context_keys=_loop_field_context_keys(),
+                )
+            ],
         )
 
         api.advance(conv_id)
@@ -363,7 +392,15 @@ class TestTypedFieldExtraction:
     def test_per_field_request_carries_the_task(self):
         llm = PromptGroundedLLM(facts={"critique": ("Too few samples.", "TASK-7731")})
         api, conv_id = _start_loop(
-            llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
+            llm,
+            [
+                typed_field_extraction(
+                    "critique",
+                    "str",
+                    "Name the flaw.",
+                    context_keys=_loop_field_context_keys(),
+                )
+            ],
         )
 
         api.advance(conv_id)
@@ -376,7 +413,15 @@ class TestTypedFieldExtraction:
     def test_agent_trace_absent_from_narrowed_prompt(self):
         llm = PromptGroundedLLM(facts={"critique": ("Too few samples.", "TASK-7731")})
         api, conv_id = _start_loop(
-            llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
+            llm,
+            [
+                typed_field_extraction(
+                    "critique",
+                    "str",
+                    "Name the flaw.",
+                    context_keys=_loop_field_context_keys(),
+                )
+            ],
         )
 
         api.advance(conv_id)
@@ -409,7 +454,15 @@ class TestTypedFieldExtraction:
     def test_fresh_keys_handler_reopens_the_loop_value(self, refresh):
         llm = PromptGroundedLLM(facts={"critique": ("Round one.", "TASK-7731")})
         api, conv_id = _start_loop(
-            llm, [_typed_field_extraction("critique", "str", "Name the flaw.")]
+            llm,
+            [
+                typed_field_extraction(
+                    "critique",
+                    "str",
+                    "Name the flaw.",
+                    context_keys=_loop_field_context_keys(),
+                )
+            ],
         )
         if refresh:
             api.register_handler(
@@ -2138,9 +2191,9 @@ class TestCoveredStatesMakeNoBulkCall:
             ]
 
     def test_typed_field_prompt_names_no_user_message(self):
-        text = _typed_field_extraction("draft", "str", "Write it.")[
-            "extraction_instructions"
-        ]
+        text = typed_field_extraction(
+            "draft", "str", "Write it.", context_keys=_loop_field_context_keys()
+        )["extraction_instructions"]
 
         assert text.endswith("'Already extracted:' context. Write it.")
         for word in ("user message", "signal", "loop"):

@@ -28,6 +28,7 @@ from typing import Any, ClassVar
 
 from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
+    FIELD_PROMPT_CONTEXT_LABEL,
     INTERNAL_KEY_PREFIXES,
     MAX_CONTEXT_FILTER_DEPTH,
     MAX_CONTEXT_FILTER_NODES,
@@ -1671,7 +1672,8 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
                 # only touches `<tag>`-like substrings, never JSON `{`/`[`/`"`
                 # structure, so extraction quality is unaffected. See D-010.
                 sections.append(
-                    f"Already extracted: {self._sanitize_text_for_prompt(ctx_json)}"
+                    f"{FIELD_PROMPT_CONTEXT_LABEL} "
+                    f"{self._sanitize_text_for_prompt(ctx_json)}"
                 )
 
         # Conversation history (compact)

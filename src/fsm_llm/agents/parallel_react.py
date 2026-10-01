@@ -28,7 +28,7 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from fsm_llm import API
+from fsm_llm import API, typed_field_extraction
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
@@ -42,7 +42,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall
 from .exceptions import AgentError
-from .fsm_definitions import _conclude_on_evidence_logic, _typed_field_extraction
+from .fsm_definitions import _conclude_on_evidence_logic, _loop_field_context_keys
 from .handlers import (
     ThinkTurnLimiter,
     forced_stop_skip,
@@ -105,17 +105,17 @@ def build_parallel_react_fsm(
         "required_context_keys": [TOOL_CALLS_KEY, "should_terminate"],
         "extraction_instructions": "",
         "field_extractions": [
-            _typed_field_extraction(
+            typed_field_extraction(
                 TOOL_CALLS_KEY,
                 "list",
                 _build_parallel_think_instructions(registry, task_description),
-                extra_context_keys=extra,
+                context_keys=_loop_field_context_keys(extra),
             ),
-            _typed_field_extraction(
+            typed_field_extraction(
                 ContextKeys.SHOULD_TERMINATE,
                 "bool",
                 build_think_terminate_instructions(),
-                extra_context_keys=extra,
+                context_keys=_loop_field_context_keys(extra),
                 required=False,
             ),
         ],

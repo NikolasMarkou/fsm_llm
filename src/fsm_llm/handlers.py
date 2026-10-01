@@ -75,7 +75,7 @@ import math
 import numbers
 import threading
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from enum import Enum
 from typing import Any, Protocol
 
@@ -993,6 +993,63 @@ def create_handler(name: str = "LambdaHandler") -> HandlerBuilder:
     :rtype: HandlerBuilder
     """
     return HandlerBuilder(name)
+
+
+# DECISION plan-2026-10-01T093600-944e2692/D-051
+# Do NOT put a key that is already unset (absent or None) in the delta: a round
+# with nothing to clear must return an empty delta, which agents'
+# make_fresh_keys_handler relies on (an older stash survives a round that
+# produced nothing). Do NOT add a "keep" predicate here: the forced-verdict
+# rule is agent semantics and stays in agents.
+def clear_keys_delta(keys: Iterable[str], context: Mapping[str, Any]) -> dict[str, Any]:
+    """The handler delta that clears ``keys`` from ``context``.
+
+    Contract (callers: :func:`clear_keys_on_entry`, agents
+    ``make_fresh_keys_handler`` and the meta-builder): returns ``{key: None}``
+    (core deletes the key) for each key in ``keys``, in order, whose value in
+    ``context`` is not None; a key that is absent or None is left out, so
+    nothing to clear gives ``{}``. Never raises.
+    """
+    return {key: None for key in keys if context.get(key) is not None}
+
+
+def clear_keys_on_entry(
+    keys: Iterable[str],
+    *,
+    state: str,
+    name: str | None = None,
+    priority: int = 100,
+) -> BaseHandler:
+    """Build a handler that clears ``keys`` whenever ``state`` is entered.
+
+    Core extracts a key only while it is unset (skip-if-set), so a value left
+    in context from an earlier visit is never re-extracted. Clearing it on
+    entry to the state that produces it lets that state's extraction run again.
+
+    Contract:
+        - ``keys``: non-empty; duplicates are dropped, order kept.
+        - ``state``: the state whose entry (``POST_TRANSITION`` with that
+          target state, :meth:`HandlerBuilder.on_state_entry`) fires the
+          handler.
+        - ``name``: handler name; defaults to ``clear_keys_on_<state>``.
+        - ``priority``: handler priority (lower runs first), default 100.
+        - Returns a :class:`BaseHandler` to pass to ``API.register_handler``;
+          its delta is :func:`clear_keys_delta` of ``keys``.
+        - Raises ``ValueError`` at build time for empty ``keys``.
+    """
+    cleared = tuple(dict.fromkeys(keys))
+    if not cleared:
+        raise ValueError("clear_keys_on_entry needs at least one key")
+
+    def clear_keys(context: dict[str, Any]) -> dict[str, Any]:
+        return clear_keys_delta(cleared, context)
+
+    return (
+        create_handler(name or f"clear_keys_on_{state}")
+        .on_state_entry(state)
+        .with_priority(priority)
+        .do(clear_keys)
+    )
 
 
 # --------------------------------------------------------------

@@ -89,6 +89,7 @@ from .definitions import (
     TransitionEvaluationError,
     TransitionEvaluationResult,
     TransitionOption,
+    typed_field_extraction,
 )
 
 # --------------------------------------------------------------
@@ -108,6 +109,7 @@ from .handlers import (
     HandlerSystem,
     HandlerSystemError,
     HandlerTiming,
+    clear_keys_on_entry,
     create_handler,
 )
 
@@ -218,6 +220,7 @@ __all__ = [
     "FieldExtractionConfig",
     "FieldExtractionRequest",
     "FieldExtractionResponse",
+    "typed_field_extraction",
     # Classification (first-class)
     "ClassificationExtractionConfig",
     "Classifier",
@@ -261,6 +264,7 @@ __all__ = [
     "HandlerBuilder",
     "HandlerTiming",
     "create_handler",
+    "clear_keys_on_entry",
     # Context utilities
     "ContextCompactor",
     # Working memory

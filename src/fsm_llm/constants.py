@@ -156,6 +156,21 @@ FSM_ID_HASH_LENGTH = 8
 # `confidence_threshold` (e.g. 0.5) can reject a cut-off artifact.
 TRUNCATED_SALVAGE_CONFIDENCE = 0.3
 
+# Label of the context section in a per-field extraction prompt (prompts.py).
+# `definitions.typed_field_extraction` names it in its instructions.
+FIELD_PROMPT_CONTEXT_LABEL = "Already extracted:"
+
+# DECISION plan-2026-09-29T103145-06a5ec0a/D-035
+# Keys of core's extraction reply envelopes (single-field
+# `{field_name, value, confidence, reasoning}`, bulk `{extracted_data, ...}`).
+# Do NOT name a typed field after one: the model answers the envelope key with
+# its own meta-commentary, which then fills the field (the step-15 `reasoning`
+# field fed that text into every later think prompt, D-034).
+# `definitions.typed_field_extraction` refuses these names.
+EXTRACTION_ENVELOPE_KEYS: frozenset[str] = frozenset(
+    {"reasoning", "confidence", "value", "field_name", "extracted_data"}
+)
+
 # --------------------------------------------------------------
 # Transition Evaluation Constants
 # --------------------------------------------------------------

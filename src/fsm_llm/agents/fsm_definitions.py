@@ -5,8 +5,9 @@ Pre-built FSM definitions for agent patterns.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Literal, get_args
+from typing import Any
 
+from fsm_llm import typed_field_extraction
 from fsm_llm.constants import has_internal_prefix
 
 from .constants import (
@@ -80,7 +81,7 @@ def build_orchestrator_fsm(
     ``subtasks`` and ``all_collected`` are explicit typed fields whose prompts
     show the task, ``worker_results`` and the caller's ``context_keys``
     (never ``agent_trace`` or ``skipped_subtasks``). Raises ``ValueError``
-    like :func:`_typed_field_extraction` for a disallowed context key.
+    like :func:`_loop_field_context_keys` for a disallowed context key.
     """
     from .prompts import (
         build_collect_response_instructions,
@@ -116,11 +117,11 @@ def build_orchestrator_fsm(
             "required_context_keys": [ContextKeys.SUBTASKS],
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.SUBTASKS,
                     "any",
                     fields[ContextKeys.SUBTASKS],
-                    extra_context_keys=judged,
+                    context_keys=_loop_field_context_keys(judged),
                 )
             ],
             "response_instructions": build_orchestrate_response_instructions(),
@@ -163,11 +164,11 @@ def build_orchestrator_fsm(
             "purpose": "Assess completeness of gathered results",
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.ALL_COLLECTED,
                     "bool",
                     fields[ContextKeys.ALL_COLLECTED],
-                    extra_context_keys=judged,
+                    context_keys=_loop_field_context_keys(judged),
                 )
             ],
             "response_instructions": build_collect_response_instructions(),
@@ -247,7 +248,7 @@ def build_adapt_fsm(
     prompts show the task, the attempt (assess, decompose) and the caller's
     ``context_keys``, never ``agent_trace``. The three loop states make no
     state-level bulk call. Raises ``ValueError`` like
-    :func:`_typed_field_extraction`.
+    :func:`_loop_field_context_keys`.
     """
     from .prompts import (
         build_adapt_field_instructions,
@@ -292,11 +293,11 @@ def build_adapt_fsm(
                 # direct answer that the answer path reads only as a str
                 # (ADaPTAgent._extract_answer). Do NOT widen it to `any` for
                 # symmetry: a native object would then never reach the answer.
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.ATTEMPT_RESULT,
                     "str",
                     fields[ContextKeys.ATTEMPT_RESULT],
-                    extra_context_keys=context_keys,
+                    context_keys=_loop_field_context_keys(context_keys),
                 )
             ],
             "response_instructions": build_attempt_response_instructions(),
@@ -328,11 +329,11 @@ def build_adapt_fsm(
             "required_context_keys": [ContextKeys.ATTEMPT_SUCCEEDED],
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.ATTEMPT_SUCCEEDED,
                     "bool",
                     fields[ContextKeys.ATTEMPT_SUCCEEDED],
-                    extra_context_keys=judged,
+                    context_keys=_loop_field_context_keys(judged),
                 )
             ],
             "response_instructions": build_assess_response_instructions(),
@@ -421,17 +422,19 @@ def build_adapt_fsm(
             "required_context_keys": [ContextKeys.SUBTASKS],
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.SUBTASKS,
                     "list",
                     fields[ContextKeys.SUBTASKS],
-                    extra_context_keys=judged,
+                    context_keys=_loop_field_context_keys(judged),
                 ),
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.OPERATOR,
                     "str",
                     fields[ContextKeys.OPERATOR],
-                    extra_context_keys=(*judged, ContextKeys.SUBTASKS),
+                    context_keys=_loop_field_context_keys(
+                        (*judged, ContextKeys.SUBTASKS)
+                    ),
                     required=False,
                 ),
             ],
@@ -544,17 +547,8 @@ def _tool_selection_field_extractions(
 # Short prose fields (feedback, critiques, reflections, plan step results,
 # ADaPT `attempt_result`, D-057) stay `str`. Answer paths serialise a
 # dict/list with base.artifact_text, which treats empty values as no answer.
-TypedFieldType = Literal["str", "float", "list", "bool", "any"]
-
-# DECISION plan-2026-09-29T103145-06a5ec0a/D-035
-# Keys of core's extraction reply envelopes (single-field
-# `{field_name, value, confidence, reasoning}`, bulk `{extracted_data, ...}`).
-# Do NOT name a typed field after one: the model answers the envelope key with
-# its own meta-commentary, which then fills the field (the step-15 `reasoning`
-# field fed that text into every later think prompt, D-034).
-_EXTRACTION_ENVELOPE_KEYS: frozenset[str] = frozenset(
-    {"reasoning", "confidence", "value", "field_name", "extracted_data"}
-)
+# (Field types: core `fsm_llm.definitions.TypedFieldType`; the builder is core
+# `typed_field_extraction`.)
 
 # Context every loop-field prompt sees: the task and the tool observations.
 _LOOP_FIELD_CONTEXT_KEYS: tuple[str, ...] = (
@@ -567,10 +561,17 @@ def _loop_field_context_keys(extra_context_keys: Sequence[str] = ()) -> list[str
     """The ``context_keys`` of a loop field prompt: ``task``, ``observations``,
     then ``extra_context_keys`` (order kept, duplicates dropped).
 
-    Shared by :func:`_typed_field_extraction` and the think builders' tool
-    selection configs. Raises ``ValueError`` for an extra key that is
-    ``agent_trace`` or internal-prefixed (core reads a listed key from raw
-    context, with no internal-key filter).
+    Every agent typed field (core ``typed_field_extraction``) and the think
+    builders' tool selection configs take their ``context_keys`` from here.
+    Raises ``ValueError`` for an extra key that is ``agent_trace`` or
+    internal-prefixed (core reads a listed key from raw context, with no
+    internal-key filter).
+
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-017
+    Do NOT drop ``context_keys`` from an agent field (``None`` dumps all
+    visible context, including the unbounded ``agent_trace``, into every
+    per-field prompt), and do NOT cap or rename ``agent_trace`` instead: it
+    feeds ``AgentResult.trace`` and marks the FSM as agent-managed for core.
     """
     bad = [
         key
@@ -602,74 +603,21 @@ def _think_field_extractions(
     """
     from .prompts import build_think_terminate_instructions
 
-    extra = (ContextKeys.AGENT_FEEDBACK, *context_keys)
+    keys = _loop_field_context_keys((ContextKeys.AGENT_FEEDBACK, *context_keys))
     return [
         *_tool_selection_field_extractions(
             think_instructions,
             include_tool_name=include_tool_name,
-            context_keys=_loop_field_context_keys(extra),
+            context_keys=keys,
         ),
-        _typed_field_extraction(
+        typed_field_extraction(
             ContextKeys.SHOULD_TERMINATE,
             "bool",
             build_think_terminate_instructions(),
-            extra_context_keys=extra,
+            context_keys=keys,
             required=False,
         ),
     ]
-
-
-def _typed_field_extraction(
-    field_name: str,
-    field_type: TypedFieldType,
-    instructions: str,
-    *,
-    extra_context_keys: Sequence[str] = (),
-    required: bool = True,
-) -> dict[str, Any]:
-    """One typed ``field_extraction`` for a loop value an agent state produces.
-
-    Contract: returns a raw dict for ``State(field_extractions=[...])``
-    declaring ``field_name`` as ``field_type`` (``str``, ``float``, ``list``,
-    ``bool``, or ``any`` for a whole generated artifact; core coerces and
-    rejects mismatches). The prompt context is
-    narrowed to ``task``, ``observations`` and ``extra_context_keys`` (in that
-    order, duplicates dropped), and the instructions tell the model to read the
-    value from the task and those keys (LOOP-11). ``required`` maps to the core flag (a null required field costs
-    one retry call). Raises ``ValueError`` for another ``field_type``, or for
-    an extra key that is ``agent_trace`` or internal-prefixed (core reads a
-    listed key from raw context, with no internal-key filter), and for a
-    ``field_name`` in :data:`_EXTRACTION_ENVELOPE_KEYS`.
-
-    Pair it with an empty state-level ``extraction_instructions`` (D-009 of
-    plan 06a5ec0a): core then runs only these per-field calls, each on its own
-    narrowed context, and makes no bulk call for the state.
-
-    # DECISION plan-2026-09-29T103145-06a5ec0a/D-017
-    Do NOT drop ``context_keys`` here (``None`` dumps all visible context,
-    including the unbounded ``agent_trace``, into every per-field prompt), and
-    do NOT cap or rename ``agent_trace`` instead: it feeds
-    ``AgentResult.trace`` and marks the FSM as agent-managed for core.
-    """
-    if field_type not in get_args(TypedFieldType):
-        raise ValueError(f"unsupported typed field type: {field_type!r}")
-    if field_name in _EXTRACTION_ENVELOPE_KEYS:
-        raise ValueError(
-            f"typed field name {field_name!r} is an extraction envelope key; "
-            "pick another name"
-        )
-    context_keys = _loop_field_context_keys(extra_context_keys)
-    return {
-        "field_name": field_name,
-        "field_type": field_type,
-        "extraction_instructions": (
-            f"Extract the '{field_name}' field ({field_type}) from the task and "
-            f"the {', '.join(repr(k) for k in context_keys)} values in the "
-            f"'Already extracted:' context. {instructions}"
-        ),
-        "context_keys": context_keys,
-        "required": required,
-    }
 
 
 def _conclude_on_evidence_logic(
@@ -940,21 +888,24 @@ def build_reflexion_fsm(
             # extractions are skipped (skip-if-set).
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.EVALUATION_PASSED,
                     "bool",
                     evaluate_fields[ContextKeys.EVALUATION_PASSED],
+                    context_keys=_loop_field_context_keys(),
                 ),
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.EVALUATION_SCORE,
                     "float",
                     evaluate_fields[ContextKeys.EVALUATION_SCORE],
+                    context_keys=_loop_field_context_keys(),
                     required=False,
                 ),
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.EVALUATION_FEEDBACK,
                     "str",
                     evaluate_fields[ContextKeys.EVALUATION_FEEDBACK],
+                    context_keys=_loop_field_context_keys(),
                     required=False,
                 ),
             ],
@@ -1019,17 +970,17 @@ def build_reflexion_fsm(
             "required_context_keys": [ContextKeys.REFLECTION],
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.REFLECTION,
                     "str",
                     reflect_fields[ContextKeys.REFLECTION],
-                    extra_context_keys=reflect_context,
+                    context_keys=_loop_field_context_keys(reflect_context),
                 ),
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.LESSONS,
                     "str",
                     reflect_fields[ContextKeys.LESSONS],
-                    extra_context_keys=reflect_context,
+                    context_keys=_loop_field_context_keys(reflect_context),
                     required=False,
                 ),
             ],
@@ -1107,14 +1058,14 @@ def build_plan_execute_fsm(
     )
     has_tools = registry is not None and len(registry) > 0
     step_fields: list[dict[str, Any]] = [
-        _typed_field_extraction(
+        typed_field_extraction(
             ContextKeys.STEP_RESULT,
             "str",
             build_execute_step_instructions(
                 registry, task_description=task_description, step_result=True
             ),
-            extra_context_keys=step_context,
-            # With tools the step's result is the tool observation.
+            context_keys=_loop_field_context_keys(step_context),
+            # With tools the step result is the tool observation.
             required=not has_tools,
         )
     ]
@@ -1135,12 +1086,13 @@ def build_plan_execute_fsm(
             "required_context_keys": [ContextKeys.PLAN_STEPS],
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.PLAN_STEPS,
                     "list",
                     build_plan_steps_instructions(
                         registry, task_description=task_description
                     ),
+                    context_keys=_loop_field_context_keys(),
                 )
             ],
             "response_instructions": "",
@@ -1217,13 +1169,13 @@ def build_plan_execute_fsm(
             "purpose": "Incorporate lessons from the failure into a revised plan",
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.PLAN_STEPS,
                     "list",
                     build_plan_steps_instructions(
                         registry, task_description=task_description, replan=True
                     ),
-                    extra_context_keys=replan_context,
+                    context_keys=_loop_field_context_keys(replan_context),
                 )
             ],
             "response_instructions": "",
@@ -1518,7 +1470,7 @@ def build_prompt_chain_fsm(
             "purpose": step.name,
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.CHAIN_STEP_RESULT,
                     "any",
                     build_chain_step_field_instructions(
@@ -1527,7 +1479,7 @@ def build_prompt_chain_fsm(
                         step.response_instructions,
                         step.extraction_instructions,
                     ),
-                    extra_context_keys=(ContextKeys.CHAIN_RESULTS,),
+                    context_keys=_loop_field_context_keys((ContextKeys.CHAIN_RESULTS,)),
                 )
             ],
             "response_instructions": step.response_instructions,
@@ -1643,11 +1595,11 @@ def build_debate_fsm(
     def _debate_field(
         name: str, context_keys: tuple[str, ...], *, required: bool = True
     ) -> dict[str, Any]:
-        return _typed_field_extraction(
+        return typed_field_extraction(
             name,
             "str",
             fields[name],
-            extra_context_keys=context_keys,
+            context_keys=_loop_field_context_keys(context_keys),
             required=required,
         )
 
@@ -1720,14 +1672,16 @@ def build_debate_fsm(
                 # earlier rounds the live judge declined consensus every
                 # round (forced_pass). It is bounded by num_rounds, unlike
                 # agent_trace, which must stay out.
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.CONSENSUS_REACHED,
                     "bool",
                     fields[ContextKeys.CONSENSUS_REACHED],
-                    extra_context_keys=(
-                        *round_values,
-                        ContextKeys.CURRENT_ROUND,
-                        ContextKeys.DEBATE_ROUNDS,
+                    context_keys=_loop_field_context_keys(
+                        (
+                            *round_values,
+                            ContextKeys.CURRENT_ROUND,
+                            ContextKeys.DEBATE_ROUNDS,
+                        )
                     ),
                 ),
             ],
@@ -1817,7 +1771,7 @@ def build_rewoo_fsm(
     prompt shows the task and the caller's ``context_keys``, never
     ``agent_trace`` (DECISION D-053 of plan 06a5ec0a, anchored in
     :func:`build_adapt_fsm`). Raises ``ValueError`` like
-    :func:`_typed_field_extraction`.
+    :func:`_loop_field_context_keys`.
     """
     from .prompts import (
         build_rewoo_plan_field_instructions,
@@ -1840,13 +1794,13 @@ def build_rewoo_fsm(
             # build_orchestrator_fsm): `plan_blueprint` is the one key read.
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.PLAN_BLUEPRINT,
                     "list",
                     build_rewoo_plan_field_instructions(
                         registry, task_description=task_description
                     ),
-                    extra_context_keys=context_keys,
+                    context_keys=_loop_field_context_keys(context_keys),
                 )
             ],
             "response_instructions": "",
@@ -1931,8 +1885,11 @@ def build_evalopt_fsm(
             "purpose": "Produce the best possible first attempt at the task",
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
-                    ContextKeys.GENERATED_OUTPUT, "any", fields[EvalOptStates.GENERATE]
+                typed_field_extraction(
+                    ContextKeys.GENERATED_OUTPUT,
+                    "any",
+                    fields[EvalOptStates.GENERATE],
+                    context_keys=_loop_field_context_keys(),
                 )
             ],
             "response_instructions": "",
@@ -2006,13 +1963,15 @@ def build_evalopt_fsm(
             "purpose": "Improve the output by addressing specific feedback points",
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.GENERATED_OUTPUT,
                     "any",
                     fields[EvalOptStates.REFINE],
-                    extra_context_keys=(
-                        ContextKeys.PREVIOUS_OUTPUT,
-                        ContextKeys.REFINEMENT_FEEDBACK,
+                    context_keys=_loop_field_context_keys(
+                        (
+                            ContextKeys.PREVIOUS_OUTPUT,
+                            ContextKeys.REFINEMENT_FEEDBACK,
+                        )
                     ),
                 )
             ],
@@ -2088,7 +2047,12 @@ def build_maker_checker_fsm(
             "purpose": "Produce a high-quality draft following the maker instructions",
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(draft, "any", fields[MakerCheckerStates.MAKE])
+                typed_field_extraction(
+                    draft,
+                    "any",
+                    fields[MakerCheckerStates.MAKE],
+                    context_keys=_loop_field_context_keys(),
+                )
             ],
             "response_instructions": "",
             "transitions": [
@@ -2112,23 +2076,23 @@ def build_maker_checker_fsm(
             # back in required_context_keys: core mints an untyped `any`
             # config per key with the whole context, agent_trace included.
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.CHECKER_FEEDBACK,
                     "str",
                     fields[ContextKeys.CHECKER_FEEDBACK],
-                    extra_context_keys=judged,
+                    context_keys=_loop_field_context_keys(judged),
                 ),
-                _typed_field_extraction(
+                typed_field_extraction(
                     "quality_score",
                     "float",
                     fields["quality_score"],
-                    extra_context_keys=judged,
+                    context_keys=_loop_field_context_keys(judged),
                 ),
-                _typed_field_extraction(
+                typed_field_extraction(
                     ContextKeys.CHECKER_PASSED,
                     "bool",
                     fields[ContextKeys.CHECKER_PASSED],
-                    extra_context_keys=judged,
+                    context_keys=_loop_field_context_keys(judged),
                     required=False,
                 ),
             ],
@@ -2192,13 +2156,15 @@ def build_maker_checker_fsm(
             "purpose": "Address all checker feedback and produce an improved draft",
             "extraction_instructions": "",
             "field_extractions": [
-                _typed_field_extraction(
+                typed_field_extraction(
                     draft,
                     "any",
                     fields[MakerCheckerStates.REVISE],
-                    extra_context_keys=(
-                        ContextKeys.PREVIOUS_DRAFT,
-                        ContextKeys.CHECKER_FEEDBACK,
+                    context_keys=_loop_field_context_keys(
+                        (
+                            ContextKeys.PREVIOUS_DRAFT,
+                            ContextKeys.CHECKER_FEEDBACK,
+                        )
                     ),
                 )
             ],

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from fsm_llm import API
 from fsm_llm.handlers import (
     BaseHandler,
     HandlerBuilder,
@@ -19,8 +20,11 @@ from fsm_llm.handlers import (
     HandlerSystemError,
     HandlerTiming,
     LambdaHandler,
+    clear_keys_delta,
+    clear_keys_on_entry,
     create_handler,
 )
+from tests.conftest import PromptGroundedLLM
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -1173,3 +1177,151 @@ class TestHandlerBuilderCritical:
             critical=True,
         )
         assert handler.critical is True
+
+
+# ── clear_keys_on_entry / clear_keys_delta (moved from agents) ─────────
+
+
+def _clear_fsm() -> dict:
+    """intro (silent, unconditional) -> collect (silent, blocked) -> done."""
+    return {
+        "name": "clearing",
+        "description": "clear_keys_on_entry through a real turn",
+        "initial_state": "intro",
+        "states": {
+            "intro": {
+                "id": "intro",
+                "description": "Intro",
+                "purpose": "Move on",
+                "response_instructions": "",
+                "transitions": [
+                    {"target_state": "collect", "description": "Go", "priority": 100}
+                ],
+            },
+            "collect": {
+                "id": "collect",
+                "description": "Collect",
+                "purpose": "Wait",
+                "response_instructions": "",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "Never",
+                        "priority": 100,
+                        "conditions": [
+                            {
+                                "description": "never",
+                                "logic": {"==": [{"var": "go"}, "now"]},
+                            }
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "Done",
+                "purpose": "End",
+                "response_instructions": "Say done",
+            },
+        },
+    }
+
+
+class TestClearKeysDelta:
+    def test_set_keys_become_none_unset_keys_left_out(self):
+        context = {"a": 1, "b": None, "d": "", "e": False}
+        assert clear_keys_delta(["a", "b", "c", "d", "e"], context) == {
+            "a": None,
+            "d": None,
+            "e": None,
+        }
+
+    def test_nothing_to_clear_is_an_empty_delta(self):
+        assert clear_keys_delta(["a", "b"], {"other": 1}) == {}
+
+    def test_order_follows_keys(self):
+        assert list(clear_keys_delta(["b", "a"], {"a": 1, "b": 2})) == ["b", "a"]
+
+
+class TestClearKeysOnEntry:
+    def test_returns_a_handler_with_name_and_priority(self):
+        handler = clear_keys_on_entry(
+            ["draft"], state="produce", name="fresh_draft", priority=7
+        )
+        assert isinstance(handler, BaseHandler)
+        assert (handler.name, handler.priority) == ("fresh_draft", 7)
+
+    def test_default_name_and_priority(self):
+        handler = clear_keys_on_entry(["draft"], state="produce")
+        assert (handler.name, handler.priority) == ("clear_keys_on_produce", 100)
+
+    def test_fires_only_on_entry_to_the_named_state(self):
+        handler = clear_keys_on_entry(["draft"], state="produce")
+        ctx = {"draft": "x"}
+
+        assert handler.should_execute(
+            HandlerTiming.POST_TRANSITION, "check", "produce", ctx
+        )
+        assert not handler.should_execute(
+            HandlerTiming.POST_TRANSITION, "produce", "check", ctx
+        )
+        assert not handler.should_execute(
+            HandlerTiming.PRE_TRANSITION, "check", "produce", ctx
+        )
+        for timing in HandlerTiming:
+            if timing is not HandlerTiming.POST_TRANSITION:
+                assert not handler.should_execute(timing, "check", "produce", ctx)
+
+    def test_delta_sets_each_held_key_to_none(self):
+        handler = clear_keys_on_entry(["draft", "verdict", "draft"], state="p")
+        assert handler.execute({"draft": "x", "verdict": True, "keep": 1}) == {
+            "draft": None,
+            "verdict": None,
+        }
+        assert handler.execute({"keep": 1}) == {}
+
+    @pytest.mark.parametrize("keys", [[], ()])
+    def test_empty_keys_rejected(self, keys):
+        with pytest.raises(ValueError, match="at least one key"):
+            clear_keys_on_entry(keys, state="produce")
+
+    def test_priority_orders_it_among_entry_handlers(self):
+        system = HandlerSystem()
+        order: list[str] = []
+        system.register_handler(
+            create_handler("late")
+            .on_state_entry("produce")
+            .with_priority(50)
+            .do(lambda ctx: order.append(f"late:{ctx.get('draft')}") or {})
+        )
+        system.register_handler(
+            clear_keys_on_entry(["draft"], state="produce", priority=10)
+        )
+
+        result = system.execute_handlers(
+            HandlerTiming.POST_TRANSITION, "check", "produce", {"draft": "x"}, None
+        )
+
+        assert result == {"draft": None}
+        assert order == ["late:None"]
+
+    def test_clears_on_entry_through_a_real_turn(self):
+        api = API.from_definition(_clear_fsm(), llm_interface=PromptGroundedLLM())
+        api.register_handler(clear_keys_on_entry(["draft", "verdict"], state="collect"))
+        conv_id, _ = api.start_conversation({"draft": "old", "verdict": True, "n": 1})
+
+        api.advance(conv_id)  # intro -> collect
+
+        data = api.get_data(conv_id)
+        assert api.get_current_state(conv_id) == "collect"
+        assert "draft" not in data and "verdict" not in data
+        assert data["n"] == 1
+
+    def test_other_state_entry_leaves_keys(self):
+        api = API.from_definition(_clear_fsm(), llm_interface=PromptGroundedLLM())
+        api.register_handler(clear_keys_on_entry(["draft"], state="done"))
+        conv_id, _ = api.start_conversation({"draft": "old"})
+
+        api.advance(conv_id)  # intro -> collect
+
+        assert api.get_data(conv_id)["draft"] == "old"
