@@ -22,7 +22,7 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.expressions import evaluate_logic
 from fsm_llm.handlers import HandlerTiming
-from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.ollama import is_ollama_model
 from tests.test_fsm_llm.test_audit_iter1_seam import (
     _ambiguous_fsm,
@@ -150,7 +150,7 @@ class TestClassifierIgnoresReservedInterfaceKwargs:
         from fsm_llm.definitions import ClassificationSchema, IntentDefinition
         from fsm_llm.pipeline import MessagePipeline
 
-        llm = MagicMock()
+        llm = MagicMock(spec=LLMInterface)
         llm.model = "gpt-4o"
         llm.timeout = 5
         llm.kwargs = {

@@ -1939,7 +1939,8 @@ class MessagePipeline:
 
         Raises:
             LLMResponseError: the transcript is not a paired list of chat
-                messages, the response format is missing or not a dict, the
+                messages (or is empty on a tool turn), the response format is
+                missing or not a dict, the
                 interface does not implement ``complete``, or the provider
                 call failed. Nothing is committed, so the turn fails with the
                 context as it was.
@@ -1964,6 +1965,19 @@ class MessagePipeline:
             raise LLMResponseError(
                 f"Completion transcript '{config.messages_key}' is "
                 f"{type(transcript).__name__}, not a list of chat messages"
+            )
+        # DECISION plan-2026-10-01T093600-944e2692/D-029: a tool turn with no
+        # transcript has no task: refuse it. The transcript is an internal key
+        # that session files do not carry, so a session restored in the
+        # middle of a tool loop arrives here empty; sending only the
+        # instructions made the model's answer to nothing the result. Do NOT
+        # send it, and do NOT persist the transcript to "fix" this (the
+        # session format is unchanged). See D-029.
+        if config.tools is not None and not transcript:
+            raise LLMResponseError(
+                f"Completion transcript '{config.messages_key}' is empty: a tool "
+                "turn needs the task (a session restored in the middle of a "
+                "tool loop does not carry its transcript)"
             )
         check_tool_transcript(transcript)
         messages: list[dict[str, Any]] = (

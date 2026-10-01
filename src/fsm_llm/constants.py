@@ -56,7 +56,9 @@ DEFAULT_TEMPERATURE = 0.5
 # non-streaming parser a stream object, and ``response_format`` would force (or
 # silently lose) structured output the parser does not expect (audit D12).
 # ``tools``/``tool_choice`` are per-request (``CompletionRequest``): set on the
-# constructor they would reach every extraction call. Shared by
+# constructor they would reach every extraction call; so would their legacy
+# OpenAI forms ``functions``/``function_call``, and ``n`` (several choices per
+# call, billed as many while the usage meter counts one call). Shared by
 # ``LiteLLMInterface`` and ``Classifier``.
 RESERVED_LLM_CALL_KWARGS = frozenset(
     {
@@ -68,6 +70,9 @@ RESERVED_LLM_CALL_KWARGS = frozenset(
         "response_format",
         "tools",
         "tool_choice",
+        "functions",
+        "function_call",
+        "n",
     }
 )
 

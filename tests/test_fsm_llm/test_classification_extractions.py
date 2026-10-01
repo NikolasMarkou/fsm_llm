@@ -33,7 +33,7 @@ from fsm_llm.definitions import (
     Transition,
 )
 from fsm_llm.handlers import HandlerSystem
-from fsm_llm.llm import LiteLLMInterface, _completion_response
+from fsm_llm.llm import LiteLLMInterface, LLMInterface, _completion_response
 from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
@@ -117,7 +117,7 @@ def _make_pipeline(
 ) -> MessagePipeline:
     if fsm is None:
         fsm = _make_fsm(states)
-    mock_llm = MagicMock()
+    mock_llm = MagicMock(spec=LLMInterface)
     mock_llm.model = "test-model"
     mock_llm.extract_field.return_value = MagicMock(
         field_name="dummy", value=None, confidence=0.0, is_valid=False
@@ -379,11 +379,13 @@ class TestExecuteClassificationExtractions:
 
         assert data == {}
 
-    def test_interface_without_complete_fails_soft(self):
+    def test_interface_without_complete_builds_no_classifier(self):
         """The classifier sends through the conversation's interface (D-006
-        of plan 944e2692); one that has no ``complete`` (nor a ``model``)
-        makes the extraction fail soft, the key stays unset. It used to be
-        skipped for the missing ``model``; no private interface is built."""
+        of plan 944e2692). One that is not an ``LLMInterface`` implementing
+        ``complete`` is refused when the classifier is built (D-029; ``API``
+        refuses the pair at construction, see test_review_fixes_core.py), so
+        a pipeline reached without that check builds and caches nothing, and
+        the extraction fails soft with the key unset."""
         config = _make_config()
         state = _make_state(classification_extractions=[config])
         pipeline = _make_pipeline()
@@ -396,9 +398,7 @@ class TestExecuteClassificationExtractions:
             )
         assert data == {}
         provider.assert_not_called()
-        assert len(pipeline._classifier_cache) == 1
-        (classifier,) = pipeline._classifier_cache.values()
-        assert classifier._llm is pipeline.llm_interface
+        assert pipeline._classifier_cache == {}
 
     def test_model_override(self):
         config = _make_config(model="gpt-4o")
@@ -915,6 +915,9 @@ class TestClassificationPromptConfigValidation:
             }
         )
         mock_llm2_interface.model = "gpt-4o"
+        # An FSM that classifies needs an interface with `complete` (D-029 of
+        # plan 944e2692); the failure under test is the prompt config's.
+        mock_llm2_interface.complete = LiteLLMInterface(model="gpt-4o").complete
         api = API.from_definition(fsm, llm_interface=mock_llm2_interface)
         conv_id, _ = api.start_conversation()
 

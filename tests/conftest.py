@@ -20,10 +20,13 @@ sys.path.insert(0, str(src_path))
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.definitions import (
     BulkExtractionRequest,
+    CompletionRequest,
+    CompletionResponse,
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     FSMDefinition,
+    LLMResponseError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
@@ -210,8 +213,12 @@ class PromptGroundedLLM(LLMInterface):
           therefore yields ``{}``.
         - ``generate_response``: ``responses[state]`` for the state named by
           the prompt's ``<current_state>`` tag, else ``default_response``.
-        - ``requests``: every call as ``(kind, request)`` in call order, kind
-          being the method name. Never raises.
+        - ``complete``: scripts no reply; raises ``LLMResponseError``, so a
+          classifier call fails soft exactly like a provider outage (core
+          refuses an interface without ``complete`` for an FSM that
+          classifies, D-029 of plan 944e2692). Not recorded.
+        - ``requests``: every other call as ``(kind, request)`` in call
+          order, kind being the method name. Only ``complete`` raises.
     """
 
     def __init__(
@@ -276,6 +283,9 @@ class PromptGroundedLLM(LLMInterface):
         return ResponseGenerationResponse(
             message=message, message_type="response", reasoning="prompt-grounded fake"
         )
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        raise LLMResponseError("PromptGroundedLLM scripts no completion replies")
 
 
 @pytest.fixture

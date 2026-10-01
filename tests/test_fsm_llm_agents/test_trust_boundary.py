@@ -425,13 +425,27 @@ class TestConstructorKwargRejection:
             harness.registry,
             config=AgentConfig(model="mock/model", max_iterations=3),
             hitl=HumanInTheLoop(approval_callback=harness.deny),
-            seed=7,
-            timeout=5,
             llm_interface=_SelectOnceLLM(select_tool=False),
         )
         result = agent.run("q")
         assert result.answer
+
+    def test_passthrough_kwargs_beside_an_injected_interface_are_refused(self):
+        """``seed``/``timeout`` beside ``llm_interface`` used to construct and
+        run with both silently dropped (the injected interface owns its
+        settings); core now refuses the pair (D-029 of plan 944e2692)."""
+        harness = _Harness()
+        agent = ReactAgent(
+            harness.registry,
+            config=AgentConfig(model="mock/model", max_iterations=3),
+            hitl=HumanInTheLoop(approval_callback=harness.deny),
+            seed=7,
+            timeout=5,
+            llm_interface=_SelectOnceLLM(select_tool=False),
+        )
         assert agent._api_kwargs["seed"] == 7
+        with pytest.raises(ValueError, match=r"\['seed', 'timeout'\]"):
+            agent.run("q")
 
     def test_litellm_passthrough_reaches_the_llm_interface(self):
         harness = _Harness()

@@ -126,7 +126,7 @@ from .handlers import (
     HandlerTiming,
     create_handler,
 )
-from .llm import LiteLLMInterface, LLMInterface
+from .llm import LiteLLMInterface, LLMInterface, implements_complete
 from .logging import handle_conversation_errors, logger
 from .prompts import (
     DataExtractionPromptBuilder,
@@ -310,6 +310,38 @@ def _run_rounds(
         steps_done += 1
 
 
+def _require_classifier_interface(
+    fsm_def: FSMDefinition, llm_interface: LLMInterface
+) -> None:
+    """Refuse a definition whose classification the interface cannot send.
+
+    Contract: raises ``ValueError`` when ``fsm_def`` has a
+    ``classification_extractions`` entry that classifies through the
+    conversation's interface (no ``model`` override, or one equal to the
+    interface's ``model``) and ``llm_interface`` does not implement
+    ``complete`` (``llm.implements_complete``). Returns ``None`` otherwise.
+    Checked once per definition (construction, push) instead of failing
+    every turn.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-031: refuse here, once. Do
+    # NOT downgrade this to a logged ERROR (library logging is off by
+    # default, so it is silent) or rely on the per-turn catch (a missing
+    # `complete` raises NotImplementedError, a RuntimeError the pipeline's
+    # soft-fail tuple turns into a stay). See D-031.
+    if implements_complete(llm_interface):
+        return
+    interface_model = getattr(llm_interface, "model", None)
+    for state in fsm_def.states.values():
+        for entry in state.classification_extractions or []:
+            if entry.model is None or entry.model == interface_model:
+                raise ValueError(
+                    f"State '{state.id}' classifies '{entry.field_name}' "
+                    f"through the conversation's interface, and "
+                    f"{type(llm_interface).__name__} does not implement "
+                    "complete (LLMInterface.complete)"
+                )
+
+
 @contextmanager
 def _closed_conversation_ends_run(api: API, conversation_id: str) -> Iterator[None]:
     """Let a step's error pass silently when the conversation was closed.
@@ -387,6 +419,18 @@ class API:
         if llm_interface is not None:
             if not isinstance(llm_interface, LLMInterface):
                 raise ValueError("llm_interface must be an instance of LLMInterface")
+            # DECISION plan-2026-10-01T093600-944e2692/D-029: connection
+            # settings beside an injected interface are refused. Do NOT
+            # accept and ignore them: a `seed` (or `caching`, `timeout`, ...)
+            # was dropped silently while the caller believed it applied.
+            if api_key is not None or llm_kwargs:
+                given = sorted(
+                    [*llm_kwargs, *(["api_key"] if api_key is not None else [])]
+                )
+                raise ValueError(
+                    f"API(llm_interface=...) takes no LLM settings {given}: "
+                    "the injected interface owns its connection settings"
+                )
             self.llm_interface = llm_interface
             logger.info(
                 f"API initialized with custom LLM interface: {type(llm_interface).__name__}"
@@ -412,6 +456,7 @@ class API:
 
         # Process FSM definition
         self.fsm_definition, self.fsm_id = self.process_fsm_definition(fsm_definition)
+        _require_classifier_interface(self.fsm_definition, self.llm_interface)
 
         # Create enhanced prompt builders
         data_extraction_prompt_builder = DataExtractionPromptBuilder()
@@ -520,8 +565,9 @@ class API:
                 f"Must be FSMDefinition, dict, or str"
             )
 
-        # DECISION plan-2026-09-20T114608-a8e47b88/D-016
-        # ONE content hash, computed from fsm_def.model_dump() AFTER
+        # DECISION plan-2026-09-20T114608-a8e47b88/D-016 (its dumped form
+        # refined by D-030 of plan 944e2692, below)
+        # ONE content hash, computed from fsm_def's model dump AFTER
         # construction, shared by all three input shapes (dict/
         # FSMDefinition/file path). Do NOT go back to a per-branch id
         # (`fsm_def_`/`fsm_dict_`/`fsm_file_{path}`): the old file-path
@@ -543,8 +589,19 @@ class API:
         # first restore post-upgrade -- an accepted, correct transition
         # cost per D-011's own "WARNING, not hard-fail" philosophy, not
         # a bug to work around. See decisions.md D-016.
+        # DECISION plan-2026-10-01T093600-944e2692/D-030 (refines D-016): the
+        # hash covers `model_dump(exclude_defaults=True)`, so a field left at
+        # its default (given explicitly or omitted) is not in it and adding an
+        # optional field to the models changes no id. Do NOT hash the full
+        # dump (every new optional field re-ids every FSM, as `completion`
+        # and `handler_only_keys` did), and do NOT use `exclude_unset` (an
+        # explicit default and an omitted field then hash differently) or
+        # `exclude_none` (an explicit None merges into a non-None default).
+        # See D-030.
         content_hash = hashlib.sha256(
-            json.dumps(fsm_def.model_dump(), sort_keys=True).encode()
+            json.dumps(
+                fsm_def.model_dump(exclude_defaults=True), sort_keys=True
+            ).encode()
         ).hexdigest()[:FSM_ID_HASH_LENGTH]
         fsm_id = f"fsm_{fsm_def.name}_{content_hash}"
 
@@ -921,6 +978,7 @@ class API:
             processed_fsm_def, processed_fsm_id = self.process_fsm_definition(
                 new_fsm_definition
             )
+            _require_classifier_interface(processed_fsm_def, self.llm_interface)
             with self._stack_lock:
                 self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
                 # DECISION plan-2026-07-21T045419-9925aa3a/D-011
@@ -932,7 +990,11 @@ class API:
 
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             initial_context = self._build_push_context(
-                current_fsm_id, context_to_pass, preserve_history, inherit_context
+                current_fsm_id,
+                context_to_pass,
+                preserve_history,
+                inherit_context,
+                child_definition=processed_fsm_def,
             )
 
             new_conversation_id, response = self.fsm_manager.start_conversation(
@@ -1004,8 +1066,15 @@ class API:
         context_to_pass: dict[str, Any] | None,
         preserve_history: bool,
         inherit_context: bool,
+        *,
+        child_definition: FSMDefinition,
     ) -> dict[str, Any]:
-        """Build initial context for pushed FSM from inheritance and passed context."""
+        """Build initial context for pushed FSM from inheritance and passed context.
+
+        The inherited part never carries the ``result_key`` of a completion
+        state of ``child_definition``: that key belongs to the child's own
+        completion calls. ``context_to_pass`` is applied after and may set it.
+        """
         initial_context: dict[str, Any] = {}
 
         if inherit_context:
@@ -1015,6 +1084,14 @@ class API:
                 )
             except KeyError as e:
                 logger.warning(f"Could not inherit context (missing key): {e!s}")
+            # DECISION plan-2026-10-01T093600-944e2692/D-029: an inherited
+            # completion result made the child's completion state skip its
+            # call (skip-if-set) and "answer" with the parent's reply. Do NOT
+            # inherit a key a child completion state owns (D-021), and do NOT
+            # drop it from an explicit `context_to_pass`. See D-029.
+            for state in child_definition.states.values():
+                if state.completion is not None:
+                    initial_context.pop(state.completion.result_key, None)
 
         if context_to_pass:
             initial_context.update(context_to_pass)

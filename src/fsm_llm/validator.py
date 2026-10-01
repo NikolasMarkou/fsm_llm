@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 from collections import deque
-from typing import Any
+from typing import Any, get_args
 
 from pydantic import BaseModel, ValidationError
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from .constants import CLI_EXIT_FAILURE, CLI_EXIT_OK
+from .constants import CLI_EXIT_FAILURE, CLI_EXIT_OK, DEFAULT_COMPLETION_RESULT_KEY
 from .definitions import (
+    CompletionResponse,
     FSMDefinition,
     State,
     Transition,
@@ -18,6 +19,27 @@ from .definitions import (
     logic_referenced_keys,
 )
 from .logging import logger
+
+# The result kinds a completion state can produce, read off the one model
+# that defines them: every kind with tools, all but ``calls`` without.
+_RESULT_KINDS: tuple[str, ...] = get_args(
+    CompletionResponse.model_fields["kind"].annotation
+)
+_STRUCTURED_RESULT_KINDS: tuple[str, ...] = tuple(
+    kind for kind in _RESULT_KINDS if kind != "calls"
+)
+
+
+def _string_literals(node: Any) -> set[str]:
+    """Every ``str`` leaf of a JsonLogic expression (keys excluded)."""
+    if isinstance(node, str):
+        return {node}
+    if isinstance(node, dict):
+        return set().union(*(_string_literals(v) for v in node.values()))
+    if isinstance(node, list):
+        return set().union(*(_string_literals(v) for v in node))
+    return set()
+
 
 # --------------------------------------------------------------
 
@@ -208,6 +230,7 @@ class FSMValidator:
         self._validate_terminal_states()
         self._validate_required_context_keys()
         self._validate_handler_only_keys()
+        self._validate_completion_states()
         self._validate_unknown_keys()
 
         # Stage 4-6: Analysis (won't affect validity but provides insights)
@@ -544,6 +567,74 @@ class FSMValidator:
                     "(expected for a key only a handler writes; otherwise check "
                     "for a typo)"
                 )
+
+    def _validate_completion_states(self) -> None:
+        """Warn on completion-state designs that fail silently at run time.
+
+        Two WARNINGs (never errors: the loader accepts both shapes):
+
+        - A completion state whose transitions do not cover every result kind
+          it can produce (``calls``, ``final``, ``malformed`` with tools;
+          ``final``, ``malformed`` for a structured turn): no unconditional
+          transition and a kind no condition names as a string literal. An
+          uncovered kind stalls the state, and skip-if-set makes no further
+          call, so the step budget burns.
+        - An extraction channel (``field_extractions``,
+          ``classification_extractions``, ``required_context_keys``) naming a
+          handler-owned key: a completion state's ``result_key``, or a
+          ``handler_only_keys`` entry (classification on those is reported by
+          ``_validate_handler_only_keys``). The pipeline never extracts such a
+          key, so the declaration is dead.
+        """
+        result_keys: set[str] = set()
+        for state_id, state in self.states.items():
+            completion = state.get("completion")
+            if not isinstance(completion, dict):
+                continue
+            result_keys.add(
+                completion.get("result_key") or DEFAULT_COMPLETION_RESULT_KEY
+            )
+            kinds = (
+                _RESULT_KINDS if completion.get("tools") else _STRUCTURED_RESULT_KINDS
+            )
+            transitions = state.get("transitions") or []
+            if any(not t.get("conditions") for t in transitions):
+                continue
+            named: set[str] = set()
+            for transition in transitions:
+                for condition in transition.get("conditions") or []:
+                    named |= _string_literals(condition.get("logic"))
+            missing = [kind for kind in kinds if kind not in named]
+            if missing:
+                self.result.add_warning(
+                    f"Completion state '{state_id}' has no transition for result "
+                    f"kind(s) {missing} and no unconditional transition: such a "
+                    "turn stays in the state and makes no further call"
+                )
+        handler_only = set(self.fsm_data.get("handler_only_keys") or [])
+        for state_id, state in self.states.items():
+            declared = [
+                ("field_extractions", fe.get("field_name"))
+                for fe in state.get("field_extractions") or []
+            ]
+            declared += [
+                ("classification_extractions", ce.get("field_name"))
+                for ce in state.get("classification_extractions") or []
+            ]
+            declared += [
+                ("required_context_keys", key)
+                for key in state.get("required_context_keys") or []
+            ]
+            for channel, key in declared:
+                owned = key in result_keys or (
+                    key in handler_only and channel != "classification_extractions"
+                )
+                if owned:
+                    self.result.add_warning(
+                        f"State '{state_id}' {channel} names '{key}', a key only "
+                        "handlers or a completion call write: it is never "
+                        "extracted"
+                    )
 
     def _validate_unknown_keys(self):
         """Warn (never error) on FSM-JSON keys that no model field declares.

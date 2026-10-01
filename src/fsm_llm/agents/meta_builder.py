@@ -280,10 +280,14 @@ class MetaBuilderAgent:
 
     def _create_api(self) -> API:
         """The core ``API`` over the meta FSM, with the build handlers."""
-        api_kwargs: dict[str, Any] = {
-            "timeout": self.meta_config.timeout_seconds,
-            **self._api_kwargs,
-        }
+        # An injected interface owns its timeout: core refuses connection
+        # settings beside it (D-029), so the config timeout applies only to
+        # the interface core builds.
+        api_kwargs: dict[str, Any] = (
+            dict(self._api_kwargs)
+            if self._api_kwargs.get("llm_interface") is not None
+            else {"timeout": self.meta_config.timeout_seconds, **self._api_kwargs}
+        )
         api = API.from_definition(
             build_meta_builder_fsm(),
             model=self.meta_config.model,

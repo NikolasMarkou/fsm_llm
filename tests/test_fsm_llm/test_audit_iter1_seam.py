@@ -1332,8 +1332,14 @@ class TestClassifierInheritsConnection:
             def generate_response(self, request):
                 raise NotImplementedError
 
-        for llm in (_Bare(), MagicMock(spec=LLMInterface), MagicMock()):
+            def complete(self, request):
+                raise NotImplementedError
+
+        for llm in (_Bare(), MagicMock(spec=LLMInterface)):
             assert _classifier(llm)._llm is llm
+        # Not an LLMInterface at all: refused (D-029 of plan 944e2692).
+        with pytest.raises(ValueError, match="implements complete"):
+            _classifier(MagicMock())
         own = _classifier(_Bare(), model="gpt-4o")._llm
         assert isinstance(own, LiteLLMInterface)
         assert own.model == "gpt-4o"

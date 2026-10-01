@@ -27,9 +27,10 @@ from .definitions import (
     HierarchicalResult,
     HierarchicalSchema,
     IntentScore,
+    LLMResponseError,
     MultiClassificationResult,
 )
-from .llm import LiteLLMInterface, LLMInterface
+from .llm import LiteLLMInterface, LLMInterface, implements_complete
 from .logging import logger
 from .prompts import (
     ClassificationPromptConfig,
@@ -72,10 +73,15 @@ class Classifier:
 
     - ``llm`` given: that interface (its model, connection settings, timeout
       and usage meter). ``model`` defaults to the interface's ``model``
-      attribute; a ``model`` that differs from it, an ``api_key`` or any
-      ``llm_kwargs`` are refused (``ValueError``): the interface owns the
-      model and the connection. An interface that does not implement
-      ``complete`` makes every call fail with ``ClassificationError``.
+      attribute; a ``model`` that is not that ``str`` attribute (an
+      interface without one included), an ``api_key``, any ``llm_kwargs``,
+      or an ``llm`` that is not an ``LLMInterface`` implementing
+      ``complete`` are refused (``ValueError``): the interface owns the
+      model and the connection.
+
+    A call fails with ``ClassificationError`` when ``complete`` raises
+    ``LLMResponseError`` (an outage, an unreadable reply) or the reply is not
+    a classification; any other exception from the interface propagates.
     - ``llm`` omitted: a ``fsm_llm.LiteLLMInterface`` constructed here from
       ``model`` (default ``DEFAULT_LLM_MODEL``), ``api_key`` and
       ``llm_kwargs`` (``timeout`` defaults to 120 seconds; ``retries`` has
@@ -112,6 +118,12 @@ class Classifier:
         # second interface beside it (two LLM paths for one classifier), and
         # do NOT fall back to a private LiteLLMInterface when the injected one
         # lacks `complete`: that is the bypass D-006 closes. See D-020.
+        # DECISION plan-2026-10-01T093600-944e2692/D-029: an injected `llm`
+        # that is not an LLMInterface overriding `complete` is refused here,
+        # and `model` beside it must equal the interface's own `str` model.
+        # Do NOT accept either and fail per call (every tie became a silent
+        # "stay"), and do NOT accept a `model` when the interface has none
+        # (the label lied about the model that answers). See D-029.
         self._llm: LLMInterface
         if llm is not None:
             if api_key is not None or llm_kwargs:
@@ -119,10 +131,15 @@ class Classifier:
                     "Classifier(llm=...) takes no api_key or connection kwargs: "
                     "the injected interface owns its connection settings"
                 )
+            if not implements_complete(llm):
+                raise ValueError(
+                    f"Classifier(llm=...) needs an LLMInterface that implements "
+                    f"complete; got {type(llm).__name__}"
+                )
             interface_model = getattr(llm, "model", None)
             if not isinstance(interface_model, str):
                 interface_model = None
-            if model is not None and interface_model not in (None, model):
+            if model is not None and model != interface_model:
                 raise ValueError(
                     f"Classifier(model={model!r}, llm=...) names a different "
                     f"model than the injected interface ({interface_model!r}); "
@@ -285,13 +302,17 @@ class Classifier:
             max_tokens=self.config.max_tokens,
             call_type="classification",
         )
-        # Every failure of the call (an outage, an unreadable reply: both
-        # LLMResponseError from `complete`) is a ClassificationError, a member
-        # of the pipeline's soft-fail tuple, never a bare AttributeError
-        # (review N10, plan-2026-09-20T165703-0d9c218e).
+        # DECISION plan-2026-10-01T093600-944e2692/D-029 (narrows D-019's
+        # "every failure"): only the documented failure of `complete`
+        # (LLMResponseError: an outage, an unreadable reply) becomes a
+        # ClassificationError, a member of the pipeline's soft-fail tuple.
+        # Do NOT widen this back to `except Exception`: since D-006 the
+        # conversation's own (possibly custom) interface runs here, and a bug
+        # in it (AttributeError, ...) must fail the turn as it does in
+        # generate_response, not become a silent "stay" (0d9c218e/D-001).
         try:
             response = self._llm.complete(request)
-        except Exception as e:
+        except LLMResponseError as e:
             raise ClassificationError(f"Classification LLM call failed: {e!s}") from e
         logger.debug(f"Classification call completed in {time.time() - start:.2f}s")
         return self._extract_response(response)
@@ -460,20 +481,27 @@ class HierarchicalClassifier:
     Two-stage classifier for large intent sets (>15 classes).
 
     Stage 1 classifies the domain, stage 2 classifies the intent within
-    that domain using a domain-specific schema.
+    that domain using a domain-specific schema. Every stage is a
+    ``Classifier`` built with the same ``model``, ``llm``, ``api_key``,
+    ``config`` and ``llm_kwargs`` (same rules and errors as ``Classifier``):
+    with ``llm`` they all send through that one interface, without it each
+    builds its own interface for ``model`` (default ``DEFAULT_LLM_MODEL``).
     """
 
     def __init__(
         self,
         schema: HierarchicalSchema,
-        model: str = DEFAULT_LLM_MODEL,
+        model: str | None = None,
         *,
+        llm: LLMInterface | None = None,
         api_key: str | None = None,
         config: ClassificationPromptConfig | None = None,
         **llm_kwargs,
     ) -> None:
         self.schema = schema
-        shared = dict(model=model, api_key=api_key, config=config, **llm_kwargs)
+        shared: dict[str, Any] = dict(
+            model=model, llm=llm, api_key=api_key, config=config, **llm_kwargs
+        )
 
         self._domain_classifier = Classifier(schema=schema.domain_schema, **shared)
         self._intent_classifiers: dict[str, Classifier] = {

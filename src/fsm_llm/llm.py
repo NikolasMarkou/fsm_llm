@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import abc
 import json
+import math
 import re
 import threading
 import time
@@ -434,20 +435,73 @@ def tool_exchange(
     ]
 
 
+def implements_complete(llm: Any) -> bool:
+    """Whether ``llm`` is an ``LLMInterface`` whose class overrides ``complete``.
+
+    Interface contract (callers: ``Classifier(llm=...)`` and ``API``, which
+    refuse an interface the classifier cannot send through):
+        - ``llm``: any object.
+        - Returns ``False`` for a non-``LLMInterface`` and for an interface
+          whose ``complete`` is the base one (which only raises
+          ``NotImplementedError``); ``True`` otherwise: a subclass override,
+          a callable assigned on the instance, or a
+          ``Mock(spec=LLMInterface)`` attribute.
+        - Never raises.
+    """
+    if not isinstance(llm, LLMInterface):
+        return False
+    method = getattr(llm, "complete", None)
+    return getattr(method, "__func__", None) is not LLMInterface.complete
+
+
+def _checked_call_id(call: dict[str, Any], position: int) -> str:
+    """The ``id`` of one transcript tool call, after checking its shape.
+
+    Raises ``LLMResponseError`` (naming transcript entry ``position``) when
+    the id is not a non-empty ``str`` or the call has no ``function`` with a
+    non-empty ``str`` name and ``str`` arguments.
+    """
+    call_id = call.get("id")
+    function = call.get("function")
+    if (
+        not isinstance(call_id, str)
+        or not call_id
+        or not isinstance(function, dict)
+        or not isinstance(function.get("name"), str)
+        or not function["name"]
+        or not isinstance(function.get("arguments"), str)
+    ):
+        raise LLMResponseError(
+            f"Transcript entry {position} has a tool call without a non-empty "
+            "str id and a function with a str name and str arguments"
+        )
+    return call_id
+
+
 def check_tool_transcript(messages: Sequence[Any]) -> None:
     """Refuse a transcript a provider must not receive.
 
     Interface contract (caller: the completion-state turn of the pipeline,
     before it sends a consumer-owned transcript):
         - Every entry is a dict whose ``role`` is ``system``, ``user``,
-          ``assistant`` or ``tool``.
+          ``assistant`` or ``tool``; a ``user`` entry has non-``None``
+          content (the builder would otherwise send an instruction-shaped
+          neutral turn as the user's words).
         - An assistant message with a non-empty ``tool_calls`` list is
           followed directly by exactly one ``tool`` message per call, matched
           by ``tool_call_id`` (any order); a ``tool`` message anywhere else is
-          an orphan. ``tool_exchange`` builds this shape.
+          an orphan. Every call has a non-empty ``str`` ``id``, unique within
+          its turn, and a ``function`` with a non-empty ``str`` ``name`` and
+          ``str`` ``arguments``; every result's ``tool_call_id`` equals one of
+          them exactly (no ``str()`` coercion) and its ``content`` is a
+          ``str``. ``tool_exchange`` builds this shape.
         - Returns ``None`` for a valid transcript (an empty one included);
           raises ``LLMResponseError`` naming the first bad entry otherwise.
     """
+    # DECISION plan-2026-10-01T093600-944e2692/D-021: refuse, never repair.
+    # Do NOT drop orphans, coerce ids with str(), pair by position or accept
+    # an id-less call: a provider that omits ids pairs two calls of one turn
+    # by position only, which nothing could detect (D-029). See D-021, D-029.
     index = 0
     while index < len(messages):
         message = messages[index]
@@ -461,6 +515,10 @@ def check_tool_transcript(messages: Sequence[Any]) -> None:
                 f"Transcript entry {index} is a tool result with no assistant "
                 "tool call before it"
             )
+        if role == "user" and message.get("content") is None:
+            raise LLMResponseError(
+                f"Transcript entry {index} is a user message with no content"
+            )
         calls = message.get("tool_calls") if role == "assistant" else None
         index += 1
         if not calls:
@@ -470,15 +528,27 @@ def check_tool_transcript(messages: Sequence[Any]) -> None:
                 f"Transcript entry {index - 1} has tool_calls that are not a list "
                 "of call objects"
             )
-        expected = sorted(str(call.get("id", "")) for call in calls)
+        expected = [_checked_call_id(call, index - 1) for call in calls]
+        if len(set(expected)) != len(expected):
+            raise LLMResponseError(
+                f"Transcript entry {index - 1} repeats a tool call id"
+            )
         answered: list[str] = []
         while index < len(messages):
             following = messages[index]
             if not isinstance(following, dict) or following.get("role") != "tool":
                 break
-            answered.append(str(following.get("tool_call_id", "")))
+            call_id = following.get("tool_call_id")
+            if not isinstance(call_id, str) or not isinstance(
+                following.get("content"), str
+            ):
+                raise LLMResponseError(
+                    f"Transcript entry {index} is a tool result without a str "
+                    "tool_call_id and str content"
+                )
+            answered.append(call_id)
             index += 1
-        if sorted(answered) != expected:
+        if sorted(answered) != sorted(expected):
             raise LLMResponseError(
                 f"Transcript entry {index - len(answered) - 1} is an assistant "
                 f"tool-call message whose {len(expected)} call(s) are not each "
@@ -1336,15 +1406,23 @@ class LiteLLMInterface(LLMInterface):
         # set, user-turn filling) lives once in _build_call_params, and every
         # send goes through _send. A malformed tool turn is data
         # (kind="malformed", no calls), an outage raises. See decisions.md D-002.
-        call_params = self._build_call_params(
-            request.messages,
-            request.call_type,
-            response_format=request.response_format,
-            tools=request.tools,
-            tool_choice=request.tool_choice,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-        )
+        # Building the request is inside the boundary too (D-029): a failing
+        # supported-params lookup is an LLMResponseError, never a raw error.
+        try:
+            call_params = self._build_call_params(
+                request.messages,
+                request.call_type,
+                response_format=request.response_format,
+                tools=request.tools,
+                tool_choice=request.tool_choice,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            )
+        except Exception as e:
+            # Broad catch is intentional: the documented error of complete.
+            error_msg = f"Completion request could not be built: {e!s}"
+            logger.error(error_msg)
+            raise LLMResponseError(error_msg) from e
         try:
             response = self._send(call_params, call_type=request.call_type)
         except Exception as e:
@@ -1518,7 +1596,17 @@ class LiteLLMInterface(LLMInterface):
         # temperature (bf7ffe24/D-003, measured 0/3 -> 3/3 tool calls on 4b);
         # `seed` is sent only when the interface was built with one
         # (879d04a0/D-008). Do NOT re-home any of them in an agent. D-027.
+        # DECISION plan-2026-10-01T093600-944e2692/D-029: both tool rules are
+        # held HERE, whatever the free-string `call_type` says: a tool turn
+        # never gets a `response_format` (neither the caller's, refused, nor
+        # the forced extraction format) and never the structured temperature
+        # 0. Do NOT gate them on `call_type` alone (`data_extraction` or
+        # `classification` with tools broke both, review area 1 concern 1).
         if tools is not None:
+            if response_format is not None:
+                raise ValueError(
+                    "A request sends tools or a response_format, never both"
+                )
             call_params["tools"] = tools
             call_params["tool_choice"] = "auto" if tool_choice is None else tool_choice
 
@@ -1529,8 +1617,10 @@ class LiteLLMInterface(LLMInterface):
         # schema-enforced agent output). This branch never fires for a
         # streaming call: streaming's call_type is always
         # "response_generation", never "data_extraction"/"field_extraction".
+        # It never fires for a tool turn either (D-029 above).
         if (
-            supported_params
+            tools is None
+            and supported_params
             and "response_format" in supported_params
             and call_type in ["data_extraction", "field_extraction"]
         ):
@@ -1559,7 +1649,10 @@ class LiteLLMInterface(LLMInterface):
             )
 
         self._apply_model_specific_params(
-            call_params, call_type, response_format=response_format
+            call_params,
+            call_type,
+            response_format=response_format,
+            tool_turn=tools is not None,
         )
 
         # Ollama: prepend /nothink and embed schema in prompt
@@ -1650,6 +1743,7 @@ class LiteLLMInterface(LLMInterface):
         call_type: str,
         *,
         response_format: dict[str, Any] | None = None,
+        tool_turn: bool = False,
     ) -> None:
         """Apply model-specific parameters to the LLM call.
 
@@ -1657,13 +1751,21 @@ class LiteLLMInterface(LLMInterface):
         mode) by mutating *call_params* in place. A call is structured
         (temperature 0 on Ollama) when its call type parses JSON, or when it
         sends a ``response_format`` and its call type is not free text (Pass
-        2 keeps the user's temperature with an ``output_schema``).
+        2 keeps the user's temperature with an ``output_schema``). A tool
+        turn (``tool_turn``) is never structured, whatever its call type.
         """
+        # DECISION plan-2026-10-01T093600-944e2692/D-019: on Ollama a
+        # response_format call runs at temperature 0 unless its call type is
+        # free text, and a tool turn keeps the caller's temperature
+        # (bf7ffe24/D-003, D-029). Do NOT drop the response_format arm (the
+        # classifier and structured completion turns rely on it) and do NOT
+        # key the tool rule on call_type. See D-019, D-029.
         # Ollama: disable thinking mode and force deterministic output
         # for structured calls (data extraction, classification, a
         # response_format completion).
-        is_structured = call_type in _STRUCTURED_CALL_TYPES or (
-            response_format is not None and call_type not in _FREE_TEXT_CALL_TYPES
+        is_structured = not tool_turn and (
+            call_type in _STRUCTURED_CALL_TYPES
+            or (response_format is not None and call_type not in _FREE_TEXT_CALL_TYPES)
         )
         apply_ollama_params(call_params, self.model, structured=is_structured)
 
@@ -2279,9 +2381,13 @@ class LiteLLMEmbedder:
             LLMResponseError: the reply does not hold one numeric vector per
                 text.
         """
-        if isinstance(texts, str) or not all(isinstance(t, str) for t in texts):
+        if isinstance(texts, str):
             raise TypeError("texts must be a sequence of strings")
+        # Materialised before the type check: checking an iterator consumed it
+        # and the batch came out empty (no request, no error, review area 1).
         batch = list(texts)
+        if not all(isinstance(t, str) for t in batch):
+            raise TypeError("texts must be a sequence of strings")
         if not batch:
             return []
         params = _connection_params(
@@ -2316,7 +2422,9 @@ def _embedding_vectors(response: Any, expected: int) -> list[list[float]]:
     """The vectors of an embedding reply, ordered by their ``index``.
 
     ``data`` items may be dicts or objects. Raises ``LLMResponseError`` when
-    the reply does not hold exactly ``expected`` numeric vectors.
+    the reply does not hold exactly ``expected`` numeric vectors, or when a
+    vector is empty, holds a non-finite value or differs in length from the
+    others (each would reach cosine scoring silently).
     """
     data = _reply_field(response, "data")
     if not isinstance(data, list) or len(data) != expected:
@@ -2332,6 +2440,17 @@ def _embedding_vectors(response: Any, expected: int) -> list[list[float]]:
             isinstance(x, (int, float)) and not isinstance(x, bool) for x in vector
         ):
             raise LLMResponseError(f"Embedding reply item {position} is not a vector")
+        if not vector:
+            raise LLMResponseError(f"Embedding reply item {position} is empty")
+        if not all(math.isfinite(x) for x in vector):
+            raise LLMResponseError(
+                f"Embedding reply item {position} holds a non-finite value"
+            )
+        if indexed and len(vector) != len(indexed[0][1]):
+            raise LLMResponseError(
+                f"Embedding reply item {position} has {len(vector)} dimensions, "
+                f"item 0 has {len(indexed[0][1])}"
+            )
         order = (
             index
             if isinstance(index, int) and not isinstance(index, bool)

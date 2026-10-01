@@ -50,6 +50,7 @@ from fsm_llm.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
+    LLMResponseError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
@@ -105,6 +106,12 @@ class _ForgingLLM(LLMInterface):
         return DataExtractionResponse(
             extracted_data=self.forgery() if self.forge() else {}
         )
+
+    def complete(self, request: Any) -> Any:
+        # No classifier reply is scripted: a classification fails soft as on
+        # an outage (core refuses an interface without `complete` for an
+        # FSM that classifies, D-029 of plan 944e2692).
+        raise LLMResponseError("_ForgingLLM scripts no completion replies")
 
     def generate_response(
         self, request: ResponseGenerationRequest
