@@ -23,6 +23,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .constants import (
     ALLOWED_JSONLOGIC_OPERATIONS,
+    COMPLETION_TOOL_CHOICE_KEYWORDS,
+    CONTEXT_KEY_AGENT_TRACE,
+    DEFAULT_COMPLETION_MESSAGES_KEY,
+    DEFAULT_COMPLETION_RESULT_KEY,
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
     JSONLOGIC_RAW_ARGUMENT_OPERATIONS,
@@ -30,6 +34,7 @@ from .constants import (
     MAX_MULTI_INTENTS,
     MAX_PERSONA_LENGTH,
     MESSAGE_TRUNCATION_SUFFIX,
+    RESERVED_CONTEXT_KEYS,
     TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
     has_internal_prefix,
 )
@@ -967,6 +972,129 @@ class ContextScope(BaseModel):
     )
 
 
+class CompletionStateConfig(BaseModel):
+    """The Pass-1 work of a completion state (``State.completion``).
+
+    A completion state's Pass 1 is ONE ``LLMInterface.complete`` call over
+    ``[system(instructions)] + context[messages_key]``: no prompt builder
+    text, no conversation history and no neutral user turn. It is either a
+    tool-calling turn (``tools``) or a structured turn (``response_format_key``
+    names the context key holding a provider response format), never both.
+    The reply is written to ``context[result_key]`` as
+    ``{"kind": "calls" | "final" | "malformed", "text": str | None,
+    "calls": [{"id", "name", "arguments"}]}``; transitions read
+    ``<result_key>.kind``. The call is made only while ``result_key`` is unset
+    (skip-if-set), so the consumer clears it once it has acted on the result.
+
+    The transcript under ``messages_key`` is owned by the consumer (handlers
+    append to it, for example with ``fsm_llm.llm.tool_exchange``); core never
+    writes it, never runs a tool, and refuses to send a transcript holding an
+    assistant tool-call message without its tool results.
+
+    Fields:
+      - ``tools``: OpenAI function schemas (``{"type": "function",
+        "function": {"name", ...}}``), at least one, unique names.
+      - ``tool_choice``: ``"auto"`` (sent when ``None``), ``"required"``,
+        ``"none"``, or the name of one of ``tools`` (sent as a named-function
+        choice). Only with ``tools``.
+      - ``response_format_key``: internal-prefixed context key holding the
+        response format of a structured turn.
+      - ``instructions``: the system message; ``None`` sends none.
+      - ``messages_key``: internal-prefixed context key of the transcript
+        (a list of OpenAI chat messages; absent means empty).
+      - ``result_key``: public context key of the result (not internal, not
+        reserved); the pipeline treats it as handler-only for extraction.
+
+    Frozen; unknown fields are refused.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tools: list[dict[str, Any]] | None = Field(
+        default=None, min_length=1, description="OpenAI function schemas"
+    )
+    tool_choice: str | None = Field(
+        default=None,
+        min_length=1,
+        description="auto, required, none, or the name of a declared tool",
+    )
+    response_format_key: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Internal context key holding a structured turn's response format",
+    )
+    instructions: str | None = Field(
+        default=None, description="System message of the request (None: none)"
+    )
+    messages_key: str = Field(
+        default=DEFAULT_COMPLETION_MESSAGES_KEY,
+        min_length=1,
+        description="Internal context key of the consumer-owned transcript",
+    )
+    result_key: str = Field(
+        default=DEFAULT_COMPLETION_RESULT_KEY,
+        min_length=1,
+        description="Public context key the result {kind, text, calls} is written to",
+    )
+
+    @model_validator(mode="after")
+    def _validate_completion(self) -> CompletionStateConfig:
+        """Exactly one turn kind; declared, unique tools; owned keys well placed."""
+        if (self.tools is None) == (self.response_format_key is None):
+            raise ValueError(
+                "a completion state declares either non-empty tools or a "
+                "response_format_key, exactly one"
+            )
+        names: list[str] = []
+        for index, schema in enumerate(self.tools or []):
+            function = schema.get("function")
+            name = function.get("name") if isinstance(function, dict) else None
+            if (
+                schema.get("type") != "function"
+                or not isinstance(name, str)
+                or not name
+            ):
+                raise ValueError(
+                    f"completion tools[{index}] is not an OpenAI function schema "
+                    '({"type": "function", "function": {"name": ...}})'
+                )
+            names.append(name)
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(f"completion tools declare {duplicates} more than once")
+        if self.tool_choice is not None:
+            if self.tools is None:
+                raise ValueError("completion tool_choice requires tools")
+            if (
+                self.tool_choice not in COMPLETION_TOOL_CHOICE_KEYWORDS
+                and self.tool_choice not in names
+            ):
+                raise ValueError(
+                    f"completion tool_choice {self.tool_choice!r} is neither one of "
+                    f"{sorted(COMPLETION_TOOL_CHOICE_KEYWORDS)} nor a declared tool"
+                )
+        for field, key in (
+            ("messages_key", self.messages_key),
+            ("response_format_key", self.response_format_key),
+        ):
+            if key is not None and not has_internal_prefix(key):
+                raise ValueError(
+                    f"completion {field} {key!r} must be internal-prefixed so no "
+                    "prompt, extraction or get_data reaches it"
+                )
+        if (
+            not self.result_key.strip()
+            or has_internal_prefix(self.result_key)
+            or self.result_key in RESERVED_CONTEXT_KEYS
+            or self.result_key == CONTEXT_KEY_AGENT_TRACE
+        ):
+            raise ValueError(
+                f"completion result_key {self.result_key!r} must be a public, "
+                "non-reserved context key (transitions read it)"
+            )
+        return self
+
+
 class State(BaseModel):
     """
     Enhanced state definition for the 2-pass architecture.
@@ -1074,6 +1202,25 @@ class State(BaseModel):
         ),
     )
 
+    # DECISION plan-2026-10-01T093600-944e2692/D-003: one optional, additive
+    # field (v4.1 unchanged: every existing definition loads as before). Its
+    # Pass-1 work is a `complete` call over a consumer-owned transcript in
+    # context, NEVER `Conversation.exchanges` (25 readers assume str pairs).
+    # Do NOT rename it `tool_calling` (it also carries the structured turn),
+    # do NOT make an LLM call inside a handler instead (a second call path
+    # beside Pass 1, outside rollback and the meter), and do NOT add a
+    # required companion field (STOP IF 9 of plan 944e2692). See D-003.
+    completion: CompletionStateConfig | None = Field(
+        default=None,
+        description=(
+            "Completion state: Pass 1 is one LLM completion (tool calling or a "
+            "structured turn) over a consumer-owned transcript in context; the "
+            "result {kind, text, calls} is written to its result_key. Excludes "
+            "field_extractions, classification_extractions, "
+            "required_context_keys and extraction_instructions."
+        ),
+    )
+
     @field_validator("transition_classification")
     @classmethod
     def _validate_transition_classification(
@@ -1158,6 +1305,31 @@ class State(BaseModel):
                 f"State '{self.id}': required_context_keys {bad_keys} are empty or "
                 "internal-prefixed and can never be extracted"
             )
+        if self.completion is not None:
+            # A completion state's Pass 1 is its one completion call: no other
+            # extraction channel runs beside it, so declaring one is dead
+            # config. A terminal state runs no turn, so its completion never
+            # would either.
+            conflicts = [
+                name
+                for name, value in (
+                    ("field_extractions", self.field_extractions),
+                    ("classification_extractions", self.classification_extractions),
+                    ("required_context_keys", self.required_context_keys),
+                    ("extraction_instructions", self.extraction_instructions),
+                )
+                if value
+            ]
+            if conflicts:
+                raise ValueError(
+                    f"State '{self.id}': a completion state cannot also declare "
+                    f"{conflicts}"
+                )
+            if not self.transitions:
+                raise ValueError(
+                    f"State '{self.id}': a completion state needs a transition "
+                    "(a terminal state runs no turn)"
+                )
         return self
 
 

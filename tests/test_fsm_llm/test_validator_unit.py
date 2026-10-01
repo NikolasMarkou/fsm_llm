@@ -929,7 +929,12 @@ def _maximal_fsm_data():
                                 "evaluation_priority": 100,
                             }
                         ],
-                    }
+                    },
+                    {
+                        "target_state": "tool_turn",
+                        "description": "Fallback to the tool turn.",
+                        "priority": 900,
+                    },
                 ],
                 "field_extractions": [
                     {
@@ -954,6 +959,36 @@ def _maximal_fsm_data():
                     "confidence_threshold": 0.7,
                 },
                 "context_scope": {"read_keys": ["name"], "write_keys": ["name"]},
+            },
+            # A completion state (plan 944e2692 step 6): anchors
+            # CompletionStateConfig; reached from `start` on a second edge.
+            "tool_turn": {
+                "id": "tool_turn",
+                "description": "One native tool-calling turn.",
+                "purpose": "Let the model call a tool.",
+                "response_instructions": "",
+                "completion": {
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "lookup",
+                                "description": "Look a word up.",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {"word": {"type": "string"}},
+                                },
+                            },
+                        }
+                    ],
+                    "tool_choice": "lookup",
+                    "instructions": "You may call the lookup tool.",
+                    "messages_key": "_tool_messages",
+                    "result_key": "tool_turn_result",
+                },
+                "transitions": [
+                    {"target_state": "done", "description": "Always finish."}
+                ],
             },
             "done": {
                 "id": "done",
@@ -991,6 +1026,7 @@ _MODEL_ANCHORS = {
         "intents",
         0,
     ),
+    "CompletionStateConfig": ("states", "tool_turn", "completion"),
 }
 
 # One violating mutation per `model_validator`/`field_validator`. These cannot be
@@ -1034,6 +1070,12 @@ _VALIDATOR_VIOLATIONS = {
     # H8: an unknown JsonLogic operator in a condition's `logic` is rejected by
     # `TransitionCondition._validate_logic` (ValueError -> value_error), so the
     # loader raises and the validator promotes to ERROR -- both agree.
+    # Plan 944e2692 step 6: a tool_choice naming no declared tool is refused by
+    # `CompletionStateConfig._validate_completion` (ValueError -> value_error).
+    ("CompletionStateConfig", "_validate_completion"): (
+        ("states", "tool_turn", "completion", "tool_choice"),
+        "undeclared_tool",
+    ),
     ("TransitionCondition", "_validate_logic"): (
         ("states", "start", "transitions", 0, "conditions", 0, "logic"),
         {"eqauls": [{"var": "name"}, 1]},

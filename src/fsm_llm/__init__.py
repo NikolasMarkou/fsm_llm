@@ -49,6 +49,7 @@ from .definitions import (
     # Completion models (LLMInterface.complete)
     CompletionRequest,
     CompletionResponse,
+    CompletionStateConfig,
     # Context and conversation management
     ContextScope,
     Conversation,
@@ -113,7 +114,7 @@ from .handlers import (
 # --------------------------------------------------------------
 # LLM Interface Components
 # --------------------------------------------------------------
-from .llm import LiteLLMEmbedder, LiteLLMInterface, LLMInterface
+from .llm import LiteLLMEmbedder, LiteLLMInterface, LLMInterface, tool_exchange
 from .logging import setup_logging
 
 # --------------------------------------------------------------
@@ -203,6 +204,7 @@ __all__ = [
     "Transition",
     "TransitionCondition",
     "ContextScope",
+    "CompletionStateConfig",
     "Conversation",
     # 2-pass architecture components
     "DataExtractionResponse",
@@ -239,6 +241,7 @@ __all__ = [
     "CompletionRequest",
     "CompletionResponse",
     "ModelToolCall",
+    "tool_exchange",
     "LLMUsage",
     "LLMCallCounts",
     # Enhanced prompt builders

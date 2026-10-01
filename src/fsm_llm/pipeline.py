@@ -22,9 +22,12 @@ import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
+from pydantic import ValidationError
+
 from .classification import Classifier
 from .constants import (
     CLASSIFIER_HISTORY_EXCHANGES,
+    COMPLETION_TOOL_CHOICE_KEYWORDS,
     CONTEXT_KEY_AGENT_TRACE,
     CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
@@ -47,6 +50,8 @@ from .definitions import (
     ClassificationExtractionConfig,
     ClassificationResult,
     ClassificationSchema,
+    CompletionRequest,
+    CompletionStateConfig,
     DataExtractionResponse,
     FieldExtractionConfig,
     FieldExtractionRequest,
@@ -56,6 +61,7 @@ from .definitions import (
     FSMInstance,
     IntentDefinition,
     InvalidTransitionError,
+    LLMResponseError,
     ResponseGenerationRequest,
     State,
     StateNotFoundError,
@@ -64,7 +70,7 @@ from .definitions import (
     TransitionOption,
 )
 from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
-from .llm import LLMInterface
+from .llm import LLMInterface, check_tool_transcript
 from .logging import logger
 from .ollama import is_ollama_model
 from .prompts import (
@@ -1121,9 +1127,19 @@ class MessagePipeline:
 
         # Step 2: Update context with extracted data
         if extraction_response.extracted_data:
-            extraction_response.extracted_data = self._clean_empty_context_keys(
-                data=extraction_response.extracted_data, conversation_id=conversation_id
-            )
+            # DECISION plan-2026-10-01T093600-944e2692/D-021: a completion
+            # state's data is its one typed result (validated public key,
+            # JSON-native CompletionResponse dump) and is committed as is. Do
+            # NOT run it through clean_context_keys: that drops None values
+            # and internal-prefixed keys at every depth, so `text: None` and a
+            # tool argument such as `{"_id": 1}` or `{"x": None}` would be
+            # silently removed from the calls the consumer runs. Every other
+            # state's model-extracted data is still cleaned. See D-021.
+            if self.get_state(instance, conversation_id).completion is None:
+                extraction_response.extracted_data = self._clean_empty_context_keys(
+                    data=extraction_response.extracted_data,
+                    conversation_id=conversation_id,
+                )
 
             if extraction_response.extracted_data:
                 committed = extraction_response.extracted_data
@@ -1484,12 +1500,19 @@ class MessagePipeline:
         return {}
 
     def _handler_only_keys(self, instance: FSMInstance) -> frozenset[str]:
-        """Keys the FSM author reserved for handlers (D-033).
+        """Keys no extraction may write (D-033): the FSM author's
+        ``handler_only_keys`` plus the ``result_key`` of every completion state
+        (only that state's own completion call writes it, D-021).
 
         Resolved per instance through ``fsm_resolver`` so a stacked child uses
         its own list, not the root's. Returns an empty set for the default.
         """
-        return frozenset(self.fsm_resolver(instance.fsm_id).handler_only_keys)
+        fsm_def = self.fsm_resolver(instance.fsm_id)
+        return frozenset(fsm_def.handler_only_keys) | {
+            state.completion.result_key
+            for state in fsm_def.states.values()
+            if state.completion is not None
+        }
 
     @staticmethod
     def _build_field_configs_from_state(state: State) -> list[FieldExtractionConfig]:
@@ -1499,8 +1522,12 @@ class MessagePipeline:
         into per-field configs so the pipeline can use the unified
         ``extract_field`` primitive for all extraction.  Explicit
         ``field_extractions`` on the state are appended after the
-        auto-generated ones.
+        auto-generated ones. A completion state gets none: its Pass 1 is its
+        completion call, and the keys its transitions read (its own
+        ``result_key`` among them) are never minted into extractions.
         """
+        if state.completion is not None:
+            return []
         configs: list[FieldExtractionConfig] = []
 
         # Collect all required keys: from state-level AND from transition
@@ -1576,6 +1603,15 @@ class MessagePipeline:
         log.debug("Executing field-based data extraction")
 
         current_state = self.get_state(instance, conversation_id)
+
+        # A completion state's Pass-1 work is its one completion call (D-003);
+        # no field, bulk or classification extraction runs beside it.
+        if current_state.completion is not None:
+            response = self._execute_completion_turn(
+                instance, current_state.completion, conversation_id
+            )
+            instance.last_extraction_response = response
+            return response
 
         # Build unified field configs. DECISION
         # plan-2026-09-19T175721-21cd7f8e/D-033: a `handler_only_keys` name
@@ -1884,6 +1920,98 @@ class MessagePipeline:
             f"confidence={min_confidence:.2f}"
         )
         return response
+
+    def _execute_completion_turn(
+        self,
+        instance: FSMInstance,
+        config: CompletionStateConfig,
+        conversation_id: str,
+    ) -> DataExtractionResponse:
+        """Pass-1 work of a completion state: one ``complete`` call.
+
+        Contract: sends exactly ``[system(config.instructions)]`` (when set)
+        plus a copy of ``context[config.messages_key]`` (absent or ``None``:
+        empty), with ``config.tools`` or the response format read from
+        ``context[config.response_format_key]``. Returns the result
+        ``{kind, text, calls}`` under ``config.result_key``, or no data when
+        that key is already set (skip-if-set: no call). Never touches
+        ``Conversation.exchanges`` or the transcript.
+
+        Raises:
+            LLMResponseError: the transcript is not a paired list of chat
+                messages, the response format is missing or not a dict, the
+                interface does not implement ``complete``, or the provider
+                call failed. Nothing is committed, so the turn fails with the
+                context as it was.
+        """
+        log = logger.bind(conversation_id=conversation_id)
+        data = instance.context.data
+        if data.get(config.result_key) is not None:
+            log.debug(f"Completion result '{config.result_key}' already set; no call")
+            return DataExtractionResponse(extracted_data={}, confidence=1.0)
+
+        # DECISION plan-2026-10-01T093600-944e2692/D-021: the request is the
+        # state's instructions plus the consumer's transcript and nothing
+        # else. Do NOT add prompt-builder text, history, rendered context or a
+        # neutral user turn here (native_fc's request bytes are pinned by a
+        # golden test), and do NOT drop or repair an unpaired transcript: an
+        # assistant tool-call message without its results is refused, never
+        # sent and never silently trimmed. See D-021.
+        transcript = data.get(config.messages_key)
+        if transcript is None:
+            transcript = []
+        if not isinstance(transcript, list):
+            raise LLMResponseError(
+                f"Completion transcript '{config.messages_key}' is "
+                f"{type(transcript).__name__}, not a list of chat messages"
+            )
+        check_tool_transcript(transcript)
+        messages: list[dict[str, Any]] = (
+            [{"role": "system", "content": config.instructions}]
+            if config.instructions is not None
+            else []
+        )
+        messages.extend(copy.deepcopy(transcript))
+
+        response_format: dict[str, Any] | None = None
+        if config.response_format_key is not None:
+            response_format = data.get(config.response_format_key)
+            if not isinstance(response_format, dict) or not response_format:
+                raise LLMResponseError(
+                    f"Completion response format '{config.response_format_key}' "
+                    "is missing or not a dict"
+                )
+        tool_choice: str | dict[str, Any] | None = config.tool_choice
+        if tool_choice is not None and tool_choice not in (
+            COMPLETION_TOOL_CHOICE_KEYWORDS
+        ):
+            tool_choice = {"type": "function", "function": {"name": tool_choice}}
+        try:
+            request = CompletionRequest(
+                messages=messages,
+                tools=config.tools,
+                tool_choice=tool_choice,
+                response_format=response_format,
+            )
+        except ValidationError as e:
+            raise LLMResponseError(
+                f"Completion state request is invalid: {e.error_count()} error(s), "
+                f"first: {e.errors()[0]['msg']}"
+            ) from e
+        try:
+            reply = self.llm_interface.complete(request)
+        except NotImplementedError as e:
+            raise LLMResponseError(
+                f"{type(self.llm_interface).__name__} does not implement "
+                "complete, which a completion state needs"
+            ) from e
+        log.debug(
+            f"Completion turn: kind={reply.kind}, calls={[c.name for c in reply.calls]}"
+        )
+        return DataExtractionResponse(
+            extracted_data={config.result_key: reply.model_dump(mode="json")},
+            confidence=1.0,
+        )
 
     def _execute_field_extractions(
         self,

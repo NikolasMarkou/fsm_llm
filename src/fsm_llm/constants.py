@@ -196,6 +196,18 @@ PROVENANCE_METADATA_KEY = "_pipeline_extracted"
 # structured-output schema; Pass 2 enforces it on terminal states only.
 CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT = "_output_response_format"
 
+# Completion state (`State.completion`, `CompletionStateConfig`): the default
+# context key of the consumer-owned transcript (internal-prefixed, so it never
+# reaches a prompt or `get_data`) and of the public result `{kind, text, calls}`
+# that transitions read as `<result_key>.kind`.
+DEFAULT_COMPLETION_MESSAGES_KEY = "_completion_messages"
+DEFAULT_COMPLETION_RESULT_KEY = "completion_result"
+# `CompletionStateConfig.tool_choice` values that are sent as given; any other
+# value names one of the state's tools and is sent as a named-function choice.
+COMPLETION_TOOL_CHOICE_KEYWORDS: frozenset[str] = frozenset(
+    {"auto", "required", "none"}
+)
+
 # Recent exchanges (user+assistant pairs) the pipeline gives each classifier
 # call as history (MessagePipeline._build_classifier_context, D-004).
 CLASSIFIER_HISTORY_EXCHANGES = 3

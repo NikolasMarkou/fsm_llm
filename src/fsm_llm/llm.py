@@ -54,7 +54,7 @@ import json
 import re
 import threading
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from litellm import completion, embedding, get_supported_openai_params
@@ -366,6 +366,125 @@ def decode_tool_arguments(raw: Any) -> dict[str, Any] | None:
         except (ValueError, RecursionError):
             return None
     return raw if isinstance(raw, dict) else None
+
+
+_TRANSCRIPT_ROLES = frozenset({"system", "user", "assistant", "tool"})
+
+
+def tool_exchange(
+    content: str | None,
+    calls: Sequence[ModelToolCall | Mapping[str, Any]],
+    results: Sequence[str],
+) -> list[dict[str, Any]]:
+    """The transcript messages of one tool round, paired.
+
+    Interface contract (callers: consumers of a completion state that run the
+    model's calls, e.g. a tool-running handler appending to the transcript):
+        - ``content``: the text the model wrote beside its calls; empty or
+          ``None`` gives ``content: None`` (the provider's tool-call shape).
+        - ``calls``: the round's calls, as ``ModelToolCall`` or as its JSON
+          dict ``{"id", "name", "arguments"}`` (the ``calls`` entries of a
+          completion state's result read back from context); at least one.
+        - ``results``: one tool-result text per call, in the same order.
+        - Returns new dicts: the assistant message ``{"role": "assistant",
+          "content", "tool_calls": [{"id", "type": "function", "function":
+          {"name", "arguments": <JSON text>}}]}`` followed by one
+          ``{"role": "tool", "tool_call_id", "content"}`` per call. This is
+          exactly the shape ``check_tool_transcript`` accepts as paired.
+        - Raises ``ValueError`` when ``calls`` is empty, the two lengths
+          differ, a call is not a valid ``ModelToolCall`` or a result is not
+          a ``str``.
+    """
+    if not calls:
+        raise ValueError("tool_exchange needs at least one call")
+    if len(calls) != len(results):
+        raise ValueError(
+            f"tool_exchange got {len(calls)} calls but {len(results)} results"
+        )
+    parsed = [
+        call if isinstance(call, ModelToolCall) else ModelToolCall.model_validate(call)
+        for call in calls
+    ]
+    for index, result in enumerate(results):
+        if not isinstance(result, str):
+            raise ValueError(
+                f"tool_exchange results[{index}] is {type(result).__name__}, not str"
+            )
+    assistant: dict[str, Any] = {
+        "role": "assistant",
+        "content": content or None,
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments),
+                },
+            }
+            for call in parsed
+        ],
+    }
+    return [
+        assistant,
+        *(
+            {"role": "tool", "tool_call_id": call.id, "content": result}
+            for call, result in zip(parsed, results, strict=True)
+        ),
+    ]
+
+
+def check_tool_transcript(messages: Sequence[Any]) -> None:
+    """Refuse a transcript a provider must not receive.
+
+    Interface contract (caller: the completion-state turn of the pipeline,
+    before it sends a consumer-owned transcript):
+        - Every entry is a dict whose ``role`` is ``system``, ``user``,
+          ``assistant`` or ``tool``.
+        - An assistant message with a non-empty ``tool_calls`` list is
+          followed directly by exactly one ``tool`` message per call, matched
+          by ``tool_call_id`` (any order); a ``tool`` message anywhere else is
+          an orphan. ``tool_exchange`` builds this shape.
+        - Returns ``None`` for a valid transcript (an empty one included);
+          raises ``LLMResponseError`` naming the first bad entry otherwise.
+    """
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        role = message.get("role") if isinstance(message, dict) else None
+        if role not in _TRANSCRIPT_ROLES:
+            raise LLMResponseError(
+                f"Transcript entry {index} is not a chat message with a known role"
+            )
+        if role == "tool":
+            raise LLMResponseError(
+                f"Transcript entry {index} is a tool result with no assistant "
+                "tool call before it"
+            )
+        calls = message.get("tool_calls") if role == "assistant" else None
+        index += 1
+        if not calls:
+            continue
+        if not isinstance(calls, list) or not all(isinstance(c, dict) for c in calls):
+            raise LLMResponseError(
+                f"Transcript entry {index - 1} has tool_calls that are not a list "
+                "of call objects"
+            )
+        expected = sorted(str(call.get("id", "")) for call in calls)
+        answered: list[str] = []
+        while index < len(messages):
+            following = messages[index]
+            if not isinstance(following, dict) or following.get("role") != "tool":
+                break
+            answered.append(str(following.get("tool_call_id", "")))
+            index += 1
+        if sorted(answered) != expected:
+            raise LLMResponseError(
+                f"Transcript entry {index - len(answered) - 1} is an assistant "
+                f"tool-call message whose {len(expected)} call(s) are not each "
+                f"answered by one tool result (got {len(answered)}); refusing to "
+                "send an unpaired transcript"
+            )
 
 
 def _completion_response(response: Any) -> CompletionResponse:
