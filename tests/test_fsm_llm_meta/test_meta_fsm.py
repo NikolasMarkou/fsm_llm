@@ -28,6 +28,8 @@ from fsm_llm.agents.constants import (
     META_AGENT_PATTERN_INTENTS,
     META_ARTIFACT_TYPE_INTENTS,
     META_HANDLER_ONLY_KEYS,
+    META_UNKNOWN_ARTIFACT_TYPE,
+    META_UNKNOWN_ARTIFACT_TYPE_DESCRIPTION,
     MetaBuilderStates,
     MetaBuildOutcome,
     MetaContextKeys,
@@ -61,12 +63,14 @@ _SILENT = (S.CLASSIFY, S.BUILD, S.BUILD_FAILED, S.DONE)
 _EDGES = {
     (S.CLASSIFY, S.BUILD, 10),
     (S.CLASSIFY, S.COLLECT, 900),
-    (S.COLLECT, S.BUILD, 10),
-    (S.COLLECT, S.CLASSIFY, 20),
+    # A switch outranks a build (D-035): "actually make it a workflow, build
+    # it" is reclassified first, then classify -> build.
+    (S.COLLECT, S.CLASSIFY, 10),
+    (S.COLLECT, S.BUILD, 20),
     (S.BUILD, S.DONE, 10),
     (S.BUILD, S.BUILD_FAILED, 900),
-    (S.BUILD_FAILED, S.BUILD, 10),
-    (S.BUILD_FAILED, S.CLASSIFY, 20),
+    (S.BUILD_FAILED, S.CLASSIFY, 10),
+    (S.BUILD_FAILED, S.BUILD, 20),
     (S.BUILD_FAILED, S.COLLECT, 900),
 }
 
@@ -205,11 +209,17 @@ class TestClassification:
     def test_artifact_type_classification(self, fsm):
         (config,) = fsm.states[S.CLASSIFY].classification_extractions
         assert config.field_name == K.ARTIFACT_TYPE
-        assert [i.name for i in config.intents] == [t.value for t in ArtifactType]
-        assert [(i.name, i.description) for i in config.intents] == list(
-            META_ARTIFACT_TYPE_INTENTS
-        )
-        assert config.fallback_intent == ArtifactType.FSM.value
+        # D-035: the three types plus a fallback that is not a type.
+        assert [i.name for i in config.intents] == [
+            *(t.value for t in ArtifactType),
+            META_UNKNOWN_ARTIFACT_TYPE,
+        ]
+        assert [(i.name, i.description) for i in config.intents] == [
+            *META_ARTIFACT_TYPE_INTENTS,
+            (META_UNKNOWN_ARTIFACT_TYPE, META_UNKNOWN_ARTIFACT_TYPE_DESCRIPTION),
+        ]
+        assert config.fallback_intent == META_UNKNOWN_ARTIFACT_TYPE
+        assert META_UNKNOWN_ARTIFACT_TYPE not in {t.value for t in ArtifactType}
         assert config.confidence_threshold == MetaDefaults.TYPE_CONFIDENCE_THRESHOLD
         assert config.confidence_threshold == 0.4
         assert config.context_keys == [K.LATEST_REQUEST]
@@ -229,6 +239,8 @@ class TestHandlerOnlyKeys:
             K.VALIDATION_ERRORS,
             K.REVIEW_PRESENTATION,
             K.BUILD_REPLY,
+            K.BUILD_PROGRESS,
+            K.BUILD_SUMMARY,
         ):
             assert key in fsm.handler_only_keys, key
 
@@ -268,7 +280,12 @@ class TestRouting:
             (S.CLASSIFY, {}, S.COLLECT),
             (S.COLLECT, {K.BUILD_REQUESTED: True}, S.BUILD),
             (S.COLLECT, {K.TYPE_SWITCH: True}, S.CLASSIFY),
-            (S.COLLECT, {K.BUILD_REQUESTED: True, K.TYPE_SWITCH: True}, S.BUILD),
+            (S.COLLECT, {K.BUILD_REQUESTED: True, K.TYPE_SWITCH: True}, S.CLASSIFY),
+            (
+                S.BUILD_FAILED,
+                {K.BUILD_REQUESTED: True, K.TYPE_SWITCH: True},
+                S.CLASSIFY,
+            ),
             (S.BUILD, {K.BUILD_OUTCOME: MetaBuildOutcome.VALID}, S.DONE),
             (S.BUILD, {K.BUILD_OUTCOME: MetaBuildOutcome.INVALID}, S.BUILD_FAILED),
             (S.BUILD, {}, S.BUILD_FAILED),

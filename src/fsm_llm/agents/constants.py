@@ -701,6 +701,8 @@ class MetaContextKeys:
     """
 
     ARTIFACT_TYPE = "artifact_type"
+    # The type before a reclassification (``classify`` entry stash, internal).
+    PREVIOUS_ARTIFACT_TYPE = "_previous_artifact_type"
     # Driver hints, recomputed from each user message before the turn.
     REQUIREMENTS = "requirements"
     LATEST_REQUEST = "latest_request"
@@ -715,13 +717,22 @@ class MetaContextKeys:
     ARTIFACT = "artifact"
     VALIDATION_ERRORS = "validation_errors"
     REVIEW_PRESENTATION = "review_presentation"
+    # The assembled builder's progress record and summary (monitor view).
+    BUILD_PROGRESS = "build_progress"
+    BUILD_SUMMARY = "build_summary"
 
 
 class MetaBuildOutcome:
-    """Values of ``MetaContextKeys.BUILD_OUTCOME``."""
+    """Values of ``MetaContextKeys.BUILD_OUTCOME``.
+
+    ``INVALID``: the reply was assembled and failed validation. ``MALFORMED``:
+    the reply is not an artifact of the requested schema (a JSON-schema echo,
+    or a field of the wrong type); nothing was assembled from it.
+    """
 
     VALID = "valid"
     INVALID = "invalid"
+    MALFORMED = "malformed"
 
 
 # ``kind`` of the ``build_reply`` record ``MetaBuilderAgent.send`` writes when
@@ -735,6 +746,65 @@ META_BUILD_CALL_FAILED = "call_failed"
 # when the model dropped it (``MetaBuilderAgent``, D-024). It carries a phrase
 # the driver's build trigger accepts ("build it").
 META_BUILD_PROMPT = "Say 'build it' when you're ready."
+
+# Keyword hints the meta-builder driver computes from each user message
+# (``MetaBuilderAgent._turn_hints``). Every phrase matches on word boundaries.
+# A message that changes the artifact type routes back to ``classify``.
+META_SWITCH_WORDS: tuple[str, ...] = (
+    "instead",
+    "actually",
+    "change",
+    "switch",
+    "no,",
+    "not a",
+)
+# Whole messages that ask for the build.
+META_BUILD_TRIGGERS: frozenset[str] = frozenset(
+    {
+        "build it",
+        "build",
+        "go",
+        "build now",
+        "create it",
+        "make it",
+        "generate",
+        "done",
+        "finish",
+        "approve",
+        "yes",
+        "ok",
+        "lgtm",
+        "ship it",
+        "do it",
+    }
+)
+# Phrases that ask for the build anywhere in a message, unless a negation
+# comes before them in the same clause ("don't build it yet").
+META_BUILD_PHRASES: tuple[str, ...] = (
+    "build it",
+    "rebuild it",
+    "create it",
+    "generate it",
+)
+META_BUILD_NEGATIONS: tuple[str, ...] = (
+    "don't",
+    "dont",
+    "do not",
+    "not",
+    "never",
+    "won't",
+    "can't",
+    "cannot",
+)
+
+# The ``classify`` state's fallback intent: the message names no artifact
+# type. Never an ``ArtifactType`` value, so a fallback or an unrecognised
+# reply is told apart from a classified ``fsm`` (D-035).
+META_UNKNOWN_ARTIFACT_TYPE = "unknown"
+META_UNKNOWN_ARTIFACT_TYPE_DESCRIPTION = (
+    "The message does not say which kind of artifact it is: a detail, an "
+    "edit, a question or a vague idea"
+)
 
 
 class MetaHandlerNames:
@@ -763,6 +833,20 @@ META_HANDLER_ONLY_KEYS: tuple[str, ...] = (
     MetaContextKeys.VALIDATION_ERRORS,
     MetaContextKeys.REVIEW_PRESENTATION,
     MetaContextKeys.BUILD_REPLY,
+    MetaContextKeys.BUILD_PROGRESS,
+    MetaContextKeys.BUILD_SUMMARY,
+)
+
+# Keys a build writes. Cleared on ``build`` entry (a retry starts from
+# nothing) and on ``classify`` entry (they belong to the old type).
+META_BUILD_OUTPUT_KEYS: tuple[str, ...] = (
+    MetaContextKeys.BUILD_REPLY,
+    MetaContextKeys.BUILD_OUTCOME,
+    MetaContextKeys.ARTIFACT,
+    MetaContextKeys.VALIDATION_ERRORS,
+    MetaContextKeys.REVIEW_PRESENTATION,
+    MetaContextKeys.BUILD_PROGRESS,
+    MetaContextKeys.BUILD_SUMMARY,
 )
 
 

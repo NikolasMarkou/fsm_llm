@@ -423,24 +423,26 @@ class TestBuildRetry:
         assert len(llm.replies) == replies_before
         assert len(llm.build_requests()) == 2
 
-    def test_a_retry_of_the_same_type_keeps_the_agent_builder(self):
-        """A second build of the same type reuses the builder: tools from the
-        first reply survive a second reply that only adds the pattern."""
+    def test_every_build_reply_gets_a_fresh_builder(self):
+        """D-029 18.3: a retry assembles the new reply alone; nothing of the
+        failed reply survives (``agent_type`` is a required field of every
+        agent build reply, D-022, so the old reason for reuse is gone)."""
         llm = ScriptedMetaLLM(
             intents=["agent"],
             builds=[
                 _spec(_AGENT_SPEC, agent_type=None),
-                _spec(_AGENT_SPEC, tools=[], agent_type="react"),
+                _spec(
+                    _AGENT_SPEC,
+                    tools=[{"name": "lookup", "description": "Look it up"}],
+                    agent_type="react",
+                ),
             ],
         )
         agent = MetaBuilderAgent(llm_interface=llm)
         agent.start("an agent for web research")
         assert "Agent type is required" in agent.send("build it")
         assert "Build complete!" in agent.send("build it")
-        assert [t["name"] for t in agent.get_result().artifact["tools"]] == [
-            "web_search",
-            "read_page",
-        ]
+        assert [t["name"] for t in agent.get_result().artifact["tools"]] == ["lookup"]
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +494,7 @@ class TestOutages:
         agent.start("a data pipeline that loads CSV files")
 
         reply = agent.send("it also writes a report")
-        assert "Say 'build it' when ready" in reply
+        assert reply.endswith(_SENTENCE)
         assert "WORKFLOW" in reply
         assert not agent.is_complete()
         # The turn was rolled back, the requirement is kept: the next turn

@@ -7,6 +7,7 @@ import socket
 
 import pytest
 
+from fsm_llm.agents.constants import META_BUILD_PROMPT
 from fsm_llm.agents.definitions import (
     ArtifactType,
     MetaBuilderConfig,
@@ -95,8 +96,8 @@ class TestMetaAgentInit:
     def test_initial_state(self):
         agent = MetaBuilderAgent()
         assert not agent.is_complete()
-        assert agent._builder is None
-        assert agent._started is False
+        assert agent.get_internal_state()["started"] is False
+        assert agent.get_internal_state()["builder_progress"] is None
 
 
 class TestMetaAgentLifecycle:
@@ -262,29 +263,32 @@ class TestMetaAgentImports:
 
 
 class TestBuildResult:
-    def test_build_result_with_valid_builder(self):
+    """The result is read from the conversation's context (D-029 18.3)."""
+
+    def test_build_result_from_a_valid_build(self):
         from fsm_llm.agents.meta_builders import FSMBuilder
 
-        agent = MetaBuilderAgent()
-        agent._artifact_type = ArtifactType.FSM
         builder = FSMBuilder()
         builder.set_overview("Bot", "A bot")
         builder.add_state("start", "Start", "Begin")
         builder.set_initial_state("start")
-        agent._builder = builder
+        result = MetaBuilderAgent()._result_from(
+            {
+                "artifact_type": "fsm",
+                "artifact": builder.to_dict(),
+                "build_outcome": "valid",
+                "validation_errors": [],
+            }
+        )
+        assert result.artifact_type == ArtifactType.FSM
+        assert result.is_valid and result.success
+        assert "Bot" in result.artifact_json
+        assert result.final_context["artifact_type"] == "fsm"
 
-        agent._build_result()
-        assert agent._result is not None
-        assert agent._result.artifact_type == ArtifactType.FSM
-        assert "Bot" in agent._result.artifact_json
-        assert agent._result.final_context["artifact_type"] == "fsm"
-
-    def test_build_result_with_no_builder(self):
-        agent = MetaBuilderAgent()
-        agent._build_result()
-        assert agent._result is not None
-        assert agent._result.success is False
-        assert agent._result.is_valid is False
+    def test_build_result_with_no_build(self):
+        result = MetaBuilderAgent()._result_from({})
+        assert result.success is False
+        assert result.is_valid is False
 
 
 @pytest.mark.usefixtures("offline_llm")
@@ -294,8 +298,10 @@ class TestStartSendFlow:
     def test_start_with_message_detects_type(self):
         agent = MetaBuilderAgent()
         response = agent.start("build me a chatbot")
+        # The canned reply names the keyword type; the failed turn was rolled
+        # back, so the conversation has no type yet (no mirror on the agent).
         assert "FSM" in response
-        assert agent.get_internal_state()["artifact_type"] == "fsm"
+        assert "artifact_type" not in agent.get_internal_state()
         assert agent.get_internal_state()["started"] is True
 
     def test_start_without_message_shows_welcome(self):
@@ -426,7 +432,7 @@ class TestLlmCallProviderFailure:
         agent = MetaBuilderAgent()
         reply = agent.start("I want a support bot")
 
-        assert "Say 'build it' when ready" in reply
+        assert reply.endswith(META_BUILD_PROMPT)
         assert reply.strip() != ""
         assert not agent.is_complete()
 

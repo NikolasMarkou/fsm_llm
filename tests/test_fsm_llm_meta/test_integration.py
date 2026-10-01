@@ -116,22 +116,25 @@ class TestWelcomeMessage:
 
 class TestBuildResultFinalContext:
     def test_has_final_context(self):
-        agent = MetaBuilderAgent()
-        agent._artifact_type = ArtifactType.FSM
-        agent._builder = FSMBuilder()
-        agent._builder.set_overview("Test", "A test FSM")
-        agent._builder.add_state("start", "Start", "Start")
-        agent._builder.initial_state = "start"
-        agent._build_result()
-        fc = agent._result.final_context
+        builder = FSMBuilder()
+        builder.set_overview("Test", "A test FSM")
+        builder.add_state("start", "Start", "Start")
+        builder.initial_state = "start"
+        result = MetaBuilderAgent()._result_from(
+            {
+                "artifact_type": ArtifactType.FSM.value,
+                "artifact": builder.to_dict(),
+                "build_outcome": "valid",
+                "validation_errors": [],
+            }
+        )
+        fc = result.final_context
         assert "artifact_json" in fc
         assert isinstance(fc["artifact_json"], dict)
         assert fc["artifact_type"] == "fsm"
 
-    def test_no_builder_empty_context(self):
-        agent = MetaBuilderAgent()
-        agent._build_result()
-        assert agent._result.final_context == {}
+    def test_no_build_empty_context(self):
+        assert MetaBuilderAgent()._result_from({}).final_context == {}
 
 
 # ---------------------------------------------------------------------------

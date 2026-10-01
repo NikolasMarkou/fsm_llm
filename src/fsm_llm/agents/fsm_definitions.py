@@ -2261,21 +2261,23 @@ def build_meta_builder_fsm() -> dict[str, Any]:
     (``MetaBuilderStates``):
 
     - ``classify`` (initial, silent): ``classification_extractions`` writes
-      ``artifact_type`` (fsm, workflow, agent; fallback fsm), reading
+      ``artifact_type`` (fsm, workflow, agent; fallback ``unknown``, which
+      the driver's exit handler resolves to a type), reading
       ``latest_request`` as its context so a message-free step classifies
       too. ``-> build`` p10 when ``build_requested`` is True, else
       ``-> collect`` p900.
     - ``collect`` (speaking, no extraction): the reply asks for details and
       ends with the build prompt; it sees only ``artifact_type``,
-      ``requirements`` and ``validation_errors``. ``-> build`` p10 on
-      ``build_requested``, ``-> classify`` p20 on ``type_switch``, otherwise
-      BLOCKED (stay).
+      ``requirements`` and ``validation_errors``. ``-> classify`` p10 on
+      ``type_switch``, ``-> build`` p20 on ``build_requested`` (a message
+      that does both is reclassified first, then ``classify -> build``),
+      otherwise BLOCKED (stay).
     - ``build`` (silent completion state): one structured completion over
       ``_build_messages`` with the response format in
       ``_build_response_format``, result in ``build_reply``. ``-> done`` p10
       when ``build_outcome == "valid"``, else ``-> build_failed`` p900.
-    - ``build_failed`` (silent): ``-> build`` p10 on ``build_requested``,
-      ``-> classify`` p20 on ``type_switch``, ``-> collect`` p900.
+    - ``build_failed`` (silent): ``-> classify`` p10 on ``type_switch``,
+      ``-> build`` p20 on ``build_requested``, ``-> collect`` p900.
     - ``done`` (terminal, silent).
 
     The driver writes ``requirements``, ``latest_request``,
@@ -2288,12 +2290,13 @@ def build_meta_builder_fsm() -> dict[str, Any]:
     from .constants import (
         META_ARTIFACT_TYPE_INTENTS,
         META_HANDLER_ONLY_KEYS,
+        META_UNKNOWN_ARTIFACT_TYPE,
+        META_UNKNOWN_ARTIFACT_TYPE_DESCRIPTION,
         MetaBuilderStates,
         MetaBuildOutcome,
         MetaContextKeys,
         MetaDefaults,
     )
-    from .definitions import ArtifactType
     from .meta_prompts import build_collect_response_instructions
 
     # DECISION plan-2026-10-01T093600-944e2692/D-011: five states with the
@@ -2321,14 +2324,28 @@ def build_meta_builder_fsm() -> dict[str, Any]:
             "purpose": ("Classify the request as an FSM, a workflow or an agent"),
             "extraction_instructions": "",
             "response_instructions": "",
+            # DECISION plan-2026-10-01T093600-944e2692/D-035: the fallback is
+            # `unknown`, not an artifact type. Do NOT make `fsm` the fallback
+            # again: core stores the fallback at any confidence, so a vague
+            # edit ("change the tool name") classified `fsm` at 0.1 flipped an
+            # agent session to an FSM, and `fsm` meant both "an FSM" and "no
+            # idea". The classify exit handler resolves `unknown` (and a
+            # discarded low-confidence intent) to the previous type, else the
+            # keyword type. See decisions.md D-035.
             "classification_extractions": [
                 {
                     "field_name": keys.ARTIFACT_TYPE,
                     "intents": [
                         {"name": name, "description": description}
-                        for name, description in META_ARTIFACT_TYPE_INTENTS
+                        for name, description in (
+                            *META_ARTIFACT_TYPE_INTENTS,
+                            (
+                                META_UNKNOWN_ARTIFACT_TYPE,
+                                META_UNKNOWN_ARTIFACT_TYPE_DESCRIPTION,
+                            ),
+                        )
                     ],
-                    "fallback_intent": ArtifactType.FSM.value,
+                    "fallback_intent": META_UNKNOWN_ARTIFACT_TYPE,
                     "confidence_threshold": MetaDefaults.TYPE_CONFIDENCE_THRESHOLD,
                     "context_keys": [keys.LATEST_REQUEST],
                 }
@@ -2365,16 +2382,16 @@ def build_meta_builder_fsm() -> dict[str, Any]:
             },
             "transitions": [
                 {
-                    "target_state": states_.BUILD,
-                    "description": "The user asked to build the artifact",
-                    "priority": 10,
-                    "conditions": [build_requested],
-                },
-                {
                     "target_state": states_.CLASSIFY,
                     "description": "The user switched to another artifact type",
-                    "priority": 20,
+                    "priority": 10,
                     "conditions": [type_switch],
+                },
+                {
+                    "target_state": states_.BUILD,
+                    "description": "The user asked to build the artifact",
+                    "priority": 20,
+                    "conditions": [build_requested],
                 },
             ],
         },
@@ -2427,16 +2444,16 @@ def build_meta_builder_fsm() -> dict[str, Any]:
             "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": states_.BUILD,
-                    "description": "The user asked to build again",
-                    "priority": 10,
-                    "conditions": [build_requested],
-                },
-                {
                     "target_state": states_.CLASSIFY,
                     "description": "The user switched to another artifact type",
-                    "priority": 20,
+                    "priority": 10,
                     "conditions": [type_switch],
+                },
+                {
+                    "target_state": states_.BUILD,
+                    "description": "The user asked to build again",
+                    "priority": 20,
+                    "conditions": [build_requested],
                 },
                 {
                     "target_state": states_.COLLECT,
