@@ -1,0 +1,59 @@
+{
+  "arm": {
+    "display": "native_fsm",
+    "native": true
+  },
+  "bench_id": "l4-execute-write",
+  "block": "B2",
+  "created_at": "2026-10-01T18:21:22Z",
+  "first_request": {
+    "n_requests": 1,
+    "run_error": "AgentError",
+    "settings_sha256": "a7809013f6e99d6d3d22b0d316ac42db5c68b2b4a86e31f4c16662f278e9595e",
+    "system_sha256": "143d22ff74f55c565cf8b264736e9205eebe797e9eb2b82a11eaf69c9ad62304",
+    "tools_sha256": "b304c2945c6bd20922ca5ca473dceb73ae50a416dace65092a91411a4919ecd8",
+    "user_sha256": "249882c42ddd4befd35d1e25ca50a1b8cd4c8322a0f35ed56387f506ccfcd4fd"
+  },
+  "fixture_hash": "739c8ec071a76123da3168b761426c1502159e6c23fec5488975ab6b28abecd1",
+  "git_commit": "38d43574f1cd32e04c1cbae3c6c3423620fc4db8",
+  "llm_request": {
+    "max_tokens": 2000,
+    "model": "ollama_chat/qwen3.5:4b",
+    "reasoning_effort": "none",
+    "seed": 20260722000,
+    "temperature": 0.3,
+    "timeout": 120.0,
+    "tool_choice": "auto"
+  },
+  "model": "ollama_chat/qwen3.5:4b",
+  "model_digest": {
+    "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+    "tag": "qwen3.5:4b"
+  },
+  "n_preregistered": 40,
+  "prompt_bytes_sha256": "4bba9ff7e039044d7013ddfbf3069ca6d491115881294300367e79a0abe3e353",
+  "seed": {
+    "base": 20260722000,
+    "effective_arm": "native",
+    "per_row": "base+run-1"
+  },
+  "tool_surface": {
+    "declared_tools": [
+      "append_file",
+      "append_plan_file",
+      "delete_file",
+      "grep_files",
+      "list_dir",
+      "list_plan_dir",
+      "path_exists",
+      "plan_path_exists",
+      "read_file",
+      "read_plan_file",
+      "write_file",
+      "write_plan_file"
+    ],
+    "native_function_calling": true,
+    "retry_attempts": 1,
+    "timeout_seconds": 600
+  }
+}

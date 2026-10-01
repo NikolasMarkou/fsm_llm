@@ -19,6 +19,8 @@ Usage (always the venv; see scripts/bench_data/README.md):
         --bench-id agents-react --block B1 --arm fsm_advance --trials 3
     .venv/bin/python scripts/agents_bench.py report agents-react \\
         --blocks B0 B1 --pair B1/fsm_advance:B0/legacy
+    .venv/bin/python scripts/agents_bench.py report agents-react \\
+        --blocks B0 B2 --pair B2/fsm_toolcall:B0/native_fc
 
 Arm labels name the code an arm ran, so a label is never reused for rows of
 changed code: ``legacy`` and ``native_fc`` are B0's arms (d4b1626), retired
@@ -835,6 +837,24 @@ def _fsm_advance_arm(
     )
 
 
+def _fsm_toolcall_arm(
+    tools: dict[str, Callable[..., Any]], model: str, llm_interface: Any
+) -> Any:
+    """create_agent("native_fc", tools, config=...): tool calls on core steps."""
+    # B0's `native_fc` construction (same AgentConfig limits), run on the
+    # code where NativeFunctionCallingReactAgent is an FSM driven by core's
+    # completion state (plan 944e2692 steps 15-16) instead of its private
+    # loop; the docstring is the manifest's `arm.factory` text.
+    from fsm_llm.agents import create_agent
+
+    return create_agent(
+        "native_fc",
+        build_registry(tools),
+        config=_agent_config(model),
+        llm_interface=llm_interface,
+    )
+
+
 #: Arm label -> factory ``(tools, model, llm_interface) -> agent with
 #: .run(task)``; the factory must hand ``llm_interface`` to the agent, or the
 #: row counts no call (``meter_parity`` shows it). Recorded rows stay
@@ -843,6 +863,7 @@ def _fsm_advance_arm(
 #: code it ran: changed code gets a NEW label, never an old one.
 ARMS: dict[str, Callable[[dict[str, Callable[..., Any]], str, Any], Any]] = {
     "fsm_advance": _fsm_advance_arm,
+    "fsm_toolcall": _fsm_toolcall_arm,
 }
 
 
@@ -1085,8 +1106,8 @@ def _completion_targets() -> list[tuple[Any, str]]:
 
     ``fsm_llm.llm`` binds ``completion`` by name at import (every
     ``LiteLLMInterface`` request, the classifier's included, is one count
-    there); a caller still on its own path (native_fc until it runs on core)
-    looks ``litellm.completion`` up at call time. Loaded here, BEFORE any arm
+    there); a caller off core's path (B0's native_fc had one) would look
+    ``litellm.completion`` up at call time. Loaded here, BEFORE any arm
     imports ``fsm_llm.agents``.
     """
     import litellm
@@ -1209,15 +1230,7 @@ def _checked_manifest(
         bench_id=bench_id, block=block, arm_name=arm_name, trials=trials, model=model
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    drift = [
-        k
-        for k in _PINNED_AT_RUN
-        if hb.manifest_differences({k: manifest.get(k)}, {k: current[k]})
-    ]
-    if manifest.get("model_digest", {}).get("digest") != current["model_digest"].get(
-        "digest"
-    ):
-        drift.append("model_digest")
+    drift = hb.pinned_drift(manifest, current, _PINNED_AT_RUN)
     if drift:
         raise BenchDataError(
             f"{manifest_path} was registered with different {drift}; "

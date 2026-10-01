@@ -433,7 +433,13 @@ class TestCLI:
 
     @pytest.mark.parametrize(
         "argv",
-        [["--help"], ["probe-seed", "--help"], ["run", "--help"], ["report", "--help"]],
+        [
+            ["--help"],
+            ["probe-seed", "--help"],
+            ["run", "--help"],
+            ["register", "--help"],
+            ["report", "--help"],
+        ],
     )
     def test_help_exits_zero(self, argv, capsys):
         """Defect guarded: a --help that crashes is a CLI nobody can operate
@@ -741,6 +747,131 @@ class TestPairAcrossArmLabels:
             "r: 0 vs false",
             "t: 120 vs 120.0",
         ]
+
+
+class TestRegisterNativeFsm:
+    """L4 B2 ``native_fsm`` (plan 944e2692 step 19, D-010, D-049): the block
+    is registered (manifest only, committed before row 1) and ``run`` keeps
+    that manifest and refuses it on drift instead of overwriting it."""
+
+    @pytest.fixture
+    def offline(self, tmp_path: Path, monkeypatch):
+        import fsm_llm.llm
+
+        def no_send(**kw):
+            raise AssertionError("the registration sent a provider request")
+
+        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
+        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
+        monkeypatch.setattr(hb, "BENCH_DATA", tmp_path)
+        monkeypatch.setattr(
+            hb, "_model_digest", lambda tag=hb.MODEL_TAG: dict(_DIGEST_STUB)
+        )
+        monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
+        monkeypatch.setattr(hb, "_git_dirty", lambda: False)
+        return tmp_path / "l4-execute-write" / "B2"
+
+    def test_native_fsm_is_the_native_flag_under_a_new_label(self):
+        """Defect guarded: B2 rows of changed code written under B1's
+        ``native`` label, or a ``native_fsm`` arm that runs the ReAct arm."""
+        assert hb.ARMS["native_fsm"] is True
+        assert hb.ARMS["native"] is True and hb.ARMS["react"] is False
+
+    def test_register_writes_the_manifest_only_and_once(self, offline):
+        """Defect guarded: a block whose manifest cannot be committed before
+        its first row, or that can be registered twice."""
+        path = hb.register_block(
+            "l4-execute-write", "B2", "native_fsm", 40, 20260722000
+        )
+        assert path == offline / "manifest_native_fsm.json"
+        assert sorted(p.name for p in offline.iterdir()) == [path.name]
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        assert all(field in manifest for field in hb.MANIFEST_FIELDS)
+        assert manifest["arm"] == {"native": True, "display": "native_fsm"}
+        assert manifest["tool_surface"]["native_function_calling"] is True
+        assert manifest["n_preregistered"] == 40
+        assert manifest["seed"]["base"] == 20260722000
+        assert manifest["llm_request"]["seed"] == 20260722000
+        assert manifest["llm_request"]["timeout"] == 120.0
+        assert manifest["first_request"]["tools_sha256"] is not None
+        with pytest.raises(hb.BenchDataError, match="registered ONCE"):
+            hb.register_block("l4-execute-write", "B2", "native_fsm", 40, 20260722000)
+        with pytest.raises(hb.BenchDataError, match="unknown arm"):
+            hb.register_block("l4-execute-write", "B2", "native_fs", 40)
+
+    def test_run_keeps_the_registered_manifest(self, offline, monkeypatch):
+        """Defect guarded: ``run`` rewriting the committed manifest (new
+        ``created_at``/``git_commit``), so the pre-registration is gone."""
+        path = hb.register_block("l4-execute-write", "B2", "native_fsm", 2, 7)
+        before = path.read_text(encoding="utf-8")
+        monkeypatch.setattr(hb, "_git_commit", lambda: "f00d")
+        seen = []
+
+        def fake_run_one(live, tmp, run, *, native, seed):
+            seen.append((run, native, seed))
+            row = _synthetic_rows([(True, True, True, True)])[0]
+            return {**row, "run": run, "seed": seed}, []
+
+        monkeypatch.setattr(hb, "_run_one", fake_run_one)
+        summary = hb.run_block("l4-execute-write", "B2", "native_fsm", 2, 7)
+        assert path.read_text(encoding="utf-8") == before
+        assert seen == [(1, True, 7), (2, True, 8)]
+        assert summary["n"] == 2 and summary["status"] == "complete"
+        assert summary["run"] == {"git_commit": "f00d", "git_dirty": False}
+
+    @pytest.mark.parametrize(
+        ("n", "seed", "field"), [(39, 7, "n_preregistered"), (2, 8, "seed")]
+    )
+    def test_run_refuses_a_registered_block_that_drifted(
+        self, offline, monkeypatch, n, seed, field
+    ):
+        """Defect guarded: a block registered at one n or seed and run at
+        another, with the committed manifest still claiming the first."""
+        hb.register_block("l4-execute-write", "B2", "native_fsm", 2, 7)
+        monkeypatch.setattr(
+            hb, "_run_one", lambda *a, **k: pytest.fail("a dispatch ran")
+        )
+        with pytest.raises(hb.BenchDataError, match=field):
+            hb.run_block("l4-execute-write", "B2", "native_fsm", n, seed)
+        assert not (offline / "rows_native_fsm.jsonl").exists()
+
+    def test_run_refuses_when_the_first_request_changed(self, offline, monkeypatch):
+        """Defect guarded: the native request bytes (tools, timeout) changing
+        between registration and run unnoticed."""
+        hb.register_block("l4-execute-write", "B2", "native_fsm", 2, 7)
+        original = hb.wire_settings
+        monkeypatch.setattr(
+            hb, "wire_settings", lambda params: {**original(params), "timeout": 30.0}
+        )
+        with pytest.raises(hb.BenchDataError, match="llm_request"):
+            hb.run_block("l4-execute-write", "B2", "native_fsm", 2, 7)
+
+    def test_pinned_drift_ignores_key_order_but_not_types(self):
+        """Defect guarded (review pass 12 note 3): a manifest read back from
+        its sort_keys file drifting from the in-memory one on key order
+        inside a list, so ``run`` refuses a valid block; a type change must
+        still be drift."""
+        current = {
+            "llm_request": {"anyOf": [{"type": "string", "description": "x"}]},
+            "model_digest": {"digest": "d"},
+        }
+        recorded = json.loads(json.dumps(current, sort_keys=True))
+        assert hb.pinned_drift(recorded, current, ("llm_request",)) == []
+        typed = {**current, "llm_request": {"anyOf": 1.0}}
+        stored = {**recorded, "llm_request": {"anyOf": 1}}
+        assert hb.pinned_drift(stored, typed, ("llm_request",)) == ["llm_request"]
+        moved = {**current, "model_digest": {"digest": "e"}}
+        assert hb.pinned_drift(recorded, moved, ()) == ["model_digest"]
+
+    def test_the_cli_registers(self, offline, capsys):
+        argv = ["register", "--bench-id", "l4-execute-write", "--block", "B2"]
+        rc = hb.main([*argv, "--arm", "native_fsm", "--n", "40", "--seed", "1"])
+        assert rc == 0
+        assert "registered" in capsys.readouterr().out
+        assert (offline / "manifest_native_fsm.json").is_file()
+
+
+_DIGEST_STUB = {"tag": "qwen3.5:4b", "digest": "2a654d98e6fb"}
 
 
 class TestRunRecordsItsCommit:

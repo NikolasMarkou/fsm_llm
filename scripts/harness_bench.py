@@ -8,9 +8,14 @@ D-001 (plan plan-2026-07-22T114536-879d04a0): the machinery is IMPORTED from
 ``tests/test_fsm_llm_harness/test_live_ollama.py``, which stays authoritative.
 D-002: blocks are pre-registered, fixed n, run exactly ONCE, no interim looks.
 
-Usage (probe-seed / run / report; always the venv; see bench_data/README.md):
+Usage (probe-seed / register / run / report; always the venv; see
+bench_data/README.md):
+    .venv/bin/python scripts/harness_bench.py register \\
+        --bench-id l4-execute-write --block B2 --arm native_fsm --n 40 \\
+        --seed 20260722000
     .venv/bin/python scripts/harness_bench.py run \\
-        --bench-id l4-execute-write --block B0 --arm native --n 40
+        --bench-id l4-execute-write --block B2 --arm native_fsm --n 40 \\
+        --seed 20260722000
 
 Import hygiene (plan assumption A6): everything beyond the stdlib imports
 LAZILY inside entry points -- ``test_live_ollama`` evaluates its live gate at
@@ -61,7 +66,24 @@ _DATE_MASK = "Today's date: <DATE>"
 _TASK_MASK = "<TASK>"
 
 #: Arm label -> ``native_function_calling`` flag (structural, not a string).
-ARMS: dict[str, bool] = {"native": True, "react": False}
+#: A label names the code it ran: ``native``/``react`` are the B0/B1 arms
+#: (plan 879d04a0); ``native_fsm`` is the same flag on the code where
+#: native_fc runs as an FSM on core's completion state (plan 944e2692, B2).
+ARMS: dict[str, bool] = {"native": True, "react": False, "native_fsm": True}
+
+#: Manifest keys a registered block must still match when ``run`` starts
+#: (``pinned_drift``; the served model digest is checked beside them).
+_PINNED_AT_RUN = (
+    "n_preregistered",
+    "seed",
+    "model",
+    "prompt_bytes_sha256",
+    "tool_surface",
+    "fixture_hash",
+    "arm",
+    "llm_request",
+    "first_request",
+)
 
 #: The per-row booleans every summary counts and every report recounts.
 K_METRICS = (
@@ -334,6 +356,40 @@ def manifest_differences(
     return lines
 
 
+def pinned_drift(
+    recorded: dict[str, Any], current: dict[str, Any], keys: tuple[str, ...]
+) -> list[str]:
+    """The pinned keys a registered manifest no longer matches at ``run``.
+
+    Interface contract (callers: ``_checked_manifest`` here and in
+    agents_bench; the tests):
+        - ``recorded`` is the manifest read back from disk, ``current`` the
+          one ``build_manifest`` returns now. ``current`` is normalised the
+          way ``_write_json`` stores a manifest (keys sorted at every level)
+          before the comparison, so key order inside a list never reads as
+          drift (review pass 12 note 3); values are compared as JSON text
+          (``manifest_differences``), so a type change is drift.
+        - Returns the drifted names in ``keys`` order, then
+          ``"model_digest"`` when the served digest moved. ``[]`` = no drift.
+          A key ``current`` lacks is compared as ``None``. Never raises.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-049: one drift check for
+    # both benches, against the stored (sort_keys) form. Do NOT compare the
+    # in-memory manifest as built (list items of dicts then drift on key
+    # order) and do NOT let `run` overwrite a registered manifest instead of
+    # checking it (the committed pre-registration would vanish). See D-049.
+    normal = json.loads(json.dumps(current, sort_keys=True))
+    drift = [
+        key
+        for key in keys
+        if manifest_differences({key: recorded.get(key)}, {key: normal.get(key)})
+    ]
+    recorded_digest = (recorded.get("model_digest") or {}).get("digest")
+    if recorded_digest != (normal.get("model_digest") or {}).get("digest"):
+        drift.append("model_digest")
+    return drift
+
+
 def _fixture_hash(live: Any) -> str:
     """sha256 pinning EXECUTE_PLAN_MD + EXECUTE_STATE_MD + SEED_FILES."""
     seeds = "\x00".join(f"{k}\n{v}" for k, v in sorted(live.SEED_FILES.items()))
@@ -509,11 +565,60 @@ def _run_one(
     return row, trace
 
 
+def register_block(
+    bench_id: str, block: str, arm_name: str, n: int, seed: int | None = None
+) -> Path:
+    """Write the manifest only, so it can be committed before dispatch 1.
+
+    Refuses an unknown arm and a block arm that already has a manifest,
+    rows or a summary (a block is registered ONCE). ``run`` later keeps the
+    registered manifest and refuses it on drift (``_checked_manifest``).
+    """
+    if arm_name not in ARMS:
+        raise BenchDataError(f"unknown arm {arm_name!r}; expected one of {ARMS}")
+    paths = _arm_paths(BENCH_DATA / bench_id / block, arm_name)
+    for path in paths:
+        if path.exists():
+            raise BenchDataError(f"{path} exists -- a block is registered ONCE")
+    live = _live()
+    manifest = build_manifest(
+        live, bench_id=bench_id, block=block, arm_name=arm_name, n=n, seed=seed
+    )
+    paths[0].parent.mkdir(parents=True, exist_ok=True)
+    _write_json(paths[0], manifest)
+    return paths[0]
+
+
+def _checked_manifest(
+    live: Any,
+    manifest_path: Path,
+    *,
+    bench_id: str,
+    block: str,
+    arm_name: str,
+    n: int,
+    seed: int | None,
+) -> dict[str, Any]:
+    """The registered manifest, refused if ``run`` would not match it."""
+    current = build_manifest(
+        live, bench_id=bench_id, block=block, arm_name=arm_name, n=n, seed=seed
+    )
+    manifest: dict[str, Any] = json.loads(manifest_path.read_text(encoding="utf-8"))
+    drift = pinned_drift(manifest, current, _PINNED_AT_RUN)
+    if drift:
+        raise BenchDataError(
+            f"{manifest_path} was registered with different {drift}; "
+            "pre-register a NEW block"
+        )
+    return manifest
+
+
 def run_block(
     bench_id: str, block: str, arm_name: str, n: int, seed: int | None = None
 ) -> dict[str, Any]:
-    """Manifest first, n dispatches, summary; an abort keeps its rows and is
-    summarised as ``status: aborted`` -- committed as-is, never re-rolled."""
+    """Manifest first (a registered one is kept and checked), n dispatches,
+    summary; an abort keeps its rows and is summarised as ``status:
+    aborted`` -- committed as-is, never re-rolled."""
     if arm_name not in ARMS:
         raise BenchDataError(f"unknown arm {arm_name!r}; expected one of {ARMS}")
     native = ARMS[arm_name]
@@ -529,11 +634,22 @@ def run_block(
             f"{rows_path} exists -- a block is run ONCE (D-002); no re-sampling"
         )
     live = _live()
-    bdir.mkdir(parents=True, exist_ok=True)
-    manifest = build_manifest(
-        live, bench_id=bench_id, block=block, arm_name=arm_name, n=n, seed=seed
-    )
-    _write_json(manifest_path, manifest)
+    if manifest_path.exists():
+        manifest = _checked_manifest(
+            live,
+            manifest_path,
+            bench_id=bench_id,
+            block=block,
+            arm_name=arm_name,
+            n=n,
+            seed=seed,
+        )
+    else:
+        bdir.mkdir(parents=True, exist_ok=True)
+        manifest = build_manifest(
+            live, bench_id=bench_id, block=block, arm_name=arm_name, n=n, seed=seed
+        )
+        _write_json(manifest_path, manifest)
     print(f"pre-registered {manifest_path} (digest {manifest['model_digest']})")
     started, status, ran = _utc_now(), "aborted", run_commit()
     try:
@@ -769,6 +885,14 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--arm", required=True, choices=sorted(ARMS))
     run.add_argument("--n", type=int, default=40)
     run.add_argument("--seed", type=int, default=None, help="base; row=base+run-1")
+    reg = sub.add_parser(
+        "register", help="write ONE block arm's manifest only (commit before run)"
+    )
+    reg.add_argument("--bench-id", required=True)
+    reg.add_argument("--block", required=True, help="block name, e.g. B2")
+    reg.add_argument("--arm", required=True, choices=sorted(ARMS))
+    reg.add_argument("--n", type=int, default=40)
+    reg.add_argument("--seed", type=int, default=None, help="base; row=base+run-1")
     rep = sub.add_parser("report", help="recompute k/n, Wilson, Fisher from jsonl")
     rep.add_argument("bench_id")
     rep.add_argument("--blocks", nargs="+", default=None, help="blocks to recount")
@@ -786,6 +910,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "probe-seed":
             probe_seed(model=args.model)
+        elif args.command == "register":
+            path = register_block(
+                args.bench_id, args.block, args.arm, args.n, args.seed
+            )
+            print(f"registered {path}")
         elif args.command == "run":
             run_block(args.bench_id, args.block, args.arm, args.n, args.seed)
         else:

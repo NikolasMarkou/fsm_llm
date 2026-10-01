@@ -425,18 +425,6 @@ class TestManifestGate:
         assert manifest["model_digest"]["tag"] == "qwen3.5:4b"
 
 
-def _native_arm(tools, model, llm_interface):
-    """create_agent("native_fc", ...): the shape step 19's arm will take."""
-    from fsm_llm.agents import create_agent
-
-    return create_agent(
-        "native_fc",
-        ab.build_registry(tools),
-        config=ab._agent_config(model),
-        llm_interface=llm_interface,
-    )
-
-
 _TWO_IDS = ("st-capital", "ty-order")
 
 
@@ -510,8 +498,7 @@ class TestManifestDisclosure:
         than what the agent hands its interface: for a native tool-calling
         arm its `tools=` must be the registry's schema bytes, and its system
         prompt the same for every task."""
-        monkeypatch.setitem(ab.ARMS, "native_probe", _native_arm)
-        disclosure = ab.request_disclosure("native_probe", ab.MODEL)
+        disclosure = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         assert disclosure["agent_class"].endswith("NativeFunctionCallingReactAgent")
         firsts = disclosure["first_request"]
         for task_id in _TWO_IDS:
@@ -1157,7 +1144,13 @@ class TestMeterV2:
 class TestArms:
     """The registered arms build their agents without an LLM call."""
 
-    @pytest.mark.parametrize(("arm", "cls"), [("fsm_advance", "ReactAgent")])
+    @pytest.mark.parametrize(
+        ("arm", "cls"),
+        [
+            ("fsm_advance", "ReactAgent"),
+            ("fsm_toolcall", "NativeFunctionCallingReactAgent"),
+        ],
+    )
     def test_arm_builds_its_agent_class(self, arm, cls):
         """Defect guarded: an arm factory broken by a signature change,
         found only after the live block has started."""
@@ -1208,6 +1201,153 @@ class TestArms:
         assert not any(tmp_path.iterdir())
 
 
+def _scripted_native_provider():
+    """A scripted tool-calling provider for a native_fc run on the bench tools.
+
+    The first turn of a run calls ``lookup_country``; once a tool result is
+    in the transcript the model answers. Usage alternates between an object,
+    a dict and absent, and requests for st-convert raise, so parity covers
+    tokens, usage-missing and errors. Returns ``(completion, calls)``.
+    """
+    calls: list[int] = []
+
+    def completion(**kw):
+        calls.append(1)
+        messages = kw["messages"]
+        if any("26.2 miles" in str(m.get("content")) for m in messages):
+            raise RuntimeError("provider down")
+        n = len(calls)
+        usage = (
+            None
+            if n % 3 == 0
+            else SimpleNamespace(
+                prompt_tokens=10 + n, completion_tokens=3, total_tokens=None
+            )
+            if n % 2
+            else {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}
+        )
+        if any(m.get("role") == "tool" for m in messages):
+            return _provider_reply("Maskett", usage)
+        call = SimpleNamespace(
+            id=f"call_{n}",
+            type="function",
+            function=SimpleNamespace(
+                name="lookup_country", arguments='{"name": "Veloria"}'
+            ),
+        )
+        message = SimpleNamespace(content=None, tool_calls=[call])
+        reply = SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        if usage is not None:
+            reply.usage = usage
+        return reply
+
+    return completion, calls
+
+
+class TestFsmToolcallArm:
+    """agents-react B2 ``fsm_toolcall`` (plan 944e2692 step 19, D-010, D-049):
+    B0 ``native_fc``'s construction and limits on the code where native_fc
+    runs on core's completion state, metered by "2"."""
+
+    @pytest.fixture
+    def provider(self, monkeypatch):
+        import fsm_llm.llm
+
+        completion, calls = _scripted_native_provider()
+        monkeypatch.setattr(fsm_llm.llm, "completion", completion)
+        monkeypatch.setattr(
+            fsm_llm.llm, "get_supported_openai_params", lambda model: []
+        )
+        return calls
+
+    def test_manifest_matches_b0_native_fc_but_the_arm_and_meter(self, monkeypatch):
+        """Defect guarded: a B2 arm registered with other limits, tasks,
+        trials or model than the B0 ``native_fc`` block it is paired with,
+        or under B0's label or meter."""
+        import fsm_llm.llm
+
+        def no_send(**kw):
+            raise AssertionError("the disclosure probe sent a provider request")
+
+        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
+        monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
+        b0 = json.loads(
+            (
+                ab.BENCH_DATA / "agents-react" / "B0" / "manifest_native_fc.json"
+            ).read_text(encoding="utf-8")
+        )
+        manifest = ab.build_manifest(
+            bench_id="agents-react",
+            block="B2",
+            arm_name="fsm_toolcall",
+            trials=ab.TRIALS,
+            model=ab.MODEL,
+        )
+        for key in ("tasks_sha256", "limits", "trials", "model", "n_tasks"):
+            assert manifest[key] == b0[key], key
+        assert manifest["prompt_bytes_sha256"] == b0["prompt_bytes_sha256"]
+        assert (
+            manifest["tool_surface"]["tools_per_task"]
+            == b0["tool_surface"]["tools_per_task"]
+        )
+        assert manifest["wrapper_version"] == "2" != b0["wrapper_version"]
+        assert manifest["arm"]["name"] == "fsm_toolcall"
+        assert manifest["arm"]["factory"].startswith('create_agent("native_fc"')
+        assert manifest["agent_class"] == (
+            "fsm_llm.agents.native_fc.NativeFunctionCallingReactAgent"
+        )
+        assert manifest["llm_request"]["timeout"] == 120.0
+        firsts = manifest["first_request"]
+        assert set(firsts) == {t.id for t in ab.TASKS}
+        for task_id, first in firsts.items():
+            assert first["tools_sha256"] == manifest["tool_schemas_sha256"][task_id]
+            assert first["run_error"] is not None
+
+    def test_the_injected_interface_sends_what_the_agent_would_send(self):
+        """Defect guarded: the metered interface changing the request a native
+        run sends (temperature, max_tokens, timeout, Ollama preparation), so
+        B2 measures a configuration B0's construction never sends."""
+        tools = ab.make_tools()
+        selected = {"lookup_country": tools["lookup_country"]}
+        prompt = ab.tasks_by_id()["st-capital"].prompt
+        sent = []
+        for llm_interface in (None, ab.metered_interface(ab.MODEL)):
+            agent = ab.ARMS["fsm_toolcall"](selected, ab.MODEL, llm_interface)
+            with hb.captured_wire() as captured:
+                with pytest.raises(Exception):
+                    agent.run(prompt)
+            assert captured, "the run sent no request"
+            sent.append(captured[0])
+        assert json.dumps(sent[0]) == json.dumps(sent[1])
+
+    def test_meter_parity_on_a_scripted_tool_calling_run(self, provider):
+        """Defect guarded (STOP IF 5): the "2" meter counting zero or twice
+        the calls of the "1" meter on a native tool-calling run, so B2's
+        calls per task are not comparable with B0's."""
+        results = ab.meter_parity(
+            ["st-capital", "st-convert"], "fsm_toolcall", "gpt-4o-mini"
+        )
+        assert all(r["equal"] for r in results), results
+        ran, failed = results
+        assert ran["error"] is None
+        assert ran["v2"]["llm_calls"] == 2
+        assert ran["v2"]["prompt_tokens"] > 0
+        assert failed["v2"]["llm_errors"] >= 1
+        assert sum(r["v1"]["llm_calls"] for r in results) == len(provider)
+
+    def test_a_scripted_trial_is_correct_with_one_tool_call(self, provider):
+        """Defect guarded: an arm that cannot succeed (the answer never
+        reaches ``AgentResult.answer``, or the tool call never runs)."""
+        task = ab.tasks_by_id()["st-capital"]
+        row = ab._trial_row(task, 1, "fsm_toolcall", "gpt-4o-mini")
+        assert row["error"] is None, row
+        assert row["correct"] is True
+        assert row["success"] is True
+        assert row["tool_calls"] == 1
+        assert row["tools_used"] == ["lookup_country"]
+        assert row["llm_calls"] == len(provider) == 2
+
+
 class TestCLI:
     @pytest.mark.parametrize(
         "argv",
@@ -1244,8 +1384,8 @@ class TestWireDisclosure:
 
     @pytest.fixture
     def native_two(self, monkeypatch):
-        """Two tasks, a stub digest/commit, the native arm registered, and a
-        provider that fails the test if anything is sent."""
+        """Two tasks, a stub digest/commit, and a provider that fails the
+        test if anything is sent (the native arm is ``fsm_toolcall``)."""
         import fsm_llm.llm
 
         def no_send(**kw):
@@ -1254,7 +1394,6 @@ class TestWireDisclosure:
         monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
         monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
         monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
-        monkeypatch.setitem(ab.ARMS, "native_probe", _native_arm)
         two = tuple(t for t in ab.TASKS if t.id in _TWO_IDS)
         monkeypatch.setattr(ab, "TASKS", two)
 
@@ -1266,7 +1405,7 @@ class TestWireDisclosure:
         manifest field, because the digest stopped at the interface."""
         from fsm_llm import LiteLLMInterface
 
-        before = ab.request_disclosure("native_probe", ab.MODEL)
+        before = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         assert before["llm_request"]["temperature"] == ab.LIMITS["temperature"]
         original = LiteLLMInterface._apply_model_specific_params
 
@@ -1277,7 +1416,7 @@ class TestWireDisclosure:
         monkeypatch.setattr(
             LiteLLMInterface, "_apply_model_specific_params", greedy_tools
         )
-        after = ab.request_disclosure("native_probe", ab.MODEL)
+        after = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         assert after["llm_request"]["temperature"] == 0
         assert hb.manifest_differences(before, after)
         for task_id in _TWO_IDS:
@@ -1293,11 +1432,11 @@ class TestWireDisclosure:
         the last user turn) going unrecorded."""
         import fsm_llm.llm
 
-        before = ab.request_disclosure("native_probe", ab.MODEL)
+        before = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         monkeypatch.setattr(
             fsm_llm.llm, "prepare_ollama_messages", lambda messages, *a: messages
         )
-        after = ab.request_disclosure("native_probe", ab.MODEL)
+        after = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         for task_id in _TWO_IDS:
             assert (
                 before["first_request"][task_id]["user_sha256"]
@@ -1324,9 +1463,9 @@ class TestWireDisclosure:
             return interface
 
         monkeypatch.setattr(ab, "metered_interface", seeded(7))
-        seven = ab.request_disclosure("native_probe", ab.MODEL)
+        seven = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         monkeypatch.setattr(ab, "metered_interface", seeded(8))
-        eight = ab.request_disclosure("native_probe", ab.MODEL)
+        eight = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         assert seven["llm_request"]["seed"] == 7
         assert seven["llm_request"]["api_key"] == "<redacted>"
         assert "sk-live" not in json.dumps(seven)
@@ -1358,14 +1497,14 @@ class TestWireDisclosure:
         from fsm_llm.agents import native_fc
 
         monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
-        ab.register_block("agents-react", "B9", "native_probe", trials=1)
+        ab.register_block("agents-react", "B9", "fsm_toolcall", trials=1)
         monkeypatch.setattr(
             native_fc, "_SYSTEM_PROMPT", "You are a terse agent. Never call tools."
         )
         with pytest.raises(ab.BenchDataError, match="first_request"):
-            ab.run_block("agents-react", "B9", "native_probe", trials=1)
+            ab.run_block("agents-react", "B9", "fsm_toolcall", trials=1)
         assert not (
-            tmp_path / "agents-react" / "B9" / "rows_native_probe.jsonl"
+            tmp_path / "agents-react" / "B9" / "rows_fsm_toolcall.jsonl"
         ).exists()
 
     def test_field_comparison_distinguishes_types(self):

@@ -34,6 +34,10 @@ read as the same axis:
 
 - `l4-execute-write`: `native` (`native_function_calling=True`, the shipped
   default) vs `react` (the opt-in control) -- these are AGENT shapes.
+  `native_fsm` (B2, plan 944e2692 D-049) is the same `native=True` dispatch
+  on the code where native_fc runs as an FSM on core's completion state
+  instead of its private loop; a new label because the code changed, paired
+  with `B1/native`.
 - `l7-explore-coldstart`: `bare` (a plain `mkdir` plan directory, L6's own
   population) vs `seeded` (the same `mkdir` plus the product's
   `PlanDirectory.seed_protocol_skeleton()`) -- these are PLAN-DIRECTORY shapes,
@@ -51,6 +55,12 @@ read as the same axis:
     code, where core's `advance`/`run_until_terminal` steps the agent FSM.
     Same tasks, trials, limits, model digest and meter as B0; paired with
     `B0/legacy` under the pass rule written in D-052 before the run.
+  - B2 (plan 944e2692 D-010, re-recorded in D-049 before row 1):
+    `fsm_toolcall` is `create_agent("native_fc", tools, config=...)`, B0
+    `native_fc`'s construction and limits on the code where
+    `NativeFunctionCallingReactAgent` is an FSM driven by core's completion
+    state. Same 38 tasks, `tasks_sha256`, 3 trials and model digest as B0;
+    meter "2". Paired with `B0/native_fc`.
 
 ## Pre-registration rule (D-002)
 
@@ -81,6 +91,23 @@ dispatch whose first request is refused (`request_disclosure`; same rules as
 the agents-react disclosures below). Recorded B0/B1 manifests predate them.
 Their summaries carry `run: {git_commit, git_dirty}` read at run start.
 
+`register` (B2 onwards) writes the manifest alone, so it is committed before
+dispatch 1; `run` then keeps it and refuses on drift in `n_preregistered`,
+`seed`, `model`, `prompt_bytes_sha256`, `tool_surface`, `fixture_hash`,
+`arm`, `llm_request`, `first_request` or the served model digest (values
+compared as JSON text). B0/B1 manifests were written by `run` itself.
+
+```
+.venv/bin/python scripts/harness_bench.py register --bench-id l4-execute-write \
+    --block B2 --arm native_fsm --n 40 --seed 20260722000
+```
+
+Only the FIRST request of the dispatch is disclosed: the capture stub
+refuses it, so request 2 (the tool-result turns, the assistant `tool_calls`
+echo, a forced or repair turn) is never built. A change in the follow-up
+turns moves no manifest field and is disclosed only by `git_commit` and the
+summary's `run.git_commit` (review pass 12 W1 of plan 944e2692).
+
 A summary without its manifest is NOT evidence; the writer refuses to emit
 one. `report` refuses to Fisher-compare two blocks whose manifests pin
 different model digests.
@@ -106,6 +133,34 @@ BLOCK/ARM:BLOCK/ARM` compares two arms whose labels differ (a B2
 first (values compared as JSON text, a field one side lacks as "not
 recorded"), then Fisher two-sided per metric both blocks carry, only when the
 two manifests pin the same model digest.
+
+A B2-vs-B1 pair (`B2/native_fsm:B1/native`) must disclose, beyond the
+printed lines (B1's manifest lacks `llm_request` and `first_request`, so the
+pair prints them as an opaque "not recorded"):
+
+- per-request timeout: B1 sent none; every B2 request carries
+  `timeout: 120.0` (core's `LiteLLMInterface` default);
+- tool-schema bytes: step 14 of plan 944e2692 (exact `args_model` schemas)
+  added `"default": "."` to the `path` parameter of `list_dir`,
+  `grep_files` and `list_plan_dir` (+48 bytes of `tools`); B1's tool bytes
+  were not recorded, so the pair cannot show it;
+- request settings: B2 records `temperature` 0.3, `max_tokens` 2000,
+  `reasoning_effort: "none"`, `tool_choice: "auto"` and the row `seed`; B1
+  recorded none of them;
+- the code path: B1 ran native_fc's private loop at 2a89226 (and native_fc
+  changed in 11 commits between 2a89226 and agents B0's 73d7a6c); B2 runs
+  the FSM on core's completion state. Core's request building for native
+  turns reproduces e1f63a9's bytes in every key except `timeout` and
+  `max_retries` (the golden test of plan 944e2692 step 1), not 2a89226's;
+- only the first request is digested (above): follow-up turns are disclosed
+  by the commit hash alone;
+- the tool trace: the row's `tool_trace` comes from the live test's tool
+  spy, which since plan 944e2692 D-034 forwards `gated` (native never
+  passes it; the react arm did not run its tools under the old spy);
+  native_fc trace entries now also carry `tool_status`;
+- harness rows have no LLM call meter (only `tool_calls` from the spy), so
+  there is no meter difference to read; the agents-react pair below has one;
+- the git commit and date (the model digest must still match).
 
 ## agents-react (scripts/agents_bench.py)
 
@@ -150,6 +205,15 @@ registration; values are compared as JSON text, so a type change (`120` vs
 at run start in the summary as `run: {git_commit, git_dirty}` (the
 manifest's `git_commit` is the registration commit).
 
+Only the FIRST request per task is digested: the capture stub refuses it, so
+request 2 and later (tool-result messages, the assistant `tool_calls` echo,
+forced, repair and conclude turns) are never built. A change confined to
+later turns moves no manifest field and `run` accepts it; such a change is
+disclosed only by the commit hashes (`git_commit`, the summary's
+`run.git_commit`). Read a pair across code versions with that in view: for
+B2-vs-B0 the private-loop-vs-core difference lives mostly in those turns
+(review pass 12 W1 of plan 944e2692).
+
 Meter (`wrapper_version`): "1" (B0, B1) patched the litellm completion
 bindings and counted every provider call through them; "2" (every later
 block) reads core's own counters, `LiteLLMInterface.usage()`, off one
@@ -179,6 +243,8 @@ per-category table.
 ```
 .venv/bin/python scripts/agents_bench.py report agents-react \
     --blocks B0 B1 --pair B1/fsm_advance:B0/legacy
+.venv/bin/python scripts/agents_bench.py report agents-react \
+    --blocks B0 B2 --pair B2/fsm_toolcall:B0/native_fc
 ```
 
 `--pair A:B` (each side `ARM` or `BLOCK/ARM`) first prints every manifest
@@ -194,4 +260,12 @@ reordered `list_stats.numbers` to `{"items", "type"}`, tasks ty-order,
 ch-order-local, ty-mean, ty-range); the code path (B0 native_fc's private
 loop at 73d7a6c vs the core completion state) and its step ceiling; provider
 errors now wrapped as `AgentError`; the git commit and date (the model
-digest must still match).
+digest must still match). Also: only the first request per task is digested
+(above), so the follow-up turns are disclosed by the commit alone; core's
+Ollama preparation of native requests (`reasoning_effort`, `/nothink` on
+the last user turn, temperature, `max_tokens`) is byte-identical to
+e1f63a9's private loop except `timeout`/`max_retries` (golden test of plan
+944e2692 step 1), while B0 ran at 73d7a6c; native_fc trace entries now
+carry a `tool_status` key (agent-side, not sent to the model); a
+`register`-time `llm_request` records `tool_choice: "auto"`, which B0 did
+not record. Rules and the full list: decisions.md D-049 of plan 944e2692.
