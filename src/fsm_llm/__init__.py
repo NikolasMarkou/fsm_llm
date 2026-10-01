@@ -70,7 +70,10 @@ from .definitions import (
     IntentDefinition,
     IntentScore,
     InvalidTransitionError,
+    # Usage counter snapshots (LiteLLMInterface.usage)
+    LLMCallCounts,
     LLMResponseError,
+    LLMUsage,
     ModelToolCall,
     MultiClassificationResult,
     ResponseGenerationRequest,
@@ -235,6 +238,8 @@ __all__ = [
     "CompletionRequest",
     "CompletionResponse",
     "ModelToolCall",
+    "LLMUsage",
+    "LLMCallCounts",
     # Enhanced prompt builders
     "DataExtractionPromptBuilder",
     "ResponseGenerationPromptBuilder",

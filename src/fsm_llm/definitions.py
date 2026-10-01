@@ -559,6 +559,42 @@ class CompletionResponse(BaseModel):
         return self
 
 
+class LLMCallCounts(BaseModel):
+    """Provider-call counters of one kind (or of all kinds summed).
+
+    ``calls`` counts every provider request, the failed ones included;
+    ``errors`` the requests that raised; ``usage_missing`` the answered
+    requests whose reply carried no token usage (every streamed call). The
+    token fields sum the usage of the replies that carried one. Frozen.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    calls: int = Field(default=0, ge=0, description="Provider requests sent")
+    errors: int = Field(default=0, ge=0, description="Requests that raised")
+    usage_missing: int = Field(
+        default=0, ge=0, description="Answered requests without token usage"
+    )
+    prompt_tokens: int = Field(default=0, ge=0, description="Prompt tokens")
+    completion_tokens: int = Field(default=0, ge=0, description="Completion tokens")
+    total_tokens: int = Field(default=0, ge=0, description="Total tokens")
+
+
+class LLMUsage(LLMCallCounts):
+    """A snapshot of an LLM interface's usage counters.
+
+    The inherited fields are the totals over every kind; ``by_kind`` holds
+    the same counters per call kind (``generate``, ``stream``, ``extract``,
+    ``classify``, ``complete``; only kinds with at least one call appear) and
+    sums to the totals. A snapshot is a copy: later calls do not change it.
+    Frozen.
+    """
+
+    by_kind: dict[str, LLMCallCounts] = Field(
+        default_factory=dict, description="Counters per call kind"
+    )
+
+
 # --------------------------------------------------------------
 # Classification Extraction Models
 # --------------------------------------------------------------

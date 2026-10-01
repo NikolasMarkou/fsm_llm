@@ -66,6 +66,9 @@ from .constants import (
     NEUTRAL_USER_TURN,
     RESERVED_LLM_CALL_KWARGS,
     TRUNCATED_SALVAGE_CONFIDENCE,
+    USAGE_KIND_BY_CALL_TYPE,
+    USAGE_KIND_COMPLETE,
+    USAGE_KIND_STREAM,
 )
 from .definitions import (
     BulkExtractionRequest,
@@ -74,7 +77,9 @@ from .definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
+    LLMCallCounts,
     LLMResponseError,
+    LLMUsage,
     ModelToolCall,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
@@ -449,6 +454,133 @@ def _safe_str(value: Any) -> str | None:
 
 
 # --------------------------------------------------------------
+# Usage counters
+# --------------------------------------------------------------
+
+_COUNTER_FIELDS = (
+    "calls",
+    "errors",
+    "usage_missing",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+)
+
+
+def _reply_field(obj: Any, name: str) -> Any:
+    """``obj[name]`` for a dict, ``obj.name`` otherwise; ``None`` when absent."""
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def _token_count(value: Any) -> int:
+    """A token count as an ``int``; anything that is not a non-negative int is 0."""
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return 0
+
+
+def _usage_of(response: Any) -> tuple[int, int, int] | None:
+    """(prompt, completion, total) tokens of a provider reply; ``None`` if absent.
+
+    Read defensively (the rules of ``scripts/agents_bench.py``'s reader):
+    ``usage`` may be a dict or an object, may be missing (streamed replies
+    carry none), and its fields may be missing or not ints. A missing
+    ``total_tokens`` is the sum of the other two.
+    """
+    usage = _reply_field(response, "usage")
+    if usage is None:
+        return None
+    prompt = _token_count(_reply_field(usage, "prompt_tokens"))
+    completion_tokens = _token_count(_reply_field(usage, "completion_tokens"))
+    total = _token_count(_reply_field(usage, "total_tokens"))
+    return prompt, completion_tokens, total or prompt + completion_tokens
+
+
+class _UsageMeter:
+    """Per-kind provider-call counters of one interface instance.
+
+    Interface contract (shared by every provider call site of ``llm.py``):
+    - ``record(kind, response)``: one answered call of ``kind``; its token
+      usage is read with ``_usage_of`` (a streamed call passes ``None`` and
+      counts as usage-missing). Never raises on a strange reply shape.
+    - ``record_error(kind)``: one call of ``kind`` that raised.
+    - ``snapshot(reset=...)``: a frozen ``LLMUsage`` copy, totals plus
+      ``by_kind``; with ``reset=True`` the counters are cleared in the same
+      critical section, so no call is lost between the read and the reset.
+    Every method holds one lock: safe when one interface is shared by
+    concurrent conversations. The lock is never held across a provider call.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counts: dict[str, dict[str, int]] = {}
+
+    def _bump(self, kind: str, **deltas: int) -> None:
+        with self._lock:
+            counts = self._counts.setdefault(kind, dict.fromkeys(_COUNTER_FIELDS, 0))
+            for name, delta in deltas.items():
+                counts[name] += delta
+
+    def record(self, kind: str, response: Any) -> None:
+        usage = _usage_of(response)
+        if usage is None:
+            self._bump(kind, calls=1, usage_missing=1)
+            return
+        prompt, completion_tokens, total = usage
+        self._bump(
+            kind,
+            calls=1,
+            prompt_tokens=prompt,
+            completion_tokens=completion_tokens,
+            total_tokens=total,
+        )
+
+    def record_error(self, kind: str) -> None:
+        self._bump(kind, calls=1, errors=1)
+
+    def snapshot(self, *, reset: bool = False) -> LLMUsage:
+        with self._lock:
+            per_kind = {kind: dict(counts) for kind, counts in self._counts.items()}
+            if reset:
+                self._counts = {}
+        totals = {
+            name: sum(counts[name] for counts in per_kind.values())
+            for name in _COUNTER_FIELDS
+        }
+        return LLMUsage(
+            **totals,
+            by_kind={
+                kind: LLMCallCounts(**counts)
+                for kind, counts in sorted(per_kind.items())
+            },
+        )
+
+
+# Guards the lazy creation of a meter, so two threads making an instance's
+# first calls at once share one meter instead of each creating its own.
+_METER_CREATION_LOCK = threading.Lock()
+
+
+def _meter_of(owner: Any) -> _UsageMeter:
+    """The ``_usage_meter`` of ``owner``, created on first use.
+
+    Lazy so that an instance built with ``__new__`` (no ``__init__``) still
+    counts. ``owner`` is any object that declares a class attribute
+    ``_usage_meter: _UsageMeter | None = None``.
+    """
+    meter: _UsageMeter | None = owner._usage_meter
+    if meter is None:
+        with _METER_CREATION_LOCK:
+            meter = owner._usage_meter
+            if meter is None:
+                meter = _UsageMeter()
+                owner._usage_meter = meter
+    return meter
+
+
+# --------------------------------------------------------------
 # Abstract Interface
 # --------------------------------------------------------------
 
@@ -610,6 +742,8 @@ class LiteLLMInterface(LLMInterface):
     _supported_params_memo: tuple[str, list[str] | None] | None = None
     # Times the D-020 apology retry fired on this instance (read-only for callers).
     apology_retry_count: int = 0
+    # Provider-call counters, created on first use (see _meter_of).
+    _usage_meter: _UsageMeter | None = None
 
     def __init__(
         self,
@@ -798,7 +932,7 @@ class LiteLLMInterface(LLMInterface):
                 stream=True,
             )
 
-            response = self._send(call_params)
+            response = self._send(call_params, call_type="response_generation")
 
             accumulated: list[str] = []
             reasoning_parts: list[str] = []
@@ -1043,7 +1177,7 @@ class LiteLLMInterface(LLMInterface):
             max_tokens=request.max_tokens,
         )
         try:
-            response = self._send(call_params)
+            response = self._send(call_params, call_type=request.call_type)
         except Exception as e:
             # Broad catch is intentional: the provider boundary. A garbled
             # tool call is a model behaviour, every other failure an outage.
@@ -1055,15 +1189,58 @@ class LiteLLMInterface(LLMInterface):
             raise LLMResponseError(error_msg) from e
         return _completion_response(response)
 
-    def _send(self, call_params: dict[str, Any]) -> Any:
+    def _send(self, call_params: dict[str, Any], *, call_type: str) -> Any:
         """Send one built request to the provider: the one ``completion`` call.
 
         Every provider request of this interface (Pass 1, Pass 2, stream,
         ``complete``) goes through here; the raw provider reply (a stream
         iterator when ``call_params["stream"]``) is returned and errors
-        propagate unchanged.
+        propagate unchanged. Each request is counted once on this instance's
+        usage meter, under the kind of ``call_type`` (``stream`` for a
+        streamed call): a raising request as a call and an error, a streamed
+        one as a call with usage missing (its chunks carry no usage on
+        Ollama, and the reply is not read here).
         """
-        return completion(**call_params)
+        # DECISION plan-2026-10-01T093600-944e2692/D-004: the meter is per
+        # instance and fed here only. Do NOT add a process-global counter
+        # (shared state across conversations and tests), do NOT count in the
+        # public methods (a second count site drifts from the one send path),
+        # and do NOT read usage off a stream (its chunks carry none on Ollama).
+        # Readers that want counts own (inject) the interface. See D-004.
+        stream = bool(call_params.get("stream"))
+        kind = (
+            USAGE_KIND_STREAM
+            if stream
+            else USAGE_KIND_BY_CALL_TYPE.get(call_type, USAGE_KIND_COMPLETE)
+        )
+        meter = _meter_of(self)
+        try:
+            response = completion(**call_params)
+        except Exception:
+            # Broad catch is intentional: count the failed request, re-raise
+            # it unchanged for the caller's own error boundary.
+            meter.record_error(kind)
+            raise
+        meter.record(kind, None if stream else response)
+        return response
+
+    def usage(self) -> LLMUsage:
+        """A frozen snapshot of this interface's provider-call counters.
+
+        Counts every provider request this instance sent since it was built
+        or since the last ``reset_usage``: totals plus ``by_kind`` (see
+        ``LLMUsage``). Safe to call while other threads use the interface.
+        """
+        return _meter_of(self).snapshot()
+
+    def reset_usage(self) -> LLMUsage:
+        """Clear the counters and return the snapshot they held.
+
+        The read and the clear are one atomic step, so a request made
+        concurrently is counted either in the returned snapshot or in the
+        next one, never lost.
+        """
+        return _meter_of(self).snapshot(reset=True)
 
     def _supported_openai_params(self) -> list[str] | None:
         """Return litellm's supported-param list for ``self.model``, memoised.
@@ -1249,7 +1426,7 @@ class LiteLLMInterface(LLMInterface):
         )
 
         # Make the API call
-        response = self._send(call_params)
+        response = self._send(call_params, call_type=call_type)
 
         # Validate response structure. D-022: `getattr(response, "choices", None)`
         # replaces `hasattr(response, "choices") and response.choices` -- see the

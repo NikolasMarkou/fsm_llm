@@ -4,6 +4,9 @@ Constants and configuration values for the FSM-LLM framework.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
 # The context-key security filters live in `security.py`. Only its public names
 # are importable from here; private helpers are imported from `security`.
 from .security import (  # noqa: F401
@@ -65,6 +68,21 @@ RESERVED_LLM_CALL_KWARGS = frozenset(
         "response_format",
         "tools",
         "tool_choice",
+    }
+)
+
+# Usage-counter kinds (``LLMUsage.by_kind`` keys), one per call path of
+# ``LiteLLMInterface``: a streamed call is ``stream``; any other call is named
+# by its call type, and a call type not listed here (a ``complete`` request
+# of the caller's own type) is ``complete``.
+USAGE_KIND_STREAM = "stream"
+USAGE_KIND_COMPLETE = "complete"
+USAGE_KIND_BY_CALL_TYPE: Mapping[str, str] = MappingProxyType(
+    {
+        "response_generation": "generate",
+        "field_extraction": "extract",
+        "data_extraction": "extract",
+        "classification": "classify",
     }
 )
 
