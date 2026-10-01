@@ -29,11 +29,15 @@ import harness_bench as hb
 _STDLIB_ALLOWED = {
     "__future__",
     "argparse",
+    "collections",
+    "contextlib",
+    "copy",
     "datetime",
     "hashlib",
     "json",
     "math",
     "pathlib",
+    "re",
     "subprocess",
     "sys",
     "tempfile",
@@ -420,6 +424,8 @@ class TestMachineryImport:
         )
         assert all(field in manifest for field in hb.MANIFEST_FIELDS)
         assert manifest["arm"] == {"native": False, "display": "react"}
+        for field in hb.DISCLOSURE_FIELDS:
+            assert manifest[field] is not None, field
 
 
 class TestCLI:
@@ -589,3 +595,164 @@ class TestLiveSpyForwardsGated:
         assert sink == [
             {"tool": "shout", "ok": True, "params": {"text": "hi"}, "error": None}
         ]
+
+
+class TestWireDisclosure:
+    """Review pass 10 warning 3 (D-037 item 18.5, D-040): an L4 manifest
+    discloses what its first request carried at core's send binding."""
+
+    @pytest.fixture
+    def live(self, monkeypatch):
+        import fsm_llm.llm
+
+        def no_send(**kw):
+            raise AssertionError("the disclosure probe sent a provider request")
+
+        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
+        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
+        return hb._live()
+
+    @pytest.mark.parametrize("native", [True, False])
+    def test_the_first_request_is_read_at_the_wire(self, live, native):
+        """Defect guarded: a harness B2 vs B1 pair that cannot show the
+        per-request timeout, the tool bytes or core's Ollama preparation."""
+        import fsm_llm.llm
+
+        disclosure = hb.request_disclosure(live, native=native, seed=None)
+        settings = disclosure["llm_request"]
+        assert settings["timeout"] == 120.0
+        assert settings["reasoning_effort"] == "none"
+        assert settings["model"] == hb.MODEL
+        first = disclosure["first_request"]
+        assert (first["tools_sha256"] is not None) is native
+        assert first["n_requests"] >= 1
+        assert fsm_llm.llm.completion.__name__ == "no_send"  # restored
+        assert disclosure == hb.request_disclosure(live, native=native, seed=None)
+
+    def test_a_seed_is_recorded_with_its_value(self, live):
+        """Defect guarded: a seeded native block indistinguishable from an
+        unseeded one."""
+        seeded = hb.request_disclosure(live, native=True, seed=7)
+        assert seeded["llm_request"]["seed"] == 7
+        unseeded = hb.request_disclosure(live, native=True, seed=None)
+        assert "seed" not in unseeded["llm_request"]
+
+    def test_the_binding_is_restored_when_the_block_raises(self, live):
+        import fsm_llm.llm
+
+        with pytest.raises(RuntimeError), hb.captured_wire():
+            raise RuntimeError("boom")
+        assert fsm_llm.llm.completion.__name__ == "no_send"
+
+    def test_the_digest_masks_the_date_and_the_task(self):
+        def params(day: str, task: str) -> dict:
+            return {
+                "model": "m",
+                "messages": [
+                    {"role": "system", "content": f"Today's date: {day}\nRules"},
+                    {"role": "user", "content": f"/nothink\n{task}"},
+                ],
+            }
+
+        a = hb.wire_digest(params("2026-10-01", "task one"), "task one")
+        b = hb.wire_digest(params("2027-01-31", "task two"), "task two")
+        assert a == b
+        c = hb.wire_digest(
+            {
+                **params("2026-10-01", "x"),
+                "messages": [{"role": "user", "content": "x"}],
+            },
+            "x",
+        )
+        assert c["user_sha256"] != a["user_sha256"]
+
+
+class TestPairAcrossArmLabels:
+    """Review pass 10 warning 3: ``report`` paired only identical arm names,
+    so a B2 ``native_fsm`` vs B1 ``native`` comparison printed no Fisher and
+    no differences."""
+
+    FLAGS_B1 = [(True, True, True, True)] * 3 + [(True, True, False, True)] * 2
+    FLAGS_B2 = [(True, True, True, True)] * 5
+
+    def _blocks(self, tmp_path: Path, **b2_manifest) -> None:
+        _make_block(tmp_path / "synthetic" / "B1", "native", self.FLAGS_B1)
+        _make_block(
+            tmp_path / "synthetic" / "B2",
+            "native_fsm",
+            self.FLAGS_B2,
+            block="B2",
+            git_commit="cafebabe",
+            llm_request={"timeout": 120.0, "seed": 7},
+            **b2_manifest,
+        )
+        path = tmp_path / "synthetic" / "B2" / "manifest_native_fsm.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest["arm"] = {"native": True, "display": "native_fsm"}
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def test_differences_then_fisher(self, tmp_path: Path, monkeypatch, capsys):
+        monkeypatch.setattr(hb, "BENCH_DATA", tmp_path)
+        self._blocks(tmp_path)
+        rc = hb.report("synthetic", ["B1", "B2"], ["B2/native_fsm:B1/native"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        head = out.index("Manifest differences, B2/native_fsm vs B1/native")
+        fisher = out.index("Fisher two-sided, B2/native_fsm vs B1/native")
+        assert head < fisher
+        diff = out[head:fisher]
+        for line in (
+            'arm.display: "native_fsm" vs "native"',
+            'git_commit: "cafebabe" vs "deadbeef"',
+            'llm_request: {"timeout": 120.0, "seed": 7} vs not recorded',
+        ):
+            assert line in diff, line
+        expected = hb.fisher_exact_two_sided(5, 5, 3, 5)
+        assert f"content_matched: 5/5 vs 3/5 p={expected:.4f}" in out[fisher:]
+
+    def test_a_pair_across_digests_is_refused_after_its_differences(
+        self, tmp_path: Path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(hb, "BENCH_DATA", tmp_path)
+        self._blocks(tmp_path, model_digest={"tag": "qwen3.5:4b", "digest": "x"})
+        assert hb.report("synthetic", pairs=["B2/native_fsm:B1/native"]) == 1
+        out = capsys.readouterr().out
+        assert out.index("Manifest differences") < out.index("REFUSING")
+        assert 'model_digest.digest: "x" vs "2a654d98e6fb"' in out
+
+    @pytest.mark.parametrize("pair", ["B2:B1", "B2/native_fsm:B1/nope"])
+    def test_a_bad_pair_is_refused(self, tmp_path: Path, monkeypatch, pair):
+        monkeypatch.setattr(hb, "BENCH_DATA", tmp_path)
+        self._blocks(tmp_path)
+        with pytest.raises(hb.BenchDataError, match="--pair"):
+            hb.report("synthetic", pairs=[pair])
+
+    def test_the_cli_takes_blocks_and_pairs(self, tmp_path: Path, monkeypatch, capsys):
+        monkeypatch.setattr(hb, "BENCH_DATA", tmp_path)
+        self._blocks(tmp_path)
+        argv = ["report", "synthetic", "--blocks", "B1", "B2"]
+        assert hb.main([*argv, "--pair", "B2/native_fsm:B1/native"]) == 0
+        assert "Fisher two-sided, B2/native_fsm vs B1/native" in capsys.readouterr().out
+
+    def test_field_comparison_distinguishes_types(self):
+        assert hb.manifest_differences(
+            {"t": 120, "r": 0}, {"t": 120.0, "r": False}
+        ) == [
+            "r: 0 vs false",
+            "t: 120 vs 120.0",
+        ]
+
+
+class TestRunRecordsItsCommit:
+    """Review pass 10 warning 2: the commit that actually ran was recorded
+    nowhere (a block may be registered at an older commit)."""
+
+    def test_summary_carries_the_run_commit(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(hb, "_git_commit", lambda: "f00d")
+        monkeypatch.setattr(hb, "_git_dirty", lambda: True)
+        bdir = tmp_path / "synthetic" / "B0"
+        _make_block(bdir, "native", [(True, True, True, True)])
+        summary = hb.write_summary(
+            bdir, "native", status="complete", run=hb.run_commit()
+        )
+        assert summary["run"] == {"git_commit": "f00d", "git_dirty": True}

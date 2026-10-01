@@ -30,6 +30,7 @@ from .constants import (
     COMPLETION_TOOL_CHOICE_KEYWORDS,
     CONTEXT_KEY_AGENT_TRACE,
     CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT,
+    CONTEXT_KEY_RESPONSE_TEMPERATURE,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     MAX_CLASSIFIER_CACHE_SIZE,
     MAX_CONTEXT_FILTER_DEPTH,
@@ -177,14 +178,36 @@ _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
 # NameError, ZeroDivisionError, ...) and BaseException are NOT in the tuple and
 # propagate. Do not widen either site back to `except Exception`, and do not
 # inline a second copy of this tuple -- add classes here or nowhere.
+# DECISION plan-2026-10-01T093600-944e2692/D-039 (narrows the class list of
+# D-001 above; the one-tuple rule stands): only the classifier's own error
+# family is soft. Since D-006 the conversation's own, possibly custom,
+# interface answers here, and the classifier turns every provider failure
+# (LLMResponseError, `complete` being total) and every unreadable reply into
+# a ClassificationError. Do NOT add ValueError, TypeError, KeyError,
+# RuntimeError or OSError back: a bug in a custom `complete`, a broken
+# prompt_config or a classifier refused at construction (no `complete`, a
+# model mismatch) became a silent "stay" or a skipped field. See D-039.
 _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS: tuple[type[Exception], ...] = (
     ClassificationError,
-    ValueError,
-    TypeError,
-    KeyError,
-    RuntimeError,
-    OSError,
 )
+
+
+def _response_temperature(instance: FSMInstance) -> float | None:
+    """The conversation's Pass-2 sampling temperature, or ``None``.
+
+    Contract: returns ``context.data[CONTEXT_KEY_RESPONSE_TEMPERATURE]``
+    unchanged (``None`` when absent). Every Pass-2 request (sync, stream,
+    greeting) carries it, and ``ResponseGenerationRequest`` refuses a value
+    that is not a number in [0, 2] (a bool or a string included), so a bad
+    value fails the turn instead of being dropped or coerced.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-038: a per-conversation
+    # Pass-2 temperature travels on the request, so it applies through an
+    # injected interface too. Do NOT read it at one Pass-2 site only, do NOT
+    # coerce or drop a bad value, and do NOT pass it as an `API(temperature=)`
+    # beside an injected interface (refused). See decisions.md D-038.
+    value: float | None = instance.context.data.get(CONTEXT_KEY_RESPONSE_TEMPERATURE)
+    return value
 
 
 def _value_digest(value: Any) -> str:
@@ -974,6 +997,7 @@ class MessagePipeline:
             user_message=user_message,
             transition_occurred=transition_occurred,
             response_format=output_response_format,
+            temperature=_response_temperature(instance),
         )
 
         # Accumulate chunks to store in conversation history
@@ -1091,6 +1115,7 @@ class MessagePipeline:
             system_prompt=system_prompt,
             user_message=None,
             transition_occurred=False,
+            temperature=_response_temperature(instance),
         )
 
         response = self.llm_interface.generate_response(request)
@@ -1939,8 +1964,8 @@ class MessagePipeline:
 
         Raises:
             LLMResponseError: the transcript is not a paired list of chat
-                messages (or is empty on a tool turn), the response format is
-                missing or not a dict, the
+                messages (or holds no user message on a tool turn), the
+                response format is missing or not a dict, the
                 interface does not implement ``complete``, or the provider
                 call failed. Nothing is committed, so the turn fails with the
                 context as it was.
@@ -1966,20 +1991,26 @@ class MessagePipeline:
                 f"Completion transcript '{config.messages_key}' is "
                 f"{type(transcript).__name__}, not a list of chat messages"
             )
-        # DECISION plan-2026-10-01T093600-944e2692/D-029: a tool turn with no
-        # transcript has no task: refuse it. The transcript is an internal key
-        # that session files do not carry, so a session restored in the
-        # middle of a tool loop arrives here empty; sending only the
-        # instructions made the model's answer to nothing the result. Do NOT
-        # send it, and do NOT persist the transcript to "fix" this (the
-        # session format is unchanged). See D-029.
-        if config.tools is not None and not transcript:
-            raise LLMResponseError(
-                f"Completion transcript '{config.messages_key}' is empty: a tool "
-                "turn needs the task (a session restored in the middle of a "
-                "tool loop does not carry its transcript)"
-            )
         check_tool_transcript(transcript)
+        # DECISION plan-2026-10-01T093600-944e2692/D-029 (narrowed by D-039):
+        # a tool turn whose transcript holds no user message has no task:
+        # refuse it. The transcript is an internal key that session files do
+        # not carry, so a session restored in the middle of a tool loop
+        # arrives here empty, or holding only the tool exchange a runner
+        # rebuilt after the restore; sending it made the model's answer to
+        # nothing the result. Do NOT reduce this to "non-empty" (an assistant
+        # tool call plus its result passed that), do NOT send it, and do NOT
+        # persist the transcript to "fix" this (the session format is
+        # unchanged). See D-029, D-039.
+        if config.tools is not None and not any(
+            message.get("role") == "user" for message in transcript
+        ):
+            raise LLMResponseError(
+                f"Completion transcript '{config.messages_key}' has no user "
+                "message: a tool turn needs the task in its transcript (a "
+                "session restored in the middle of a tool loop does not carry "
+                "its transcript)"
+            )
         messages: list[dict[str, Any]] = (
             [{"role": "system", "content": config.instructions}]
             if config.instructions is not None
@@ -3007,6 +3038,7 @@ class MessagePipeline:
             user_message=user_message,
             transition_occurred=transition_occurred,
             response_format=output_response_format,
+            temperature=_response_temperature(instance),
         )
 
         response = self.llm_interface.generate_response(request)

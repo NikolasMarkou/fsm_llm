@@ -25,6 +25,7 @@ from typing import Any, ClassVar, cast
 from pydantic import BaseModel, ValidationError
 
 from fsm_llm import API
+from fsm_llm.api import llm_settings_for
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
 from fsm_llm.context import ContextCompactor
 from fsm_llm.definitions import FSMError, RunBudgetExceededError
@@ -457,6 +458,9 @@ class BaseAgent(ABC):
     # States in which core's seconds budget does not stop the run (core
     # `seconds_exempt_states`, D-032 of plan 944e2692): a pattern's wind-down
     # that must finish once reached. Empty: the clock is checked every step.
+    # It may name states of every shape a pattern builds; each run passes
+    # only those its built FSM has (`_seconds_exempt_for`), since core
+    # refuses an id that is not a state of the running definition (D-039).
     _seconds_exempt_states: ClassVar[frozenset[str]] = frozenset()
 
     def __init__(
@@ -467,6 +471,34 @@ class BaseAgent(ABC):
         _reject_misplaced_kwargs(type(self).__name__, api_kwargs)
         self.config = config or AgentConfig()
         self._api_kwargs = api_kwargs
+        self._refuse_prompt_cache_with_injected_interface()
+
+    def _seconds_exempt_for(self, api: API) -> frozenset[str]:
+        """The ``_seconds_exempt_states`` that the run's built FSM has.
+
+        Contract: the intersection of the class attribute with the states of
+        ``api.fsm_definition`` (the root definition the run starts in); never
+        raises.
+        """
+        return self._seconds_exempt_states & frozenset(api.fsm_definition.states)
+
+    def _refuse_prompt_cache_with_injected_interface(self) -> None:
+        """Raise ``AgentError`` when ``enable_prompt_cache`` meets ``llm_interface``.
+
+        Contract: called at construction and again each time a run builds its
+        ``API`` (``config`` is a plain attribute a caller may replace), so the
+        refusal names the config flag the caller set, never core's "takes no
+        LLM settings ['caching']". Returns ``None`` otherwise.
+        """
+        # DECISION plan-2026-10-01T093600-944e2692/D-038: refuse, never drop.
+        # Do NOT add `caching` only when no interface is injected (the flag
+        # would then be ignored silently), and do NOT let core's refusal name
+        # a `caching` kwarg the caller never passed. See D-038.
+        if (
+            self.config.enable_prompt_cache
+            and self._api_kwargs.get("llm_interface") is not None
+        ):
+            raise AgentError(ErrorMessages.PROMPT_CACHE_WITH_INTERFACE)
 
     # ------------------------------------------------------------------
     # Public API
@@ -539,7 +571,7 @@ class BaseAgent(ABC):
                     max_steps=max_steps,
                     max_seconds=max_seconds,
                     before_step=partial(self._on_loop_iteration, api, conv_id),
-                    seconds_exempt_states=self._seconds_exempt_states,
+                    seconds_exempt_states=self._seconds_exempt_for(api),
                 )
             except RunBudgetExceededError as exc:
                 raise self._budget_error(exc, max_iterations) from exc
@@ -1298,7 +1330,14 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------------
 
     def _create_api(self, fsm_def: dict[str, Any]) -> API:
-        """Create an API instance from an FSM definition."""
+        """Create an API instance from an FSM definition.
+
+        ``config.model``, ``temperature`` and ``max_tokens`` configure the
+        interface core builds; with an injected ``llm_interface`` they are not
+        passed (the interface owns them, ``llm_settings_for``), and
+        ``enable_prompt_cache`` is refused (``AgentError``).
+        """
+        self._refuse_prompt_cache_with_injected_interface()
         kwargs = dict(self._api_kwargs)
         if self.config.transition_config is not None:
             kwargs["transition_config"] = self.config.transition_config
@@ -1314,9 +1353,12 @@ class BaseAgent(ABC):
         try:
             return API.from_definition(
                 with_instructions(fsm_def, self.config.instructions),
-                model=self.config.model,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
+                **llm_settings_for(
+                    kwargs,
+                    model=self.config.model,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                ),
                 **kwargs,
             )
         except ValueError as exc:
@@ -1446,7 +1488,7 @@ class BaseAgent(ABC):
                     max_steps=max_steps,
                     max_seconds=max_seconds,
                     before_step=partial(self._on_loop_iteration, api, conv_id),
-                    seconds_exempt_states=self._seconds_exempt_states,
+                    seconds_exempt_states=self._seconds_exempt_for(api),
                 )
             finally:
                 self._end_run_conversation(api, conv_id)

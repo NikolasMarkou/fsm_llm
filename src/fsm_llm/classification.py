@@ -30,7 +30,12 @@ from .definitions import (
     LLMResponseError,
     MultiClassificationResult,
 )
-from .llm import LiteLLMInterface, LLMInterface, implements_complete
+from .llm import (
+    LiteLLMInterface,
+    LLMInterface,
+    implements_complete,
+    interface_model,
+)
 from .logging import logger
 from .prompts import (
     ClassificationPromptConfig,
@@ -136,17 +141,15 @@ class Classifier:
                     f"Classifier(llm=...) needs an LLMInterface that implements "
                     f"complete; got {type(llm).__name__}"
                 )
-            interface_model = getattr(llm, "model", None)
-            if not isinstance(interface_model, str):
-                interface_model = None
-            if model is not None and model != interface_model:
+            injected_model = interface_model(llm)
+            if model is not None and model != injected_model:
                 raise ValueError(
                     f"Classifier(model={model!r}, llm=...) names a different "
-                    f"model than the injected interface ({interface_model!r}); "
+                    f"model than the injected interface ({injected_model!r}); "
                     "omit llm to classify with another model"
                 )
             self._llm = llm
-            self.model: str | None = model if model is not None else interface_model
+            self.model: str | None = model if model is not None else injected_model
         else:
             self.model = model if model is not None else DEFAULT_LLM_MODEL
             connection: dict[str, Any] = {

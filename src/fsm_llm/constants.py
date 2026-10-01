@@ -201,6 +201,14 @@ PROVENANCE_METADATA_KEY = "_pipeline_extracted"
 # structured-output schema; Pass 2 enforces it on terminal states only.
 CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT = "_output_response_format"
 
+# Context key holding a conversation's Pass-2 sampling temperature (a number
+# in [0, 2], not a bool); every response-generation request of the
+# conversation (sync, stream, greeting) carries it as
+# `ResponseGenerationRequest.temperature`, so it applies through any interface,
+# an injected one included. Absent or None: the interface's own temperature.
+# Internal-prefixed: never extracted, never in a prompt or `get_data` (D-038).
+CONTEXT_KEY_RESPONSE_TEMPERATURE = "_response_temperature"
+
 # Completion state (`State.completion`, `CompletionStateConfig`): the default
 # context key of the consumer-owned transcript (internal-prefixed, so it never
 # reaches a prompt or `get_data`) and of the public result `{kind, text, calls}`

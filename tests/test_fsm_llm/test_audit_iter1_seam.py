@@ -19,6 +19,7 @@ from fsm_llm.api import API
 from fsm_llm.classification import Classifier
 from fsm_llm.definitions import (
     BulkExtractionRequest,
+    ClassificationError,
     ClassificationResponseError,
     ClassificationSchema,
     FieldExtractionRequest,
@@ -1126,7 +1127,7 @@ class _StayHarness:
 
         classifier = MagicMock()
         if self.intent is None:
-            classifier.classify.side_effect = RuntimeError("classifier down")
+            classifier.classify.side_effect = ClassificationError("classifier down")
         else:
             classifier.classify.return_value = ClassificationResult(
                 reasoning="r", intent=self.intent, confidence=self.confidence

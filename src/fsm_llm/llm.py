@@ -454,6 +454,20 @@ def implements_complete(llm: Any) -> bool:
     return getattr(method, "__func__", None) is not LLMInterface.complete
 
 
+def interface_model(llm: Any) -> str | None:
+    """The model name an injected interface states, if it states one.
+
+    Interface contract (callers: ``Classifier(llm=...)`` and ``API``, which
+    refuse a ``model`` beside an injected interface unless it equals this):
+        - ``llm``: any object.
+        - Returns ``llm.model`` when it is a ``str``; ``None`` otherwise
+          (absent, ``None``, a mock attribute, any other type).
+        - Never raises.
+    """
+    model = getattr(llm, "model", None)
+    return model if isinstance(model, str) else None
+
+
 def _checked_call_id(call: dict[str, Any], position: int) -> str:
     """The ``id`` of one transcript tool call, after checking its shape.
 
@@ -570,10 +584,18 @@ def _completion_response(response: Any) -> CompletionResponse:
           With no tool call, an empty content is recovered from the reasoning
           trace (``_resolve_reasoning_trace``); with tool calls it is not
           (``content: None`` is their normal shape).
-        - Tool calls: every call needs a function name and arguments that
-          decode to a JSON object (``decode_tool_arguments``); if ANY call
-          fails that, the turn is ``malformed`` with no calls, the valid ones
-          included, and its text kept.
+        - ``tool_calls`` is absent, ``None``, empty, or an iterable of calls
+          (a list in every litellm reply), read once into a list; a ``str``,
+          ``bytes``, mapping or non-iterable is ``LLMResponseError``
+          ("Malformed LLM response shape: ...").
+        - Tool calls: every call needs a non-empty ``str`` id, a function
+          name and arguments that decode to a JSON object
+          (``decode_tool_arguments``); if ANY call fails that, the turn is
+          ``malformed`` with no calls, the valid ones included, and its text
+          kept.
+        - Total: returns a ``CompletionResponse`` or raises
+          ``LLMResponseError``, never another exception, whatever the reply's
+          shape (``complete`` also wraps anything unforeseen raised here).
     """
     choices = getattr(response, "choices", None) if response else None
     if not choices:
@@ -584,6 +606,22 @@ def _completion_response(response: Any) -> CompletionResponse:
         raw_calls = getattr(message, "tool_calls", None) or []
     except (AttributeError, IndexError, KeyError, TypeError) as e:
         raise LLMResponseError(f"Malformed LLM response shape: {e}") from e
+    # DECISION plan-2026-10-01T093600-944e2692/D-039: `complete` is total. A
+    # reply shape that cannot be read raises LLMResponseError here, never a
+    # raw TypeError from iterating it: the classifier turns only
+    # LLMResponseError into its soft ClassificationError, so any other
+    # exception now fails the turn. Do NOT iterate `tool_calls` unchecked:
+    # a str, bytes or mapping, or anything that is not iterable, is a shape
+    # error; any other iterable is materialised once into a list.
+    try:
+        if isinstance(raw_calls, (str, bytes, Mapping)):
+            raise TypeError("a str, bytes or mapping is not a list of calls")
+        raw_calls = list(raw_calls)
+    except TypeError as e:
+        raise LLMResponseError(
+            "Malformed LLM response shape: tool_calls is "
+            f"{type(raw_calls).__name__}, not a list ({e})"
+        ) from e
 
     if isinstance(content, dict):
         text: str | None = json.dumps(content)
@@ -603,26 +641,29 @@ def _completion_response(response: Any) -> CompletionResponse:
     # (a tool ran with parameters the model never sent) or drop only the bad
     # call. The reasoning trace is recovered only without tool calls
     # (bf7ffe24/D-003: `content: None` is their normal shape). See D-027.
+    # An id-less call makes the turn malformed too (D-039): its result could
+    # not be paired in the next turn (check_tool_transcript refuses it), so
+    # it is refused here, before any tool runs, not after.
     calls: list[ModelToolCall] = []
     for raw_call in raw_calls:
         function = getattr(raw_call, "function", None)
         name = getattr(function, "name", None)
         arguments = decode_tool_arguments(getattr(function, "arguments", None))
-        if not isinstance(name, str) or not name or arguments is None:
+        call_id = getattr(raw_call, "id", None)
+        if (
+            not isinstance(name, str)
+            or not name
+            or arguments is None
+            or not isinstance(call_id, str)
+            or not call_id
+        ):
             logger.warning(
-                "Model tool-call turn is malformed (a call with no tool name or "
-                "with arguments that are not a JSON object); none of its "
+                "Model tool-call turn is malformed (a call with no id, no tool "
+                "name or arguments that are not a JSON object); none of its "
                 "calls is returned"
             )
             return CompletionResponse(kind="malformed", text=text)
-        call_id = getattr(raw_call, "id", None)
-        calls.append(
-            ModelToolCall(
-                id=call_id if isinstance(call_id, str) else "",
-                name=name,
-                arguments=arguments,
-            )
-        )
+        calls.append(ModelToolCall(id=call_id, name=name, arguments=arguments))
     if calls:
         return CompletionResponse(kind="calls", text=text, calls=tuple(calls))
     if text is None:
@@ -846,6 +887,9 @@ class LLMInterface(abc.ABC):
             request: Response generation request with final state context.
                 Never sent for a silent state (empty
                 ``response_instructions``): the pipeline makes no call there.
+                A non-``None`` ``request.temperature`` is this call's
+                sampling temperature and must be honoured (it replaces the
+                interface's own for this request only).
 
         Returns:
             Response generation response with user-facing message
@@ -1099,6 +1143,7 @@ class LiteLLMInterface(LLMInterface):
                 messages,
                 "response_generation",
                 response_format=request.response_format,
+                temperature=request.temperature,
             )
             response_time = time.time() - start_time
 
@@ -1125,6 +1170,7 @@ class LiteLLMInterface(LLMInterface):
                             messages,
                             "response_generation",
                             response_format=request.response_format,
+                            temperature=request.temperature,
                         ),
                         structured=request.response_format is not None,
                     )
@@ -1169,6 +1215,7 @@ class LiteLLMInterface(LLMInterface):
                 "response_generation",
                 response_format=request.response_format,
                 stream=True,
+                temperature=request.temperature,
             )
 
             response = self._send(call_params, call_type="response_generation")
@@ -1434,7 +1481,16 @@ class LiteLLMInterface(LLMInterface):
             error_msg = f"Completion call failed: {e!s}"
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
-        return _completion_response(response)
+        try:
+            return _completion_response(response)
+        except LLMResponseError:
+            raise
+        except Exception as e:
+            # Broad catch is intentional: reading a reply is total (D-039);
+            # a shape the normaliser did not foresee is a garbled reply.
+            error_msg = f"Malformed LLM response shape: {e!s}"
+            logger.error(error_msg)
+            raise LLMResponseError(error_msg) from e
 
     def _send(self, call_params: dict[str, Any], *, call_type: str) -> Any:
         """Send one built request to the provider: the one ``completion`` call.
@@ -1669,6 +1725,8 @@ class LiteLLMInterface(LLMInterface):
         messages: list[dict[str, str | None]],
         call_type: str,
         response_format: dict[str, Any] | None = None,
+        *,
+        temperature: float | None = None,
     ) -> Any:
         """
         Make LLM API call with appropriate configuration.
@@ -1678,12 +1736,17 @@ class LiteLLMInterface(LLMInterface):
             call_type: Type of call for optimization
             response_format: Optional response format override for constrained
                 decoding (e.g., JSON schema enforcement).
+            temperature: per-call temperature (a Pass-2 request's
+                ``temperature``); ``None`` keeps the interface's.
 
         Returns:
             Raw LLM response
         """
         call_params = self._build_call_params(
-            messages, call_type, response_format=response_format
+            messages,
+            call_type,
+            response_format=response_format,
+            temperature=temperature,
         )
 
         # Make the API call

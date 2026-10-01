@@ -37,6 +37,7 @@ from fsm_llm.agents.constants import (
 from fsm_llm.agents.definitions import ArtifactType
 from fsm_llm.agents.exceptions import BuilderError, MetaValidationError
 from fsm_llm.agents.meta_builder import MetaBuilderAgent, _with_build_prompt
+from fsm_llm.definitions import LLMResponseError
 
 from .conftest import SCRIPTED_REPLY, ScriptedMetaLLM
 
@@ -278,7 +279,7 @@ class TestReclassificationKeepsThePreviousType:
             ("workflow", 0.1),
             META_UNKNOWN_ARTIFACT_TYPE,
             ("nonsense", 0.9),  # unknown intent -> the fallback
-            RuntimeError("classifier down"),
+            LLMResponseError("classifier down"),
         ],
     )
     def test_a_fallback_or_low_confidence_switch_keeps_the_type(self, switch_answer):
@@ -459,7 +460,7 @@ class TestKeywordHints:
         assert MetaBuilderAgent._detect_type_fallback(text) == kind
 
     def test_start_agent_with_the_classifier_down_is_an_agent(self):
-        llm = ScriptedMetaLLM(intents=[RuntimeError("classifier down")])
+        llm = ScriptedMetaLLM(intents=[LLMResponseError("classifier down")])
         agent = MetaBuilderAgent(llm_interface=llm)
         agent.start("agent")
         assert agent.get_internal_state()["artifact_type"] == "agent"

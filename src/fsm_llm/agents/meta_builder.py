@@ -35,6 +35,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 
 from fsm_llm import API
+from fsm_llm.api import llm_settings_for
 from fsm_llm.definitions import LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError
 from fsm_llm.logging import logger
@@ -397,9 +398,12 @@ class MetaBuilderAgent:
         )
         api = API.from_definition(
             build_meta_builder_fsm(),
-            model=self.meta_config.model,
-            temperature=self.meta_config.temperature,
-            max_tokens=self.meta_config.max_tokens,
+            **llm_settings_for(
+                api_kwargs,
+                model=self.meta_config.model,
+                temperature=self.meta_config.temperature,
+                max_tokens=self.meta_config.max_tokens,
+            ),
             **api_kwargs,
         )
         api.register_handler(

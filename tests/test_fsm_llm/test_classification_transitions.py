@@ -49,6 +49,7 @@ from fsm_llm.constants import (
 from fsm_llm.definitions import (
     ClassificationError,
     ClassificationExtractionConfig,
+    ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
     CompletionRequest,
@@ -600,10 +601,9 @@ class TestAmbiguousTransitionExceptionDiscipline:
         "exc",
         [
             ClassificationError("classifier outage"),
-            ValueError("bad payload"),
-            RuntimeError("transport hiccup"),
+            ClassificationResponseError("unreadable reply"),
         ],
-        ids=["ClassificationError", "ValueError", "RuntimeError"],
+        ids=["ClassificationError", "ClassificationResponseError"],
     )
     def test_soft_fail_classes_stay_in_state_with_fallback_marker(self, exc):
         api, conv_id, patcher, exc = _api_with_failing_classifier(exc)
@@ -621,8 +621,22 @@ class TestAmbiguousTransitionExceptionDiscipline:
 
     @pytest.mark.parametrize(
         "exc",
-        [AttributeError("no such attr"), ZeroDivisionError("division by zero")],
-        ids=["AttributeError", "ZeroDivisionError"],
+        [
+            AttributeError("no such attr"),
+            ZeroDivisionError("division by zero"),
+            ValueError("bad payload"),
+            RuntimeError("bug in a custom interface"),
+            KeyError("missing"),
+            TypeError("bad type"),
+        ],
+        ids=[
+            "AttributeError",
+            "ZeroDivisionError",
+            "ValueError",
+            "RuntimeError",
+            "KeyError",
+            "TypeError",
+        ],
     )
     def test_programming_errors_propagate_out_of_converse(self, exc):
         """Not swallowed into a stay. ``FSMManager.process_message`` wraps any
@@ -644,12 +658,13 @@ class TestAmbiguousTransitionExceptionDiscipline:
         assert METADATA_KEY_TRANSITION_CLASSIFICATION not in instance.context.metadata
 
     def test_construction_failure_degrades_to_stay(self):
-        """A ``Classifier(...)`` CONSTRUCTION failure at the transition site is
-        covered by the same soft-fail try as ``classify()``: the turn stays in
-        state instead of escaping as ``FSMError``. RED on the pre-step-2 code,
-        where the ``_get_classifier`` call sat outside the try (review W2).
+        """A ``Classifier(...)`` CONSTRUCTION failure of the classifier's own
+        error family at the transition site is covered by the same soft-fail
+        try as ``classify()``: the turn stays in state instead of escaping as
+        ``FSMError``. RED on the pre-step-2 code, where the
+        ``_get_classifier`` call sat outside the try (review W2).
         """
-        exc = ValueError("schema rejected at construction")
+        exc = ClassificationError("schema rejected at construction")
         api, conv_id, patcher, exc = _api_with_failing_classifier(exc)
         with patcher as mock_cls:
             mock_cls.side_effect = exc
@@ -662,6 +677,21 @@ class TestAmbiguousTransitionExceptionDiscipline:
         stored = instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION]
         assert stored["fallback"] is True
         assert str(exc) in stored["error"]
+
+    def test_a_configuration_error_at_construction_propagates(self):
+        """A ``ValueError`` from ``Classifier(...)`` (an interface without
+        ``complete``, a model mismatch) is a configuration error, not an
+        outage: it fails the turn (D-037 of plan 944e2692), where it was a
+        silent stay on every turn."""
+        exc = ValueError("schema rejected at construction")
+        api, conv_id, patcher, exc = _api_with_failing_classifier(exc)
+        with patcher as mock_cls:
+            mock_cls.side_effect = exc
+            with pytest.raises(FSMError) as info:
+                api.converse("which one?", conv_id)
+
+        assert info.value.__cause__ is exc
+        assert api.get_current_state(conv_id) == "start"
 
     def test_keyboard_interrupt_propagates_bare(self):
         api, conv_id, patcher, exc = _api_with_failing_classifier(KeyboardInterrupt())

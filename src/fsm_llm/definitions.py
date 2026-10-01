@@ -202,6 +202,18 @@ class ResponseGenerationRequest(BaseModel):
         ),
     )
 
+    temperature: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=2.0,
+        strict=True,
+        description=(
+            "Sampling temperature of this request; None keeps the interface's "
+            "own. The pipeline sets it from the context key "
+            "CONTEXT_KEY_RESPONSE_TEMPERATURE; an interface must honour it."
+        ),
+    )
+
 
 class ResponseGenerationResponse(BaseModel):
     """
@@ -523,7 +535,11 @@ class ModelToolCall(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    id: str = Field(..., description="Provider id of the call ('' when none)")
+    id: str = Field(
+        ...,
+        min_length=1,
+        description="Provider id of the call (a call without one is malformed)",
+    )
     name: str = Field(..., min_length=1, description="Name of the called tool")
     arguments: dict[str, Any] = Field(
         default_factory=dict, description="Decoded call arguments"
@@ -539,8 +555,8 @@ class CompletionResponse(BaseModel):
       - ``"final"``: a reply with no tool call; ``text`` is the reply, or
         ``None`` when the model returned no text at all.
       - ``"malformed"``: a tool-call turn that cannot be run (a call whose
-        arguments are not a JSON object or that names no tool, or the
-        provider's own malformed-tool-call error). It carries no calls, so
+        arguments are not a JSON object, that names no tool or that carries
+        no id, or the provider's own malformed-tool-call error). It carries no calls, so
         none of the turn's calls runs, the valid ones included.
 
     A provider outage is not a response: ``complete`` raises. Frozen.
@@ -988,8 +1004,21 @@ class CompletionStateConfig(BaseModel):
 
     The transcript under ``messages_key`` is owned by the consumer (handlers
     append to it, for example with ``fsm_llm.llm.tool_exchange``); core never
-    writes it, never runs a tool, and refuses to send a transcript holding an
-    assistant tool-call message without its tool results.
+    writes it and never runs a tool. A turn is refused with
+    ``LLMResponseError`` and nothing is sent when:
+      - the transcript is not a list, or ``fsm_llm.llm.check_tool_transcript``
+        rejects it (an assistant tool-call message without exactly one tool
+        result per call, an orphan tool result, a call without a non-empty
+        ``str`` id or function name, a user message with ``None`` content);
+      - it is a tool-calling turn (``tools``) and the transcript holds no
+        ``user`` message: the task must be in the transcript, not only in
+        ``instructions``. The transcript is an internal key that session
+        files do not carry, so a session restored in the middle of a tool
+        loop fails its next tool turn loudly instead of sending a request
+        with no task;
+      - a structured turn's response format is missing or not a dict.
+    A reply whose tool call has no id, no tool name or arguments that are not
+    a JSON object is ``kind: "malformed"`` with no calls (none of them runs).
 
     Fields:
       - ``tools``: OpenAI function schemas (``{"type": "function",
@@ -1001,7 +1030,8 @@ class CompletionStateConfig(BaseModel):
         response format of a structured turn.
       - ``instructions``: the system message; ``None`` sends none.
       - ``messages_key``: internal-prefixed context key of the transcript
-        (a list of OpenAI chat messages; absent means empty).
+        (a list of OpenAI chat messages; absent means empty, which a
+        tool-calling turn refuses).
       - ``result_key``: public context key of the result (not internal, not
         reserved); the pipeline treats it as handler-only for extraction.
 

@@ -976,6 +976,13 @@ class ErrorMessages:
         "execute(tool_call, *, gated=False) (agents pass gated=True for a call "
         "an approver granted, so it is never re-run)"
     )
+    PROMPT_CACHE_WITH_INTERFACE = (
+        "AgentConfig.enable_prompt_cache=True cannot apply to an injected "
+        "llm_interface: response caching is a setting (litellm caching=True) "
+        "of the interface core builds, and an injected interface owns its own "
+        "settings. Enable caching on the interface you inject, or drop "
+        "llm_interface"
+    )
     EMPTY_CHAIN = "Cannot create prompt chain agent with empty chain"
     NO_SAMPLES = "num_samples must be at least 1"
     PROMPT_SLOT_OVERFLOW = (

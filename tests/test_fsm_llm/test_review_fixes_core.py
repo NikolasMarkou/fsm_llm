@@ -363,7 +363,7 @@ class TestToolTurnWithoutATaskIsRefused:
         restored = API.from_definition(fsm, llm_interface=llm, session_store=store)
         restored.register_handler(_tool_runner())
         restored_id, _ = restored.restore_session(saved.stem)
-        with pytest.raises(LLMResponseError, match="empty"):
+        with pytest.raises(LLMResponseError, match="no user message"):
             restored.advance(restored_id)
         assert len(llm.requests) == 1  # only the call made before the save
         assert restored.get_current_state(restored_id) == "call_model"
@@ -373,7 +373,7 @@ class TestToolTurnWithoutATaskIsRefused:
         api = _api(_tool_fsm(), llm)
         conv_id, _ = api.start_conversation()
         _to_call_model(api, conv_id)
-        with pytest.raises(LLMResponseError, match="empty"):
+        with pytest.raises(LLMResponseError, match="no user message"):
             api.advance(conv_id)
         assert llm.requests == []
 

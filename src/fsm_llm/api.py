@@ -91,7 +91,7 @@ import json
 import os
 import threading
 import time
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
@@ -126,7 +126,12 @@ from .handlers import (
     HandlerTiming,
     create_handler,
 )
-from .llm import LiteLLMInterface, LLMInterface, implements_complete
+from .llm import (
+    LiteLLMInterface,
+    LLMInterface,
+    implements_complete,
+    interface_model,
+)
 from .logging import handle_conversation_errors, logger
 from .prompts import (
     DataExtractionPromptBuilder,
@@ -364,16 +369,55 @@ def _require_classifier_interface(
     # soft-fail tuple turns into a stay). See D-031.
     if implements_complete(llm_interface):
         return
-    interface_model = getattr(llm_interface, "model", None)
+    injected_model = getattr(llm_interface, "model", None)
     for state in fsm_def.states.values():
         for entry in state.classification_extractions or []:
-            if entry.model is None or entry.model == interface_model:
+            if entry.model is None or entry.model == injected_model:
                 raise ValueError(
                     f"State '{state.id}' classifies '{entry.field_name}' "
                     f"through the conversation's interface, and "
                     f"{type(llm_interface).__name__} does not implement "
                     "complete (LLMInterface.complete)"
                 )
+
+
+def llm_settings_for(api_kwargs: Mapping[str, Any], **settings: Any) -> dict[str, Any]:
+    """The LLM settings a caller may pass to ``API`` beside ``api_kwargs``.
+
+    Interface contract (callers: every subpackage that builds an ``API`` from
+    its own config plus a caller's ``API`` keyword arguments: the agents'
+    ``BaseAgent._create_api``, the meta-builder, the reasoning engine):
+        - ``api_kwargs``: the caller's extra ``API`` keyword arguments.
+        - ``settings``: the subpackage's own LLM settings for the interface
+          ``API`` builds (``model``, ``temperature``, ``max_tokens``, ...).
+        - Returns a copy of ``settings`` when ``api_kwargs`` injects no
+          ``llm_interface``; ``{}`` when it does: the injected interface owns
+          its model and sampling settings, and ``API`` refuses them beside it.
+        - Never raises.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-038: a subpackage's own
+    # config defaults (AgentConfig.model/temperature/max_tokens, which always
+    # carry a value) configure only the interface core builds. Do NOT pass
+    # them beside an injected interface (API refuses them, D-038), and do NOT
+    # copy this rule into each subpackage. A setting the CALLER passes beside
+    # its interface still reaches API and is refused there. See D-038.
+    if api_kwargs.get("llm_interface") is not None:
+        return {}
+    return dict(settings)
+
+
+def _check_exempt_states(exempt: frozenset[str], fsm_def: FSMDefinition) -> None:
+    """Refuse ``seconds_exempt_states`` ids that are not states of ``fsm_def``.
+
+    Contract: ``fsm_def`` is the definition at the top of the conversation's
+    stack when the run is called; raises ``ValueError`` naming the unknown
+    ids (sorted) and the definition; returns ``None`` otherwise.
+    """
+    unknown = sorted(exempt - set(fsm_def.states))
+    if unknown:
+        raise ValueError(
+            f"seconds_exempt_states {unknown} are not states of FSM '{fsm_def.name}'"
+        )
 
 
 @contextmanager
@@ -453,17 +497,31 @@ class API:
         if llm_interface is not None:
             if not isinstance(llm_interface, LLMInterface):
                 raise ValueError("llm_interface must be an instance of LLMInterface")
-            # DECISION plan-2026-10-01T093600-944e2692/D-029: connection
-            # settings beside an injected interface are refused. Do NOT
-            # accept and ignore them: a `seed` (or `caching`, `timeout`, ...)
-            # was dropped silently while the caller believed it applied.
-            if api_key is not None or llm_kwargs:
-                given = sorted(
-                    [*llm_kwargs, *(["api_key"] if api_key is not None else [])]
+            # DECISION plan-2026-10-01T093600-944e2692/D-029 (completed by
+            # D-038): every LLM setting beside an injected interface is
+            # refused: connection kwargs, `api_key`, `temperature`,
+            # `max_tokens`, and a `model` other than the interface's own `str`
+            # model (the rule `Classifier(llm=...)` applies). Do NOT accept
+            # and ignore any of them: a `seed` (or `caching`, `timeout`, a
+            # per-sample `temperature`, ...) was dropped silently while the
+            # caller believed it applied. Subpackages omit their own config
+            # defaults when an interface is injected (`llm_settings_for`).
+            given = sorted(llm_kwargs)
+            given += [
+                name
+                for name, value in (
+                    ("api_key", api_key),
+                    ("temperature", temperature),
+                    ("max_tokens", max_tokens),
                 )
+                if value is not None
+            ]
+            if model is not None and model != interface_model(llm_interface):
+                given.append("model")
+            if given:
                 raise ValueError(
                     f"API(llm_interface=...) takes no LLM settings {given}: "
-                    "the injected interface owns its connection settings"
+                    "the injected interface owns its model and settings"
                 )
             self.llm_interface = llm_interface
             logger.info(
@@ -899,7 +957,17 @@ class API:
                 propagates unchanged and the step does not run.
             seconds_exempt_states: State ids in which a spent ``max_seconds``
                 does not stop the run (a wind-down that must finish once
-                reached); ``max_steps`` still applies. Default: none.
+                reached); ``max_steps`` still applies, so in an exempt state
+                the overrun past ``max_seconds`` is bounded only by the steps
+                left times one step's duration. Default: none. Each id must
+                be a state of the definition at the top of the stack when
+                the run is called (``ValueError`` otherwise; not checked for
+                a conversation that has already ended, which runs nothing).
+                Each round matches the CURRENT top of the stack by state id
+                only: when a handler pushes a child FSM during the run, a
+                child state whose id is in the set is exempt too, and the
+                parent's exempt states count again once the child is
+                popped.
 
         Returns:
             The ``AdvanceResult`` of every step, in order; ``()`` when the
@@ -910,8 +978,9 @@ class API:
         Raises:
             ValueError: an invalid ``max_steps``, ``max_seconds`` (wrong
                 type, ``max_steps < 1``, ``max_seconds <= 0``) or
-                ``seconds_exempt_states`` (a ``str``, or a non-``str`` member),
-                or a conversation ID that was never started.
+                ``seconds_exempt_states`` (a ``str``, a non-``str`` member,
+                or an id that is not a state of the running definition), or a
+                conversation ID that was never started.
             RunBudgetExceededError: a budget was spent before the conversation
                 ended. The steps already run are kept in the conversation, but
                 the error does not carry their ``AdvanceResult``s: read the
@@ -922,7 +991,7 @@ class API:
                 kept), or a turn is already running for the conversation.
         """
         _check_run_budgets(max_steps, max_seconds)
-        exempt = _seconds_exempt_set(seconds_exempt_states)
+        exempt = self._checked_exempt_states(conversation_id, seconds_exempt_states)
         results: list[AdvanceResult] = []
         for _ in _run_rounds(
             self, conversation_id, max_steps, max_seconds, before_step, exempt
@@ -959,7 +1028,8 @@ class API:
                 time budget.
             before_step: Called once before each step with its number
                 (1, 2, ...), after the budget checks.
-            seconds_exempt_states: As in ``run_until_terminal``.
+            seconds_exempt_states: As in ``run_until_terminal`` (checked
+                against the running definition at call time).
 
         Yields:
             String chunks of each speaking state's reply as they arrive.
@@ -977,12 +1047,10 @@ class API:
         ``run_until_terminal``.
         """
         _check_run_budgets(max_steps, max_seconds)
-        exempt = _seconds_exempt_set(seconds_exempt_states)
         # Existence check at call time, holding no lock afterwards. An ended
         # conversation (terminal, or already closed and remembered) is valid
         # and streams nothing; an unknown ID raises ``ValueError`` here.
-        if not self.has_conversation_ended(conversation_id):
-            self._get_current_fsm_conversation_id(conversation_id)
+        exempt = self._checked_exempt_states(conversation_id, seconds_exempt_states)
 
         # Lazy nested closure, as in ``converse_stream`` (anchor
         # plan-2026-07-21T082818-4c63deac/D-002 there).
@@ -994,6 +1062,30 @@ class API:
                     yield from self.advance_stream(conversation_id)
 
         return _stream()
+
+    def _checked_exempt_states(
+        self, conversation_id: str, seconds_exempt_states: Collection[str]
+    ) -> frozenset[str]:
+        """Validate a run's ``seconds_exempt_states`` at call time.
+
+        Contract: shape-checks the collection (``_seconds_exempt_set``); for a
+        live conversation, checks every id against the definition at the top
+        of its stack (``_check_exempt_states``). An unknown conversation ID
+        raises ``ValueError`` (from ``has_conversation_ended``); an ended one
+        is not checked against any definition. Returns the frozen set.
+        """
+        exempt = _seconds_exempt_set(seconds_exempt_states)
+        if self.has_conversation_ended(conversation_id):
+            return exempt
+        # Raises ValueError for an unknown ID or an empty (corrupted) stack.
+        self._get_current_fsm_conversation_id(conversation_id)
+        if exempt:
+            with self._stack_lock:
+                stack = self.conversation_stacks.get(conversation_id)
+                fsm_def = stack[-1].fsm_definition if stack else None
+            if fsm_def is not None:
+                _check_exempt_states(exempt, fsm_def)
+        return exempt
 
     # ==========================================
     # FSM STACKING METHODS (Enhanced)

@@ -372,12 +372,33 @@ class TestExecuteClassificationExtractions:
         pipeline = _make_pipeline()
         instance = _make_instance()
 
-        with patch.object(Classifier, "classify", side_effect=RuntimeError("boom")):
+        with patch.object(
+            Classifier, "classify", side_effect=ClassificationError("boom")
+        ):
             data = pipeline._execute_classification_extractions(
                 state, "test", instance, "conv1"
             )
 
         assert data == {}
+
+    @pytest.mark.parametrize(
+        "error", [RuntimeError("bug"), ValueError("bug"), KeyError("bug")]
+    )
+    def test_an_error_outside_the_classifier_family_propagates(self, error: Exception):
+        """Only ``ClassificationError`` (an outage or an unreadable reply) is
+        soft; anything else is a bug and propagates (D-037 of plan 944e2692)."""
+        config = _make_config()
+        state = _make_state(classification_extractions=[config])
+        pipeline = _make_pipeline()
+        instance = _make_instance()
+
+        with (
+            patch.object(Classifier, "classify", side_effect=error),
+            pytest.raises(type(error)),
+        ):
+            pipeline._execute_classification_extractions(
+                state, "test", instance, "conv1"
+            )
 
     def test_interface_without_complete_builds_no_classifier(self):
         """The classifier sends through the conversation's interface (D-006
@@ -385,18 +406,21 @@ class TestExecuteClassificationExtractions:
         ``complete`` is refused when the classifier is built (D-029; ``API``
         refuses the pair at construction, see test_review_fixes_core.py), so
         a pipeline reached without that check builds and caches nothing, and
-        the extraction fails soft with the key unset."""
+        the extraction fails loudly: a configuration error is not an outage
+        (D-037 of plan 944e2692)."""
         config = _make_config()
         state = _make_state(classification_extractions=[config])
         pipeline = _make_pipeline()
         pipeline.llm_interface = MagicMock(spec=[])  # no .model, no .complete
         instance = _make_instance()
 
-        with patch("fsm_llm.llm.completion") as provider:
-            data = pipeline._execute_classification_extractions(
+        with (
+            patch("fsm_llm.llm.completion") as provider,
+            pytest.raises(ValueError, match="implements complete"),
+        ):
+            pipeline._execute_classification_extractions(
                 state, "test", instance, "conv1"
             )
-        assert data == {}
         provider.assert_not_called()
         assert pipeline._classifier_cache == {}
 
@@ -896,15 +920,13 @@ class TestClassificationPromptConfigValidation:
         with pytest.raises(ValueError, match="max_intents"):
             _make_config(prompt_config={"max_intents": 0})
 
-    def test_bad_prompt_config_on_a_state_is_a_warning_at_converse_time(
-        self, mock_llm2_interface
-    ):
+    def test_bad_prompt_config_on_a_state_fails_the_turn(self, mock_llm2_interface):
         """Defence in depth: a bad `prompt_config` that bypassed load
         validation (plain attribute assignment) on a soft field.
 
-        The `ClassificationPromptConfig(**prompt_config)` call sits inside the
-        extraction site's narrow `try`, whose tuple carries `ValueError`, so the
-        turn completes, the key stays unset and the failure is logged.
+        A broken configuration is not a classifier outage: since D-037 of plan
+        944e2692 only `ClassificationError` is soft, so the turn fails (it was
+        a logged warning with the key unset) and no classifier is built.
         """
         config = _make_config()
         config.prompt_config = {"max_intents": 0}
@@ -921,25 +943,14 @@ class TestClassificationPromptConfigValidation:
         api = API.from_definition(fsm, llm_interface=mock_llm2_interface)
         conv_id, _ = api.start_conversation()
 
-        records: list = []
-        sink_id = logger.add(
-            lambda message: records.append(message.record), level="WARNING"
-        )
-        logger.enable("fsm_llm")
-        try:
-            with patch("fsm_llm.llm.completion") as mock_completion:
-                response = api.converse("I am furious", conv_id)
-        finally:
-            logger.remove(sink_id)
+        with (
+            patch("fsm_llm.llm.completion") as mock_completion,
+            pytest.raises(FSMError, match="max_intents"),
+        ):
+            api.converse("I am furious", conv_id)
 
-        assert isinstance(response, str)
         assert not mock_completion.called, "classifier must not be built"
         assert "sentiment" not in api.get_data(conv_id)
-        messages = [r["message"] for r in records]
-        assert any(
-            "Classification extraction 'sentiment' failed" in m and "max_intents" in m
-            for m in messages
-        ), messages
 
 
 _NON_ASCII_NAMES = ["café", "名前", "naïve_intent", "буя", "intent_µ"]

@@ -509,7 +509,7 @@ class TestOutages:
 
     def test_classifier_outage_uses_the_keyword_type(self):
         llm = ScriptedMetaLLM(
-            intents=[RuntimeError("classifier down")],
+            intents=[LLMResponseError("classifier down")],
             builds=[json.dumps(_WORKFLOW_SPEC)],
         )
         agent = MetaBuilderAgent(llm_interface=llm)
@@ -520,7 +520,7 @@ class TestOutages:
         assert agent.get_result().artifact_type == ArtifactType.WORKFLOW
 
     def test_classifier_outage_with_no_keyword_is_an_fsm(self):
-        llm = ScriptedMetaLLM(intents=[RuntimeError("classifier down")])
+        llm = ScriptedMetaLLM(intents=[LLMResponseError("classifier down")])
         agent = MetaBuilderAgent(llm_interface=llm)
         agent.start("something that helps my team")
         assert agent.get_internal_state()["artifact_type"] == "fsm"

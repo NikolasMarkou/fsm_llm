@@ -12,6 +12,7 @@ import threading
 from typing import Any
 
 from fsm_llm import API, ContextMergeStrategy
+from fsm_llm.api import llm_settings_for
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 from fsm_llm.utilities import redacting_json_default
@@ -93,14 +94,17 @@ class ReasoningEngine:
 
     def _initialize_apis(self):
         """Initialize APIs with all necessary handlers."""
+        # An injected `llm_interface` owns its model: core refuses another
+        # one beside it, so `model` goes only to an interface core builds.
+        settings = llm_settings_for(self.api_kwargs, model=self.model)
         # Main orchestrator API
         self.orchestrator = API.from_definition(
-            self.main_fsm, model=self.model, **self.api_kwargs
+            self.main_fsm, **settings, **self.api_kwargs
         )
 
         # Classification API
         self.classifier = API.from_definition(
-            self.classifier_fsm, model=self.model, **self.api_kwargs
+            self.classifier_fsm, **settings, **self.api_kwargs
         )
 
         # Register handlers

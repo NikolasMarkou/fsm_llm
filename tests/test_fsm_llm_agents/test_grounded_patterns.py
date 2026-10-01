@@ -1814,7 +1814,7 @@ class TestCutOffArtifactEnvelopeNeverShips:
 
         seen: list[str] = []
 
-        def reply(messages, call_type, response_format=None):
+        def reply(messages, call_type, response_format=None, *, temperature=None):
             if call_type == "field_extraction":
                 content = self._CUT
             elif call_type == "data_extraction":

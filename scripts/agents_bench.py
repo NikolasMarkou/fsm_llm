@@ -110,6 +110,8 @@ wilson_ci = hb.wilson_ci
 fisher_exact_two_sided = hb.fisher_exact_two_sided
 append_row = hb.append_row
 read_rows = hb.read_rows
+sha256_json = hb.sha256_json
+manifest_differences = hb.manifest_differences
 
 #: harness_bench's six comparability fields plus the agent-bench extras.
 EXTRA_MANIFEST_FIELDS = (
@@ -119,9 +121,9 @@ EXTRA_MANIFEST_FIELDS = (
     "limits",
     "wrapper_version",
 )
-#: What a block's requests carried beyond the task text, so a pair can show
-#: every difference besides the model (``request_disclosure``,
-#: ``llm_request_settings``). Recorded B0/B1 manifests predate them; ``report
+#: What a block's requests carried beyond the task text, read at core's send
+#: binding, so a pair can show every difference besides the model
+#: (``request_disclosure``). Recorded B0/B1 manifests predate them; ``report
 #: --pair`` prints a field a manifest lacks as "not recorded".
 DISCLOSURE_FIELDS = (
     "llm_request",
@@ -131,8 +133,6 @@ DISCLOSURE_FIELDS = (
     "first_request",
 )
 MANIFEST_FIELDS = tuple(hb.MANIFEST_FIELDS) + EXTRA_MANIFEST_FIELDS + DISCLOSURE_FIELDS
-#: How ``report --pair`` prints a field one manifest does not carry.
-NOT_RECORDED = "not recorded"
 
 
 # --- BEGIN TASKS (hashed: tools, tasks, graders, reference solvers) ----------
@@ -872,119 +872,57 @@ def metered_interface(model: str) -> Any:
     )
 
 
-def llm_request_settings(model: str) -> dict[str, Any]:
-    """The per-request transport settings of the trial interface (manifest
-    ``llm_request``): ``timeout`` (seconds, ``None`` = litellm's default),
-    ``retries`` (0 = the SDK default) and the names of any extra provider
-    kwargs (a ``seed`` would show here)."""
-    llm = metered_interface(model)
-    return {
-        "timeout": llm.timeout,
-        "retries": llm.retries,
-        "extra_kwargs": sorted(llm.kwargs),
-    }
-
-
 # --- Request disclosure ------------------------------------------------------
 
 
-def sha256_json(obj: Any) -> str:
-    """sha256 of ``json.dumps(obj)`` with key order kept, never sorted: a
-    schema whose keys were reordered is a different digest."""
-    return hashlib.sha256(json.dumps(obj).encode("utf-8")).hexdigest()
-
-
-def _request_recorder(model: str) -> Any:
-    """An ``LLMInterface`` that records every request and refuses it.
-
-    Each method appends ``(method_name, request)`` to ``requests`` and raises
-    ``LLMResponseError``, so an agent run on it ends after its first refused
-    request(s) without any provider call. ``model`` is the arm's model, so the
-    agent sees the interface it would be given in a trial.
-    """
-    from fsm_llm import LLMInterface, LLMResponseError
-
-    class _RequestRecorder(LLMInterface):
-        def __init__(self) -> None:
-            self.model = model
-            self.requests: list[tuple[str, Any]] = []
-
-        def _refuse(self, kind: str, request: Any) -> Any:
-            self.requests.append((kind, request))
-            raise LLMResponseError("agents_bench request probe: no provider")
-
-        def generate_response(self, request: Any) -> Any:
-            return self._refuse("generate_response", request)
-
-        def generate_response_stream(self, request: Any) -> Any:
-            return self._refuse("generate_response_stream", request)
-
-        def extract_field(self, request: Any) -> Any:
-            return self._refuse("extract_field", request)
-
-        def extract_bulk_data(self, request: Any) -> Any:
-            return self._refuse("extract_bulk_data", request)
-
-        def complete(self, request: Any) -> Any:
-            return self._refuse("complete", request)
-
-    return _RequestRecorder()
-
-
-def _request_digest(kind: str, request: Any) -> dict[str, Any]:
-    """``kind`` plus digests of a request's system text(s) and ``tools``."""
-    messages = getattr(request, "messages", None)
-    if messages is not None:
-        system = [m.get("content") for m in messages if m.get("role") == "system"]
-    else:
-        system = [request.system_prompt]
-    tools = getattr(request, "tools", None)
-    return {
-        "kind": kind,
-        "system_sha256": sha256_json(system),
-        "tools_sha256": None if tools is None else sha256_json(tools),
-    }
-
-
 def request_disclosure(arm_name: str, model: str) -> dict[str, Any]:
-    """What *arm_name*'s agent hands its interface, per task, with no provider.
+    """What *arm_name*'s requests carry at the wire, per task, with no provider.
 
-    Interface contract (callers: ``build_manifest``; the tests):
-        - Builds the arm for every task on a ``_request_recorder`` and runs
-          it; the recorder refuses every request, so nothing is sent and the
-          run ends in an error, which is expected and recorded by name.
-        - Returns ``{"agent_class", "run_cap", "tool_schemas_sha256",
-          "first_request"}``: the agent's ``module.qualname``; its core step
-          ceiling for ``LIMITS["max_iterations"]`` as ``{"max_steps",
-          "formula", "max_seconds"}`` (``None`` for an agent without
+    Interface contract (callers: ``build_manifest``, so also ``run``'s drift
+    check; the tests):
+        - Builds the arm for every task on the trial interface
+          (``metered_interface``) and runs it inside ``hb.captured_wire``:
+          core's send binding records the final request and refuses it, so
+          nothing is sent and the run ends in an error, which is expected and
+          recorded by name.
+        - Returns ``{"llm_request", "agent_class", "run_cap",
+          "tool_schemas_sha256", "first_request"}``: the first task's first
+          request settings with values (``hb.wire_settings``: temperature,
+          ``max_tokens``, timeout, ``max_retries``, Ollama's
+          ``reasoning_effort``, any extra kwarg such as a ``seed``; secrets
+          redacted), ``None`` when no task sent a request; the agent's
+          ``module.qualname``; its core step ceiling for
+          ``LIMITS["max_iterations"]`` as ``{"max_steps", "formula",
+          "max_seconds"}`` (``None`` for an agent without
           ``_step_ceiling``); per task the ``sha256_json`` of the registry's
-          ``get_json_schemas()`` (the bytes a native ``tools=`` carries, and
-          the one schema source a prompt-mode arm renders); per task the
-          first request's ``{"kind", "system_sha256", "tools_sha256",
-          "run_error"}`` (``None`` when the run sent no request).
-        - A prompt-mode arm's system prompt carries today's date, so its
-          ``system_sha256`` is specific to the day it was computed.
+          ``get_json_schemas()``; per task the first request's
+          ``hb.wire_digest`` (date line and task text masked, so it is
+          stable across days and time zones) plus ``run_error`` (``None``
+          when the run sent no request).
         - Raises whatever the arm factory raises (a broken arm fails the
           registration, not a trial). Writes nothing.
     """
     tool_schemas: dict[str, str] = {}
     first_request: dict[str, dict[str, Any] | None] = {}
+    llm_request: dict[str, Any] | None = None
     agent: Any = None
     for task in TASKS:
         tools = make_tools()
         selected = {name: tools[name] for name in task.tools}
         tool_schemas[task.id] = sha256_json(build_registry(selected).get_json_schemas())
-        recorder = _request_recorder(model)
-        agent = ARMS[arm_name](selected, model, recorder)
+        agent = ARMS[arm_name](selected, model, metered_interface(model))
         run_error = None
-        try:
-            agent.run(task.prompt)
-        except Exception as exc:  # every request is refused: the run must fail
-            run_error = type(exc).__name__
-        if not recorder.requests:
+        with hb.captured_wire() as captured:
+            try:
+                agent.run(task.prompt)
+            except Exception as exc:  # every request is refused: the run fails
+                run_error = type(exc).__name__
+        if not captured:
             first_request[task.id] = None
             continue
-        digest = _request_digest(*recorder.requests[0])
+        if llm_request is None:
+            llm_request = hb.wire_settings(captured[0])
+        digest = hb.wire_digest(captured[0], task.prompt)
         first_request[task.id] = {**digest, "run_error": run_error}
     step_ceiling = getattr(agent, "_step_ceiling", None)
     run_cap = None
@@ -996,6 +934,7 @@ def request_disclosure(arm_name: str, model: str) -> dict[str, Any]:
             "max_seconds": LIMITS["timeout_seconds"],
         }
     return {
+        "llm_request": llm_request,
         "agent_class": f"{type(agent).__module__}.{type(agent).__qualname__}",
         "run_cap": run_cap,
         "tool_schemas_sha256": tool_schemas,
@@ -1174,17 +1113,18 @@ def build_manifest(
     """The pre-registration record, written BEFORE row 1.
 
     Besides the comparability fields it discloses what the arm's requests
-    carry (``DISCLOSURE_FIELDS``): transport settings, agent class, run cap,
-    tool-schema and first-request digests, computed offline with no provider
-    call (``request_disclosure``).
+    carry at the wire (``DISCLOSURE_FIELDS``): request settings with values,
+    agent class, run cap, tool-schema and first-request digests, computed
+    offline with no provider call (``request_disclosure``).
     """
-    # DECISION plan-2026-10-01T093600-944e2692/D-036: a manifest records what
-    # its requests carried (timeout, tool-schema bytes, system prompt, agent
-    # class, run cap), computed by running the arm on a refusing recorder.
-    # Do NOT derive these from constants or source text (they drift from
-    # what is sent: the step-14 schema diff hid behind a key-sorted
-    # comparison), do NOT sort keys before hashing, and do NOT edit a
-    # recorded manifest to add them (report prints "not recorded"). D-036.
+    # DECISION plan-2026-10-01T093600-944e2692/D-036 (refined by D-040): a
+    # manifest records what its requests carried (settings, tool-schema
+    # bytes, system prompt, agent class, run cap), captured at core's send
+    # binding by running the arm with the provider call refused. Do NOT
+    # derive these from constants or source text (they drift from what is
+    # sent: the step-14 schema diff hid behind a key-sorted comparison), do
+    # NOT sort keys before hashing, and do NOT edit a recorded manifest to
+    # add them (report prints "not recorded"). D-036, D-040.
     fixture = tasks_sha256()
     disclosure = request_disclosure(arm_name, model)
     return {
@@ -1207,7 +1147,6 @@ def build_manifest(
         "temperature": LIMITS["temperature"],
         "limits": dict(LIMITS),
         "wrapper_version": WRAPPER_VERSION,
-        "llm_request": llm_request_settings(model),
         **disclosure,
     }
 
@@ -1217,9 +1156,9 @@ def _arm_paths(bdir: Path, arm: str) -> tuple[Path, Path, Path]:
     return (bdir / names[0], bdir / names[1], bdir / names[2])
 
 
-#: Manifest keys a pre-registered block must still match when ``run`` starts.
-#: ``first_request`` is not one: a prompt-mode arm's system prompt carries
-#: the date, so it moves overnight without any code change.
+#: Manifest keys a pre-registered block must still match when ``run`` starts
+#: (compared as JSON text, so a type change is drift). ``first_request`` is
+#: one: its digests mask the date line, so they move only with the code.
 _PINNED_AT_RUN = (
     "tasks_sha256",
     "trials",
@@ -1230,6 +1169,7 @@ _PINNED_AT_RUN = (
     "agent_class",
     "run_cap",
     "tool_schemas_sha256",
+    "first_request",
 )
 
 
@@ -1269,7 +1209,11 @@ def _checked_manifest(
         bench_id=bench_id, block=block, arm_name=arm_name, trials=trials, model=model
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    drift = [k for k in _PINNED_AT_RUN if manifest.get(k) != current[k]]
+    drift = [
+        k
+        for k in _PINNED_AT_RUN
+        if hb.manifest_differences({k: manifest.get(k)}, {k: current[k]})
+    ]
     if manifest.get("model_digest", {}).get("digest") != current["model_digest"].get(
         "digest"
     ):
@@ -1367,7 +1311,7 @@ def run_block(
         )
         hb._write_json(manifest_path, manifest)
     print(f"pre-registered {manifest_path} (digest {manifest['model_digest']})")
-    started, status = hb._utc_now(), "aborted"
+    started, status, ran = hb._utc_now(), "aborted", hb.run_commit()
     try:
         total = len(TASKS) * trials
         done = 0
@@ -1386,7 +1330,9 @@ def run_block(
                 )
         status = "complete"
     finally:
-        summary = write_summary(bdir, arm_name, status=status, started_at=started)
+        summary = write_summary(
+            bdir, arm_name, status=status, started_at=started, run=ran
+        )
         print(f"wrote {summary_path} (status: {status})")
     return summary
 
@@ -1553,7 +1499,12 @@ def compute_metrics(rows: list[dict[str, Any]], trials: int) -> dict[str, Any]:
 
 
 def write_summary(
-    bdir: Path, arm_name: str, *, status: str, started_at: str | None = None
+    bdir: Path,
+    arm_name: str,
+    *,
+    status: str,
+    started_at: str | None = None,
+    run: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Summary from rows; REFUSES without a complete manifest (not evidence)."""
     manifest_path, rows_path, summary_path = _arm_paths(bdir, arm_name)
@@ -1573,6 +1524,9 @@ def write_summary(
         "started_at": started_at,
         "finished_at": hb._utc_now(),
         "manifest": manifest_path.name,
+        # The code the run executed (``hb.run_commit`` at run start); the
+        # manifest's git_commit is the registration commit.
+        "run": run,
         "metrics": compute_metrics(read_rows(rows_path), int(manifest["trials"])),
     }
     hb._write_json(summary_path, summary)
@@ -1648,41 +1602,6 @@ def _resolve(
             f"--pair side {side!r} matches {len(hits)} blocks; write BLOCK/ARM"
         )
     return hits[0]
-
-
-#: Marks a manifest key one side of a pair lacks (distinct from a JSON null).
-_ABSENT = object()
-
-
-def _show(value: Any) -> str:
-    return NOT_RECORDED if value is _ABSENT else json.dumps(value)
-
-
-def manifest_differences(
-    a: dict[str, Any], b: dict[str, Any], prefix: str = ""
-) -> list[str]:
-    """One ``"key: A vs B"`` line per manifest leaf that differs, A first.
-
-    Interface contract (callers: ``report`` for ``--pair``; the tests):
-        - Walks the union of both manifests' keys in sorted order, recursing
-          into keys whose values are dicts on both sides (dotted paths, e.g.
-          ``model_digest.digest``); every other differing value is one line
-          with both values as JSON.
-        - A key one side lacks prints as ``not recorded`` (recorded B0/B1
-          manifests predate ``DISCLOSURE_FIELDS``); nothing is skipped or
-          truncated. Equal manifests give ``[]``. Never raises.
-    """
-    lines: list[str] = []
-    for key in sorted(set(a) | set(b)):
-        va, vb = a.get(key, _ABSENT), b.get(key, _ABSENT)
-        if va == vb:
-            continue
-        path = f"{prefix}{key}"
-        if isinstance(va, dict) and isinstance(vb, dict):
-            lines.extend(manifest_differences(va, vb, f"{path}."))
-        else:
-            lines.append(f"{path}: {_show(va)} vs {_show(vb)}")
-    return lines
 
 
 def report(

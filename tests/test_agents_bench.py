@@ -468,18 +468,22 @@ class TestManifestDisclosure:
         )
         for field in ab.DISCLOSURE_FIELDS:
             assert field in manifest, field
-        assert manifest["llm_request"] == {
-            "timeout": 120.0,
-            "retries": 0,
-            "extra_kwargs": [],
-        }
+        settings = manifest["llm_request"]
+        # The FINAL request (D-040): core's Ollama preparation is in it.
+        assert settings["timeout"] == 120.0
+        assert settings["max_tokens"] == ab.LIMITS["max_tokens"]
+        assert settings["reasoning_effort"] == "none"
+        assert settings["temperature"] == 0  # an extraction call on Ollama
+        assert settings["model"] == ab.MODEL
+        assert "messages" not in settings and "tools" not in settings
         assert manifest["agent_class"] == "fsm_llm.agents.react.ReactAgent"
         assert manifest["run_cap"]["max_steps"] == 24
         assert manifest["run_cap"]["max_seconds"] == ab.LIMITS["timeout_seconds"]
         assert set(manifest["tool_schemas_sha256"]) == set(_TWO_IDS)
         first = manifest["first_request"]["st-capital"]
-        assert first["kind"] == "extract_field" and first["tools_sha256"] is None
-        assert len(first["system_sha256"]) == 64
+        assert first["tools_sha256"] is None
+        for digest in ("system_sha256", "user_sha256", "settings_sha256"):
+            assert len(first[digest]) == 64
         assert first["run_error"] == "AgentError"
 
     def test_tool_schema_digest_is_the_exact_unsorted_registry_bytes(self, two_tasks):
@@ -511,7 +515,6 @@ class TestManifestDisclosure:
         assert disclosure["agent_class"].endswith("NativeFunctionCallingReactAgent")
         firsts = disclosure["first_request"]
         for task_id in _TWO_IDS:
-            assert firsts[task_id]["kind"] == "complete"
             assert (
                 firsts[task_id]["tools_sha256"]
                 == disclosure["tool_schemas_sha256"][task_id]
@@ -528,6 +531,7 @@ class TestManifestDisclosure:
 
         monkeypatch.setitem(ab.ARMS, "silent", silent)
         disclosure = ab.request_disclosure("silent", ab.MODEL)
+        assert disclosure["llm_request"] is None
         assert disclosure["run_cap"] is None
         assert disclosure["first_request"] == {t: None for t in _TWO_IDS}
         assert disclosure["agent_class"] == "types.SimpleNamespace"
@@ -540,12 +544,14 @@ class TestManifestDisclosure:
         monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
         monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
         ab.register_block("agents-react", "B9", "fsm_advance", trials=1)
-        settings = ab.llm_request_settings
-        monkeypatch.setattr(
-            ab,
-            "llm_request_settings",
-            lambda model: {**settings(model), "timeout": 30.0},
-        )
+        original = ab.metered_interface
+
+        def shorter(model):
+            llm = original(model)
+            llm.timeout = 30.0
+            return llm
+
+        monkeypatch.setattr(ab, "metered_interface", shorter)
         with pytest.raises(ab.BenchDataError, match="llm_request"):
             ab.run_block("agents-react", "B9", "fsm_advance", trials=1)
         assert not (
@@ -890,6 +896,7 @@ class TestRunEndToEnd:
         monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
         monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
         monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
+        monkeypatch.setattr(hb, "_git_dirty", lambda: False)
         monkeypatch.setattr(
             fsm_llm.llm,
             "completion",
@@ -943,6 +950,7 @@ class TestRunEndToEnd:
         manifest = json.loads((bdir / "manifest_mock.json").read_text())
         assert manifest["git_commit"] == "cafebabe" and manifest["trials"] == 2
         assert summary["status"] == "complete"
+        assert summary["run"] == {"git_commit": "cafebabe", "git_dirty": False}
         assert summary["metrics"]["k_pass1_first_trial"] == 1
         assert summary["metrics"]["k_pass_hat_k"] == 1
         assert ab.report("agents-react") == 0
@@ -1227,3 +1235,144 @@ class TestCLI:
         assert ab.main(["list-tasks", "--verify"]) == 0
         out = capsys.readouterr().out
         assert "verify: ok" in out and f"{len(ab.TASKS)} tasks" in out
+
+
+class TestWireDisclosure:
+    """Review pass 10 warnings 1 and 2, notes 6 and 7 (D-037 item 18.5, D-040):
+    the disclosure is read off the FINAL request at core's send binding, is
+    stable across days, and is pinned at ``run``."""
+
+    @pytest.fixture
+    def native_two(self, monkeypatch):
+        """Two tasks, a stub digest/commit, the native arm registered, and a
+        provider that fails the test if anything is sent."""
+        import fsm_llm.llm
+
+        def no_send(**kw):
+            raise AssertionError("the disclosure probe sent a provider request")
+
+        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
+        monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
+        monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
+        monkeypatch.setitem(ab.ARMS, "native_probe", _native_arm)
+        two = tuple(t for t in ab.TASKS if t.id in _TWO_IDS)
+        monkeypatch.setattr(ab, "TASKS", two)
+
+    def test_a_tool_turn_temperature_rule_change_moves_the_disclosure(
+        self, native_two, monkeypatch
+    ):
+        """Defect guarded: forcing temperature 0 on a tool turn (the
+        bf7ffe24/D-003 rule, measured 0/3 vs 3/3 tool calls) moved no
+        manifest field, because the digest stopped at the interface."""
+        from fsm_llm import LiteLLMInterface
+
+        before = ab.request_disclosure("native_probe", ab.MODEL)
+        assert before["llm_request"]["temperature"] == ab.LIMITS["temperature"]
+        original = LiteLLMInterface._apply_model_specific_params
+
+        def greedy_tools(self, call_params, call_type, **kw):
+            original(self, call_params, call_type, **kw)
+            call_params["temperature"] = 0
+
+        monkeypatch.setattr(
+            LiteLLMInterface, "_apply_model_specific_params", greedy_tools
+        )
+        after = ab.request_disclosure("native_probe", ab.MODEL)
+        assert after["llm_request"]["temperature"] == 0
+        assert hb.manifest_differences(before, after)
+        for task_id in _TWO_IDS:
+            assert (
+                before["first_request"][task_id]["settings_sha256"]
+                != after["first_request"][task_id]["settings_sha256"]
+            )
+
+    def test_dropping_the_ollama_user_turn_prefix_moves_the_disclosure(
+        self, native_two, monkeypatch
+    ):
+        """Defect guarded: core's Ollama message preparation (``/nothink`` on
+        the last user turn) going unrecorded."""
+        import fsm_llm.llm
+
+        before = ab.request_disclosure("native_probe", ab.MODEL)
+        monkeypatch.setattr(
+            fsm_llm.llm, "prepare_ollama_messages", lambda messages, *a: messages
+        )
+        after = ab.request_disclosure("native_probe", ab.MODEL)
+        for task_id in _TWO_IDS:
+            assert (
+                before["first_request"][task_id]["user_sha256"]
+                != after["first_request"][task_id]["user_sha256"]
+            )
+
+    def test_extra_settings_are_recorded_with_values_and_secrets_redacted(
+        self, native_two, monkeypatch
+    ):
+        """Defect guarded: a seed 7 vs seed 8 block (or an api_base change)
+        looking identical because only kwarg NAMES were recorded."""
+        from fsm_llm import LiteLLMInterface
+
+        def seeded(seed):
+            def interface(model):
+                return LiteLLMInterface(
+                    model=model,
+                    temperature=ab.LIMITS["temperature"],
+                    max_tokens=ab.LIMITS["max_tokens"],
+                    seed=seed,
+                    api_key="sk-live-abcdef0123456789abcdef",
+                )
+
+            return interface
+
+        monkeypatch.setattr(ab, "metered_interface", seeded(7))
+        seven = ab.request_disclosure("native_probe", ab.MODEL)
+        monkeypatch.setattr(ab, "metered_interface", seeded(8))
+        eight = ab.request_disclosure("native_probe", ab.MODEL)
+        assert seven["llm_request"]["seed"] == 7
+        assert seven["llm_request"]["api_key"] == "<redacted>"
+        assert "sk-live" not in json.dumps(seven)
+        assert "llm_request.seed: 7 vs 8" in hb.manifest_differences(seven, eight)
+
+    def test_digests_do_not_move_with_the_date(self, native_two, monkeypatch):
+        """Defect guarded: a prompt-mode system prompt carries today's date,
+        so its digest moved overnight (or with TZ) and could not be pinned
+        at ``run``."""
+        import datetime as real_datetime
+
+        def on(day):
+            class _Day(real_datetime.date):
+                @classmethod
+                def today(cls):
+                    return cls(2026, 10, day)
+
+            monkeypatch.setattr(real_datetime, "date", _Day)
+            return ab.request_disclosure("fsm_advance", ab.MODEL)["first_request"]
+
+        assert on(1) == on(2)
+
+    def test_run_refuses_a_block_whose_native_system_prompt_changed(
+        self, native_two, tmp_path, monkeypatch
+    ):
+        """Defect guarded (pass 10 warning 2): ``run`` accepted a native block
+        whose system prompt changed after registration (first_request was not
+        pinned)."""
+        from fsm_llm.agents import native_fc
+
+        monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
+        ab.register_block("agents-react", "B9", "native_probe", trials=1)
+        monkeypatch.setattr(
+            native_fc, "_SYSTEM_PROMPT", "You are a terse agent. Never call tools."
+        )
+        with pytest.raises(ab.BenchDataError, match="first_request"):
+            ab.run_block("agents-react", "B9", "native_probe", trials=1)
+        assert not (
+            tmp_path / "agents-react" / "B9" / "rows_native_probe.jsonl"
+        ).exists()
+
+    def test_field_comparison_distinguishes_types(self):
+        """Defect guarded (pass 10 note 6): Python ``==`` hid a ``retries: 0``
+        vs ``false`` or a ``timeout: 120`` vs ``120.0`` change."""
+        lines = ab.manifest_differences(
+            {"a": 1, "b": {"t": 120}}, {"a": True, "b": {"t": 120.0}}
+        )
+        assert lines == ["a: 1 vs true", "b.t: 120 vs 120.0"]
+        assert ab.manifest_differences is hb.manifest_differences

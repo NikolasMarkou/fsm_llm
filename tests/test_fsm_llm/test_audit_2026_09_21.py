@@ -22,6 +22,7 @@ from fsm_llm.constants import (
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
 )
 from fsm_llm.definitions import (
+    ClassificationError,
     ClassificationExtractionConfig,
     ClassificationResult,
     ClassificationSchema,
@@ -794,7 +795,7 @@ class TestStep04A4:
         with patch("fsm_llm.pipeline.Classifier") as mock_cls:
             mock_cls.return_value.classify.side_effect = [
                 _classification("a", 0.05),
-                RuntimeError("down"),
+                ClassificationError("down"),
             ]
             api.converse("maybe a?", conv_id)
             assert _a4_metadata(api, conv_id)[_A4_TRANSITION_KEY]["low_confidence"]

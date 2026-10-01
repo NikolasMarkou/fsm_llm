@@ -13,14 +13,13 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.constants import CONTEXT_KEY_RESPONSE_TEMPERATURE
 from fsm_llm.logging import logger
 
 from .base import (
     BaseAgent,
     pattern_run_output_keys,
-    prompt_overflow_error,
     strip_caller_context,
-    with_instructions,
 )
 from .constants import (
     ContextKeys,
@@ -323,22 +322,18 @@ class SelfConsistencyAgent(BaseAgent):
             ``generate`` state never extracts, so its greeting reply is the
             sample; its ``Answer:`` line is what the vote compares.
         """
-        try:
-            api = API.from_definition(
-                with_instructions(fsm_def, self.config.instructions),
-                model=self.config.model,
-                temperature=temperature,
-                max_tokens=self.config.max_tokens,
-                **self._api_kwargs,
-            )
-        except ValueError as exc:
-            error = prompt_overflow_error(exc, self.config.instructions, None)
-            if error is None:
-                raise
-            raise error from exc
+        # DECISION plan-2026-10-01T093600-944e2692/D-038: the sample's
+        # temperature travels on core's Pass-2 request (context key
+        # CONTEXT_KEY_RESPONSE_TEMPERATURE), not on the interface, so it
+        # applies through an injected `llm_interface` too. Do NOT pass
+        # `temperature=` to API (refused beside an injected interface, and
+        # silently dropped before that refusal), and do NOT build a private
+        # interface per sample. See decisions.md D-038.
+        api = self._create_api(fsm_def)
 
         context: dict[str, Any] = dict(initial_context) if initial_context else {}
         context[ContextKeys.TASK] = task
+        context[CONTEXT_KEY_RESPONSE_TEMPERATURE] = temperature
 
         # The FSM is one terminal state that speaks: the greeting is the sample.
         conv_id, sample = api.start_conversation(context)

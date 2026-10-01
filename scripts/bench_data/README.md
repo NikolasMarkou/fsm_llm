@@ -73,6 +73,14 @@ read as the same axis:
 | `arm` | `native` boolean + display label |
 | `git_commit` | the source commit the block ran against |
 
+Blocks run after B1 also carry the request disclosures `llm_request` (the
+first request's kwargs with values, secrets redacted) and `first_request`
+(digests of its system text, other messages, tools and settings, plus
+`n_requests` and `run_error`), read at core's send binding by one EXECUTE
+dispatch whose first request is refused (`request_disclosure`; same rules as
+the agents-react disclosures below). Recorded B0/B1 manifests predate them.
+Their summaries carry `run: {git_commit, git_dirty}` read at run start.
+
 A summary without its manifest is NOT evidence; the writer refuses to emit
 one. `report` refuses to Fisher-compare two blocks whose manifests pin
 different model digests.
@@ -88,7 +96,16 @@ Recompute everything from the raw rows:
 
 ```
 .venv/bin/python scripts/harness_bench.py report <bench-id>
+.venv/bin/python scripts/harness_bench.py report l4-execute-write \
+    --blocks B1 B2 --pair B2/native_fsm:B1/native
 ```
+
+Two blocks compare each arm label present in both. `--pair
+BLOCK/ARM:BLOCK/ARM` compares two arms whose labels differ (a B2
+`native_fsm` against a B1 `native`): it prints every differing manifest field
+first (values compared as JSON text, a field one side lacks as "not
+recorded"), then Fisher two-sided per metric both blocks carry, only when the
+two manifests pin the same model digest.
 
 ## agents-react (scripts/agents_bench.py)
 
@@ -110,21 +127,28 @@ sit outside it), `trials`, `temperature`, `limits`, `wrapper_version`,
 
 Request disclosures (blocks registered after B1; B0/B1 manifests predate them
 and are never edited, so `report` prints them as "not recorded"). They are
-computed offline at `register`/`run` by building the arm for every task on a
-recording interface that refuses every request (no provider call):
+computed offline at `register`/`run` by running the arm for every task on the
+trial interface with core's one send binding (`fsm_llm.llm.completion`)
+replaced by a stub that records the FINAL request and refuses it
+(`harness_bench.captured_wire`; no provider call). So everything core adds
+on the way out counts: Ollama preparation (`reasoning_effort`, `/nothink` on
+the last user turn, a schema echo), the temperature rules, `max_tokens`,
+timeout, retries and any extra provider kwarg (D-040 of plan 944e2692):
 
 | Field | Pins |
 |---|---|
-| `llm_request` | the trial interface's per-request `timeout` (seconds; B0's native_fc sent none, litellm's default), `retries` (0 = SDK default) and the names of extra provider kwargs (a `seed` would show here) |
-| `agent_class` | `module.qualname` of the agent the arm factory builds (the code path) |
+| `llm_request` | the first task's first request kwargs except `messages` and `tools`, WITH values (`model`, `temperature`, `max_tokens`, `timeout`, `max_retries`, `reasoning_effort`, `tool_choice`, `response_format`, a `seed`, an `api_base`, ...); a secret-looking entry keeps its key with the value `"<redacted>"` (core's `is_forbidden_context_entry` via `redact_secret_entries`) |
+| `agent_class` | `module.qualname` of the agent the arm factory builds (a rewrite under the same name shows only in `git_commit` and the request digests) |
 | `run_cap` | the agent's core step ceiling for `max_iterations` (`max_steps`, `formula`) and `max_seconds` |
 | `tool_schemas_sha256` | per task, sha256 of `json.dumps(registry.get_json_schemas())` with key order kept (never sorted): the exact `tools=` bytes a native arm sends and the one schema a prompt-mode arm renders |
-| `first_request` | per task, the first request the agent hands its interface: `kind`, `system_sha256` (its system text), `tools_sha256`, `run_error` |
+| `first_request` | per task, digests of the first FINAL request: `system_sha256` (system texts), `user_sha256` (every other message, role and content), `tools_sha256` (the `tools` bytes or null), `settings_sha256` (the `llm_request` shape of that request), plus `run_error`. The `Today's date: YYYY-MM-DD` line and the task text are masked (`<DATE>`, `<TASK>`; `tasks_sha256` pins the task text), so the digests move only with the code, not with the day or the time zone |
 
 `run` refuses a registered block whose `llm_request`, `agent_class`,
-`run_cap` or `tool_schemas_sha256` changed since registration.
-`first_request` is not checked: a prompt-mode arm's system prompt carries
-today's date, so its digest moves overnight.
+`run_cap`, `tool_schemas_sha256` or `first_request` changed since
+registration; values are compared as JSON text, so a type change (`120` vs
+`120.0`, `0` vs `false`) is drift. The commit that actually ran is recorded
+at run start in the summary as `run: {git_commit, git_dirty}` (the
+manifest's `git_commit` is the registration commit).
 
 Meter (`wrapper_version`): "1" (B0, B1) patched the litellm completion
 bindings and counted every provider call through them; "2" (every later
@@ -159,7 +183,8 @@ per-category table.
 
 `--pair A:B` (each side `ARM` or `BLOCK/ARM`) first prints every manifest
 field that differs between the two blocks (nested keys as dotted paths, a
-field one side lacks as "not recorded"), then Fisher two-sided on
+field one side lacks as "not recorded", values compared as JSON text so a
+type change prints), then Fisher two-sided on
 first-trial pass@1 and pass^k, only when both manifests pin the same model
 digest. A pair across code versions is read with those differences in view.
 A B2-vs-B0 pair must disclose, beyond the printed lines: meter "2" vs "1";
