@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from fsm_llm import RunBudgetExceededError
 from fsm_llm.definitions import (
     BulkExtractionRequest,
     DataExtractionResponse,
@@ -21,8 +22,10 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm.reasoning import ReasoningEngine
+from fsm_llm.reasoning import ReasoningEngine, ReasoningExecutionError
 from fsm_llm.reasoning.constants import (
+    HYBRID_EVALUATION_STATE,
+    ORCHESTRATOR_HANDLER_ONLY_KEYS,
     ContextKeys,
     Defaults,
     OrchestratorStates,
@@ -299,3 +302,173 @@ class TestForcedPop:
         assert len(wait_replies) == Defaults.MAX_SUB_FSM_ITERATIONS
         assert context["deductive_reasoning_completed"] is True
         assert _visited(trace_info)[-1] == OrchestratorStates.FINAL_ANSWER
+
+
+class _ClaimingLLM(_ScriptedLLM):
+    """A model that claims, in every bulk reply, the keys it may not write."""
+
+    def __init__(self, script: dict[str, Any], claims: dict[str, Any]) -> None:
+        super().__init__(script)
+        self.claims = claims
+
+    def extract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
+        self.requests.append(request)
+        return DataExtractionResponse(extracted_data=dict(self.claims), confidence=0.9)
+
+
+def _replies_from(llm: _ScriptedLLM, state_id: str) -> int:
+    """Pass-2 calls made from ``state_id`` (one per step that ends there)."""
+    tag = f"<current_state>{state_id}</current_state>"
+    return sum(
+        1
+        for r in llm.requests
+        if isinstance(r, ResponseGenerationRequest) and tag in r.system_prompt
+    )
+
+
+# The model never synthesizes a solution but claims it is valid.
+_CLAIMED_VALID_SCRIPT: dict[str, Any] = {
+    key: value
+    for key, value in _VALID_SCRIPT.items()
+    if key != ContextKeys.PROPOSED_SOLUTION
+}
+
+
+class TestHandlerOnlyGate:
+    """A model reply cannot write the validation verdict or the counters (D-054)."""
+
+    def test_a_bulk_claim_of_validity_does_not_open_the_gate(self):
+        llm = _ClaimingLLM(
+            _CLAIMED_VALID_SCRIPT,
+            claims={
+                ContextKeys.VALIDATION_RESULT: True,
+                ContextKeys.SOLUTION_CONFIDENCE: 1.0,
+            },
+        )
+        _solution, trace_info = _engine(llm).solve_problem(_PROBLEM)
+        context = trace_info["final_context"]
+
+        # No solution was ever proposed: every attempt fails validation.
+        assert context[ContextKeys.VALIDATION_RESULT] is False
+        assert context[ContextKeys.RETRY_COUNT] == Defaults.MAX_RETRIES
+        assert context[ContextKeys.MAX_RETRIES_REACHED] is True
+        assert context[ContextKeys.SOLUTION_CONFIDENCE] < 1.0
+        entries = _visited(trace_info).count(OrchestratorStates.EXECUTE_REASONING)
+        assert entries == Defaults.MAX_RETRIES
+
+    def test_no_field_extraction_is_minted_for_a_handler_only_key(self):
+        # validate_refine is entered with no verdict on every attempt.
+        llm = _ScriptedLLM(_CLAIMED_VALID_SCRIPT)
+        _engine(llm).solve_problem(_PROBLEM)
+
+        for key in ORCHESTRATOR_HANDLER_ONLY_KEYS:
+            assert llm.field_requests(key) == [], key
+
+    def test_a_merged_calculator_solution_gets_a_handler_verdict(self):
+        """The calculator's solution, merged back on pop, is judged by the
+        validator handler: no model verdict is needed to finish."""
+        script = {
+            "problem_type": "arithmetic",
+            "problem_components": ["2", "+", "3"],
+            "problem_domain": "math",
+            "recommended_reasoning_type": "simple_calculator",
+            "reasoning_strategy": "simple_calculator",
+            "strategy_rationale": "plain addition",
+            "operand1": 2,
+            "operand2": 3,
+            "operator": "+",
+            "calculation_result": 5,
+            "key_insights": ["addition"],
+            "final_solution": "5",
+        }
+        llm = _ScriptedLLM(script)
+        solution, trace_info = _engine(llm).solve_problem("What is 2 + 3?")
+        context = trace_info["final_context"]
+
+        assert solution == "5"
+        assert context[ContextKeys.PROPOSED_SOLUTION] == 5
+        assert context[ContextKeys.VALIDATION_RESULT] is True
+        assert context[ContextKeys.RETRY_COUNT] == 0
+        assert _visited(trace_info)[-1] == OrchestratorStates.FINAL_ANSWER
+
+
+_HYBRID_SCRIPT: dict[str, Any] = {
+    **_VALID_SCRIPT,
+    "problem_aspects": ["validity"],
+    "reasoning_map": {"validity": "deductive"},
+    "analytical_breakdown": "two premises",
+    "component_relationships": "premise chain",
+    "logical_conclusions": ["Socrates is mortal"],
+    "reasoning_chain": ["major", "minor", "conclusion"],
+    "creative_insights": ["none needed"],
+    "novel_approaches": ["none"],
+    "evaluation_results": "sound",
+    "integrated_solution": "Socrates is mortal",
+    "reasoning_synthesis_notes": "deduction suffices",
+    "final_hybrid_solution": "Socrates is mortal",
+    "reasoning_synthesis": "deduction",
+}
+
+
+class TestHybridLoopCounter:
+    """The hybrid back edge runs at most MAX_HYBRID_LOOPS times (D-054)."""
+
+    def test_the_back_edge_runs_at_most_twice(self):
+        # The model always asks for refinement and keeps resetting the count.
+        llm = _ClaimingLLM(
+            _HYBRID_SCRIPT,
+            claims={
+                ContextKeys.NEEDS_REFINEMENT: True,
+                ContextKeys.HYBRID_LOOP_COUNT: 0,
+            },
+        )
+        _solution, trace_info = _engine(llm).solve_problem(
+            _PROBLEM,
+            {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.HYBRID.value},
+        )
+        context = trace_info["final_context"]
+
+        # One pass plus MAX_HYBRID_LOOPS refinements, then on to the terminal.
+        passes = 1 + Defaults.MAX_HYBRID_LOOPS
+        assert _replies_from(llm, "identify_components") == passes
+        assert _replies_from(llm, HYBRID_EVALUATION_STATE) == passes
+        assert _replies_from(llm, "finalize_hybrid") == 1
+        assert context["hybrid_reasoning_completed"] is True
+        assert context[ContextKeys.FINAL_HYBRID_SOLUTION] == "Socrates is mortal"
+
+
+# problem_components never arrives: problem_analysis never leaves.
+_NEVER_ENDING_SCRIPT: dict[str, Any] = {
+    key: value
+    for key, value in _VALID_SCRIPT.items()
+    if key != ContextKeys.PROBLEM_COMPONENTS
+}
+
+
+class TestSpentBudget:
+    """A solve that does not finish raises with its partial context (D-014)."""
+
+    def test_raises_with_the_partial_context(self):
+        llm = _ScriptedLLM(_NEVER_ENDING_SCRIPT)
+        engine = _engine(llm)
+
+        with pytest.raises(ReasoningExecutionError) as info:
+            engine.solve_problem(_PROBLEM)
+
+        error = info.value
+        assert isinstance(error.__cause__, RunBudgetExceededError)
+        assert error.__cause__.steps_done == Defaults.MAX_SOLVE_STEPS
+        details = error.details
+        assert set(details) == {
+            "conversation_id",
+            "responses_so_far",
+            "partial_context",
+        }
+        partial = details["partial_context"]
+        assert partial[ContextKeys.PROBLEM_STATEMENT] == _PROBLEM
+        assert partial[ContextKeys.PROBLEM_TYPE] == "logic puzzle"
+        assert ContextKeys.PROBLEM_COMPONENTS not in partial
+        # The conversation was ended after the context was read.
+        assert engine.orchestrator.list_active_conversations() == []

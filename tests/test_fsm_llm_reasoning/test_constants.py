@@ -5,6 +5,7 @@ Unit tests for reasoning engine constants.
 import pytest
 
 from fsm_llm.reasoning.constants import (
+    ORCHESTRATOR_HANDLER_ONLY_KEYS,
     ClassifierStates,
     ContextKeys,
     Defaults,
@@ -123,6 +124,7 @@ class TestHandlerNames:
         assert HandlerNames.CONTEXT_PRUNER == "ContextPruner"
         assert HandlerNames.RETRY_LIMITER == "RetryLimiter"
         assert HandlerNames.RETRY_KEY_CLEARER == "RetryKeyClearer"
+        assert HandlerNames.HYBRID_LOOP_COUNTER == "HybridLoopCounter"
 
 
 class TestDefaults:
@@ -143,6 +145,35 @@ class TestDefaults:
             + (Defaults.MAX_RETRIES + 1) * Defaults.MAX_SUB_FSM_ITERATIONS
         )
         assert Defaults.MAX_SOLVE_STEPS == 170
+
+    def test_hybrid_back_edge_limit(self):
+        assert Defaults.MAX_HYBRID_LOOPS == 2
+
+
+class TestHandlerOnlyKeys:
+    """D-054 of plan 944e2692: the orchestrator's handler-owned keys."""
+
+    def test_orchestrator_list(self):
+        assert set(ORCHESTRATOR_HANDLER_ONLY_KEYS) == {
+            "validation_result",
+            "validation_checks",
+            "max_retries_reached",
+            "retry_count",
+            "solution_confidence",
+            "reasoning_type_selected",
+            "classified_problem_type",
+            "reasoning_push_pending",
+        }
+
+    def test_the_fsm_definitions_carry_them(self):
+        from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+
+        assert ALL_REASONING_FSMS["orchestrator"]["handler_only_keys"] == list(
+            ORCHESTRATOR_HANDLER_ONLY_KEYS
+        )
+        assert ALL_REASONING_FSMS["hybrid"]["handler_only_keys"] == [
+            ContextKeys.HYBRID_LOOP_COUNT
+        ]
 
 
 class TestErrorMessages:

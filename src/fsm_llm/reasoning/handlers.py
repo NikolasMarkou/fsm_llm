@@ -218,6 +218,23 @@ class ReasoningHandlers:
         }
 
     @staticmethod
+    def count_hybrid_loop(context: dict[str, Any]) -> dict[str, Any]:
+        """Count one exit of the hybrid strategy's critical_evaluation state.
+
+        Registered on that state's exit (PRE_TRANSITION, after the transition
+        was chosen), so the back edge reads the count of earlier exits: with
+        the count starting at 0 it runs at most ``Defaults.MAX_HYBRID_LOOPS``
+        times. Returns ``{hybrid_loop_count: previous + 1}`` (an unset count
+        is 0). Never raises.
+        """
+        # DECISION plan-2026-10-01T093600-944e2692/D-054: the count is a
+        # handler-only key. Do NOT ask the model to increment it again: a
+        # message-free bulk fills unset keys only, so a model-written count
+        # never moves and the back edge loops until the forced pop.
+        previous = context.get(ContextKeys.HYBRID_LOOP_COUNT) or 0
+        return {ContextKeys.HYBRID_LOOP_COUNT: int(previous) + 1}
+
+    @staticmethod
     def update_reasoning_trace(context: dict[str, Any]) -> dict[str, Any]:
         """
         Update reasoning trace with size management.

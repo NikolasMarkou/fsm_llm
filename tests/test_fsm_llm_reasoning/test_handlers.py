@@ -10,6 +10,7 @@ from fsm_llm.reasoning.constants import (
     ErrorMessages,
     ReasoningType,
 )
+from fsm_llm.reasoning.engine import ReasoningEngine
 from fsm_llm.reasoning.handlers import (
     ContextManager,
     OutputFormatter,
@@ -100,6 +101,70 @@ class TestValidateSolution:
         result = ReasoningHandlers.validate_solution(ctx)
         # Empty problem_statement -> addresses_problem defaults to has_solution
         assert result[ContextKeys.VALIDATION_CHECKS]["addresses_problem"] is True
+
+
+class TestCountHybridLoop:
+    """ReasoningHandlers.count_hybrid_loop counts critical_evaluation exits."""
+
+    def test_unset_count_starts_at_one(self):
+        assert ReasoningHandlers.count_hybrid_loop({}) == {
+            ContextKeys.HYBRID_LOOP_COUNT: 1
+        }
+
+    def test_count_increments(self):
+        ctx = {ContextKeys.HYBRID_LOOP_COUNT: 1}
+        assert ReasoningHandlers.count_hybrid_loop(ctx) == {
+            ContextKeys.HYBRID_LOOP_COUNT: 2
+        }
+
+    def test_none_count_is_zero(self):
+        ctx = {ContextKeys.HYBRID_LOOP_COUNT: None}
+        assert ReasoningHandlers.count_hybrid_loop(ctx) == {
+            ContextKeys.HYBRID_LOOP_COUNT: 1
+        }
+
+
+def _bare_engine() -> ReasoningEngine:
+    engine = object.__new__(ReasoningEngine)
+    engine.handlers = ReasoningHandlers()
+    return engine
+
+
+class TestCheckRetryLimit:
+    """validate_refine entry: a verdict when the attempt has none (D-054)."""
+
+    def test_existing_verdict_is_kept(self):
+        ctx = {
+            ContextKeys.VALIDATION_RESULT: False,
+            ContextKeys.RETRY_COUNT: 1,
+        }
+        assert _bare_engine()._check_retry_limit(ctx) == {
+            ContextKeys.MAX_RETRIES_REACHED: False
+        }
+
+    def test_missing_verdict_is_computed_from_the_solution(self):
+        ctx = {
+            ContextKeys.PROPOSED_SOLUTION: 5,
+            ContextKeys.REASONING_TYPE_SELECTED: ReasoningType.SIMPLE_CALCULATOR,
+            ContextKeys.PROBLEM_STATEMENT: "What is 2 + 3?",
+            ContextKeys.RETRY_COUNT: 0,
+        }
+        result = _bare_engine()._check_retry_limit(ctx)
+
+        assert result[ContextKeys.VALIDATION_RESULT] is True
+        assert result[ContextKeys.RETRY_COUNT] == 0
+        assert result[ContextKeys.MAX_RETRIES_REACHED] is False
+
+    def test_missing_solution_counts_a_failed_attempt(self):
+        ctx = {
+            ContextKeys.PROBLEM_STATEMENT: "Explain the tides.",
+            ContextKeys.RETRY_COUNT: Defaults.MAX_RETRIES - 1,
+        }
+        result = _bare_engine()._check_retry_limit(ctx)
+
+        assert result[ContextKeys.VALIDATION_RESULT] is False
+        assert result[ContextKeys.RETRY_COUNT] == Defaults.MAX_RETRIES
+        assert result[ContextKeys.MAX_RETRIES_REACHED] is True
 
 
 class TestUpdateReasoningTrace:

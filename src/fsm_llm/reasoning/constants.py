@@ -102,6 +102,10 @@ class ContextKeys:
     RETRY_COUNT = "retry_count"
     MAX_RETRIES_REACHED = "max_retries_reached"
 
+    # Hybrid strategy loop control (the critical_evaluation back edge)
+    NEEDS_REFINEMENT = "needs_refinement"
+    HYBRID_LOOP_COUNT = "hybrid_loop_count"
+
     # Simple calculator specific
     OPERAND1 = "operand1"
     OPERAND2 = "operand2"
@@ -241,6 +245,26 @@ RETRY_CLEARED_KEYS: tuple[str, ...] = (
 )
 
 
+# Orchestrator keys only handlers, update_context and initial_context write
+# (core ``handler_only_keys``): no extraction, bulk or per-field, may set them,
+# so a model reply can never open the validation gate or pick the strategy.
+ORCHESTRATOR_HANDLER_ONLY_KEYS: tuple[str, ...] = (
+    ContextKeys.VALIDATION_RESULT,
+    ContextKeys.VALIDATION_CHECKS,
+    ContextKeys.MAX_RETRIES_REACHED,
+    ContextKeys.RETRY_COUNT,
+    ContextKeys.SOLUTION_CONFIDENCE,
+    ContextKeys.REASONING_TYPE_SELECTED,
+    ContextKeys.CLASSIFIED_PROBLEM_TYPE,
+    ContextKeys.REASONING_PUSH_PENDING,
+)
+
+# The hybrid strategy state whose exit the loop counter handler counts; its
+# back edge to the first hybrid state runs at most Defaults.MAX_HYBRID_LOOPS
+# times.
+HYBRID_EVALUATION_STATE = "critical_evaluation"
+
+
 class HandlerNames:
     """Handler names for registration."""
 
@@ -251,6 +275,7 @@ class HandlerNames:
     CONTEXT_PRUNER = "ContextPruner"
     RETRY_LIMITER = "RetryLimiter"
     RETRY_KEY_CLEARER = "RetryKeyClearer"
+    HYBRID_LOOP_COUNTER = "HybridLoopCounter"
 
 
 class Defaults:
@@ -268,6 +293,7 @@ class Defaults:
     MAX_SUB_FSM_ITERATIONS = 30  # Steps of a strategy FSM before a forced pop
     MAX_CLASSIFICATION_ITERATIONS = 10  # Steps budget of the classifier FSM run
     MAX_TOTAL_ITERATIONS = 50  # Orchestrator steps of one solve
+    MAX_HYBRID_LOOPS = 2  # Times the hybrid critical_evaluation back edge runs
     # Steps budget of the one orchestrator run of a solve (D-013): the
     # orchestrator's own steps plus a full strategy run for the first attempt
     # and each retry. A pop of an ended strategy FSM is not a step (D-052).

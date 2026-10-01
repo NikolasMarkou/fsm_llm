@@ -8,7 +8,14 @@ All FSMs use standardized context keys from constants.py.
 
 from __future__ import annotations
 
-from .constants import ClassifierStates, ContextKeys, Defaults, OrchestratorStates
+from .constants import (
+    HYBRID_EVALUATION_STATE,
+    ORCHESTRATOR_HANDLER_ONLY_KEYS,
+    ClassifierStates,
+    ContextKeys,
+    Defaults,
+    OrchestratorStates,
+)
 
 # ============================================================================
 # ORCHESTRATOR FSM - Main control flow with retry management
@@ -19,6 +26,12 @@ orchestrator_fsm = {
     "description": "Orchestrates various reasoning strategies with retry limits and loop prevention.",
     "initial_state": OrchestratorStates.PROBLEM_ANALYSIS,
     "persona": "You are a reasoning guide helping to solve problems step by step. Be clear, logical, and thorough.",
+    # DECISION plan-2026-10-01T093600-944e2692/D-054: the validation verdict,
+    # retry counters, confidence and strategy choice are handler-owned. Do NOT
+    # take a key out of this list to let the model "help" (a bulk reply with
+    # validation_result: true would open the gate) and do NOT list them in a
+    # state's required_context_keys (never extracted, the validator warns).
+    "handler_only_keys": list(ORCHESTRATOR_HANDLER_ONLY_KEYS),
     "states": {
         OrchestratorStates.PROBLEM_ANALYSIS: {
             "id": OrchestratorStates.PROBLEM_ANALYSIS,
@@ -140,10 +153,6 @@ orchestrator_fsm = {
             "id": OrchestratorStates.VALIDATE_REFINE,
             "description": "Validate solution with retry limit protection",
             "purpose": f"Check '{ContextKeys.VALIDATION_RESULT}' and retry if needed (max {Defaults.MAX_RETRIES} times)",
-            "required_context_keys": [
-                ContextKeys.VALIDATION_RESULT,
-                ContextKeys.SOLUTION_CONFIDENCE,
-            ],
             "extraction_instructions": """
             Validate the proposed solution:
 
@@ -153,7 +162,7 @@ orchestrator_fsm = {
             - Identify any significant gaps or errors
             - Consider if retry is warranted (only for serious issues)
 
-            Handlers will manage retry_count to prevent infinite loops. Set validation_result to True/False.
+            Handlers set validation_result and manage retry_count to prevent infinite loops.
 
             IMPORTANT: Do not ask questions or request additional input from the user. Validate based on the solution quality and completeness.
             """,
@@ -220,7 +229,6 @@ orchestrator_fsm = {
             "required_context_keys": [
                 ContextKeys.FINAL_SOLUTION,
                 ContextKeys.REASONING_TRACE,
-                ContextKeys.SOLUTION_CONFIDENCE,
             ],
             "extraction_instructions": """
             Present the final solution with complete context:
@@ -231,7 +239,6 @@ orchestrator_fsm = {
             - 'Unable to find valid solution after maximum attempts' if no valid solution
 
             Include:
-            - Copy solution_confidence from validation
             - Complete reasoning_trace showing the path taken
             - Summary of key insights and approach used
 
@@ -1356,6 +1363,9 @@ hybrid_fsm = {
     "description": "Systematically combines multiple reasoning approaches for comprehensive problem solving with loop prevention mechanisms",
     "initial_state": "identify_components",
     "persona": "You are a master strategist who skillfully combines different reasoning approaches to tackle complex problems from multiple complementary angles.",
+    # The loop counter is written only by the HybridLoopCounter handler on
+    # critical_evaluation exit (D-054); the model never sets it.
+    "handler_only_keys": [ContextKeys.HYBRID_LOOP_COUNT],
     "states": {
         "identify_components": {
             "id": "identify_components",
@@ -1374,7 +1384,7 @@ hybrid_fsm = {
             - What aspects need critical evaluation of arguments or evidence?
             - What patterns might inductive reasoning help reveal from available data?
 
-            Create a comprehensive map of problem aspects to appropriate reasoning approaches. Initialize hybrid_loop_count to 0 for loop management.
+            Create a comprehensive map of problem aspects to appropriate reasoning approaches.
 
             IMPORTANT: Do not ask questions or request additional input from the user. Analyze the problem as presented to identify reasoning needs.
             """,
@@ -1468,15 +1478,15 @@ hybrid_fsm = {
             "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
             "transitions": [
                 {
-                    "target_state": "critical_evaluation",
+                    "target_state": HYBRID_EVALUATION_STATE,
                     "description": "Creative reasoning systematically applied",
                 }
             ],
         },
-        "critical_evaluation": {
-            "id": "critical_evaluation",
+        HYBRID_EVALUATION_STATE: {
+            "id": HYBRID_EVALUATION_STATE,
             "description": "Critically evaluate all findings with systematic loop prevention",
-            "purpose": f"Create '{ContextKeys.EVALUATION_RESULTS}' and determine if refinement needed (maximum 2 loops)",
+            "purpose": f"Create '{ContextKeys.EVALUATION_RESULTS}' and determine if refinement needed (maximum {Defaults.MAX_HYBRID_LOOPS} loops)",
             "required_context_keys": [ContextKeys.EVALUATION_RESULTS],
             "extraction_instructions": """
             Critically evaluate the integration of all reasoning approaches:
@@ -1487,7 +1497,7 @@ hybrid_fsm = {
             - Are there critical flaws or missing elements that would justify returning for refinement?
             - How robust and comprehensive is the overall reasoning when considered together?
 
-            Set needs_refinement=True only for serious, fundamental issues. Always increment hybrid_loop_count to prevent infinite loops.
+            Set needs_refinement=True only for serious, fundamental issues.
 
             IMPORTANT: Do not ask questions or request additional input from the user. Evaluate comprehensively based on your multi-faceted analysis.
             """,
@@ -1502,8 +1512,18 @@ hybrid_fsm = {
                             "description": "No critical issues found or maximum loops reached",
                             "logic": {
                                 "or": [
-                                    {"!=": [{"var": "needs_refinement"}, True]},
-                                    {">=": [{"var": "hybrid_loop_count"}, 2]},
+                                    {
+                                        "!=": [
+                                            {"var": ContextKeys.NEEDS_REFINEMENT},
+                                            True,
+                                        ]
+                                    },
+                                    {
+                                        ">=": [
+                                            {"var": [ContextKeys.HYBRID_LOOP_COUNT, 0]},
+                                            Defaults.MAX_HYBRID_LOOPS,
+                                        ]
+                                    },
                                 ]
                             },
                         }
@@ -1518,8 +1538,18 @@ hybrid_fsm = {
                             "description": "Critical issues found and loops available",
                             "logic": {
                                 "and": [
-                                    {"==": [{"var": "needs_refinement"}, True]},
-                                    {"<": [{"var": "hybrid_loop_count"}, 2]},
+                                    {
+                                        "==": [
+                                            {"var": ContextKeys.NEEDS_REFINEMENT},
+                                            True,
+                                        ]
+                                    },
+                                    {
+                                        "<": [
+                                            {"var": [ContextKeys.HYBRID_LOOP_COUNT, 0]},
+                                            Defaults.MAX_HYBRID_LOOPS,
+                                        ]
+                                    },
                                 ]
                             },
                         }

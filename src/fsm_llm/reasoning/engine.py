@@ -14,6 +14,7 @@ from fsm_llm import (
     API,
     AdvanceResult,
     ContextMergeStrategy,
+    FSMError,
     RunBudgetExceededError,
     clear_keys_on_entry,
 )
@@ -22,6 +23,7 @@ from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .constants import (
+    HYBRID_EVALUATION_STATE,
     RETRY_CLEARED_KEYS,
     ContextKeys,
     Defaults,
@@ -175,6 +177,14 @@ class ReasoningEngine:
             self.orchestrator.create_handler(HandlerNames.RETRY_LIMITER)
             .on_state_entry(OrchestratorStates.VALIDATE_REFINE)
             .do(self._check_retry_limit)
+        )
+
+        # Hybrid back-edge counter: strategy FSMs run on the orchestrator API,
+        # and only the hybrid FSM has this state.
+        self.orchestrator.register_handler(
+            self.orchestrator.create_handler(HandlerNames.HYBRID_LOOP_COUNTER)
+            .on_state_exit(HYBRID_EVALUATION_STATE)
+            .do(self.handlers.count_hybrid_loop)
         )
 
     def _classify_problem(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -350,18 +360,30 @@ class ReasoningEngine:
 
     def _check_retry_limit(self, context: dict[str, Any]) -> dict[str, Any]:
         """
-        Check if retry limit has been reached.
+        Give this attempt a verdict if it has none, then check the retry limit.
 
         :param context: Current context
-        :return: Retry status
+        :return: Retry status, plus the verdict keys of
+            ``ReasoningHandlers.validate_solution`` when no verdict was set
         """
-        retry_count = context.get(ContextKeys.RETRY_COUNT, 0)
+        # DECISION plan-2026-10-01T093600-944e2692/D-054: the verdict is
+        # handler-only, so an attempt that produced no proposed_solution (the
+        # validator runs on its CONTEXT_UPDATE only) gets it here. Do NOT hand
+        # the verdict back to the model: its bulk reply must not open the
+        # gate, and with no verdict validate_refine would stay until the step
+        # budget.
+        verdict: dict[str, Any] = {}
+        if context.get(ContextKeys.VALIDATION_RESULT) is None:
+            verdict = self.handlers.validate_solution(context)
+        retry_count = verdict.get(
+            ContextKeys.RETRY_COUNT, context.get(ContextKeys.RETRY_COUNT, 0)
+        )
         max_reached = retry_count >= Defaults.MAX_RETRIES
 
         if max_reached:
             logger.warning(ErrorMessages.MAX_RETRIES_EXCEEDED)
 
-        return {ContextKeys.MAX_RETRIES_REACHED: max_reached}
+        return {**verdict, ContextKeys.MAX_RETRIES_REACHED: max_reached}
 
     def solve_problem(
         self, problem: str, initial_context: dict[str, Any] | None = None
@@ -392,7 +414,7 @@ class ReasoningEngine:
 
         # Start orchestrator
         conv_id, initial_response = self.orchestrator.start_conversation(context)
-        log = logger.bind(conversation_id=conv_id, package="fsm_llm.reasoning")
+        log = _solve_log(conv_id)
         log.info(f"Started reasoning process: {conv_id}")
 
         stack = _StrategyStack(self, conv_id)
@@ -402,12 +424,25 @@ class ReasoningEngine:
             results = self.orchestrator.run_until_terminal(
                 conv_id, max_steps=Defaults.MAX_SOLVE_STEPS, before_step=stack
             )
+        except RunBudgetExceededError as e:
+            # DECISION plan-2026-10-01T093600-944e2692/D-054 (D-014): an
+            # unfinished solve raises, never returns a fallback string as the
+            # solution. Do NOT end the conversation before reading the partial
+            # context (get_data of an ended solve has nothing to give), and do
+            # NOT fold this into the generic wrap below (it carries no context).
+            partial_context = self._read_partial_context(conv_id)
+            self._end_quietly(conv_id)
+            raise ReasoningExecutionError(
+                f"Reasoning did not finish within {e.limit} {e.budget}",
+                details={
+                    "conversation_id": conv_id,
+                    "responses_so_far": 1 + len(stack.responses),
+                    "partial_context": partial_context,
+                },
+            ) from e
         except Exception as e:
             # Clean up conversation before re-raising
-            try:
-                self.orchestrator.end_conversation(conv_id)
-            except Exception as cleanup_err:
-                log.warning(f"Failed to clean up conversation {conv_id}: {cleanup_err}")
+            self._end_quietly(conv_id)
             raise ReasoningExecutionError(
                 f"Reasoning execution failed: {e}",
                 details={
@@ -446,10 +481,33 @@ class ReasoningEngine:
             }
         finally:
             # Always clean up the conversation, even if post-processing raises
-            try:
-                self.orchestrator.end_conversation(conv_id)
-            except Exception as cleanup_err:
-                log.warning(f"Failed to clean up conversation {conv_id}: {cleanup_err}")
+            self._end_quietly(conv_id)
+
+    def _read_partial_context(self, conv_id: str) -> dict[str, Any] | None:
+        """The context of the frame on top of a solve that did not finish.
+
+        Must run before the conversation is ended. Returns ``None`` (with a
+        WARNING) when core cannot read it, so the caller's error still
+        reports the unfinished solve.
+        """
+        try:
+            data: dict[str, Any] = self.orchestrator.get_data(conv_id)
+            return data
+        except FSMError as read_err:
+            _solve_log(conv_id).warning(
+                f"Could not read the partial context of {conv_id}: {read_err}"
+            )
+            return None
+
+    def _end_quietly(self, conv_id: str) -> None:
+        """End the orchestrator conversation; a failure is logged, not raised
+        (it runs on paths that already return or raise a result)."""
+        try:
+            self.orchestrator.end_conversation(conv_id)
+        except Exception as cleanup_err:
+            _solve_log(conv_id).warning(
+                f"Failed to clean up conversation {conv_id}: {cleanup_err}"
+            )
 
     def _extract_reasoning_types(
         self, final_context: dict[str, Any], trace_steps: list[dict[str, Any]]
@@ -468,6 +526,11 @@ class ReasoningEngine:
                 types.add(snapshot[ContextKeys.REASONING_TYPE_SELECTED])
 
         return list(types) if types else ["unknown"]
+
+
+def _solve_log(conversation_id: str) -> Any:
+    """The logger bound to one solve's orchestrator conversation."""
+    return logger.bind(conversation_id=conversation_id, package="fsm_llm.reasoning")
 
 
 class _StrategyStack:
@@ -494,9 +557,7 @@ class _StrategyStack:
         self._engine = engine
         self._api = engine.orchestrator
         self._conversation_id = conversation_id
-        self._log = logger.bind(
-            conversation_id=conversation_id, package="fsm_llm.reasoning"
-        )
+        self._log = _solve_log(conversation_id)
         self.responses: list[tuple[int, str]] = []
         self._pushed_at = 0
         self._reasoning_type = ""

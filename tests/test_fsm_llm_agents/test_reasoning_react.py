@@ -344,3 +344,33 @@ class TestReasonToolInputAndShadowing:
             assert handlers.execute_tool(ctx)[ContextKeys.TOOL_STATUS] == "success"
         assert len(runs) == 1
         assert registry.cache_hits == 1
+
+
+class TestReasonToolEngineFailure:
+    """An engine that raises (e.g. a spent solve budget, D-014 of plan
+    944e2692) becomes a failed tool call, never a crash of the run."""
+
+    def test_spent_budget_is_a_failed_tool_call(self):
+        from fsm_llm import RunBudgetExceededError
+        from fsm_llm.agents.handlers import AgentHandlers
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+        from fsm_llm.reasoning import ReasoningExecutionError
+
+        error = ReasoningExecutionError(
+            "Reasoning did not finish within 170 steps",
+            details={
+                "conversation_id": "c",
+                "responses_so_far": 3,
+                "partial_context": {"problem_type": "logic"},
+            },
+        )
+        error.__cause__ = RunBudgetExceededError("steps", 170, 170)
+        agent = ReasoningReactAgent(tools=ToolRegistry())
+        executor = agent._make_reasoning_tool_executor(AgentHandlers(agent.tools))
+        with patch.object(agent._reasoning_engine, "solve_problem", side_effect=error):
+            delta = executor(_reason_context({"problem": "Is 91 prime?"}))
+
+        assert delta[ContextKeys.TOOL_STATUS] == "failed"
+        assert "did not finish" in delta[ContextKeys.TOOL_ERROR]
+        assert str(delta[ContextKeys.TOOL_RESULT]).startswith("Reasoning failed")
+        assert ReasoningIntegrationKeys.REASONING_RESULT not in delta
