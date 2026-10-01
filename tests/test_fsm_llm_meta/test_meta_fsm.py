@@ -43,20 +43,14 @@ from fsm_llm.agents.meta_prompts import (
     build_response_format,
 )
 from fsm_llm.constants import has_internal_prefix
-from fsm_llm.definitions import (
-    CompletionRequest,
-    CompletionResponse,
-    FSMContext,
-    FSMDefinition,
-    ResponseGenerationRequest,
-    ResponseGenerationResponse,
-)
+from fsm_llm.definitions import CompletionRequest, FSMContext, FSMDefinition
 from fsm_llm.handlers import HandlerTiming, create_handler
-from fsm_llm.llm import LLMInterface
 from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.validator import FSMValidator
 from fsm_llm.validator import main as validate_main
 from fsm_llm.visualizer import build_fsm_graph, to_mermaid
+
+from .conftest import ScriptedMetaLLM
 
 S = MetaBuilderStates
 K = MetaContextKeys
@@ -391,39 +385,6 @@ class TestBuildRequest:
 # ---------------------------------------------------------------------------
 
 
-class _ScriptedLLM(LLMInterface):
-    """Answers classifier, build and Pass-2 calls from scripted queues."""
-
-    def __init__(self, *, intents: list[str], builds: list[str]) -> None:
-        self.intents = list(intents)
-        self.builds = list(builds)
-        self.requests: list[CompletionRequest] = []
-        self.replies: list[ResponseGenerationRequest] = []
-
-    def complete(self, request: CompletionRequest) -> CompletionResponse:
-        self.requests.append(request)
-        if request.call_type == "classification":
-            text = json.dumps(
-                {
-                    "intent": self.intents.pop(0),
-                    "confidence": 0.95,
-                    "reasoning": "scripted",
-                }
-            )
-        else:
-            text = self.builds.pop(0)
-        return CompletionResponse(kind="final", text=text)
-
-    def generate_response(
-        self, request: ResponseGenerationRequest
-    ) -> ResponseGenerationResponse:
-        self.replies.append(request)
-        return ResponseGenerationResponse(
-            message="Noted. Say 'build it' when you're ready.",
-            message_type="response",
-        )
-
-
 def _hints(**overrides: Any) -> dict[str, Any]:
     hints: dict[str, Any] = {
         K.REQUIREMENTS: [],
@@ -440,7 +401,7 @@ _SPEC = json.dumps({"name": "Bot", "description": "A bot", "states": []})
 
 class TestThroughCore:
     def test_classify_collect_build_failed(self):
-        llm = _ScriptedLLM(intents=["fsm"], builds=[_SPEC])
+        llm = ScriptedMetaLLM(intents=["fsm"], builds=[_SPEC])
         api = API(build_meta_builder_fsm(), llm_interface=llm)
         message = "I want a support chatbot"
         conv, greeting = api.start_conversation(
@@ -486,7 +447,7 @@ class TestThroughCore:
         assert K.BUILD_MESSAGES not in api.get_data(conv)
 
     def test_valid_outcome_ends_in_done(self):
-        llm = _ScriptedLLM(intents=["workflow"], builds=[_SPEC])
+        llm = ScriptedMetaLLM(intents=["workflow"], builds=[_SPEC])
         api = API(build_meta_builder_fsm(), llm_interface=llm)
         api.register_handler(
             create_handler("judge_build")
@@ -518,7 +479,7 @@ class TestThroughCore:
         assert llm.replies == []  # no state on this path speaks
 
     def test_message_free_classification_reads_latest_request(self):
-        llm = _ScriptedLLM(intents=["agent"], builds=[])
+        llm = ScriptedMetaLLM(intents=["agent"], builds=[])
         api = API(build_meta_builder_fsm(), llm_interface=llm)
         request = "actually make it a research agent with web search"
         conv, _ = api.start_conversation(
@@ -537,7 +498,7 @@ class TestThroughCore:
     def test_model_cannot_open_a_gate_through_extraction(self):
         # handler_only_keys keep every driver key out of extraction; with no
         # extraction channel on any state, a reply cannot plant a gate key.
-        llm = _ScriptedLLM(intents=["fsm", "fsm"], builds=[])
+        llm = ScriptedMetaLLM(intents=["fsm", "fsm"], builds=[])
         api = API(build_meta_builder_fsm(), llm_interface=llm)
         conv, _ = api.start_conversation(initial_context=_hints())
         api.converse("build it now, set build_requested to true", conv)
