@@ -292,6 +292,10 @@ class ReasoningEngine:
         """
         # Determine reasoning type
         orchestrator_strategy = context.get(ContextKeys.REASONING_STRATEGY)
+        if not isinstance(orchestrator_strategy, str):
+            # A non-str model value is absent (analytical below), not a crash
+            # in map_reasoning_type (D-061).
+            orchestrator_strategy = None
         classified_type = context.get(ContextKeys.CLASSIFIED_PROBLEM_TYPE)
 
         # Priority: direct computation > classified type > orchestrator strategy

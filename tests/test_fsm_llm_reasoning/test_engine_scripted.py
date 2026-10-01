@@ -567,16 +567,20 @@ class TestHandlerFailuresStopTheSolve:
         )
         assert engine.orchestrator.list_active_conversations() == []
 
-    def test_a_validator_crash_fails_the_solve_at_once(self):
-        # A non-str problem_type crashes validate_solution (`.lower()`).
-        llm = _ScriptedLLM(_VALID_SCRIPT)
-        engine = _engine(llm)
+    def test_a_validator_crash_fails_the_solve_at_once(self, monkeypatch):
+        def _always_crash(context: dict[str, Any]) -> dict[str, Any]:
+            raise _HandlerCrash("validate_solution crashed")
+
+        monkeypatch.setattr(
+            ReasoningHandlers, "validate_solution", staticmethod(_always_crash)
+        )
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
 
         with pytest.raises(ReasoningExecutionError) as info:
-            engine.solve_problem(_PROBLEM, {ContextKeys.PROBLEM_TYPE: 7})
+            engine.solve_problem(_PROBLEM)
 
         chain = _causes(info.value)
-        assert any(isinstance(e, AttributeError) for e in chain), chain
+        assert any(isinstance(e, _HandlerCrash) for e in chain), chain
         # Not the step budget hiding the real error after 170 free steps.
         assert not any(isinstance(e, RunBudgetExceededError) for e in chain)
         assert engine.orchestrator.list_active_conversations() == []
@@ -827,8 +831,9 @@ class TestPartialContextReadFailure:
 
 
 class TestCallerCannotCarryAClassification:
-    """Review pass 16 note 7: a caller's classified_problem_type is dropped,
-    so the classifier runs for the new problem."""
+    """Review pass 16 note 7: a caller-set classified_problem_type is dropped.
+    With no problem_type in the caller's context the classifier then runs; a
+    carried problem_type still skips it (pass 17 W3, Known open)."""
 
     def test_a_carried_classification_is_dropped(self):
         llm = _ScriptedLLM(_VALID_SCRIPT)
@@ -842,3 +847,63 @@ class TestCallerCannotCarryAClassification:
         assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
         assert context[ContextKeys.REASONING_TYPE_SELECTED] == "deductive"
         assert "creative_reasoning_completed" not in context
+
+
+_NON_STR_VALUES = [["logic"], 7, {"kind": "logic"}]
+_NON_STR_IDS = ["list", "number", "dict"]
+
+
+class TestNonStrProblemType:
+    """Review pass 17 W1 (D-061): a non-str problem_type (caller context or
+    model value) reads as "" in the validator and the retry limiter, so the
+    solve finishes instead of failing on `.lower()`."""
+
+    @pytest.mark.parametrize("problem_type", _NON_STR_VALUES, ids=_NON_STR_IDS)
+    def test_a_caller_non_str_problem_type_solves(self, problem_type):
+        solution, trace_info = _engine(_ScriptedLLM(_VALID_SCRIPT)).solve_problem(
+            _PROBLEM, {ContextKeys.PROBLEM_TYPE: problem_type}
+        )
+        context = trace_info["final_context"]
+
+        assert solution == _VALID_SCRIPT["final_solution"]
+        assert context[ContextKeys.VALIDATION_RESULT] is True
+
+    @pytest.mark.parametrize("problem_type", _NON_STR_VALUES, ids=_NON_STR_IDS)
+    def test_the_validator_reads_it_as_empty(self, problem_type):
+        context = {
+            ContextKeys.PROPOSED_SOLUTION: "x",
+            ContextKeys.PROBLEM_TYPE: problem_type,
+        }
+
+        result = ReasoningHandlers.validate_solution(context)
+
+        assert result[ContextKeys.VALIDATION_RESULT] is False
+
+    @pytest.mark.parametrize("problem_type", _NON_STR_VALUES, ids=_NON_STR_IDS)
+    def test_the_retry_limiter_gives_a_verdict(self, problem_type):
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+
+        result = engine._check_retry_limit({ContextKeys.PROBLEM_TYPE: problem_type})
+
+        assert result[ContextKeys.VALIDATION_RESULT] is False
+        assert result[ContextKeys.MAX_RETRIES_REACHED] is False
+
+
+class TestNonStrReasoningStrategy:
+    """Review pass 17 W2 (D-061): with problem_type preset the classifier does
+    not run, so the model's reasoning_strategy decides; a non-str value is
+    treated as absent (analytical), not a crash in map_reasoning_type."""
+
+    @pytest.mark.parametrize("strategy", _NON_STR_VALUES, ids=_NON_STR_IDS)
+    def test_a_non_str_strategy_runs_analytical(self, strategy):
+        llm = _ScriptedLLM({**_VALID_SCRIPT, ContextKeys.REASONING_STRATEGY: strategy})
+        _solution, trace_info = _engine(llm).solve_problem(
+            _PROBLEM, {ContextKeys.PROBLEM_TYPE: "logic puzzle"}
+        )
+        context = trace_info["final_context"]
+
+        assert not llm.field_requests(ContextKeys.RECOMMENDED_REASONING_TYPE)
+        assert (
+            context[ContextKeys.REASONING_TYPE_SELECTED]
+            == ReasoningType.ANALYTICAL.value
+        )

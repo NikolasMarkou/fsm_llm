@@ -118,7 +118,12 @@ class ReasoningHandlers:
         """
         solution = context.get(ContextKeys.PROPOSED_SOLUTION, "")
         insights = context.get(ContextKeys.KEY_INSIGHTS, [])
-        problem_type = context.get(ContextKeys.PROBLEM_TYPE, "").lower()
+        # A non-str problem_type (a caller's initial_context, a model value)
+        # reads as "", so the validator never crashes on it (D-061).
+        raw_problem_type = context.get(ContextKeys.PROBLEM_TYPE)
+        problem_type = (
+            raw_problem_type.lower() if isinstance(raw_problem_type, str) else ""
+        )
         reasoning_strategy = context.get(ContextKeys.REASONING_STRATEGY, "")
         retry_count = context.get(ContextKeys.RETRY_COUNT, 0)
 

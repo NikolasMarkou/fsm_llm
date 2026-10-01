@@ -262,9 +262,10 @@ ORCHESTRATOR_HANDLER_ONLY_KEYS: tuple[str, ...] = (
 # Keys only the engine's own handlers write to choose and push the strategy
 # (``_classify_problem``, ``_StrategyStack``): ``solve_problem`` drops them
 # from a caller's ``initial_context``, so a caller cannot push a strategy
-# before the orchestrator has chosen one, and a ``final_context`` passed back
-# in does not carry the previous problem's classification into the next
-# solve (a set ``classified_problem_type`` skips the classifier).
+# before the orchestrator has chosen one, nor set a classification. This
+# does NOT make a ``final_context`` passed back in start fresh: a carried
+# ``problem_type`` keeps the classifier from running and a carried
+# ``reasoning_strategy`` then picks the strategy (Known open, D-061).
 SOLVE_DRIVER_KEYS: tuple[str, ...] = (
     ContextKeys.REASONING_PUSH_PENDING,
     ContextKeys.REASONING_TYPE_SELECTED,
