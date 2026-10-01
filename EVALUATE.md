@@ -472,6 +472,17 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 - **Raw logs**: 0 envelope leaks (`"field_name"`, `"extracted_data"`), 0 `Continue.`, 0 tracebacks at both commits. Agents `Success: True`/`False` lines: 22/3 vs 22/4. Every `Success: False` example still scores 4.
 - **Note**: the agents category alone (180/192) is 2 points above the recorded G3 baseline at `d4b1626` (178/192, 2026-09-29). Bench block `agents-react/B1` from the same day is in `docs/agents_roadmap.md`.
 
+### Run 008 -- 2026-10-01 (48 agents Examples, after the PlanExecute planner fix, 92.2%)
+
+- **File**: `evaluation/2026-10-01_10-50_e9ef064_qwen3.5-4b/scorecard.md`
+- **Model**: `ollama_chat/qwen3.5:4b` (digest `2a654d98e6fb`) | **Workers**: 4 | **Timeouts**: default 120 s plus the built-in overrides (same settings as Run 007) | **N**: 1 | **Category**: agents only (`--category agents`), started 07:50 UTC, nothing else on Ollama
+- **Commit**: `e9ef064` (plan `07ad3f8c` step 24.1: the PlanExecute `plan_steps`/replan field adds no tool-less step unless the task asks for one and no confirm/wait step, D-055)
+- **Health Score**: agents 177/192 = 92.2% (Run 007 same day: `0f0789c` 180/192, `d4b1626` 183/192; G3 `d4b1626` 2026-09-29: 178/192)
+- **Score distribution**: 43x4, 0x3, 0x2, 5x1, 0x0; wall time 1,363 s
+- **Top failure codes**: F-LOOP 5 (all timeouts); F-CODE 0
+- **Changed scores**: `agents/hierarchical_orchestrator` 4 -> 1 (timeout at 300 s; 114.4 s at `0f0789c`, 164.1 s at `d4b1626`; OrchestratorAgent, code unchanged by the fix, also a timeout in the G3 run at `d4b1626`: load, not this change). `agents/plan_execute_recovery` stays 1 (timeout at 180 s; 4 at `d4b1626`): run alone it now takes 20 LLM calls and 28 s (`0f0789c` 24 calls, `d4b1626` 16), still over the timeout under 4 workers. `plan_execute`, `orchestrator_specialist`, `supply_chain_optimizer` time out at all three points.
+- **Raw logs**: 0 envelope leaks, 0 `Continue.`, 0 tracebacks; `Success: True`/`False` lines 21/3 (the same three `Success: False` examples as `0f0789c`, all scored 4); the 5 timeouts print nothing.
+
 ---
 
 _New evaluation runs should be appended above this line._
