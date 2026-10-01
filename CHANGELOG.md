@@ -41,7 +41,11 @@ pre-registered problems, 2 trials each): the `e1f63a9` baseline passed 22/24 at
 ships passed 24/24 at 49.71 calls with none; a further variant with typed per-key
 fields and silent states passed 18/24 at 28.50 calls, failed its pre-registered rule
 (logic problems answered with a bare "True"/"False", an open-ended answer with one
-item) and was reverted.
+item) and was reverted. Full examples eval (101 examples, 4 workers, same day, Ollama
+shared with another loaded model): 386/404 (95.5%) against 367/404 (90.8%) for
+`e1f63a9`, 0 F-CODE, 0 envelope leaks; the one example that dropped
+(`agents/reasoning_stacking`, a 180 s timeout) scores 4 in about 45 s run alone at both
+commits (`EVALUATE.md` Run 009).
 
 Measured on `ollama_chat/qwen3.5:4b` (2026-10-01, `docs/agents_roadmap.md`,
 `EVALUATE.md` Runs 007 and 008): agent bench block `agents-react/B1` 32/38 first-trial

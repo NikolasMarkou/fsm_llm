@@ -483,6 +483,18 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 - **Changed scores**: `agents/hierarchical_orchestrator` 4 -> 1 (timeout at 300 s; 114.4 s at `0f0789c`, 164.1 s at `d4b1626`; OrchestratorAgent, code unchanged by the fix, also a timeout in the G3 run at `d4b1626`: load, not this change). `agents/plan_execute_recovery` stays 1 (timeout at 180 s; 4 at `d4b1626`): run alone it now takes 20 LLM calls and 28 s (`0f0789c` 24 calls, `d4b1626` 16), still over the timeout under 4 workers. `plan_execute`, `orchestrator_specialist`, `supply_chain_optimizer` time out at all three points.
 - **Raw logs**: 0 envelope leaks, 0 `Continue.`, 0 tracebacks; `Success: True`/`False` lines 21/3 (the same three `Success: False` examples as `0f0789c`, all scored 4); the 5 timeouts print nothing.
 
+### Run 009 -- 2026-10-01 (101 Examples, one LLM layer A/B against `e1f63a9` on the same day, 95.5% vs 90.8%)
+
+- **Files**: `evaluation/2026-10-01_22-19_7c823be_qwen3.5-4b/scorecard.md` (HEAD) and `evaluation/2026-10-01_21-32_e1f63a9_qwen3.5-4b_same-day-baseline/scorecard.md` (baseline); both run from isolated worktrees with `PYTHONPATH=<worktree>/src`, one after the other (21:32 and 22:19 UTC)
+- **Model**: `ollama_chat/qwen3.5:4b` (digest `2a654d98e6fb`) | **Workers**: 4 | **Timeouts**: default 120 s plus the built-in overrides | **N**: 1 per commit | **Load**: Ollama was shared with an external `qwen3.5:9b-q8_0` server under load during both runs, so timeouts are higher than in Run 007
+- **Commits**: `7c823be` (plan `944e2692`: one LLM layer, core completion state, native_fc and the meta-builder as FSMs on core, reasoning engine on core's run loop; the last reasoning fix `6496430` landed during the run and its examples were re-run, below) vs `e1f63a9`
+- **Health Score**: `7c823be` 95.5% (386/404) vs `e1f63a9` 90.8% (367/404), +19 points
+- **Top failure codes**: `7c823be` F-LOOP 4 (timeouts), F-EXTRACT 3; `e1f63a9` F-LOOP 11 (timeouts), F-EXTRACT 2; F-CODE 0 at both
+- **Changed scores**: up at HEAD (baseline timeouts): `advanced/vendor_evaluation`, `agents/agent_memory_chain`, `agents/hierarchical_tools`, `agents/pipeline_review`, `agents/plan_execute_recovery`, `agents/react_hitl_combined`, `agents/react_structured_pipeline` 1 -> 4, `agents/concurrent_react` 1 -> 2. Down: `agents/reasoning_stacking` 4 -> 1 (timeout at 180 s; 168.9 s at the baseline). Run alone twice per commit it scores 4 at both (`e1f63a9` 45.4 s, 45.5 s; `6496430` 45.2 s, 45.6 s): load, not code
+- **Rebuilt paths**: the 5 meta examples, `reasoning/math_tutor` and `agents/reasoning_tool` score 4 at HEAD; at `6496430` `reasoning/math_tutor` 4 (8.1 s) and `agents/reasoning_tool` 4 (11.8 s) run alone
+- **Raw logs**: 0 envelope leaks (`"field_name"`, `"extracted_data"`), 0 `Continue.`, 0 tracebacks at HEAD; agents `Success: True`/`False` lines 22/4
+- **Rule** (pre-registered, plan `944e2692` D-016): total within 8 points of the baseline, no code-caused 4 -> 1 drop, 0 F-CODE, rebuilt examples within 1 point, 0 leaks: met (the `reasoning_stacking` clause through the solo re-runs, D-063)
+
 ---
 
 _New evaluation runs should be appended above this line._
