@@ -581,11 +581,12 @@ class LLMCallCounts(BaseModel):
 
 
 class LLMUsage(LLMCallCounts):
-    """A snapshot of an LLM interface's usage counters.
+    """A snapshot of an LLM interface's (or an embedder's) usage counters.
 
     The inherited fields are the totals over every kind; ``by_kind`` holds
     the same counters per call kind (``generate``, ``stream``, ``extract``,
-    ``classify``, ``complete``; only kinds with at least one call appear) and
+    ``classify``, ``complete``; ``embed`` for ``LiteLLMEmbedder``; only kinds
+    with at least one call appear) and
     sums to the totals. A snapshot is a copy: later calls do not change it.
     Frozen.
     """

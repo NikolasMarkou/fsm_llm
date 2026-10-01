@@ -71,12 +71,19 @@ RESERVED_LLM_CALL_KWARGS = frozenset(
     }
 )
 
+# Kwargs ``LiteLLMEmbedder`` sets per call (``input``), plus the chat-call
+# kwargs that have no meaning for an embedding request; ignored with a
+# WARNING when given to its constructor.
+RESERVED_EMBEDDING_CALL_KWARGS = RESERVED_LLM_CALL_KWARGS | {"input"}
+
 # Usage-counter kinds (``LLMUsage.by_kind`` keys), one per call path of
 # ``LiteLLMInterface``: a streamed call is ``stream``; any other call is named
 # by its call type, and a call type not listed here (a ``complete`` request
 # of the caller's own type) is ``complete``.
 USAGE_KIND_STREAM = "stream"
 USAGE_KIND_COMPLETE = "complete"
+# The one kind of ``LiteLLMEmbedder``: an embedding request (any batch size).
+USAGE_KIND_EMBED = "embed"
 USAGE_KIND_BY_CALL_TYPE: Mapping[str, str] = MappingProxyType(
     {
         "response_generation": "generate",

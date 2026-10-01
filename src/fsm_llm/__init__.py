@@ -113,7 +113,7 @@ from .handlers import (
 # --------------------------------------------------------------
 # LLM Interface Components
 # --------------------------------------------------------------
-from .llm import LiteLLMInterface, LLMInterface
+from .llm import LiteLLMEmbedder, LiteLLMInterface, LLMInterface
 from .logging import setup_logging
 
 # --------------------------------------------------------------
@@ -235,6 +235,7 @@ __all__ = [
     # LLM interfaces
     "LLMInterface",
     "LiteLLMInterface",
+    "LiteLLMEmbedder",
     "CompletionRequest",
     "CompletionResponse",
     "ModelToolCall",
