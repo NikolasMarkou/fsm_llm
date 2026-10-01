@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from fsm_llm.definitions import CompletionRequest
+from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.logging import logger
 from fsm_llm.utilities import extract_json_from_text
 
@@ -77,29 +79,36 @@ _JUDGE_PROMPT = (
 
 
 def _default_complete(model: str, prompt: str) -> str:
-    import litellm
+    """Send ``prompt`` as one user turn to ``model`` at temperature 0.0.
 
-    # DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE]: wrap the litellm boundary
-    # HERE so a provider outage leaves this function as an AgentError subclass,
-    # never as a raw openai.APIError. `EvaluationError` rather than the bare
-    # `AgentError` root because this function exists only to back
-    # `default_llm_judge` — at this call site an LLM failure IS an evaluation
-    # failure. Do NOT narrow the clause to named litellm classes: RateLimitError
-    # / Timeout / APIConnectionError all descend from openai.APIError ->
-    # Exception and share no narrower common base, which is the same reasoning
-    # `fsm_llm/classification.py` records under its D-004 wrap. Do NOT drop the
+    The call goes through core's ``LiteLLMInterface.complete``, so the one
+    request builder applies (connection kwargs, timeout, and on Ollama models
+    thinking off and ``/nothink`` on the user turn). Returns the reply text,
+    ``""`` when the model wrote none. A provider failure raises
+    ``EvaluationError`` chained from core's ``LLMResponseError``.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-007: the judge sends through
+    # core's LiteLLMInterface.complete. Do NOT import the provider library
+    # here or call a provider binding directly, and do NOT add a "skip Ollama
+    # preparation" option to keep the old thinking-on judge: that is a second
+    # request path and the flag sprawl the user ruled out. Ollama judges now
+    # run with thinking off. See decisions.md D-007.
+    request = CompletionRequest(messages=[{"role": "user", "content": prompt}])
+    # DECISION plan-2026-07-20T040150-876e7164/D-006 [STALE]: wrap the LLM
+    # boundary HERE so a provider outage leaves this function as an
+    # AgentError subclass, never as core's LLMResponseError or a raw provider
+    # error, and never as an empty answer. `EvaluationError` rather than the bare `AgentError` root
+    # because this function exists only to back `default_llm_judge`: at this
+    # call site an LLM failure IS an evaluation failure. The clause stays broad
+    # because this is the provider boundary of the judge. Do NOT drop the
     # `from e`: `judge()` below renders the exception into its user-facing
-    # feedback string, and losing __cause__ erases the provider's own message.
-    # See decisions.md D-006.
+    # feedback string, and the chain (EvaluationError <- LLMResponseError <-
+    # provider error) keeps the provider's own message. See decisions.md D-006.
     try:
-        response = litellm.completion(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-        )
+        response = LiteLLMInterface(model, temperature=0.0).complete(request)
     except Exception as e:
         raise EvaluationError(f"LLM judge completion failed: {e!s}") from e
-    return response.choices[0].message.content or ""
+    return response.text or ""
 
 
 def default_llm_judge(
@@ -111,12 +120,13 @@ def default_llm_judge(
     """Build an LLM-as-judge ``evaluation_fn`` returning an EvaluationResult.
 
     Args:
-        model: litellm model id used to grade (when ``complete_fn`` is None).
+        model: Provider model id used to grade (when ``complete_fn`` is None).
             ``None`` resolves now: env ``LLM_MODEL``, else ``DEFAULT_LLM_MODEL``.
         criteria: Optional extra grading criteria appended to the prompt.
         threshold: Score at/above which ``passed`` is True.
         complete_fn: Optional ``(model, prompt) -> str`` override (for tests or
-            a custom backend). Defaults to a litellm completion.
+            a custom backend). Defaults to one completion through core's
+            ``LiteLLMInterface`` at temperature 0.0.
 
     The returned callable has signature ``(output, context) -> EvaluationResult``
     matching :class:`EvaluatorOptimizerAgent`.
