@@ -1,0 +1,104 @@
+{
+  "arm": "fsm_toolcall",
+  "bench_id": "agents-react",
+  "block": "B2",
+  "finished_at": "2026-10-01T18:31:06Z",
+  "manifest": "manifest_fsm_toolcall.json",
+  "metrics": {
+    "completion_tokens_mean": 105.807,
+    "k_correct_rows": 108,
+    "k_error_rows": 0,
+    "k_pass1_first_trial": 37,
+    "k_pass_hat_k": 35,
+    "k_success_rows": 114,
+    "latency_p50_s": 0.896,
+    "latency_p95_s": 3.212,
+    "llm_calls_mean": 2.3947,
+    "llm_calls_median": 2.0,
+    "n_rows": 114,
+    "n_tasks": 38,
+    "per_category": {
+      "distractor_tools": {
+        "first_trial_correct": 6,
+        "pass_hat_k": 6,
+        "rows": 18,
+        "rows_correct": 18,
+        "tasks": 6
+      },
+      "error_recovery": {
+        "first_trial_correct": 5,
+        "pass_hat_k": 5,
+        "rows": 15,
+        "rows_correct": 15,
+        "tasks": 5
+      },
+      "multi_step_chain": {
+        "first_trial_correct": 6,
+        "pass_hat_k": 6,
+        "rows": 18,
+        "rows_correct": 18,
+        "tasks": 6
+      },
+      "no_tool_needed": {
+        "first_trial_correct": 4,
+        "pass_hat_k": 3,
+        "rows": 15,
+        "rows_correct": 10,
+        "tasks": 5
+      },
+      "single_tool": {
+        "first_trial_correct": 6,
+        "pass_hat_k": 6,
+        "rows": 18,
+        "rows_correct": 18,
+        "tasks": 6
+      },
+      "typed_args": {
+        "first_trial_correct": 5,
+        "pass_hat_k": 5,
+        "rows": 15,
+        "rows_correct": 15,
+        "tasks": 5
+      },
+      "unanswerable": {
+        "first_trial_correct": 5,
+        "pass_hat_k": 4,
+        "rows": 15,
+        "rows_correct": 14,
+        "tasks": 5
+      }
+    },
+    "prompt_tokens_mean": 1317.4298,
+    "stop_reasons": {
+      "answered": 114
+    },
+    "success_vs_correct": {
+      "fail_correct": 0,
+      "fail_incorrect": 0,
+      "success_correct": 108,
+      "success_incorrect": 6
+    },
+    "tool_calls_mean": 1.5,
+    "total_tokens_mean": 1423.2368,
+    "total_tokens_median": 1309.0,
+    "trials": 3,
+    "wilson_correct_rows": [
+      0.8899,
+      0.9757
+    ],
+    "wilson_pass1_first_trial": [
+      0.865,
+      0.9953
+    ],
+    "wilson_pass_hat_k": [
+      0.792,
+      0.9728
+    ]
+  },
+  "run": {
+    "git_commit": "955f189ef1a4e13fa8f37e6db0f2710e576a542a",
+    "git_dirty": false
+  },
+  "started_at": "2026-10-01T18:28:35Z",
+  "status": "complete"
+}

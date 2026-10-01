@@ -350,6 +350,39 @@ Read from the raw rows:
 - First-trial flips: 4, all B0-incorrect to B1-correct, none the other way: `st-capital` ("The capital of Veloria is Maskett." to "Maskett"), `ty-repeat`, `nt-ready`, `nt-paint`. Each task asks for the bare value; the B1 answers follow that instruction. Over all three trials `un-employee` (1/3 to 3/3) and `un-founder` (2/3 to 3/3) also improved.
 - Remaining incorrect tasks (incorrect in all 3 trials): `ch-density`, `ch-manager-budget`, `ch-salaries`, `ch-order-local`, `nt-reverse`, `di-currency`. Per task, B1 is either correct in all 3 trials or in none.
 
+### Agent bench block B2 and harness L4 block B2 (plan `944e2692`)
+
+`NativeFunctionCallingReactAgent` runs as an FSM on core's completion state instead of its private loop. Both blocks ran once on 2026-10-01 at `955f189` (clean tree; manifests registered at `38d4357`), `ollama_chat/qwen3.5:4b`, digest `2a654d98e6fb...`, one Ollama workload at a time. Pass rules (D-010, re-recorded in D-049 before row 1); result in D-050. Both PASS.
+
+```bash
+.venv/bin/python scripts/agents_bench.py run --bench-id agents-react --block B2 --arm fsm_toolcall --trials 3
+.venv/bin/python scripts/agents_bench.py report agents-react --blocks B0 B2 --pair B2/fsm_toolcall:B0/native_fc
+.venv/bin/python scripts/harness_bench.py run --bench-id l4-execute-write --block B2 --arm native_fsm --n 40 --seed 20260722000
+.venv/bin/python scripts/harness_bench.py report l4-execute-write --blocks B1 B2 --pair B2/native_fsm:B1/native
+```
+
+`scripts/bench_data/agents-react/B2/` (run 18:28-18:31 UTC). Arm `fsm_toolcall` = `create_agent("native_fc", tools, config=...)` with B0 `native_fc`'s limits (max_iterations 8, timeout 180 s, temperature 0.5, max_tokens 1000), same 38 tasks and `tasks_sha256`, 3 trials, call meter "2" (core usage; B0 used meter "1").
+
+| Block / arm | First-trial pass@1 (Wilson 95%) | pass^3 | Rows correct | success but incorrect | fail but correct | LLM calls mean / median | Tokens mean | Latency p50 / p95 | Stop reasons |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| B0 `native_fc` (`d4b1626` code) | 37/38 = 97.4% (0.865-0.995) | 36/38 | 110/114 | 4 | 0 | 2.39 / 2.0 | 1,432 | 0.95 s / 3.19 s | answered 114 |
+| B2 `fsm_toolcall` | 37/38 = 97.4% (0.865-0.995) | 35/38 | 108/114 | 6 | 0 | 2.39 / 2.0 | 1,423 | 0.90 s / 3.21 s | answered 114 |
+
+Fisher two-sided, B2 vs B0 first-trial pass@1: p = 1.000 (pass^3: p = 1.000). Rule: pass@1 >= 35/38 PASS, calls <= 4.0 PASS, Fisher not required at 37/38, 0 envelope leaks PASS.
+
+- Envelope leaks (`"field_name"`, `"extracted_data"`, `"extracted_value"` in an answer): 0 of 114 (B0: 0). `Continue.`: 0. Error rows: 0. Empty answers: 0. Max latency 5.4 s.
+- First-trial flips: none. Incorrect rows, all `success=True`: `nt-reverse` in all 3 trials (as in B0), `nt-paint` t2 and t3 (a full sentence where the task asks for one word; B0 3/3), `un-station` t2 ("cannot be provided because there is no weather station", outside the grader's not-found phrases; B0 3/3). `st-capital` went from 2/3 to 3/3.
+- `--pair` prints 12 differing manifest fields; the request disclosures (timeout 120 s, step-14 schema bytes, settings, code path) are listed in `scripts/bench_data/README.md`.
+
+`scripts/bench_data/l4-execute-write/B2/` (run 18:31-18:33 UTC). Arm `native_fsm` = the `native=True` EXECUTE dispatch on the new code, n=40, seeds 20260722000-20260722039 (B1's).
+
+| Block / arm | content_matched (Wilson 95%) | write_tool_issued | bytes_on_disk | success | Tool calls mean (distribution) | Elapsed mean / max |
+| --- | --- | --- | --- | --- | --- | --- |
+| B1 `native` (`2a89226` code) | 40/40 (0.912-1.000) | 40/40 | 40/40 | 40/40 | 2.70 (2: 34, 3: 3, 9: 1, 11: 2) | 8.5 s / 20.3 s |
+| B2 `native_fsm` | 40/40 (0.912-1.000) | 40/40 | 40/40 | 40/40 | 2.33 (2: 38, 6: 1, 11: 1) | 2.8 s / 6.4 s |
+
+Fisher two-sided on every metric: p = 1.000. Rule: >= 38/40 verified writes PASS. Failed tool calls 6 (B1: 10); the 11-call row (run 2) retried `read_file` four times, then wrote, then appended to a plan file.
+
 ### Full examples evaluation, `0f0789c` against `d4b1626` (same day)
 
 `fsm-llm-eval examples`, all 101 examples, 4 workers, default timeout 120 s with the built-in per-example and per-category overrides (`src/fsm_llm/eval/` is unchanged since `d4b1626`, and so is `examples/`). The `d4b1626` run used an isolated worktree with `PYTHONPATH=<worktree>/src`; the example subprocesses inherited it (checked in a live subprocess environment), and its `results.json` records `git_commit` `d4b1626`. N=1 heuristic score each.
