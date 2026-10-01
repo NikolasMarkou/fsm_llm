@@ -9,6 +9,7 @@ plan-2026-09-29T184639-65baa765.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import subprocess
 import sys
@@ -94,6 +95,11 @@ def _synthetic_manifest(arm: str = "legacy", **overrides) -> dict:
         "temperature": 0.5,
         "limits": dict(ab.LIMITS),
         "wrapper_version": ab.WRAPPER_VERSION,
+        "llm_request": {"timeout": 120.0, "retries": 0, "extra_kwargs": []},
+        "agent_class": "fsm_llm.agents.react.ReactAgent",
+        "run_cap": {"max_steps": 24, "formula": "x", "max_seconds": 180.0},
+        "tool_schemas_sha256": {"t1": "2" * 64, "t2": "3" * 64},
+        "first_request": {"t1": None, "t2": None},
     }
     manifest.update(overrides)
     return manifest
@@ -407,6 +413,8 @@ class TestManifestGate:
         monkeypatch.setattr(
             hb, "_model_digest", lambda tag: {"tag": tag, "digest": "x"}
         )
+        two = tuple(t for t in ab.TASKS if t.id in ("st-capital", "er-flaky"))
+        monkeypatch.setattr(ab, "TASKS", two)
         manifest = ab.build_manifest(
             bench_id="x", block="B1", arm_name="fsm_advance", trials=3, model=ab.MODEL
         )
@@ -415,6 +423,237 @@ class TestManifestGate:
         assert manifest["tasks_sha256"] == ab.tasks_sha256()
         assert manifest["n_preregistered"] == len(ab.TASKS) * 3
         assert manifest["model_digest"]["tag"] == "qwen3.5:4b"
+
+
+def _native_arm(tools, model, llm_interface):
+    """create_agent("native_fc", ...): the shape step 19's arm will take."""
+    from fsm_llm.agents import create_agent
+
+    return create_agent(
+        "native_fc",
+        ab.build_registry(tools),
+        config=ab._agent_config(model),
+        llm_interface=llm_interface,
+    )
+
+
+_TWO_IDS = ("st-capital", "ty-order")
+
+
+class TestManifestDisclosure:
+    """A new manifest records what its requests carried beyond the task text
+    (review pass 7 concerns 2-4, D-029 item 18.4, D-036)."""
+
+    @pytest.fixture
+    def two_tasks(self, monkeypatch):
+        """Two tasks (one with the order_total schema step 14 changed), a
+        stub digest, and a provider that fails the test if anything is sent."""
+        import fsm_llm.llm
+
+        def no_send(**kw):
+            raise AssertionError("the disclosure probe sent a provider request")
+
+        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
+        monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
+        two = tuple(t for t in ab.TASKS if t.id in _TWO_IDS)
+        monkeypatch.setattr(ab, "TASKS", two)
+        return two
+
+    def test_manifest_records_timeout_class_cap_and_digests(self, two_tasks):
+        """Defect guarded: a B2-vs-B0 pair that cannot show the per-request
+        timeout (none at B0, 120 s now), the code path or the step ceiling,
+        because the manifest never recorded them."""
+        manifest = ab.build_manifest(
+            bench_id="x", block="B9", arm_name="fsm_advance", trials=3, model=ab.MODEL
+        )
+        for field in ab.DISCLOSURE_FIELDS:
+            assert field in manifest, field
+        assert manifest["llm_request"] == {
+            "timeout": 120.0,
+            "retries": 0,
+            "extra_kwargs": [],
+        }
+        assert manifest["agent_class"] == "fsm_llm.agents.react.ReactAgent"
+        assert manifest["run_cap"]["max_steps"] == 24
+        assert manifest["run_cap"]["max_seconds"] == ab.LIMITS["timeout_seconds"]
+        assert set(manifest["tool_schemas_sha256"]) == set(_TWO_IDS)
+        first = manifest["first_request"]["st-capital"]
+        assert first["kind"] == "extract_field" and first["tools_sha256"] is None
+        assert len(first["system_sha256"]) == 64
+        assert first["run_error"] == "AgentError"
+
+    def test_tool_schema_digest_is_the_exact_unsorted_registry_bytes(self, two_tasks):
+        """Defect guarded: a digest taken over key-sorted JSON (how the step-14
+        record missed the `items`/`type` reorder and the added
+        `additionalProperties`), so a schema byte change goes unrecorded."""
+        tools = ab.make_tools()
+        task = two_tasks[1]
+        schemas = ab.build_registry(
+            {n: tools[n] for n in task.tools}
+        ).get_json_schemas()
+        disclosure = ab.request_disclosure("fsm_advance", ab.MODEL)
+        expected = hashlib.sha256(json.dumps(schemas).encode("utf-8")).hexdigest()
+        assert disclosure["tool_schemas_sha256"][task.id] == expected
+        reordered = {"items": {"type": "number"}, "type": "array"}
+        original = {"type": "array", "items": {"type": "number"}}
+        assert reordered == original
+        assert ab.sha256_json(reordered) != ab.sha256_json(original)
+
+    def test_native_first_request_sends_the_registry_schema_bytes(
+        self, two_tasks, monkeypatch
+    ):
+        """Defect guarded: the first-request digest reading something other
+        than what the agent hands its interface: for a native tool-calling
+        arm its `tools=` must be the registry's schema bytes, and its system
+        prompt the same for every task."""
+        monkeypatch.setitem(ab.ARMS, "native_probe", _native_arm)
+        disclosure = ab.request_disclosure("native_probe", ab.MODEL)
+        assert disclosure["agent_class"].endswith("NativeFunctionCallingReactAgent")
+        firsts = disclosure["first_request"]
+        for task_id in _TWO_IDS:
+            assert firsts[task_id]["kind"] == "complete"
+            assert (
+                firsts[task_id]["tools_sha256"]
+                == disclosure["tool_schemas_sha256"][task_id]
+            )
+        assert len({firsts[t]["system_sha256"] for t in _TWO_IDS}) == 1
+        assert disclosure["run_cap"]["formula"].startswith("2 x max_iterations")
+
+    def test_an_arm_without_a_step_ceiling_records_none(self, two_tasks, monkeypatch):
+        """Defect guarded: a non-agent arm (or one that sends nothing) crashing
+        the registration instead of recording what it can."""
+
+        def silent(tools, model, llm_interface):
+            return SimpleNamespace(run=lambda prompt: None)
+
+        monkeypatch.setitem(ab.ARMS, "silent", silent)
+        disclosure = ab.request_disclosure("silent", ab.MODEL)
+        assert disclosure["run_cap"] is None
+        assert disclosure["first_request"] == {t: None for t in _TWO_IDS}
+        assert disclosure["agent_class"] == "types.SimpleNamespace"
+
+    def test_run_refuses_a_block_whose_request_settings_drifted(
+        self, two_tasks, tmp_path, monkeypatch
+    ):
+        """Defect guarded: a block registered at one per-request timeout and
+        run at another, with the manifest still claiming the first."""
+        monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
+        monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
+        ab.register_block("agents-react", "B9", "fsm_advance", trials=1)
+        settings = ab.llm_request_settings
+        monkeypatch.setattr(
+            ab,
+            "llm_request_settings",
+            lambda model: {**settings(model), "timeout": 30.0},
+        )
+        with pytest.raises(ab.BenchDataError, match="llm_request"):
+            ab.run_block("agents-react", "B9", "fsm_advance", trials=1)
+        assert not (
+            tmp_path / "agents-react" / "B9" / "rows_fsm_advance.jsonl"
+        ).exists()
+
+    def test_recorded_manifests_predate_the_disclosures(self):
+        """Defect guarded: a recorded B0/B1 manifest edited to carry fields
+        it never recorded (blocks are never edited; report prints them as
+        "not recorded")."""
+        recorded = sorted(
+            (ab.BENCH_DATA / "agents-react").glob("B[01]/manifest_*.json")
+        )
+        assert len(recorded) == 3
+        for path in recorded:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            assert not set(ab.DISCLOSURE_FIELDS) & set(manifest), path
+
+
+class TestPairDisclosure:
+    """`report --pair` prints every manifest difference before any number."""
+
+    def test_manifest_differences_walks_nested_keys_and_absent_fields(self):
+        """Defect guarded: a nested change (one digest inside model_digest, one
+        limit) or a field one side never recorded going unprinted."""
+        a = _synthetic_manifest(wrapper_version="2")
+        b = _synthetic_manifest(
+            wrapper_version="1",
+            limits={**ab.LIMITS, "max_iterations": 10},
+            model_digest={"tag": "qwen3.5:4b", "digest": "other"},
+        )
+        del b["llm_request"]
+        lines = ab.manifest_differences(a, b)
+        assert lines == [
+            "limits.max_iterations: 8 vs 10",
+            'llm_request: {"timeout": 120.0, "retries": 0, "extra_kwargs": []} '
+            "vs not recorded",
+            'model_digest.digest: "2a654d98e6fb" vs "other"',
+            'wrapper_version: "2" vs "1"',
+        ]
+        assert ab.manifest_differences(a, dict(a)) == []
+
+    def test_pair_prints_every_differing_field_before_the_numbers(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Defect guarded (review pass 7 concern 3): a pair that prints only
+        Fisher lines, so a cross-meter, cross-timeout, cross-schema comparison
+        reads as like for like."""
+        monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
+        _make_block(tmp_path / "synthetic" / "B0", "native_fc", _ROWS)
+        old = tmp_path / "synthetic" / "B0" / "manifest_native_fc.json"
+        recorded = json.loads(old.read_text(encoding="utf-8"))
+        for field in ab.DISCLOSURE_FIELDS:
+            del recorded[field]
+        recorded.update(wrapper_version="1", git_commit="73d7a6c")
+        old.write_text(json.dumps(recorded), encoding="utf-8")
+        _make_block(
+            tmp_path / "synthetic" / "B2",
+            "fsm_toolcall",
+            _ROWS,
+            block="B2",
+            tasks_sha256="9" * 64,
+        )
+        rc = ab.report("synthetic", ["B0", "B2"], ["B2/fsm_toolcall:B0/native_fc"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        head = out.index("Manifest differences, B2/fsm_toolcall vs B0/native_fc")
+        assert head < out.index("Fisher two-sided")
+        diff = out[head : out.index("Fisher two-sided")]
+        for line in (
+            'wrapper_version: "2" vs "1"',
+            'git_commit: "deadbeef" vs "73d7a6c"',
+            f'tasks_sha256: "{"9" * 64}" vs "{"1" * 64}"',
+            'arm.name: "fsm_toolcall" vs "native_fc"',
+            "vs not recorded",
+        ):
+            assert line in diff, line
+        for field in ab.DISCLOSURE_FIELDS:
+            assert f"  {field}: " in diff, field
+
+    def test_differences_are_printed_even_when_the_pair_is_refused(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Defect guarded: a refused pair hiding which manifest field made it
+        incomparable."""
+        monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
+        _make_block(tmp_path / "synthetic" / "B0", "legacy", _ROWS)
+        _make_block(
+            tmp_path / "synthetic" / "B1",
+            "runtime_native",
+            _ROWS,
+            model_digest={"tag": "qwen3.5:4b", "digest": "other"},
+        )
+        assert ab.report("synthetic", pairs=["runtime_native:legacy"]) == 1
+        out = capsys.readouterr().out
+        assert 'model_digest.digest: "other" vs "2a654d98e6fb"' in out
+        assert out.index("Manifest differences") < out.index("REFUSING")
+
+    def test_recorded_b1_b0_pair_discloses_its_differences(self, capsys):
+        """Defect guarded: the recorded pair (manifests without the new
+        fields) breaking the report, or its known differences (code commit,
+        arm) going unprinted."""
+        rc = ab.report("agents-react", ["B0", "B1"], ["B1/fsm_advance:B0/legacy"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Manifest differences, B1/fsm_advance vs B0/legacy: 6 field(s)" in out
+        assert 'git_commit: "1c8572e1dda702b48944aa12006d73fb29747fff" vs ' in out
+        assert "pass@1 first trial: 32/38 vs 28/38" in out
 
 
 class TestReport:

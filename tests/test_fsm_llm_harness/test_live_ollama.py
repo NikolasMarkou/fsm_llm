@@ -899,8 +899,8 @@ def _spy_on_tools(sink: list[dict[str, Any]]):
     """
     original = ToolRegistry.execute
 
-    def spied(self, tool_call):  # type: ignore[no-untyped-def]
-        result = original(self, tool_call)
+    def spied(self, tool_call, **kwargs):  # type: ignore[no-untyped-def]
+        result = original(self, tool_call, **kwargs)
         sink.append(
             {
                 "tool": tool_call.tool_name,

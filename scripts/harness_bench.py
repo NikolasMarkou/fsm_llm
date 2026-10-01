@@ -58,6 +58,9 @@ K_METRICS = (
 DISPATCH_TIMEOUT_SECONDS = 600
 DISPATCH_RETRY_ATTEMPTS = 1
 
+#: Per-request timeout of ``probe-seed`` (seconds).
+PROBE_TIMEOUT_SECONDS = 120.0
+
 
 class BenchDataError(RuntimeError):
     """A bench invariant would be violated; refuse rather than degrade."""
@@ -328,18 +331,32 @@ def run_block(
 def probe_seed(
     model: str = MODEL, seed_a: int = 1234, seed_b: int = 4321
 ) -> dict[str, Any]:
-    """Same seed twice + different seed once; not reproducible => seed: null."""
-    import litellm  # lazy: heavyweight, never needed at import time
+    """Same seed twice + different seed once; not reproducible => seed: null.
+
+    Each request goes through core's one request builder (a fresh
+    ``LiteLLMInterface`` per seed: temperature 0, ``seed``, timeout
+    ``PROBE_TIMEOUT_SECONDS``), so it carries what every framework request
+    carries on that model (on Ollama: thinking off, ``/nothink`` on the user
+    turn, the interface's ``max_tokens``).
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-036: the probe sends through
+    # core's LiteLLMInterface.complete, imported lazily here. Do NOT call
+    # litellm directly (user direction: no litellm import outside core's LLM
+    # layer) and do NOT import fsm_llm at module top (it pulls litellm, which
+    # opens a socket; the offline `report` must not). See D-036.
+    from fsm_llm import CompletionRequest, LiteLLMInterface
 
     digest = _model_digest()
     prompt = "List the first five primes, then one short sentence about retries."
     outputs: list[dict[str, Any]] = []
     for seed in (seed_a, seed_a, seed_b):
-        messages = [{"role": "user", "content": prompt}]
-        resp = litellm.completion(
-            model=model, messages=messages, temperature=0, seed=seed, timeout=120
+        llm = LiteLLMInterface(
+            model=model, temperature=0.0, timeout=PROBE_TIMEOUT_SECONDS, seed=seed
         )
-        text = resp.choices[0].message.content or ""
+        reply = llm.complete(
+            CompletionRequest(messages=[{"role": "user", "content": prompt}])
+        )
+        text = reply.text or ""
         sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
         outputs.append({"seed": seed, "sha256": sha, "text": text})
         print(f"seed={seed}: sha256={sha[:16]}...", flush=True)

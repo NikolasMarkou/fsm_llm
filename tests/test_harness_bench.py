@@ -452,3 +452,140 @@ class TestCLI:
         shell wrapper cannot distinguish from a crash."""
         monkeypatch.setattr(hb, "BENCH_DATA", tmp_path)
         assert hb.main(["report", "never-registered"]) == 1
+
+
+def _stub_reply(text: str):
+    """A litellm-shaped completion reply with usage."""
+    from types import SimpleNamespace
+
+    message = SimpleNamespace(content=text, tool_calls=None)
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=message)],
+        usage={"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+    )
+
+
+class TestProbeSeedOnCore:
+    """probe-seed sends through core's LiteLLMInterface, never litellm itself
+    (review round 1, D-029 item 18.4, D-036)."""
+
+    @pytest.fixture
+    def stubbed(self, tmp_path: Path, monkeypatch):
+        """BENCH_DATA in tmp, a stub digest/commit, a recording provider
+        behind core's one send binding, and a direct litellm call made loud."""
+        import litellm
+
+        import fsm_llm.llm
+
+        sent: list[dict] = []
+
+        def completion(**kw):
+            sent.append(kw)
+            return _stub_reply(f"primes for seed {kw.get('seed')}")
+
+        def direct(**kw):
+            raise AssertionError("probe-seed called litellm.completion directly")
+
+        monkeypatch.setattr(hb, "BENCH_DATA", tmp_path)
+        monkeypatch.setattr(
+            hb, "_model_digest", lambda tag=hb.MODEL_TAG: {"tag": tag, "digest": "d"}
+        )
+        monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
+        monkeypatch.setattr(fsm_llm.llm, "completion", completion)
+        monkeypatch.setattr(litellm, "completion", direct)
+        return sent
+
+    def test_requests_carry_what_the_direct_call_sent(self, stubbed, capsys):
+        """Defect guarded: the move onto core dropping or changing what the
+        probe exists for (same model, temperature 0, the seed per request,
+        the 120 s timeout, the one user prompt). The old direct call sent
+        exactly {model, messages, temperature, seed, timeout}; each of those
+        must still be sent with the same value (the user turn may gain
+        core's Ollama `/nothink` marker), and nothing may add tools or a
+        response_format."""
+        record = hb.probe_seed(model="ollama_chat/qwen3.5:4b", seed_a=7, seed_b=9)
+        capsys.readouterr()
+        assert [kw["seed"] for kw in stubbed] == [7, 7, 9]
+        for kw in stubbed:
+            assert kw["model"] == "ollama_chat/qwen3.5:4b"
+            assert kw["temperature"] == 0
+            assert kw["timeout"] == 120
+            assert "tools" not in kw and "response_format" not in kw
+            (user,) = kw["messages"]
+            assert user["role"] == "user"
+            assert user["content"].endswith(record["prompt"])
+        assert record["outputs"][0]["text"] == "primes for seed 7"
+        assert record["verdict"].startswith("seed-effective")
+        written = list((hb.BENCH_DATA / "seed-probe").glob("probe_*.json"))
+        assert len(written) == 1
+
+    def test_a_non_ollama_model_sends_the_prompt_unchanged(self, stubbed, capsys):
+        """Defect guarded: core preparation leaking into a provider that never
+        had it (the prompt must reach a non-Ollama model byte for byte)."""
+        record = hb.probe_seed(model="gpt-4o-mini", seed_a=1, seed_b=2)
+        capsys.readouterr()
+        for kw in stubbed:
+            assert kw["messages"] == [{"role": "user", "content": record["prompt"]}]
+            assert "reasoning_effort" not in kw
+
+    def test_no_direct_litellm_reference_anywhere_in_the_module(self):
+        """Defect guarded: a second provider path beside core's LLM layer
+        (user direction: no litellm import outside it), lazy or not."""
+        tree = ast.parse(Path(hb.__file__).read_text(encoding="utf-8"))
+        offenders = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            elif isinstance(node, ast.Name):
+                names = [node.id]
+            else:
+                continue
+            offenders += [n for n in names if n.split(".")[0] == "litellm"]
+        assert offenders == []
+
+
+class TestLiveSpyForwardsGated:
+    """D-034: the live harness spy that the L4 bench rows run through."""
+
+    def test_spy_forwards_keyword_arguments_to_the_real_execute(self, monkeypatch):
+        """Defect guarded: `_spy_on_tools` replacing `ToolRegistry.execute`
+        with `spied(self, tool_call)`, so every ReAct tool call (which passes
+        `gated`) raised TypeError and the L4 react arm measured a broken spy
+        with zero tool calls (07900ff live probe, D-033/D-034)."""
+        from fsm_llm.agents.definitions import ToolCall
+        from fsm_llm.agents.tools import ToolRegistry, refuse_execute_without_gated
+
+        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
+        live = hb._live()
+        seen: list[dict] = []
+        real = ToolRegistry.execute
+
+        def recording(self, tool_call, **kwargs):
+            seen.append(kwargs)
+            return real(self, tool_call, **kwargs)
+
+        monkeypatch.setattr(ToolRegistry, "execute", recording)
+
+        def shout(text: str) -> str:
+            """Upper-case the text."""
+            return text.upper()
+
+        registry = ToolRegistry()
+        registry.register_function(shout, name="shout")
+        sink: list[dict] = []
+        original = live._spy_on_tools(sink)
+        try:
+            refuse_execute_without_gated(registry)
+            result = registry.execute(
+                ToolCall(tool_name="shout", parameters={"text": "hi"}), gated=True
+            )
+        finally:
+            ToolRegistry.execute = original
+        assert original is recording
+        assert seen == [{"gated": True}]
+        assert result.success
+        assert sink == [
+            {"tool": "shout", "ok": True, "params": {"text": "hi"}, "error": None}
+        ]

@@ -108,6 +108,33 @@ limits and per-task tool names, `arm` is `{name, factory}`) plus
 sit outside it), `trials`, `temperature`, `limits`, `wrapper_version`,
 `n_tasks`, `n_preregistered`, `order`, `model`.
 
+Request disclosures (blocks registered after B1; B0/B1 manifests predate them
+and are never edited, so `report` prints them as "not recorded"). They are
+computed offline at `register`/`run` by building the arm for every task on a
+recording interface that refuses every request (no provider call):
+
+| Field | Pins |
+|---|---|
+| `llm_request` | the trial interface's per-request `timeout` (seconds; B0's native_fc sent none, litellm's default), `retries` (0 = SDK default) and the names of extra provider kwargs (a `seed` would show here) |
+| `agent_class` | `module.qualname` of the agent the arm factory builds (the code path) |
+| `run_cap` | the agent's core step ceiling for `max_iterations` (`max_steps`, `formula`) and `max_seconds` |
+| `tool_schemas_sha256` | per task, sha256 of `json.dumps(registry.get_json_schemas())` with key order kept (never sorted): the exact `tools=` bytes a native arm sends and the one schema a prompt-mode arm renders |
+| `first_request` | per task, the first request the agent hands its interface: `kind`, `system_sha256` (its system text), `tools_sha256`, `run_error` |
+
+`run` refuses a registered block whose `llm_request`, `agent_class`,
+`run_cap` or `tool_schemas_sha256` changed since registration.
+`first_request` is not checked: a prompt-mode arm's system prompt carries
+today's date, so its digest moves overnight.
+
+Meter (`wrapper_version`): "1" (B0, B1) patched the litellm completion
+bindings and counted every provider call through them; "2" (every later
+block) reads core's own counters, `LiteLLMInterface.usage()`, off one
+interface per trial that the bench builds with the arm's settings and
+injects as `llm_interface=`. Row fields and meanings are the same, so
+`report` recounts both; `meter_parity` runs tasks under both meters at once
+and must show them equal before a "2" block is registered (D-004 of plan
+944e2692).
+
 Row schema (rows_<arm>.jsonl): `task_id`, `category`, `arm`, `trial`,
 `correct` (grader on `answer`), `success`, `stop_reason` (`timeout`/`error`
 when the run raised), `iterations`, `tool_calls`, `tools_used`, `llm_calls`,
@@ -130,6 +157,16 @@ per-category table.
     --blocks B0 B1 --pair B1/fsm_advance:B0/legacy
 ```
 
-`--pair A:B` (each side `ARM` or `BLOCK/ARM`) prints Fisher two-sided on
+`--pair A:B` (each side `ARM` or `BLOCK/ARM`) first prints every manifest
+field that differs between the two blocks (nested keys as dotted paths, a
+field one side lacks as "not recorded"), then Fisher two-sided on
 first-trial pass@1 and pass^k, only when both manifests pin the same model
-digest.
+digest. A pair across code versions is read with those differences in view.
+A B2-vs-B0 pair must disclose, beyond the printed lines: meter "2" vs "1";
+per-request timeout 120 s vs none; tool-schema bytes (step 14 of plan
+944e2692 added `"additionalProperties": true` to `order_total.quantities` and
+reordered `list_stats.numbers` to `{"items", "type"}`, tasks ty-order,
+ch-order-local, ty-mean, ty-range); the code path (B0 native_fc's private
+loop at 73d7a6c vs the core completion state) and its step ceiling; provider
+errors now wrapped as `AgentError`; the git commit and date (the model
+digest must still match).
