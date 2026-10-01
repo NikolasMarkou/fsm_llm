@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.logging import logger
 
-from .constants import Defaults, MetaDefaults, ToolObservationPrefix
+from .constants import Defaults, MetaDefaults, ToolObservationPrefix, ToolRunStatus
 from .truncation import smart_truncate
 
 # DECISION plan-2026-07-20T040150-876e7164/D-008 [STALE]
@@ -163,6 +163,18 @@ class ToolResult(BaseModel):
         if self.timed_out:
             return f"{ToolObservationPrefix.OUTCOME_UNKNOWN} {self.summary}"
         return f"{ToolObservationPrefix.FAILED} {self.summary}"
+
+    @property
+    def status(self) -> str:
+        """``ToolRunStatus`` of this call: success, failed, or unknown (timed out).
+
+        The one mapping every executor writes to ``tool_status``.
+        """
+        if self.success:
+            return ToolRunStatus.SUCCESS
+        if self.timed_out:
+            return ToolRunStatus.UNKNOWN
+        return ToolRunStatus.FAILED
 
 
 class AgentStep(BaseModel):

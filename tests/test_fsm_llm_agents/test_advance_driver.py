@@ -1675,8 +1675,18 @@ class TestRewooOnTheCoreLoop:
             "E2": _FRANCE_FACTS["population of France"],
         }
         assert run.final[ContextKeys.EVIDENCE_STATUS] == [
-            {"id": "E1", "tool_name": "lookup", "success": True},
-            {"id": "E2", "tool_name": "lookup", "success": True},
+            {
+                "id": "E1",
+                "tool_name": "lookup",
+                "success": True,
+                "tool_status": "success",
+            },
+            {
+                "id": "E2",
+                "tool_name": "lookup",
+                "success": True,
+                "tool_status": "success",
+            },
         ]
         assert [(c.tool_name, c.parameters) for c in result.trace.tool_calls] == [
             ("lookup", {"query": "capital of France"}),

@@ -182,7 +182,109 @@ def with_feedback(message: str, delta: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-class AgentHandlers:
+class ThinkTurnLimiter:
+    """The ReAct-family iteration limiter: counts think turns on the instance.
+
+    Interface contract (callers: ``AgentHandlers``, which inherits it, and
+    ``ParallelReactAgent``, which needs the limiter but runs its own tool
+    batch and never passes ``gated=``): create one per ``run()`` call (never
+    store it on ``self``, 089d0ec7 D-014) and register
+    :meth:`check_iteration_limit` as the PRE_TRANSITION limiter. Construction
+    never raises.
+    """
+
+    def __init__(self) -> None:
+        self._current_iteration = 0
+        self._transitions = 0
+
+    def reset(self) -> None:
+        """Reset the counters for a new run."""
+        self._current_iteration = 0
+        self._transitions = 0
+
+    def check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Count think turns and force the stop once the budget is spent.
+
+        Called as a PRE_TRANSITION handler on every transition. ``max_iterations``
+        (``_max_iterations`` in context) counts think turns: the count rises on
+        each transition out of ``think``. The stop is forced (``max_iterations_
+        reached`` and ``should_terminate`` True) when a later transition closes
+        a cycle with ``count >= max - 1``, so the next think turn concludes: a
+        limit of N gives N think turns and N - 1 tool turns, and no tool runs
+        after the flag. An approved ``await_approval -> act`` exit does not close
+        the cycle (its call still runs). Independently, the stop is forced
+        ``FORCED_STOP_MARGIN`` transitions (at most ``max``) before the
+        ``max * FSM_BUDGET_MULTIPLIER`` loop ceiling, so a run with long cycles
+        concludes instead of raising ``BudgetExhaustedError``. A limit of 1
+        behaves like 2 (the first cycle's tool always runs). A turn that
+        concludes on its own evidence (:func:`concluded_on_evidence`) with no
+        recorded forced reason is never forced, and withdraws an earlier flag
+        (``max_iterations_reached`` back to False), so the last think turn's
+        own conclusion reports ``success=True``. Never raises.
+        """
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-028
+        # LOOP-04: count think exits here, on the instance. Do NOT move this
+        # into make_iteration_limiter or give that factory a state filter
+        # (3e4eb3e5 D-003, c1d5bfbc D-007: the other patterns count every turn).
+        # Do NOT force the stop on the think exit itself: the think -> act
+        # decision is already made, so the cycle's tool would be skipped and
+        # max_iterations=1 would run no tool at all. Keep the `- 1` early rule:
+        # the flag lands at the end of cycle max - 1, and think turn max
+        # concludes on it. See decisions.md D-028.
+        self._transitions += 1
+        leaving = context.get(ContextKeys.CURRENT_STATE) or AgentStates.THINK
+        if leaving == AgentStates.THINK:
+            self._current_iteration += 1
+        max_iterations = context.get("_max_iterations", Defaults.MAX_ITERATIONS)
+
+        logger.debug(
+            LogMessages.ITERATION.format(
+                current=self._current_iteration, max=max_iterations
+            )
+        )
+
+        # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: a turn whose own
+        # verdict concludes on evidence (think: should_terminate, which think
+        # entry refreshed; Reflexion evaluate: evaluation_passed) is the
+        # model's conclusion, not the budget's, even after the flag: the
+        # flag is withdrawn so the run reports success. Do NOT drop the
+        # recorded-reason check (a stall or reflection cap stays forced) and
+        # do NOT read should_terminate on a state that does not refresh it.
+        if (
+            concluded_on_evidence(leaving, context)
+            and recorded_forced_reason(context) is None
+        ):
+            update: dict[str, Any] = {
+                ContextKeys.ITERATION_COUNT: self._current_iteration
+            }
+            if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
+                logger.info("The model concluded on its own on the last turn")
+                update[ContextKeys.MAX_ITERATIONS_REACHED] = False
+            return update
+
+        approved = (
+            leaving == AgentStates.AWAIT_APPROVAL
+            and context.get(ContextKeys.APPROVAL_GRANTED) is True
+        )
+        cycle_closed = leaving != AgentStates.THINK and not approved
+        spent = cycle_closed and self._current_iteration >= max_iterations - 1
+        margin = min(Defaults.FORCED_STOP_MARGIN, max_iterations)
+        ceiling = max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
+        if spent or self._transitions >= ceiling - margin:
+            return {
+                ContextKeys.ITERATION_COUNT: self._current_iteration,
+                ContextKeys.MAX_ITERATIONS_REACHED: True,
+                ContextKeys.SHOULD_TERMINATE: True,
+            }
+
+        return {ContextKeys.ITERATION_COUNT: self._current_iteration}
+
+
+# DECISION plan-2026-10-01T093600-944e2692/D-042: the `gated` check lives in
+# the executor that passes `gated`, not in the limiter. Do NOT build an
+# AgentHandlers in an agent that only needs the limiter (ParallelReact): its
+# constructor refuses an old-signature registry the agent never sends `gated`.
+class AgentHandlers(ThinkTurnLimiter):
     """Collection of handler functions for agent FSM operations."""
 
     def __init__(
@@ -202,10 +304,9 @@ class AgentHandlers:
                 (``refuse_execute_without_gated``).
         """
         refuse_execute_without_gated(registry)
+        super().__init__()
         self.registry = registry
         self.requires_approval = requires_approval
-        self._current_iteration = 0
-        self._transitions = 0
         self._consecutive_no_tool = 0
         # Last driver grant this instance spent and how many it has spent;
         # see approval_refusal (plan-2026-09-29T103145-06a5ec0a/D-015).
@@ -214,8 +315,7 @@ class AgentHandlers:
 
     def reset(self) -> None:
         """Reset handler state for a new run."""
-        self._current_iteration = 0
-        self._transitions = 0
+        super().reset()
         self._consecutive_no_tool = 0
         self._spent_grant = None
         self._grants_spent = 0
@@ -432,12 +532,17 @@ class AgentHandlers:
         # Preserve structured tool input so _build_trace can recover parameters
         # (mirrors REWOOAgent, which stores tool_input on the trace dict).
         trace_step["tool_input"] = shown_input
+        trace_step[ContextKeys.TOOL_STATUS] = result.status
         trace.append(trace_step)
 
+        # DECISION plan-2026-10-01T093600-944e2692/D-043: the status is
+        # `ToolResult.status` (`unknown` for a timed-out call). Do NOT write
+        # "failed" for a timeout: the approver's context summary and
+        # PlanExecute read this key, and "failed" reads as safe to run again.
         return {
             **spent,
             ContextKeys.TOOL_RESULT: observation,
-            ContextKeys.TOOL_STATUS: "success" if result.success else "failed",
+            ContextKeys.TOOL_STATUS: result.status,
             ContextKeys.TOOL_ERROR: result.error,
             ContextKeys.OBSERVATIONS: observations,
             ContextKeys.OBSERVATION_COUNT: len(observations),
@@ -572,83 +677,6 @@ class AgentHandlers:
             if not refused:
                 delta = {**delta, ContextKeys.DRIVER_APPROVAL: None}
         return delta
-
-    def check_iteration_limit(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Count think turns and force the stop once the budget is spent.
-
-        Called as a PRE_TRANSITION handler on every transition. ``max_iterations``
-        (``_max_iterations`` in context) counts think turns: the count rises on
-        each transition out of ``think``. The stop is forced (``max_iterations_
-        reached`` and ``should_terminate`` True) when a later transition closes
-        a cycle with ``count >= max - 1``, so the next think turn concludes: a
-        limit of N gives N think turns and N - 1 tool turns, and no tool runs
-        after the flag. An approved ``await_approval -> act`` exit does not close
-        the cycle (its call still runs). Independently, the stop is forced
-        ``FORCED_STOP_MARGIN`` transitions (at most ``max``) before the
-        ``max * FSM_BUDGET_MULTIPLIER`` loop ceiling, so a run with long cycles
-        concludes instead of raising ``BudgetExhaustedError``. A limit of 1
-        behaves like 2 (the first cycle's tool always runs). A turn that
-        concludes on its own evidence (:func:`concluded_on_evidence`) with no
-        recorded forced reason is never forced, and withdraws an earlier flag
-        (``max_iterations_reached`` back to False), so the last think turn's
-        own conclusion reports ``success=True``. Never raises.
-        """
-        # DECISION plan-2026-09-29T103145-06a5ec0a/D-028
-        # LOOP-04: count think exits here, on the instance. Do NOT move this
-        # into make_iteration_limiter or give that factory a state filter
-        # (3e4eb3e5 D-003, c1d5bfbc D-007: the other patterns count every turn).
-        # Do NOT force the stop on the think exit itself: the think -> act
-        # decision is already made, so the cycle's tool would be skipped and
-        # max_iterations=1 would run no tool at all. Keep the `- 1` early rule:
-        # the flag lands at the end of cycle max - 1, and think turn max
-        # concludes on it. See decisions.md D-028.
-        self._transitions += 1
-        leaving = context.get(ContextKeys.CURRENT_STATE) or AgentStates.THINK
-        if leaving == AgentStates.THINK:
-            self._current_iteration += 1
-        max_iterations = context.get("_max_iterations", Defaults.MAX_ITERATIONS)
-
-        logger.debug(
-            LogMessages.ITERATION.format(
-                current=self._current_iteration, max=max_iterations
-            )
-        )
-
-        # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: a turn whose own
-        # verdict concludes on evidence (think: should_terminate, which think
-        # entry refreshed; Reflexion evaluate: evaluation_passed) is the
-        # model's conclusion, not the budget's, even after the flag: the
-        # flag is withdrawn so the run reports success. Do NOT drop the
-        # recorded-reason check (a stall or reflection cap stays forced) and
-        # do NOT read should_terminate on a state that does not refresh it.
-        if (
-            concluded_on_evidence(leaving, context)
-            and recorded_forced_reason(context) is None
-        ):
-            update: dict[str, Any] = {
-                ContextKeys.ITERATION_COUNT: self._current_iteration
-            }
-            if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True:
-                logger.info("The model concluded on its own on the last turn")
-                update[ContextKeys.MAX_ITERATIONS_REACHED] = False
-            return update
-
-        approved = (
-            leaving == AgentStates.AWAIT_APPROVAL
-            and context.get(ContextKeys.APPROVAL_GRANTED) is True
-        )
-        cycle_closed = leaving != AgentStates.THINK and not approved
-        spent = cycle_closed and self._current_iteration >= max_iterations - 1
-        margin = min(Defaults.FORCED_STOP_MARGIN, max_iterations)
-        ceiling = max_iterations * Defaults.FSM_BUDGET_MULTIPLIER
-        if spent or self._transitions >= ceiling - margin:
-            return {
-                ContextKeys.ITERATION_COUNT: self._current_iteration,
-                ContextKeys.MAX_ITERATIONS_REACHED: True,
-                ContextKeys.SHOULD_TERMINATE: True,
-            }
-
-        return {ContextKeys.ITERATION_COUNT: self._current_iteration}
 
 
 # DECISION plan-2026-09-24T045559-3e4eb3e5/D-003: the 8 context-counting

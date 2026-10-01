@@ -198,7 +198,12 @@ class REWOOAgent(BaseAgent):
             # Store evidence (a failed call stores its error text)
             evidence[plan_id] = result.summary
             status.append(
-                {"id": plan_id, "tool_name": tool_name, "success": result.success}
+                {
+                    "id": plan_id,
+                    "tool_name": tool_name,
+                    "success": result.success,
+                    ContextKeys.TOOL_STATUS: result.status,
+                }
             )
 
             if result.success:
@@ -220,6 +225,7 @@ class REWOOAgent(BaseAgent):
                     "description": description,
                     "result": result.summary,
                     "success": result.success,
+                    ContextKeys.TOOL_STATUS: result.status,
                 }
             )
 

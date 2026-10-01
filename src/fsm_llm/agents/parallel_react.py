@@ -38,12 +38,13 @@ from .constants import (
     AgentStates,
     ContextKeys,
     Defaults,
+    ToolRunStatus,
 )
 from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall
 from .exceptions import AgentError
 from .fsm_definitions import _conclude_on_evidence_logic, _typed_field_extraction
 from .handlers import (
-    AgentHandlers,
+    ThinkTurnLimiter,
     forced_stop_skip,
     next_step_number,
     with_feedback,
@@ -246,7 +247,10 @@ class ParallelReactAgent(BaseAgent):
         # most-recently-assigned instance). Do NOT reintroduce
         # `self._handlers = AgentHandlers(...)` here. See decisions.md D-014.
         self._refuse_flagged_tools()
-        handlers = AgentHandlers(self.tools)
+        # plan-2026-10-01T093600-944e2692/D-042: the limiter only. This agent
+        # calls `execute(call)` without `gated`, so an older registry
+        # override still runs here.
+        handlers = ThinkTurnLimiter()
         fsm_def = build_parallel_react_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
@@ -271,7 +275,7 @@ class ParallelReactAgent(BaseAgent):
     # satisfies BaseAgent's narrower abstract signature. Do NOT fall back to
     # `self._handlers` if `handlers` is None. See decisions.md D-014.
     def _register_handlers(
-        self, api: API, handlers: AgentHandlers | None = None
+        self, api: API, handlers: ThinkTurnLimiter | None = None
     ) -> None:
         if handlers is None:
             raise AgentError(
@@ -346,6 +350,7 @@ class ParallelReactAgent(BaseAgent):
                 observation=observation,
             ).model_dump(mode="json")
             trace_step["tool_input"] = shown_input
+            trace_step[ContextKeys.TOOL_STATUS] = result.status
             trace.append(trace_step)
 
         if len(observations) > Defaults.MAX_OBSERVATIONS:
@@ -356,9 +361,18 @@ class ParallelReactAgent(BaseAgent):
             f"{sum(1 for _, r in results if r.success)} succeeded"
         )
 
+        # plan-2026-10-01T093600-944e2692/D-043: one timed-out call makes the
+        # batch's outcome unknown, whatever else succeeded.
+        statuses = {result.status for _, result in results}
+        if ToolRunStatus.UNKNOWN in statuses:
+            batch_status = ToolRunStatus.UNKNOWN
+        elif any_success:
+            batch_status = ToolRunStatus.SUCCESS
+        else:
+            batch_status = ToolRunStatus.FAILED
         return {
             ContextKeys.TOOL_RESULT: f"Executed {len(calls)} tool(s).",
-            ContextKeys.TOOL_STATUS: "success" if any_success else "failed",
+            ContextKeys.TOOL_STATUS: batch_status,
             ContextKeys.OBSERVATIONS: observations,
             ContextKeys.OBSERVATION_COUNT: len(observations),
             ContextKeys.AGENT_TRACE: trace,

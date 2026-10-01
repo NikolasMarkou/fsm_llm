@@ -779,7 +779,9 @@ META_BUILD_TRIGGERS: frozenset[str] = frozenset(
     }
 )
 # Phrases that ask for the build anywhere in a message, unless a negation
-# comes before them in the same clause ("don't build it yet").
+# governs them: it stands right before the phrase, at most with filler words
+# between ("don't build it yet", "do not ever build it"). "why not" is no
+# negation ("why not build it" asks for the build).
 META_BUILD_PHRASES: tuple[str, ...] = (
     "build it",
     "rebuild it",
@@ -795,6 +797,15 @@ META_BUILD_NEGATIONS: tuple[str, ...] = (
     "won't",
     "can't",
     "cannot",
+)
+# Words that may stand between a negation and the build phrase it governs.
+META_BUILD_NEGATION_FILLERS: tuple[str, ...] = (
+    "ever",
+    "yet",
+    "just",
+    "actually",
+    "really",
+    "even",
 )
 
 # The ``classify`` state's fallback intent: the message names no artifact
@@ -954,6 +965,21 @@ class ToolObservationPrefix:
     FAILED = "[TOOL FAILED]"
     # The call timed out: it may still be running, its effects may happen.
     OUTCOME_UNKNOWN = "[TOOL OUTCOME UNKNOWN]"
+
+
+class ToolRunStatus:
+    """How a call that was sent to a tool ended (``ToolResult.status``).
+
+    Written to ``ContextKeys.TOOL_STATUS`` by the executors that run a tool;
+    the other statuses there (``skipped``, ``rejected``,
+    ``awaiting_approval``) mean no tool ran.
+    """
+
+    SUCCESS = "success"
+    FAILED = "failed"
+    # The call timed out: it may still be running and may still take effect.
+    # Distinct from FAILED so no reader treats it as "safe to run again".
+    UNKNOWN = "unknown"
 
 
 class ErrorMessages:

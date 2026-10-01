@@ -43,6 +43,7 @@ from fsm_llm.logging import logger
 from .base import _reject_misplaced_kwargs
 from .constants import (
     META_BUILD_CALL_FAILED,
+    META_BUILD_NEGATION_FILLERS,
     META_BUILD_NEGATIONS,
     META_BUILD_OUTPUT_KEYS,
     META_BUILD_PHRASES,
@@ -107,7 +108,12 @@ def _words_pattern(words: Iterable[str], *, plural: bool = False) -> re.Pattern[
 
 _SWITCH_PATTERN = _words_pattern(META_SWITCH_WORDS)
 _BUILD_PHRASE_PATTERN = _words_pattern(META_BUILD_PHRASES)
-_NEGATION_PATTERN = _words_pattern(META_BUILD_NEGATIONS)
+# A negation that governs what follows it: only filler words between it and
+# the end of the text before the phrase; "why not" is not a negation.
+_GOVERNING_NEGATION = re.compile(
+    rf"(?<!\bwhy ){_words_pattern(META_BUILD_NEGATIONS).pattern}"
+    rf"(?: {_words_pattern(META_BUILD_NEGATION_FILLERS).pattern})* $"
+)
 _CLAUSE_BREAK = re.compile(r"[.,;:!?\n]+")
 
 # Every output of the last build; cleared on ``build`` and ``classify`` entry.
@@ -334,15 +340,21 @@ class MetaBuilderAgent:
     def _is_build_trigger(normalized: str) -> bool:
         """True when the normalized message asks for the build.
 
-        A whole-message trigger ("ok", "build it"), or a build phrase with no
-        negation before it in its clause ("don't build it yet" is not one).
+        A whole-message trigger ("ok", "build it"), or a build phrase that no
+        negation governs ("don't build it yet" and "do not ever build it" are
+        not one; "it's not perfect but build it" and "why not build it" are).
         """
+        # DECISION plan-2026-10-01T093600-944e2692/D-044: a negation blocks a
+        # build phrase only when it governs it (right before it, filler words
+        # allowed). Do NOT go back to "any negation earlier in the clause":
+        # "don't forget to build it", "not a problem build it" and "it's not
+        # perfect but build it" stopped building (they built at e1f63a9).
         if normalized.strip() in META_BUILD_TRIGGERS:
             return True
         for clause in _CLAUSE_BREAK.split(normalized):
-            match = _BUILD_PHRASE_PATTERN.search(clause)
-            if match and not _NEGATION_PATTERN.search(clause, 0, match.start()):
-                return True
+            for match in _BUILD_PHRASE_PATTERN.finditer(clause):
+                if not _GOVERNING_NEGATION.search(clause[: match.start()]):
+                    return True
         return False
 
     @staticmethod

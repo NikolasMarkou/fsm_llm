@@ -1928,7 +1928,12 @@ class TestREWOOOutcome:
         assert result.success is False
         assert result.stop_reason == "no_result"
         assert result.final_context[ContextKeys.EVIDENCE_STATUS] == [
-            {"id": "E1", "tool_name": "lookup", "success": False}
+            {
+                "id": "E1",
+                "tool_name": "lookup",
+                "success": False,
+                "tool_status": "failed",
+            }
         ]
 
     def test_one_successful_tool_is_evidence(self):

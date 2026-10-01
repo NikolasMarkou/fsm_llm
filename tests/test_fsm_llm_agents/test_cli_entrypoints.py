@@ -79,13 +79,15 @@ class TestMetaCli:
         assert exc.value.code == 1
         assert "Error: boom" in capsys.readouterr().out
 
-    def test_keyboard_interrupt_exits_1(self, monkeypatch, capsys):
+    def test_keyboard_interrupt_exits_130(self, monkeypatch, capsys):
+        """Ctrl-C exits 130 like every project CLI (plan 944e2692 step 18.6;
+        it exited 1 before)."""
         _install_fake_agent(monkeypatch, KeyboardInterrupt())
 
         with pytest.raises(SystemExit) as exc:
             _run_meta_cli(monkeypatch)
 
-        assert exc.value.code == 1
+        assert exc.value.code == 130
         assert "Aborted." in capsys.readouterr().out
 
     def test_invalid_result_exits_1_and_writes_nothing(self, monkeypatch, tmp_path):

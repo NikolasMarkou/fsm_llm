@@ -475,3 +475,49 @@ class TestKeywordHints:
         assert len(llm.classifier_requests()) == 2
         (build,) = llm.build_requests()
         assert "Design a WORKFLOW" in build.messages[0]["content"]
+
+
+class TestNegationGovernsOnlyItsBuildPhrase:
+    """Review round 2 (pass 9 W3, D-044 of plan 944e2692; RED on 1be35d7).
+
+    Any negation earlier in the clause blocked the build phrase, so five
+    ordinary build requests that built at e1f63a9 stopped building. A
+    negation now blocks the phrase only when it governs it.
+    """
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "it's not perfect but build it",
+            "please don't change anything and build it",
+            "not a problem build it",
+            "don't forget to build it",
+            "why not build it",
+        ],
+    )
+    def test_pass9_false_negatives_build_again(self, message):
+        normalized = " ".join(message.split()).lower()
+        assert MetaBuilderAgent._is_build_trigger(normalized) is True
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "don't build it yet",
+            "do not build",
+            "do not build it",
+            "do not ever build it",
+            "never build it",
+            "please don't just rebuild it",
+        ],
+    )
+    def test_a_governing_negation_still_blocks(self, message):
+        normalized = " ".join(message.split()).lower()
+        assert MetaBuilderAgent._is_build_trigger(normalized) is False
+
+    def test_a_session_builds_on_a_message_with_an_earlier_negation(self):
+        llm = ScriptedMetaLLM(intents=["fsm"], builds=[_GOOD_FSM])
+        agent = MetaBuilderAgent(llm_interface=llm)
+        agent.start("a quiz bot")
+        agent.send("It's not perfect but build it")
+        assert len(llm.build_requests()) == 1
+        assert agent.is_complete()

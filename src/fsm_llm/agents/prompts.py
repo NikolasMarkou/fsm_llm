@@ -28,13 +28,17 @@ _COMPOSE = (
 )
 
 
-def _build_tool_example(tool_name: str, params: dict) -> str:
-    """Build a compact JSON example for a specific tool call."""
+def _build_tool_example(tool_name: str, schema: dict) -> str:
+    """Build a compact JSON example for a call of the tool with *schema*.
+
+    *schema* is the tool's ``tool_parameters_schema`` (its ``$defs`` resolve
+    ``$ref`` parameters).
+    """
     import json
 
     example_values: dict[str, object] = {}
-    for pname, pschema in params.items():
-        types = [t for t in schema_types(pschema) if t != "null"]
+    for pname, pschema in schema.get("properties", {}).items():
+        types = [t for t in schema_types(pschema, root=schema) if t != "null"]
         ptype = types[0] if types else "string"
         if ptype == "number" or ptype == "integer":
             example_values[pname] = 0
@@ -100,15 +104,15 @@ def build_think_extraction_instructions(
     # Generate per-tool examples from registry (uses filtered list if semantic)
     tools_with_params = []
     for tool in tools:
-        props = tool_parameters_schema(tool).get("properties", {})
-        if props:
-            tools_with_params.append((tool.name, props))
+        schema = tool_parameters_schema(tool)
+        if schema.get("properties"):
+            tools_with_params.append((tool.name, schema))
 
     if tools_with_params:
         parts.append("")
         parts.append("Examples for each tool (you MUST provide tool_input parameters):")
-        for tool_name, params in tools_with_params:
-            parts.append(_build_tool_example(tool_name, params))
+        for tool_name, schema in tools_with_params:
+            parts.append(_build_tool_example(tool_name, schema))
     else:
         parts.append("")
         parts.append("Example — using a tool:")

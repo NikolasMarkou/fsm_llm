@@ -56,7 +56,7 @@ from .constants import (
     NativeLoopEnd,
     StopReason,
 )
-from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall
+from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall, ToolResult
 from .exceptions import AgentError
 from .fsm_definitions import build_native_fc_fsm
 from .handlers import call_label, next_step_number
@@ -136,19 +136,21 @@ def _turn_calls(reply: Any) -> list[dict[str, Any]] | None:
     return calls
 
 
-def _trace_step(trace: list[Any], call: ToolCall, observation: str) -> dict[str, Any]:
+def _trace_step(trace: list[Any], call: ToolCall, result: ToolResult) -> dict[str, Any]:
     """The ``agent_trace`` entry of one executed call, parameters redacted.
 
     Same shape as the ReAct executor's entry (``_build_trace`` reads
-    ``action`` and ``tool_input``): the call ran with ``call``, the trace
-    holds the ``_shown_call`` copy (D-016 of plan 06a5ec0a).
+    ``action`` and ``tool_input``; ``tool_status`` is ``result.status``): the
+    call ran with ``call``, the trace holds the ``_shown_call`` copy (D-016 of
+    plan 06a5ec0a).
     """
     step = AgentStep(
         iteration=next_step_number(trace),
         action=call_label(call.tool_name, call.parameters),
-        observation=observation,
+        observation=result.observation,
     ).model_dump(mode="json")
     step["tool_input"] = _shown_call(call).parameters
+    step[ContextKeys.TOOL_STATUS] = result.status
     return step
 
 
@@ -287,9 +289,8 @@ class NativeFCHandlers:
         """
         call = ToolCall(tool_name=entry["name"], parameters=entry["arguments"])
         result = self.tools.execute(call)
-        observation = result.observation
-        trace.append(_trace_step(trace, call, observation))
-        return observation
+        trace.append(_trace_step(trace, call, result))
+        return result.observation
 
     def _end_loop(
         self, context: dict[str, Any], how: str, answer: str

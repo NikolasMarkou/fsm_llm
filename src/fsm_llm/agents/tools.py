@@ -15,7 +15,7 @@ import time
 import types
 import typing
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -641,7 +641,7 @@ class ToolRegistry:
                 required_keys = set(schema.get("required", []))
                 param_parts = []
                 for pname, pschema in params.items():
-                    ptype = " or ".join(schema_types(pschema)) or "any"
+                    ptype = " or ".join(schema_types(pschema, root=schema)) or "any"
                     pdesc = pschema.get("description", "")
                     marker = "[REQUIRED]" if pname in required_keys else "[optional]"
                     param_parts.append(f"{pname} {marker} ({ptype}): {pdesc}")
@@ -998,13 +998,29 @@ def tool_parameters_schema(tool: ToolDefinition) -> dict[str, Any]:
     return _args_model_schema(tool.args_model) or tool.parameter_schema or {}
 
 
-def schema_types(prop: Any) -> list[str]:
+def schema_types(prop: Any, *, root: Mapping[str, Any] | None = None) -> list[str]:
     """The JSON types a property schema allows, in order, without repeats.
 
-    Reads ``type`` (a string or a list), ``anyOf``/``oneOf`` members and a
-    ``$ref`` (shown as ``object``). ``[]`` when none is stated (any value).
-    Never raises.
+    Interface contract (callers: ``ToolRegistry.to_prompt_description`` and
+    the think-state examples in ``prompts.py``, both passing the tool's
+    ``tool_parameters_schema`` as *root*):
+        - Reads ``type`` (a string or a list), ``anyOf``/``oneOf`` members and
+          a local ``$ref`` (``#/...``, e.g. ``#/$defs/Color``), which is
+          resolved against *root* and read as the schema it points to (a
+          ``str`` Enum is ``string``, an ``IntEnum`` ``integer``, a model
+          ``object``).
+        - A ``$ref`` that cannot be resolved (no *root*, a non-local or
+          dangling pointer, a reference cycle) adds no type: on its own the
+          property reads as ``[]`` (any value), never as a guessed type.
+        - ``[]`` when no type is stated (any value). Never raises.
     """
+    return list(dict.fromkeys(_schema_types(prop, root, frozenset())))
+
+
+def _schema_types(
+    prop: Any, root: Mapping[str, Any] | None, seen: frozenset[str]
+) -> list[str]:
+    """``schema_types`` body; *seen* holds the ``$ref`` chain (cycle guard)."""
     if not isinstance(prop, dict):
         return []
     found: list[str] = []
@@ -1013,14 +1029,35 @@ def schema_types(prop: Any) -> list[str]:
         found.append(declared)
     elif isinstance(declared, list):
         found.extend(t for t in declared if isinstance(t, str))
-    if "$ref" in prop:
-        found.append("object")
+    # DECISION plan-2026-10-01T093600-944e2692/D-041: a `$ref` is read as the
+    # schema it points to. Do NOT render it as "object": pydantic writes every
+    # Enum parameter as `{"$ref": "#/$defs/Color"}`, and a prompt-mode model
+    # told "object" sends an object the args_model rejects. Do NOT guess a
+    # type for a ref that does not resolve: it reads as "any".
+    ref = prop.get("$ref")
+    if isinstance(ref, str) and ref not in seen:
+        target = _resolve_local_ref(ref, root)
+        if target is not None:
+            found.extend(_schema_types(target, root, seen | {ref}))
     for key in ("anyOf", "oneOf"):
         members = prop.get(key)
         if isinstance(members, list):
             for member in members:
-                found.extend(schema_types(member))
-    return list(dict.fromkeys(found))
+                found.extend(_schema_types(member, root, seen))
+    return found
+
+
+def _resolve_local_ref(ref: str, root: Mapping[str, Any] | None) -> Any:
+    """The node a local JSON pointer (``#/a/b``) names in *root*, else ``None``."""
+    if root is None or not ref.startswith("#/"):
+        return None
+    node: Any = root
+    for raw in ref[2:].split("/"):
+        token = raw.replace("~1", "/").replace("~0", "~")
+        if not isinstance(node, Mapping) or token not in node:
+            return None
+        node = node[token]
+    return node
 
 
 def _args_model_schema(args_model: type[BaseModel] | None) -> dict[str, Any]:

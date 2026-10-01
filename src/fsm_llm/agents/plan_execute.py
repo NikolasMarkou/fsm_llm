@@ -23,6 +23,7 @@ from .constants import (
     HandlerPriorities,
     LogMessages,
     PlanExecuteStates,
+    ToolRunStatus,
 )
 from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_plan_execute_fsm
@@ -30,7 +31,9 @@ from .handlers import AgentHandlers, make_fresh_keys_handler, make_iteration_lim
 from .tools import ToolRegistry
 
 # Tool statuses that mean a tool really ran for the step (AgentHandlers).
-_TOOL_RAN = frozenset({"success", "failed"})
+_TOOL_RAN = frozenset(
+    {ToolRunStatus.SUCCESS, ToolRunStatus.FAILED, ToolRunStatus.UNKNOWN}
+)
 
 
 def _bounded_plan(value: Any) -> list[Any]:
@@ -304,7 +307,7 @@ class PlanExecuteAgent(BaseAgent):
             # _has_execution_evidence instead (see decisions.md D-001).
             status = context.get(ContextKeys.TOOL_STATUS)
             tool_ran = status in _TOOL_RAN
-            step_failed = status == "failed"
+            step_failed = status == ToolRunStatus.FAILED
             # A tool step records the tool observation, not the pre-tool note.
             observation = context.get(ContextKeys.TOOL_RESULT) if tool_ran else None
             step_result = observation or context.get(ContextKeys.STEP_RESULT)
@@ -313,7 +316,7 @@ class PlanExecuteAgent(BaseAgent):
                     {
                         "step_index": current_index,
                         "result": str(step_result),
-                        "success": tool_ran and not step_failed,
+                        "success": status == ToolRunStatus.SUCCESS,
                     }
                 )
 
@@ -321,7 +324,18 @@ class PlanExecuteAgent(BaseAgent):
                 ContextKeys.STEP_RESULTS: step_results,
                 ContextKeys.STEP_FAILED: step_failed,
             }
-            if step_failed:
+            # DECISION plan-2026-10-01T093600-944e2692/D-043: a timed-out step
+            # (outcome unknown: it may still run and take effect) ends the
+            # plan and goes to synthesis. Do NOT treat it as failed (a replan
+            # would run the same side effect again) nor as done (the next
+            # step would build on an outcome nobody knows).
+            if status == ToolRunStatus.UNKNOWN:
+                logger.warning(
+                    f"Step {current_index + 1} timed out with an unknown "
+                    "outcome: synthesizing the results so far"
+                )
+                updates[ContextKeys.ALL_STEPS_COMPLETE] = True
+            elif step_failed:
                 if context.get("_replan_count", 0) >= max_replans:
                     logger.warning(
                         f"Step {current_index + 1} failed with {max_replans} "

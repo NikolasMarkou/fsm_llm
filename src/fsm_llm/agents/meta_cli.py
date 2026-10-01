@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from fsm_llm.constants import CLI_EXIT_INTERRUPTED
+
 from .constants import MetaDefaults
 from .definitions import MetaBuilderConfig
 from .exceptions import MetaBuilderError
@@ -67,7 +69,7 @@ def main_cli() -> None:
         result = agent.run_interactive()
     except KeyboardInterrupt:
         print("\nAborted.")
-        sys.exit(1)
+        sys.exit(CLI_EXIT_INTERRUPTED)
     except MetaBuilderError as e:
         print(f"\nError: {e}")
         sys.exit(1)
