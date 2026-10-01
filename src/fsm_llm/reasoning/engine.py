@@ -268,15 +268,7 @@ class ReasoningEngine:
                 except Exception as cleanup_err:
                     logger.debug(f"Cleanup error (suppressed): {cleanup_err}")
 
-        # Create classification result
-        classification = ReasoningClassificationResult(
-            recommended_type=result.get(
-                ContextKeys.RECOMMENDED_REASONING_TYPE, "analytical"
-            ),
-            justification=result.get(ContextKeys.STRATEGY_JUSTIFICATION, ""),
-            domain=result.get(ContextKeys.PROBLEM_DOMAIN, ""),
-            alternatives=result.get(ContextKeys.ALTERNATIVE_APPROACHES, []),
-        )
+        classification = _classification_from(result)
 
         logger.info(
             LogMessages.CLASSIFICATION_COMPLETE.format(
@@ -425,7 +417,7 @@ class ReasoningEngine:
         """Internal solve logic, must be called while holding ``_solve_lock``."""
         # Initialize context (copy to avoid mutating caller's dict)
         context = dict(initial_context) if initial_context else {}
-        # The push hook's driver keys are the engine's own (D-058).
+        # The strategy keys are the engine's own (D-058, D-060).
         dropped = [
             key for key in SOLVE_DRIVER_KEYS if context.pop(key, None) is not None
         ]
@@ -526,12 +518,14 @@ class ReasoningEngine:
 
         Must run before the conversation is ended. Returns ``None`` (with a
         WARNING) when core cannot read it, so the caller's error still
-        reports the unfinished solve.
+        reports the unfinished solve and the conversation is still ended.
         """
         try:
             data: dict[str, Any] = self.orchestrator.get_data(conv_id)
             return data
-        except FSMError as read_err:
+        except (FSMError, ValueError) as read_err:
+            # get_data raises FSMError, or ValueError for a conversation
+            # whose stack is gone (core's handle_conversation_errors).
             _solve_log(conv_id).warning(
                 f"Could not read the partial context of {conv_id}: {read_err}"
             )
@@ -564,6 +558,52 @@ class ReasoningEngine:
                 types.add(snapshot[ContextKeys.REASONING_TYPE_SELECTED])
 
         return list(types) if types else ["unknown"]
+
+
+def _classification_from(result: dict[str, Any]) -> ReasoningClassificationResult:
+    """The classification of a finished classifier conversation's ``result``.
+
+    Contract: never raises for any JSON value the model wrote. A
+    ``recommended_reasoning_type`` that is missing, not a ``str`` or blank
+    becomes ``"analytical"`` (an unknown name is mapped to analytical later,
+    by ``map_reasoning_type``); a non-``str`` justification or domain becomes
+    ``""``; ``alternative_approaches`` keeps its non-blank ``str`` items (a
+    bare non-blank ``str`` becomes a one-item list), anything else is
+    dropped. Each replaced value is logged as a WARNING; well-shaped values
+    pass unchanged.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-060: the classifier handler
+    # is critical (D-058), so the model's values are normalised here. Do NOT
+    # build ReasoningClassificationResult from the raw values again: a badly
+    # shaped auxiliary field (a str alternative_approaches, seen live) would
+    # fail the whole solve. Do NOT drop `.critical()` to absorb it instead:
+    # that also hides a spent classifier budget or a provider error.
+    recommended = result.get(ContextKeys.RECOMMENDED_REASONING_TYPE)
+    if not (isinstance(recommended, str) and recommended.strip()):
+        if recommended is not None:
+            logger.warning(f"Malformed recommended reasoning type: {recommended!r}")
+        recommended = ReasoningType.ANALYTICAL.value
+    texts: dict[str, str] = {}
+    for key in (ContextKeys.STRATEGY_JUSTIFICATION, ContextKeys.PROBLEM_DOMAIN):
+        value = result.get(key)
+        if value is not None and not isinstance(value, str):
+            logger.warning(f"Malformed classifier field {key} dropped: {value!r}")
+        texts[key] = value if isinstance(value, str) else ""
+    approaches = result.get(ContextKeys.ALTERNATIVE_APPROACHES)
+    items = [approaches] if isinstance(approaches, str) else approaches
+    alternatives = (
+        [item for item in items if isinstance(item, str) and item.strip()]
+        if isinstance(items, list)
+        else []
+    )
+    if approaches is not None and alternatives != approaches:
+        logger.warning(f"Malformed alternative approaches normalised: {approaches!r}")
+    return ReasoningClassificationResult(
+        recommended_type=recommended,
+        justification=texts[ContextKeys.STRATEGY_JUSTIFICATION],
+        domain=texts[ContextKeys.PROBLEM_DOMAIN],
+        alternatives=alternatives,
+    )
 
 
 def _solve_log(conversation_id: str) -> Any:

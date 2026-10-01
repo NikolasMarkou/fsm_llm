@@ -259,13 +259,16 @@ ORCHESTRATOR_HANDLER_ONLY_KEYS: tuple[str, ...] = (
     ContextKeys.REASONING_PUSH_PENDING,
 )
 
-# Keys only the engine's own handlers write to drive the strategy push hook
-# (``_StrategyStack``): ``solve_problem`` drops them from a caller's
-# ``initial_context``, so a caller cannot push a strategy before the
-# orchestrator has chosen one.
+# Keys only the engine's own handlers write to choose and push the strategy
+# (``_classify_problem``, ``_StrategyStack``): ``solve_problem`` drops them
+# from a caller's ``initial_context``, so a caller cannot push a strategy
+# before the orchestrator has chosen one, and a ``final_context`` passed back
+# in does not carry the previous problem's classification into the next
+# solve (a set ``classified_problem_type`` skips the classifier).
 SOLVE_DRIVER_KEYS: tuple[str, ...] = (
     ContextKeys.REASONING_PUSH_PENDING,
     ContextKeys.REASONING_TYPE_SELECTED,
+    ContextKeys.CLASSIFIED_PROBLEM_TYPE,
 )
 
 # The hybrid strategy state whose exit the loop counter handler counts; its

@@ -8,6 +8,7 @@ its pop and the validation retry loop.
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 import pytest
@@ -36,6 +37,7 @@ from fsm_llm.reasoning.constants import (
     OrchestratorStates,
     ReasoningType,
 )
+from fsm_llm.reasoning.handlers import ReasoningHandlers
 
 _PROBLEM = "Is the argument valid? All men are mortal; Socrates is a man."
 
@@ -655,3 +657,188 @@ class TestCallerCannotDriveThePush:
         assert context[ContextKeys.REASONING_TYPE_SELECTED] == "deductive"
         assert "creative_reasoning_completed" not in context
         assert context["deductive_reasoning_completed"] is True
+
+
+class TestMalformedClassifierValues:
+    """Review pass 16 C1 (D-060): a badly shaped classifier value from the
+    model is normalised, not a failed solve, while the classifier handler
+    stays critical for real failures."""
+
+    @pytest.mark.parametrize(
+        ("overrides", "classified", "alternatives"),
+        [
+            # Seen live (e1f63a9 P2_t1): a str for an (any) list field.
+            (
+                {ContextKeys.ALTERNATIVE_APPROACHES: '["cost first", "ratio"]'},
+                "deductive",
+                ['["cost first", "ratio"]'],
+            ),
+            (
+                {ContextKeys.ALTERNATIVE_APPROACHES: [{"name": "x"}, "inductive"]},
+                "deductive",
+                ["inductive"],
+            ),
+            ({ContextKeys.ALTERNATIVE_APPROACHES: 3}, "deductive", []),
+            (
+                {ContextKeys.RECOMMENDED_REASONING_TYPE: ["deductive", "x"]},
+                "analytical",
+                ["analytical"],
+            ),
+            (
+                {ContextKeys.RECOMMENDED_REASONING_TYPE: ""},
+                "analytical",
+                ["analytical"],
+            ),
+            (
+                {ContextKeys.STRATEGY_JUSTIFICATION: ["a", "b"]},
+                "deductive",
+                ["analytical"],
+            ),
+            (
+                {ContextKeys.PROBLEM_DOMAIN: {"primary": "logic"}},
+                "deductive",
+                ["analytical"],
+            ),
+        ],
+        ids=[
+            "alternatives-str",
+            "alternatives-dicts",
+            "alternatives-number",
+            "recommended-list",
+            "recommended-empty",
+            "justification-list",
+            "domain-dict",
+        ],
+    )
+    def test_a_malformed_value_still_solves(self, overrides, classified, alternatives):
+        llm = _ScriptedLLM({**_VALID_SCRIPT, **overrides})
+        solution, trace_info = _engine(llm).solve_problem(_PROBLEM)
+        context = trace_info["final_context"]
+
+        assert solution == _VALID_SCRIPT["final_solution"]
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == classified
+        assert context[ContextKeys.REASONING_TYPE_SELECTED] == classified
+        assert context[ContextKeys.ALTERNATIVE_APPROACHES] == alternatives
+        for key in (
+            ContextKeys.CLASSIFICATION_JUSTIFICATION,
+            ContextKeys.PROBLEM_DOMAIN,
+        ):
+            assert isinstance(context[key], str)
+
+    def test_well_shaped_values_pass_unchanged(self):
+        _solution, trace_info = _engine(_ScriptedLLM(_VALID_SCRIPT)).solve_problem(
+            _PROBLEM
+        )
+        context = trace_info["final_context"]
+
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
+        assert context[ContextKeys.CLASSIFICATION_JUSTIFICATION] == "a syllogism"
+        assert context[ContextKeys.PROBLEM_DOMAIN] == "logic"
+        assert context[ContextKeys.ALTERNATIVE_APPROACHES] == ["analytical"]
+
+
+class _HandlerCrash(RuntimeError):
+    """Raised by a patched engine handler on its first call."""
+
+
+def _crash_on_first_call(
+    monkeypatch: pytest.MonkeyPatch, owner: type, name: str
+) -> list[Any]:
+    """Patch ``owner.name`` (before the engine registers it) to raise
+    ``_HandlerCrash`` on its first call and delegate afterwards; returns the
+    list of recorded calls."""
+    original = inspect.getattr_static(owner, name)
+    is_static = isinstance(original, staticmethod)
+    function = original.__func__ if is_static else original
+    calls: list[Any] = []
+
+    def patched(*args: Any) -> Any:
+        calls.append(args)
+        if len(calls) == 1:
+            raise _HandlerCrash(f"{name} crashed")
+        return function(*args)
+
+    monkeypatch.setattr(owner, name, staticmethod(patched) if is_static else patched)
+    return calls
+
+
+class TestEachCriticalRegistration:
+    """Review pass 16 W2: each `.critical()` registration is pinned on its
+    own. The first call of one handler crashes; later calls work, so a
+    non-critical registration would log the crash, skip it and finish (the
+    retry limiter's own validate_solution call cannot mask the validator)."""
+
+    @pytest.mark.parametrize(
+        ("owner", "name", "initial_context"),
+        [
+            (ReasoningEngine, "_classify_problem", None),
+            (ReasoningEngine, "_prepare_reasoning_execution", None),
+            (ReasoningHandlers, "validate_solution", None),
+            (ReasoningEngine, "_check_retry_limit", None),
+            (
+                ReasoningHandlers,
+                "count_hybrid_loop",
+                {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.HYBRID.value},
+            ),
+        ],
+        ids=["classifier", "executor", "validator", "retry-limiter", "hybrid-counter"],
+    )
+    def test_a_crash_stops_the_solve(self, monkeypatch, owner, name, initial_context):
+        calls = _crash_on_first_call(monkeypatch, owner, name)
+        engine = _engine(_ScriptedLLM(_HYBRID_SCRIPT))
+
+        with pytest.raises(ReasoningExecutionError) as info:
+            engine.solve_problem(_PROBLEM, initial_context)
+
+        assert len(calls) == 1
+        assert any(isinstance(e, _HandlerCrash) for e in _causes(info.value))
+        assert engine.orchestrator.list_active_conversations() == []
+
+
+class TestPartialContextReadFailure:
+    """Review pass 16 note 5: a get_data that raises ValueError (a stack torn
+    down mid-run) while a failed solve reads its partial context still gives
+    ReasoningExecutionError and ends the conversation."""
+
+    def test_value_error_on_the_read_is_reported_and_the_solve_ended(self, monkeypatch):
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+        api = engine.orchestrator
+        original_get_data = api.get_data
+        popped: list[bool] = []
+
+        def failing_pop(*args: Any, **kwargs: Any) -> str:
+            popped.append(True)
+            raise RuntimeError("pop exploded")
+
+        def get_data(conversation_id: str) -> dict[str, Any]:
+            if popped:
+                raise ValueError(f"Unknown conversation ID: {conversation_id}")
+            return original_get_data(conversation_id)
+
+        monkeypatch.setattr(api, "pop_fsm", failing_pop)
+        monkeypatch.setattr(api, "get_data", get_data)
+
+        with pytest.raises(ReasoningExecutionError, match="pop exploded") as info:
+            engine.solve_problem(_PROBLEM)
+
+        assert info.value.details["partial_context"] is None
+        assert isinstance(info.value.__cause__, RuntimeError)
+        assert api.list_active_conversations() == []
+
+
+class TestCallerCannotCarryAClassification:
+    """Review pass 16 note 7: a caller's classified_problem_type is dropped,
+    so the classifier runs for the new problem."""
+
+    def test_a_carried_classification_is_dropped(self):
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        _solution, trace_info = _engine(llm).solve_problem(
+            _PROBLEM,
+            {ContextKeys.CLASSIFIED_PROBLEM_TYPE: ReasoningType.CREATIVE.value},
+        )
+        context = trace_info["final_context"]
+
+        assert llm.field_requests(ContextKeys.RECOMMENDED_REASONING_TYPE)
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
+        assert context[ContextKeys.REASONING_TYPE_SELECTED] == "deductive"
+        assert "creative_reasoning_completed" not in context
