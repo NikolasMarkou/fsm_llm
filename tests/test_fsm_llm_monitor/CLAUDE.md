@@ -30,13 +30,13 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | autouse `_clear_monitor_api_key_env` | `monkeypatch.delenv("FSM_LLM_MONITOR_API_KEY", raising=False)`; without it an exported key makes about 22 `test_app.py` tests 401 |
-| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 113 tests; asserts `"0.11.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
+| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 128 tests; asserts `"0.11.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
 | `test_server_security.py` | Origin/Host, body limit, headers, gated reads, WebSocket auth, error mapping, bounds, dashboard config, builder busy guard, `validate_preset_id` | 36 tests; autouse `_reset_key` reconfigures with env key `""` after each test |
-| `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools | 61 tests; contains unmarked `async def` tests |
+| `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools | 73 tests; contains unmarked `async def` tests |
 | `test_collector.py` | `EventCollector` | 45 tests |
 | `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | 50 tests |
 | `test_otel.py` | `OTELExporter` | 22 tests; autouse `_mock_otel` fixture |
-| `test_audit_2026_09_28.py` | regression tests for the 2026-09-28 audit (non-HTTP) | 36 tests; module-level `pytest.importorskip("fsm_llm.workflows")` (line 436) skips all 36 when workflows is missing |
+| `test_audit_2026_09_28.py` | regression tests for the 2026-09-28 audit (non-HTTP) | 37 tests; module-level `pytest.importorskip("fsm_llm.workflows")` (line 436) skips all 37 when workflows is missing |
 
 ## Public interface
 

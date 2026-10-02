@@ -284,9 +284,11 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 ### Changed
 
 - Install hints: runtime install messages (lazy extension imports, monitor, OTEL,
-  MCP, A2A, harness CLI) and the extras docstrings now name a clone install
-  (`pip install -e ".[extra]"`), because the `fsm-llm` PyPI name belongs to another
-  project.
+  MCP, A2A, harness CLI) and the extras docstrings now name a clone install, because
+  the `fsm-llm` PyPI name belongs to another project: `pip install -e ".[extra]"`
+  where the extra adds packages (`monitor`, `otel`, `mcp`, `a2a`, `harness`) and
+  `pip install -e .` where it adds none (`workflows`, `reasoning`, `agents`, `eval`,
+  and the lazy-import hints in the core package).
 
 - Builder standard: `fsm_llm.workflows.WorkflowBuilder.build()` has no `validate`
   argument (removed, not deprecated): it always validates, returns a fresh,
@@ -805,6 +807,12 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   they are redacted like the other tool-input log lines.
 - Docs: `docs/api_reference.md` agent snippets passed `model=` to constructors, which
   crashed at run time.
+- Agents (meta): builder subclasses that skip `ArtifactBuilder.__init__` no longer
+  fail in `take_warnings()` and the `validate` and `get_summary` meta tools (the
+  warnings list is created on first use).
+- Core: `APIBuilder.build()` reports an open-ended option that repeats a constructor
+  parameter before it reports a missing definition, so
+  `set_llm_option("fsm_definition", ...)` points at `set_definition()`.
 
 ### Renamed
 
