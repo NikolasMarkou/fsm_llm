@@ -51,6 +51,8 @@ flowchart TD
 | Swarm | `SwarmAgent` | Agents pass the task to each other |
 | Agent graph | `AgentGraph` | Agents wired as a graph with conditional edges, no cycles |
 
+`ConfiguredAgentBuilder` builds any pattern step by step instead of one wide `create_agent(...)` call: `ConfiguredAgentBuilder().set_pattern("react").add_tool(fn).set_model("ollama_chat/qwen3.5:4b").set_max_iterations(8).build()`. Setters only record and return the builder; `build()` raises `BuildError` (a `ValueError`, with `.errors` and the cause chained) for anything `create_agent` refuses. `set_option(name, value)` passes any other `create_agent` keyword unfiltered. `AgentGraphBuilder.build()` raises `BuildError` too, and a repeated node name is an error.
+
 ## Files
 
 - `base.py` - `BaseAgent`: the shared loop, limits, answer extraction, trace, structured output.
@@ -62,7 +64,8 @@ flowchart TD
 - `composition.py` - use ReAct agents as orchestrator workers; an LLM judge for the evaluator-optimizer.
 - `skills.py`, `sop.py` - load tools from folders of Python files; reusable task templates (three built in).
 - `mcp.py` - load tools from an MCP (Model Context Protocol) server. `remote.py` - serve an agent over HTTP, or call a remote one as a tool.
-- `meta_builder.py`, `meta_builders.py`, `meta_tools.py`, `meta_prompts.py`, `meta_output.py`, `meta_cli.py` - the meta-builder, its builders and its `fsm-llm-meta` command.
+- `meta_builder.py`, `meta_builders.py`, `meta_tools.py`, `meta_prompts.py`, `meta_output.py`, `meta_cli.py` - the meta-builder, its artifact builders (`FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`: calls chain, `take_warnings()` returns and clears the warnings, `build()` validates) and its `fsm-llm-meta` command.
+- `builders.py` - `ConfiguredAgentBuilder`.
 - `definitions.py`, `constants.py`, `exceptions.py` - data models, names and defaults, errors.
 - `__init__.py`, `__main__.py`, `__version__.py` - exports and `create_agent()`, `python -m fsm_llm.agents --info`, version.
 

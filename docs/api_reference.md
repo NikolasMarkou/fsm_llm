@@ -159,6 +159,31 @@ Fluent API returned by `api.create_handler()`:
 | `.do(fn)` | Set handler function and build |
 | `.build()` | Build the handler from the current configuration (`.do(fn)` calls it) |
 
+## Builders and `BuildError`
+
+One convention for every builder (`APIBuilder`, `FSMManagerBuilder`, `HandlerBuilder`, `AgentGraphBuilder`, `ConfiguredAgentBuilder`, `HarnessAgentBuilder`, `workflows.WorkflowBuilder`, the meta artifact builders): `<Product>Builder`; `set_`, `add_` and `remove_` mutators only record and return the builder; `build()` is the only validator, copies what the builder owns, and raises `BuildError`. `BuildError` is exported from `fsm_llm`; it is an `FSMError` and a `ValueError`, `.errors` lists the problems, and the domain or constructor error that caused it is its `__cause__`. Objects you pass in (an `LLMInterface`, a session store, handlers, agents, registries) stay shared by reference. `HandlerBuilder` keeps its `at`/`on_state`/`do` vocabulary, and the meta artifact builders still refuse a bad call at call time with `BuilderError` (also a `BuildError`) and report warnings with `take_warnings()`.
+
+```python
+from fsm_llm import APIBuilder, BuildError
+
+try:
+    api = (
+        APIBuilder()
+        .set_definition("bot.json")
+        .set_model("ollama_chat/qwen3.5:4b")
+        .set_temperature(0.3)
+        .set_llm_option("seed", 7)       # open-ended litellm kwarg, never filtered
+        .build()
+    )
+except BuildError as exc:
+    print(exc.errors, exc.__cause__)
+```
+
+- `APIBuilder`: one setter per `API` parameter (`set_definition`, `set_llm_interface`, `set_model`, `set_api_key`, `set_temperature`, `set_max_tokens`, `set_llm_option(name, value)`, `add_handler`, `set_handler_error_mode`, `set_transition_config`, `set_session_store`, `set_handler_timeout`, `set_max_history_size`, `set_max_message_length`, `set_max_fsm_cache_size`). Only set values reach `API(...)`, so `API`'s own rules (an `llm_interface` refuses other LLM settings) apply unchanged and come back as `BuildError`. No definition is a `BuildError`.
+- `FSMManagerBuilder`: `set_fsm_loader`, `set_llm_interface`, the three prompt builders, `set_transition_evaluator`, `set_max_history_size`, `set_max_message_length`, `set_handler_system`, `set_handler_error_mode`, `set_max_fsm_cache_size`, `build() -> FSMManager`.
+- `fsm_llm.agents.ConfiguredAgentBuilder`: `set_pattern`, `add_tool` (or `set_tool_registry`, not both), `set_config`, `set_config_option`, typed config setters (`set_model`, `set_temperature`, `set_max_tokens`, `set_max_iterations`, `set_timeout_seconds`, `set_system_prompt`), `set_hitl`, `set_option(name, value)`; `build()` calls `create_agent`.
+- `fsm_llm.harness.HarnessAgentBuilder`: one `set_<parameter>` per `HarnessAgent` parameter and `set_api_option(name, value)`; `build() -> HarnessAgent`.
+
 ## HandlerTiming Enum
 
 `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`
@@ -380,12 +405,12 @@ agent = ReactAgent(tools=registry, config=AgentConfig(model="gpt-4o-mini"), hitl
 - `initial_context` cannot set run-owned keys (`final_answer`, `should_terminate`, `observation_count`, tool and approval keys, `refused_actions`, a pattern's own outputs such as ADaPT `operator`) or the driver grant `_approval_granted`: they are dropped with a warning.
 - Tools: `@tool(name=, description=, parameter_schema=, requires_approval=, annotations=ToolAnnotations(read_only=, destructive=, idempotent=, open_world=), timeout_s=)`. Native tool schemas and prompt descriptions come from the function's own pydantic model (exact types: `Optional[int]` is `integer or null`). `ToolRegistry.execute(call, *, gated=False)` never raises; a `timeout_s` call runs in a worker thread and a timeout returns a failed `ToolResult` with `timed_out=True` and `status` `unknown` (the tool keeps running). `RetryingToolRegistry` re-runs only tools annotated `idempotent` or `read_only`, never a granted (`gated`) call. A custom registry's `execute` must accept `gated`.
 - `NativeFunctionCallingReactAgent(tools, config=None, system_policy=None, *, seed=None, **api_kwargs)` uses the provider's native tool calls as an FSM on core completion states (`build_native_fc_fsm`); inject an interface with `llm_interface=` (there is no `complete_fn`). `config.force_final_tool` adds one forced tool turn and `output_schema` one repair turn.
-- `MetaBuilderAgent(config=MetaBuilderConfig(model, temperature=0.7, max_tokens=4096, max_turns=50, timeout_seconds=...), **api_kwargs)`: `run(task)`, `start(message="")`, `send(message)`, `is_complete()`, `get_result()`, `get_internal_state()`, `run_interactive()`. It is an FSM run by core (type classification, collect replies, one structured build call); a malformed build raises `MetaValidationError` from `run`, a build-call outage `BuilderError`.
+- `MetaBuilderAgent(config=MetaBuilderConfig(model, temperature=0.7, max_tokens=4096, max_turns=50, timeout_seconds=...), **api_kwargs)`: `run(task)`, `start(message="")`, `send(message)`, `is_complete()`, `get_result()`, `get_internal_state()`, `run_interactive()`. It is an FSM run by core (type classification, collect replies, one structured build call); a malformed build raises `MetaValidationError` from `run`, a build-call outage `BuilderError`. The artifact builders it uses are `FSMArtifactBuilder`, `WorkflowArtifactBuilder` and `AgentArtifactBuilder` (mutators return the builder; `take_warnings()` returns and clears the accumulated warnings; `build()` validates and raises `BuildError`).
 - Agents drive their FSM with core's `run_until_terminal` / `run_until_terminal_stream`: no synthetic user message, and silent intermediate states make no reply call. On a HITL denial the driver writes one sentence per refused call that did not run to `final_context["refused_actions"]` (`ContextKeys.REFUSED_ACTIONS`, built by `handlers.refusal_record` from `handlers.call_label`), and approval-gated conclude prompts tell the model those actions were not performed; a call approved and run later loses its entry, and a denied repeat of a call that already ran (`handlers.call_ran`) adds none.
 
 18 `create_agent()` patterns: `react`, `rewoo`, `debate`, `plan_execute`, `prompt_chain`, `self_consistency`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reflexion`, `meta_builder`, `swarm`, `parallel_react`, `native_fc`, `verified_react`, `auto_memory`, `reasoning_react`. The source of truth is `_PATTERNS` in `src/fsm_llm/agents/__init__.py`; an unknown pattern raises `ValueError` listing the available names. `tools=` for a pattern that takes none (`debate`, `prompt_chain`, `self_consistency`, `evaluator_optimizer`, `maker_checker`, `meta_builder`, `swarm`) raises `TypeError`. Pattern names are matched after `strip().lower()`; any other first argument (including the removed `create_agent("You are ...", tools)` form) raises `ValueError`. Pass instructions as `system_prompt=`.
 
-Multi-agent coordination and integrations (constructed directly, not via the factory): `SwarmAgent`, `AgentGraph` / `AgentGraphBuilder` (DAG orchestration), `MCPToolProvider` (MCP tools), `AgentServer` / `RemoteAgentTool` (A2A), `SemanticToolRegistry` (embedding-based tool retrieval through core's `LiteLLMEmbedder`, or `embed_fn=`), `SOPRegistry` / `load_builtin_sops` (reusable agent templates).
+Multi-agent coordination and integrations (constructed directly, not via the factory): `SwarmAgent`, `AgentGraph` / `AgentGraphBuilder` (DAG orchestration; `build()` raises `BuildError`, a duplicate node name included), `ConfiguredAgentBuilder` (fluent `create_agent`), `MCPToolProvider` (MCP tools), `AgentServer` / `RemoteAgentTool` (A2A), `SemanticToolRegistry` (embedding-based tool retrieval through core's `LiteLLMEmbedder`, or `embed_fn=`), `SOPRegistry` / `load_builtin_sops` (reusable agent templates).
 
 User guide: `src/fsm_llm/agents/README.md`. Audit record, adjusted decisions and deferred work: `docs/agents_roadmap.md`.
 
@@ -405,6 +430,8 @@ await engine.advance_workflow(instance_id)
 status = engine.get_workflow_status(instance_id)
 await engine.shutdown()
 ```
+
+`workflow_builder(id, name)` returns a `WorkflowBuilder` (`add_step`, `set_initial_step`, `add_metadata`); its `build()` always validates, returns a new `WorkflowDefinition` that later builder calls do not change, and raises `BuildError` chained from `WorkflowDefinitionError` or `WorkflowValidationError`. It has no `validate` argument.
 
 11 step types: `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`, `conversation_step`, `agent_step`, `retry_step`, `switch_step`.
 
@@ -432,6 +459,7 @@ agent = HarnessAgent(
     iteration_hard_cap=6,        # PLAN -> EXECUTE
     max_explore_redispatches=9,  # extra EXPLORE dispatches per run while blocked
 )
+# Same agent, fluent: HarnessAgentBuilder().set_worker_factory(...).set_max_fix_attempts(2).build()
 result = agent.run(
     "add a retry to the uploader",
     initial_context={
@@ -715,6 +743,7 @@ FSMError
 ├── TransitionEvaluationError
 ├── ClassificationError (-> ClassificationResponseError)
 ├── RunBudgetExceededError (run_until_terminal spent max_steps or max_seconds)
+├── BuildError (also a ValueError: a builder's build() refused; .errors, cause chained)
 ├── HandlerSystemError (-> HandlerExecutionError)
 ├── ReasoningEngineError (-> ReasoningExecutionError, ReasoningClassificationError)
 ├── WorkflowError (-> Definition, Step, Instance, Timeout, Validation, State, Event, Resource)

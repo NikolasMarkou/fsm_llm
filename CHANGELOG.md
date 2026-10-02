@@ -55,6 +55,17 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 
 ### Added
 
+- Builder standard (plan `89b03f61`): `BuildError(FSMError, ValueError)` in core,
+  exported from `fsm_llm`, with `.errors` (the problem strings) and the domain or
+  constructor error chained as `__cause__`. Every builder's `build()` raises it.
+- Builder standard: `APIBuilder` and `FSMManagerBuilder` (`fsm_llm`),
+  `ConfiguredAgentBuilder` (`fsm_llm.agents`, any `create_agent` pattern) and
+  `HarnessAgentBuilder` (`fsm_llm.harness`). Each has `set_`/`add_` mutators that
+  return the builder and only record, and a `build()` that passes only the values that
+  were set to the real constructor, copies what the builder owns and raises
+  `BuildError`. Open-ended input has its own unfiltered setter (`set_llm_option`,
+  `set_option`, `set_api_option`). The convention is written once in
+  `src/fsm_llm/CLAUDE.md` (Invariants) and `docs/api_reference.md`.
 - One LLM layer, core: `LLMInterface.complete(request: CompletionRequest) ->
   CompletionResponse`, the one request primitive for tool calling, plain completion
   and structured output. It is not abstract: the base method raises
@@ -263,6 +274,24 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 - `docs/agents_roadmap.md`: the agents audit record and deferred roadmap.
 
 ### Changed
+
+- Builder standard: `fsm_llm.workflows.WorkflowBuilder.build()` has no `validate`
+  argument (removed, not deprecated): it always validates, returns a fresh,
+  isolated `WorkflowDefinition` (a later builder call no longer changes it) and
+  raises `BuildError` chained from `WorkflowValidationError` or
+  `WorkflowDefinitionError`. A caller that caught `WorkflowValidationError` from
+  `build()` now catches `BuildError` and reads `__cause__`.
+- Builder standard: `AgentGraphBuilder.add_node` with a name already used is now a
+  `build()` error instead of a silent overwrite; `HandlerBuilder.build()` refuses a
+  non-callable execution function. The graph, handler, workflow and meta builders
+  raise `BuildError` (still a `ValueError`, so existing `except ValueError` keeps
+  working). `HandlerBuilder` keeps its `at`/`on_state`/`when`/`do` vocabulary.
+- Builder standard: the meta artifact builders' mutators return the builder, so
+  calls chain, and the warnings they used to return as a `list[str]` are read with
+  `take_warnings()` (returns and clears). A new `build()` runs `validate_complete()`
+  and raises `BuildError`, else returns a deep copy of `to_dict()`. The call-time
+  `BuilderError` refusals (empty id, unknown type, missing source) stay.
+  `BuilderError` is now also a `BuildError`.
 
 - One LLM layer, core: the classifier of an AMBIGUOUS transition and of a
   `classification_extractions` entry sends its request to the conversation's own
@@ -763,7 +792,13 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   `fsm_llm.agents` and `fsm_llm.agents.meta_builders` are now `FSMArtifactBuilder`,
   `WorkflowArtifactBuilder` and `AgentArtifactBuilder`, with no alias. The old
   `WorkflowBuilder` name clashed with `fsm_llm.workflows.WorkflowBuilder`, a different
-  class that keeps its name. `ArtifactBuilder` is unchanged.
+  class that keeps its name. `ArtifactBuilder` is unchanged. Removed names:
+  `fsm_llm.agents.FSMBuilder`, `fsm_llm.agents.WorkflowBuilder`,
+  `fsm_llm.agents.AgentBuilder` and the same three in
+  `fsm_llm.agents.meta_builders`. `fsm_llm.harness.AgentBuilder` (a callable alias)
+  and `fsm_llm.workflows.WorkflowBuilder` are different objects and keep their names.
+- Builder standard: `fsm_llm.workflows.WorkflowBuilder.build(validate=...)` lost its
+  `validate` argument (see Changed).
 
 ### Removed
 

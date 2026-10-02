@@ -30,7 +30,7 @@ There are 11 step types: automatic (run a function, move on), API call, conditio
 
 - `engine.py` - `WorkflowEngine`: starts and drives instances, delivers events, runs timers and deadlines, cancels, cleans up, calls hooks. Also `Timer`.
 - `steps.py` - the `WorkflowStep` base class and the 11 step classes.
-- `dsl.py` - short factory functions (`create_workflow`, `auto_step`, `condition_step`, ...), `WorkflowBuilder`, and three pattern helpers that register a set of steps without wiring them together.
+- `dsl.py` - short factory functions (`create_workflow`, `auto_step`, `condition_step`, ...), `WorkflowBuilder` (`add_step`, `set_initial_step`, `add_metadata`; `build()` always validates, returns a fresh definition and raises `BuildError` chained from the workflow error), and three pattern helpers that register a set of steps without wiring them together.
 - `definitions.py` - `WorkflowDefinition` with validation (targets exist, all steps reachable, no loop that never pauses) and `WorkflowValidator`.
 - `models.py` - statuses, events, step results, instances, history entries, event listeners, wait settings.
 - `dependency_resolver.py` - `DependencyResolver`: sorts steps with declared dependencies into "waves" that could run in parallel. A standalone helper; the engine does not use it.

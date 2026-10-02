@@ -248,9 +248,9 @@ class TestAPIBuilder:
         assert api.fsm_definition == definition
 
     def test_builders_module_does_not_import_litellm(self):
-        import fsm_llm.builders as mod
-
         import re
+
+        import fsm_llm.builders as mod
 
         with open(mod.__file__) as fh:
             assert not re.search(r"import litellm|from litellm", fh.read())

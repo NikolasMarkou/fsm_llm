@@ -33,7 +33,7 @@ flowchart LR
 
 ## Files
 
-- `harness.py` - `HarnessAgent`, the driver: dispatches workers, runs the gates, the leash and the retry budgets, writes `state.md`, resumes a run.
+- `harness.py` - `HarnessAgent`, the driver, and `HarnessAgentBuilder` (a fluent way to build it): dispatches workers, runs the gates, the leash and the retry budgets, writes `state.md`, resumes a run.
 - `fsm_definition.py` - `build_harness_fsm()`: the 6-state, 9-transition FSM and its gate rules.
 - `rules.py` - per-state protocol text, which role runs in which state, who owns which file, and the explore topics.
 - `roles.py` - the six role specs, their prompts and reply schemas, and the stock worker factory.
@@ -85,6 +85,8 @@ result = agent.run(
 )
 print(result.success, result.answer)
 ```
+
+`HarnessAgentBuilder` builds the same agent with one `set_<parameter>` call per constructor parameter (`set_worker_factory(...)`, `set_approval_callback(...)`, `set_api_option(name, value)`, ...) and a `build()` that raises `BuildError` for anything the constructor refuses.
 
 ## Things to know
 
