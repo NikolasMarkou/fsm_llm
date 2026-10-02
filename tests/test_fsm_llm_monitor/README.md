@@ -1,6 +1,6 @@
 # test_fsm_llm_monitor
 
-The pytest suite for `fsm_llm.monitor`, the web dashboard package of FSM-LLM (source in `src/fsm_llm/monitor/`). It lives at `tests/test_fsm_llm_monitor/` and collects 388 tests.
+The pytest suite for `fsm_llm.monitor`, the web dashboard package of FSM-LLM (source in `src/fsm_llm/monitor/`). It lives at `tests/test_fsm_llm_monitor/` and collects 391 tests in 6 files.
 
 ## What it is for
 
@@ -26,13 +26,13 @@ flowchart LR
 
 - `conftest.py` - autouse fixture that removes `FSM_LLM_MONITOR_API_KEY` from the environment for every test.
 - `__init__.py` - empty package marker.
-- `test_app.py` - HTTP routes, static files, public exports, version, API-key gate, WebSocket redaction hook, and that the UI log levels, Max Iterations limit and log CSS match the server constants (113 tests).
+- `test_app.py` - HTTP routes, static files, public exports, version, API-key gate, WebSocket redaction hook, and that the UI log levels, Max Iterations limit and log CSS match the server constants (128 tests).
 - `test_server_security.py` - Origin and Host checks, body size limit, security headers, key-gated reads, WebSocket auth, error-to-status mapping, request bounds, dashboard config parsing, builder guards, preset path validation (36 tests).
-- `test_instance_manager.py` - `ManagedFSM`/`ManagedWorkflow`/`ManagedAgent`, `InstanceManager` lookups, destroy, activity, workflow presets, disabled agent types, agent status resolution, stub tools (60 tests).
+- `test_instance_manager.py` - `ManagedFSM`/`ManagedWorkflow`/`ManagedAgent`, `InstanceManager` lookups, destroy, activity, workflow presets, disabled agent types, agent status resolution, stub tools (73 tests).
 - `test_collector.py` - `EventCollector` buffers, metrics, log filtering, handler callbacks, loguru sink, cursors, thread safety (45 tests).
 - `test_definitions.py` - Pydantic models and helpers in `definitions.py` (50 tests).
 - `test_otel.py` - `OTELExporter` enable, disable, shutdown and event routing (22 tests).
-- `test_audit_2026_09_28.py` - one class per finding of the 2026-09-28 monitor audit (non-HTTP parts) (36 tests).
+- `test_audit_2026_09_28.py` - one class per finding of the 2026-09-28 monitor audit (non-HTTP parts) (37 tests).
 
 ## How to use it
 
@@ -51,6 +51,7 @@ The monitor extra must be installed (`fastapi`, `uvicorn`, `jinja2`), for exampl
 - `test_otel.py` does not need `opentelemetry` installed. It puts fake modules into `sys.modules` and re-imports `fsm_llm.monitor.otel` for each test.
 - `test_audit_2026_09_28.py` calls `pytest.importorskip("fsm_llm.workflows")` at module level, so when `fsm_llm.workflows` cannot be imported the whole file is skipped, including its non-workflow tests. `TestStubToolExecution` is skipped without `fsm_llm.agents`.
 - Async tests have no marker. They rely on `asyncio_mode = "auto"` in `pyproject.toml`.
-- `test_app.py` asserts the version string `"0.11.0"` in two places. Update both on a version bump.
-- `test_env_key_applies_without_configure` starts a Python subprocess (120 s timeout).
+- `test_app.py` asserts the version string `"0.11.0"` in two places (`/api/info` `monitor_version` and `fsm_llm.monitor.__version__`). Update both on a version bump.
+- The server test files import `fastapi.testclient` at module level, so they fail at collection (they do not skip) when the monitor extra is missing.
+- `test_env_key_applies_without_configure` (in `test_server_security.py`) starts a Python subprocess (120 s timeout).
 - Preset tests need the repo `examples/` directory. Some of them only assert when presets are found.

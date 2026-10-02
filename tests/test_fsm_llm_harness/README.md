@@ -30,16 +30,17 @@ flowchart LR
 
 - `__init__.py` - marks the folder as a package so tests can import each other.
 - `conftest.py` - shared fixtures: the recording worker, the approval recorder, the `make_harness` factory, temp plan and workspace folders, a loguru log capture.
-- `test_artifacts.py` - parsing, validation and round-trip of every protocol markdown file (`state.md`, `plan.md`, `decisions.md`, `changelog.md` and others).
-- `test_cli.py` - the `fsm-llm-harness` command: subcommands, exit codes, `--model` precedence, dry-run `close`, the public `__all__`.
-- `test_extraction_cost.py` - proves the harness FSM makes zero core data-extraction LLM calls per turn.
-- `test_fsm_definition.py` - the FSM graph (6 states, 9 edges) and every JsonLogic gate, run through the real core transition evaluator.
-- `test_hardening.py` - small-model helpers: stripping `<think>` blocks and code fences, JSON recovery, strict type coercion, retry with backoff.
-- `test_harness_agent.py` - the driver: dispatch ledger, the 2-attempt fix leash, approvals, redispatch caps, disk-derived counts, `state.md` sync and resume.
-- `test_live_ollama.py` - live tests against `ollama_chat/qwen3.5:4b` (skipped by default), plus offline checks of the bench helpers they use.
-- `test_plan_validator.py` - `pre_step_gate` (four hard-stop slugs) and `audit` (advisory issues) over a realistic plan folder.
-- `test_roles_and_tools.py` - role prompts, tool scopes, file ownership, path confinement, the shell allowlist, write-evidence checks.
-- `test_storage.py` - plan id minting, atomic writes, `LESSONS.md` eviction, the 4-plan sliding window, `PlanDirectory`.
+- `test_artifacts.py` (271 tests) - parsing, validation and round-trip of every protocol markdown file (`state.md`, `plan.md`, `decisions.md`, `changelog.md` and others).
+- `test_cli.py` (108) - the `fsm-llm-harness` command: subcommands, exit codes, `--model` precedence, dry-run `close`, the public `__all__`.
+- `test_extraction_cost.py` (24) - proves the harness FSM makes zero core data-extraction LLM calls per turn.
+- `test_fsm_definition.py` (87) - the FSM graph (6 states, 9 edges) and every JsonLogic gate, run through the real core transition evaluator.
+- `test_hardening.py` (258) - small-model helpers: stripping `<think>` blocks and code fences, JSON recovery, strict type coercion, retry with backoff.
+- `test_harness_agent.py` (385) - the driver: dispatch ledger, the 2-attempt fix leash, approvals, redispatch caps, disk-derived counts, `state.md` sync and resume, the run on the core step loop, and `TestHarnessAgentBuilder` (the fluent `HarnessAgentBuilder`: limits and callbacks reach the agent, unset values equal the constructor defaults, the config copy is shallow and isolated per build, a constructor refusal becomes a build error with its cause, an open option naming the approval callback is refused).
+- `test_live_ollama.py` (94) - 17 live tests against `ollama_chat/qwen3.5:4b` (skipped by default) and 77 offline checks of the bench helpers and rubrics they use.
+- `test_plan_validator.py` (191) - `pre_step_gate` (four hard-stop slugs) and `audit` (advisory issues) over a realistic plan folder.
+- `test_removed_legacy.py` (11) - absence tests for harness names removed as legacy (four unread `Defaults` constants, the `storage._atomic_write_text` alias, retired `plan_YYYY-MM-DD_hex8` directory names).
+- `test_roles_and_tools.py` (484) - role prompts, tool scopes, file ownership, path confinement, the shell allowlist, write-evidence checks.
+- `test_storage.py` (115) - plan id minting, atomic writes, `LESSONS.md` eviction, the 4-plan sliding window, `PlanDirectory`.
 
 ## How to use it
 
@@ -50,7 +51,7 @@ Run from the repository root with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_harness/test_storage.py -q
 ```
 
-The full folder currently collects 2,028 tests: 2,011 pass and 17 are skipped because the live gate is closed.
+The full folder collects 2,028 tests; a default run (about one minute) gives 2,011 passed and 17 skipped because the live gate is closed.
 
 To arm the live tests, set the switch and have Ollama running with the model pulled:
 
@@ -61,7 +62,8 @@ FSM_LLM_HARNESS_LIVE=1 .venv/bin/python -m pytest tests/test_fsm_llm_harness/tes
 ## Things to know
 
 - Run from the repo root: tests import `tests.conftest` and each other as packages.
-- The live file is marked `slow`, `integration` and `real_llm` as a whole, so `-m "not slow"` also drops its offline checks.
-- The live L6, L7 and L8 blocks append rows under `scripts/bench_data/` and refuse to run if that block's rows file already exists. The current blocks (`l6-e2e/B8`, `l7-explore-coldstart/B0`, `l8-explore-loop/B1`) already have rows, so those three fail on purpose if armed.
+- The live file is marked `slow`, `integration` and `real_llm` as a whole (94 tests), so `-m "not slow"` also drops its 77 offline checks. Only the 17 gated by `requires_live` skip in a default run. The gate reads `FSM_LLM_HARNESS_LIVE=1` first and probes Ollama only after that, so a default run opens no socket.
+- The live L6, L7 and L8 blocks append rows under `scripts/bench_data/` and refuse to run if that block's rows file already exists. The current blocks (`l6-e2e/B8`, `l7-explore-coldstart/B0`, `l8-explore-loop/B1`) already have rows, so those fail on purpose if armed.
 - `test_harness_agent.py` reads a real file, `scripts/bench_data/l6-e2e/B5/artifacts/run-1/plan.md`, and `test_cli.py` reads `pyproject.toml`.
+- `conftest.py` also has an autouse fixture that clears the module-level dispatch re-entrancy flag around every test.
 - Assert on log messages with the `captured_logs` fixture, never with pytest's `caplog`: the package logs through loguru, which `caplog` cannot see.

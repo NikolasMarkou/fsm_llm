@@ -68,7 +68,7 @@ flowchart TD
 
 ## How to use it
 
-Install from the repository root, then use the package from Python:
+Install from the repository root (add extras in brackets, for example `pip install -e ".[monitor]"`), then use the package from Python. The examples below use `examples/basic/simple_greeting/fsm.json` from the repository root and a local Ollama model; any litellm model name works in `model=`.
 
 ```bash
 pip install -e .
@@ -77,7 +77,7 @@ pip install -e .
 ```python
 from fsm_llm import API
 
-api = API.from_file("greeter.json", model="ollama_chat/qwen3.5:4b")
+api = API.from_file("examples/basic/simple_greeting/fsm.json", model="ollama_chat/qwen3.5:4b")
 conv_id, reply = api.start_conversation()
 print(api.converse("Hi, I'm Alice", conv_id))
 print(api.get_data(conv_id))
@@ -87,13 +87,15 @@ api.end_conversation(conv_id)
 Console scripts installed from `pyproject.toml`:
 
 ```bash
-fsm-llm --fsm greeter.json            # chat interactively (needs env LLM_MODEL)
-fsm-llm-validate --fsm greeter.json   # check an FSM file
-fsm-llm-visualize --fsm greeter.json  # draw it as ASCII
-fsm-llm-monitor                       # needs the monitor extra
+export LLM_MODEL=ollama_chat/qwen3.5:4b
+fsm=examples/basic/simple_greeting/fsm.json
+fsm-llm --fsm $fsm                    # chat interactively (fails without env LLM_MODEL)
+fsm-llm-validate --fsm $fsm           # check an FSM file
+fsm-llm-visualize --fsm $fsm          # draw it as ASCII (--format mermaid or dot)
+fsm-llm-monitor                       # web dashboard, needs the monitor extra
 fsm-llm-meta                          # design an FSM, workflow or agent by chatting
-fsm-llm-harness new "goal"
-fsm-llm-eval examples
+fsm-llm-harness new "goal"            # experimental iterative planner
+fsm-llm-eval examples                 # score every example 0 to 4 (slow, calls the model)
 ```
 
 ## Things to know

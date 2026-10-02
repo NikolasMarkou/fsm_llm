@@ -49,7 +49,9 @@ flowchart TD
 | Auto-memory ReAct | `AutoMemoryReactAgent` | Recall related memories before a run, save the exchange after |
 | Native function calling | `NativeFunctionCallingReactAgent` | Uses the provider's own tool-calling API: an FSM whose model turns are core tool-calling states |
 | Swarm | `SwarmAgent` | Agents pass the task to each other |
-| Agent graph | `AgentGraph` | Agents wired as a graph with conditional edges, no cycles |
+| Meta-builder | `MetaBuilderAgent` | Chat about what you need, then get a validated FSM, workflow or agent definition (see the meta-builder note below) |
+
+These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `plan_execute`, `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reasoning_react`, `parallel_react`, `verified_react`, `auto_memory`, `native_fc`, `swarm`, `meta_builder`). `AgentGraph` is not one of them: it wires agents you built into a graph with conditional edges and no cycles, and it is built with `AgentGraphBuilder().add_node(name, agent).add_edge(src, dst, condition=None).set_entry(name).build()`.
 
 `ConfiguredAgentBuilder` builds any pattern step by step instead of one wide `create_agent(...)` call: `ConfiguredAgentBuilder().set_pattern("react").add_tool(fn).set_model("ollama_chat/qwen3.5:4b").set_max_iterations(8).build()`. Setters only record and return the builder; `build()` raises `BuildError` (a `ValueError`, with `.errors` and the cause chained) for anything `create_agent` refuses. `set_option(name, value)` passes any other `create_agent` keyword; a name that repeats a named parameter (`pattern`, `tools`, `config`, `system_prompt`, ...) is refused at `build()` with the typed setter named. The `AgentConfig` is copied shallowly, so callables inside it stay shared. `AgentGraphBuilder.build()` raises `BuildError` too, and a repeated node name is an error.
 
@@ -70,6 +72,8 @@ flowchart TD
 - `__init__.py`, `__main__.py`, `__version__.py` - exports and `create_agent()`, `python -m fsm_llm.agents --info`, version.
 
 ## How to use it
+
+Install from a clone with `pip install -e .` (the `fsm-llm` name on PyPI belongs to a different project; the `agents` extra adds no packages). The examples below need a model: they use a local Ollama model, or set `LLM_MODEL` to any litellm model name.
 
 ```python
 from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
@@ -106,9 +110,15 @@ Build a new FSM by chatting (say "build it" when ready):
 fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
 ```
 
+## Where to go next
+
+- `examples/agents/` and `examples/meta/`: runnable programs for the patterns and the meta-builder.
+- `docs/agents_roadmap.md`: the audit record and the work that is still open.
+- `src/fsm_llm/README.md`: the core engine these agents run on (message-free steps, handlers, the LLM layer).
+
 ## Things to know
 
-- `pip install "fsm-llm[agents]"` adds no dependencies. `mcp.py` needs `fsm-llm[mcp]`; `RemoteAgentTool` needs `fsm-llm[a2a]` (httpx); `AgentServer` needs fastapi (for example via `fsm-llm[monitor]`). `ReasoningReactAgent` uses `fsm_llm.reasoning`, which ships in every install.
+- The `agents` extra adds no dependencies. `mcp.py` needs the `mcp` extra; `RemoteAgentTool` needs the `a2a` extra (httpx); `AgentServer` needs fastapi (for example via the `monitor` extra). Install extras from a clone: `pip install -e ".[mcp]"`. `ReasoningReactAgent` uses `fsm_llm.reasoning`, which ships in every install.
 - `AgentConfig` rejects unknown fields (a typo raises). `model` defaults to the `LLM_MODEL` environment variable, read when the config is built, then `ollama_chat/qwen3.5:4b`. `instructions` (at most 2,000 characters; `create_agent(system_prompt=...)` sets it) is added to every non-empty state and per-field instruction (not to `classification_extractions`, the core transition classifier or ReasoningReact's reasoning engine). Together with a large tool catalogue it can overflow core's 5,000-character instruction slot; that raises `AgentError` at `run()` naming the slot, the instructions length and the tool count; `NativeFunctionCallingReactAgent` uses it as its system policy. Swarm and the meta-builder do not use it.
 - Constructor mistakes raise `TypeError` instead of being passed to the LLM provider: `hitl=`, `tools=` or a `HumanInTheLoop` argument (`approval_policy=`, `approval_callback=`, `on_escalation=`, ...) on a pattern that cannot use them, and `model=`, `temperature=` or `max_tokens=` as keyword arguments (put them in `AgentConfig`). Other keyword arguments, such as `seed=`, `timeout=` or `llm_interface=`, still pass through.
 - `ReactAgent`, `REWOOAgent`, `ReflexionAgent`, `ParallelReactAgent` and `NativeFunctionCallingReactAgent` refuse an empty tool registry.

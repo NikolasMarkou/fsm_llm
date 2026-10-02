@@ -43,7 +43,9 @@ The examples score is a heuristic: it reads the example's exit code, timing and 
 
 ## How to use it
 
-Examples:
+The package ships in every install; the `eval` extra adds no third-party dependency (`pip install -e ".[eval]"` is the same as `pip install -e .`). Both commands need a reachable model unless you pass a fake LLM from Python. Shared flags are `--model`, `--workers` (default 4), `--output-dir`, `--config` and `--fail-under`.
+
+Examples (run from the repository root, where `examples/` lives):
 
 ```bash
 fsm-llm-eval examples --list                      # what would run
@@ -81,9 +83,9 @@ fsm-llm-eval run cases.json --temperature 0 --max-tokens 512
 python -m fsm_llm.eval run cases.json     # same command without the console script
 ```
 
-A dataset can also be a plain JSON list of cases, or a `.jsonl` file with one case per line (no embedded `config` then).
+A case has an `id` (unique), `fsm` (a path relative to the dataset file, or an inline FSM definition), `turns` (at least one user message), `expect`, and optionally `initial_context` and `description`. `expect` accepts `final_state`, `visited_states`, `context` (exact values), `context_keys` (present and not null), `responses_contain` (case-insensitive, the start reply included) and `ended`; it must declare at least one. A dataset can also be a plain JSON list of cases, or a `.jsonl` file with one case per line (no embedded `config` then). `--fail-under PCT` on `fsm-llm-eval run` is compared with the overall pass rate over all trials.
 
-LLM settings beyond model, temperature and max tokens go in `llm_kwargs` in a config file or the dataset's `config`; they are passed to `fsm_llm.API` (for example `{"llm_kwargs": {"api_base": "http://localhost:11434", "max_history_size": 10}}`). `results.json` records their keys, never their values.
+LLM settings beyond model, temperature and max tokens go in `llm_kwargs` in a config file or the dataset's `config`; they are passed to `fsm_llm.API` (the FSM, `model`, `temperature`, `max_tokens`, `llm_interface`, `handlers`, `transition_config` and `session_store` cannot be set there; for example `{"llm_kwargs": {"api_base": "http://localhost:11434", "max_history_size": 10}}`). `results.json` records their keys, never their values.
 
 From Python, one call does what `fsm-llm-eval run` does:
 

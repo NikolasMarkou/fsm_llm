@@ -8,7 +8,7 @@ The FSM-LLM Monitor is a browser dashboard for the FSM-LLM framework. FSM-LLM ru
 
 ## How it works
 
-`src/fsm_llm/monitor/static/app.js` imports every page module, wires them together, and routes clicks to them. Pages do not import `app.js`. Instead `app.js` hands each page the functions it needs (such as `showPage`) through a `setDeps(...)` call. Buttons in the generated HTML carry a `data-action="..."` attribute, and `app.js` maps each action name to a page function. Live data arrives through the WebSocket manager in `static/services/ws.js`, which calls page functions such as `updateMetrics` or `appendLogs`. `app.js` also runs a 10 second timer: on the Dashboard it refreshes instances and the activity table, on the Control Center it refreshes instances and the table, and on the Logs page it calls `syncLogs`.
+`src/fsm_llm/monitor/static/app.js` imports every page module, wires them together, and routes clicks to them. Pages do not import `app.js`. Instead `app.js` hands the pages that need other pages' functions (such as `showPage`) a `setDeps(...)` call (the dashboard has `setNavigateToInstance(...)`). Buttons in the generated HTML carry a `data-action="..."` attribute, and `app.js` maps each action name to a page function. Live data arrives through the WebSocket manager in `static/services/ws.js`, which calls page functions such as `updateMetrics` or `appendLogs`. `app.js` also runs a 10 second timer: on the Dashboard it refreshes instances and the activity table, on the Control Center it refreshes instances and the table, and on the Logs page it calls `syncLogs`.
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
 | Control Center | A filterable table of all instances; click one to open a side drawer with details, events, and actions |
 | Conversations | Inside the drawer: read an FSM conversation's state, context, last LLM calls, and chat with it |
 | Launch modal | Start an FSM (from a preset or pasted JSON), a workflow preset, or an agent with stub tools |
-| Visualizer | Paste or pick an FSM definition and see it drawn as a graph |
+| Visualizer | Paste or pick an FSM definition and see it drawn as a graph, or pick an agent or workflow pattern to see its hand-drawn flow |
 | Builder | Chat with the meta-builder agent to create an FSM, workflow, or agent definition, then launch it |
 | Logs | Live log stream with level filters, search, pause, and jump-to-latest |
 | Settings | Monitor refresh rate, buffer sizes, log level, API key, and system info |
@@ -57,6 +57,6 @@ Every page is reachable from the sidebar. To launch something, open the Launch m
 - The drawer re-fetches its content every 2 seconds while it is open on the Control Center, except while a conversation is shown in it.
 - The Logs page only draws new entries while you are on it. On other pages it still updates the error badge and level counts, and it reloads the latest 500 entries from the server when you come back.
 - While logs are paused, up to 5,000 new entries are buffered and older ones are dropped. The visible stream keeps at most 1,000 entries.
-- Custom dashboard panels only appear when a dashboard config has been set on the server.
+- Custom dashboard panels only appear when a dashboard config has been set on the server (`POST /api/dashboard/config`).
 - The API key entered in Settings is kept in the browser tab's sessionStorage only.
 - There are no JavaScript unit tests; check changes by running `fsm-llm-monitor` and using the page.

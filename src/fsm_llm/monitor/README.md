@@ -27,7 +27,7 @@ flowchart LR
 
 1. `fsm-llm-monitor` starts a FastAPI server (default `http://127.0.0.1:8420`) and opens your browser once the port is listening.
 2. The server keeps one `InstanceManager`. It creates FSM instances (from example presets or pasted JSON), agents (run in background threads with stub tools), and two small demo workflows.
-3. Every instance gets observer hooks. They record events (conversation start and end, state transitions, errors, workflow steps, agent results) into a per-instance `EventCollector` and a global one. Log output from the `fsm_llm` logger is captured too.
+3. Every instance gets observer hooks. They record events (conversation start and end, state transitions, pre and post processing, context updates, errors, instance launch and destroy, workflow steps, agent start, iteration, tool call and result) into a per-instance `EventCollector` and a global one. Log output from the `fsm_llm` logger is captured too.
 4. The browser page is one HTML file (`templates/index.html`) plus plain JavaScript modules in `static/`, with no build step. It calls REST endpoints for actions and details and keeps a WebSocket open. Every `refresh_interval` seconds (1 by default) the server pushes metrics, new events, new logs, the instance list, and progress for running agents and workflows.
 5. Everything shown on the page that comes from a conversation context or an agent trace goes through one redaction function first, so secret-looking values never reach the browser.
 
@@ -35,7 +35,7 @@ flowchart LR
 
 - `__main__.py` - the `fsm-llm-monitor` command: `--host`, `--port`, `--api-key`, `--otel`, `--no-browser`, `--version`, `--info`; then runs uvicorn.
 - `server.py` - FastAPI app: HTML page, REST API, WebSocket, security checks, optional API key, meta-builder chat sessions.
-- `instance_manager.py` - creates, runs, queries, and destroys FSM, agent, and workflow instances; attaches the observer hooks; `attach_api` shows an `API` object you already have.
+- `instance_manager.py` - creates, runs, queries, and destroys FSM, agent, and workflow instances; attaches the observer hooks; `attach_api` shows an `API` object you already have (its events and conversations; one at a time).
 - `collector.py` - `EventCollector` (thread-safe bounded store of events and logs, metric counters, hook callbacks) and `redact_context`.
 - `otel.py` - `OTELExporter`: mirrors collector events as OpenTelemetry spans.
 - `definitions.py` - Pydantic models for events, logs, metrics, snapshots, config, and request bodies.
@@ -50,11 +50,13 @@ flowchart LR
 Run the dashboard:
 
 ```bash
-pip install "fsm-llm[monitor]"
+pip install -e ".[monitor]"      # from a clone of the repository
 fsm-llm-monitor                       # opens http://127.0.0.1:8420
 fsm-llm-monitor --port 9000 --no-browser
 python -m fsm_llm.monitor --info
 ```
+
+The command exits with 0 after `--version` and `--info`, and with 1 if `fastapi`, `uvicorn` or `jinja2` is missing. Other flags: `--host` (default `127.0.0.1`), `--api-key` and `--otel` (below).
 
 Screens: Dashboard (metrics, events, instances, activity), Control Center (instance table with a detail drawer and chat), Visualizer (FSM graphs from core `build_fsm_graph`; agent and workflow graphs from `flows.json`), Logs, Builder (design an FSM or agent by chatting with a meta-builder agent), Settings. Keys `1` to `6` switch screens, `?` shows the shortcuts.
 
@@ -69,9 +71,11 @@ setup_logging()  # library logging is off by default; the Logs page stays empty 
 api = API.from_file("examples/basic/simple_greeting/fsm.json", model="ollama_chat/qwen3.5:4b")
 manager = InstanceManager()
 manager.attach_api(api)
-configure(manager=manager)
+configure(manager=manager)   # call before the first request
 uvicorn.run(app, host="127.0.0.1", port=8420)
 ```
+
+`configure()` also takes `api_key=`, `cors_origins=` and `trusted_hosts=` (environment variables `FSM_LLM_MONITOR_API_KEY`, `FSM_LLM_MONITOR_CORS_ORIGINS`, `FSM_LLM_MONITOR_TRUSTED_HOSTS`). Call it with the same `api_key` every time: a later call without one clears a key set earlier (and logs a warning).
 
 Export events to OpenTelemetry (needs the `otel` extra):
 
@@ -96,9 +100,9 @@ fsm-llm-monitor --api-key secret
 ## Things to know
 
 - Importing `fsm_llm.monitor` needs `fastapi`, `uvicorn`, and `jinja2`. `OTELExporter` needs the `otel` extra only when you create one.
-- With an API key set, every route that changes something and every route that shows conversation, event, log, agent, or workflow data needs the key, and the WebSocket needs it as its first message. Health, metrics, config reads, instance lists, presets, and visualizations stay open.
-- The server only answers requests whose Host header is `localhost`, `127.0.0.1`, or `::1` by default, refuses state-changing requests from other web origins, and caps request bodies at 1 MiB. Binding to another address with `--host` adjusts the Host list; doing so without an API key prints a warning.
-- FSM presets are read from the repository's `examples/` folder. In an installed wheel without that folder, the preset list is empty.
+- With an API key set, every route that changes something and every route that shows conversation, event, log, agent, or workflow data needs the key. The WebSocket needs `{"type": "auth", "api_key": "..."}` as its first message within 5 seconds, or the server closes it with code 4401 (code 4403 for a refused Host or Origin). With no key set, no first message is needed. Health, `GET /api/auth`, metrics, config reads, instance lists and details, presets, and visualizations stay open.
+- The server only answers requests whose Host header is `localhost`, `127.0.0.1`, or `::1` by default, refuses state-changing requests from other web origins, and caps request bodies at 1 MiB. Binding to another address with `--host` adds it to the Host list (a wildcard such as `0.0.0.0` turns the Host check off); doing so without an API key prints a warning.
+- FSM presets are read from the repository's `examples/` folder (the `basic`, `intermediate`, `advanced`, `classification` and `reasoning` categories). In an installed wheel without that folder, the preset list is empty.
 - Only seven agent types can be launched: ReAct, Reflexion, Plan-Execute, REWOO, ADaPT, Debate, and Self-Consistency. The first five need at least one tool. Tools are stubs that return a fixed text you type in. At most 8 agents run at once and 200 instances exist at once by default.
 - Workflows are limited to two built-in demos (`demo_linear`, `demo_branching`). Pasted workflow JSON is rejected, and workflows made in the Builder cannot be launched.
 - Cancelling an agent sets a flag, but an agent run cannot be interrupted mid-flight. Destroying it waits 1.5 seconds and then leaves the thread running.

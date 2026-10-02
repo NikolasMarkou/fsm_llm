@@ -22,7 +22,7 @@ flowchart LR
 - `api.js` wraps `fetch`. It adds an `X-API-Key` header when a key is stored. A non-2xx response throws an `Error` whose message is the server's `detail` field made readable, or the HTTP status text. On a 401 it asks the user for a key once and retries the request once.
 - `auth.js` stores the optional API key in the tab's `sessionStorage` and drives the key-entry modal (`#apikey-modal` in `templates/index.html`).
 - `state.js` exports one object wrapped in a JavaScript `Proxy`. Every top-level assignment that changes a value fires a `statechange` event.
-- `ws.js` opens a WebSocket to `/ws` on the same host and sends `{"type": "auth", "api_key": ...}` as the first message. Each incoming message is inspected field by field (metrics, events, instances, agent and workflow updates, logs, dashboard config) and forwarded to the page handler registered for it. If the socket closes it reconnects with exponential backoff, except when the server closes with code 4401 (auth failed).
+- `ws.js` opens a WebSocket to `/ws` on the same host and sends `{"type": "auth", "api_key": ...}` as the first message (an empty key when none is stored; the server only reads it when a key is configured). Each incoming message is inspected field by field (metrics, events, instances, agent and workflow updates, logs, dashboard config) and forwarded to the page handler registered for it. If the socket closes it reconnects with exponential backoff, except when the server closes with code 4401 (auth failed).
 
 ## Files
 

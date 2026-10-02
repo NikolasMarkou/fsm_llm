@@ -29,7 +29,7 @@ flowchart TD
 - **Pass 1** asks the LLM to pull named values (such as `name` or `email`) out of the message and stores them in the conversation's context, a dictionary of everything collected so far.
 - **Transition rules** are written in JsonLogic, a small JSON rule language (for example `{">=": [{"var": "age"}, 18]}`). They are checked in plain Python, not by the LLM. If several transitions pass, the one with the lowest `priority` number wins; the LLM is asked only when two or more tie at that lowest priority.
 - **Pass 2** writes the reply from the state the conversation ends up in, so the bot never answers from a state it has already left. A state with empty `response_instructions` skips Pass 2: it makes no LLM call, replies with the empty string and adds nothing to the history.
-- **Steps without a user message**: `api.advance(conv_id)` runs the same two passes with no user message and returns an `AdvanceResult` (state before and after, transition outcome, reply, ended). `api.run_until_terminal(conv_id, max_steps=N)` repeats it until a terminal state and raises `RunBudgetExceededError` when `max_steps` or `max_seconds` runs out. The agents and the harness are driven this way.
+- **Steps without a user message**: `api.advance(conv_id)` runs the same two passes with no user message and returns an `AdvanceResult` (`state_before`, `state_after`, `transition_outcome`, `response`, `ended`). `api.run_until_terminal(conv_id, max_steps=N)` repeats it until a terminal state and raises `RunBudgetExceededError` when `max_steps` or `max_seconds` runs out. The agents and the harness are driven this way.
 - **Handlers** are your own Python functions that run at 8 fixed points in this flow (start, before and after processing, before and after a transition, on context update, at the end, on error).
 - **FSM stacking** lets one conversation temporarily hand control to a second FSM (for example an address form) and come back with its results.
 - **Tool calling and structured output**: a state with the optional `completion` field makes its Pass 1 a single native tool-calling or JSON-schema call over a message list your handlers keep in the context. The reply (`{kind, text, calls}`) is stored under a key the transitions read; your handler runs the tools and appends the results with `tool_exchange`. The core never runs a tool itself. The `native_fc` agent and the meta-builder are built this way.
@@ -58,10 +58,10 @@ flowchart TD
 | Subpackage | What it does | Entry points |
 | --- | --- | --- |
 | `reasoning/` | Solves a problem step by step: an orchestrator FSM picks one of 9 reasoning strategies (calculator, deductive, analogical, ...), runs it as a stacked FSM, checks the answer and retries up to 3 times | `ReasoningEngine(model).solve_problem(problem) -> (solution, trace)`, `python -m fsm_llm.reasoning "problem"` |
-| `workflows/` | Async, in-memory workflow engine: named steps over a shared context, 11 step types (Python function, API call, branch, LLM prompt, FSM conversation, agent, timer, wait for event, parallel, retry, ...) and a Python DSL | `WorkflowEngine`, `create_workflow`, `auto_step`, `condition_step`, ... |
-| `agents/` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan and execute, debate, swarm, agent graph, ...), mostly built as generated FSMs; tools, human approval, memory, MCP and HTTP integration, and a meta-builder that designs an FSM, workflow or agent from a chat | `create_agent`, `ReactAgent`, `ToolRegistry`, `@tool`, `fsm-llm-meta` |
+| `workflows/` | Async, in-memory workflow engine: named steps over a shared context, 11 step types (Python function, API call, branch, LLM prompt, FSM conversation, agent, timer, wait for event, parallel, retry, ...) and a Python DSL | `WorkflowEngine`, `create_workflow`, `WorkflowBuilder`, `auto_step`, `condition_step`, ... |
+| `agents/` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan and execute, debate, swarm, agent graph, ...), mostly built as generated FSMs; tools, human approval, memory, MCP and HTTP integration, and a meta-builder that designs an FSM, workflow or agent from a chat | `create_agent`, `ConfiguredAgentBuilder`, `ReactAgent`, `ToolRegistry`, `@tool`, `fsm-llm-meta` |
 | `monitor/` | FastAPI web dashboard to launch, watch and talk to FSMs, agents and workflows; optional OpenTelemetry export | `fsm-llm-monitor` (http://127.0.0.1:8420), `InstanceManager.attach_api`, `OTELExporter` |
-| `harness/` | Experimental "iterative planner" as a 6-state FSM (explore, plan, execute, reflect, pivot, close) whose gates count files on disk instead of trusting the model | `fsm-llm-harness new "goal"`, `HarnessAgent` |
+| `harness/` | Experimental "iterative planner" as a 6-state FSM (explore, plan, execute, reflect, pivot, close) whose gates count files on disk instead of trusting the model | `fsm-llm-harness new "goal"`, `HarnessAgent`, `HarnessAgentBuilder` |
 | `eval/` | Runs the repository examples and scores them 0 to 4, or runs scripted conversations against any FSM over several trials and reports pass rates with confidence intervals | `fsm-llm-eval examples`, `fsm-llm-eval run cases.json`, `run_dataset` |
 
 ## Files
@@ -69,7 +69,8 @@ flowchart TD
 - `api.py` - `API`, the class you use: start conversations, send messages, read data, push and pop FSMs, save and restore sessions.
 - `fsm.py` - `FSMManager`: keeps conversations, their locks, and a cache of FSM definitions.
 - `pipeline.py` - `MessagePipeline`: the two-pass processing for each message.
-- `definitions.py` - Pydantic data models (states, transitions, FSM definition, context, classification results) and the error classes.
+- `definitions.py` - Pydantic data models (states, transitions, FSM definition, context, classification results) and the error classes, including `BuildError`.
+- `builders.py` - `APIBuilder` and `FSMManagerBuilder`: fluent builders over `API` and `FSMManager` (see "Builders" below).
 - `transition_evaluator.py` - decides whether a transition is certain, ambiguous, or blocked.
 - `expressions.py` - the JsonLogic rule evaluator.
 - `classification.py` - intent classification with an LLM (`Classifier`, `HierarchicalClassifier`, `IntentRouter`). Inside a conversation the classifier uses the conversation's own LLM interface, so a custom `llm_interface` is honoured.
@@ -147,6 +148,8 @@ fsm-llm-validate --fsm greeter.json      # check for problems
 fsm-llm-visualize --fsm greeter.json     # draw it
 ```
 
+To try it without a model, pass your own `llm_interface=` (a subclass of `fsm_llm.LLMInterface`); the repository's tests do this with the fakes in `tests/conftest.py`.
+
 Run code at a point in the flow with a handler:
 
 ```python
@@ -160,12 +163,37 @@ api.register_handler(
 )
 ```
 
+### Builders
+
+`APIBuilder` and `FSMManagerBuilder` (in `fsm_llm.builders`, also exported from `fsm_llm`) build the same objects as the constructors, one call at a time. Every `set_*` or `add_*` call only records a value and returns the builder; `build()` is the only place that checks anything. It hands the real constructor just the values you set, so defaults and rules stay in one place:
+
+```python
+from fsm_llm import APIBuilder, BuildError, HandlerTiming, create_handler
+
+api = (
+    APIBuilder()
+    .set_definition("greeter.json")                  # a path, a dict or an FSMDefinition
+    .set_model("ollama_chat/qwen3.5:4b")
+    .set_max_history_size(10)
+    .set_llm_option("seed", 7)                       # any other litellm keyword
+    .add_handler(create_handler("audit").at(HandlerTiming.POST_TRANSITION).do(lambda ctx: {}))
+    .build()
+)
+
+try:
+    APIBuilder().build()                             # no definition
+except BuildError as err:
+    print(err.errors)
+```
+
+`build()` raises `BuildError` (a `FSMError` and a `ValueError`, with `.errors` listing the problems and the constructor's own error chained as the cause). Dictionaries, lists and definitions you pass in are copied at `build()`; interfaces, stores and handlers stay shared with you. `set_llm_option` refuses a name that is a named `API` parameter (for example `model`) and tells you which setter to use. `FSMManagerBuilder` works the same way and needs `set_llm_interface(...)`. The subpackages follow the same convention: `ConfiguredAgentBuilder` and `AgentGraphBuilder` (agents), `WorkflowBuilder` (workflows), `HarnessAgentBuilder` (harness). The meta-builder's `FSMArtifactBuilder`, `WorkflowArtifactBuilder` and `AgentArtifactBuilder` are the one exception: they refuse a bad call immediately.
+
 The subpackages have their own commands:
 
 ```bash
 python -m fsm_llm.reasoning "What is 15% of 240?"
 fsm-llm-meta --output my_bot.json        # design an FSM by chatting
-fsm-llm-monitor                          # needs: pip install "fsm-llm[monitor]"
+fsm-llm-monitor                          # needs: pip install -e ".[monitor]"
 fsm-llm-eval examples --category basic   # run from the repository root
 fsm-llm-harness new "add a retry to the uploader" --create-only
 ```
@@ -181,4 +209,10 @@ fsm-llm-harness new "add a retry to the uploader" --create-only
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`. This covers the subpackages too.
 - `FileSessionStore` saves state to JSON, so values like `datetime` come back as strings.
 - One conversation can only process one message at a time. A second concurrent call for the same conversation raises an error instead of waiting.
-- Errors from the core, reasoning, workflows, agents, harness and eval all derive from `FSMError`. The monitor's `MonitorError` does not.
+- Errors from the core, reasoning, workflows, agents, harness and eval all derive from `FSMError`, and so does `BuildError`. The monitor's `MonitorError` does not.
+
+## Where to go next
+
+- Each subpackage has its own README: `reasoning/README.md`, `workflows/README.md`, `agents/README.md` (next to this file).
+- `examples/` at the repository root: 100 runnable examples in 8 categories (`basic`, `intermediate`, `advanced`, `classification`, `agents`, `meta`, `reasoning`, `workflows`).
+- `docs/quickstart.md`, `docs/fsm_design.md`, `docs/handlers.md` and `docs/api_reference.md`: guides and the full reference.

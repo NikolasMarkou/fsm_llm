@@ -7,20 +7,21 @@ Welcome to FSM-LLM! This tutorial will have you building stateful conversations 
 ## Prerequisites
 
 - Python 3.10 or higher
-- An OpenAI API key (or another supported LLM provider)
+- An LLM: a local Ollama model (the default is `ollama_chat/qwen3.5:4b`), or any LiteLLM provider such as OpenAI with its API key (set `LLM_MODEL` and the provider's key)
 
 ## 1. Installation
 
 ```bash
-pip install fsm-llm
+git clone https://github.com/NikolasMarkou/fsm_llm.git && cd fsm_llm
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
 
 # With extensions
-pip install fsm-llm[reasoning]   # Structured reasoning engine
-pip install fsm-llm[workflows]   # Workflow orchestration
-pip install fsm-llm[agents]      # Agentic patterns (ReAct, HITL, meta-builder)
-pip install fsm-llm[monitor]     # Real-time monitoring dashboard
-pip install fsm-llm[all]         # Everything
+pip install -e ".[monitor]"      # Real-time monitoring dashboard (fastapi, uvicorn, jinja2)
+pip install -e ".[all]"          # Every optional dependency
 ```
+
+The name `fsm-llm` on PyPI belongs to a different project, so install from a clone. The reasoning, workflows, agents and eval extras add no packages (that code ships in every install); extras only add third-party dependencies.
 
 Classification is built into the core package -- no extra install needed.
 

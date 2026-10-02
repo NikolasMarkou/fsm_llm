@@ -29,8 +29,10 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 ## Files
 
 - `__init__.py` - empty; makes the folder a package so `test_forced_stop_flag.py` can import from `test_maker_checker.py`.
-- `conftest.py` - autouse network block: any IPv4/IPv6 connection raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`.
+- `conftest.py` - autouse fixture `_offline_network`, which calls `block_network` from `tests/conftest.py`: for every test it patches `socket.socket.connect` and `connect_ex` (loopback included, because the default model is a local Ollama) so any IPv4/IPv6 connection raises `ConnectionRefusedError` at once, naming the address. Unix sockets (MCP stdio, asyncio self-pipes) stay open, and tests marked `real_llm` or `integration` are exempt. The patch is undone at teardown.
+- `fixtures/native_fc_golden_requests.json` - recorded requests that `test_native_fc_golden.py` compares against.
 - `mcp_fixture_server.py` - a real stdio MCP server used by `test_mcp_stdio.py` (not a test). Tools `add`, `slow`, `fail`; flag `--hang`.
+- `test_advance_driver.py` - agents run on core's bounded loops (`run_until_terminal`) with no synthetic turn: loop hook, core budgets, HITL approval through `before_step`, VerifiedReact reflection and AutoMemory on the loop.
 - `test_adapt.py` - ADaPTAgent, its FSM, `DecompositionResult`, JSON-envelope leak fix, assess/decompose fallback edges.
 - `test_agent_config_passthrough.py` - newer `AgentConfig` fields and what `_create_api` forwards to `API.from_definition`.
 - `test_auto_memory.py` - `augment_task_with_memories`, `remember_interaction`, `AutoMemoryReactAgent` recall and remember.
@@ -69,7 +71,10 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_premature_terminate_guard.py` - ReAct cannot conclude on turn 1 with no tool.
 - `test_prompt_chain.py` - PromptChainAgent, `ChainStep`, its FSM, gate checker.
 - `test_prompts.py` - prompt builder functions.
-- `test_public_api.py` - `create_agent` (pattern first, legacy prompt shim), `AgentConfig` strict fields, `LLM_MODEL`, `instructions`, static `__all__`.
+- `test_public_api.py` - `create_agent` (pattern first, `system_prompt=` keyword fills `instructions`), `AgentConfig` strict fields, `LLM_MODEL`, static `__all__`, core owning typed fields and key clearing, and `TestConfiguredAgentBuilder` (`ConfiguredAgentBuilder`: mutators return the same builder, a default build equals `create_agent`, config isolation and independent builds, shared callables, named-option refusal, tool registration).
+- `test_removed_legacy.py` - absence pins for removed agents names: a positional system prompt now raises listing the patterns, shim helpers and unraised exceptions are gone, native_fc has no private loop, terminal agent states extract nothing, the meta builders are artifact builders.
+- `test_review_round1_agents.py`, `test_review_round2_agents.py` - fixes from two review rounds of the step-driver plan: truthful `refused_actions` records in every order, run outputs that cannot be planted, a run ended from outside, budget errors of the run loops.
+- `test_security_review_fixes.py` - security review findings: run outputs cannot be forged through `initial_context`, `AgentServer`, graph edges or swarm hand-offs; unapprovable `requires_approval` tools fail closed; `HumanInTheLoop` kwargs are checked; fallback logs are redacted.
 - `test_react.py` - ReactAgent creation, HITL gating, concurrent runs, single-use approval.
 - `test_reasoning_react.py` - ReasoningReactAgent export, `reason` tool, per-run handlers.
 - `test_reflexion.py` - ReflexionAgent, its FSM, models, conclude needs evidence, every budget ends.
@@ -104,12 +109,11 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_agents/ --collect-only -q | tail -1
 ```
 
-The whole suite needs no network or API key; the `conftest.py` network block makes sure of it.
+The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 2,360 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
 
 ## Things to know
 
-- Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`), `fastapi` and `httpx` (`test_remote.py` and some server tests), the opentelemetry SDK (OTEL tests), `fsm_llm.workflows` (one workflow-step test).
+- Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`, which is a module-level skip), `fastapi` and `httpx` (`test_remote.py` and the `AgentServer` tests in other files), the opentelemetry SDK (OTEL tests), `fsm_llm.reasoning` and `fsm_llm.workflows` (a few tests that use them). In a venv without `mcp` a default run shows 1 skipped.
 - The async tests in `test_strands_phase2.py` need `asyncio_mode = "auto"`, which `pyproject.toml` sets.
 - Library logging is off by default. Tests that check a warning call `logger.enable("fsm_llm")`, add a sink, and disable logging again afterwards.
-- A run can print an OpenTelemetry "I/O operation on closed file" traceback at the end. It comes from the OTEL exporter tests and does not fail the run.
 - Many docstrings cite `DECISION plan-.../D-NNN` ids. They record why a behaviour exists; do not weaken those assertions.

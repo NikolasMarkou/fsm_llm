@@ -39,12 +39,12 @@ flowchart LR
 ## How to use it
 
 ```bash
-pip install "fsm-llm[monitor]"
+pip install -e ".[monitor]"      # from a clone of the repository
 fsm-llm-monitor
 # open http://127.0.0.1:8420
 ```
 
-Keyboard shortcuts (when not typing in a field): `1` Dashboard, `2` Control Center, `3` Visualizer, `4` Logs, `5` Builder, `6` Settings, `?` show shortcuts, `Esc` close the key prompt, or else the shortcuts overlay, launch modal, and drawer. The current page is kept in the URL hash, for example `#logs`.
+Keyboard shortcuts (the number keys and `?` work only when you are not typing in a field): `1` Dashboard, `2` Control Center, `3` Visualizer, `4` Logs, `5` Builder, `6` Settings, `?` show shortcuts. `Esc` closes the key prompt if it is open, and otherwise the shortcuts overlay, launch modal and drawer. The current page is kept in the URL hash, for example `#logs`.
 
 ## Things to know
 

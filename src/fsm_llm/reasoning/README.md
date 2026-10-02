@@ -61,7 +61,7 @@ The package ships with `fsm-llm` itself; the `reasoning` extra adds no dependenc
 python -m fsm_llm.reasoning "What is 15% of 240?"
 python -m fsm_llm.reasoning "Why might sales drop in summer?" --type abductive --output detailed
 python -m fsm_llm.reasoning "Compare a city to a cell" --model ollama_chat/qwen3.5:4b --save results.json
-python -m fsm_llm.reasoning --list-types --verbose
+python -m fsm_llm.reasoning --list-types
 ```
 
 ```python
@@ -73,7 +73,15 @@ print(solution)
 print(trace["summary"])
 ```
 
-`trace` has the keys `reasoning_trace`, `summary`, `final_context` and `all_responses`.
+`solve_problem(problem, initial_context=None)` also takes a dictionary of extra context. `trace` has the keys `reasoning_trace`, `summary`, `final_context` and `all_responses`. The solve examples call a live model. Any litellm model name works. The default is `ollama_chat/qwen3.5:4b`: unlike `API` and the agents, `ReasoningEngine` does not read `LLM_MODEL`, so pass `model=` (or `--model`) to use another one.
+
+The command line also takes `--context '{"audience": "child"}'` (extra context as a JSON object), `--quiet` (print the solution only) and `--version`. `--quiet` and `--verbose` cannot be combined.
+
+## Where to go next
+
+- `examples/reasoning/math_tutor/`: a runnable example that uses the engine.
+- `src/fsm_llm/agents/README.md`: `ReasoningReactAgent`, a ReAct agent with a built-in `reason` tool that calls this engine.
+- `src/fsm_llm/README.md`: the core engine that runs the orchestrator and strategy FSMs.
 
 ## Things to know
 
@@ -84,5 +92,5 @@ print(trace["summary"])
 - `--type` (or `preferred_reasoning_type` in the starting context) overrides the automatic choice when it names a valid strategy.
 - If a strategy FSM cannot be loaded, the engine falls back to `analytical` only, never to another style.
 - Unknown words passed to `map_reasoning_type` fall back to `analytical` with a warning.
-- `--list-types` writes through the library logger, which is off until `--verbose` turns it on, so run `--list-types --verbose` to see the list. Solutions print on stdout.
+- `--list-types` prints its table through the logger, so it goes to stderr with log prefixes (not stdout); `--verbose` also turns on the engine's own log records. Solutions print on stdout.
 - In `--output json` and in `.json` save files, `reasoning_types_used` is a sorted list of type names.

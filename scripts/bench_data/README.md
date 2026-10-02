@@ -1,11 +1,87 @@
-# bench_data -- committed harness bench artifacts
+# bench_data: committed bench artifacts
 
-Raw, append-only evidence produced by `scripts/harness_bench.py` and
-`scripts/agents_bench.py`. This
-directory is GIT-TRACKED on purpose: the predecessor plan's bench scripts and
+Raw, append-only evidence produced by `scripts/harness_bench.py`,
+`scripts/agents_bench.py` and the live tests in
+`tests/test_fsm_llm_harness/test_live_ollama.py`. Every block here ran against
+a local Ollama model, `ollama_chat/qwen3.5:4b` (the digest each block actually
+served is pinned in its manifest).
+
+This directory is GIT-TRACKED on purpose: an earlier plan's bench scripts and
 jsonl traces lived in gitignored scratch directories and are gone, so none of
-its live numbers can be diffed or recomputed (plans/LESSONS.md [I:4]). Nothing
-under here may be moved to a gitignored path.
+its live numbers can be diffed or recomputed (`plans/LESSONS.md` [I:4], a local
+gitignored file). Nothing under here may be moved to a gitignored path.
+
+Rules for anyone touching this folder:
+
+- Never edit, re-run or delete a block's files. Blocks are pre-registered, run
+  ONCE at a fixed n, and kept as measured (see the pre-registration rule below).
+- Only this README may change after a block is committed. A new question needs
+  a new block with a new manifest.
+- References to `decisions.md` entries (`D-002`, `D-049`, ...) point at plan
+  directories under `plans/`, which are gitignored (only `plans/ANCHORS.md` is
+  tracked). In a fresh clone those files do not exist; the rules are restated
+  here and in the per-block `PRE_REGISTRATION*.md` / `GRADING.md` files.
+
+## Status at a glance
+
+All numbers below are recounted from the committed rows (`report` for the
+benches that support it, direct reads of `rows.jsonl` for L6 and L8).
+
+| Bench id | What it measures | Blocks | Result |
+|---|---|---|---|
+| `l4-execute-write` | Does one harness EXECUTE dispatch write the assigned file? n=40 per arm | B0, B1, B2 | `native` B0 14/40 `success`, B1 40/40; `react` 0/40 in B0 and B1; `native_fsm` B2 40/40 |
+| `l6-e2e` | Full harness run on one goal, graded on a rubric. n=3 per block | B0 to B8 | Floor met by 0/3 rows in B0 to B7; B8 is 2/3 (3/3 bar NOT MET); no run in any block reached CLOSE (`success` is false in all 27 rows) |
+| `l7-explore-coldstart` | EXPLORE cold start, bare vs seeded plan directory. n=12 per arm | B0 | `write_tool_issued` bare 5/12, seeded 7/12 (Wilson CIs overlap widely) |
+| `l8-explore-loop` | The EXPLORE redispatch loop, per tool call. n=10 runs | B0, B1 | Runs reaching PLAN: B0 0/10, B1 9/10 |
+| `agents-react` | 38 deterministic tool-loop tasks x 3 trials | B0, B1, B2 | First-trial pass@1: `legacy` 28/38, `native_fc` 37/38 (B0); `fsm_advance` 32/38 (B1); `fsm_toolcall` 37/38 (B2) |
+| `seed-probe` | Does Ollama honour `seed`? | one record | Same seed is identical at temperature 0.7, a different seed diverges (temperature 0 hides any seed effect) |
+
+Honest status of the harness: it is experimental and not production-ready. The
+committed end-to-end block `l6-e2e/B8` (see `l6-e2e/B8/GRADING.md`,
+`ollama_chat/qwen3.5:4b`, n=3) has 2/3 floor rows (floor row: reached EXECUTE
+or later, `verified_write`, `honest_halt`). The frozen 3/3 bar is NOT MET. Row
+2 halted at `plan-cap` before EXECUTE. Rows 1 and 3 wrote the file and halted
+honestly at `close-cap` (row 1: the CLOSE approval was denied four times
+because `verification.md` stayed empty) and `reflect-cap` (row 3: four REFLECT
+dispatches did not produce a parseable verdict). The 4B-model results say
+nothing about larger models, and these are small-n, single-configuration
+measurements.
+
+Agents numbers are a different bench: pass@1 on synthetic ground-truth tasks
+with pure in-file tools. They are not an end-to-end quality claim.
+
+## Commands
+
+Always the venv. `report` and `list-tasks` read only committed files (no model,
+no network); `register` writes a manifest only; `run` and `probe-seed` are LIVE
+(need Ollama) and `run` refuses a block that already has rows.
+
+```
+.venv/bin/python scripts/harness_bench.py report <bench-id> [--blocks B1 B2] [--pair B2/native_fsm:B1/native]
+.venv/bin/python scripts/harness_bench.py register --bench-id <id> --block <B> --arm {native,native_fsm,react} --n N --seed S
+.venv/bin/python scripts/harness_bench.py run      --bench-id <id> --block <B> --arm {native,native_fsm,react} --n N --seed S
+.venv/bin/python scripts/harness_bench.py probe-seed
+.venv/bin/python scripts/agents_bench.py list-tasks [--verify]
+.venv/bin/python scripts/agents_bench.py register|run|report ...
+```
+
+`harness_bench.py` `register` and `run` only build `l4-execute-write` blocks
+(arms `native`, `native_fsm`, `react`). `report` also recounts
+`l7-explore-coldstart` (per-arm files) but prints nothing for `l6-e2e`,
+`l8-explore-loop` or `seed-probe`, whose rows are flat `rows.jsonl` or a single
+`probe.json`. The L6, L7 and L8 blocks were produced by live pytest nodes in
+`test_live_ollama.py` (they need `FSM_LLM_HARNESS_LIVE=1` and Ollama), for
+example the L6 node:
+
+```
+FSM_LLM_HARNESS_LIVE=1 .venv/bin/python -m pytest \
+  "tests/test_fsm_llm_harness/test_live_ollama.py::TestL6EndToEndRealWorkers::test_three_full_runs_grade_at_or_above_the_floor" -q -s
+```
+
+Do not run these against an existing block (the L6 test refuses when
+`rows.jsonl` exists). A new block needs a new pre-registration first, and the
+block constant (`L6_BLOCK`, `L7_BLOCK`, `L8_BLOCK`) in the test module names the
+block it writes.
 
 ## Layout
 
@@ -17,16 +93,25 @@ bench_data/
 │       ├── rows_<arm>.jsonl      # one raw row per dispatch, append-only
 │       └── summary_<arm>.json    # k/n + Wilson CI, recounted from rows
 ├── l6-e2e/                   # per-run e2e rubric vectors, graded not binary
-│   └── <block>/              # B0, B1, ... one pre-registered block each;
-│                             #   manifest.json + rows.jsonl (no arm suffix:
-│                             #   L6 is always native and test-embedded)
+│   ├── <block>/              # B0 .. B8, n=3 each; manifest.json + rows.jsonl
+│   │                         #   (no arm suffix, no summary file: L6 is always
+│   │                         #   native and test-embedded). B4 to B8 also keep
+│   │                         #   artifacts/run-N/ (observations, plan.md,
+│   │                         #   state.md); B7 and B8 have a GRADING.md
+│   ├── PRE_REGISTRATION_B2.md .. _B8.md   # decision rule, written before rows
+│   └── probe-*/              # NON-pre-registered scratch probes with a
+│                             #   RESULT.md or VERDICT.md, not benches
 ├── l7-explore-coldstart/     # EXPLORE cold-start A/B, one dispatch per row
-│   └── <block>/              # B0, ... manifest_<arm>.json + rows_<arm>.jsonl
+│   └── <block>/              # B0: manifest_<arm>.json + rows_<arm>.jsonl
 │                             #   + summary_<arm>.json, arm in {bare, seeded}
+├── l8-explore-loop/          # EXPLORE redispatch-loop characterization
+│   ├── <block>/              # B0, B1, n=10 runs each; manifest.json,
+│   │                         #   rows.jsonl, summary.json (no arm suffix)
+│   └── PRE_REGISTRATION.md, PRE_REGISTRATION_B1.md
 ├── agents-react/             # agents_bench.py: ground-truth tool-loop tasks,
 │   └── <block>/              #   one row per (task, trial); manifest_<arm>.json
 │                             #   + rows_<arm>.jsonl + summary_<arm>.json
-└── seed-probe/               # probe-seed records (plan step 2)
+└── seed-probe/               # probe-seed record (probe.json)
 ```
 
 Arms carry TWO different meanings depending on the bench, and they must not be
@@ -91,7 +176,7 @@ dispatch whose first request is refused (`request_disclosure`; same rules as
 the agents-react disclosures below). Recorded B0/B1 manifests predate them.
 Their summaries carry `run: {git_commit, git_dirty}` read at run start.
 
-`register` (B2 onwards) writes the manifest alone, so it is committed before
+`register` (l4 B2 onwards) writes the manifest alone, so it is committed before
 dispatch 1; `run` then keeps it and refuses on drift in `n_preregistered`,
 `seed`, `model`, `prompt_bytes_sha256`, `tool_surface`, `fixture_hash`,
 `arm`, `llm_request`, `first_request` or the served model digest (values
@@ -116,8 +201,9 @@ different model digests.
 
 `bench_id`, `block`, `arm` (display), `native` (bool), `run`, `ts`,
 `elapsed_s`, `tool_calls`, `write_tool_issued`, `bytes_on_disk`,
-`content_matched` (sha256-based, never stat), `success`,
-`tool_trace` (`[{tool, ok}]`), `seed` (int or null).
+`content_matched` (sha256-based, never stat), `content_matched_ast` (B2
+only), `success`, `tool_trace` (`[{tool, ok}]`), `seed` (int or null) and
+`seed_effective`.
 
 Recompute everything from the raw rows:
 

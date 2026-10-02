@@ -4,7 +4,7 @@ An async workflow engine that ships inside the `fsm-llm` package as the subpacka
 
 ## What it is for
 
-Some jobs are not one chat but a pipeline: load an order, check it, wait for a manager to approve, then finish. This package lets you describe such a pipeline in Python as named steps, where each step says which step comes next. The engine runs the steps, keeps one shared context dictionary between them, pauses when a step waits for a timer or an event, and records a history of every step. Steps can wrap FSM-LLM conversations (the core `fsm_llm` package, which runs chatbots as finite state machines) and agents from `fsm_llm.agents`. Everything lives in memory; nothing is written to disk.
+Some jobs are not one chat but a pipeline: load an order, check it, wait for a manager to approve, then finish. This package lets you describe such a pipeline in Python as named steps, where each step says which step comes next. The engine runs the steps, keeps one shared context dictionary between them, pauses when a step waits for a timer or an event, and records a history of every step. Steps can wrap FSM-LLM conversations (the core `fsm_llm` package, which runs chatbots as finite state machines) and agents from `fsm_llm.agents`. Everything lives in memory; nothing is written to disk, and there is no JSON loader because steps hold Python functions.
 
 ## How it works
 
@@ -69,7 +69,37 @@ async def main():
 asyncio.run(main())
 ```
 
-Installing the `workflows` extra (`pip install "fsm-llm[workflows]"`) adds no packages beyond core `fsm-llm`. Runnable examples live in `examples/workflows/`.
+This snippet needs no model and no network. A step that calls an LLM, a conversation or an agent (`llm_step`, `conversation_step`, `agent_step`) needs one, and the `fsm_llm.agents` or core `fsm_llm` objects you pass in bring it.
+
+`create_workflow` returns a definition you add steps to; the engine validates it when you register it. To get a definition that is validated as soon as it is built, use `WorkflowBuilder` (or `workflow_builder(...)`). `build()` returns a fresh `WorkflowDefinition`, always validates it, and raises `BuildError` (core `fsm_llm.BuildError`, a `FSMError` and a `ValueError` with `.errors`) chained from the workflow error:
+
+```python
+from fsm_llm import BuildError
+from fsm_llm.workflows import WorkflowBuilder, auto_step
+
+finish = auto_step("finish", "Finish", next_state="")
+start = auto_step("start", "Start", next_state="finish", action=lambda ctx: {"ok": True})
+definition = (
+    WorkflowBuilder("demo", "Demo")
+    .add_step(finish)
+    .set_initial_step(start)      # takes the step itself, not its id
+    .add_metadata("owner", "ops")
+    .build()
+)
+
+try:
+    WorkflowBuilder("bad", "Bad").set_initial_step(auto_step("a", "A", next_state="nowhere")).build()
+except BuildError as err:
+    print(err.errors)             # ["Step 'a' references unknown state: 'nowhere'"]
+```
+
+Installing the `workflows` extra (`pip install -e ".[workflows]"` from a clone) adds no packages beyond core `fsm-llm`.
+
+## Where to go next
+
+- `examples/workflows/`: runnable workflows (order processing, onboarding, agent chains).
+- `src/fsm_llm/README.md`: the core engine behind `conversation_step`.
+- `src/fsm_llm/agents/README.md`: agents you can run inside an `agent_step`.
 
 ## Things to know
 

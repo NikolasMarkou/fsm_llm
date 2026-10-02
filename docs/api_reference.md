@@ -440,7 +440,7 @@ Events and loops: `await engine.process_event(WorkflowEvent(event_type="paid", p
 ## Harness (`fsm_llm.harness`)
 
 The iterative-planner protocol as a 6-state FSM over a plan directory. Requires
-`pip install fsm-llm[harness]`. The public surface is one literal `__all__`; the
+`pip install -e ".[harness]"` from a clone (the `harness` extra pulls `agents`). The public surface is one literal `__all__`; the
 load-bearing names are below.
 
 ### HarnessAgent -- the driver

@@ -19,6 +19,7 @@ Each test imports from `fsm_llm.reasoning.*` and calls classes or static methods
 - `test_constants.py` - 26 tests for `ReasoningType`, state name constants, `ContextKeys`, `HandlerNames`, `Defaults`, and message templates.
 - `test_definitions.py` - 28 tests for the Pydantic models (`ReasoningStep`, `ValidationResult`, `ReasoningTrace`, `ProblemContext`, `SolutionResult`, and others).
 - `test_engine.py` - 10 tests for models, handlers, `map_reasoning_type`, and the rule that a missing reasoning FSM may only fall back to analytical.
+- `test_engine_scripted.py` - 48 tests that run whole solves offline through the core engine with a scripted `LLMInterface`: orchestrator, classifier FSM, pushed and popped strategy FSM, validation retry loop, forced pop, spent step budget, failures that keep `partial_context`, caller context that cannot drive the push.
 - `test_exceptions.py` - 8 tests for `ReasoningEngineError`, `ReasoningExecutionError`, `ReasoningClassificationError`.
 - `test_handlers.py` - 39 tests for `ReasoningHandlers`, `ContextManager`, and `OutputFormatter`.
 
@@ -38,6 +39,6 @@ From the repository root, with the project virtualenv:
 - The tests import the engine as `fsm_llm.reasoning`, a subpackage of the core `fsm_llm` package.
 - Library logging is off by default. Tests that check a log line turn it on with `logger.enable("fsm_llm")`, add a temporary sink, and turn it off again. `pytest`'s `caplog` does not work here because the logger is loguru, not the standard `logging` module.
 - `test_cli_logging.py` runs a child Python process with a 60 second timeout and clears `FSM_LLM_LOG_LEVEL` for it.
-- Several audit tests match exact strings in the engine source (for example that it contains no `converse(` and no `"Continue reasoning"`, and does contain `"except ReasoningClassificationError:"` and `"default=redacting_json_default"`). Renaming or rewording that code will fail them.
+- Several audit tests match exact strings in the source. The engine module must contain no `converse(`, no `"Continue reasoning"`, no `json.dumps` and no `default=str`; in `ReasoningEngine._classify_problem` the text `except RunBudgetExceededError as e:` must come before `except Exception as e:`; `handlers.py` must keep the words "never emitted" in a comment. Renaming or rewording that code will fail them.
 - `test_engine_scripted.py` runs whole solves through the core engine with a scripted LLM interface and checks every call (no user message is ever sent, the strategy FSM is pushed and popped, retries reach their limit, failures carry `partial_context`).
 - Some pruning tests only assert when the key appears in the result (`if ... in result`), so they pass if pruning leaves the key untouched.

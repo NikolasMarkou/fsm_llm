@@ -41,6 +41,15 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_context_unit.py` - context cleaning, compaction, search, and the secret filter measured against `fixtures/`.
 - `test_prompts_unit.py` - prompt builders, text sanitizing, token estimates, secret filtering in prompts.
 - `test_llm_unit.py`, `test_ollama.py` - `LiteLLMInterface` and Ollama-specific parameters.
+- `test_llm_complete.py` - `LLMInterface.complete`, the one request primitive: `CompletionRequest` and `CompletionResponse` models, request rules in `LiteLLMInterface`, reply normalising, failures as `LLMResponseError`.
+- `test_llm_request_path.py` - the classifier sends through `fsm_llm.llm`, and no provider request carries an empty user turn.
+- `test_llm_usage.py` - the per-call-kind usage counters of `LiteLLMInterface` (`usage()`, `reset_usage()`), including errors, streams and concurrency.
+- `test_embedder.py` - `LiteLLMEmbedder`: request shape, construction, reply shapes, usage.
+- `test_completion_state.py` - the optional `completion` state field: definition rules, `tool_exchange`, one `complete` call per Pass 1, structured turns, failures that roll the turn back.
+- `test_advance.py`, `test_run_until_terminal.py` - the message-free step `API.advance` (and its stream form) and the bounded loops `run_until_terminal` and `run_until_terminal_stream` (budgets, `before_step`, FSM stack).
+- `test_typed_field_extraction.py` - the core `typed_field_extraction` builder and its prompt-context narrowing through a real `API` turn.
+- `test_builders.py` - the core `BuildError` shared by every `build()`, and the `HandlerBuilder`, `API` and `FSMManager` builders.
+- `test_removed_legacy.py` - absence pins for core names removed by the "no legacy" cleanup.
 - `test_llm_parse_fallback_seam.py` - response parsing falls back from JSON to embedded JSON to raw text and never raises.
 - `test_handlers_unit.py`, `test_handler_timeout.py` - `HandlerSystem`, `HandlerBuilder`, timing points, priorities, timeouts.
 - `test_pipeline_handler_contract.py` - handler failures seen through `API.converse`, including rollback.
@@ -54,11 +63,12 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_core_hardening_seam.py` - session file writes, logging redaction, bounded context, read concurrency.
 - `test_audit_iter1_seam.py` to `test_audit_iter4_seam.py` - four audit-fix loops of one plan; later files reuse helpers from earlier ones.
 - `test_audit_2026_09_21.py`, `test_audit_2026_09_22.py`, `test_audit_sweeps.py` - two core audits and cross-module agreement sweeps.
+- `test_review_round1_core.py`, `test_review_round2_core.py`, `test_review_fixes_core.py`, `test_review_fixes_core_round2.py` - findings of two review rounds of the step-driver and LLM-layer plans; each class pins one accepted finding.
 - `test_validator_unit.py`, `test_visualizer_unit.py` - `FSMValidator` and the ASCII visualizer, including their CLIs.
 - `test_runner_unit.py`, `test_utilities_unit.py` - the interactive runner's redaction and JSON helpers, FSM file loading.
 - `test_logging_unit.py`, `test_logging_structured.py` - logging helpers, `setup_logging()` and JSON output.
-- `test_docs_snippets.py` - every full FSM JSON example in `README.md`, `CLAUDE.md`, `docs/quickstart.md` and `src/fsm_llm/README.md` must load.
-- `test_live_classification_memory.py` - real-model tests on Ollama `qwen3.5:9b-q8_0`.
+- `test_docs_snippets.py` - every fenced `json` or `python` block that contains `"initial_state"` in `README.md`, `CLAUDE.md`, `docs/quickstart.md`, `src/fsm_llm/README.md`, `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md` and `docs/handlers.md` must load through `FSMDefinition`.
+- `test_live_classification_memory.py` - 7 real-model tests on Ollama `qwen3.5:9b-q8_0`, marked `integration`, `real_llm` and `slow`, skipped without the model.
 
 ## How to use it
 
@@ -73,9 +83,10 @@ From the repository root, with the project virtualenv:
 ## Things to know
 
 - Run pytest from the repository root. Several files import helpers as `tests.conftest` or `tests.test_fsm_llm.<file>`.
-- 14 tests are marked `slow`: 7 handler timeout tests that sleep, and the 7 live Ollama tests. `-m "not slow"` skips them.
+- 14 tests are marked `slow`: 7 in `test_handler_timeout.py` (they sleep) and the 7 live Ollama tests, which also carry `integration` and `real_llm`. `-m "not slow"` skips them.
 - The live file needs Ollama running with `qwen3.5:9b-q8_0` pulled. Without it the tests are skipped, not failed.
 - One test in `test_context_unit.py` is `xfail(strict=True)` on purpose: the secret filter misses its target rate. If it starts passing, the test fails, so the change gets looked at.
 - Do not edit the `fixtures/` corpora to make a failure rate look better. Tests pin exact counts and banner text in those files.
 - A few tests import from `fsm_llm.agents`, `fsm_llm.harness.hardening` and `fsm_llm.workflows`, so those subpackages must be importable.
 - Editing an FSM example in the listed docs can break `test_docs_snippets.py`.
+- Logging is off by default, so tests that check a log line enable `fsm_llm` logging with a temporary loguru sink (`caplog` cannot see loguru output).

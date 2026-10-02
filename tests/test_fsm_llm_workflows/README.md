@@ -20,7 +20,7 @@ Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_m
 ## Files
 
 - `test_workflows.py` - exceptions, models (`WorkflowStatus`, `WorkflowEvent`, `WorkflowStepResult`, `WorkflowInstance`, `EventListener`, `WaitEventConfig`), definition validation, basic DSL, internal-key filtering, terminal routing on `""`, nested-step serialization, package exports. 41 tests.
-- `test_dsl.py` - every DSL factory (`auto_step`, `api_step`, `llm_step`, `timer_step`, ...), the `workflow_builder` fluent builder, and the `linear_workflow`, `conditional_workflow`, `event_driven_workflow` helpers. 41 tests.
+- `test_dsl.py` - every DSL factory (`auto_step`, `api_step`, `llm_step`, `timer_step`, ...), the `WorkflowBuilder` fluent builder, and the `linear_workflow`, `conditional_workflow`, `event_driven_workflow` helpers. The builder classes pin that `build()` always validates (an empty builder is refused), that step call order is kept (the last `set_initial_step` is initial but the step keeps its position), that every failure inside `build()` is a `BuildError` chained from its cause, and that each build is isolated (mutating the builder after a build, or the product before the next build, touches neither; steps stay shared by reference). 41 tests.
 - `test_steps.py` - execution of `AutoTransitionStep`, `ConditionStep`, `APICallStep`, `WaitForEventStep`, `TimerStep`, `ParallelStep`, `ConversationStep`. 25 tests.
 - `test_new_steps.py` - `SwitchStep`, `RetryStep`, `AgentStep`, their DSL factories, and engine instance removal and purging. 46 tests.
 - `test_step_timeouts.py` - the per-step `timeout` field and the `_with_timeout` helper. 21 tests, 8 marked `slow`.
@@ -38,7 +38,7 @@ From the repository root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_workflows/test_steps.py -k ParallelStep
 ```
 
-The full run takes about 10 seconds. `-m "not slow"` skips the 8 slow timeout tests (223 run).
+The full run takes about 10 to 15 seconds. `-m "not slow"` skips the 8 slow timeout tests (261 run).
 
 ## Things to know
 

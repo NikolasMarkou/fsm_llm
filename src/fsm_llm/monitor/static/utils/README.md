@@ -17,7 +17,7 @@ The FSM-LLM Monitor (command `fsm-llm-monitor`) is a web dashboard for watching 
 
 ## Files
 
-- `dom.js` - escaping, element lookup, toasts, status and error lines, badges, safe CSS class tokens, dialog open/close with focus restore, form value parsing, clipboard copy, search highlighting, instance-list hashing.
+- `dom.js` - escaping, element lookup (`$`), toasts, status and error lines, badges, safe CSS class tokens (`safeClass`, `levelClass`), dialog open/close with focus restore, form value parsing (`numVal`, `intVal`), clipboard copy, search highlighting, instance-list hashing, and two small renderers (`renderResultBanner`, `renderLLMData`).
 - `format.js` - `formatTime`, `relativeTime`, `formatNumber`.
 - `markdown.js` - `renderMarkdown(text)`.
 - `graph.js` - `renderGraph(svgId, data, opts)`.
@@ -45,8 +45,8 @@ renderGraph('viz-svg', {
 
 ## Things to know
 
-- `renderMarkdown` supports fenced and inline code, `#`/`##`/`###` headings (rendered as bold text, not real headings), bold, italic, `-`/`*` bullet lists, numbered items, and horizontal rules. Numbered items become `<li>` elements but are not wrapped in an `<ol>`. Links and tables are not supported.
-- `renderGraph` changes the node objects you pass in: it writes `x` and `y` onto each one.
+- `renderMarkdown` supports fenced and inline code, `#`/`##`/`###` headings (rendered as bold text, not real headings), bold (`**x**` or `__x__`), italic (`*x*` or `_x_`), `-`/`*` bullet lists, numbered items, and horizontal rules. Numbered items become `<li>` elements but are not wrapped in an `<ol>`. Links and tables are not supported.
+- `renderGraph(svgId, data, opts)`: nodes take `id`, optional `label`, `is_initial`, `is_terminal`, `step_type` and `description`; edges take `from`, `to` and optional `label`. `opts` may set `colorVar`, `arrowColor`, `rx` and `nodeClass`. The initial node (else the first one) starts the layout, and layouts of more than 5 layers wrap into rows. It changes the node objects you pass in: it writes `x` and `y` onto each one.
 - Nodes the layout cannot reach from the initial node all go in one extra layer at the end.
 - `showToast` shows a success style only when the type is exactly `'success'`; any other type gets the error style. It also copies the text into the `#toast-live` element so screen readers announce it.
 - `copyToClipboard` falls back to the old `document.execCommand('copy')` path and always resolves to `true`.
