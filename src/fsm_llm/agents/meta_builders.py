@@ -11,12 +11,13 @@ Each builder maintains partial state and provides:
 
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
 from pydantic import ValidationError
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import BuildError, FSMDefinition
 from fsm_llm.logging import logger
 
 from .constants import MetaDefaults
@@ -25,7 +26,35 @@ from .exceptions import BuilderError
 
 
 class ArtifactBuilder(ABC):
-    """Base class for incrementally building artifacts."""
+    """Base class for incrementally building artifacts.
+
+    Interface contract: every ``set_*``/``add_*``/``update_*``/``remove_*``
+    mutator returns ``self`` (fluent) and records soft warnings, read once
+    with ``take_warnings()``. A mutator raises ``BuilderError`` at call time
+    only for an unusable argument (empty id, unknown target); this is the one
+    carve-out from "validate in ``build()``", kept so the LLM tools give
+    per-call feedback. ``build()`` is strict: ``BuildError`` unless
+    ``validate_complete()`` is empty, else a deep copy of ``to_dict()``.
+    ``MetaBuilderAgent`` uses the non-raising ``validate_complete()`` instead.
+    """
+
+    def __init__(self) -> None:
+        self._warnings: list[str] = []
+
+    def take_warnings(self) -> list[str]:
+        """Return the warnings recorded since the last call, and clear them."""
+        warnings, self._warnings = self._warnings, []
+        return warnings
+
+    def build(self) -> dict[str, Any]:
+        """Return a deep copy of ``to_dict()``; ``BuildError`` if incomplete."""
+        errors = self.validate_complete()
+        if errors:
+            raise BuildError(
+                f"Incomplete {self.artifact_type.value}: {'; '.join(errors)}",
+                errors=errors,
+            )
+        return copy.deepcopy(self.to_dict())
 
     @property
     @abstractmethod
@@ -67,6 +96,7 @@ class FSMArtifactBuilder(ArtifactBuilder):
     """Incrementally builds an FSMDefinition."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.name: str | None = None
         self.description: str | None = None
         self.persona: str | None = None
@@ -84,8 +114,8 @@ class FSMArtifactBuilder(ArtifactBuilder):
         name: str,
         description: str,
         persona: str | None = None,
-    ) -> list[str]:
-        """Set basic FSM metadata. Returns list of warnings."""
+    ) -> FSMArtifactBuilder:
+        """Set basic FSM metadata. Warnings go to ``take_warnings()``; returns self."""
         warnings: list[str] = []
         self.name = name.strip()
         self.description = description.strip()
@@ -95,7 +125,8 @@ class FSMArtifactBuilder(ArtifactBuilder):
             warnings.append("FSM name cannot be empty")
         if not self.description:
             warnings.append("FSM description cannot be empty")
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
     def add_state(
         self,
@@ -104,12 +135,18 @@ class FSMArtifactBuilder(ArtifactBuilder):
         purpose: str,
         extraction_instructions: str | None = None,
         response_instructions: str | None = None,
-    ) -> list[str]:
-        """Add a state. Returns list of warnings."""
+    ) -> FSMArtifactBuilder:
+        """Add a state. Warnings go to ``take_warnings()``; returns self."""
         warnings: list[str] = []
         state_id = state_id.strip()
 
         if not state_id:
+            # DECISION plan-2026-10-02T052921-89b03f61/D-005
+            # Call-time BuilderError refusals (here and in every mutator below)
+            # are the one carve-out from "validate only in build()". Do NOT
+            # move them into build(): the LLM tools and _assemble_* need
+            # per-call feedback, and a bad model reply must skip one item, not
+            # abort the whole artifact.
             raise BuilderError("State ID cannot be empty", action="add_state")
         if state_id in self.states:
             warnings.append(f"State '{state_id}' already exists; overwriting")
@@ -137,12 +174,13 @@ class FSMArtifactBuilder(ArtifactBuilder):
             )
 
         logger.debug(f"Added state '{state_id}' to FSM builder")
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
-    def remove_state(self, state_id: str) -> bool:
-        """Remove a state. Returns True if removed."""
+    def remove_state(self, state_id: str) -> FSMArtifactBuilder:
+        """Remove a state. A missing item is a no-op; returns self."""
         if state_id not in self.states:
-            return False
+            return self
 
         del self.states[state_id]
 
@@ -157,10 +195,10 @@ class FSMArtifactBuilder(ArtifactBuilder):
             self.initial_state = None
 
         logger.debug(f"Removed state '{state_id}' from FSM builder")
-        return True
+        return self
 
-    def update_state(self, state_id: str, **fields: Any) -> list[str]:
-        """Update fields on an existing state. Returns list of warnings."""
+    def update_state(self, state_id: str, **fields: Any) -> FSMArtifactBuilder:
+        """Update fields on an existing state. Warnings go to ``take_warnings()``; returns self."""
         if state_id not in self.states:
             raise BuilderError(
                 f"State '{state_id}' not found",
@@ -191,7 +229,8 @@ class FSMArtifactBuilder(ArtifactBuilder):
             value = value.strip()
             self.states[state_id][key] = value
 
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
     def add_transition(
         self,
@@ -200,8 +239,8 @@ class FSMArtifactBuilder(ArtifactBuilder):
         description: str,
         priority: int = MetaDefaults.DEFAULT_PRIORITY,
         conditions: list[dict[str, Any]] | None = None,
-    ) -> list[str]:
-        """Add a transition between states. Returns list of warnings."""
+    ) -> FSMArtifactBuilder:
+        """Add a transition between states. Warnings go to ``take_warnings()``; returns self."""
         warnings: list[str] = []
 
         if from_state not in self.states:
@@ -226,23 +265,26 @@ class FSMArtifactBuilder(ArtifactBuilder):
 
         self.states[from_state]["transitions"].append(transition)
         logger.debug(f"Added transition '{from_state}' -> '{target_state}'")
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
-    def remove_transition(self, from_state: str, target_state: str) -> bool:
-        """Remove a transition. Returns True if removed."""
+    def remove_transition(
+        self, from_state: str, target_state: str
+    ) -> FSMArtifactBuilder:
+        """Remove a transition. A missing item is a no-op; returns self."""
         if from_state not in self.states:
-            return False
+            return self
 
         original = self.states[from_state]["transitions"]
         filtered = [t for t in original if t["target_state"] != target_state]
         if len(filtered) == len(original):
-            return False
+            return self
 
         self.states[from_state]["transitions"] = filtered
-        return True
+        return self
 
-    def set_initial_state(self, state_id: str) -> list[str]:
-        """Set the initial state. Returns list of warnings."""
+    def set_initial_state(self, state_id: str) -> FSMArtifactBuilder:
+        """Set the initial state. Warnings go to ``take_warnings()``; returns self."""
         warnings: list[str] = []
         if state_id not in self.states:
             raise BuilderError(
@@ -250,7 +292,8 @@ class FSMArtifactBuilder(ArtifactBuilder):
                 action="set_initial_state",
             )
         self.initial_state = state_id
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
     # -- Serialization ------------------------------------------------------
 
@@ -515,6 +558,7 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
     }
 
     def __init__(self) -> None:
+        super().__init__()
         self.workflow_id: str | None = None
         self.name: str | None = None
         self.description: str | None = None
@@ -532,13 +576,14 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
         workflow_id: str,
         name: str,
         description: str,
-    ) -> list[str]:
+    ) -> WorkflowArtifactBuilder:
         """Set basic workflow metadata."""
         warnings: list[str] = []
         self.workflow_id = workflow_id.strip()
         self.name = name.strip()
         self.description = description.strip()
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
     def add_step(
         self,
@@ -547,7 +592,7 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
         name: str,
         description: str = "",
         config: dict[str, Any] | None = None,
-    ) -> list[str]:
+    ) -> WorkflowArtifactBuilder:
         """Add a workflow step."""
         warnings: list[str] = []
         step_id = step_id.strip()
@@ -578,12 +623,13 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
             self.initial_step_id = step_id
             warnings.append(f"Auto-set initial step to '{step_id}'")
 
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
-    def remove_step(self, step_id: str) -> bool:
-        """Remove a step. Returns True if removed."""
+    def remove_step(self, step_id: str) -> WorkflowArtifactBuilder:
+        """Remove a step. A missing item is a no-op; returns self."""
         if step_id not in self.steps:
-            return False
+            return self
         del self.steps[step_id]
 
         # Clean up transitions
@@ -592,14 +638,14 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
 
         if self.initial_step_id == step_id:
             self.initial_step_id = None
-        return True
+        return self
 
     def set_step_transition(
         self,
         from_step: str,
         to_step: str,
         condition: str | None = None,
-    ) -> list[str]:
+    ) -> WorkflowArtifactBuilder:
         """Add a transition between steps."""
         warnings: list[str] = []
 
@@ -619,14 +665,15 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
             transition["condition"] = condition
 
         self.steps[from_step]["transitions"].append(transition)
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
-    def set_initial_step(self, step_id: str) -> list[str]:
+    def set_initial_step(self, step_id: str) -> WorkflowArtifactBuilder:
         """Set the initial step."""
         if step_id not in self.steps:
             raise BuilderError(f"Step '{step_id}' not found", action="set_initial_step")
         self.initial_step_id = step_id
-        return []
+        return self
 
     # -- Serialization ------------------------------------------------------
 
@@ -822,6 +869,7 @@ class AgentArtifactBuilder(ArtifactBuilder):
     }
 
     def __init__(self) -> None:
+        super().__init__()
         self.agent_type: str | None = None
         self.name: str | None = None
         self.description: str | None = None
@@ -859,7 +907,7 @@ class AgentArtifactBuilder(ArtifactBuilder):
         "rewoo_agent": "rewoo",
     }
 
-    def set_agent_type(self, agent_type: str) -> list[str]:
+    def set_agent_type(self, agent_type: str) -> AgentArtifactBuilder:
         """Set the agent pattern type."""
         warnings: list[str] = []
         agent_type = agent_type.strip().lower()
@@ -872,17 +920,18 @@ class AgentArtifactBuilder(ArtifactBuilder):
                 action="set_agent_type",
             )
         self.agent_type = agent_type
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
     def set_overview(
         self,
         name: str,
         description: str,
-    ) -> list[str]:
+    ) -> AgentArtifactBuilder:
         """Set basic agent metadata."""
         self.name = name.strip()
         self.description = description.strip()
-        return []
+        return self
 
     # Allowed config fields and their expected types
     _CONFIG_ALLOWED: ClassVar[set[str]] = {
@@ -895,7 +944,7 @@ class AgentArtifactBuilder(ArtifactBuilder):
     _CONFIG_NUMERIC: ClassVar[set[str]] = {"timeout_seconds", "temperature"}
     _CONFIG_INT: ClassVar[set[str]] = {"max_iterations", "max_tokens"}
 
-    def set_config(self, **kwargs: Any) -> list[str]:
+    def set_config(self, **kwargs: Any) -> AgentArtifactBuilder:
         """Update agent config fields."""
         warnings: list[str] = []
         for key, value in kwargs.items():
@@ -924,14 +973,15 @@ class AgentArtifactBuilder(ArtifactBuilder):
                     )
                     continue
             self.config[key] = value
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
     def add_tool(
         self,
         name: str,
         description: str,
         parameter_schema: dict[str, Any] | None = None,
-    ) -> list[str]:
+    ) -> AgentArtifactBuilder:
         """Add a tool definition."""
         warnings: list[str] = []
         name = name.strip()
@@ -952,13 +1002,13 @@ class AgentArtifactBuilder(ArtifactBuilder):
         if parameter_schema:
             tool_def["parameter_schema"] = parameter_schema
         self.tools.append(tool_def)
-        return warnings
+        self._warnings.extend(warnings)
+        return self
 
-    def remove_tool(self, name: str) -> bool:
-        """Remove a tool. Returns True if removed."""
-        original_len = len(self.tools)
+    def remove_tool(self, name: str) -> AgentArtifactBuilder:
+        """Remove a tool. A missing item is a no-op; returns self."""
         self.tools = [t for t in self.tools if t["name"] != name]
-        return len(self.tools) < original_len
+        return self
 
     # -- Serialization ------------------------------------------------------
 

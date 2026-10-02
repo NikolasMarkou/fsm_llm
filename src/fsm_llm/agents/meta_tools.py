@@ -83,12 +83,12 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
     @tool
     def set_overview(name: str, description: str, persona: str = "") -> str:
         """Set the FSM name, description, and optional persona. Call this first."""
-        warnings = builder.set_overview(
+        builder.set_overview(
             name=name,
             description=description,
             persona=persona or None,
         )
-        return _fmt(f"Overview set: name='{name}'", warnings)
+        return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
 
     @tool
     def add_state(
@@ -108,7 +108,7 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
                     purpose=purpose,
                     extraction_instructions=extraction_instructions or None,
                     response_instructions=response_instructions or None,
-                ),
+                ).take_warnings(),
             )
         )
 
@@ -134,19 +134,17 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
         return _safe(
             lambda: _fmt(
                 f"Updated state '{state_id}'",
-                builder.update_state(state_id, **fields),
+                builder.update_state(state_id, **fields).take_warnings(),
             )
         )
 
     @tool
     def remove_state(state_id: str) -> str:
         """Remove a state and all its transitions."""
-        removed = builder.remove_state(state_id)
-        return (
-            f"Removed state '{state_id}'"
-            if removed
-            else f"State '{state_id}' not found"
-        )
+        if state_id not in builder.states:
+            return f"State '{state_id}' not found"
+        builder.remove_state(state_id)
+        return f"Removed state '{state_id}'"
 
     @tool
     def add_transition(
@@ -164,15 +162,20 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
                     target_state=target_state,
                     description=description,
                     priority=priority,
-                ),
+                ).take_warnings(),
             )
         )
 
     @tool
     def remove_transition(from_state: str, target_state: str) -> str:
         """Remove a transition between two states."""
-        removed = builder.remove_transition(from_state, target_state)
-        return "Removed transition" if removed else "Transition not found"
+        if not any(
+            t["target_state"] == target_state
+            for t in builder.states.get(from_state, {}).get("transitions", [])
+        ):
+            return "Transition not found"
+        builder.remove_transition(from_state, target_state)
+        return "Removed transition"
 
     @tool
     def set_initial_state(state_id: str) -> str:
@@ -180,7 +183,7 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
         return _safe(
             lambda: _fmt(
                 f"Initial state set to '{state_id}'",
-                builder.set_initial_state(state_id),
+                builder.set_initial_state(state_id).take_warnings(),
             )
         )
 
@@ -212,12 +215,12 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
     @tool
     def set_overview(workflow_id: str, name: str, description: str) -> str:
         """Set the workflow ID, name, and description. Call this first."""
-        warnings = builder.set_overview(
+        builder.set_overview(
             workflow_id=workflow_id,
             name=name,
             description=description,
         )
-        return _fmt(f"Overview set: name='{name}'", warnings)
+        return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
 
     @tool
     def add_step(
@@ -235,15 +238,17 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
                     step_type=step_type,
                     name=name,
                     description=description,
-                ),
+                ).take_warnings(),
             )
         )
 
     @tool
     def remove_step(step_id: str) -> str:
         """Remove a workflow step."""
-        removed = builder.remove_step(step_id)
-        return f"Removed step '{step_id}'" if removed else f"Step '{step_id}' not found"
+        if step_id not in builder.steps:
+            return f"Step '{step_id}' not found"
+        builder.remove_step(step_id)
+        return f"Removed step '{step_id}'"
 
     @tool
     def set_step_transition(
@@ -259,7 +264,7 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
                     from_step=from_step,
                     to_step=to_step,
                     condition=condition or None,
-                ),
+                ).take_warnings(),
             )
         )
 
@@ -269,7 +274,7 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
         return _safe(
             lambda: _fmt(
                 f"Initial step set to '{step_id}'",
-                builder.set_initial_step(step_id),
+                builder.set_initial_step(step_id).take_warnings(),
             )
         )
 
@@ -299,8 +304,8 @@ def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
     @tool
     def set_overview(name: str, description: str) -> str:
         """Set the agent name and description. Call this first."""
-        warnings = builder.set_overview(name=name, description=description)
-        return _fmt(f"Overview set: name='{name}'", warnings)
+        builder.set_overview(name=name, description=description)
+        return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
 
     @tool
     def set_agent_type(agent_type: str) -> str:
@@ -308,7 +313,7 @@ def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
         return _safe(
             lambda: _fmt(
                 f"Agent type set to '{agent_type}'",
-                builder.set_agent_type(agent_type),
+                builder.set_agent_type(agent_type).take_warnings(),
             )
         )
 
@@ -318,15 +323,17 @@ def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
         return _safe(
             lambda: _fmt(
                 f"Added tool '{name}'",
-                builder.add_tool(name=name, description=description),
+                builder.add_tool(name=name, description=description).take_warnings(),
             )
         )
 
     @tool
     def remove_tool(name: str) -> str:
         """Remove a tool from the agent."""
-        removed = builder.remove_tool(name)
-        return f"Removed tool '{name}'" if removed else f"Tool '{name}' not found"
+        if not any(t["name"] == name for t in builder.tools):
+            return f"Tool '{name}' not found"
+        builder.remove_tool(name)
+        return f"Removed tool '{name}'"
 
     @tool
     def set_config(
@@ -350,8 +357,8 @@ def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
             kwargs["max_tokens"] = max_tokens
         if not kwargs:
             return "No config fields to update"
-        warnings = builder.set_config(**kwargs)
-        return _fmt("Config updated", warnings)
+        builder.set_config(**kwargs)
+        return _fmt("Config updated", builder.take_warnings())
 
     for fn in [
         set_overview,

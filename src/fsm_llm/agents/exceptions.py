@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fsm_llm.definitions import FSMError
+from fsm_llm.definitions import BuildError, FSMError
 
 
 class AgentError(FSMError):
@@ -79,8 +79,12 @@ class MetaBuilderError(AgentError):
     pass
 
 
-class BuilderError(MetaBuilderError):
-    """Error during artifact building (invalid state/step/tool operations)."""
+class BuilderError(MetaBuilderError, BuildError):
+    """Error during artifact building (invalid state/step/tool operations).
+
+    Also a core ``BuildError`` so one ``except BuildError`` covers every
+    builder; ``.errors`` is ``[message]``, ``.action`` and ``.details`` as before.
+    """
 
     def __init__(self, message: str, action: str | None = None, **kwargs: Any):
         super().__init__(message, **kwargs)

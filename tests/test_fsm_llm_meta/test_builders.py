@@ -19,7 +19,7 @@ from fsm_llm.agents.meta_builders import (
 
 class TestFSMBuilderOverview:
     def test_set_overview(self, fsm_builder: FSMArtifactBuilder):
-        warnings = fsm_builder.set_overview("MyBot", "A test bot")
+        warnings = fsm_builder.set_overview("MyBot", "A test bot").take_warnings()
         assert warnings == []
         assert fsm_builder.name == "MyBot"
         assert fsm_builder.description == "A test bot"
@@ -29,13 +29,15 @@ class TestFSMBuilderOverview:
         assert fsm_builder.persona == "Friendly helper"
 
     def test_empty_name_warns(self, fsm_builder: FSMArtifactBuilder):
-        warnings = fsm_builder.set_overview("", "desc")
+        warnings = fsm_builder.set_overview("", "desc").take_warnings()
         assert any("empty" in w.lower() for w in warnings)
 
 
 class TestFSMBuilderStates:
     def test_add_state(self, fsm_builder: FSMArtifactBuilder):
-        warnings = fsm_builder.add_state("greeting", "Greet user", "Welcome them")
+        warnings = fsm_builder.add_state(
+            "greeting", "Greet user", "Welcome them"
+        ).take_warnings()
         assert "greeting" in fsm_builder.states
         assert fsm_builder.states["greeting"]["id"] == "greeting"
         assert fsm_builder.states["greeting"]["description"] == "Greet user"
@@ -44,8 +46,10 @@ class TestFSMBuilderStates:
         assert any("Auto-set" in w for w in warnings)
 
     def test_add_second_state_no_auto_initial(self, fsm_builder: FSMArtifactBuilder):
-        fsm_builder.add_state("first", "First state", "Purpose")
-        warnings = fsm_builder.add_state("second", "Second state", "Purpose")
+        fsm_builder.add_state("first", "First state", "Purpose").take_warnings()
+        warnings = fsm_builder.add_state(
+            "second", "Second state", "Purpose"
+        ).take_warnings()
         assert fsm_builder.initial_state == "first"
         assert not any("Auto-set" in w for w in warnings)
 
@@ -62,7 +66,9 @@ class TestFSMBuilderStates:
 
     def test_add_duplicate_warns(self, fsm_builder: FSMArtifactBuilder):
         fsm_builder.add_state("s1", "First", "Purpose")
-        warnings = fsm_builder.add_state("s1", "Overwritten", "New purpose")
+        warnings = fsm_builder.add_state(
+            "s1", "Overwritten", "New purpose"
+        ).take_warnings()
         assert any("already exists" in w for w in warnings)
         assert fsm_builder.states["s1"]["description"] == "Overwritten"
 
@@ -73,12 +79,13 @@ class TestFSMBuilderStates:
     def test_remove_state(self, fsm_builder: FSMArtifactBuilder):
         fsm_builder.add_state("s1", "State 1", "Purpose")
         fsm_builder.add_state("s2", "State 2", "Purpose")
-        assert fsm_builder.remove_state("s1")
+        fsm_builder.remove_state("s1")
         assert "s1" not in fsm_builder.states
         assert fsm_builder.initial_state is None  # was s1
 
     def test_remove_nonexistent(self, fsm_builder: FSMArtifactBuilder):
-        assert not fsm_builder.remove_state("nope")
+        assert fsm_builder.remove_state("nope") is fsm_builder
+        assert fsm_builder.states == {}
 
     def test_remove_cleans_transitions(self, fsm_builder: FSMArtifactBuilder):
         fsm_builder.add_state("a", "A", "Purpose")
@@ -88,8 +95,10 @@ class TestFSMBuilderStates:
         assert fsm_builder.states["a"]["transitions"] == []
 
     def test_update_state(self, fsm_builder: FSMArtifactBuilder):
-        fsm_builder.add_state("s1", "Old desc", "Old purpose")
-        warnings = fsm_builder.update_state("s1", description="New desc")
+        fsm_builder.add_state("s1", "Old desc", "Old purpose").take_warnings()
+        warnings = fsm_builder.update_state(
+            "s1", description="New desc"
+        ).take_warnings()
         assert warnings == []
         assert fsm_builder.states["s1"]["description"] == "New desc"
 
@@ -99,7 +108,7 @@ class TestFSMBuilderStates:
 
     def test_update_ignores_unknown_fields(self, fsm_builder: FSMArtifactBuilder):
         fsm_builder.add_state("s1", "desc", "purpose")
-        warnings = fsm_builder.update_state("s1", unknown_field="value")
+        warnings = fsm_builder.update_state("s1", unknown_field="value").take_warnings()
         assert any("Ignoring" in w for w in warnings)
 
 
@@ -107,7 +116,8 @@ class TestFSMBuilderTransitions:
     def test_add_transition(self, fsm_builder: FSMArtifactBuilder):
         fsm_builder.add_state("a", "A", "Purpose")
         fsm_builder.add_state("b", "B", "Purpose")
-        warnings = fsm_builder.add_transition("a", "b", "Move to B")
+        fsm_builder.take_warnings()
+        warnings = fsm_builder.add_transition("a", "b", "Move to B").take_warnings()
         assert warnings == []
         assert len(fsm_builder.states["a"]["transitions"]) == 1
         assert fsm_builder.states["a"]["transitions"][0]["target_state"] == "b"
@@ -142,12 +152,13 @@ class TestFSMBuilderTransitions:
         fsm_builder.add_state("a", "A", "Purpose")
         fsm_builder.add_state("b", "B", "Purpose")
         fsm_builder.add_transition("a", "b", "desc")
-        assert fsm_builder.remove_transition("a", "b")
+        fsm_builder.remove_transition("a", "b")
         assert fsm_builder.states["a"]["transitions"] == []
 
     def test_remove_nonexistent_transition(self, fsm_builder: FSMArtifactBuilder):
         fsm_builder.add_state("a", "A", "Purpose")
-        assert not fsm_builder.remove_transition("a", "b")
+        assert fsm_builder.remove_transition("a", "b") is fsm_builder
+        assert fsm_builder.states["a"]["transitions"] == []
 
     def test_set_initial_state(self, fsm_builder: FSMArtifactBuilder):
         fsm_builder.add_state("a", "A", "Purpose")
@@ -264,12 +275,14 @@ class TestWorkflowBuilder:
     def test_add_step_invalid_type_warns(
         self, workflow_builder: WorkflowArtifactBuilder
     ):
-        warnings = workflow_builder.add_step("s1", "invalid_type", "Step 1")
+        warnings = workflow_builder.add_step(
+            "s1", "invalid_type", "Step 1"
+        ).take_warnings()
         assert any("Unknown step type" in w for w in warnings)
 
     def test_remove_step(self, workflow_builder: WorkflowArtifactBuilder):
         workflow_builder.add_step("s1", "auto_transition", "S1")
-        assert workflow_builder.remove_step("s1")
+        workflow_builder.remove_step("s1")
         assert "s1" not in workflow_builder.steps
 
     def test_set_step_transition(self, workflow_builder: WorkflowArtifactBuilder):
@@ -329,7 +342,7 @@ class TestAgentBuilder:
         assert agent_builder.artifact_type == ArtifactType.AGENT
 
     def test_set_agent_type(self, agent_builder: AgentArtifactBuilder):
-        warnings = agent_builder.set_agent_type("react")
+        warnings = agent_builder.set_agent_type("react").take_warnings()
         assert warnings == []
         assert agent_builder.agent_type == "react"
 
@@ -342,14 +355,14 @@ class TestAgentBuilder:
         assert agent_builder.name == "SearchAgent"
 
     def test_add_tool(self, agent_builder: AgentArtifactBuilder):
-        warnings = agent_builder.add_tool("search", "Search the web")
+        warnings = agent_builder.add_tool("search", "Search the web").take_warnings()
         assert warnings == []
         assert len(agent_builder.tools) == 1
         assert agent_builder.tools[0]["name"] == "search"
 
     def test_add_tool_duplicate_warns(self, agent_builder: AgentArtifactBuilder):
         agent_builder.add_tool("search", "V1")
-        warnings = agent_builder.add_tool("search", "V2")
+        warnings = agent_builder.add_tool("search", "V2").take_warnings()
         assert any("already exists" in w for w in warnings)
         assert len(agent_builder.tools) == 1
         assert agent_builder.tools[0]["description"] == "V2"
@@ -365,11 +378,12 @@ class TestAgentBuilder:
 
     def test_remove_tool(self, agent_builder: AgentArtifactBuilder):
         agent_builder.add_tool("search", "desc")
-        assert agent_builder.remove_tool("search")
+        agent_builder.remove_tool("search")
         assert len(agent_builder.tools) == 0
 
     def test_remove_nonexistent_tool(self, agent_builder: AgentArtifactBuilder):
-        assert not agent_builder.remove_tool("nope")
+        assert agent_builder.remove_tool("nope") is agent_builder
+        assert agent_builder.tools == []
 
     def test_set_config(self, agent_builder: AgentArtifactBuilder):
         agent_builder.set_config(model="gpt-4o", max_iterations=20)
@@ -377,7 +391,7 @@ class TestAgentBuilder:
         assert agent_builder.config["max_iterations"] == 20
 
     def test_set_config_unknown_warns(self, agent_builder: AgentArtifactBuilder):
-        warnings = agent_builder.set_config(unknown_field="value")
+        warnings = agent_builder.set_config(unknown_field="value").take_warnings()
         assert any("Ignoring" in w for w in warnings)
 
     def test_to_dict(self, agent_builder: AgentArtifactBuilder):
@@ -485,3 +499,156 @@ class TestAgentBuilderTieredSummary:
     def test_full_matches_default(self, agent_builder: AgentArtifactBuilder):
         agent_builder.set_agent_type("react")
         assert agent_builder.get_summary() == agent_builder.get_summary("full")
+
+
+# ===================================================================
+# Fluent mutators, take_warnings(), strict build()
+# ===================================================================
+
+
+def _complete_fsm() -> FSMArtifactBuilder:
+    return (
+        FSMArtifactBuilder()
+        .set_overview("Bot", "A bot")
+        .add_state("a", "A", "Start")
+        .add_state("b", "B", "End")
+        .add_transition("a", "b", "go")
+    )
+
+
+def _complete_workflow() -> WorkflowArtifactBuilder:
+    return (
+        WorkflowArtifactBuilder()
+        .set_overview("wf", "Flow", "A flow")
+        .add_step("s1", "auto_transition", "One")
+        .add_step("s2", "auto_transition", "Two")
+        .set_step_transition("s1", "s2")
+    )
+
+
+def _complete_agent() -> AgentArtifactBuilder:
+    return (
+        AgentArtifactBuilder()
+        .set_overview("Ag", "An agent")
+        .set_agent_type("react")
+        .add_tool("search", "Search")
+    )
+
+
+class TestFluentMutators:
+    def test_fsm_mutators_return_same_builder(self):
+        b = FSMArtifactBuilder()
+        assert b.set_overview("n", "d") is b
+        assert b.add_state("a", "A", "p") is b
+        assert b.add_state("b", "B", "p") is b
+        assert b.update_state("a", description="x") is b
+        assert b.add_transition("a", "b", "go") is b
+        assert b.set_initial_state("b") is b
+        assert b.remove_transition("a", "b") is b
+        assert b.remove_state("b") is b
+        assert b.remove_state("missing") is b
+
+    def test_workflow_mutators_return_same_builder(self):
+        b = WorkflowArtifactBuilder()
+        assert b.set_overview("w", "n", "d") is b
+        assert b.add_step("s1", "timer", "One") is b
+        assert b.add_step("s2", "timer", "Two") is b
+        assert b.set_step_transition("s1", "s2") is b
+        assert b.set_initial_step("s2") is b
+        assert b.remove_step("s2") is b
+        assert b.remove_step("missing") is b
+
+    def test_agent_mutators_return_same_builder(self):
+        b = AgentArtifactBuilder()
+        assert b.set_overview("n", "d") is b
+        assert b.set_agent_type("react") is b
+        assert b.set_config(model="m") is b
+        assert b.add_tool("t", "d") is b
+        assert b.remove_tool("t") is b
+        assert b.remove_tool("missing") is b
+
+    def test_take_warnings_returns_then_clears(self):
+        b = FSMArtifactBuilder()
+        b.add_state("a", "A", "p")
+        b.add_state("a", "A2", "p")
+        warnings = b.take_warnings()
+        assert any("Auto-set initial state" in w for w in warnings)
+        assert any("already exists" in w for w in warnings)
+        assert b.take_warnings() == []
+
+    def test_take_warnings_without_mutation_is_empty(self):
+        assert AgentArtifactBuilder().take_warnings() == []
+
+    def test_call_time_refusal_still_raises(self):
+        with pytest.raises(BuilderError) as exc:
+            FSMArtifactBuilder().add_state("", "d", "p")
+        assert exc.value.action == "add_state"
+
+
+class TestStrictBuild:
+    @pytest.mark.parametrize(
+        "make", [FSMArtifactBuilder, WorkflowArtifactBuilder, AgentArtifactBuilder]
+    )
+    def test_incomplete_raises_build_error(self, make):
+        from fsm_llm import BuildError
+
+        builder = make()
+        expected = builder.validate_complete()
+        assert expected
+        with pytest.raises(BuildError) as exc:
+            builder.build()
+        assert exc.value.errors == expected
+
+    @pytest.mark.parametrize(
+        "make", [_complete_fsm, _complete_workflow, _complete_agent]
+    )
+    def test_complete_returns_dict_equal_to_to_dict(self, make):
+        builder = make()
+        assert builder.validate_complete() == []
+        assert builder.build() == builder.to_dict()
+
+    @pytest.mark.parametrize(
+        "make", [_complete_fsm, _complete_workflow, _complete_agent]
+    )
+    def test_build_twice_is_isolated(self, make):
+        builder = make()
+        first = builder.build()
+        second = builder.build()
+        assert first == second
+        assert first is not second
+        first["name"] = "mutated"
+        for value in first.values():
+            if isinstance(value, dict):
+                value["poison"] = True
+            elif isinstance(value, list):
+                value.append("poison")
+        assert builder.build() == second
+
+    def test_builder_mutation_after_build_does_not_change_product(self):
+        builder = _complete_fsm()
+        product = builder.build()
+        builder.update_state("a", description="changed")
+        builder.add_transition("a", "b", "again")
+        assert product["states"]["a"]["description"] == "A"
+        assert len(product["states"]["a"]["transitions"]) == 1
+
+    def test_workflow_build_isolated_from_nested_steps(self):
+        builder = _complete_workflow()
+        product = builder.build()
+        builder.set_step_transition("s2", "s1")
+        assert product["steps"]["s2"]["transitions"] == []
+
+
+class TestBuilderErrorHierarchy:
+    def test_is_both_build_error_and_meta_builder_error(self):
+        from fsm_llm import BuildError
+        from fsm_llm.agents.exceptions import MetaBuilderError
+
+        err = BuilderError("boom", action="add_state", details={"k": 1})
+        assert isinstance(err, BuildError)
+        assert isinstance(err, MetaBuilderError)
+        assert isinstance(err, ValueError)
+        assert err.action == "add_state"
+        assert err.details == {"k": 1}
+        assert err.errors == ["boom"]
+        assert str(err) == "boom"

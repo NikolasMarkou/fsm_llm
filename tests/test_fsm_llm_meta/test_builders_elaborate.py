@@ -21,7 +21,9 @@ class TestFSMBuilderUpdateStateTypeChecking:
     """Bug fix: update_state should reject non-string values."""
 
     def test_none_value_warns(self, populated_fsm_builder: FSMArtifactBuilder):
-        warnings = populated_fsm_builder.update_state("greeting", description=None)
+        warnings = populated_fsm_builder.update_state(
+            "greeting", description=None
+        ).take_warnings()
         assert any("None" in w for w in warnings)
         # Original value should be preserved
         assert populated_fsm_builder.states["greeting"]["description"] != ""
@@ -29,7 +31,9 @@ class TestFSMBuilderUpdateStateTypeChecking:
     def test_int_value_converts_with_warning(
         self, populated_fsm_builder: FSMArtifactBuilder
     ):
-        warnings = populated_fsm_builder.update_state("greeting", purpose=42)
+        warnings = populated_fsm_builder.update_state(
+            "greeting", purpose=42
+        ).take_warnings()
         assert any("string" in w.lower() for w in warnings)
         assert populated_fsm_builder.states["greeting"]["purpose"] == "42"
 
@@ -38,7 +42,7 @@ class TestFSMBuilderUpdateStateTypeChecking:
     ):
         warnings = populated_fsm_builder.update_state(
             "greeting", description={"bad": "value"}
-        )
+        ).take_warnings()
         assert any("string" in w.lower() for w in warnings)
 
 
@@ -161,7 +165,7 @@ class TestAgentBuilderConfigValidation:
     def test_set_config_rejects_wrong_type_for_max_iterations(
         self, agent_builder: AgentArtifactBuilder
     ):
-        warnings = agent_builder.set_config(max_iterations="ten")
+        warnings = agent_builder.set_config(max_iterations="ten").take_warnings()
         assert any("max_iterations" in w for w in warnings)
         # Should not have changed
         assert (
@@ -171,26 +175,26 @@ class TestAgentBuilderConfigValidation:
     def test_set_config_rejects_string_for_temperature(
         self, agent_builder: AgentArtifactBuilder
     ):
-        warnings = agent_builder.set_config(temperature="warm")
+        warnings = agent_builder.set_config(temperature="warm").take_warnings()
         assert any("temperature" in w for w in warnings)
         assert agent_builder.config["temperature"] == MetaDefaults.AGENT_TEMPERATURE
 
     def test_set_config_accepts_int_for_temperature(
         self, agent_builder: AgentArtifactBuilder
     ):
-        warnings = agent_builder.set_config(temperature=0)
+        warnings = agent_builder.set_config(temperature=0).take_warnings()
         assert warnings == []
         assert agent_builder.config["temperature"] == 0
 
     def test_set_config_accepts_valid_model(self, agent_builder: AgentArtifactBuilder):
-        warnings = agent_builder.set_config(model="gpt-4o")
+        warnings = agent_builder.set_config(model="gpt-4o").take_warnings()
         assert warnings == []
         assert agent_builder.config["model"] == "gpt-4o"
 
     def test_set_config_rejects_unknown_field(
         self, agent_builder: AgentArtifactBuilder
     ):
-        warnings = agent_builder.set_config(unknown_field="value")
+        warnings = agent_builder.set_config(unknown_field="value").take_warnings()
         assert any("unknown" in w.lower() for w in warnings)
 
     def test_defaults_use_constants(self):
@@ -206,7 +210,7 @@ class TestAgentBuilderSetType:
     def test_all_valid_types_accepted(self, agent_builder: AgentArtifactBuilder):
         for agent_type in AgentArtifactBuilder.VALID_AGENT_TYPES:
             b = AgentArtifactBuilder()
-            warnings = b.set_agent_type(agent_type)
+            warnings = b.set_agent_type(agent_type).take_warnings()
             assert warnings == []
             assert b.agent_type == agent_type
 
