@@ -266,7 +266,7 @@ Compare current run's per-example scores against the previous run. Flag:
 **Comparability break (2026-09-29 restructure).** Since the extensions moved under
 `fsm_llm`, one library-wide `logger.disable("fsm_llm")` silences agents, reasoning,
 workflows, monitor and harness logs, and no example enables logging. Before, their
-warnings and tracebacks reached stderr, which `eval.py` scans for failure signals and
+warnings and tracebacks reached stderr, which `fsm_llm.eval` (`scoring.py`) scans for failure signals and
 which the per-example logs keep. Runs from before and after that change are not
 comparable, for agent examples especially: re-baseline before flagging a regression or
 improvement, and expect thinner per-example logs.

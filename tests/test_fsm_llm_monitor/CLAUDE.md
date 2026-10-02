@@ -1,7 +1,7 @@
 # test_fsm_llm_monitor
 
 Path: `tests/test_fsm_llm_monitor`
-Purpose: pytest suite (388 collected tests) for `fsm_llm.monitor`, the FastAPI dashboard package in `src/fsm_llm/monitor/`.
+Purpose: pytest suite (391 collected tests) for `fsm_llm.monitor`, the FastAPI dashboard package in `src/fsm_llm/monitor/`.
 
 ## Scope
 

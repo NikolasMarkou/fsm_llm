@@ -106,7 +106,7 @@ Behaviour pinned by `test_audit_2026_09_27.py` (2026-09-27 audit findings in the
 
 ## Working here
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (about 10 s); `-m "not slow"` runs 223.
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (about 10 s); `-m "not slow"` runs 261.
 - New audit regressions: add a class per finding in the matching audit file, or a new `test_audit_<date>.py`; put helpers at module top with a `_` prefix (`_wait_then_done`, `_settle`, `_CoreLikeLLM`, `_RecordingAgent`).
 - Mark any test that sleeps near a second or more with `@pytest.mark.slow`.
 - Custom steps subclass `WorkflowStep` and implement `async def execute(self, context)`; extra pydantic fields are declared as class attributes (see `_SlowStep`).
