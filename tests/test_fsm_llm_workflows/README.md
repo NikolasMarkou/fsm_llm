@@ -20,7 +20,7 @@ Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_m
 ## Files
 
 - `test_workflows.py` - exceptions, models (`WorkflowStatus`, `WorkflowEvent`, `WorkflowStepResult`, `WorkflowInstance`, `EventListener`, `WaitEventConfig`), definition validation, basic DSL, internal-key filtering, terminal routing on `""`, nested-step serialization, package exports. 41 tests.
-- `test_dsl.py` - every DSL factory (`auto_step`, `api_step`, `llm_step`, `timer_step`, ...), the `workflow_builder` fluent builder, and the `linear_workflow`, `conditional_workflow`, `event_driven_workflow` helpers. 27 tests.
+- `test_dsl.py` - every DSL factory (`auto_step`, `api_step`, `llm_step`, `timer_step`, ...), the `workflow_builder` fluent builder, and the `linear_workflow`, `conditional_workflow`, `event_driven_workflow` helpers. 36 tests.
 - `test_steps.py` - execution of `AutoTransitionStep`, `ConditionStep`, `APICallStep`, `WaitForEventStep`, `TimerStep`, `ParallelStep`, `ConversationStep`. 25 tests.
 - `test_new_steps.py` - `SwitchStep`, `RetryStep`, `AgentStep`, their DSL factories, and engine instance removal and purging. 22 tests.
 - `test_step_timeouts.py` - the per-step `timeout` field and the `_with_timeout` helper. 21 tests, 8 marked `slow`.

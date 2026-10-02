@@ -7,7 +7,7 @@ Purpose: Falsifying pytest suite for `fsm_llm.harness` (`src/fsm_llm/harness/`):
 
 - In: tests for `artifacts`, `hardening`, `fsm_definition`/`rules`, `harness` (the `HarnessAgent` driver), `plan_validator`, `roles`, `tools`, `storage`, `__main__` (CLI), plus the opt-in live suite and its offline guards.
 - Out: the package source itself; the bench runner `scripts/harness_bench.py` (tested by `tests/test_harness_bench.py`); committed bench rows under `scripts/bench_data/`.
-- Collection today: 1,986 tests; default run is 1,969 passed, 17 skipped (the 17 are the live-gated tests).
+- Collection today: 2,021 tests; default run is 2,004 passed, 17 skipped (the 17 are the live-gated tests).
 
 ## Architecture
 
