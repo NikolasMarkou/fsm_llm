@@ -132,6 +132,16 @@ class TestAPIBuilder:
         with pytest.raises(BuildError, match="definition"):
             APIBuilder().build()
 
+    def test_named_option_refused_before_missing_definition(self):
+        from fsm_llm import APIBuilder
+
+        with pytest.raises(BuildError, match="set_definition"):
+            APIBuilder().set_llm_option("fsm_definition", {}).build()
+        with pytest.raises(BuildError, match="no FSM definition set"):
+            APIBuilder().build()
+        with pytest.raises(BuildError, match="no FSM definition set"):
+            APIBuilder().set_llm_option("seed", 3).build()
+
     def test_refusal_parity(self):
         from fsm_llm import API, APIBuilder
 

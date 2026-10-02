@@ -169,6 +169,7 @@ class APIBuilder:
         return self._put("max_fsm_cache_size", size)
 
     def build(self) -> API:
+        refuse_named_options(API, self._llm_options, _API_HINTS, owner=APIBuilder)
         if self._definition is None:
             raise BuildError("Cannot build API: no FSM definition set")
         definition = self._definition
@@ -176,7 +177,6 @@ class APIBuilder:
             definition = definition.model_copy(deep=True)
         elif isinstance(definition, dict):
             definition = copy.deepcopy(definition)
-        refuse_named_options(API, self._llm_options, _API_HINTS, owner=APIBuilder)
         kwargs = dict(self._set)
         if self._handlers:
             kwargs["handlers"] = list(self._handlers)
