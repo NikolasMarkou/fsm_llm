@@ -40,6 +40,8 @@ from .context import ContextCompactor
 from .definitions import (
     # Message-free step result
     AdvanceResult,
+    # Exception classes
+    BuildError,
     # Classification models
     ClassificationError,
     ClassificationExtractionConfig,
@@ -63,7 +65,6 @@ from .definitions import (
     FSMContext,
     FSMDefinition,
     FSMDefinitionNotFoundError,
-    # Exception classes
     FSMError,
     FSMInstance,
     HierarchicalResult,
@@ -301,6 +302,7 @@ __all__ = [
     "to_dot",
     # Exceptions
     "FSMError",
+    "BuildError",
     "FSMDefinitionNotFoundError",
     "ConversationBusyError",
     "RunBudgetExceededError",

@@ -2231,6 +2231,25 @@ class RunBudgetExceededError(FSMError):
         return (self.__class__, (self.budget, self.limit, self.steps_done))
 
 
+class BuildError(FSMError, ValueError):
+    """A builder's ``build()`` refused its accumulated configuration.
+
+    Interface contract: ``BuildError(message, errors=None, **kwargs)``.
+    ``errors`` is the list of problem strings (defaults to ``[message]``);
+    ``kwargs`` (e.g. ``details``) go to ``FSMError``. A domain or constructor
+    error that caused the failure is chained as ``__cause__``.
+    """
+
+    # DECISION plan-2026-10-02T052921-89b03f61/D-003
+    # Do NOT make this a separate error family per subpackage, and do NOT drop
+    # the ValueError base: existing ``pytest.raises(ValueError, match=...)`` and
+    # ``except ValueError`` on builders must keep passing. One class, one
+    # ``except BuildError`` for every builder. See decisions.md D-003.
+    def __init__(self, message: str, errors: list[str] | None = None, **kwargs):
+        super().__init__(message, **kwargs)
+        self.errors = list(errors) if errors is not None else [message]
+
+
 class FSMDefinitionNotFoundError(FSMError, ValueError):
     """No FSM definition is resolvable for a non-path id.
 
