@@ -308,6 +308,27 @@ class TestAPIBuilder:
         assert len(second.handler_system.handlers) == 2
         assert len(first.handler_system.handlers) == 1
 
+    def test_dict_definition_is_deep_copied_before_the_constructor(self, monkeypatch):
+        from fsm_llm import APIBuilder
+
+        received = {}
+
+        def recorder(**kwargs):
+            received.update(kwargs)
+            return object()
+
+        monkeypatch.setattr("fsm_llm.builders.API", recorder)
+        d = _definition_dict()
+        APIBuilder().set_definition(d).set_llm_interface(_mock_llm()).build()
+        seen = received["fsm_definition"]
+        assert seen is not d
+        assert seen["states"] is not d["states"]
+        assert seen["states"]["a"] is not d["states"]["a"]
+        d["states"]["a"]["purpose"] = "changed"
+        d["name"] = "changed"
+        assert seen["states"]["a"]["purpose"] == "p"
+        assert seen["name"] == "B"
+
     def test_definition_object_is_copied(self):
         from fsm_llm import API, APIBuilder
 

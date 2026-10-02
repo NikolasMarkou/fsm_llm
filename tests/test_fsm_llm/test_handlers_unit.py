@@ -532,6 +532,47 @@ class TestHandlerBuilderFluentAPI:
         )
         assert same is builder
 
+    def test_handler_builder_build_copies_collections(self):
+        builder = (
+            create_handler("copies")
+            .when(lambda *a: True)
+            .on_state("s1")
+            .at(HandlerTiming.PRE_PROCESSING)
+            .when_context_has("k1")
+        )
+        builder.execution_lambda = lambda ctx: {}
+        h = builder.build()
+        names = ("condition_lambdas", "timings", "states", "required_keys")
+        for attr in names:
+            assert getattr(h, attr) is not getattr(builder, attr)
+
+        builder.when(lambda *a: False)
+        builder.on_state("s2")
+        builder.at(HandlerTiming.POST_PROCESSING)
+        builder.when_context_has("k2")
+        assert len(h.condition_lambdas) == 1
+        assert h.states == {"s1"}
+        assert h.timings == {HandlerTiming.PRE_PROCESSING}
+        assert h.required_keys == {"k1"}
+
+        h.states.add("only_h")
+        h.required_keys.add("only_h")
+        h.timings.add(HandlerTiming.PRE_TRANSITION)
+        h.condition_lambdas.append(lambda *a: True)
+        assert builder.states == {"s1", "s2"}
+        assert builder.required_keys == {"k1", "k2"}
+        assert HandlerTiming.PRE_TRANSITION not in builder.timings
+        assert len(builder.condition_lambdas) == 2
+
+        second = builder.build()
+        assert second.states == {"s1", "s2"}
+        assert second.required_keys == {"k1", "k2"}
+        assert second.timings == {
+            HandlerTiming.PRE_PROCESSING,
+            HandlerTiming.POST_PROCESSING,
+        }
+        assert len(second.condition_lambdas) == 2
+
 
 # ══════════════════════════════════════════════════════════════
 # 8. HandlerBuilder — missing .do() raises ValueError

@@ -545,3 +545,37 @@ class TestConfiguredAgentBuilder:
         agent = self._builder().set_pattern("self_consistency").set_model("m").build()
         assert agent.config.model == "m"
         assert type(agent) is type(create_agent("self_consistency"))
+
+
+class TestAgentGraphBuilderIsolation:
+    def test_agent_graph_builder_second_build_independent_and_isolated(self):
+        from types import SimpleNamespace
+
+        from fsm_llm.agents.agent_graph import AgentGraphBuilder
+
+        a1, a2, a3 = (SimpleNamespace(name=n) for n in ("a1", "a2", "a3"))
+        builder = (
+            AgentGraphBuilder()
+            .add_node("one", a1)
+            .add_node("two", a2)
+            .add_edge("one", "two")
+            .set_entry("one")
+        )
+        graph_a = builder.build()
+        builder.add_node("three", a3).add_edge("two", "three")
+        graph_b = builder.build()
+
+        assert graph_a.nodes == ["one", "two"]
+        assert graph_b.nodes == ["one", "two", "three"]
+        assert graph_a._nodes is not graph_b._nodes
+        assert graph_a._adjacency is not graph_b._adjacency
+        assert "two" not in graph_a._adjacency
+        assert [t for t, _ in graph_b._adjacency["two"]] == ["three"]
+
+        graph_a._nodes["extra"] = a3
+        graph_a._adjacency["one"].append(("extra", None))
+        assert "extra" not in graph_b._nodes
+        assert [t for t, _ in graph_b._adjacency["one"]] == ["two"]
+
+        assert graph_a._nodes["one"] is a1 and graph_b._nodes["one"] is a1
+        assert graph_b._nodes["two"] is a2
