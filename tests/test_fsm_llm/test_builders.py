@@ -42,3 +42,27 @@ class TestBuildError:
     def test_exported_from_package(self):
         assert "BuildError" in fsm_llm.__all__
         assert fsm_llm.BuildError is BuildError
+
+
+class TestHandlerBuilderBuildError:
+    def test_missing_lambda_is_build_error_and_value_error(self):
+        builder = fsm_llm.create_handler("h")
+        with pytest.raises(BuildError, match="Execution lambda is required") as exc:
+            builder.build()
+        assert isinstance(exc.value, ValueError)
+
+    def test_non_callable_do_raises_build_error(self):
+        builder = fsm_llm.create_handler("h")
+        with pytest.raises(BuildError, match="must be callable") as exc:
+            builder.do("not callable")  # type: ignore[arg-type]
+        assert isinstance(exc.value, ValueError)
+
+    def test_do_records_and_build_refuses_non_callable(self):
+        builder = fsm_llm.HandlerBuilder("h")
+        builder.execution_lambda = 42  # type: ignore[assignment]
+        with pytest.raises(BuildError, match="must be callable"):
+            builder.build()
+
+    def test_callable_still_builds(self):
+        handler = fsm_llm.create_handler("h").do(lambda ctx: {})
+        assert handler.name == "h"

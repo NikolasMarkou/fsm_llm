@@ -474,6 +474,47 @@ class TestAgentGraph:
                 .build()
             )
 
+    def test_cycle_is_build_error(self):
+        from fsm_llm import BuildError
+        from fsm_llm.agents.agent_graph import AgentGraphBuilder
+
+        a = self._make_mock_agent("A", {})
+        b = self._make_mock_agent("B", {})
+        with pytest.raises(BuildError, match="cycle") as exc:
+            (
+                AgentGraphBuilder()
+                .add_node("a", a)
+                .add_node("b", b)
+                .add_edge("a", "b")
+                .add_edge("b", "a")
+                .set_entry("a")
+                .build()
+            )
+        assert isinstance(exc.value, ValueError)
+
+    def test_duplicate_node_reported_at_build(self):
+        from fsm_llm import BuildError
+        from fsm_llm.agents.agent_graph import AgentGraphBuilder
+
+        a = self._make_mock_agent("A", {})
+        builder = AgentGraphBuilder().add_node("a", a).add_node("a", a)
+        builder.set_entry("a")
+        with pytest.raises(BuildError, match="Duplicate node name 'a'") as exc:
+            builder.build()
+        assert isinstance(exc.value, ValueError)
+
+    def test_graph_errors_are_build_errors(self):
+        from fsm_llm import BuildError
+        from fsm_llm.agents.agent_graph import AgentGraphBuilder
+
+        a = self._make_mock_agent("A", {})
+        with pytest.raises(BuildError, match="Entry node must be set"):
+            AgentGraphBuilder().add_node("a", a).build()
+        with pytest.raises(BuildError, match="Edge target 'z' not in nodes"):
+            AgentGraphBuilder().add_node("a", a).add_edge("a", "z").set_entry(
+                "a"
+            ).build()
+
     def test_missing_entry(self):
         """Missing entry node raises ValueError."""
         from fsm_llm.agents.agent_graph import AgentGraphBuilder

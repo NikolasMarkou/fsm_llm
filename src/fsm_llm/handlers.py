@@ -83,7 +83,7 @@ from typing import Any, Protocol
 # Local imports
 # --------------------------------------------------------------
 from .constants import MAX_TIMED_HANDLER_STRAGGLERS
-from .definitions import FSMError, checked_key_names
+from .definitions import BuildError, FSMError, checked_key_names
 from .logging import logger
 
 # --------------------------------------------------------------
@@ -929,7 +929,8 @@ class HandlerBuilder:
         :type execution: ExecutionLambda
         :return: Configured BaseHandler instance ready for use
         :rtype: BaseHandler
-        :raises ValueError: If called before setting execution logic
+        :raises BuildError: If *execution* is missing or not callable (the
+            check is ``build()``'s; ``do()`` records and then builds)
         """
         self.execution_lambda = execution
         return self.build()
@@ -944,10 +945,16 @@ class HandlerBuilder:
 
         :return: Configured BaseHandler instance
         :rtype: BaseHandler
-        :raises ValueError: If execution lambda is not set
+        :raises BuildError: (a ``ValueError``) If the execution lambda is not
+            set or not callable
         """
         if not self.execution_lambda:
-            raise ValueError("Execution lambda is required - use .do() to set it")
+            raise BuildError("Execution lambda is required - use .do() to set it")
+        if not callable(self.execution_lambda):
+            raise BuildError(
+                "Execution lambda must be callable, "
+                f"got {type(self.execution_lambda).__name__}"
+            )
 
         # Create a handler instance with all the configured parameters
         handler = LambdaHandler(

@@ -13,6 +13,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from typing import Any
 
+from fsm_llm.definitions import BuildError
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, pattern_run_output_keys, strip_caller_context
@@ -40,13 +41,16 @@ class AgentGraphBuilder:
     """
 
     def __init__(self) -> None:
-        self._nodes: dict[str, BaseAgent] = {}
+        self._nodes: list[tuple[str, BaseAgent]] = []
         self._edges: list[tuple[str, str, Callable[[dict], bool] | None]] = []
         self._entry: str | None = None
 
     def add_node(self, name: str, agent: BaseAgent) -> AgentGraphBuilder:
-        """Add an agent as a named node in the graph."""
-        self._nodes[name] = agent
+        """Add an agent as a named node in the graph.
+
+        Only records: a repeated *name* is refused by ``build()``.
+        """
+        self._nodes.append((name, agent))
         return self
 
     def add_edge(
@@ -75,24 +79,33 @@ class AgentGraphBuilder:
     def build(self) -> AgentGraph:
         """Build and validate the AgentGraph.
 
+        The node and edge collections are copied; the agents and condition
+        callables are shared with the caller.
+
         Raises:
-            ValueError: No entry, an unknown entry or edge endpoint, or a cycle
-                (raised by ``AgentGraph``).
+            BuildError: (a ``ValueError``) a duplicate node name, no entry, an
+                unknown entry or edge endpoint, or a cycle (raised by
+                ``AgentGraph``).
         """
+        nodes: dict[str, BaseAgent] = {}
+        for name, agent in self._nodes:
+            if name in nodes:
+                raise BuildError(f"Duplicate node name '{name}'")
+            nodes[name] = agent
         if self._entry is None:
-            raise ValueError("Entry node must be set with set_entry()")
-        if self._entry not in self._nodes:
-            raise ValueError(
+            raise BuildError("Entry node must be set with set_entry()")
+        if self._entry not in nodes:
+            raise BuildError(
                 f"Entry node '{self._entry}' not found in nodes. "
-                f"Available: {sorted(self._nodes.keys())}"
+                f"Available: {sorted(nodes.keys())}"
             )
 
         # Validate edges reference existing nodes
         for source, target, _ in self._edges:
-            if source not in self._nodes:
-                raise ValueError(f"Edge source '{source}' not in nodes")
-            if target not in self._nodes:
-                raise ValueError(f"Edge target '{target}' not in nodes")
+            if source not in nodes:
+                raise BuildError(f"Edge source '{source}' not in nodes")
+            if target not in nodes:
+                raise BuildError(f"Edge target '{target}' not in nodes")
 
         # Build adjacency list
         adjacency: dict[str, list[tuple[str, Callable | None]]] = defaultdict(list)
@@ -100,7 +113,7 @@ class AgentGraphBuilder:
             adjacency[source].append((target, condition))
 
         return AgentGraph(
-            nodes=dict(self._nodes),
+            nodes=nodes,
             adjacency=dict(adjacency),
             entry=self._entry,
         )
@@ -113,7 +126,7 @@ class AgentGraph:
     evaluating edge conditions to determine the execution path.
 
     Raises:
-        ValueError: The edges form a cycle.
+        BuildError: (a ``ValueError``) The edges form a cycle.
     """
 
     def __init__(
@@ -326,7 +339,8 @@ def _topological_order(
     Iterative, so a long chain cannot hit the recursion limit (AG-001).
 
     Raises:
-        ValueError: The edges form a cycle (some node never reaches in-degree 0).
+        BuildError: (a ``ValueError``) The edges form a cycle (some node never
+            reaches in-degree 0).
     """
     in_degree = {name: 0 for name in nodes}
     for source in nodes:
@@ -343,7 +357,7 @@ def _topological_order(
                 ready.append(target)
     if len(order) != len(nodes):
         cyclic = sorted(name for name in nodes if name not in order)
-        raise ValueError(
+        raise BuildError(
             f"Agent graph contains cycles (nodes {cyclic}). "
             "Use SwarmAgent for cyclic coordination patterns."
         )
