@@ -18,6 +18,7 @@ from .__version__ import __version__
 # Main API Components
 # --------------------------------------------------------------
 from .api import API, ContextMergeStrategy
+from .builders import APIBuilder, FSMManagerBuilder
 
 # --------------------------------------------------------------
 # Core Definitions and Models
@@ -199,6 +200,8 @@ __all__ = [
     "API",
     "ContextMergeStrategy",
     "FSMManager",
+    "APIBuilder",
+    "FSMManagerBuilder",
     # Core definitions
     "FSMDefinition",
     "FSMInstance",
