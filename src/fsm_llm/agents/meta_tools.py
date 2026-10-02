@@ -68,7 +68,8 @@ def _call(builder: _AnyBuilder, body: Any, *, safe: bool = True) -> str:
     *safe*, True to turn a ``BuilderError`` into ``"Error: ..."`` (the tools
     that never caught it pass False, so their refusals are unchanged).
     Returns the body's reply. Any other exception propagates; the lock is
-    released either way.
+    released either way. Direct builder calls are not serialised against tool
+    calls.
     """
     with _builder_locks_guard:
         lock = _builder_locks.setdefault(builder, threading.RLock())

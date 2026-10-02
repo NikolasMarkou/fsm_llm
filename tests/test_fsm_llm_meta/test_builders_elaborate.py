@@ -3,6 +3,9 @@ from __future__ import annotations
 """Elaborate tests for artifact builders: edge cases, type validation,
 config validation, WorkflowArtifactBuilder ClassVar, and false-positive fixes."""
 
+import copy
+import pickle
+
 import pytest
 
 from fsm_llm.agents.constants import MetaDefaults
@@ -12,6 +15,7 @@ from fsm_llm.agents.meta_builders import (
     FSMArtifactBuilder,
     WorkflowArtifactBuilder,
 )
+from fsm_llm.agents.meta_tools import create_fsm_tools
 from fsm_llm.definitions import FSMDefinition
 
 # ---- FSMArtifactBuilder Edge Cases -------------------------------------------
@@ -373,3 +377,42 @@ class TestSummaryContentAssertions:
         summary = populated_fsm_builder.get_summary("full")
         assert "Persona:" in summary
         assert "Friendly assistant" in summary
+
+
+class _NoSuperFSMBuilder(FSMArtifactBuilder):
+    """A subclass that skips ``super().__init__()``."""
+
+    def __init__(self) -> None:
+        self.name = None
+        self.description = None
+        self.persona = None
+        self.initial_state = None
+        self.states = {}
+
+
+class TestLazyWarnings:
+    """``_warnings`` exists for a builder subclass that skips ``__init__``."""
+
+    def test_subclass_without_super_init_survives(self):
+        b = _NoSuperFSMBuilder()
+        assert b.take_warnings() == []
+        assert _NoSuperFSMBuilder().take_warnings() == []
+        b.set_overview("Bot", "A bot")
+        b.add_state("a", "desc", "purpose")
+        b.update_state("a", description=None)
+        assert any("None" in w for w in b.take_warnings())
+        registry = create_fsm_tools(b)
+        for name in ("validate", "get_summary"):
+            out = registry.get(name).execute_fn()
+            assert isinstance(out, str)
+
+    def test_instances_do_not_share_warnings(self):
+        a, b = FSMArtifactBuilder(), FSMArtifactBuilder()
+        a._warnings.append("x")
+        assert b.take_warnings() == []
+
+    def test_copy_and_pickle_keep_warnings(self):
+        b = FSMArtifactBuilder()
+        b._warnings.append("kept")
+        assert copy.deepcopy(b).take_warnings() == ["kept"]
+        assert pickle.loads(pickle.dumps(b)).take_warnings() == ["kept"]

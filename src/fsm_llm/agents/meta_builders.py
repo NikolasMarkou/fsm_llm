@@ -36,10 +36,20 @@ class ArtifactBuilder(ABC):
     per-call feedback. ``build()`` is strict: ``BuildError`` unless
     ``validate_complete()`` is empty, else a deep copy of ``to_dict()``.
     ``MetaBuilderAgent`` uses the non-raising ``validate_complete()`` instead.
+    Subclasses need not call ``super().__init__()``: the warnings list is lazy.
     """
 
-    def __init__(self) -> None:
-        self._warnings: list[str] = []
+    @property
+    def _warnings(self) -> list[str]:
+        # Lazy so a subclass that skips ``super().__init__()`` still works. Kept
+        # per instance in ``__dict__`` (not a class-level list, which all
+        # instances would share), so deepcopy and pickle see a plain list.
+        warnings: list[str] = self.__dict__.setdefault("_warnings", [])
+        return warnings
+
+    @_warnings.setter
+    def _warnings(self, value: list[str]) -> None:
+        self.__dict__["_warnings"] = value
 
     def take_warnings(self) -> list[str]:
         """Return the warnings recorded since the last call, and clear them."""
