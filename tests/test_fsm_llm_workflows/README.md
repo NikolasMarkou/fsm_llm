@@ -1,6 +1,6 @@
 # test_fsm_llm_workflows
 
-The pytest suite for `fsm_llm.workflows`, the async workflow engine that lives in `src/fsm_llm/workflows/` of the FSM-LLM repository. It holds 231 tests in 7 files, and none of them call a real LLM or the network.
+The pytest suite for `fsm_llm.workflows`, the async workflow engine that lives in `src/fsm_llm/workflows/` of the FSM-LLM repository. It holds 269 tests in 7 files, and none of them call a real LLM or the network.
 
 ## What it is for
 
@@ -20,9 +20,9 @@ Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_m
 ## Files
 
 - `test_workflows.py` - exceptions, models (`WorkflowStatus`, `WorkflowEvent`, `WorkflowStepResult`, `WorkflowInstance`, `EventListener`, `WaitEventConfig`), definition validation, basic DSL, internal-key filtering, terminal routing on `""`, nested-step serialization, package exports. 41 tests.
-- `test_dsl.py` - every DSL factory (`auto_step`, `api_step`, `llm_step`, `timer_step`, ...), the `workflow_builder` fluent builder, and the `linear_workflow`, `conditional_workflow`, `event_driven_workflow` helpers. 36 tests.
+- `test_dsl.py` - every DSL factory (`auto_step`, `api_step`, `llm_step`, `timer_step`, ...), the `workflow_builder` fluent builder, and the `linear_workflow`, `conditional_workflow`, `event_driven_workflow` helpers. 41 tests.
 - `test_steps.py` - execution of `AutoTransitionStep`, `ConditionStep`, `APICallStep`, `WaitForEventStep`, `TimerStep`, `ParallelStep`, `ConversationStep`. 25 tests.
-- `test_new_steps.py` - `SwitchStep`, `RetryStep`, `AgentStep`, their DSL factories, and engine instance removal and purging. 22 tests.
+- `test_new_steps.py` - `SwitchStep`, `RetryStep`, `AgentStep`, their DSL factories, and engine instance removal and purging. 46 tests.
 - `test_step_timeouts.py` - the per-step `timeout` field and the `_with_timeout` helper. 21 tests, 8 marked `slow`.
 - `test_audit_fixes.py` - regressions for earlier audit findings: parallel failure reporting, event listener cleanup, conversation cleanup, template errors, per-instance locking, terminal-status guards, float timeouts. 21 tests.
 - `test_audit_2026_09_27.py` - regressions for the 2026-09-27 audit (findings labelled H, M, L), grouped one class per finding. 74 tests.

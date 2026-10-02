@@ -1,7 +1,7 @@
 # test_fsm_llm_workflows
 
 Path: `tests/test_fsm_llm_workflows`
-Purpose: pytest suite (231 tests, 7 files) for `fsm_llm.workflows`, the in-memory async workflow engine in `src/fsm_llm/workflows/`.
+Purpose: pytest suite (269 tests, 7 files) for `fsm_llm.workflows`, the in-memory async workflow engine in `src/fsm_llm/workflows/`.
 
 ## Scope
 
@@ -30,9 +30,9 @@ flowchart LR
 | File | Tests | What it pins |
 | --- | --- | --- |
 | `test_workflows.py` | 41 | Exception attributes and hierarchy under `WorkflowError`; `WorkflowStatus` values; `WorkflowEvent` UUID and ISO timestamp dump; `WorkflowStepResult.success_result`/`failure_result`, exception-to-string `error`; `WorkflowInstance` lifecycle and history; `EventListener.is_expired`; `WaitEventConfig` positive timeout; `WorkflowDefinition.validate` errors; step data filter (`TestStepDataInternalKeyFilter`); `""` route completes (`TestSwitchStepTerminalRoute`, `TestWideTerminalPredicateAfterD020Revert`); Timer/Wait reach `WAITING`; `serialize()` of nested `RetryStep.step` and `ParallelStep.steps`; `__all__`, `__version__` equals `fsm_llm.__version__` |
-| `test_dsl.py` | 36 | Factories `create_workflow`, `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`; `workflow_builder(...).add_step/set_initial_step/add_metadata/build`; `linear_workflow` (empty list raises `ValueError` "at least one step"), `conditional_workflow`, `event_driven_workflow` |
+| `test_dsl.py` | 41 | Factories `create_workflow`, `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`; `workflow_builder(...).add_step/set_initial_step/add_metadata/build`; `linear_workflow` (empty list raises `ValueError` "at least one step"), `conditional_workflow`, `event_driven_workflow` |
 | `test_steps.py` | 25 | `AutoTransitionStep` (sync/async action, action error raises `WorkflowStepError`), `ConditionStep`, `APICallStep` (exception gives failure to `failure_state`), `WaitForEventStep` `_waiting_info`, `TimerStep` `_timer_info`, `ParallelStep` (default `step_<i>_<key>` aggregation, custom aggregation, context isolation), `ConversationStep` (needs exactly one of `fsm_file`/`fsm_definition`, mappings, `max_turns`) |
-| `test_new_steps.py` | 22 | `SwitchStep` (case, default, missing key, numeric value stringified, no default fails); `RetryStep` (retries failures and bare exceptions, re-raises original exception type on exhaustion); `AgentStep`; DSL `agent_step`, `retry_step`, `switch_step`; `remove_instance`, `max_completed_instances` purge |
+| `test_new_steps.py` | 46 | `SwitchStep` (case, default, missing key, numeric value stringified, no default fails); `RetryStep` (retries failures and bare exceptions, re-raises original exception type on exhaustion); `AgentStep`; DSL `agent_step`, `retry_step`, `switch_step`; `remove_instance`, `max_completed_instances` purge |
 | `test_step_timeouts.py` | 21 (8 `slow`) | `timeout` default `None`; async actions/conditions over timeout raise `WorkflowStepError` whose `.cause` says "timed out"; sync actions are not wrapped; `APICallStep` and `ParallelStep` return failure instead; `_with_timeout` direct calls |
 | `test_audit_fixes.py` | 21 | F-001 parallel failure without `error_state`; F-002 `process_event` uses `.pop(` not `del self.event_listeners` (source inspection); F-004 `end_conversation` called on exception; F-007 missing template var gives failure; F-010 no `conversation_map`; F4 per-instance lock (no double execution, lock dropped on remove/purge); F5 terminal guards on `_handle_step_exception` and `cancel_workflow`; F7 sub-second `workflow_timeout` reported as float |
 | `test_audit_2026_09_27.py` | 74 | 2026-09-27 audit: 21 classes grouped by finding id (H, M and L series) plus `TestReviewFollowUp` |
@@ -42,7 +42,7 @@ flowchart LR
 
 This directory exports nothing; its surface is the pytest entry points and the module-level helpers that tests share.
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (231 tests); `-m "not slow"` skips the 8 `slow` tests in `test_step_timeouts.py`.
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (269 tests); `-m "not slow"` skips the 8 `slow` tests in `test_step_timeouts.py`.
 - Helpers in `test_audit_2026_09_27.py`:
   - `_wait_then_done(workflow_id: str, event_type: str = "go", **wait_kwargs) -> WorkflowDefinition`: a `wait_event_step("wait", ...)` routed to a terminal `auto_step("done", ..., next_state="")`.
   - `async _settle(seconds: float = 0.05) -> None`: `asyncio.sleep` wrapper used to let background work finish.

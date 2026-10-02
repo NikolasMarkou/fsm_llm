@@ -50,7 +50,7 @@ Run from the repository root with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_harness/test_storage.py -q
 ```
 
-The full folder currently collects 2,021 tests: 2,004 pass and 17 are skipped because the live gate is closed.
+The full folder currently collects 2,028 tests: 2,011 pass and 17 are skipped because the live gate is closed.
 
 To arm the live tests, set the switch and have Ollama running with the model pulled:
 

@@ -40,13 +40,13 @@ flowchart TD
 
 | Folder | Tests | What it checks |
 | --- | --- | --- |
-| `test_fsm_llm/` | 3,471 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/` |
-| `test_fsm_llm_agents/` | 2,354 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI |
+| `test_fsm_llm/` | 3,477 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/` |
+| `test_fsm_llm_agents/` | 2,360 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI |
 | `test_fsm_llm_meta/` | 220 | The meta-builder in `fsm_llm.agents`: FSM, workflow and agent builders, builder tools, prompts, `MetaBuilderAgent` |
 | `test_fsm_llm_reasoning/` | 126 | Reasoning engine constants, models, exceptions, handlers, strategy fallback, CLI logging and JSON output |
 | `test_fsm_llm_workflows/` | 231 | Async workflow engine: step types, DSL, engine lifecycle, timeouts, audit fixes |
 | `test_fsm_llm_monitor/` | 388 | FastAPI dashboard: routes, security checks, instance manager, event collector, bridge, OpenTelemetry exporter |
-| `test_fsm_llm_harness/` | 2,021 | Iterative-planner harness: disk-derived gates, the 6-state FSM, artifacts, roles and tools, storage, CLI; 17 live tests off by default |
+| `test_fsm_llm_harness/` | 2,028 | Iterative-planner harness: disk-derived gates, the 6-state FSM, artifacts, roles and tools, storage, CLI; 17 live tests off by default |
 | `test_fsm_llm_eval/` | 261 | `fsm_llm.eval` and the `fsm-llm-eval` CLI: example scoring, case datasets, config, statistics, result files |
 | `test_fsm_llm_regression/` | 264 | One class per fixed bug across core, reasoning, workflows, CLI and packaging text |
 | `test_examples/` | 43 | Every JSON file under `examples/` loads, parses as an `FSMDefinition` and passes `FSMValidator` (3 tests per file, plus one check that at least 5 exist) |

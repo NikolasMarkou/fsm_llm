@@ -1,7 +1,7 @@
 # test_fsm_llm_meta
 
 Path: `tests/test_fsm_llm_meta`
-Purpose: Pytest suite (426 tests) for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, the meta FSM (`build_meta_builder_fsm`) and `MetaBuilderAgent`, which drives that FSM through core.
+Purpose: Pytest suite (434 tests) for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, the meta FSM (`build_meta_builder_fsm`) and `MetaBuilderAgent`, which drives that FSM through core.
 
 ## Scope
 
@@ -42,9 +42,9 @@ LLM isolation methods used:
 | --- | --- | --- |
 | `conftest.py` | Fixtures | `fsm_builder`, `workflow_builder`, `agent_builder`, `populated_fsm_builder`, `meta_config`, `offline_llm` |
 | `test_agent.py` | `MetaBuilderAgent` behavior | 47 tests; carries DECISION references |
-| `test_builders.py` | Builder core behavior | 71 tests |
+| `test_builders.py` | Builder core behavior | 89 tests |
 | `test_builders_elaborate.py` | Builder edge cases, exceptions, config validators | 44 tests |
-| `test_tools.py` | Tool registries | 26 tests; `_make_call(tool_name, **kwargs)` helper at file bottom |
+| `test_tools.py` | Tool registries | 34 tests; `_make_call(tool_name, **kwargs)` helper at file bottom |
 | `test_integration.py` | Cross-piece checks | 11 tests |
 | `test_definitions.py` | Pydantic models and enum | 16 tests |
 | `test_prompts.py` | Prompt text builders | 8 tests |
