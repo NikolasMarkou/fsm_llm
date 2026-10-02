@@ -464,7 +464,8 @@ class WorkflowBuilder:
         return self
 
     def set_initial_step(self, step: WorkflowStep) -> WorkflowBuilder:
-        """Record the initial step (it is also added as a step)."""
+        """Record a step in call order; the last call decides the initial step."""
+        self._steps.append(step)
         self._initial = step
         return self
 
@@ -477,9 +478,16 @@ class WorkflowBuilder:
         """Return a fresh, validated ``WorkflowDefinition``.
 
         Raises:
-            BuildError: duplicate step id or failed validation; the cause is
+            BuildError: duplicate step id, a non-step entry, invalid
+                definition fields or failed validation; the cause is
                 chained and ``.errors`` lists the messages.
         """
+        for pos, step in enumerate(self._steps):
+            if not isinstance(step, WorkflowStep):
+                raise BuildError(
+                    f"step at position {pos} is not a WorkflowStep: "
+                    f"{type(step).__name__}"
+                )
         try:
             wf = WorkflowDefinition(
                 workflow_id=self._workflow_id,
@@ -490,13 +498,15 @@ class WorkflowBuilder:
             for step in self._steps:
                 wf.with_step(step)
             if self._initial is not None:
-                wf.with_initial_step(self._initial)
+                wf.initial_step_id = self._initial.step_id
             wf.validate()
         except WorkflowValidationError as exc:
             raise BuildError(
                 str(exc), errors=[str(e) for e in exc.validation_errors]
             ) from exc
         except WorkflowDefinitionError as exc:
+            raise BuildError(str(exc)) from exc
+        except ValueError as exc:
             raise BuildError(str(exc)) from exc
         return wf
 

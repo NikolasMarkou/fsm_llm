@@ -7,6 +7,7 @@ import pytest
 from fsm_llm import BuildError
 from fsm_llm.workflows.definitions import WorkflowDefinition
 from fsm_llm.workflows.dsl import (
+    WorkflowBuilder,
     api_step,
     auto_step,
     condition_step,
@@ -280,6 +281,59 @@ class TestWorkflowBuilder:
     def test_build_has_no_validate_parameter(self):
         with pytest.raises(TypeError):
             _valid_builder().build(validate=False)  # type: ignore[call-arg]
+
+
+class TestWorkflowBuilderCallOrder:
+    """set_initial_step keeps the step in call order; the last call is initial."""
+
+    def test_two_initial_calls_keep_both_steps_in_call_order(self):
+        a = auto_step("a", "A", "end")
+        b = auto_step("b", "B", "a")
+        wf = (
+            workflow_builder("wf-1", "Test")
+            .set_initial_step(a)
+            .set_initial_step(b)
+            .add_step(_end())
+            .build()
+        )
+        assert list(wf.steps) == ["a", "b", "end"]
+        assert wf.initial_step_id == "b"
+
+    def test_initial_step_keeps_its_call_position(self):
+        wf = (
+            workflow_builder("wf-1", "Test")
+            .add_step(_end())
+            .set_initial_step(auto_step("s1", "S1", "end"))
+            .build()
+        )
+        assert list(wf.steps) == ["end", "s1"]
+        assert wf.initial_step_id == "s1"
+
+
+class TestWorkflowBuilderBuildErrors:
+    """Every failure inside build() is a BuildError chained from its cause."""
+
+    def test_invalid_definition_fields_raise_build_error(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(BuildError) as ei:
+            WorkflowBuilder(None, "W").build()  # type: ignore[arg-type]
+        assert isinstance(ei.value.__cause__, ValidationError)
+
+    def test_non_step_raises_build_error_naming_position(self):
+        with pytest.raises(BuildError, match=r"position 1.*NoneType"):
+            (
+                workflow_builder("wf-1", "Test")
+                .add_step(_end())
+                .add_step(None)  # type: ignore[arg-type]
+                .build()
+            )
+
+    def test_non_step_initial_raises_build_error(self):
+        with pytest.raises(BuildError):
+            workflow_builder("wf-1", "Test").set_initial_step(
+                "nope"  # type: ignore[arg-type]
+            ).build()
 
 
 class TestWorkflowBuilderConvention:

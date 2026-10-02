@@ -280,7 +280,10 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   isolated `WorkflowDefinition` (a later builder call no longer changes it) and
   raises `BuildError` chained from `WorkflowValidationError` or
   `WorkflowDefinitionError`. A caller that caught `WorkflowValidationError` from
-  `build()` now catches `BuildError` and reads `__cause__`.
+  `build()` now catches `BuildError` and reads `__cause__`. `set_initial_step`
+  keeps its step in call order (the last call decides the initial step, earlier
+  ones stay as steps) and a malformed step or definition field raises `BuildError`
+  at `build()`.
 - Builder standard: `AgentGraphBuilder.add_node` with a name already used is now a
   `build()` error instead of a silent overwrite; `HandlerBuilder.build()` refuses a
   non-callable execution function. The graph, handler, workflow and meta builders
