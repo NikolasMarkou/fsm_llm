@@ -2,6 +2,9 @@ from __future__ import annotations
 
 """Tests for meta-agent builder tools."""
 
+import sys
+import threading
+
 import pytest
 
 from fsm_llm.agents.definitions import ArtifactType
@@ -650,3 +653,54 @@ def _replay(registry, script) -> list[str]:
         assert result.success, result.error
         replies.append(result.result)
     return replies
+
+
+class TestToolWarningIsolation:
+    """Tool replies carry only their own call's warnings (ParallelReact threads)."""
+
+    def test_concurrent_calls_keep_their_own_warnings(self) -> None:
+        builder = FSMArtifactBuilder()
+        reg = create_fsm_tools(builder)
+        clean = {"name": "Bot", "description": "A bot"}
+        noisy = {"name": "", "description": ""}
+
+        def reply(args: dict) -> str:
+            return reg.execute(_make_call("set_overview", **args)).result
+
+        expected = {"clean": reply(clean), "noisy": reply(noisy)}
+        assert "warnings" not in expected["clean"]
+        assert "warnings" in expected["noisy"]
+
+        n_threads, rounds = 8, 400
+        barrier = threading.Barrier(n_threads)
+        bad: list[tuple[str, str]] = []
+
+        def worker() -> None:
+            barrier.wait()
+            for _ in range(rounds):
+                for kind, args in (("clean", clean), ("noisy", noisy)):
+                    got = reply(args)
+                    if got != expected[kind]:
+                        bad.append((kind, got))
+
+        old = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        finally:
+            sys.setswitchinterval(old)
+        assert not bad, f"{len(bad)} wrong replies, first: {bad[0]}"
+
+    def test_leftover_direct_mutator_warnings_do_not_leak(self) -> None:
+        builder = FSMArtifactBuilder()
+        builder.add_state("a", description="d", purpose="p")
+        builder.add_state("a", description="d", purpose="p")  # overwrite warning
+        reg = create_fsm_tools(builder)
+        result = reg.execute(
+            _make_call("set_overview", name="Bot", description="A bot")
+        )
+        assert result.result == "Overview set: name='Bot'"

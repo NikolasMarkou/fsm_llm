@@ -8,6 +8,8 @@ for programmatic artifact construction outside of MetaBuilderAgent.
 
 from __future__ import annotations
 
+import threading
+import weakref
 from typing import Any
 
 from .definitions import ArtifactType
@@ -42,6 +44,38 @@ def _safe(fn: Any, *args: Any, **kwargs: Any) -> str:
 
 _AnyBuilder = FSMArtifactBuilder | WorkflowArtifactBuilder | AgentArtifactBuilder
 
+# DECISION plan-2026-10-02T052921-89b03f61/D-013
+# Every tool call runs under one re-entrant lock per builder, and clears stale
+# warnings inside it before the mutator runs. Do NOT remove the lock or the
+# pre-call clear and go back to bare ``mutate(...).take_warnings()``:
+# ParallelReact runs tools concurrently on one registry (one builder), so
+# mutate-then-take pairs interleave and replies steal or carry foreign
+# warnings; warnings left by direct programmatic mutator calls also leaked
+# into the next reply. Do NOT move the lock into ``ArtifactBuilder.__init__``:
+# an ``RLock`` attribute breaks ``copy.deepcopy`` and ``pickle`` of builders,
+# which work today, and subclasses would all have to call ``super().__init__()``.
+_builder_locks: weakref.WeakKeyDictionary[Any, threading.RLock] = (
+    weakref.WeakKeyDictionary()
+)
+_builder_locks_guard = threading.Lock()
+
+
+def _call(builder: _AnyBuilder, body: Any, *, safe: bool = True) -> str:
+    """Run one tool body on *builder* alone, with no stale warnings.
+
+    Parameters: the bound *builder*; *body*, a zero-argument callable returning
+    the reply string (it mutates, then reads ``builder.take_warnings()``);
+    *safe*, True to turn a ``BuilderError`` into ``"Error: ..."`` (the tools
+    that never caught it pass False, so their refusals are unchanged).
+    Returns the body's reply. Any other exception propagates; the lock is
+    released either way.
+    """
+    with _builder_locks_guard:
+        lock = _builder_locks.setdefault(builder, threading.RLock())
+    with lock:
+        builder.take_warnings()
+        return _safe(body) if safe else body()
+
 
 def _make_validate_tool(builder: _AnyBuilder) -> Any:
     """Return the ``validate`` tool shared by all three factories, bound to *builder*."""
@@ -49,13 +83,17 @@ def _make_validate_tool(builder: _AnyBuilder) -> Any:
     @tool
     def validate() -> str:
         """Validate the artifact. Returns errors and warnings. Call before concluding."""
-        errors = builder.validate_complete()
-        warnings = builder.validate_partial()
-        if errors:
-            return f"ERRORS: {'; '.join(errors)}"
-        if warnings:
-            return f"Valid (warnings: {'; '.join(warnings)})"
-        return "Valid: no errors or warnings"
+
+        def body() -> str:
+            errors = builder.validate_complete()
+            warnings = builder.validate_partial()
+            if errors:
+                return f"ERRORS: {'; '.join(errors)}"
+            if warnings:
+                return f"Valid (warnings: {'; '.join(warnings)})"
+            return "Valid: no errors or warnings"
+
+        return _call(builder, body, safe=False)
 
     return validate
 
@@ -66,7 +104,9 @@ def _make_summary_tool(builder: _AnyBuilder) -> Any:
     @tool
     def get_summary() -> str:
         """Get the current builder state as a human-readable summary."""
-        return builder.get_summary(detail_level="full")
+        return _call(
+            builder, lambda: builder.get_summary(detail_level="full"), safe=False
+        )
 
     return get_summary
 
@@ -83,12 +123,16 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
     @tool
     def set_overview(name: str, description: str, persona: str = "") -> str:
         """Set the FSM name, description, and optional persona. Call this first."""
-        builder.set_overview(
-            name=name,
-            description=description,
-            persona=persona or None,
-        )
-        return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
+
+        def body() -> str:
+            builder.set_overview(
+                name=name,
+                description=description,
+                persona=persona or None,
+            )
+            return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
+
+        return _call(builder, body, safe=False)
 
     @tool
     def add_state(
@@ -99,7 +143,8 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
         response_instructions: str = "",
     ) -> str:
         """Add a state to the FSM. The first state added automatically becomes the initial state."""
-        return _safe(
+        return _call(
+            builder,
             lambda: _fmt(
                 f"Added state '{state_id}'",
                 builder.add_state(
@@ -109,7 +154,7 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
                     extraction_instructions=extraction_instructions or None,
                     response_instructions=response_instructions or None,
                 ).take_warnings(),
-            )
+            ),
         )
 
     @tool
@@ -131,20 +176,25 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
             }.items()
             if v
         }
-        return _safe(
+        return _call(
+            builder,
             lambda: _fmt(
                 f"Updated state '{state_id}'",
                 builder.update_state(state_id, **fields).take_warnings(),
-            )
+            ),
         )
 
     @tool
     def remove_state(state_id: str) -> str:
         """Remove a state and all its transitions."""
-        if state_id not in builder.states:
-            return f"State '{state_id}' not found"
-        builder.remove_state(state_id)
-        return f"Removed state '{state_id}'"
+
+        def body() -> str:
+            if state_id not in builder.states:
+                return f"State '{state_id}' not found"
+            builder.remove_state(state_id)
+            return f"Removed state '{state_id}'"
+
+        return _call(builder, body, safe=False)
 
     @tool
     def add_transition(
@@ -154,7 +204,8 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
         priority: int = 100,
     ) -> str:
         """Add a transition between two existing states."""
-        return _safe(
+        return _call(
+            builder,
             lambda: _fmt(
                 f"Added transition '{from_state}' -> '{target_state}'",
                 builder.add_transition(
@@ -163,28 +214,33 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
                     description=description,
                     priority=priority,
                 ).take_warnings(),
-            )
+            ),
         )
 
     @tool
     def remove_transition(from_state: str, target_state: str) -> str:
         """Remove a transition between two states."""
-        if not any(
-            t["target_state"] == target_state
-            for t in builder.states.get(from_state, {}).get("transitions", [])
-        ):
-            return "Transition not found"
-        builder.remove_transition(from_state, target_state)
-        return "Removed transition"
+
+        def body() -> str:
+            if not any(
+                t["target_state"] == target_state
+                for t in builder.states.get(from_state, {}).get("transitions", [])
+            ):
+                return "Transition not found"
+            builder.remove_transition(from_state, target_state)
+            return "Removed transition"
+
+        return _call(builder, body, safe=False)
 
     @tool
     def set_initial_state(state_id: str) -> str:
         """Set which state the FSM starts in."""
-        return _safe(
+        return _call(
+            builder,
             lambda: _fmt(
                 f"Initial state set to '{state_id}'",
                 builder.set_initial_state(state_id).take_warnings(),
-            )
+            ),
         )
 
     for fn in [
@@ -215,12 +271,16 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
     @tool
     def set_overview(workflow_id: str, name: str, description: str) -> str:
         """Set the workflow ID, name, and description. Call this first."""
-        builder.set_overview(
-            workflow_id=workflow_id,
-            name=name,
-            description=description,
-        )
-        return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
+
+        def body() -> str:
+            builder.set_overview(
+                workflow_id=workflow_id,
+                name=name,
+                description=description,
+            )
+            return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
+
+        return _call(builder, body, safe=False)
 
     @tool
     def add_step(
@@ -230,7 +290,8 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
         description: str = "",
     ) -> str:
         """Add a workflow step. Valid step types: auto_transition, api_call, condition, llm_processing, wait_for_event, timer, parallel, conversation. The first step added automatically becomes the initial step."""
-        return _safe(
+        return _call(
+            builder,
             lambda: _fmt(
                 f"Added step '{step_id}' ({step_type})",
                 builder.add_step(
@@ -239,16 +300,20 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
                     name=name,
                     description=description,
                 ).take_warnings(),
-            )
+            ),
         )
 
     @tool
     def remove_step(step_id: str) -> str:
         """Remove a workflow step."""
-        if step_id not in builder.steps:
-            return f"Step '{step_id}' not found"
-        builder.remove_step(step_id)
-        return f"Removed step '{step_id}'"
+
+        def body() -> str:
+            if step_id not in builder.steps:
+                return f"Step '{step_id}' not found"
+            builder.remove_step(step_id)
+            return f"Removed step '{step_id}'"
+
+        return _call(builder, body, safe=False)
 
     @tool
     def set_step_transition(
@@ -257,7 +322,8 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
         condition: str = "",
     ) -> str:
         """Connect two workflow steps with an optional condition."""
-        return _safe(
+        return _call(
+            builder,
             lambda: _fmt(
                 f"Connected '{from_step}' -> '{to_step}'",
                 builder.set_step_transition(
@@ -265,17 +331,18 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
                     to_step=to_step,
                     condition=condition or None,
                 ).take_warnings(),
-            )
+            ),
         )
 
     @tool
     def set_initial_step(step_id: str) -> str:
         """Set which step the workflow starts at."""
-        return _safe(
+        return _call(
+            builder,
             lambda: _fmt(
                 f"Initial step set to '{step_id}'",
                 builder.set_initial_step(step_id).take_warnings(),
-            )
+            ),
         )
 
     for fn in [
@@ -304,36 +371,46 @@ def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
     @tool
     def set_overview(name: str, description: str) -> str:
         """Set the agent name and description. Call this first."""
-        builder.set_overview(name=name, description=description)
-        return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
+
+        def body() -> str:
+            builder.set_overview(name=name, description=description)
+            return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
+
+        return _call(builder, body, safe=False)
 
     @tool
     def set_agent_type(agent_type: str) -> str:
         """Set the agent pattern type. Valid types: react, plan_execute, reflexion, rewoo, evaluator_optimizer, maker_checker, prompt_chain, self_consistency, debate, orchestrator, adapt."""
-        return _safe(
+        return _call(
+            builder,
             lambda: _fmt(
                 f"Agent type set to '{agent_type}'",
                 builder.set_agent_type(agent_type).take_warnings(),
-            )
+            ),
         )
 
     @tool
     def add_tool(name: str, description: str) -> str:
         """Add a tool definition to the agent."""
-        return _safe(
+        return _call(
+            builder,
             lambda: _fmt(
                 f"Added tool '{name}'",
                 builder.add_tool(name=name, description=description).take_warnings(),
-            )
+            ),
         )
 
     @tool
     def remove_tool(name: str) -> str:
         """Remove a tool from the agent."""
-        if not any(t["name"] == name for t in builder.tools):
-            return f"Tool '{name}' not found"
-        builder.remove_tool(name)
-        return f"Removed tool '{name}'"
+
+        def body() -> str:
+            if not any(t["name"] == name for t in builder.tools):
+                return f"Tool '{name}' not found"
+            builder.remove_tool(name)
+            return f"Removed tool '{name}'"
+
+        return _call(builder, body, safe=False)
 
     @tool
     def set_config(
@@ -357,8 +434,12 @@ def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
             kwargs["max_tokens"] = max_tokens
         if not kwargs:
             return "No config fields to update"
-        builder.set_config(**kwargs)
-        return _fmt("Config updated", builder.take_warnings())
+
+        def body() -> str:
+            builder.set_config(**kwargs)
+            return _fmt("Config updated", builder.take_warnings())
+
+        return _call(builder, body, safe=False)
 
     for fn in [
         set_overview,
