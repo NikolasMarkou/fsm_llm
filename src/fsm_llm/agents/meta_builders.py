@@ -39,6 +39,10 @@ class ArtifactBuilder(ABC):
     Subclasses need not call ``super().__init__()``: the warnings list is lazy.
     """
 
+    # DECISION plan-2026-10-02T105536-042b086f/D-012
+    # Do NOT make this a class-level list (all instances would share it) and do NOT
+    # drop the property to require super().__init__() (the tools must work for
+    # subclasses that skip it). See decisions.md D-012.
     @property
     def _warnings(self) -> list[str]:
         # Lazy so a subclass that skips ``super().__init__()`` still works. Kept

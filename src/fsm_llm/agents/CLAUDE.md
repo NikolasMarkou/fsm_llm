@@ -90,7 +90,7 @@ Other patterns (FSM states in `constants.py`):
 | `semantic_tools.py`, `semantic_memory.py`, `composition.py` | `SemanticToolRegistry`, `SemanticMemoryStore`, the LLM judge | embeddings through core `LiteLLMEmbedder` (`_embedding_backend`), the judge through core `LiteLLMInterface.complete` |
 | `meta_builders.py` | `ArtifactBuilder`, `FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder` | workflow/agent validation is structural (D-004); mutators return `self`, warnings accumulate and `take_warnings()` returns and clears them, `build()` = `validate_complete()` then `BuildError` or a deep copy of `to_dict()`; call-time `BuilderError` refusals stay (the one carve-out, D-005 of plan 89b03f61) |
 | `builders.py` | `ConfiguredAgentBuilder` | fluent `create_agent`; passes only what was set; typed config setters write `AgentConfig` so the config-owned denylist holds by construction; `build()` raises `BuildError` (D-008 of plan 89b03f61) |
-| `meta_tools.py` | `create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools` | separate programmatic API over a builder |
+| `meta_tools.py` | `create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools` | separate programmatic API over a builder; tools serialise per builder, direct builder calls are not serialised against tool calls |
 
 ## Public interface
 

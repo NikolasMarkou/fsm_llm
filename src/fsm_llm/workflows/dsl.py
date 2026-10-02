@@ -482,6 +482,10 @@ class WorkflowBuilder:
                 definition fields or failed validation; the cause is
                 chained and ``.errors`` lists the messages.
         """
+        # DECISION plan-2026-10-02T105536-042b086f/D-011
+        # Do NOT drop this gate (a None or foreign step raises a raw AttributeError
+        # from with_step), do NOT make Mock(spec=WorkflowStep) pass, and do NOT
+        # catch AttributeError broadly (it would mask real bugs). See decisions.md D-011.
         for pos, step in enumerate(self._steps):
             if not isinstance(step, WorkflowStep):
                 raise BuildError(
