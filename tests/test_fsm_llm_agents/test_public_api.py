@@ -355,3 +355,142 @@ class TestCoreOwnsTypedFieldsAndKeyClearing:
         src = Path(__file__).resolve().parents[2] / "src" / "fsm_llm" / "agents"
         for path in ("handlers.py", "meta_builder.py"):
             assert "clear_keys_delta(" in (src / path).read_text(), path
+
+
+class TestConfiguredAgentBuilder:
+    """ConfiguredAgentBuilder: records, then calls create_agent unchanged."""
+
+    @staticmethod
+    def _builder():
+        from fsm_llm.agents import ConfiguredAgentBuilder
+
+        return ConfiguredAgentBuilder()
+
+    def test_mutators_return_same_builder(self):
+        b = self._builder()
+        for call in (
+            lambda: b.set_pattern("react"),
+            lambda: b.add_tool(_search),
+            lambda: b.set_config(AgentConfig()),
+            lambda: b.set_config_option("max_iterations", 3),
+            lambda: b.set_model("m"),
+            lambda: b.set_temperature(0.1),
+            lambda: b.set_max_tokens(10),
+            lambda: b.set_max_iterations(4),
+            lambda: b.set_timeout_seconds(5.0),
+            lambda: b.set_system_prompt("hi"),
+            lambda: b.set_option("seed", 1),
+        ):
+            assert call() is b
+
+    def test_default_build_matches_create_agent(self):
+        from fsm_llm.definitions import BuildError  # noqa: F401
+
+        built = self._builder().add_tool(_search).build()
+        direct = create_agent("react", [_search])
+        assert type(built) is type(direct)
+        assert built.config.model_dump() == direct.config.model_dump()
+        assert built.tools.tool_names == direct.tools.tool_names
+
+    def test_typed_setters_write_config(self):
+        agent = (
+            self._builder()
+            .set_pattern("debate")
+            .set_model("m")
+            .set_temperature(0.3)
+            .set_max_tokens(77)
+            .set_max_iterations(4)
+            .set_timeout_seconds(9.0)
+            .build()
+        )
+        c = agent.config
+        assert (c.model, c.temperature, c.max_tokens) == ("m", 0.3, 77)
+        assert (c.max_iterations, c.timeout_seconds) == (4, 9.0)
+
+    def test_set_option_model_is_not_filtered(self):
+        from fsm_llm.definitions import BuildError
+
+        with pytest.raises(BuildError) as info:
+            self._builder().set_option("model", "x").build()
+        assert isinstance(info.value.__cause__, TypeError)
+
+    def test_set_option_seed_lands_in_api_kwargs(self):
+        agent = self._builder().set_pattern("debate").set_option("seed", 3).build()
+        assert agent._api_kwargs["seed"] == 3
+
+    def test_system_prompt_conflict_is_wrapped(self):
+        from fsm_llm.definitions import BuildError
+
+        b = (
+            self._builder()
+            .set_pattern("debate")
+            .set_config(AgentConfig(instructions="a"))
+            .set_system_prompt("b")
+        )
+        with pytest.raises(BuildError) as info:
+            b.build()
+        assert isinstance(info.value.__cause__, ValueError)
+        assert "pass the instructions once" in str(info.value)
+
+    def test_system_prompt_applied(self):
+        agent = self._builder().set_pattern("debate").set_system_prompt("Cite.").build()
+        assert agent.config.instructions == "Cite."
+
+    def test_config_isolation_and_independent_builds(self):
+        cfg = AgentConfig(max_iterations=5)
+        b = self._builder().set_pattern("debate").set_config(cfg)
+        first = b.build()
+        cfg.max_iterations = 99
+        assert first.config.max_iterations == 5
+        second = b.build()
+        assert second.config is not first.config
+        assert second.config.max_iterations == 99
+
+    def test_second_build_independent(self):
+        b = self._builder().add_tool(_search).set_option("seed", 1)
+        a1, a2 = b.build(), b.build()
+        assert a1 is not a2
+        assert a1.tools is not a2.tools
+        assert a1._api_kwargs is not a2._api_kwargs
+
+    def test_add_tool_registers_tool_function(self):
+        from fsm_llm.agents import tool
+
+        @tool
+        def lookup(q: str) -> str:
+            """Look up."""
+            return q
+
+        agent = self._builder().add_tool(lookup).build()
+        assert agent.tools.tool_names == ["lookup"]
+
+    def test_add_tool_with_registry_errors(self):
+        from fsm_llm.definitions import BuildError
+
+        b = self._builder().add_tool(_search).set_tool_registry(_registry())
+        with pytest.raises(BuildError):
+            b.build()
+
+    def test_set_tool_registry_shared_by_reference(self):
+        reg = _registry()
+        agent = self._builder().set_tool_registry(reg).build()
+        assert agent.tools is reg
+
+    def test_bad_config_option_wraps_validation_error(self):
+        from fsm_llm.definitions import BuildError
+
+        with pytest.raises(BuildError) as info:
+            self._builder().set_config_option("bogus", 1).build()
+        assert isinstance(info.value.__cause__, ValidationError)
+
+    def test_toolless_pattern_with_tool_errors(self):
+        from fsm_llm.definitions import BuildError
+
+        with pytest.raises(BuildError) as info:
+            self._builder().set_pattern("debate").add_tool(_search).build()
+        assert isinstance(info.value.__cause__, TypeError)
+
+    def test_toolless_pattern_builds(self):
+        agent = self._builder().set_pattern("self_consistency").set_model("m").build()
+        assert agent.config.model == "m"
+        assert type(agent) is type(create_agent("self_consistency"))

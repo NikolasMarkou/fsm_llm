@@ -258,6 +258,8 @@ def create_agent(
     return cls(**kwargs)
 
 
+from .builders import ConfiguredAgentBuilder
+
 __all__ = [
     # Main classes
     "BaseAgent",
@@ -289,6 +291,7 @@ __all__ = [
     # Phase 2: Graph, MCP, SOP, Remote
     "AgentGraph",
     "AgentGraphBuilder",
+    "ConfiguredAgentBuilder",
     "MCPToolProvider",
     "SOPDefinition",
     "SOPRegistry",
