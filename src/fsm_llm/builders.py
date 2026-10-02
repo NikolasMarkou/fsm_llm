@@ -10,8 +10,9 @@ that were set, so every default and every rule (the ``llm_interface`` refusal,
 from __future__ import annotations
 
 import copy
+import inspect
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TypeVar
 
 from .api import API
@@ -34,6 +35,58 @@ def _construct(product: Callable[..., _T], what: str, **kwargs: Any) -> _T:
         raise BuildError(f"Cannot build {what}: {exc}", errors=[str(exc)]) from exc
 
 
+def refuse_named_options(
+    target: Callable[..., Any],
+    options: Iterable[str],
+    hint: Mapping[str, str],
+    *,
+    owner: type,
+) -> None:
+    """Refuse open-ended option names that are named parameters of ``target``.
+
+    Interface contract (shared by ``APIBuilder``, ``ConfiguredAgentBuilder``
+    and ``HarnessAgentBuilder``): ``target`` is the constructor or factory the
+    builder will call; ``options`` are the names recorded through the builder's
+    open-ended setter; ``hint`` maps a parameter name to the builder method
+    that sets it when that is not ``set_<name>``; ``owner`` is the builder
+    class, probed with ``hasattr`` for the ``set_<name>`` fallback. Returns
+    ``None`` when no option names a parameter (``self`` and ``*args`` /
+    ``**kwargs`` do not count, so ``seed``, ``timeout`` ... pass); otherwise
+    raises ``BuildError`` whose ``.errors`` has one line per conflicting
+    option, in ``options`` order. The names come from ``inspect.signature``,
+    never from a list kept here.
+    """
+    # DECISION plan-2026-10-02T052921-89b03f61/D-014
+    # An open-ended option that repeats a named parameter must be refused, not
+    # merged: a merge makes the open-ended setter silently beat (or be beaten
+    # by) the typed one whatever the call order. Do NOT replace this with a
+    # hand-written name list or a whitelist (D-008): the names are read from the
+    # real signature so open-ended litellm kwargs still flow.
+    named = {
+        p.name
+        for p in inspect.signature(target).parameters.values()
+        if p.name != "self"
+        and p.kind
+        not in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+    }
+    errors = []
+    for name in options:
+        if name not in named:
+            continue
+        method = hint.get(name) or (
+            f"set_{name}" if hasattr(owner, f"set_{name}") else None
+        )
+        use = f"use {method}()" if method else "use the builder's typed setter"
+        errors.append(f"option {name!r} names a constructor parameter; {use}")
+    if errors:
+        raise BuildError(
+            f"Cannot build {owner.__name__}: " + "; ".join(errors), errors=errors
+        )
+
+
+_API_HINTS = {"fsm_definition": "set_definition", "handlers": "add_handler"}
+
+
 class APIBuilder:
     """Builds an :class:`API`.
 
@@ -41,7 +94,10 @@ class APIBuilder:
     ``build()`` returns a new ``API`` or raises ``BuildError`` (chained from the
     constructor's ``ValueError``/``TypeError``) with ``.errors``. A missing
     definition raises ``BuildError``. ``set_llm_option(name, value)`` passes
-    open-ended litellm kwargs (``seed``, ``timeout``, ...) unfiltered.
+    open-ended litellm kwargs (``seed``, ``timeout``, ...) unfiltered, except
+    that a name which is a named ``API`` parameter (``model``,
+    ``max_history_size``, ``handlers``, ...) is refused at ``build()`` with a
+    ``BuildError`` naming the typed method to use.
 
     Isolation: a dict definition, an ``FSMDefinition``, the handler list and
     the option dict are copied at ``build()``; objects passed by reference (an
@@ -120,6 +176,7 @@ class APIBuilder:
             definition = definition.model_copy(deep=True)
         elif isinstance(definition, dict):
             definition = copy.deepcopy(definition)
+        refuse_named_options(API, self._llm_options, _API_HINTS, owner=APIBuilder)
         kwargs = dict(self._set)
         if self._handlers:
             kwargs["handlers"] = list(self._handlers)

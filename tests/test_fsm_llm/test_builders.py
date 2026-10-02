@@ -157,6 +157,70 @@ class TestAPIBuilder:
         )
         assert api.llm_interface.kwargs["seed"] == 3
 
+    @pytest.mark.parametrize(
+        ("name", "value", "method"),
+        [
+            ("max_history_size", 1, "set_max_history_size"),
+            ("model", "b", "set_model"),
+            ("handlers", [], "add_handler"),
+            ("fsm_definition", {}, "set_definition"),
+        ],
+    )
+    def test_open_option_naming_a_parameter_is_refused(self, name, value, method):
+        from fsm_llm import APIBuilder
+
+        b = (
+            APIBuilder()
+            .set_definition(_definition_dict())
+            .set_max_history_size(50)
+            .set_llm_option(name, value)
+        )
+        with pytest.raises(BuildError) as exc:
+            b.build()
+        assert name in str(exc.value)
+        assert method in str(exc.value)
+        assert exc.value.errors
+
+    def test_every_conflicting_option_is_listed(self):
+        from fsm_llm import APIBuilder
+
+        b = (
+            APIBuilder()
+            .set_definition(_definition_dict())
+            .set_llm_option("model", "b")
+            .set_llm_option("max_tokens", 3)
+            .set_llm_option("seed", 3)
+        )
+        with pytest.raises(BuildError) as exc:
+            b.build()
+        assert len(exc.value.errors) == 2
+        assert "model" in exc.value.errors[0]
+        assert "max_tokens" in exc.value.errors[1]
+
+    def test_refuse_named_options_helper_on_toy_signature(self):
+        from fsm_llm.builders import refuse_named_options
+
+        class Owner:
+            def set_alpha(self):
+                pass
+
+        def target(self, alpha, *args, beta=1, **kw):
+            pass
+
+        refuse_named_options(target, {"seed": 1, "gamma": 2}, {}, owner=Owner)
+        with pytest.raises(BuildError) as exc:
+            refuse_named_options(
+                target,
+                {"alpha": 1, "beta": 2, "seed": 3},
+                {"beta": "put_beta"},
+                owner=Owner,
+            )
+        assert exc.value.errors == [
+            "option 'alpha' names a constructor parameter; use set_alpha()",
+            "option 'beta' names a constructor parameter; use put_beta()",
+        ]
+        refuse_named_options(target, {"self": 1}, {}, owner=Owner)
+
     def test_unset_values_equal_api_defaults(self):
         from fsm_llm import API, APIBuilder
 
