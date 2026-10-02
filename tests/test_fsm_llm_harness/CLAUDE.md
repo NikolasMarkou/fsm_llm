@@ -51,7 +51,7 @@ flowchart LR
 | `test_extraction_cost.py` | Zero core Pass-1 LLM calls per turn (D-041) | 24 tests; `CountingLLM` owns `_make_llm_call` |
 | `test_fsm_definition.py` | Graph shape, gates via real `TransitionEvaluator`, priority spacing, ownership | 87 tests |
 | `test_hardening.py` | `strip_model_noise`, `parse_json_payload`, `parse_role_output`, coercers, `retry` | 258 tests; drives the real `_WORKER_WRITABLE` table |
-| `test_harness_agent.py` | `HarnessAgent` behaviour end to end | 354 tests; class-to-decision map in module docstring |
+| `test_harness_agent.py` | `HarnessAgent` behaviour end to end | 385 tests; class-to-decision map in module docstring |
 | `test_live_ollama.py` | L1-L8 live criteria and their offline guards | 94 tests; 17 gated |
 | `test_plan_validator.py` | `pre_step_gate`, `audit`, anchor scan | 191 tests; base fixture is audit-clean |
 | `test_removed_legacy.py` | Removed harness names stay gone (`storage.PLAN_ID_RE`, unread `Defaults`, the legacy plan-id read path) | 11 tests |

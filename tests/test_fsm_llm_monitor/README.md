@@ -1,6 +1,6 @@
 # test_fsm_llm_monitor
 
-The pytest suite for `fsm_llm.monitor`, the web dashboard package of FSM-LLM (source in `src/fsm_llm/monitor/`). It lives at `tests/test_fsm_llm_monitor/` and collects 391 tests in 6 files.
+The pytest suite for `fsm_llm.monitor`, the web dashboard package of FSM-LLM (source in `src/fsm_llm/monitor/`). It lives at `tests/test_fsm_llm_monitor/` and collects 391 tests in 7 files.
 
 ## What it is for
 
