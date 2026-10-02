@@ -4,12 +4,14 @@ Unit tests for the workflow DSL factory functions and WorkflowBuilder.
 
 import pytest
 
+from fsm_llm import BuildError
 from fsm_llm.workflows.definitions import WorkflowDefinition
 from fsm_llm.workflows.dsl import (
     api_step,
     auto_step,
     condition_step,
     conditional_workflow,
+    conversation_step,
     create_workflow,
     event_driven_workflow,
     linear_workflow,
@@ -18,6 +20,10 @@ from fsm_llm.workflows.dsl import (
     timer_step,
     wait_event_step,
     workflow_builder,
+)
+from fsm_llm.workflows.exceptions import (
+    WorkflowDefinitionError,
+    WorkflowValidationError,
 )
 from fsm_llm.workflows.steps import (
     APICallStep,
@@ -213,40 +219,127 @@ class TestParallelStep:
         assert step.aggregation_function is fn
 
 
-class TestWorkflowBuilder:
-    """Test WorkflowBuilder fluent API."""
+def _end():
+    """A terminal step (no outgoing state) so a built workflow validates."""
+    return conversation_step("end", "End", fsm_file="x.json")
 
-    def test_build_empty(self):
-        wf = workflow_builder("wf-1", "Test").build()
+
+def _valid_builder():
+    return (
+        workflow_builder("wf-1", "Test")
+        .set_initial_step(auto_step("s1", "Step 1", "end"))
+        .add_step(_end())
+    )
+
+
+class TestWorkflowBuilder:
+    """Test WorkflowBuilder fluent API (build() always validates)."""
+
+    def test_build_empty_is_refused(self):
+        with pytest.raises(BuildError) as ei:
+            workflow_builder("wf-1", "Test").build()
+        assert isinstance(ei.value.__cause__, WorkflowValidationError)
+
+    def test_build_returns_definition(self):
+        wf = _valid_builder().build()
         assert isinstance(wf, WorkflowDefinition)
         assert wf.workflow_id == "wf-1"
 
     def test_add_step(self):
-        s = auto_step("s1", "Step 1", "done")
-        wf = workflow_builder("wf-1", "Test").add_step(s).build()
-        assert "s1" in wf.steps
+        wf = (
+            workflow_builder("wf-1", "Test")
+            .set_initial_step(auto_step("s1", "S1", "s2"))
+            .add_step(auto_step("s2", "S2", "end"))
+            .add_step(_end())
+            .build()
+        )
+        assert set(wf.steps) == {"s1", "s2", "end"}
 
     def test_set_initial_step(self):
-        s = auto_step("s1", "Step 1", "done")
-        wf = workflow_builder("wf-1", "Test").set_initial_step(s).build()
+        wf = _valid_builder().build()
         assert wf.initial_step_id == "s1"
 
     def test_add_metadata(self):
-        wf = workflow_builder("wf-1", "Test").add_metadata("version", "1.0").build()
+        wf = _valid_builder().add_metadata("version", "1.0").build()
         assert wf.metadata["version"] == "1.0"
 
     def test_chaining(self):
         s1 = auto_step("s1", "Step 1", "s2")
-        s2 = auto_step("s2", "Step 2", "done")
+        s2 = auto_step("s2", "Step 2", "end")
         wf = (
             workflow_builder("wf-1", "Test")
             .set_initial_step(s1)
             .add_step(s2)
+            .add_step(_end())
             .add_metadata("key", "val")
             .build()
         )
         assert wf.initial_step_id == "s1"
         assert "s2" in wf.steps
+
+    def test_build_has_no_validate_parameter(self):
+        with pytest.raises(TypeError):
+            _valid_builder().build(validate=False)  # type: ignore[call-arg]
+
+
+class TestWorkflowBuilderConvention:
+    """Mutators record, build() copies what the builder owns and validates."""
+
+    def test_mutators_return_same_builder(self):
+        b = workflow_builder("wf-1", "Test")
+        s = auto_step("s1", "S1", "end")
+        assert b.add_step(s) is b
+        assert b.set_initial_step(s) is b
+        assert b.add_metadata("k", "v") is b
+
+    def test_builder_mutation_after_build_does_not_touch_product(self):
+        b = _valid_builder().add_metadata("k", "v")
+        wf = b.build()
+        b.add_step(auto_step("late", "Late", "end")).add_metadata("k2", "v2")
+        assert "late" not in wf.steps
+        assert "k2" not in wf.metadata
+
+    def test_product_mutation_does_not_touch_next_build(self):
+        b = _valid_builder().add_metadata("k", "v")
+        wf = b.build()
+        wf.metadata["k"] = "changed"
+        wf.steps.pop("end")
+        again = b.build()
+        assert again.metadata["k"] == "v"
+        assert "end" in again.steps
+
+    def test_second_build_is_independent(self):
+        b = _valid_builder()
+        first, second = b.build(), b.build()
+        assert first is not second
+        assert first.steps is not second.steps
+        assert first.metadata is not second.metadata
+
+    def test_steps_are_shared_by_reference(self):
+        s = auto_step("s1", "S1", "end")
+        wf = workflow_builder("wf-1", "T").set_initial_step(s).add_step(_end()).build()
+        assert wf.steps["s1"] is s
+
+    def test_duplicate_step_id_is_a_build_error(self):
+        b = (
+            workflow_builder("wf-1", "Test")
+            .add_step(auto_step("s1", "A", "end"))
+            .add_step(auto_step("s1", "B", "end"))
+        )
+        with pytest.raises(BuildError) as ei:
+            b.build()
+        assert isinstance(ei.value.__cause__, WorkflowDefinitionError)
+
+    def test_invalid_workflow_is_a_build_error_with_errors(self):
+        b = workflow_builder("wf-1", "Test").set_initial_step(
+            auto_step("s1", "S1", "nowhere")
+        )
+        with pytest.raises(BuildError) as ei:
+            b.build()
+        cause = ei.value.__cause__
+        assert isinstance(cause, WorkflowValidationError)
+        assert ei.value.errors == cause.validation_errors
+        assert any("nowhere" in e for e in ei.value.errors)
 
 
 class TestLinearWorkflow:

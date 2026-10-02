@@ -10,7 +10,10 @@ from typing import Any
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
+from fsm_llm.definitions import BuildError
+
 from .definitions import WorkflowDefinition
+from .exceptions import WorkflowDefinitionError, WorkflowValidationError
 from .models import WaitEventConfig
 from .steps import (
     AgentStep,
@@ -427,39 +430,75 @@ def conversation_step(
 
 # Workflow builder class for even more fluent API
 class WorkflowBuilder:
-    """Builder class for creating workflows with a fluent API."""
+    """Record steps and metadata, then ``build()`` one validated definition.
 
+    Interface contract: ``add_step``, ``set_initial_step`` and ``add_metadata``
+    only record and return ``self``. ``build()`` is the single terminal verb:
+    it creates a fresh ``WorkflowDefinition`` (so the builder can be reused and
+    mutated after, and the product can be mutated without touching the
+    builder), always validates it, and raises ``BuildError`` (``.errors`` holds
+    the validation messages) chained from ``WorkflowDefinitionError`` (a
+    duplicate step id) or ``WorkflowValidationError``.
+
+    Shared by reference: the steps (they hold agents and callables) and the
+    metadata values. Fresh per ``build()``: the definition, its ``steps`` dict
+    and its ``metadata`` dict.
+    """
+
+    # DECISION plan-2026-10-02T052921-89b03f61/D-006
+    # Do NOT wrap a live WorkflowDefinition here and return it from build(), and
+    # do NOT bring back an optional ``validate`` flag: both let a later builder
+    # call change the product and let an invalid workflow out. See decisions.md D-006.
     def __init__(self, workflow_id: str, name: str, description: str = ""):
         """Initialize the workflow builder."""
-        self.workflow = WorkflowDefinition(
-            workflow_id=workflow_id, name=name, description=description
-        )
+        self._workflow_id = workflow_id
+        self._name = name
+        self._description = description
+        self._steps: list[WorkflowStep] = []
+        self._initial: WorkflowStep | None = None
+        self._metadata: dict[str, Any] = {}
 
     def add_step(self, step: WorkflowStep) -> WorkflowBuilder:
-        """Add a step to the workflow."""
-        self.workflow.with_step(step)
+        """Record a step to add to the workflow."""
+        self._steps.append(step)
         return self
 
     def set_initial_step(self, step: WorkflowStep) -> WorkflowBuilder:
-        """Set the initial step of the workflow."""
-        self.workflow.with_initial_step(step)
+        """Record the initial step (it is also added as a step)."""
+        self._initial = step
         return self
 
     def add_metadata(self, key: str, value: Any) -> WorkflowBuilder:
-        """Add metadata to the workflow."""
-        self.workflow.metadata[key] = value
+        """Record a metadata entry."""
+        self._metadata[key] = value
         return self
 
-    def build(self, validate: bool = False) -> WorkflowDefinition:
-        """Return the workflow definition (the builder's own object).
+    def build(self) -> WorkflowDefinition:
+        """Return a fresh, validated ``WorkflowDefinition``.
 
-        Args:
-            validate: Run ``WorkflowDefinition.validate()`` first (raises
-                ``WorkflowValidationError``).
+        Raises:
+            BuildError: duplicate step id or failed validation; the cause is
+                chained and ``.errors`` lists the messages.
         """
-        if validate:
-            self.workflow.validate()
-        return self.workflow
+        try:
+            wf = WorkflowDefinition(
+                workflow_id=self._workflow_id,
+                name=self._name,
+                description=self._description,
+                metadata=dict(self._metadata),
+            )
+            for step in self._steps:
+                wf.with_step(step)
+            if self._initial is not None:
+                wf.with_initial_step(self._initial)
+            wf.validate()
+        except WorkflowValidationError as exc:
+            raise BuildError(
+                str(exc), errors=[str(e) for e in exc.validation_errors]
+            ) from exc
+        except WorkflowDefinitionError as exc:
+            raise BuildError(str(exc)) from exc
+        return wf
 
 
 # --------------------------------------------------------------
