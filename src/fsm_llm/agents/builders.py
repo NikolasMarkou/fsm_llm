@@ -10,12 +10,20 @@ from __future__ import annotations
 
 from typing import Any
 
+from fsm_llm.builders import refuse_named_options
 from fsm_llm.definitions import BuildError
 
 from . import create_agent
 from .definitions import AgentConfig, ToolDefinition
 from .exceptions import AgentError
 from .tools import ToolRegistry
+
+_NAMED_OPTION_HINT = {
+    "pattern": "set_pattern",
+    "tools": "add_tool or set_tool_registry",
+    "config": "set_config",
+    "system_prompt": "set_system_prompt",
+}
 
 
 class ConfiguredAgentBuilder:
@@ -34,10 +42,17 @@ class ConfiguredAgentBuilder:
     ``create_agent`` keyword (pattern parameters, API passthrough such as
     ``seed``, ``handlers``, ``llm_interface``, ``hitl``) unfiltered.
 
-    Isolation: the ``AgentConfig``, the option dict and the tool list are
-    copied at ``build()``, and ``add_tool`` entries go into a fresh
-    ``ToolRegistry`` each build. A registry from ``set_tool_registry``, the
-    tools themselves, and objects passed as options stay shared by reference.
+    ``set_option`` may not repeat a named ``create_agent`` parameter
+    (``pattern``, ``tools``, ``config``, ``system_prompt``): ``build()`` refuses
+    it with the typed setter to use.
+
+    Isolation: the ``AgentConfig`` is a shallow private copy (a later change to
+    the object you passed does not reach the agent), the option dict and the
+    tool list are copied at ``build()``, and ``add_tool`` entries go into a
+    fresh ``ToolRegistry`` each build. Callables and objects inside the config
+    (``verification_fn``, ``transition_config``, ``output_schema``), a registry
+    from ``set_tool_registry``, the tools themselves, and objects passed as
+    options stay shared by reference.
     """
 
     def __init__(self) -> None:
@@ -104,6 +119,9 @@ class ConfiguredAgentBuilder:
                 "Cannot build agent: add_tool() and set_tool_registry() are "
                 "mutually exclusive"
             )
+        refuse_named_options(
+            create_agent, self._options, _NAMED_OPTION_HINT, owner=type(self)
+        )
         try:
             args: dict[str, Any] = {}
             config = self._config_for_build()
@@ -137,6 +155,6 @@ class ConfiguredAgentBuilder:
         """A private ``AgentConfig`` (set config overlaid by the options), or ``None``."""
         if self._config is None and not self._config_options:
             return None
-        base = self._config.model_copy(deep=True) if self._config else AgentConfig()
+        base = self._config.model_copy() if self._config else AgentConfig()
         fields = {name: getattr(base, name) for name in type(base).model_fields}
         return type(base)(**{**fields, **self._config_options})

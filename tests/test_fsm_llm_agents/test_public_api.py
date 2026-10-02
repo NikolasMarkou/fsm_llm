@@ -446,6 +446,57 @@ class TestConfiguredAgentBuilder:
         assert second.config is not first.config
         assert second.config.max_iterations == 99
 
+    def test_callables_and_objects_in_config_stay_shared(self):
+        import threading
+
+        class _Verifier:
+            def __init__(self):
+                self.lock = threading.Lock()
+
+            def check(self, answer, ctx):
+                return True
+
+        v = _Verifier()
+        transition = object()
+        cfg = AgentConfig(verification_fn=v.check, transition_config=transition)
+        b = self._builder().set_pattern("debate").set_config(cfg)
+        agent = b.build()
+        assert agent.config.verification_fn.__self__ is v
+        assert agent.config.transition_config is transition
+        assert agent.config is not cfg
+        cfg.max_iterations = 77
+        assert agent.config.max_iterations != 77
+        second = b.build()
+        assert second.config is not agent.config
+        assert second.config.verification_fn.__self__ is v
+
+    @pytest.mark.parametrize(
+        ("name", "value", "method"),
+        [
+            ("config", AgentConfig(), "set_config"),
+            ("pattern", "react", "set_pattern"),
+            ("tools", [_search], "add_tool"),
+            ("system_prompt", "x", "set_system_prompt"),
+        ],
+    )
+    def test_set_option_naming_a_create_agent_parameter_is_refused(
+        self, name, value, method
+    ):
+        from fsm_llm.definitions import BuildError
+
+        with pytest.raises(BuildError) as info:
+            self._builder().set_option(name, value).build()
+        assert method in str(info.value)
+        assert any(repr(name) in e for e in info.value.errors)
+
+    def test_set_option_beside_typed_setter_is_refused_by_name(self):
+        from fsm_llm.definitions import BuildError
+
+        b = self._builder().set_pattern("debate").set_option("pattern", "react")
+        with pytest.raises(BuildError) as info:
+            b.build()
+        assert "set_pattern" in str(info.value)
+
     def test_second_build_independent(self):
         b = self._builder().add_tool(_search).set_option("seed", 1)
         a1, a2 = b.build(), b.build()
