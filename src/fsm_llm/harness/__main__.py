@@ -61,7 +61,7 @@ EXIT_ERROR = 1
 EXIT_GATE = 2
 
 _PROG = "fsm-llm-harness"
-_INSTALL_HINT = "pip install fsm-llm[harness]"
+_INSTALL_HINT = 'pip install -e ".[harness]" (from a clone)'
 
 #: Printed instead of a plan step when ``state.md`` has no cursor yet.
 _NO_STEP = "-"

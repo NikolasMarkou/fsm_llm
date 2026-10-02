@@ -1142,7 +1142,7 @@ class TestOptionalDependencyGuard:
             cli.main_cli(["status", "somewhere"])
         assert exc.value.code == cli.EXIT_ERROR
         err = capsys.readouterr().err
-        assert "fsm-llm[harness]" in err
+        assert '-e ".[harness]"' in err
 
     def test_guard_never_produces_the_gate_code(
         self, monkeypatch: pytest.MonkeyPatch

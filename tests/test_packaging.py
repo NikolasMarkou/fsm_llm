@@ -313,6 +313,20 @@ class TestModuleDocstringsAreReal:
         )
 
 
+class TestNoPypiInstallHint:
+    """`fsm-llm` on PyPI is a different project: this repo installs from a clone."""
+
+    def test_no_pypi_install_hint_in_src(self):
+        needle = "pip install fsm-llm"
+        hits = [
+            f"{p.relative_to(_REPO_ROOT)}:{n}"
+            for p in sorted((_REPO_ROOT / "src").rglob("*.py"))
+            for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+            if needle in line
+        ]
+        assert not hits, f"stale PyPI install hint (clone install instead): {hits}"
+
+
 # ══════════════════════════════════════════════════════════════
 # Documented test counts: every hand-maintained literal == measured
 # ══════════════════════════════════════════════════════════════

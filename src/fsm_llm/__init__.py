@@ -382,8 +382,8 @@ def get_workflows():
     """Get workflows module if available, otherwise raise ImportError."""
     return _import_extension(
         "fsm_llm.workflows",
-        "Workflows functionality requires the workflows extra. "
-        "Install with: pip install fsm-llm[workflows]",
+        "fsm_llm.workflows is missing from this install. "
+        "Reinstall from a clone of https://github.com/NikolasMarkou/fsm_llm: pip install -e .",
     )
 
 
@@ -399,8 +399,8 @@ def get_reasoning():
     """Get reasoning module if available, otherwise raise ImportError."""
     return _import_extension(
         "fsm_llm.reasoning",
-        "Reasoning functionality requires the reasoning extra. "
-        "Install with: pip install fsm-llm[reasoning]",
+        "fsm_llm.reasoning is missing from this install. "
+        "Reinstall from a clone of https://github.com/NikolasMarkou/fsm_llm: pip install -e .",
     )
 
 
@@ -416,8 +416,8 @@ def get_agents():
     """Get agents module if available, otherwise raise ImportError."""
     return _import_extension(
         "fsm_llm.agents",
-        "Agents functionality requires the agents extra. "
-        "Install with: pip install fsm-llm[agents]",
+        "fsm_llm.agents is missing from this install. "
+        "Reinstall from a clone of https://github.com/NikolasMarkou/fsm_llm: pip install -e .",
     )
 
 

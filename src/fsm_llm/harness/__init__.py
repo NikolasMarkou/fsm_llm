@@ -12,7 +12,8 @@ by the core ``TransitionEvaluator``, so a transition is either DETERMINISTIC or
 BLOCKED -- never an LLM judgement call on a gated edge.
 
 Install:
-    pip install fsm-llm[harness]
+    From a clone of https://github.com/NikolasMarkou/fsm_llm:
+    pip install -e ".[harness]"
 """
 
 from __future__ import annotations

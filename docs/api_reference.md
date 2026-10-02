@@ -726,7 +726,7 @@ uvicorn.run(app, host="127.0.0.1", port=8420)
 # Or just use the CLI: fsm-llm-monitor (it also enables library logging;
 # when embedding, call fsm_llm.setup_logging() to fill the Logs page)
 
-# OTEL export is available via OTELExporter (requires fsm-llm[otel])
+# OTEL export is available via OTELExporter (requires the otel extra)
 ```
 
 `attach_api` registers the monitor handlers on the `API` and lists its conversations next to the launched ones; one API is attached at a time (attaching another switches the previous one's handlers off), and a failed registration raises `MonitorConnectionError` with the previous API kept. The FSM visualizer routes (`POST /api/fsm/visualize`, `GET /api/fsm/visualize/preset/{id}`) draw the nodes and edges of core `build_fsm_graph`, the same graph data as `to_mermaid` and `to_dot`; a definition core cannot graph (unknown initial state, a transition to a missing state) answers 400 `failed to parse FSM definition: <reason>`. Agent and workflow graphs come from the hand-written `static/flows.json`.

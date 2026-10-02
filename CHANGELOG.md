@@ -283,6 +283,11 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 
 ### Changed
 
+- Install hints: runtime install messages (lazy extension imports, monitor, OTEL,
+  MCP, A2A, harness CLI) and the extras docstrings now name a clone install
+  (`pip install -e ".[extra]"`), because the `fsm-llm` PyPI name belongs to another
+  project.
+
 - Builder standard: `fsm_llm.workflows.WorkflowBuilder.build()` has no `validate`
   argument (removed, not deprecated): it always validates, returns a fresh,
   isolated `WorkflowDefinition` (a later builder call no longer changes it) and

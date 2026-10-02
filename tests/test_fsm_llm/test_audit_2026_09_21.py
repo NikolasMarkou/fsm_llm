@@ -3696,7 +3696,7 @@ class TestStep14C6C12:
         from fsm_llm import get_workflows
 
         with _c10_failing_import("fsm_llm.workflows"):
-            with pytest.raises(ImportError, match=r"fsm-llm\[workflows\]"):
+            with pytest.raises(ImportError, match=r"pip install -e \."):
                 get_workflows()
 
     def test_c10_disable_warnings_scoped_to_fsm_llm(self):

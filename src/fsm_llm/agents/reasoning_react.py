@@ -163,7 +163,7 @@ class ReasoningReactAgent(BaseAgent):
         if not _HAS_REASONING:
             raise AgentError(
                 "ReasoningReactAgent requires fsm_llm.reasoning. "
-                "Install with: pip install fsm-llm[reasoning]"
+                "Reinstall from a clone of https://github.com/NikolasMarkou/fsm_llm: pip install -e ."
             )
 
         super().__init__(config, **api_kwargs)
