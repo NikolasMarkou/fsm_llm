@@ -98,13 +98,7 @@ To use a hosted model, pass `model=` (for example `API.from_file("greeter.json",
 
 A state with no transitions (`goodbye`) is terminal. `required_context_keys` only tells Pass 1 what to extract; it never blocks a transition, so the transition above carries its own condition (`requires_context_keys` plus `logic`).
 
-The same thing with the fluent builder (`build()` is the only place that validates):
-
-```python
-from fsm_llm import APIBuilder
-
-api = APIBuilder().set_definition("greeter.json").set_model("ollama_chat/qwen3.5:4b").set_temperature(0.2).build()
-```
+Prefer to assemble it one setting at a time? See [Assemble it step by step](#assemble-it-step-by-step).
 
 ### Try it without a model
 
@@ -137,6 +131,79 @@ print(api.get_data(conv_id), api.get_current_state(conv_id))  # {'name': 'Alice'
 ```
 
 `API` refuses `model=`, `temperature=` and similar settings next to `llm_interface=`, because the interface owns them.
+
+## Assemble it step by step
+
+Anything with more than a couple of settings can be put together by chaining calls. While you chain, nothing is checked; the final `.build()` checks everything at once and hands back a private copy, so one recipe can make many independent objects.
+
+A conversation with a hook and a model:
+
+```python
+from fsm_llm import APIBuilder, HandlerTiming, create_handler
+
+audit = (
+    create_handler("audit")
+    .at(HandlerTiming.POST_TRANSITION)
+    .do(lambda context: {"audited": True})
+)
+
+api = (
+    APIBuilder()
+    .set_definition("greeter.json")
+    .set_model("ollama_chat/qwen3.5:4b")
+    .set_temperature(0.2)
+    .add_handler(audit)
+    .build()
+)
+```
+
+An agent with a tool, an instruction and an iteration limit (a real run against the local model; the wording differs each time):
+
+```python
+from fsm_llm.agents import ConfiguredAgentBuilder, tool
+
+
+@tool
+def add(a: int, b: int) -> int:
+    """Add two integers."""
+    return a + b
+
+
+agent = (
+    ConfiguredAgentBuilder()
+    .set_pattern("react")
+    .add_tool(add)
+    .set_system_prompt("Answer in one short sentence.")
+    .set_max_iterations(6)
+    .build()
+)
+result = agent("What is 19 + 23? Use the add tool.")
+print(result.answer, result.success, result.stop_reason)
+# 19 + 23 equals 42, as calculated by the add tool. True answered
+```
+
+Mistakes come back together, in one error, instead of one at a time:
+
+```python
+from fsm_llm import APIBuilder, BuildError
+
+try:
+    APIBuilder().set_llm_option("model", "a").set_llm_option("max_history_size", 3).build()
+except BuildError as err:
+    print(*err.errors, sep="\n")
+# option 'model' names a constructor parameter; use set_model()
+# option 'max_history_size' names a constructor parameter; use set_max_history_size()
+```
+
+What you get from this style:
+
+- Setters only record, so you can chain them in any order and pass the half-built recipe around.
+- One `.build()` does all the checking and raises one error type. `BuildError` is a `ValueError` that lists every problem in `.errors` and keeps the underlying cause attached.
+- The result is a private copy: change the recipe afterwards, or build again, and nothing already built moves. Objects you hand in (a model interface, a tool, a store) stay shared, not copied.
+- Settings that pass straight through to the model library are accepted without a whitelist, and a name that clashes with a typed setter is refused with a message that names the setter to use.
+- It is an alternative, not a replacement: the plain constructors and `from_file` still work everywhere.
+
+The same shape builds conversations, agents of any pattern, workflows, agent graphs, handlers and the planning harness. The workflow example below uses it too. The rules are in [docs/api_reference.md](docs/api_reference.md).
 
 ## How it works
 
@@ -210,15 +277,18 @@ A workflow (needs no LLM; prints `WorkflowStatus.COMPLETED`):
 
 ```python
 import asyncio
-from fsm_llm.workflows import WorkflowEngine, auto_step, condition_step, create_workflow
+from fsm_llm.workflows import WorkflowEngine, auto_step, condition_step, workflow_builder
 
-wf = create_workflow("orders", "Order check")
-wf.with_initial_step(auto_step("load", "Load order", next_state="route",
-                               action=lambda ctx: {"amount": 1500}))
-wf.with_step(condition_step("route", "Big order?", condition=lambda ctx: ctx["amount"] >= 1000,
-                            true_state="review", false_state="done"))
-wf.with_step(auto_step("review", "Manual review", next_state="done"))
-wf.with_step(auto_step("done", "Finish", next_state=""))
+wf = (
+    workflow_builder("orders", "Order check")
+    .set_initial_step(auto_step("load", "Load order", next_state="route",
+                                action=lambda ctx: {"amount": 1500}))
+    .add_step(condition_step("route", "Big order?", condition=lambda ctx: ctx["amount"] >= 1000,
+                             true_state="review", false_state="done"))
+    .add_step(auto_step("review", "Manual review", next_state="done"))
+    .add_step(auto_step("done", "Finish", next_state=""))
+    .build()
+)
 
 
 async def main():
@@ -231,7 +301,7 @@ async def main():
 asyncio.run(main())
 ```
 
-**Builders.** Every part has a fluent builder that records calls and checks everything in `build()`, which raises `BuildError` (a `FSMError` and a `ValueError`, with `.errors`): `APIBuilder` and `FSMManagerBuilder` (core), `ConfiguredAgentBuilder` and `AgentGraphBuilder` (agents), `WorkflowBuilder` (workflows), `HarnessAgentBuilder` (harness). The convention is described in [src/fsm_llm/CLAUDE.md](src/fsm_llm/CLAUDE.md).
+**Step-by-step assembly.** Every part can also be put together by chaining calls and checking everything at the end; see [Assemble it step by step](#assemble-it-step-by-step).
 
 **Evaluation honesty.** The examples scorer reads each run's output with simple rules and gives 0 to 4. It overstates quality, and runs from before and after the 2026-09-29 restructure are not comparable. The method and the run log are in [EVALUATE.md](EVALUATE.md). Offline tests (the default) replace the model with a fake, so they say nothing about model quality.
 
@@ -318,6 +388,7 @@ Rules to know before you open a pull request:
 - Do not edit `examples/` unless asked: they are evaluation baselines.
 - litellm is imported only in `src/fsm_llm/llm.py`. Do not add a second request builder or provider call elsewhere.
 - Internal-key and secret-key checks go through `fsm_llm.constants.has_internal_prefix` and `is_forbidden_context_entry`. Do not re-inline them.
+- Anything new that is configured with many settings gets a step-by-step builder that follows the convention in [src/fsm_llm/CLAUDE.md](src/fsm_llm/CLAUDE.md): setters only record, `build()` is the only validator.
 - Read `# DECISION plan-<id>/D-NNN` comments before editing nearby code: they say what not to do and why.
 - Test counts in this file and in `CLAUDE.md` are pinned by `tests/test_packaging.py`. After adding tests, re-measure with `pytest --collect-only -q | tail -1` and update them. Every FSM JSON block in this file is loaded by `tests/test_fsm_llm/test_docs_snippets.py`, so keep it valid.
 - Commit messages follow `<type>(<scope>): <summary>`. Plan-step commits start with `[plan-YYYY-MM-DD-<8 hex>/iter-N/step-M]`.
