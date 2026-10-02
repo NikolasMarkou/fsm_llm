@@ -99,6 +99,7 @@ from fsm_llm.agents.constants import StopReason
 from fsm_llm.agents.definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.hitl import ApprovalCallback, HumanInTheLoop
+from fsm_llm.definitions import BuildError
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
@@ -143,6 +144,7 @@ from .tools import (
 
 __all__ = [
     "HarnessAgent",
+    "HarnessAgentBuilder",
     "Presentation",
     "RevertCallback",
     "RevertDirective",
@@ -3669,6 +3671,95 @@ class HarnessAgent(BaseAgent):
                 working.pop(key, None)
             else:
                 working[key] = value
+
+
+class HarnessAgentBuilder:
+    """Builds a :class:`HarnessAgent`.
+
+    Interface contract: one ``set_<parameter>`` per constructor parameter, each
+    returning ``self``; ``set_api_option(name, value)`` (repeatable, never
+    filtered) feeds the open-ended ``**api_kwargs`` (``llm_interface``,
+    ``seed``, ...). ``build()`` passes ONLY the values that were set, so every
+    default and rule stays in ``HarnessAgent``, and returns a new agent or
+    raises ``BuildError`` chained from the constructor's ``ValueError`` /
+    ``TypeError`` / ``AgentError`` / ``HarnessError`` (message includes the
+    cause, ``.errors`` lists it). No parameter is required.
+
+    Isolation: the config and the option dict are copied at ``build()``; the
+    worker factory and the callbacks stay shared with the caller by reference.
+    A second ``build()`` yields an independent agent.
+    """
+
+    def __init__(self) -> None:
+        self._set: dict[str, Any] = {}
+        self._api_options: dict[str, Any] = {}
+
+    def _put(self, name: str, value: Any) -> HarnessAgentBuilder:
+        self._set[name] = value
+        return self
+
+    def set_worker_factory(self, factory: WorkerFactory | None) -> HarnessAgentBuilder:
+        return self._put("worker_factory", factory)
+
+    def set_approval_callback(
+        self, callback: ApprovalCallback | None
+    ) -> HarnessAgentBuilder:
+        return self._put("approval_callback", callback)
+
+    def set_revert_callback(
+        self, callback: RevertCallback | None
+    ) -> HarnessAgentBuilder:
+        return self._put("revert_callback", callback)
+
+    def set_config(self, config: AgentConfig | None) -> HarnessAgentBuilder:
+        return self._put("config", config)
+
+    def set_findings_threshold(self, value: int) -> HarnessAgentBuilder:
+        return self._put("findings_threshold", value)
+
+    def set_max_fix_attempts(self, value: int) -> HarnessAgentBuilder:
+        return self._put("max_fix_attempts", value)
+
+    def set_max_leash_grants(self, value: int) -> HarnessAgentBuilder:
+        return self._put("max_leash_grants", value)
+
+    def set_iteration_hard_cap(self, value: int) -> HarnessAgentBuilder:
+        return self._put("iteration_hard_cap", value)
+
+    def set_max_explore_redispatches(self, value: int) -> HarnessAgentBuilder:
+        return self._put("max_explore_redispatches", value)
+
+    def set_max_plan_redispatches(self, value: int) -> HarnessAgentBuilder:
+        return self._put("max_plan_redispatches", value)
+
+    def set_max_reflect_redispatches(self, value: int) -> HarnessAgentBuilder:
+        return self._put("max_reflect_redispatches", value)
+
+    def set_max_close_denials(self, value: int) -> HarnessAgentBuilder:
+        return self._put("max_close_denials", value)
+
+    def set_max_stall_turns(self, value: int) -> HarnessAgentBuilder:
+        return self._put("max_stall_turns", value)
+
+    def set_api_option(self, name: str, value: Any) -> HarnessAgentBuilder:
+        self._api_options[name] = value
+        return self
+
+    def build(self) -> HarnessAgent:
+        kwargs = dict(self._set)
+        if kwargs.get("config") is not None:
+            kwargs["config"] = kwargs["config"].model_copy(deep=True)
+        # DECISION plan-2026-10-02T052921-89b03f61/D-008
+        # Open-ended options go to the constructor unfiltered. Do NOT add a
+        # kwarg whitelist or copy BaseAgent's denylist here: the constructor
+        # refuses bad names itself and a builder-side copy would drift.
+        kwargs.update(self._api_options)
+        try:
+            return HarnessAgent(**kwargs)
+        except (ValueError, TypeError, AgentError, HarnessError) as exc:
+            raise BuildError(
+                f"Cannot build HarnessAgent: {exc}", errors=[str(exc)]
+            ) from exc
 
 
 #: One pre-step-gate slug's action: it may write context, emit a presentation,

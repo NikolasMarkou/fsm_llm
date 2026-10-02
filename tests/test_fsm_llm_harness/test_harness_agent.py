@@ -5845,3 +5845,97 @@ class TestRunsOnTheCoreLoop:
             [(HarnessStates.REFLECT, HarnessStates.REFLECT, _BLOCKED)] * 3
         )
         assert spy.converse == []
+
+
+class TestHarnessAgentBuilder:
+    """``HarnessAgentBuilder``: a fluent front that only forwards what was set."""
+
+    _LIMITS = (
+        "findings_threshold",
+        "max_fix_attempts",
+        "max_leash_grants",
+        "iteration_hard_cap",
+        "max_explore_redispatches",
+        "max_plan_redispatches",
+        "max_reflect_redispatches",
+        "max_close_denials",
+        "max_stall_turns",
+    )
+
+    @staticmethod
+    def _builder():
+        from fsm_llm.harness import HarnessAgentBuilder
+
+        return HarnessAgentBuilder().set_api_option(
+            "llm_interface", MockLLM2Interface()
+        )
+
+    def test_exported_from_the_package(self) -> None:
+        import fsm_llm.harness as pkg
+
+        assert "HarnessAgentBuilder" in pkg.__all__
+
+    def test_mutators_return_the_same_builder(self) -> None:
+        b = self._builder()
+        assert b.set_worker_factory(lambda r: None) is b
+        assert b.set_approval_callback(lambda r: True) is b
+        assert b.set_revert_callback(lambda d: None) is b
+        assert b.set_config(AgentConfig()) is b
+        assert b.set_api_option("seed", 1) is b
+        for name in self._LIMITS:
+            assert getattr(b, f"set_{name}")(5) is b
+
+    def test_unset_values_equal_the_constructor_defaults(self) -> None:
+        built = self._builder().build()
+        direct = HarnessAgent(llm_interface=MockLLM2Interface())
+        assert isinstance(built, HarnessAgent)
+        for name in self._LIMITS:
+            assert getattr(built, name) == getattr(direct, name)
+        assert built.worker_factory is None
+        assert built.config == direct.config
+
+    @pytest.mark.parametrize("name", _LIMITS)
+    def test_each_limit_reaches_the_agent(self, name: str) -> None:
+        agent = getattr(self._builder(), f"set_{name}")(7).build()
+        assert getattr(agent, name) == 7
+
+    def test_callbacks_reach_the_agent_by_reference(self) -> None:
+        def worker(request):
+            return None
+
+        def approve(request):
+            return True
+
+        agent = (
+            self._builder()
+            .set_worker_factory(worker)
+            .set_approval_callback(approve)
+            .build()
+        )
+        assert agent.worker_factory is worker
+        assert agent._approval_callback is approve
+
+    def test_api_option_is_passed_through_unfiltered(self) -> None:
+        agent = self._builder().set_api_option("seed", 123).build()
+        assert agent._api_kwargs["seed"] == 123
+
+    def test_constructor_refusal_is_a_build_error_with_the_cause(self) -> None:
+        from fsm_llm.definitions import BuildError
+
+        with pytest.raises(BuildError) as info:
+            self._builder().set_api_option("model", "x").build()
+        assert isinstance(info.value.__cause__, TypeError)
+        assert str(info.value.__cause__) in str(info.value)
+        assert info.value.errors
+
+    def test_config_is_isolated_and_builds_are_independent(self) -> None:
+        cfg = AgentConfig(temperature=0.1)
+        b = self._builder().set_config(cfg)
+        first = b.build()
+        cfg.temperature = 0.9
+        second = b.build()
+        assert first.config.temperature == 0.1
+        assert second.config.temperature == 0.9
+        second.config.temperature = 0.5
+        assert first.config.temperature == 0.1
+        assert first is not second

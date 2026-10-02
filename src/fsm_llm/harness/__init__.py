@@ -93,6 +93,7 @@ from .hardening import (
 )
 from .harness import (
     HarnessAgent,
+    HarnessAgentBuilder,
     Presentation,
     RevertCallback,
     RevertDirective,
@@ -239,6 +240,7 @@ __all__ = [
     "pre_step_gate",
     # Driver
     "HarnessAgent",
+    "HarnessAgentBuilder",
     "Presentation",
     "RevertCallback",
     "RevertDirective",
