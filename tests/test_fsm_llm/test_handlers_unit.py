@@ -537,36 +537,70 @@ class TestHandlerBuilderFluentAPI:
             create_handler("copies")
             .when(lambda *a: True)
             .on_state("s1")
+            .on_target_state("t1")
+            .not_on_state("n1")
+            .not_on_target_state("nt1")
             .at(HandlerTiming.PRE_PROCESSING)
             .when_context_has("k1")
+            .when_keys_updated("u1")
         )
         builder.execution_lambda = lambda ctx: {}
         h = builder.build()
-        names = ("condition_lambdas", "timings", "states", "required_keys")
+        # every collection build() copies into the handler
+        names = (
+            "condition_lambdas",
+            "timings",
+            "states",
+            "target_states",
+            "required_keys",
+            "updated_keys",
+            "not_states",
+            "not_target_states",
+        )
         for attr in names:
-            assert getattr(h, attr) is not getattr(builder, attr)
+            assert getattr(h, attr) is not getattr(builder, attr), attr
 
         builder.when(lambda *a: False)
         builder.on_state("s2")
+        builder.on_target_state("t2")
+        builder.not_on_state("n2")
+        builder.not_on_target_state("nt2")
         builder.at(HandlerTiming.POST_PROCESSING)
         builder.when_context_has("k2")
+        builder.when_keys_updated("u2")
         assert len(h.condition_lambdas) == 1
         assert h.states == {"s1"}
+        assert h.target_states == {"t1"}
+        assert h.not_states == {"n1"}
+        assert h.not_target_states == {"nt1"}
         assert h.timings == {HandlerTiming.PRE_PROCESSING}
         assert h.required_keys == {"k1"}
+        assert h.updated_keys == {"u1"}
 
         h.states.add("only_h")
+        h.target_states.add("only_h")
+        h.not_states.add("only_h")
+        h.not_target_states.add("only_h")
         h.required_keys.add("only_h")
+        h.updated_keys.add("only_h")
         h.timings.add(HandlerTiming.PRE_TRANSITION)
         h.condition_lambdas.append(lambda *a: True)
         assert builder.states == {"s1", "s2"}
+        assert builder.target_states == {"t1", "t2"}
+        assert builder.not_states == {"n1", "n2"}
+        assert builder.not_target_states == {"nt1", "nt2"}
         assert builder.required_keys == {"k1", "k2"}
+        assert builder.updated_keys == {"u1", "u2"}
         assert HandlerTiming.PRE_TRANSITION not in builder.timings
         assert len(builder.condition_lambdas) == 2
 
         second = builder.build()
         assert second.states == {"s1", "s2"}
+        assert second.target_states == {"t1", "t2"}
+        assert second.not_states == {"n1", "n2"}
+        assert second.not_target_states == {"nt1", "nt2"}
         assert second.required_keys == {"k1", "k2"}
+        assert second.updated_keys == {"u1", "u2"}
         assert second.timings == {
             HandlerTiming.PRE_PROCESSING,
             HandlerTiming.POST_PROCESSING,
