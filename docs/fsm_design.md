@@ -1,6 +1,6 @@
 # FSM Design Guide
 
-> Covers FSM-LLM v0.11.0
+> Covers FSM-LLM v0.12.0
 
 Best practices for designing effective Finite State Machines for conversational AI.
 

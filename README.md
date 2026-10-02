@@ -10,7 +10,7 @@
 
 FSM-LLM is a Python framework for chatbots and agents that follow a fixed structure: you describe the conversation as a finite state machine in JSON, and a language model does the language work inside each state.
 
-Version 0.11.0, Apache-2.0, Python 3.10 to 3.12.
+Version 0.12.0, Apache-2.0, Python 3.10 to 3.12.
 
 ## Why it exists
 
@@ -332,7 +332,7 @@ Good places to help, all taken from recorded open items:
 
 ## Status
 
-- Version 0.11.0. Most tests are offline and use a fake model, so they check logic and wiring, not model quality.
+- Version 0.12.0. Most tests are offline and use a fake model, so they check logic and wiring, not model quality.
 - **The harness is experimental and not production-ready.** In the committed end-to-end block `scripts/bench_data/l6-e2e/B8` (`ollama_chat/qwen3.5:4b`, n=3), 2 of 3 runs met the floor (reached EXECUTE, wrote a verified file, halted with a named reason); the third stopped in PLAN. No run in any block closed a plan, and the 3 of 3 bar is not met. See [scripts/bench_data/README.md](scripts/bench_data/README.md).
 - Evaluation scores are a heuristic and overstate quality. The recorded runs in [EVALUATE.md](EVALUATE.md) used a 4B local model, and scores on other models differ.
 

@@ -30,7 +30,7 @@ Tests fall into four styles:
 - `test_regression_jsonlogic_and_merge.py` - plan 9: multi-key JsonLogic dicts raise, reserved LLM kwargs, `transition_decision` never gets structured output, context merge, LIFO stack teardown in `end_conversation`, history role mapping (an unknown role becomes system), exception chaining, `min`/`max`/`missing_some`, `None` comparisons, removed dead code.
 - `test_regression_logic_and_visualizer.py` - plan 7: empty `and`/`or`, visualizer box widths, instance cleanup when a START_CONVERSATION handler fails, removed `early_termination`.
 - `test_regression_messages_and_operators.py` - plan 12: message truncation length, allowed JsonLogic operator names, validator output without emoji, Python 3.10 floor, no `HANDLER_ERROR_SKIP`.
-- `test_regression_review.py` - review fixes C1 to M6: version `0.11.0`, reasoning context pruning and `ContextKeys` use, LLM `timeout`, litellm spec excludes 1.82.7 and 1.82.8, no async handlers, static `__all__`, no Sphinx in `tox.ini`.
+- `test_regression_review.py` - review fixes C1 to M6: version `0.12.0`, reasoning context pruning and `ContextKeys` use, LLM `timeout`, litellm spec excludes 1.82.7 and 1.82.8, no async handlers, static `__all__`, no Sphinx in `tox.ini`.
 - `test_regression_transition_eval.py` - plan 8: strict condition matching stops on error, priority tie-break, dict content in response parsing, no CONTEXT_UPDATE handlers for empty data, `pop_fsm` failure path.
 
 ## How to use it
@@ -46,7 +46,7 @@ At the time of writing, 264 tests are collected: 262 pass and 2 are skipped (the
 
 ## Things to know
 
-- `test_regression_review.py` pins the package version to `"0.11.0"`. Update it on every release.
+- `test_regression_review.py` pins the package version to `"0.12.0"`. Update it on every release.
 - Many tests call private methods (for example `TransitionEvaluator._determine_evaluation_result`, `LiteLLMInterface._parse_response_generation_response`, `manager._pipeline._execute_state_transition`). Renaming them breaks these tests.
 - Source checks fail on text, not behavior: reintroducing the string `md5` in `src/fsm_llm/api.py` or `import asyncio` in `handlers.py` fails a test even if unused.
 - Tests that build `API.__new__(API)` must set every attribute the method reads (`_stack_lock`, `_last_accessed`, `_pending_push_ids`, `_ended_conversations`, `_MAX_ENDED_CACHE`, `_temp_fsm_definitions`). A new attribute in `API.__init__` may need adding here.

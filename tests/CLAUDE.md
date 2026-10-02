@@ -102,7 +102,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - `ModuleNotFoundError: tests...`: pytest run from outside the repo root.
 - `test_packaging.py` count failures: a test was added or removed without updating the pinned doc literals.
-- Version failures after a release: `"0.11.0"` literals in `test_fsm_llm_monitor/test_app.py` and `test_fsm_llm_regression/test_regression_review.py`.
+- Version failures after a release: `"0.12.0"` literals in `test_fsm_llm_monitor/test_app.py` and `test_fsm_llm_regression/test_regression_review.py`.
 - Armed live harness blocks `pytest.fail` when their rows file already exists; running them also writes into tracked `scripts/bench_data/`.
 - Timing-sensitive workflow and harness tests can flake on a loaded machine; live Ollama tests time out under GPU load.
 - An OpenTelemetry "I/O operation on closed file" traceback after an agents run is shutdown noise, not a failure.

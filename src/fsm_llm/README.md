@@ -87,7 +87,7 @@ flowchart TD
 - `security.py` - the two key checks every context filter uses: internal keys (`has_internal_prefix`) and secret-looking keys (`is_forbidden_context_entry`).
 - `constants.py` - defaults, limits, environment variable names and shared key names; it also re-exports the names from `security.py`.
 - `logging.py` - loguru setup (logging is off until you turn it on).
-- `__init__.py`, `__version__.py`, `py.typed` - public exports, version (0.11.0, shared by all subpackages), type-hint marker.
+- `__init__.py`, `__version__.py`, `py.typed` - public exports, version (0.12.0, shared by all subpackages), type-hint marker.
 
 ## How to use it
 

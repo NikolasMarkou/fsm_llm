@@ -111,7 +111,7 @@ class TestWebServer:
         assert resp.status_code == 200
         data = resp.json()
         assert "monitor_version" in data
-        assert data["monitor_version"] == "0.11.0"
+        assert data["monitor_version"] == "0.12.0"
 
     def test_api_fsm_load(self):
         resp = self.client.post(
@@ -283,7 +283,7 @@ class TestMonitorImports:
     def test_version(self):
         from fsm_llm.monitor import __version__
 
-        assert __version__ == "0.11.0"
+        assert __version__ == "0.12.0"
 
     def test_server_import(self):
         from fsm_llm.monitor.server import app, configure

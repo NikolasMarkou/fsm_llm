@@ -4,10 +4,10 @@ The `docs/` folder at the root of the FSM-LLM repository holds the long-form use
 
 ## What it is for
 
-The package READMEs say what each part is. These guides go further: they teach you to build a bot, design states and transitions, write handlers, and they list the public API. Five files are current guides for version 0.11.0, and each one starts with the line `> Covers FSM-LLM v0.11.0`. The other four are dated design records, kept to explain design choices, not to teach usage:
+The package READMEs say what each part is. These guides go further: they teach you to build a bot, design states and transitions, write handlers, and they list the public API. Five files are current guides for version 0.12.0, and each one starts with the line `> Covers FSM-LLM v0.12.0`. The other four are dated design records, kept to explain design choices, not to teach usage:
 
 - Three come from the "Strands" initiative, which adapted features from the Strands Agents SDK. All of it shipped in v0.4.0, and their counts and paths are from the time of writing.
-- `agents_roadmap.md` is the audit record and roadmap for `fsm_llm.agents` (dated 2026-09-29, with measured baselines added later). It has no `Covers` header, and parts of it describe unreleased work on top of 0.11.0.
+- `agents_roadmap.md` is the audit record and roadmap for `fsm_llm.agents` (dated 2026-09-29, with measured baselines added later). It has no `Covers` header, and it describes work that shipped in 0.12.0, on top of 0.11.0.
 
 If you only want to use the library, read the five guides. Per-package READMEs under `src/fsm_llm/` and the repo root `README.md` hold the rest.
 

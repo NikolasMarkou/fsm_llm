@@ -3,7 +3,7 @@
 Status: design record for the `fsm_llm.agents` audit, 2026-09-29.
 
 - Code range: `c632893..HEAD` (plan `plan-2026-09-29T103145-06a5ec0a`, 27 steps plus eight completion fixes: 15.1, 20.1, 13.1, 3.1, 21.1, 21.2, 24.1, 20.2).
-- Version: unreleased changes on top of `0.11.0`. See `CHANGELOG.md` `## [Unreleased]`.
+- Version: released in `0.12.0`, on top of `0.11.0`. See `CHANGELOG.md` `## [0.12.0]`.
 - Scope: Track A of the audit (test infrastructure E3/E4, Phase 0 hotfixes, Phase 1 pattern correctness). Track B (Phases 2-6), the live agent bench (E1/E2), E5 and the D5 deprecations are deferred.
 - Current contracts: `src/fsm_llm/agents/README.md` (user guide), `src/fsm_llm/agents/CLAUDE.md` (maintainer contracts), `docs/api_reference.md` (Agents section).
 

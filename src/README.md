@@ -4,7 +4,7 @@ The `src/` folder holds the source code of the FSM-LLM project. It contains one 
 
 ## What it is for
 
-FSM-LLM is a Python framework (version 0.11.0, Apache-2.0, Python 3.10 to 3.12) for building chatbots that follow a fixed structure. A finite state machine (FSM) is a set of named states, each with its own job, plus rules for moving between them. You describe the conversation as states in a JSON file. A large language model (LLM) does the language work: it pulls facts out of what the user typed and writes the replies. Plain Python rules decide when to move between states, so the flow stays predictable and testable.
+FSM-LLM is a Python framework (version 0.12.0, Apache-2.0, Python 3.10 to 3.12) for building chatbots that follow a fixed structure. A finite state machine (FSM) is a set of named states, each with its own job, plus rules for moving between them. You describe the conversation as states in a JSON file. A large language model (LLM) does the language work: it pulls facts out of what the user typed and writes the replies. Plain Python rules decide when to move between states, so the flow stays predictable and testable.
 
 The project uses the "src layout": the package lives under `src/` rather than at the repository root, so tests run against the installed package and not against stray files. `pyproject.toml` finds packages with `where = ["src"]`.
 

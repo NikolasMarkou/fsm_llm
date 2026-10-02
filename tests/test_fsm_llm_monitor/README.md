@@ -51,7 +51,7 @@ The monitor extra must be installed (`fastapi`, `uvicorn`, `jinja2`), for exampl
 - `test_otel.py` does not need `opentelemetry` installed. It puts fake modules into `sys.modules` and re-imports `fsm_llm.monitor.otel` for each test.
 - `test_audit_2026_09_28.py` calls `pytest.importorskip("fsm_llm.workflows")` at module level, so when `fsm_llm.workflows` cannot be imported the whole file is skipped, including its non-workflow tests. `TestStubToolExecution` is skipped without `fsm_llm.agents`.
 - Async tests have no marker. They rely on `asyncio_mode = "auto"` in `pyproject.toml`.
-- `test_app.py` asserts the version string `"0.11.0"` in two places (`/api/info` `monitor_version` and `fsm_llm.monitor.__version__`). Update both on a version bump.
+- `test_app.py` asserts the version string `"0.12.0"` in two places (`/api/info` `monitor_version` and `fsm_llm.monitor.__version__`). Update both on a version bump.
 - The server test files import `fastapi.testclient` at module level, so they fail at collection (they do not skip) when the monitor extra is missing.
 - `test_env_key_applies_without_configure` (in `test_server_security.py`) starts a Python subprocess (120 s timeout).
 - Preset tests need the repo `examples/` directory. Some of them only assert when presets are found.

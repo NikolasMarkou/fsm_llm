@@ -30,7 +30,7 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | autouse `_clear_monitor_api_key_env` | `monkeypatch.delenv("FSM_LLM_MONITOR_API_KEY", raising=False)`; without it an exported key makes about 22 `test_app.py` tests 401 |
-| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 128 tests; asserts `"0.11.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
+| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 128 tests; asserts `"0.12.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
 | `test_server_security.py` | Origin/Host, body limit, headers, gated reads, WebSocket auth, error mapping, bounds, dashboard config, builder busy guard, `validate_preset_id` | 36 tests; autouse `_reset_key` reconfigures with env key `""` after each test |
 | `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools | 73 tests; contains unmarked `async def` tests |
 | `test_collector.py` | `EventCollector` | 45 tests |
@@ -137,7 +137,7 @@ Payloads and records pinned elsewhere in the suite:
 ## Failure modes
 
 - 401s across `test_app.py`: an API key leaked in (env var or a test that did not reset `configure`).
-- Version assertion failures in `test_app.py` after a release: update the two `"0.11.0"` literals.
+- Version assertion failures in `test_app.py` after a release: update the two `"0.12.0"` literals.
 - Static file tests fail if a JS module under `src/fsm_llm/monitor/static/` is renamed or removed.
 - `test_examples_dir_resolves_to_repo_examples` fails if `instance_manager.py` moves to another depth.
 - Preset tests only assert when `/api/presets` finds FSM presets; they pass vacuously if none exist.

@@ -1,7 +1,7 @@
 # docs
 
 Path: `docs/`
-Purpose: Long-form Markdown guides for FSM-LLM v0.11.0 (quickstart, FSM design, handlers, architecture, API reference) plus three historical Strands design records.
+Purpose: Long-form Markdown guides for FSM-LLM v0.12.0 (quickstart, FSM design, handlers, architecture, API reference) plus three historical Strands design records.
 
 ## Scope
 
@@ -14,7 +14,7 @@ Two groups of files:
 
 | Group | Files | Header | Status |
 | --- | --- | --- | --- |
-| Current guides | `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md` | `> Covers FSM-LLM v0.11.0` (matches `src/fsm_llm/__version__.py`) | Must match the code |
+| Current guides | `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md` | `> Covers FSM-LLM v0.12.0` (matches `src/fsm_llm/__version__.py`) | Must match the code |
 | Historical records | `strands_features.md`, `strands_features_phase_1.md`, `strands_features_phase_2.md` | `> **Historical design record.** ...` blockquote | Frozen snapshots. The blockquote says the counts are from the time of writing |
 
 Links between the docs: `fsm_design.md` ends with `**Next:** [Handler Development](./handlers.md)`. Each Strands file links to `api_reference.md`.

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-02
+
 Two sets of changes. The entries marked "Step driver" come from plan `07ad3f8c`
 (2026-09-30 to 2026-10-01): core gained a message-free step (`API.advance`) and a
 bounded run loop (`API.run_until_terminal`), every agent pattern and the harness now
@@ -3775,6 +3777,7 @@ examples, signatures, and the 2-pass core contract are unchanged. New optional
 - 7 examples (basic, intermediate, advanced)
 - Comprehensive documentation
 
+[0.12.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.8.0...v0.9.0
