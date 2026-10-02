@@ -757,6 +757,14 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 - Docs: `docs/api_reference.md` agent snippets passed `model=` to constructors, which
   crashed at run time.
 
+### Renamed
+
+- Agents (meta-builder): `FSMBuilder`, `WorkflowBuilder` and `AgentBuilder` in
+  `fsm_llm.agents` and `fsm_llm.agents.meta_builders` are now `FSMArtifactBuilder`,
+  `WorkflowArtifactBuilder` and `AgentArtifactBuilder`, with no alias. The old
+  `WorkflowBuilder` name clashed with `fsm_llm.workflows.WorkflowBuilder`, a different
+  class that keeps its name. `ArtifactBuilder` is unchanged.
+
 ### Removed
 
 - One LLM layer, core: `LiteLLMInterface.complete_structured`; use

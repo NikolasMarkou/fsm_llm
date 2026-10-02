@@ -3,7 +3,7 @@ from __future__ import annotations
 """Tests for meta-agent prompt builders (hybrid architecture)."""
 
 from fsm_llm.agents.definitions import ArtifactType
-from fsm_llm.agents.meta_builders import FSMBuilder
+from fsm_llm.agents.meta_builders import FSMArtifactBuilder
 from fsm_llm.agents.meta_prompts import (
     build_followup_message,
     build_output_message,
@@ -45,7 +45,7 @@ class TestFollowupMessage:
 
 class TestReviewPresentation:
     def test_valid_artifact(self):
-        builder = FSMBuilder()
+        builder = FSMArtifactBuilder()
         builder.set_overview("Bot", "A bot")
         builder.add_state("s1", "State 1", "Purpose")
 
@@ -55,7 +55,7 @@ class TestReviewPresentation:
         assert "approve" in msg.lower() or "changes" in msg.lower()
 
     def test_invalid_artifact_shows_errors(self):
-        builder = FSMBuilder()
+        builder = FSMArtifactBuilder()
         msg = build_review_presentation(builder, ArtifactType.FSM)
         assert "error" in msg.lower()
 

@@ -6,7 +6,11 @@ from typing import Any
 import pytest
 
 from fsm_llm.agents.definitions import MetaBuilderConfig
-from fsm_llm.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from fsm_llm.agents.meta_builders import (
+    AgentArtifactBuilder,
+    FSMArtifactBuilder,
+    WorkflowArtifactBuilder,
+)
 from fsm_llm.definitions import (
     CompletionRequest,
     CompletionResponse,
@@ -114,27 +118,27 @@ def offline_llm(monkeypatch):
 
 
 @pytest.fixture
-def fsm_builder() -> FSMBuilder:
+def fsm_builder() -> FSMArtifactBuilder:
     """Fresh FSM builder."""
-    return FSMBuilder()
+    return FSMArtifactBuilder()
 
 
 @pytest.fixture
-def workflow_builder() -> WorkflowBuilder:
+def workflow_builder() -> WorkflowArtifactBuilder:
     """Fresh workflow builder."""
-    return WorkflowBuilder()
+    return WorkflowArtifactBuilder()
 
 
 @pytest.fixture
-def agent_builder() -> AgentBuilder:
+def agent_builder() -> AgentArtifactBuilder:
     """Fresh agent builder."""
-    return AgentBuilder()
+    return AgentArtifactBuilder()
 
 
 @pytest.fixture
-def populated_fsm_builder() -> FSMBuilder:
+def populated_fsm_builder() -> FSMArtifactBuilder:
     """FSM builder with some states and transitions already added."""
-    b = FSMBuilder()
+    b = FSMArtifactBuilder()
     b.set_overview("GreetingBot", "A simple greeting bot", persona="Friendly assistant")
     b.add_state("greeting", "Greet the user", "Welcome the user and ask their name")
     b.add_state(

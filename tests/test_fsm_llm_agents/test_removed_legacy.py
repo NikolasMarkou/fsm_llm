@@ -205,3 +205,35 @@ class TestTerminalAgentStatesExtractNothing:
             assert not state.get("field_extractions"), (pattern, sid)
             assert not state.get("classification_extractions"), (pattern, sid)
             assert state["response_instructions"], (pattern, sid)
+
+
+class TestMetaBuildersAreArtifactBuilders:
+    """Plan 89b03f61 step 2: the meta builders took the *ArtifactBuilder names.
+
+    The bare names clashed with ``fsm_llm.workflows.WorkflowBuilder`` (a
+    different class) and ``fsm_llm.harness.AgentBuilder`` (a callable alias).
+    """
+
+    @pytest.mark.parametrize("name", ["FSMBuilder", "WorkflowBuilder", "AgentBuilder"])
+    def test_old_name_is_gone_from_agents_and_meta_builders(self, name):
+        meta_builders = importlib.import_module("fsm_llm.agents.meta_builders")
+
+        assert name not in agents.__all__
+        assert not hasattr(agents, name)
+        assert not hasattr(meta_builders, name)
+
+    @pytest.mark.parametrize(
+        "name",
+        ["FSMArtifactBuilder", "WorkflowArtifactBuilder", "AgentArtifactBuilder"],
+    )
+    def test_new_name_is_exported(self, name):
+        meta_builders = importlib.import_module("fsm_llm.agents.meta_builders")
+
+        assert name in agents.__all__
+        assert getattr(agents, name) is getattr(meta_builders, name)
+
+    def test_workflow_builder_lives_only_in_workflows(self):
+        import fsm_llm.workflows as workflows
+
+        assert not hasattr(agents, "WorkflowBuilder")
+        assert "WorkflowBuilder" in workflows.__all__

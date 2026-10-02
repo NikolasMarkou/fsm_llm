@@ -20,7 +20,11 @@ from .constants import (
     MetaContextKeys,
 )
 from .definitions import ArtifactType
-from .meta_builders import AgentBuilder, ArtifactBuilder, WorkflowBuilder
+from .meta_builders import (
+    AgentArtifactBuilder,
+    ArtifactBuilder,
+    WorkflowArtifactBuilder,
+)
 
 # ------------------------------------------------------------------
 # Build request -- schemas, response format, prompt
@@ -83,7 +87,7 @@ _WORKFLOW_SCHEMA: dict[str, Any] = {
                     # later in ``validate_complete``.
                     "step_type": {
                         "type": "string",
-                        "enum": sorted(WorkflowBuilder.VALID_STEP_TYPES),
+                        "enum": sorted(WorkflowArtifactBuilder.VALID_STEP_TYPES),
                     },
                     "name": {"type": "string"},
                     "description": {"type": "string"},
@@ -162,7 +166,7 @@ def build_response_format(artifact_type: ArtifactType) -> dict[str, Any]:
 
     ``{"type": "json_schema", "json_schema": {"name", "schema"}}`` around
     :func:`artifact_schema`. For an agent the schema also requires
-    ``agent_type``, an enum of ``AgentBuilder.VALID_AGENT_TYPES`` whose
+    ``agent_type``, an enum of ``AgentArtifactBuilder.VALID_AGENT_TYPES`` whose
     description lists each pattern, so the build call picks the agent pattern
     (no second classifier call, D-011). Never raises for an ``ArtifactType``
     member.
@@ -174,7 +178,7 @@ def build_response_format(artifact_type: ArtifactType) -> dict[str, Any]:
         )
         schema["properties"]["agent_type"] = {
             "type": "string",
-            "enum": sorted(AgentBuilder.VALID_AGENT_TYPES),
+            "enum": sorted(AgentArtifactBuilder.VALID_AGENT_TYPES),
             "description": (
                 f"The agent pattern that fits the requirement best. {patterns}"
             ),

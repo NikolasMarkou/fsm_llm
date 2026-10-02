@@ -88,7 +88,7 @@ Other patterns (FSM states in `constants.py`):
 | `meta_builder.py` | `MetaBuilderAgent` | not a `BaseAgent`; drives `build_meta_builder_fsm` through core `converse`/`advance`; does not use `meta_tools.py` |
 | `meta_prompts.py` | collect instructions, `artifact_schema`, `build_response_format`, `build_artifact_prompt`, review texts | one home for every build-request byte |
 | `semantic_tools.py`, `semantic_memory.py`, `composition.py` | `SemanticToolRegistry`, `SemanticMemoryStore`, the LLM judge | embeddings through core `LiteLLMEmbedder` (`_embedding_backend`), the judge through core `LiteLLMInterface.complete` |
-| `meta_builders.py` | `ArtifactBuilder`, `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder` | workflow/agent validation is structural (D-004) |
+| `meta_builders.py` | `ArtifactBuilder`, `FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder` | workflow/agent validation is structural (D-004) |
 | `meta_tools.py` | `create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools` | separate programmatic API over a builder |
 
 ## Public interface

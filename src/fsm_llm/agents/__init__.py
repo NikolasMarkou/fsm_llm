@@ -91,10 +91,10 @@ from .memory_persistence import (
 from .memory_tools import create_memory_tools
 from .meta_builder import MetaBuilderAgent
 from .meta_builders import (
-    AgentBuilder,
+    AgentArtifactBuilder,
     ArtifactBuilder,
-    FSMBuilder,
-    WorkflowBuilder,
+    FSMArtifactBuilder,
+    WorkflowArtifactBuilder,
 )
 from .meta_output import format_artifact_json, format_summary, save_artifact
 from .meta_tools import (
@@ -314,9 +314,9 @@ __all__ = [
     "SkillLoader",
     # Meta-builder
     "ArtifactBuilder",
-    "FSMBuilder",
-    "WorkflowBuilder",
-    "AgentBuilder",
+    "FSMArtifactBuilder",
+    "WorkflowArtifactBuilder",
+    "AgentArtifactBuilder",
     "create_builder_tools",
     "create_fsm_tools",
     "create_workflow_tools",

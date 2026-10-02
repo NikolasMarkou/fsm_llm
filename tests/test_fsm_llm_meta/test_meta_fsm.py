@@ -37,7 +37,7 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.definitions import ArtifactType
 from fsm_llm.agents.fsm_definitions import build_meta_builder_fsm
-from fsm_llm.agents.meta_builders import AgentBuilder, WorkflowBuilder
+from fsm_llm.agents.meta_builders import AgentArtifactBuilder, WorkflowArtifactBuilder
 from fsm_llm.agents.meta_prompts import (
     artifact_schema,
     build_artifact_prompt,
@@ -340,13 +340,13 @@ class TestBuildRequest:
         schema = build_response_format(ArtifactType.WORKFLOW)["json_schema"]["schema"]
         prop = self._step_type(schema)
         assert prop["type"] == "string"
-        assert prop["enum"] == sorted(WorkflowBuilder.VALID_STEP_TYPES)
+        assert prop["enum"] == sorted(WorkflowArtifactBuilder.VALID_STEP_TYPES)
 
     def test_agent_format_requires_an_agent_type_enum(self):
         schema = build_response_format(ArtifactType.AGENT)["json_schema"]["schema"]
         prop = schema["properties"]["agent_type"]
         assert prop["type"] == "string"
-        assert prop["enum"] == sorted(AgentBuilder.VALID_AGENT_TYPES)
+        assert prop["enum"] == sorted(AgentArtifactBuilder.VALID_AGENT_TYPES)
         assert "agent_type" in schema["required"]
         for name, description in META_AGENT_PATTERN_INTENTS:
             assert f"{name}: {description}" in prop["description"]
@@ -354,7 +354,7 @@ class TestBuildRequest:
     def test_agent_pattern_table_names_every_valid_agent_type(self):
         names = [name for name, _ in META_AGENT_PATTERN_INTENTS]
         assert len(names) == len(set(names))
-        assert set(names) == AgentBuilder.VALID_AGENT_TYPES
+        assert set(names) == AgentArtifactBuilder.VALID_AGENT_TYPES
 
     @pytest.mark.parametrize("artifact_type", [ArtifactType.FSM, ArtifactType.WORKFLOW])
     def test_other_formats_carry_no_agent_type(self, artifact_type):
@@ -392,12 +392,12 @@ class TestBuildRequest:
             (
                 ArtifactType.WORKFLOW,
                 self._step_type,
-                sorted(WorkflowBuilder.VALID_STEP_TYPES),
+                sorted(WorkflowArtifactBuilder.VALID_STEP_TYPES),
             ),
             (
                 ArtifactType.AGENT,
                 lambda s: s["properties"]["agent_type"],
-                sorted(AgentBuilder.VALID_AGENT_TYPES),
+                sorted(AgentArtifactBuilder.VALID_AGENT_TYPES),
             ),
         ):
             mapped = OllamaChatConfig().map_openai_params(

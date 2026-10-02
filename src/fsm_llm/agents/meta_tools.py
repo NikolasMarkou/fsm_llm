@@ -12,7 +12,11 @@ from typing import Any
 
 from .definitions import ArtifactType
 from .exceptions import BuilderError
-from .meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from .meta_builders import (
+    AgentArtifactBuilder,
+    FSMArtifactBuilder,
+    WorkflowArtifactBuilder,
+)
 from .tools import ToolRegistry, tool
 
 # ------------------------------------------------------------------
@@ -36,7 +40,7 @@ def _safe(fn: Any, *args: Any, **kwargs: Any) -> str:
         return f"Error: {e}"
 
 
-_AnyBuilder = FSMBuilder | WorkflowBuilder | AgentBuilder
+_AnyBuilder = FSMArtifactBuilder | WorkflowArtifactBuilder | AgentArtifactBuilder
 
 
 def _make_validate_tool(builder: _AnyBuilder) -> Any:
@@ -72,7 +76,7 @@ def _make_summary_tool(builder: _AnyBuilder) -> Any:
 # ------------------------------------------------------------------
 
 
-def create_fsm_tools(builder: FSMBuilder) -> ToolRegistry:
+def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
     """Create tools for building an FSM definition."""
     registry = ToolRegistry()
 
@@ -201,7 +205,7 @@ def create_fsm_tools(builder: FSMBuilder) -> ToolRegistry:
 # ------------------------------------------------------------------
 
 
-def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
+def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
     """Create tools for building a workflow definition."""
     registry = ToolRegistry()
 
@@ -288,7 +292,7 @@ def create_workflow_tools(builder: WorkflowBuilder) -> ToolRegistry:
 # ------------------------------------------------------------------
 
 
-def create_agent_tools(builder: AgentBuilder) -> ToolRegistry:
+def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
     """Create tools for building an agent configuration."""
     registry = ToolRegistry()
 
@@ -369,20 +373,26 @@ def create_agent_tools(builder: AgentBuilder) -> ToolRegistry:
 
 
 def create_builder_tools(
-    builder: FSMBuilder | WorkflowBuilder | AgentBuilder,
+    builder: FSMArtifactBuilder | WorkflowArtifactBuilder | AgentArtifactBuilder,
     artifact_type: ArtifactType,
 ) -> ToolRegistry:
     """Create the appropriate tool registry for a builder instance."""
     if artifact_type == ArtifactType.FSM:
-        if not isinstance(builder, FSMBuilder):
-            raise TypeError(f"Expected FSMBuilder, got {type(builder).__name__}")
+        if not isinstance(builder, FSMArtifactBuilder):
+            raise TypeError(
+                f"Expected FSMArtifactBuilder, got {type(builder).__name__}"
+            )
         return create_fsm_tools(builder)
     if artifact_type == ArtifactType.WORKFLOW:
-        if not isinstance(builder, WorkflowBuilder):
-            raise TypeError(f"Expected WorkflowBuilder, got {type(builder).__name__}")
+        if not isinstance(builder, WorkflowArtifactBuilder):
+            raise TypeError(
+                f"Expected WorkflowArtifactBuilder, got {type(builder).__name__}"
+            )
         return create_workflow_tools(builder)
     if artifact_type == ArtifactType.AGENT:
-        if not isinstance(builder, AgentBuilder):
-            raise TypeError(f"Expected AgentBuilder, got {type(builder).__name__}")
+        if not isinstance(builder, AgentArtifactBuilder):
+            raise TypeError(
+                f"Expected AgentArtifactBuilder, got {type(builder).__name__}"
+            )
         return create_agent_tools(builder)
     raise ValueError(f"Unknown artifact type: {artifact_type}")

@@ -1,33 +1,41 @@
 from __future__ import annotations
 
 """Elaborate tests for artifact builders: edge cases, type validation,
-config validation, WorkflowBuilder ClassVar, and false-positive fixes."""
+config validation, WorkflowArtifactBuilder ClassVar, and false-positive fixes."""
 
 import pytest
 
 from fsm_llm.agents.constants import MetaDefaults
 from fsm_llm.agents.exceptions import BuilderError
-from fsm_llm.agents.meta_builders import AgentBuilder, FSMBuilder, WorkflowBuilder
+from fsm_llm.agents.meta_builders import (
+    AgentArtifactBuilder,
+    FSMArtifactBuilder,
+    WorkflowArtifactBuilder,
+)
 from fsm_llm.definitions import FSMDefinition
 
-# ---- FSMBuilder Edge Cases -------------------------------------------
+# ---- FSMArtifactBuilder Edge Cases -------------------------------------------
 
 
 class TestFSMBuilderUpdateStateTypeChecking:
     """Bug fix: update_state should reject non-string values."""
 
-    def test_none_value_warns(self, populated_fsm_builder: FSMBuilder):
+    def test_none_value_warns(self, populated_fsm_builder: FSMArtifactBuilder):
         warnings = populated_fsm_builder.update_state("greeting", description=None)
         assert any("None" in w for w in warnings)
         # Original value should be preserved
         assert populated_fsm_builder.states["greeting"]["description"] != ""
 
-    def test_int_value_converts_with_warning(self, populated_fsm_builder: FSMBuilder):
+    def test_int_value_converts_with_warning(
+        self, populated_fsm_builder: FSMArtifactBuilder
+    ):
         warnings = populated_fsm_builder.update_state("greeting", purpose=42)
         assert any("string" in w.lower() for w in warnings)
         assert populated_fsm_builder.states["greeting"]["purpose"] == "42"
 
-    def test_dict_value_converts_with_warning(self, populated_fsm_builder: FSMBuilder):
+    def test_dict_value_converts_with_warning(
+        self, populated_fsm_builder: FSMArtifactBuilder
+    ):
         warnings = populated_fsm_builder.update_state(
             "greeting", description={"bad": "value"}
         )
@@ -37,7 +45,7 @@ class TestFSMBuilderUpdateStateTypeChecking:
 class TestFSMBuilderToDict:
     """Fix false positive: verify to_dict produces correct field values."""
 
-    def test_to_dict_field_values(self, populated_fsm_builder: FSMBuilder):
+    def test_to_dict_field_values(self, populated_fsm_builder: FSMArtifactBuilder):
         d = populated_fsm_builder.to_dict()
         assert d["name"] == "GreetingBot"
         assert d["description"] == "A simple greeting bot"
@@ -47,7 +55,7 @@ class TestFSMBuilderToDict:
         assert set(d["states"].keys()) == {"greeting", "ask_name", "farewell"}
 
     def test_to_dict_produces_valid_fsm_with_values(
-        self, populated_fsm_builder: FSMBuilder
+        self, populated_fsm_builder: FSMArtifactBuilder
     ):
         d = populated_fsm_builder.to_dict()
         definition = FSMDefinition(**d)
@@ -55,7 +63,9 @@ class TestFSMBuilderToDict:
         assert len(definition.states) == 3
         assert definition.initial_state == "greeting"
 
-    def test_to_dict_transitions_preserved(self, populated_fsm_builder: FSMBuilder):
+    def test_to_dict_transitions_preserved(
+        self, populated_fsm_builder: FSMArtifactBuilder
+    ):
         d = populated_fsm_builder.to_dict()
         greeting_transitions = d["states"]["greeting"]["transitions"]
         assert len(greeting_transitions) == 1
@@ -63,12 +73,14 @@ class TestFSMBuilderToDict:
 
 
 class TestFSMBuilderEdgeCases:
-    def test_self_transition(self, fsm_builder: FSMBuilder):
+    def test_self_transition(self, fsm_builder: FSMArtifactBuilder):
         fsm_builder.add_state("s1", "State", "Purpose")
         fsm_builder.add_transition("s1", "s1", "Loop")
         assert len(fsm_builder.states["s1"]["transitions"]) == 1
 
-    def test_multiple_transitions_from_same_source(self, fsm_builder: FSMBuilder):
+    def test_multiple_transitions_from_same_source(
+        self, fsm_builder: FSMArtifactBuilder
+    ):
         fsm_builder.add_state("s1", "State 1", "P1")
         fsm_builder.add_state("s2", "State 2", "P2")
         fsm_builder.add_state("s3", "State 3", "P3")
@@ -76,14 +88,14 @@ class TestFSMBuilderEdgeCases:
         fsm_builder.add_transition("s1", "s3", "To s3")
         assert len(fsm_builder.states["s1"]["transitions"]) == 2
 
-    def test_remove_only_state_leaves_empty(self, fsm_builder: FSMBuilder):
+    def test_remove_only_state_leaves_empty(self, fsm_builder: FSMArtifactBuilder):
         fsm_builder.add_state("s1", "State", "Purpose")
         fsm_builder.remove_state("s1")
         assert len(fsm_builder.states) == 0
         assert fsm_builder.initial_state is None
 
     def test_add_transition_uses_defaults_constant(self):
-        b = FSMBuilder()
+        b = FSMArtifactBuilder()
         b.add_state("s1", "S1", "P1")
         b.add_state("s2", "S2", "P2")
         b.add_transition("s1", "s2", "Go")
@@ -91,15 +103,15 @@ class TestFSMBuilderEdgeCases:
         assert t["priority"] == MetaDefaults.DEFAULT_PRIORITY
 
 
-# ---- WorkflowBuilder ClassVar and Validation -------------------------
+# ---- WorkflowArtifactBuilder ClassVar and Validation -------------------------
 
 
 class TestWorkflowBuilderClassVar:
     def test_valid_step_types_is_classvar(self):
-        assert hasattr(WorkflowBuilder, "VALID_STEP_TYPES")
-        assert isinstance(WorkflowBuilder.VALID_STEP_TYPES, set)
-        assert "auto_transition" in WorkflowBuilder.VALID_STEP_TYPES
-        assert len(WorkflowBuilder.VALID_STEP_TYPES) == 8
+        assert hasattr(WorkflowArtifactBuilder, "VALID_STEP_TYPES")
+        assert isinstance(WorkflowArtifactBuilder.VALID_STEP_TYPES, set)
+        assert "auto_transition" in WorkflowArtifactBuilder.VALID_STEP_TYPES
+        assert len(WorkflowArtifactBuilder.VALID_STEP_TYPES) == 8
 
     def test_all_eight_types_present(self):
         expected = {
@@ -112,25 +124,27 @@ class TestWorkflowBuilderClassVar:
             "parallel",
             "conversation",
         }
-        assert WorkflowBuilder.VALID_STEP_TYPES == expected
+        assert WorkflowArtifactBuilder.VALID_STEP_TYPES == expected
 
 
 class TestWorkflowBuilderEdgeCases:
-    def test_remove_step_cleans_transitions(self, workflow_builder: WorkflowBuilder):
+    def test_remove_step_cleans_transitions(
+        self, workflow_builder: WorkflowArtifactBuilder
+    ):
         workflow_builder.add_step("s1", "auto_transition", "Step 1")
         workflow_builder.add_step("s2", "auto_transition", "Step 2")
         workflow_builder.set_step_transition("s1", "s2")
         workflow_builder.remove_step("s2")
         assert len(workflow_builder.steps["s1"]["transitions"]) == 0
 
-    def test_set_initial_step_explicit(self, workflow_builder: WorkflowBuilder):
+    def test_set_initial_step_explicit(self, workflow_builder: WorkflowArtifactBuilder):
         workflow_builder.add_step("s1", "auto_transition", "Step 1")
         workflow_builder.add_step("s2", "auto_transition", "Step 2")
         workflow_builder.set_initial_step("s2")
         assert workflow_builder.initial_step_id == "s2"
 
     def test_validate_complete_checks_transition_targets(
-        self, workflow_builder: WorkflowBuilder
+        self, workflow_builder: WorkflowArtifactBuilder
     ):
         workflow_builder.set_overview("wf1", "Workflow", "Desc")
         workflow_builder.add_step("s1", "auto_transition", "Step 1")
@@ -140,12 +154,12 @@ class TestWorkflowBuilderEdgeCases:
         assert any("nonexistent" in e for e in errors)
 
 
-# ---- AgentBuilder Config Validation ----------------------------------
+# ---- AgentArtifactBuilder Config Validation ----------------------------------
 
 
 class TestAgentBuilderConfigValidation:
     def test_set_config_rejects_wrong_type_for_max_iterations(
-        self, agent_builder: AgentBuilder
+        self, agent_builder: AgentArtifactBuilder
     ):
         warnings = agent_builder.set_config(max_iterations="ten")
         assert any("max_iterations" in w for w in warnings)
@@ -155,28 +169,32 @@ class TestAgentBuilderConfigValidation:
         )
 
     def test_set_config_rejects_string_for_temperature(
-        self, agent_builder: AgentBuilder
+        self, agent_builder: AgentArtifactBuilder
     ):
         warnings = agent_builder.set_config(temperature="warm")
         assert any("temperature" in w for w in warnings)
         assert agent_builder.config["temperature"] == MetaDefaults.AGENT_TEMPERATURE
 
-    def test_set_config_accepts_int_for_temperature(self, agent_builder: AgentBuilder):
+    def test_set_config_accepts_int_for_temperature(
+        self, agent_builder: AgentArtifactBuilder
+    ):
         warnings = agent_builder.set_config(temperature=0)
         assert warnings == []
         assert agent_builder.config["temperature"] == 0
 
-    def test_set_config_accepts_valid_model(self, agent_builder: AgentBuilder):
+    def test_set_config_accepts_valid_model(self, agent_builder: AgentArtifactBuilder):
         warnings = agent_builder.set_config(model="gpt-4o")
         assert warnings == []
         assert agent_builder.config["model"] == "gpt-4o"
 
-    def test_set_config_rejects_unknown_field(self, agent_builder: AgentBuilder):
+    def test_set_config_rejects_unknown_field(
+        self, agent_builder: AgentArtifactBuilder
+    ):
         warnings = agent_builder.set_config(unknown_field="value")
         assert any("unknown" in w.lower() for w in warnings)
 
     def test_defaults_use_constants(self):
-        b = AgentBuilder()
+        b = AgentArtifactBuilder()
         assert b.config["model"] == MetaDefaults.AGENT_MODEL
         assert b.config["max_iterations"] == MetaDefaults.AGENT_MAX_ITERATIONS
         assert b.config["timeout_seconds"] == MetaDefaults.AGENT_TIMEOUT_SECONDS
@@ -185,20 +203,20 @@ class TestAgentBuilderConfigValidation:
 
 
 class TestAgentBuilderSetType:
-    def test_all_valid_types_accepted(self, agent_builder: AgentBuilder):
-        for agent_type in AgentBuilder.VALID_AGENT_TYPES:
-            b = AgentBuilder()
+    def test_all_valid_types_accepted(self, agent_builder: AgentArtifactBuilder):
+        for agent_type in AgentArtifactBuilder.VALID_AGENT_TYPES:
+            b = AgentArtifactBuilder()
             warnings = b.set_agent_type(agent_type)
             assert warnings == []
             assert b.agent_type == agent_type
 
-    def test_invalid_type_raises(self, agent_builder: AgentBuilder):
+    def test_invalid_type_raises(self, agent_builder: AgentArtifactBuilder):
         with pytest.raises(BuilderError, match="Unknown agent type"):
             agent_builder.set_agent_type("invalid")
         # Should NOT have set the type
         assert agent_builder.agent_type is None
 
-    def test_type_is_normalized(self, agent_builder: AgentBuilder):
+    def test_type_is_normalized(self, agent_builder: AgentArtifactBuilder):
         agent_builder.set_agent_type("  REACT  ")
         assert agent_builder.agent_type == "react"
 
@@ -319,33 +337,35 @@ class TestSummaryContentAssertions:
     """Replace fragile length-based test with content assertions."""
 
     def test_minimal_omits_extraction_instructions(
-        self, populated_fsm_builder: FSMBuilder
+        self, populated_fsm_builder: FSMArtifactBuilder
     ):
         summary = populated_fsm_builder.get_summary("minimal")
         assert "extraction:" not in summary
         assert "response:" not in summary
 
     def test_standard_omits_extraction_instructions(
-        self, populated_fsm_builder: FSMBuilder
+        self, populated_fsm_builder: FSMArtifactBuilder
     ):
         summary = populated_fsm_builder.get_summary("standard")
         assert "extraction:" not in summary
 
     def test_full_includes_extraction_instructions(
-        self, populated_fsm_builder: FSMBuilder
+        self, populated_fsm_builder: FSMArtifactBuilder
     ):
         summary = populated_fsm_builder.get_summary("full")
         assert "extraction:" in summary
 
-    def test_minimal_has_state_count(self, populated_fsm_builder: FSMBuilder):
+    def test_minimal_has_state_count(self, populated_fsm_builder: FSMArtifactBuilder):
         summary = populated_fsm_builder.get_summary("minimal")
         assert "States (3)" in summary
 
-    def test_standard_has_transition_targets(self, populated_fsm_builder: FSMBuilder):
+    def test_standard_has_transition_targets(
+        self, populated_fsm_builder: FSMArtifactBuilder
+    ):
         summary = populated_fsm_builder.get_summary("standard")
         assert "-> ask_name" in summary
 
-    def test_full_has_persona(self, populated_fsm_builder: FSMBuilder):
+    def test_full_has_persona(self, populated_fsm_builder: FSMArtifactBuilder):
         summary = populated_fsm_builder.get_summary("full")
         assert "Persona:" in summary
         assert "Friendly assistant" in summary

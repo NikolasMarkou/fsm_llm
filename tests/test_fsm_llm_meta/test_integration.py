@@ -10,8 +10,8 @@ from __future__ import annotations
 from fsm_llm.agents.definitions import ArtifactType
 from fsm_llm.agents.meta_builder import MetaBuilderAgent
 from fsm_llm.agents.meta_builders import (
-    FSMBuilder,
-    WorkflowBuilder,
+    FSMArtifactBuilder,
+    WorkflowArtifactBuilder,
 )
 from fsm_llm.agents.meta_prompts import build_welcome_message
 from fsm_llm.agents.meta_tools import create_builder_tools
@@ -36,7 +36,7 @@ class TestTypeAliasMatching:
 
 class TestReachabilityValidation:
     def test_unreachable_state_detected(self):
-        b = FSMBuilder()
+        b = FSMArtifactBuilder()
         b.set_overview("Test", "Test FSM")
         b.add_state("start", "Start", "Start")
         b.add_state("mid", "Mid", "Mid")
@@ -47,7 +47,7 @@ class TestReachabilityValidation:
         assert any("orphan" in e.lower() for e in errors)
 
     def test_all_reachable_no_errors(self):
-        b = FSMBuilder()
+        b = FSMArtifactBuilder()
         b.set_overview("Test", "Test FSM")
         b.add_state("start", "Start", "Start")
         b.add_state("end", "End", "End")
@@ -58,7 +58,7 @@ class TestReachabilityValidation:
         assert len(unreachable) == 0
 
     def test_transition_to_nonexistent_state(self):
-        b = FSMBuilder()
+        b = FSMArtifactBuilder()
         b.set_overview("Test", "Test FSM")
         b.add_state("start", "Start", "Start")
         b.add_state("end", "End", "End")
@@ -83,8 +83,8 @@ class TestReachabilityValidation:
 
 class TestWorkflowBuilderOrdering:
     def test_sequential_transitions(self):
-        """WorkflowBuilder handles add_step + set_step_transition correctly."""
-        b = WorkflowBuilder()
+        """WorkflowArtifactBuilder handles add_step + set_step_transition correctly."""
+        b = WorkflowArtifactBuilder()
         b.set_overview(workflow_id="wf", name="Test", description="Test")
         b.add_step("s1", "auto_transition", "Step 1")
         b.add_step("s2", "auto_transition", "Step 2")
@@ -116,7 +116,7 @@ class TestWelcomeMessage:
 
 class TestBuildResultFinalContext:
     def test_has_final_context(self):
-        builder = FSMBuilder()
+        builder = FSMArtifactBuilder()
         builder.set_overview("Test", "A test FSM")
         builder.add_state("start", "Start", "Start")
         builder.initial_state = "start"
@@ -144,7 +144,7 @@ class TestBuildResultFinalContext:
 
 class TestAgenticToolSelection:
     def test_fsm_tools_created(self):
-        b = FSMBuilder()
+        b = FSMArtifactBuilder()
         tools = create_builder_tools(b, ArtifactType.FSM)
         names = {t.name for t in tools.list_tools()}
         assert "set_overview" in names
@@ -153,7 +153,7 @@ class TestAgenticToolSelection:
         assert "validate" in names
 
     def test_workflow_tools_created(self):
-        b = WorkflowBuilder()
+        b = WorkflowArtifactBuilder()
         tools = create_builder_tools(b, ArtifactType.WORKFLOW)
         names = {t.name for t in tools.list_tools()}
         assert "add_step" in names
@@ -163,7 +163,7 @@ class TestAgenticToolSelection:
         """Tools modify the builder in place — confirming closure pattern works."""
         from fsm_llm.agents.definitions import ToolCall
 
-        b = FSMBuilder()
+        b = FSMArtifactBuilder()
         tools = create_builder_tools(b, ArtifactType.FSM)
         tools.execute(
             ToolCall(

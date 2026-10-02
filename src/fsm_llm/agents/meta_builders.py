@@ -63,7 +63,7 @@ class ArtifactBuilder(ABC):
 # ---------------------------------------------------------------------------
 
 
-class FSMBuilder(ArtifactBuilder):
+class FSMArtifactBuilder(ArtifactBuilder):
     """Incrementally builds an FSMDefinition."""
 
     def __init__(self) -> None:
@@ -500,7 +500,7 @@ class FSMBuilder(ArtifactBuilder):
 # ---------------------------------------------------------------------------
 
 
-class WorkflowBuilder(ArtifactBuilder):
+class WorkflowArtifactBuilder(ArtifactBuilder):
     """Incrementally builds a workflow definition."""
 
     VALID_STEP_TYPES: ClassVar[set[str]] = {
@@ -804,7 +804,7 @@ class WorkflowBuilder(ArtifactBuilder):
 # ---------------------------------------------------------------------------
 
 
-class AgentBuilder(ArtifactBuilder):
+class AgentArtifactBuilder(ArtifactBuilder):
     """Incrementally builds an agent configuration."""
 
     VALID_AGENT_TYPES: ClassVar[set[str]] = {

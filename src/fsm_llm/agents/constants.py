@@ -885,7 +885,7 @@ META_ARTIFACT_TYPE_INTENTS: tuple[tuple[str, str], ...] = (
 )
 
 # Agent patterns an agent artifact may use, with their descriptions (names are
-# ``AgentBuilder.VALID_AGENT_TYPES``; ``react`` is the default).
+# ``AgentArtifactBuilder.VALID_AGENT_TYPES``; ``react`` is the default).
 META_AGENT_PATTERN_INTENTS: tuple[tuple[str, str], ...] = (
     (
         "react",

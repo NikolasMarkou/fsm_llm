@@ -30,7 +30,7 @@ from fsm_llm.agents.constants import (
 from fsm_llm.agents.definitions import ArtifactType, MetaBuilderConfig
 from fsm_llm.agents.exceptions import BuilderError, MetaBuilderError
 from fsm_llm.agents.meta_builder import MetaBuilderAgent
-from fsm_llm.agents.meta_builders import AgentBuilder, WorkflowBuilder
+from fsm_llm.agents.meta_builders import AgentArtifactBuilder, WorkflowArtifactBuilder
 from fsm_llm.agents.meta_prompts import build_response_format
 from fsm_llm.definitions import FSMDefinition, LLMResponseError
 
@@ -273,7 +273,7 @@ class TestAgentPatternFromTheBuildSchema:
         (build,) = llm.build_requests()
         schema = build.response_format["json_schema"]["schema"]
         assert schema["properties"]["agent_type"]["enum"] == sorted(
-            AgentBuilder.VALID_AGENT_TYPES
+            AgentArtifactBuilder.VALID_AGENT_TYPES
         )
         assert "agent_type" in schema["required"]
         assert result.artifact["agent_type"] == "plan_execute"
@@ -739,7 +739,7 @@ class TestWorkflowStepTypeEnumInSession:
         step_type = build.response_format["json_schema"]["schema"]["properties"][
             "steps"
         ]["items"]["properties"]["step_type"]
-        assert step_type["enum"] == sorted(WorkflowBuilder.VALID_STEP_TYPES)
+        assert step_type["enum"] == sorted(WorkflowArtifactBuilder.VALID_STEP_TYPES)
         # A model that ignores the enum gets an invalid build, not a crash.
         assert "teleport" in reply
         assert not agent.is_complete()

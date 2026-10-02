@@ -14,7 +14,7 @@ Most tests work on plain builder objects with no LLM at all. The meta-builder it
 flowchart LR
     conftest[conftest.py fixtures] --> builders[test_builders*.py]
     conftest --> tools[test_tools.py]
-    builders --> B[FSMBuilder / WorkflowBuilder / AgentBuilder]
+    builders --> B[FSMArtifactBuilder / WorkflowArtifactBuilder / AgentArtifactBuilder]
     tools --> T[create_*_tools registries]
     agent[test_agent.py, test_meta_conversation.py, test_review_fixes_meta.py, test_integration.py] --> M[MetaBuilderAgent on the meta FSM]
     fsm[test_meta_fsm.py] --> F[build_meta_builder_fsm]
@@ -24,7 +24,7 @@ flowchart LR
 
 ## Files
 
-- `conftest.py` - fixtures: empty `FSMBuilder`, `WorkflowBuilder`, `AgentBuilder`, a 3-state `populated_fsm_builder` ("GreetingBot"), a `meta_config`, and `offline_llm`, which makes every LLM call fail at once; the scripted interface `ScriptedMetaLLM`.
+- `conftest.py` - fixtures: empty `FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`, a 3-state `populated_fsm_builder` ("GreetingBot"), a `meta_config`, and `offline_llm`, which makes every LLM call fail at once; the scripted interface `ScriptedMetaLLM`.
 - `test_meta_fsm.py` - the meta FSM: structure, gates, the build request and its schemas, a run through the core engine.
 - `test_meta_conversation.py` - whole conversations by behaviour: each artifact kind, a type switch, a failed then fixed build, outages, `max_turns`, what the monitor reads.
 - `test_review_fixes_meta.py` - review fixes: malformed build replies, keyword hints and negation, the build prompt sentence.

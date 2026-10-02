@@ -65,10 +65,10 @@ from .definitions import (
 from .exceptions import BuilderError, MetaBuilderError, MetaValidationError
 from .fsm_definitions import build_meta_builder_fsm
 from .meta_builders import (
-    AgentBuilder,
+    AgentArtifactBuilder,
     ArtifactBuilder,
-    FSMBuilder,
-    WorkflowBuilder,
+    FSMArtifactBuilder,
+    WorkflowArtifactBuilder,
 )
 from .meta_output import format_artifact_json
 from .meta_prompts import (
@@ -592,11 +592,13 @@ class MetaBuilderAgent:
             spec = _SPEC_MODELS[artifact_type].model_validate(raw)
         except ValidationError as e:
             return MetaBuildOutcome.MALFORMED, _shape_errors(e)
-        if isinstance(spec, _FSMSpec) and isinstance(builder, FSMBuilder):
+        if isinstance(spec, _FSMSpec) and isinstance(builder, FSMArtifactBuilder):
             cls._assemble_fsm(spec, builder)
-        elif isinstance(spec, _WorkflowSpec) and isinstance(builder, WorkflowBuilder):
+        elif isinstance(spec, _WorkflowSpec) and isinstance(
+            builder, WorkflowArtifactBuilder
+        ):
             cls._assemble_workflow(spec, builder)
-        elif isinstance(spec, _AgentSpec) and isinstance(builder, AgentBuilder):
+        elif isinstance(spec, _AgentSpec) and isinstance(builder, AgentArtifactBuilder):
             cls._assemble_agent(spec, builder, requirement)
         errors = builder.validate_complete()
         return (MetaBuildOutcome.INVALID if errors else MetaBuildOutcome.VALID), errors
@@ -606,7 +608,7 @@ class MetaBuilderAgent:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _assemble_fsm(spec: _FSMSpec, builder: FSMBuilder) -> None:
+    def _assemble_fsm(spec: _FSMSpec, builder: FSMArtifactBuilder) -> None:
         """FSM assembly: overview, states in order (the first is initial), edges."""
         builder.set_overview(
             name=spec.name, description=spec.description, persona=spec.persona
@@ -641,7 +643,9 @@ class MetaBuilderAgent:
                 logger.warning(f"Failed to add transition: {e}")
 
     @staticmethod
-    def _assemble_workflow(spec: _WorkflowSpec, builder: WorkflowBuilder) -> None:
+    def _assemble_workflow(
+        spec: _WorkflowSpec, builder: WorkflowArtifactBuilder
+    ) -> None:
         """Workflow assembly: steps chained in reply order, the first initial."""
         builder.set_overview(
             workflow_id=spec.workflow_id, name=spec.name, description=spec.description
@@ -672,7 +676,7 @@ class MetaBuilderAgent:
 
     @classmethod
     def _assemble_agent(
-        cls, spec: _AgentSpec, builder: AgentBuilder, requirement: str
+        cls, spec: _AgentSpec, builder: AgentArtifactBuilder, requirement: str
     ) -> None:
         """Agent assembly: overview, pattern, tools (first of each name kept)."""
         if spec.name or spec.description:
@@ -692,7 +696,7 @@ class MetaBuilderAgent:
 
     @staticmethod
     def _set_agent_type(
-        builder: AgentBuilder, agent_type: str | None, requirement: str
+        builder: AgentArtifactBuilder, agent_type: str | None, requirement: str
     ) -> None:
         """Set the pattern from the reply, else the first one named in ``requirement``.
 
@@ -707,7 +711,7 @@ class MetaBuilderAgent:
             except BuilderError as e:
                 logger.warning(f"Build reply agent_type rejected: {e}")
         normalized = requirement.strip().lower()
-        for pattern in sorted(AgentBuilder.VALID_AGENT_TYPES):
+        for pattern in sorted(AgentArtifactBuilder.VALID_AGENT_TYPES):
             if pattern in normalized or pattern.replace("_", " ") in normalized:
                 builder.set_agent_type(pattern)
                 return
@@ -1054,13 +1058,13 @@ class MetaBuilderAgent:
     @staticmethod
     def _create_builder(
         artifact_type: ArtifactType,
-    ) -> FSMBuilder | WorkflowBuilder | AgentBuilder:
+    ) -> FSMArtifactBuilder | WorkflowArtifactBuilder | AgentArtifactBuilder:
         if artifact_type == ArtifactType.FSM:
-            return FSMBuilder()
+            return FSMArtifactBuilder()
         if artifact_type == ArtifactType.WORKFLOW:
-            return WorkflowBuilder()
+            return WorkflowArtifactBuilder()
         if artifact_type == ArtifactType.AGENT:
-            return AgentBuilder()
+            return AgentArtifactBuilder()
         raise MetaBuilderError(f"Unknown artifact type: {artifact_type}")
 
     def _result_from(self, data: dict[str, Any]) -> MetaBuilderResult:

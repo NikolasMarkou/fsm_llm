@@ -246,9 +246,9 @@ class TestMetaAgentImports:
         import fsm_llm.agents
 
         assert hasattr(fsm_llm.agents, "MetaBuilderAgent")
-        assert hasattr(fsm_llm.agents, "FSMBuilder")
-        assert hasattr(fsm_llm.agents, "WorkflowBuilder")
-        assert hasattr(fsm_llm.agents, "AgentBuilder")
+        assert hasattr(fsm_llm.agents, "FSMArtifactBuilder")
+        assert hasattr(fsm_llm.agents, "WorkflowArtifactBuilder")
+        assert hasattr(fsm_llm.agents, "AgentArtifactBuilder")
         assert hasattr(fsm_llm.agents, "ArtifactType")
         assert hasattr(fsm_llm.agents, "MetaBuilderConfig")
         assert hasattr(fsm_llm.agents, "MetaBuilderResult")
@@ -266,9 +266,9 @@ class TestBuildResult:
     """The result is read from the conversation's context (D-029 18.3)."""
 
     def test_build_result_from_a_valid_build(self):
-        from fsm_llm.agents.meta_builders import FSMBuilder
+        from fsm_llm.agents.meta_builders import FSMArtifactBuilder
 
-        builder = FSMBuilder()
+        builder = FSMArtifactBuilder()
         builder.set_overview("Bot", "A bot")
         builder.add_state("start", "Start", "Begin")
         builder.set_initial_state("start")
@@ -314,25 +314,25 @@ class TestStartSendFlow:
 
 class TestCreateBuilder:
     def test_creates_fsm_builder(self):
-        from fsm_llm.agents.meta_builders import FSMBuilder
+        from fsm_llm.agents.meta_builders import FSMArtifactBuilder
 
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.FSM)
-        assert isinstance(builder, FSMBuilder)
+        assert isinstance(builder, FSMArtifactBuilder)
 
     def test_creates_workflow_builder(self):
-        from fsm_llm.agents.meta_builders import WorkflowBuilder
+        from fsm_llm.agents.meta_builders import WorkflowArtifactBuilder
 
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.WORKFLOW)
-        assert isinstance(builder, WorkflowBuilder)
+        assert isinstance(builder, WorkflowArtifactBuilder)
 
     def test_creates_agent_builder(self):
-        from fsm_llm.agents.meta_builders import AgentBuilder
+        from fsm_llm.agents.meta_builders import AgentArtifactBuilder
 
         agent = MetaBuilderAgent()
         builder = agent._create_builder(ArtifactType.AGENT)
-        assert isinstance(builder, AgentBuilder)
+        assert isinstance(builder, AgentArtifactBuilder)
 
 
 class TestFewShotFSMExample:
@@ -439,7 +439,7 @@ class TestLlmCallProviderFailure:
 
 class TestWorkflowStepTypeEnum:
     """DECISION plan-2026-09-24T091842-c1d5bfbc/D-010: the workflow extraction
-    schema constrains ``step_type`` to ``WorkflowBuilder.VALID_STEP_TYPES`` at
+    schema constrains ``step_type`` to ``WorkflowArtifactBuilder.VALID_STEP_TYPES`` at
     extraction time, and the enum survives into the ``response_format`` that
     is actually sent (and into Ollama's ``format`` grammar)."""
 
@@ -448,16 +448,16 @@ class TestWorkflowStepTypeEnum:
         return schema["properties"]["steps"]["items"]["properties"]["step_type"]
 
     def test_schema_step_type_is_the_valid_set(self):
-        from fsm_llm.agents.meta_builders import WorkflowBuilder
+        from fsm_llm.agents.meta_builders import WorkflowArtifactBuilder
 
         prop = self._step_type_prop(artifact_schema(ArtifactType.WORKFLOW))
         assert prop["type"] == "string"
-        assert prop["enum"] == sorted(WorkflowBuilder.VALID_STEP_TYPES)
+        assert prop["enum"] == sorted(WorkflowArtifactBuilder.VALID_STEP_TYPES)
 
     def test_enum_reaches_response_format_and_ollama_format(self, monkeypatch):
         from litellm.llms.ollama.chat.transformation import OllamaChatConfig
 
-        from fsm_llm.agents.meta_builders import WorkflowBuilder
+        from fsm_llm.agents.meta_builders import WorkflowArtifactBuilder
 
         sent: list[dict] = []
         spec = {
@@ -504,7 +504,7 @@ class TestWorkflowStepTypeEnum:
         assert len(builds) == 1
         response_format = builds[0]["response_format"]
         schema = response_format["json_schema"]["schema"]
-        expected = sorted(WorkflowBuilder.VALID_STEP_TYPES)
+        expected = sorted(WorkflowArtifactBuilder.VALID_STEP_TYPES)
         assert self._step_type_prop(schema)["enum"] == expected
 
         mapped = OllamaChatConfig().map_openai_params(
