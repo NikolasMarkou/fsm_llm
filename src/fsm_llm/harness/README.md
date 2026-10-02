@@ -86,7 +86,7 @@ result = agent.run(
 print(result.success, result.answer)
 ```
 
-`HarnessAgentBuilder` builds the same agent with one `set_<parameter>` call per constructor parameter (`set_worker_factory(...)`, `set_approval_callback(...)`, `set_api_option(name, value)`, ...) and a `build()` that raises `BuildError` for anything the constructor refuses.
+`HarnessAgentBuilder` builds the same agent with one `set_<parameter>` call per constructor parameter (`set_worker_factory(...)`, `set_approval_callback(...)`, `set_api_option(name, value)`, ...) and a `build()` that raises `BuildError` for anything the constructor refuses, including a `set_api_option` name that repeats a constructor parameter. The config is copied shallowly (callables inside it stay shared).
 
 ## Things to know
 

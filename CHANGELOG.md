@@ -57,14 +57,22 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
 
 - Builder standard (plan `89b03f61`): `BuildError(FSMError, ValueError)` in core,
   exported from `fsm_llm`, with `.errors` (the problem strings) and the domain or
-  constructor error chained as `__cause__`. Every builder's `build()` raises it.
+  constructor error chained as `__cause__`. A `build()` failure that comes from the
+  builder's own rules or from the constructor or validation it calls is a
+  `BuildError` chained from the cause; a programming error such as `None` where an
+  object is required may still raise its own error.
 - Builder standard: `APIBuilder` and `FSMManagerBuilder` (`fsm_llm`),
   `ConfiguredAgentBuilder` (`fsm_llm.agents`, any `create_agent` pattern) and
   `HarnessAgentBuilder` (`fsm_llm.harness`). Each has `set_`/`add_` mutators that
   return the builder and only record, and a `build()` that passes only the values that
   were set to the real constructor, copies what the builder owns and raises
-  `BuildError`. Open-ended input has its own unfiltered setter (`set_llm_option`,
-  `set_option`, `set_api_option`). The convention is written once in
+  `BuildError`. Open-ended input has its own setter (`set_llm_option`, `set_option`,
+  `set_api_option`) that passes names through unfiltered, except that `build()`
+  refuses a name that repeats a named constructor parameter (read from the
+  signature) and says which typed setter to use. `ConfiguredAgentBuilder` and
+  `HarnessAgentBuilder` copy the `AgentConfig` shallowly: callables inside it stay
+  shared. `ConfiguredAgentBuilder.set_option` also refuses `pattern`, `tools`,
+  `config` and `system_prompt`. The convention is written once in
   `src/fsm_llm/CLAUDE.md` (Invariants) and `docs/api_reference.md`.
 - One LLM layer, core: `LLMInterface.complete(request: CompletionRequest) ->
   CompletionResponse`, the one request primitive for tool calling, plain completion
@@ -293,8 +301,12 @@ pass@1 at 10.97 LLM calls per task against B0's 28/38 at 11.5, 0 envelope leaks,
   calls chain, and the warnings they used to return as a `list[str]` are read with
   `take_warnings()` (returns and clears). A new `build()` runs `validate_complete()`
   and raises `BuildError`, else returns a deep copy of `to_dict()`. The call-time
-  `BuilderError` refusals (empty id, unknown type, missing source) stay.
-  `BuilderError` is now also a `BuildError`.
+  `BuilderError` refusals (empty id, unknown type, missing source) stay, as does
+  `update_state`. `BuilderError` is now also a `BuildError`.
+- Agents (fix): the meta artifact tools (`create_fsm_tools` and the workflow and
+  agent siblings) serialise each call per builder, so parallel tool calls no longer
+  steal each other's warnings, and warnings left by direct mutator calls no longer
+  leak into the next tool reply.
 
 - One LLM layer, core: the classifier of an AMBIGUOUS transition and of a
   `classification_extractions` entry sends its request to the conversation's own

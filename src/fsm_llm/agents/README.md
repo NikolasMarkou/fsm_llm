@@ -51,7 +51,7 @@ flowchart TD
 | Swarm | `SwarmAgent` | Agents pass the task to each other |
 | Agent graph | `AgentGraph` | Agents wired as a graph with conditional edges, no cycles |
 
-`ConfiguredAgentBuilder` builds any pattern step by step instead of one wide `create_agent(...)` call: `ConfiguredAgentBuilder().set_pattern("react").add_tool(fn).set_model("ollama_chat/qwen3.5:4b").set_max_iterations(8).build()`. Setters only record and return the builder; `build()` raises `BuildError` (a `ValueError`, with `.errors` and the cause chained) for anything `create_agent` refuses. `set_option(name, value)` passes any other `create_agent` keyword unfiltered. `AgentGraphBuilder.build()` raises `BuildError` too, and a repeated node name is an error.
+`ConfiguredAgentBuilder` builds any pattern step by step instead of one wide `create_agent(...)` call: `ConfiguredAgentBuilder().set_pattern("react").add_tool(fn).set_model("ollama_chat/qwen3.5:4b").set_max_iterations(8).build()`. Setters only record and return the builder; `build()` raises `BuildError` (a `ValueError`, with `.errors` and the cause chained) for anything `create_agent` refuses. `set_option(name, value)` passes any other `create_agent` keyword; a name that repeats a named parameter (`pattern`, `tools`, `config`, `system_prompt`, ...) is refused at `build()` with the typed setter named. The `AgentConfig` is copied shallowly, so callables inside it stay shared. `AgentGraphBuilder.build()` raises `BuildError` too, and a repeated node name is an error.
 
 ## Files
 

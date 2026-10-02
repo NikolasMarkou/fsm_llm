@@ -58,7 +58,7 @@ stateDiagram-v2
 
 ## Public interface
 
-- `HarnessAgentBuilder().set_<parameter>(v)...set_api_option(name, value).build() -> HarnessAgent`: one setter per constructor parameter, only set values reach `HarnessAgent(...)`, config and option dict copied at `build()`, worker factory and callbacks shared; constructor refusals come back as `BuildError` (D-008 of plan 89b03f61).
+- `HarnessAgentBuilder().set_<parameter>(v)...set_api_option(name, value).build() -> HarnessAgent`: one setter per constructor parameter, only set values reach `HarnessAgent(...)`, config copied shallowly (callables inside stay shared) and option dict copied at `build()`, worker factory and callbacks shared; `set_api_option` refuses a name that repeats a constructor parameter at `build()`; constructor refusals come back as `BuildError` (D-008 of plan 89b03f61).
 - `HarnessAgent(*, worker_factory=None, approval_callback=None, revert_callback=None, config=None, findings_threshold=3, max_fix_attempts=2, max_leash_grants=2, iteration_hard_cap=6, max_explore_redispatches=9, max_plan_redispatches=3, max_reflect_redispatches=3, max_close_denials=3, max_stall_turns=3, **api_kwargs)`. `api_kwargs` go to `fsm_llm.API`. `HarnessAgent._default_config()` builds the `AgentConfig` from `Defaults`.
   - `run(task, initial_context=None) -> AgentResult`. Pass `ContextKeys.PLAN_DIR` and `ContextKeys.WORKSPACE_ROOT` in `initial_context`; only non-empty `str` values are adopted. A halt returns `success=False`, the reason as `answer`, and the slug in `final_context["last_gate_slug"]`.
   - Properties `api`, `conversation_id`, `presentations`, `reverts`, `audit_issues` (None until CLOSE ran). Method `on_leash_cap(context, *, step, attempts) -> RevertDirective | None`.
