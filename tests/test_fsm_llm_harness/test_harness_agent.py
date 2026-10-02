@@ -5939,3 +5939,92 @@ class TestHarnessAgentBuilder:
         second.config.temperature = 0.5
         assert first.config.temperature == 0.1
         assert first is not second
+
+    def test_config_copy_is_shallow_so_callables_stay_shared(self) -> None:
+        class _Verifier:
+            def __init__(self) -> None:
+                self._lock = threading.Lock()
+
+            def check(self, *args: Any) -> bool:
+                return True
+
+        v = _Verifier()
+        cfg = AgentConfig(verification_fn=v.check)
+        b = self._builder().set_config(cfg)
+        first = b.build()
+        assert first.config.verification_fn.__self__ is v
+        assert first.config is not cfg
+        cfg.temperature = 0.9
+        assert first.config.temperature != 0.9
+        second = b.build()
+        assert second.config is not first.config
+        assert second.config.verification_fn.__self__ is v
+
+    @staticmethod
+    def _named_parameters() -> list[str]:
+        import inspect
+
+        return [
+            p.name
+            for p in inspect.signature(HarnessAgent).parameters.values()
+            if p.name != "self"
+            and p.kind
+            not in (
+                inspect.Parameter.VAR_KEYWORD,
+                inspect.Parameter.VAR_POSITIONAL,
+            )
+        ]
+
+    def test_named_parameter_list_tracks_the_signature(self) -> None:
+        names = self._named_parameters()
+        assert "approval_callback" in names
+        assert "config" in names
+
+    @pytest.mark.parametrize("typed_first", [True, False])
+    def test_open_option_naming_the_approval_callback_is_refused(
+        self, typed_first: bool
+    ) -> None:
+        from fsm_llm.definitions import BuildError
+
+        def allow(request):
+            return True
+
+        def deny(request):
+            return False
+
+        b = self._builder()
+        if typed_first:
+            b.set_approval_callback(deny).set_api_option("approval_callback", allow)
+        else:
+            b.set_api_option("approval_callback", allow).set_approval_callback(deny)
+        with pytest.raises(BuildError) as info:
+            b.build()
+        assert "set_approval_callback" in str(info.value)
+        agent = self._builder().set_approval_callback(deny).build()
+        assert agent._approval_callback is deny
+
+    def test_open_option_naming_config_is_refused(self) -> None:
+        from fsm_llm.definitions import BuildError
+
+        b = (
+            self._builder()
+            .set_api_option("config", AgentConfig(temperature=0.9))
+            .set_config(AgentConfig(temperature=0.1))
+        )
+        with pytest.raises(BuildError) as info:
+            b.build()
+        assert "set_config" in str(info.value)
+
+    def test_every_constructor_parameter_is_refused_as_an_open_option(self) -> None:
+        from fsm_llm.definitions import BuildError
+
+        for name in self._named_parameters():
+            with pytest.raises(BuildError) as info:
+                self._builder().set_api_option(name, object()).build()
+            assert name in str(info.value), name
+            assert info.value.__cause__ is None
+
+    def test_unnamed_open_options_still_pass_through(self) -> None:
+        agent = self._builder().set_api_option("seed", 3).build()
+        assert agent._api_kwargs["seed"] == 3
+        assert "llm_interface" in agent._api_kwargs

@@ -99,6 +99,7 @@ from fsm_llm.agents.constants import StopReason
 from fsm_llm.agents.definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.hitl import ApprovalCallback, HumanInTheLoop
+from fsm_llm.builders import refuse_named_options
 from fsm_llm.definitions import BuildError
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
@@ -3685,9 +3686,13 @@ class HarnessAgentBuilder:
     ``TypeError`` / ``AgentError`` / ``HarnessError`` (message includes the
     cause, ``.errors`` lists it). No parameter is required.
 
-    Isolation: the config and the option dict are copied at ``build()``; the
-    worker factory and the callbacks stay shared with the caller by reference.
-    A second ``build()`` yields an independent agent.
+    Isolation: ``build()`` hands the agent a shallow private copy of the
+    config (mutating the passed config object afterwards does not reach the
+    agent) and a copy of the option dict; callables and objects inside the
+    config, the worker factory and the callbacks stay shared with the caller by
+    reference. A second ``build()`` yields an independent agent. An open-ended
+    option may not repeat a constructor parameter: ``build()`` refuses it with a
+    ``BuildError`` naming the typed setter.
     """
 
     def __init__(self) -> None:
@@ -3746,15 +3751,18 @@ class HarnessAgentBuilder:
         return self
 
     def build(self) -> HarnessAgent:
-        kwargs = dict(self._set)
-        if kwargs.get("config") is not None:
-            kwargs["config"] = kwargs["config"].model_copy(deep=True)
+        refuse_named_options(HarnessAgent, self._api_options, {}, owner=type(self))
         # DECISION plan-2026-10-02T052921-89b03f61/D-008
         # Open-ended options go to the constructor unfiltered. Do NOT add a
         # kwarg whitelist or copy BaseAgent's denylist here: the constructor
-        # refuses bad names itself and a builder-side copy would drift.
-        kwargs.update(self._api_options)
+        # refuses bad names itself and a builder-side copy would drift. Only
+        # names that repeat a constructor parameter are refused above (D-014).
+        # Do NOT deep-copy the config: callables inside it stay shared (D-004).
         try:
+            kwargs = dict(self._set)
+            if kwargs.get("config") is not None:
+                kwargs["config"] = kwargs["config"].model_copy()
+            kwargs.update(self._api_options)
             return HarnessAgent(**kwargs)
         except (ValueError, TypeError, AgentError, HarnessError) as exc:
             raise BuildError(
