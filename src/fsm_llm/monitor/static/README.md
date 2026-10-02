@@ -21,18 +21,18 @@ flowchart LR
 ```
 
 1. The server returns one HTML page (`src/fsm_llm/monitor/templates/index.html`). It loads `style.css` and `app.js` as a module.
-2. `app.js` asks the server whether an API key is needed, opens the WebSocket, loads settings and instances, and wires the page modules together.
-3. Every click on an element with a `data-action` attribute goes to one central handler in `app.js`, which calls the right page function.
+2. `app.js` asks the server whether an API key is needed, opens the WebSocket, loads settings and instances, and wires the page modules together. Pages never import `app.js`; it passes them the functions they need (such as `showPage`) at start-up.
+3. Every click on an element with a `data-action` attribute goes to one central handler in `app.js`, which calls the right page function. Typing in search boxes and changing dropdowns are routed the same way by element id.
 4. Pages fetch data from the REST API and write HTML into the page. Live pushes (metrics, events, logs, instance changes) arrive over the WebSocket and are forwarded to page functions.
 5. Every 10 seconds `app.js` refreshes instances and activity on the Dashboard and Control Center, and catches up the log stream on the Logs page.
 6. `flows.json` is not loaded by the page code. The server reads it to answer "draw this agent or workflow pattern" requests.
 
 ## Files
 
-- `app.js` - entry point: navigation, click, input and change routing, keyboard shortcuts, boot sequence, 10-second polling.
+- `app.js` - entry point: navigation by URL hash, click, input and change routing, keyboard shortcuts, boot sequence, 10-second polling.
 - `style.css` - the whole dark theme: color, spacing, and font tokens, layout, responsive rules, and every component style.
-- `flows.json` - hand-written graphs of 12 agent patterns and 5 workflow examples for the Visualizer.
-- `pages/` - one module per screen: Dashboard, Control Center (with a side drawer), Conversations (inside the drawer), Launch modal, Visualizer, Builder, Logs, Settings.
+- `flows.json` - hand-written graphs of 12 agent patterns and 5 workflow examples (`order_processing`, `data_pipeline`, `approval_flow`, `parallel_processing`, `timer_wait`) for the Visualizer.
+- `pages/` - one module per screen: Dashboard, Control Center (with a side drawer), Conversations (inside the drawer), Launch modal, Visualizer, Builder, Logs, Settings. Each builds HTML strings and calls the REST API.
 - `services/` - the REST helper (`api.js`), optional API key handling (`auth.js`), shared reactive state (`state.js`), and the WebSocket connection with automatic reconnect (`ws.js`).
 - `utils/` - HTML escaping and UI feedback (`dom.js`), time and number formatting (`format.js`), a small safe Markdown renderer (`markdown.js`), and an SVG graph drawer (`graph.js`).
 
@@ -55,4 +55,6 @@ Keyboard shortcuts (when not typing in a field): `1` Dashboard, `2` Control Cent
 - If the server goes away, the WebSocket keeps retrying, waiting from 3 seconds up to 30 seconds between tries.
 - The agent and workflow graphs in `flows.json` are drawn by hand. They are not generated from the real agent code, so they can drift from it.
 - Workflows made in the Builder cannot be launched from the monitor; only the server's built-in workflow presets can.
+- Agents that need tools (`ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `REWOOAgent`, `ADaPTAgent`) can only be launched with stub tools that return a fixed string you type.
+- Element ids and `data-action` names are shared between `templates/index.html`, `app.js`, and `pages/`. Renaming one side breaks the feature silently.
 - There are no JavaScript unit tests. Python tests only check that the files exist, ship in the package, and are served. Check changes by running `fsm-llm-monitor` and using the page.

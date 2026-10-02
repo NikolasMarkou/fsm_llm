@@ -43,7 +43,7 @@ The nine strategies and their number of states:
 
 ## Files
 
-- `engine.py` - `ReasoningEngine`: builds the orchestrator and classifier, registers handlers, runs the solve loop.
+- `engine.py` - `ReasoningEngine`: builds the orchestrator and classifier, registers handlers, runs one solve through the hooks and handlers.
 - `reasoning_modes.py` - all 11 FSM definitions as Python dictionaries (orchestrator, classifier, nine strategies) and the `ALL_REASONING_FSMS` registry.
 - `handlers.py` - answer validation, trace recording, context pruning, mapping strategy results back, picking the final answer.
 - `definitions.py` - Pydantic models for steps, traces, validation, classification, problems and solutions.
@@ -61,7 +61,7 @@ The package ships with `fsm-llm` itself; the `reasoning` extra adds no dependenc
 python -m fsm_llm.reasoning "What is 15% of 240?"
 python -m fsm_llm.reasoning "Why might sales drop in summer?" --type abductive --output detailed
 python -m fsm_llm.reasoning "Compare a city to a cell" --model ollama_chat/qwen3.5:4b --save results.json
-python -m fsm_llm.reasoning --list-types
+python -m fsm_llm.reasoning --list-types --verbose
 ```
 
 ```python
@@ -84,5 +84,5 @@ print(trace["summary"])
 - `--type` (or `preferred_reasoning_type` in the starting context) overrides the automatic choice when it names a valid strategy.
 - If a strategy FSM cannot be loaded, the engine falls back to `analytical` only, never to another style.
 - Unknown words passed to `map_reasoning_type` fall back to `analytical` with a warning.
-- `--list-types` and `--verbose` messages are printed as log lines on stderr, not as plain stdout text.
+- `--list-types` writes through the library logger, which is off until `--verbose` turns it on, so run `--list-types --verbose` to see the list. Solutions print on stdout.
 - In `--output json` and in `.json` save files, `reasoning_types_used` is a sorted list of type names.

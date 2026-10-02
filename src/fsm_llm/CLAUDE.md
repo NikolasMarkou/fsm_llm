@@ -6,7 +6,7 @@ Purpose: The FSM-LLM package: core engine (JSON-defined finite state machines dr
 ## Scope
 
 - Top-level modules: the core. `API`, `FSMManager`, `MessagePipeline`, Pydantic models, JsonLogic, handlers, classification, the LLM layer (the only litellm import), prompts, context security, working memory, sessions, validator, visualizer, CLI.
-- Subpackages (each has its own README.md/CLAUDE.md with full contracts): `reasoning/`, `workflows/`, `agents/`, `monitor/`, `harness/`, `eval/`. Summarised under Subpackages below.
+- Subpackages: `reasoning/`, `workflows/`, `agents/`, `monitor/`, `harness/`, `eval/`. Role, entry points and the core contracts each relies on are in the Subpackages table below; this file is the contract reference for the core and the cross-package rules.
 - Version 0.11.0 in `__version__.py`; every subpackage re-exports it. Python 3.10-3.12. Core deps (pyproject): loguru, litellm (>=1.83.0,<2.0), pydantic (>=2.0), python-dotenv, tenacity (needed by litellm's sync retry path; nothing here imports it, do not remove).
 - `__init__.py` never imports a subpackage (DECISION D-003 of plan 3a032517: they import `from fsm_llm import API`, so an eager import hits a half-initialised package, and monitor would drag fastapi into core installs). Do not add eager imports or a module `__getattr__`. `has_workflows/get_workflows`, `has_reasoning/get_reasoning`, `has_agents/get_agents` probe by dotted name; `get_*` gives the install hint only when the package itself is missing.
 

@@ -65,7 +65,7 @@ Features of the core:
 - `src/fsm_llm/` - the one source package: the core at the top level, and the subpackages `reasoning`, `workflows`, `agents`, `monitor`, `harness`, `eval`.
 - `tests/` - the pytest suite (9,850 tests): one folder per part of the package, plus regression, example and packaging checks. The default run replaces the LLM with a fake.
 - `examples/` - 100 runnable examples in 8 categories, each a folder with `run.py` and its FSM JSON.
-- `docs/` - long guides: `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md`, plus three dated Strands design records.
+- `docs/` - long guides: `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md`, `agents_roadmap.md` (agents audit record), plus three dated Strands design records.
 - `scripts/audit_pth.py` - scans installed packages for malicious or code-bearing `.pth` files (used by `make audit` and CI).
 - `scripts/harness_bench.py`, `scripts/agents_bench.py` and `scripts/bench_data/` - pre-registered benchmarks of the harness and the agents on a local model, with their raw result rows.
 - `evaluation/datasets/` - sample conversation datasets for `fsm-llm-eval run`. Evaluation runs are written next to it in dated folders.
@@ -227,7 +227,7 @@ result = agent("What is the capital of France?")
 print(result.answer, result.success, result.stop_reason)
 ```
 
-`success` is `True` only when the run reached its goal; a run stopped by its iteration budget still returns its last answer, with `success=False` and `stop_reason="max_iterations"`. See `src/fsm_llm/agents/README.md` for the patterns and `docs/agents_roadmap.md` for the 2026-09-29 agents audit.
+`success` is `True` only when the run reached its goal; a run stopped by its iteration budget still returns its last answer, with `success=False` and `stop_reason="max_iterations"`. The patterns live in `src/fsm_llm/agents/`; the 2026-09-29 agents audit record is `docs/agents_roadmap.md`.
 
 **Monitor**:
 
@@ -298,7 +298,7 @@ make audit          # scan site-packages for suspicious .pth files
 
 `pytest -m "not slow"` skips the slow tests. CI runs on GitHub Actions for Python 3.10, 3.11 and 3.12: `.pth` audit, ruff lint and format check, mypy, and pytest without the `slow`, `real_llm` and `integration` markers.
 
-To contribute (details in `CONTRIBUTING.md`): fork, branch, run `make install-dev`, make your change with a test that fails before it, make sure `make lint`, `make type-check` and `make test` pass, add an entry under `Unreleased` in `CHANGELOG.md`, and open a pull request.
+To contribute: fork, branch, run `make install-dev`, make your change with a test that fails before it, make sure `make lint`, `make type-check` and `make test` pass, add an entry under `Unreleased` in `CHANGELOG.md` for any public removal or rename, and open a pull request. Commit messages follow the `<type>(<scope>): <summary>` shape.
 
 ## Things to know
 
@@ -307,7 +307,7 @@ To contribute (details in `CONTRIBUTING.md`): fork, branch, run `make install-de
 - One conversation handles one message at a time. A second `converse` on the same conversation while one is running raises `FSMError`.
 - `required_context_keys` never blocks a transition. Use a transition condition to wait for a value.
 - The default test run needs no network and no model. Live tests skip without a local Ollama; the harness live tests also need `FSM_LLM_HARNESS_LIVE=1`.
-- Test counts written in `CLAUDE.md` and in this file are checked against a fresh collection by `tests/test_packaging.py`. After adding tests, re-measure with `pytest --collect-only -q | tail -1` and update them. The FSM JSON above is loaded by `tests/test_fsm_llm/test_docs_snippets.py`, so it must stay valid.
+- Test counts quoted in this file and in the repository's contributor notes are checked against a fresh collection by `tests/test_packaging.py`. After adding tests, re-measure with `pytest --collect-only -q | tail -1` and update them. The FSM JSON above is loaded by `tests/test_fsm_llm/test_docs_snippets.py`, so it must stay valid.
 - Do not edit `examples/` unless asked: they are evaluation baselines and tests load their JSON.
 - The harness is experimental and not production-ready.
 - Evaluation scores are a heuristic and overstate quality; read the logs as well. Runs from before and after the 2026-09-29 restructure are not comparable.

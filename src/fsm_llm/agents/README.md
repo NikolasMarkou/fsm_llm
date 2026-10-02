@@ -47,7 +47,7 @@ flowchart TD
 | Parallel ReAct | `ParallelReactAgent` | Several tool calls per step, run in a thread pool |
 | Verified ReAct | `VerifiedReactAgent` | Check the answer with your function and retry |
 | Auto-memory ReAct | `AutoMemoryReactAgent` | Recall related memories before a run, save the exchange after |
-| Native function calling | `NativeFunctionCallingReactAgent` | Uses the provider's own tool-calling API: an FSM whose model turns are core tool-calling states (about 2.4 LLM calls per task in the agent bench) |
+| Native function calling | `NativeFunctionCallingReactAgent` | Uses the provider's own tool-calling API: an FSM whose model turns are core tool-calling states |
 | Swarm | `SwarmAgent` | Agents pass the task to each other |
 | Agent graph | `AgentGraph` | Agents wired as a graph with conditional edges, no cycles |
 
@@ -131,4 +131,3 @@ fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
 - MCP servers get a 30-second timeout per tool discovery and per tool call by default (`timeout=None` turns it off). Each call starts a new connection to the server, and that start counts toward the timeout.
 - The meta-builder is itself an FSM run by core: it classifies the artifact type, writes a reply per message until you say "build it", then makes one structured LLM call that returns the whole design, which is assembled and validated in Python (an agent's pattern comes from that same call). Every reply while collecting ends with "Say 'build it' when you're ready." A design the model returns in the wrong shape is reported as validation errors (`send`) or `MetaValidationError` (`run`). For workflows and agents, `is_valid` means the spec is complete, not that it loads as a runnable object; you still wire in the Python functions. `fsm-llm-meta` exits 130 on Ctrl-C.
 - `save_artifact` writes wherever it is told; check paths that come from untrusted input.
-- The 2026-09-29 audit of this package, what it fixed and what is deferred: `docs/agents_roadmap.md`. API summary: `docs/api_reference.md`.
