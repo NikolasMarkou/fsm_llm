@@ -1,7 +1,7 @@
 # test_fsm_llm_meta
 
 Path: `tests/test_fsm_llm_meta`
-Purpose: Pytest suite (434 tests) for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, the meta FSM (`build_meta_builder_fsm`) and `MetaBuilderAgent`, which drives that FSM through core.
+Purpose: Pytest suite (437 tests) for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, the meta FSM (`build_meta_builder_fsm`) and `MetaBuilderAgent`, which drives that FSM through core.
 
 ## Scope
 
@@ -43,7 +43,7 @@ LLM isolation methods used:
 | `conftest.py` | Fixtures | `fsm_builder`, `workflow_builder`, `agent_builder`, `populated_fsm_builder`, `meta_config`, `offline_llm` |
 | `test_agent.py` | `MetaBuilderAgent` behavior | 47 tests; carries DECISION references |
 | `test_builders.py` | Builder core behavior | 89 tests |
-| `test_builders_elaborate.py` | Builder edge cases, exceptions, config validators | 44 tests |
+| `test_builders_elaborate.py` | Builder edge cases, exceptions, config validators | 47 tests |
 | `test_tools.py` | Tool registries | 34 tests; `_make_call(tool_name, **kwargs)` helper at file bottom |
 | `test_integration.py` | Cross-piece checks | 11 tests |
 | `test_definitions.py` | Pydantic models and enum | 16 tests |
@@ -138,4 +138,4 @@ Agent:
 - Use the conftest fixtures instead of building builders inline; for new tool tests use `_make_call` in `test_tools.py`.
 - Inject `ScriptedMetaLLM` with `llm_interface=` (or patch `fsm_llm.llm.completion`); do not add tests that need a live provider.
 - Read the DECISION notes in `TestSchemaEchoRejection`, `TestLlmCallProviderFailure`, `TestWorkflowStepTypeEnum` and the D-0xx references of plan 944e2692 in `test_meta_fsm.py`, `test_meta_conversation.py`, `test_review_fixes_meta.py` before changing the behavior they pin.
-- Adding or removing tests changes the suite count (218) stated in this file and the README here. Re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_meta --collect-only -q | tail -1`.
+- Adding or removing tests changes the suite count (437) stated in this file and the README here. Re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_meta --collect-only -q | tail -1`.
