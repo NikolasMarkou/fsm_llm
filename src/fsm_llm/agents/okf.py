@@ -227,8 +227,9 @@ def _budget(tool: str, **params: Any) -> int:
     Residual: a model that echoes more than the margin in unknown keys (or a
     total input of about 600+ characters, where the floor applies) still gets
     its entry cut by the loop. The cut is visible (``...[truncated N chars]...``
-    in the middle) and ``next offset`` is the end of the page this tool
-    produced, never past it, so a page is re-read, not lost silently.
+    in the middle) and ``next offset`` never points past the page this tool
+    produced, so the model can re-read from the offset it was given. Text cut
+    from the middle of an over-long entry is not recovered.
     """
     wrapper = len(f"[Step 999] Tool: {tool} | Input: {params} | Result: ")
     room = Defaults.MAX_OBSERVATION_LENGTH - wrapper - _WRAPPER_MARGIN - _ECHO_MARGIN
