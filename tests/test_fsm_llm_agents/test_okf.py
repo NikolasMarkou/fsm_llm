@@ -897,3 +897,16 @@ class TestExportAgentResult:
         )
         assert path.resolve().is_relative_to((tmp_path / "kb").resolve())
         assert list((tmp_path).rglob("etc")) == []
+
+
+class TestExportSemanticMemorySurrogates:
+    def test_a_lone_surrogate_entry_does_not_fail_the_export(self, tmp_path: Path):
+        store = SemanticMemoryStore(embed_fn=_embed)
+        store.add("first ok", entry_id="a")
+        store.add("bad \ud800 surrogate", entry_id="b")
+
+        written = export_semantic_memory(store, tmp_path / "kb")
+
+        names = sorted(p.relative_to(tmp_path / "kb").as_posix() for p in written)
+        assert names == ["index.md", "memory/a.md", "memory/b.md"]
+        assert "�" in (tmp_path / "kb" / "memory" / "b.md").read_text("utf-8")

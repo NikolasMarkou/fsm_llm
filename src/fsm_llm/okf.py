@@ -12,12 +12,11 @@ pre-1.0 and mutable. The trust tier is a CLAIM the bundle makes about itself
 (a free ``verified[].by`` string), advisory only, never authorization.
 
 Entry points: ``parse_concept_text(concept_id, text) -> (OKFConcept, issues)``,
-``load_bundle(path) -> OKFBundle`` (bounded, confined, never follows symlinks),
-``OKFBundle`` (lookup, lexical search, link graph), ``check_bundle(bundle)``
-(spec section 11 conformance as a list of issues), ``write_bundle(bundle,
-path)`` (atomic per file, confined) and ``bundle_from_memory_entries(entries)``
-(plain memory-entry mappings to a bundle), ``create_okf_handler(bundle)`` (capped
-concept summaries into a public context key of a plain FSM).
+``load_bundle(path)`` (bounded, confined, never follows symlinks), ``OKFBundle``
+(lookup, lexical search, link graph), ``check_bundle(bundle)`` (spec section 11),
+``write_bundle(bundle, path)`` (atomic per file, confined),
+``bundle_from_memory_entries(entries)`` and ``create_okf_handler(bundle)``
+(capped concept summaries into a public context key of a plain FSM).
 """
 
 from __future__ import annotations
@@ -29,8 +28,10 @@ import tempfile
 import time
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import suppress
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
+from functools import partial
 from itertools import islice
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
@@ -141,8 +142,7 @@ class OKFIssue(BaseModel):
 class OKFLimits(BaseModel):
     """Resource bounds for reading a bundle (defaults from ``constants.OKF_*``).
 
-    ``max_seconds`` is a wall-clock budget checked between files; the load
-    stops with a ``load-deadline`` error issue and keeps what it has.
+    ``max_seconds`` is a wall-clock budget checked between files (``load-deadline``).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -177,11 +177,10 @@ _STRICT_TS_RE = re.compile(
 def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
     """Parse an OKF timestamp; return ``(aware datetime | None, warning code)``.
 
-    Does not use ``datetime.fromisoformat``: on Python 3.10 it rejects a ``Z``
-    suffix and fractions that are not 3 or 6 digits. Accepts ``Z``, ``+HH``,
-    ``+HH:MM``, ``+HHMM`` and any fraction length. The code is ``None`` for the
-    conformant form (explicit UTC offset), ``"date-only"`` (midnight UTC),
-    ``"naive"`` (read as UTC) or ``"invalid"`` (datetime is ``None``).
+    Accepts ``Z``, ``+HH``, ``+HH:MM``, ``+HHMM`` and any fraction length. The
+    code is ``None`` for the conformant form (explicit UTC offset),
+    ``"date-only"`` (midnight UTC), ``"naive"`` (read as UTC) or ``"invalid"``
+    (datetime is ``None``).
     """
     if isinstance(value, datetime):
         if value.tzinfo is None:
@@ -312,10 +311,8 @@ _MAX_FILE_WARNINGS = 25
 class _OKFLoader(yaml.SafeLoader):
     """``SafeLoader`` without timestamp auto-resolution, aliases and anchors.
 
-    SECURITY: the resolver table is a COPY. Mutating
-    ``yaml.SafeLoader.yaml_implicit_resolvers`` would change ``yaml.safe_load``
-    for the whole process. Timestamps stay strings (OKF code parses them).
-    Aliases and anchors are refused in ``compose_node``, before any expansion,
+    SECURITY: the resolver table is a COPY (see the anchor below). Timestamps
+    stay strings (OKF code parses them). Aliases and anchors are refused in ``compose_node``, before any expansion,
     so an alias bomb cannot grow. Duplicate keys are recorded; the last wins.
     """
 
@@ -369,8 +366,7 @@ def _split_frontmatter(text: str) -> tuple[str | None, str, str | None]:
 def _flow_depth_exceeded(raw: str) -> bool:
     """PyYAML's scanner is quadratic on deeply nested ``[``/``{``: bound it first.
 
-    Brackets in quoted scalars count too; a false positive needs 64 unclosed
-    brackets in one string and costs that concept one error issue.
+    Brackets in quoted scalars count too (a false positive costs one concept).
     """
     depth = 0
     for ch in raw:
@@ -403,8 +399,7 @@ def _load_yaml(raw: str, note: _Note) -> dict[Any, Any]:
         note("error", "frontmatter-invalid", f"{type(exc).__name__}: {problem}"[:160])
         return {}
     except Exception as exc:  # PyYAML constructors raise anything
-        # A malformed built-in tag (``!!timestamp x``, an empty ``!!int``) escapes
-        # as AttributeError, KeyError or IndexError. The issue names the class.
+        # A malformed built-in tag (``!!timestamp x``) escapes as AttributeError etc.
         logger.debug(f"OKF frontmatter rejected: {type(exc).__name__}: {exc}")
         note("error", "frontmatter-invalid", f"{type(exc).__name__}: {exc}"[:160])
         return {}
@@ -653,9 +648,8 @@ def _link_candidates(target: object, from_id: str) -> _Ids:
     is percent-decoded once, external schemes and non-``.md`` targets give
     nothing, and a target that climbs above the root is not a candidate.
 
-    SECURITY: this is lexical on purpose. It works in id space and never
-    touches the filesystem, so nothing here can read outside the bundle;
-    D-032's "no normpath" governs the loader's file access, not this.
+    SECURITY: lexical on purpose. It works in id space and never touches the
+    filesystem, so nothing here can read outside the bundle.
     """
     if not isinstance(target, str) or len(target) > 4096:
         return []
@@ -892,8 +886,8 @@ def load_bundle(
 
     A missing or non-directory root is an ``OKFError`` and is never created.
     Everything else (oversize, non-UTF-8, symlinked, hardlinked, unsafe-named
-    or unreadable files, a spent limit, an unexpected failure on one file)
-    becomes an ``OKFIssue`` and the rest still loads.
+    or unreadable files, a spent limit, an unexpected failure on one file, which
+    is ``parse-failed``) becomes an ``OKFIssue`` and the rest still loads.
 
     Interface contract:
         - Files are visited in sorted order; only exact ``.md`` names count.
@@ -914,8 +908,6 @@ def load_bundle(
           and at ``max_seconds`` of wall-clock time (``load-deadline``, checked
           between entries); the concepts loaded so far are kept. Directories
           deeper than ``max_depth`` are not entered.
-        - An unexpected exception while processing one file becomes a
-          ``parse-failed`` issue for that file.
         - Residual hole (TOCTOU): a path swapped for a symlink between the
           scan and the open is refused by ``O_NOFOLLOW`` on its last part only.
     """
@@ -1089,12 +1081,11 @@ def load_bundle(
 def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
     """Spec section 11 conformance as a list of issues. Never raises.
 
-    The load-time issues (parse problems, skipped files, reserved-file checks)
-    plus model-level checks that also cover concepts added with ``put``: a
-    non-empty ``type``, no reserved concept id, timestamp forms without an
-    explicit UTC offset (warnings), broken internal links (info: consumers must
-    tolerate them) and an unknown ``okf_version`` (info). Duplicates are
-    dropped; the result is capped like ``load_bundle``'s.
+    The load-time issues plus model-level checks that also cover concepts
+    added with ``put``: a non-empty ``type``, no reserved concept id, timestamp
+    forms without an explicit UTC offset (warnings), broken internal links
+    (info: consumers must tolerate them) and an unknown ``okf_version`` (info).
+    Duplicates are dropped; the result is capped like ``load_bundle``'s.
     """
     out = list(bundle.issues)
     seen = {(i.code, i.path, i.id, i.message) for i in out}
@@ -1157,13 +1148,15 @@ def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
 
 _INDEX_TYPE_FALLBACK = "Untyped"
 _MAX_CLASHES_SHOWN = 5
+_MAX_PATH_BYTES = 4_000  # Linux PATH_MAX is 4,096; room left for the temp sibling
+_SURROGATE_RE = re.compile("[\ud800-\udfff]")
 
 
 class _OKFDumper(yaml.SafeDumper):
     """``SafeDumper`` that never emits anchors or aliases.
 
-    The loader refuses aliases, so a value shared by two keys (the same dict
-    object twice) must be written out twice, not as ``&id001`` / ``*id001``.
+    The loader refuses aliases, so a shared value is written out twice, not as
+    ``&id001`` / ``*id001``.
     """
 
     def ignore_aliases(self, data: Any) -> bool:
@@ -1191,8 +1184,19 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _render_concept(concept: OKFConcept) -> str:
-    """The file text of *concept*. Raises ``OKFError`` when it cannot be dumped.
+def _lone_surrogate(value: Any) -> bool:
+    """True when a string, key or item anywhere in *value* is a lone surrogate."""
+    if isinstance(value, str):
+        return bool(_SURROGATE_RE.search(value))
+    if isinstance(value, Mapping):
+        value = [*value, *value.values()]
+    return isinstance(value, (list, tuple, set, frozenset)) and any(
+        map(_lone_surrogate, value)
+    )
+
+
+def _render_concept(concept: OKFConcept) -> bytes:
+    """The UTF-8 file bytes of *concept*; ``OKFError`` when it cannot be written.
 
     Key order is fixed: the known keys, ``usage_window`` (kept in ``extra``)
     after ``sources``, then the remaining ``extra`` keys in original order.
@@ -1223,8 +1227,9 @@ def _render_concept(concept: OKFConcept) -> str:
         front["stale_after"] = concept.stale_after
     front.update(extra)
     try:
+        plain = _plain(front)
         dumped = yaml.dump(
-            _plain(front),
+            plain,
             Dumper=_OKFDumper,
             sort_keys=False,
             allow_unicode=True,
@@ -1238,7 +1243,9 @@ def _render_concept(concept: OKFConcept) -> str:
     body = concept.body
     if body and not body.endswith("\n"):
         body += "\n"
-    return f"---\n{dumped}---\n{body}"
+    if _lone_surrogate(plain) or _SURROGATE_RE.search(body):  # YAML would escape it
+        raise OKFError(f"concept {concept.id!r}: holds a lone surrogate (not UTF-8)")
+    return f"---\n{dumped}---\n{body}".encode()
 
 
 def _render_index(bundle: OKFBundle) -> str:
@@ -1268,9 +1275,14 @@ def _target_problem(root: Path, rel: str) -> str | None:
     """
     lexical = root.joinpath(*rel.split("/"))
     try:
+        if len(os.fsencode(lexical)) > _MAX_PATH_BYTES:
+            return "is too long for the file system"
         resolved = resolve_within(root, rel)
         if resolved is None:
             return "resolves outside the target directory"
+        # DECISION plan-2026-10-21T140931-095ea5f8/D-014
+        # Do NOT relax this to the plain `resolve_within` containment test: a
+        # symlinked directory INSIDE the root would then be written through.
         if resolved != lexical:
             return "passes through a symbolic link"
         if lexical.is_dir():
@@ -1285,29 +1297,26 @@ def _target_problem(root: Path, rel: str) -> str | None:
     return None
 
 
-def _atomic_write(path: Path, text: str) -> None:
-    """Write *text* to *path* through a same-directory temp file and rename.
+# DECISION plan-2026-10-21T140931-095ea5f8/D-014
+# Do NOT swap this private copy for a shared helper or `harness._atomic` (the
+# `agents/semantic_memory.py` anchor and the layering rule forbid both), and do
+# NOT widen the cleanup to `except BaseException`.
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Write *data* (encoded while validating) to *path* via a temp file, rename.
 
-    Mirrors ``session.FileSessionStore.save`` on purpose (a private copy; the
-    anchor at ``agents/semantic_memory.py`` forbids a shared helper without a
-    maintainer decision, and core must not import ``harness``). The suffix is
-    not ``.md``, so a crash never leaves a loadable file. ``fsync`` before the
-    rename, and an existence-checked ``finally`` cleans up on ANY failure; no
-    ``except BaseException``. The file mode is the temp file's (owner-only).
+    Mirrors ``session.FileSessionStore.save``. The suffix is not ``.md``, so a
+    crash never leaves a loadable file; a ``finally`` removes it on ANY failure.
     """
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".okf-tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
     finally:
-        if os.path.exists(tmp):
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+        with suppress(OSError):  # gone after a successful rename
+            os.unlink(tmp)
 
 
 def write_bundle(
@@ -1326,23 +1335,26 @@ def write_bundle(
           body, a trailing newline. Unknown keys survive; a second write of a
           loaded bundle is byte-identical. ``datetime`` values get an explicit
           UTC offset (naive taken as UTC); strings read from disk are verbatim.
-        - Every id and target is validated and every file rendered BEFORE the
-          first byte is written, so a bad id, a clash or an unwritable value
-          leaves the directory untouched (``OKFError`` naming them, capped).
-          An id that is empty, absolute, has an empty, ``.``, ``..`` or
-          dot-prefixed segment, control characters, or ends in ``index`` /
-          ``log`` is refused, as is a case-insensitive duplicate.
+        - Every id and target is validated and every file rendered AND encoded
+          to UTF-8 BEFORE the first byte is written, so a bad id, a clash, a
+          lone surrogate, an over-long path or a file and a directory sharing
+          a path (ids ``q`` and ``q.md/z``) leave the directory untouched
+          (``OKFError`` naming them, capped). An id that is empty, absolute,
+          has an empty or dot-prefixed segment, control characters, or ends in
+          ``index`` / ``log`` is refused, as is a case-insensitive duplicate.
         - Each target passes ``security.resolve_within``; a symlinked target or
-          directory component is refused even with ``overwrite=True``.
-        - An existing file is replaced only with ``overwrite=True``; otherwise
-          every clash is listed in the ``OKFError``. A root that exists as a
-          file is refused.
+          directory component is refused even with ``overwrite=True``. An
+          existing file is replaced only with ``overwrite=True`` (else every
+          clash is listed in the ``OKFError``). A root that is a file is refused.
         - ``write_index`` adds a root ``index.md`` (``okf_version: "0.2"``, a
           ``* [Title](/id.md) - description`` bullet per concept under a
           ``# <type>`` heading). An existing ``index.md`` is kept unless
           ``overwrite=True``.
         - Atomic PER FILE (temp file, fsync, rename). The whole bundle is not
-          atomic: an I/O failure midway leaves the files already written.
+          atomic: an I/O failure midway leaves the files already written. A
+          parent directory swapped for a symlink between validation and the
+          write still wins; whole-bundle atomicity is not claimed (per-file
+          only).
     """
     try:
         root = Path(path).resolve()
@@ -1352,7 +1364,7 @@ def write_bundle(
         raise OKFError(f"cannot open bundle root: {type(exc).__name__}") from exc
 
     problems: list[str] = []
-    plan: list[tuple[str, Path, str]] = []  # (id, target, text)
+    plan: list[tuple[str, Path, bytes]] = []  # (id, target, encoded file)
     seen: set[str] = set()
     for concept in bundle:
         cid = concept.id
@@ -1378,7 +1390,12 @@ def write_bundle(
         elif (reason := _target_problem(root, "index.md")) is not None:
             problems.append(f"'index.md' {reason}")
         else:
-            plan.append(("index", index, _render_index(bundle)))
+            plan.append(("index", index, _render_index(bundle).encode()))
+    files = {_id_key(t.relative_to(root).as_posix()) for _, t, _ in plan}
+    for cid, target, _ in plan:  # ids "q" and "q.md/z": a file and a directory
+        parts = _id_key(target.relative_to(root).as_posix()).split("/")
+        if any("/".join(parts[:i]) in files for i in range(1, len(parts))):
+            problems.append(f"{cid[:80]!r} needs a directory where a file goes")
     if problems:
         shown = "; ".join(problems[:_MAX_CLASHES_SHOWN])
         more = len(problems) - _MAX_CLASHES_SHOWN
@@ -1388,10 +1405,10 @@ def write_bundle(
         )
 
     written: list[Path] = []
-    for cid, target, text in plan:
+    for cid, target, data in plan:
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write(target, text)
+            _atomic_write(target, data)
         except OSError as exc:
             raise OKFError(
                 f"cannot write {cid[:80]!r}: {type(exc).__name__}; "
@@ -1412,6 +1429,9 @@ _MAX_META_TEXT = 2_000
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
+_unlone = partial(_SURROGATE_RE.sub, "\ufffd")  # lone surrogate -> U+FFFD
+
+
 def _native(value: Any, depth: int = 0) -> Any:
     """JSON-native copy of *value* or ``_DROP``; secret-looking and internal
     keys at any depth are removed (``security`` is the single decision point)."""
@@ -1420,7 +1440,7 @@ def _native(value: Any, depth: int = 0) -> Any:
     if isinstance(value, float):
         return value if math.isfinite(value) else _DROP
     if isinstance(value, str):
-        return value[:_MAX_META_TEXT]
+        return _unlone(value[:_MAX_META_TEXT])
     if depth >= _MAX_META_DEPTH:
         return _DROP
     if isinstance(value, (list, tuple)):
@@ -1435,7 +1455,7 @@ def _native(value: Any, depth: int = 0) -> Any:
                 and not is_forbidden_context_entry(key, item)
                 and (clean := _native(item, depth + 1)) is not _DROP
             ):
-                out[key[:_MAX_META_TEXT]] = clean
+                out[_unlone(key[:_MAX_META_TEXT])] = clean
         return out
     return _DROP
 
@@ -1473,7 +1493,9 @@ def bundle_from_memory_entries(
           ``title`` is metadata ``title`` else the first non-blank line, capped
           at ``OKF_SUMMARY_FIELD_CHARS``; ``tags`` are the string items of a
           metadata ``tags`` list. The body is the text (cut at
-          ``OKF_EXPORT_TEXT_MAX_CHARS`` with a warning issue).
+          ``OKF_EXPORT_TEXT_MAX_CHARS`` with a warning issue). A lone surrogate
+          in the text or any metadata string or key becomes U+FFFD, with a
+          ``text-sanitized`` warning issue (never an error).
         - Every other metadata entry whose value is JSON-native goes under
           ``extra["metadata"]``. Entries are dropped when
           ``is_forbidden_context_entry(key, value)`` is true or the key is
@@ -1506,6 +1528,9 @@ def bundle_from_memory_entries(
         if len(text) > OKF_EXPORT_TEXT_MAX_CHARS:
             text = text[:OKF_EXPORT_TEXT_MAX_CHARS]
             skip(index, "text was cut", "text-truncated")
+        if _lone_surrogate(entry):
+            text = _unlone(text)
+            skip(index, "lone surrogates replaced with U+FFFD", "text-sanitized")
         raw_meta = entry.get("metadata")
         meta = _native(dict(raw_meta)) if isinstance(raw_meta, Mapping) else {}
         type_, title, tags = (meta.pop(k, None) for k in ("type", "title", "tags"))

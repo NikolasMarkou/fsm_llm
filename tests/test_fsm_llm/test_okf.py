@@ -3883,3 +3883,201 @@ class TestLoaderTrims:
 
         assert hits["y"] == pytest.approx(1 / 6)
         assert hits["x"] == pytest.approx(1.0)
+
+
+_LONE = "bad \ud800 surrogate"
+
+
+class TestWriteEncodesBeforeWriting:
+    """A lone surrogate cannot become UTF-8; it is refused in the validation
+    pass, naming the concept, not after earlier files were written."""
+
+    @pytest.mark.parametrize(
+        "field",
+        ["body", "title", "description", "tag", "extra-value", "extra-key"],
+    )
+    def test_a_lone_surrogate_anywhere_refuses_the_whole_write(
+        self, tmp_path: Path, field: str
+    ) -> None:
+        kwargs: dict[str, Any] = {
+            "body": {"body": _LONE},
+            "title": {"title": _LONE},
+            "description": {"description": _LONE},
+            "tag": {"tags": [_LONE]},
+            "extra-value": {"extra": {"note": _LONE}},
+            "extra-key": {"extra": {_LONE: "v"}},
+        }[field]
+        bundle = _bundle_of(_note("good"), _note("evil/one", **kwargs), _note("zed"))
+        out = tmp_path / "out"
+
+        with pytest.raises(OKFError, match=r"evil/one.*UTF-8"):
+            write_bundle(bundle, out)
+
+        assert not out.exists()
+
+    def test_nothing_is_written_into_an_existing_directory(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        out.mkdir()
+        bundle = _bundle_of(_note("a"), _note("b", body=_LONE), _note("c"))
+
+        with pytest.raises(OKFError):
+            write_bundle(bundle, out)
+
+        assert _tree(out) == {} and list(out.iterdir()) == []
+
+    def test_the_index_is_encoded_in_the_same_pass(self, tmp_path: Path) -> None:
+        bundle = _bundle_of(_note("a", title=_LONE))
+
+        with pytest.raises(OKFError, match="UTF-8"):
+            write_bundle(bundle, tmp_path / "out", write_index=True)
+
+        assert not (tmp_path / "out").exists()
+
+    def test_a_clean_unicode_bundle_still_writes(self, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        write_bundle(_bundle_of(_note("a", body="café \U0001f600\n")), out)
+
+        assert "café \U0001f600" in (out / "a.md").read_text(encoding="utf-8")
+
+
+class TestWriteRefusesUnwritableTargets:
+    def test_a_file_and_a_directory_with_the_same_path_are_refused(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        bundle = _bundle_of(_note("a"), _note("q"), _note("q.md/z"))
+
+        with pytest.raises(OKFError, match=r"q\.md/z.*directory"):
+            write_bundle(bundle, out)
+
+        assert not out.exists()
+
+    def test_the_clash_is_case_insensitive_and_covers_the_index(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+
+        with pytest.raises(OKFError, match="directory"):
+            write_bundle(_bundle_of(_note("Q"), _note("q.MD/z")), out)
+        with pytest.raises(OKFError, match="directory"):
+            write_bundle(_bundle_of(_note("index.md/z")), out)
+
+        assert not out.exists()
+
+    def test_siblings_with_a_shared_prefix_are_not_a_clash(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        write_bundle(_bundle_of(_note("q"), _note("q/z")), out)
+
+        assert sorted(_tree(out)) == ["index.md", "q.md", "q/z.md"]
+
+    def test_an_over_long_total_path_is_refused_before_any_write(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        deep = "/".join(["d" * 150] * 30)  # segments pass the id rule, total >4000
+        bundle = _bundle_of(_note("a"), _note(deep))
+
+        with pytest.raises(OKFError, match="too long"):
+            write_bundle(bundle, out)
+
+        assert not out.exists()
+
+
+class TestWriteRoundTripOfCoercibleStrings:
+    """Strings that plain YAML 1.1 would re-read as another type must come back
+    as the same strings (the dumper quotes them)."""
+
+    TRICKY: ClassVar[list[str]] = ["yes", "True", "0.10", "1:30", "null", "off", "1e3"]
+
+    @pytest.mark.parametrize("value", TRICKY)
+    def test_load_write_load_keeps_the_string(self, tmp_path: Path, value: str) -> None:
+        quoted = json.dumps(value)
+        src = _write(
+            tmp_path / "src",
+            {
+                "c.md": f"---\ntype: {quoted}\ntitle: {quoted}\n"
+                f"description: {quoted}\ntags: [{quoted}]\nflag: {quoted}\n"
+                f"nest: {{k: [{quoted}]}}\n---\nbody\n"
+            },
+        )
+        first = load_bundle(src).get("c")
+        assert first is not None and first.type == value
+
+        write_bundle(load_bundle(src), tmp_path / "out", write_index=False)
+        raw = yaml.safe_load((tmp_path / "out" / "c.md").read_text().split("---\n")[1])
+        second = load_bundle(tmp_path / "out").get("c")
+
+        assert second is not None
+        assert (second.type, second.title, second.description) == (value,) * 3
+        assert second.tags == [value]
+        assert second.extra == {"flag": value, "nest": {"k": [value]}}
+        assert raw["type"] == value and raw["flag"] == value
+
+
+_SURROGATE_REPRO = (
+    '{"entries":[{"id":"a","text":"first ok"},'
+    '{"id":"b","text":"bad \\ud800 surrogate"}]}'
+)
+
+
+class TestMemoryExportSurvivesLoneSurrogates:
+    """A hostile memory entry must not make the whole export fail."""
+
+    def test_text_and_metadata_are_sanitized_with_one_warning(self) -> None:
+        bundle = bundle_from_memory_entries(
+            [
+                {"id": "a", "text": "first ok"},
+                {
+                    "id": "b",
+                    "text": _LONE,
+                    "metadata": {"note": _LONE, _LONE: "v", "deep": {"x": [_LONE]}},
+                },
+            ]
+        )
+
+        assert len(bundle) == 2
+        b = bundle.get("memory/b")
+        assert b is not None and "\ud800" not in b.body
+        assert b.body == "bad \ufffd surrogate"
+        assert b.extra["metadata"] == {
+            "note": "bad \ufffd surrogate",
+            "bad \ufffd surrogate": "v",
+            "deep": {"x": ["bad \ufffd surrogate"]},
+        }
+        assert [i.code for i in bundle.issues] == ["text-sanitized"]
+        assert bundle.issues[0].severity == "warning"
+        assert "\ud800" not in bundle.issues[0].message
+
+    def test_a_clean_entry_gets_no_warning(self) -> None:
+        bundle = bundle_from_memory_entries([{"id": "a", "text": "caf\u00e9"}])
+
+        assert bundle.issues == []
+
+    def test_the_sanitized_bundle_writes_and_loads(self, tmp_path: Path) -> None:
+        bundle = bundle_from_memory_entries(
+            [{"id": "b", "text": _LONE, "metadata": {"title": _LONE, "k": _LONE}}]
+        )
+
+        write_bundle(bundle, tmp_path / "out")
+
+        again = load_bundle(tmp_path / "out")
+        assert len(again) == 1
+        assert "\ufffd" in again.get("memory/b").body
+
+    def test_the_cli_export_repro_writes_both_files_and_warns(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        memory = tmp_path / "store.json"
+        memory.write_text(_SURROGATE_REPRO, encoding="utf-8")
+
+        code = okf_cli_main(["export", str(memory), str(tmp_path / "kb")])
+        captured = capsys.readouterr()
+
+        assert code == 0, captured.err
+        assert (tmp_path / "kb" / "memory" / "a.md").is_file()
+        assert (tmp_path / "kb" / "memory" / "b.md").is_file()
+        assert "text-sanitized" in captured.err
