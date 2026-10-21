@@ -61,7 +61,6 @@ from .security import (
 )
 
 # --- Untrusted-text helper (shared by every output path) ---
-
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
 _LINE_BREAKS = "\n\r\t\u2028\u2029\x0b\x0c\x85"
 # Cf characters that spell words (Persian and Indic ZWNJ, emoji ZWJ sequences,
@@ -71,13 +70,11 @@ _VISIBLE_CATEGORIES = "LMNPS"
 
 
 def strip_unsafe_text(text: str, *, multiline: bool = False) -> str:
-    """Remove what could drive a terminal or hide text from a reader.
-
-    Drops ANSI escapes, control (Cc) and format characters (Cf: zero-width and
-    bidi marks, BOM), except ZWNJ, ZWJ and soft hyphen between two visible
-    characters (so ``می‌خواهم`` and emoji sequences survive). Each line break or
-    tab becomes one space, unless ``multiline`` keeps ``\\n`` and ``\\t``.
-    """
+    """Remove what could drive a terminal or hide text from a reader: ANSI
+    escapes, control (Cc) and format characters (Cf: zero-width and bidi marks,
+    BOM), except ZWNJ, ZWJ and soft hyphen between two visible characters (so
+    ``می‌خواهم`` and emoji sequences survive). Each line break or tab becomes one
+    space, unless ``multiline`` keeps ``\\n`` and ``\\t``."""
     if text.isascii() and text.isprintable():
         return text  # nothing to strip: the common case, fast
     clean = _ANSI_RE.sub("", text)
@@ -108,11 +105,8 @@ class TrustTier(str, Enum):
 
 
 class OKFIssue(BaseModel):
-    """One problem found while reading or checking a bundle.
-
-    ``message``, ``path`` and ``id`` come from untrusted input, so they are
-    control-stripped and the message is capped when the issue is built.
-    """
+    """One problem found while reading or checking a bundle; ``message``,
+    ``path`` and ``id`` are untrusted, so control-stripped and capped here."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -162,12 +156,9 @@ _STRICT_TS_RE = re.compile(
 # rejects a `Z` suffix and fractions that are not 3 or 6 digits, and OKF
 # stamps use both. See decisions.md D-014.
 def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
-    """Parse an OKF timestamp; return ``(aware datetime | None, warning code)``.
-
-    Accepts ``Z``, ``+HH``, ``+HH:MM``, ``+HHMM`` and any fraction length. The
-    code is ``None`` (explicit UTC offset), ``"date-only"`` (midnight UTC),
-    ``"naive"`` (read as UTC) or ``"invalid"`` (datetime is ``None``).
-    """
+    """Parse an OKF timestamp: ``(aware datetime | None, warning code)``; the
+    code is ``None`` (explicit offset: ``Z``, ``+HH``, ``+HH:MM``, ``+HHMM``),
+    ``"date-only"`` (midnight UTC), ``"naive"`` (read as UTC) or ``"invalid"``."""
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc), "naive"
@@ -202,11 +193,9 @@ def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
 
 
 class OKFConcept(BaseModel):
-    """One concept document. ``id`` is the file path minus ``.md``.
-
-    Values are kept as read (timestamps stay strings, unknown keys stay in
-    ``extra``); ``type`` is ``""`` when the document gave none (an error issue).
-    """
+    """One concept document; ``id`` is the file path minus ``.md``. Values are
+    kept as read (timestamps stay strings, unknown keys stay in ``extra``);
+    ``type`` is ``""`` when the document gave none (an error issue)."""
 
     id: str
     type: str = ""
@@ -272,7 +261,6 @@ class OKFConcept(BaseModel):
 
 
 # --- Tolerant parser ---
-
 _Note = Callable[[Literal["error", "warning", "info"], str, str], None]
 _TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
 _KNOWN_KEYS = frozenset(
@@ -285,12 +273,9 @@ _MAX_FILE_WARNINGS = 25
 
 
 class _OKFLoader(yaml.SafeLoader):
-    """``SafeLoader`` without timestamp auto-resolution, aliases and anchors.
-
-    SECURITY: the resolver table is a COPY (see the anchor below). Aliases and
-    anchors are refused in ``compose_node``, before any expansion. Duplicate
-    keys are recorded; the last wins.
-    """
+    """``SafeLoader`` without timestamp auto-resolution, aliases and anchors
+    (refused in ``compose_node``, before any expansion); duplicate keys are
+    recorded, the last wins. SECURITY: the resolver table is a COPY (below)."""
 
     # DECISION plan-2026-10-21T140931-095ea5f8/D-014
     # The timestamp resolver is left out of a COPY of the table. Do NOT call
@@ -456,11 +441,8 @@ def _check_timestamps(
 
 
 def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKFIssue]]:
-    """Parse one concept document. Never raises on content.
-
-    Returns the concept and the issues found. Without usable frontmatter the
-    text is the body. An unexpected failure becomes an error issue.
-    """
+    """Parse one concept document into ``(concept, issues)``; never raises on
+    content. Without usable frontmatter the text is the body."""
     issues: list[OKFIssue] = []
     warnings = 0
 
@@ -534,7 +516,6 @@ def _build_concept(concept_id: str, text: str, note: _Note) -> OKFConcept:
 
 
 # --- Links (lexical, in id space) ---
-
 _Ids = list[str]
 _Concepts = list[OKFConcept]
 _Hits = list[tuple[OKFConcept, float]]
@@ -609,12 +590,10 @@ def _body_links(body: str) -> Iterator[str]:
 
 
 def _link_candidates(target: object, from_id: str) -> _Ids:
-    """Concept ids a link or path-valued key may name, best first (D-003).
-
-    ``/``-prefixed is bundle-root relative; else file-relative (spec 6.2), then
-    root relative (spec 6.3). Fragment and query dropped, the rest percent-decoded
-    once; external, non-``.md`` and above-root targets give nothing. Lexical only.
-    """
+    """Concept ids a link or path-valued key may name, best first (D-003):
+    ``/``-prefixed is root relative; else file-relative (spec 6.2), then root
+    relative (spec 6.3). Fragment and query dropped, percent-decoded once;
+    external, non-``.md`` and above-root targets give nothing. Lexical only."""
     if not isinstance(target, str) or len(target) > 4096:
         return []
     return list(_resolve_path(target, from_id.rpartition("/")[0]))
@@ -650,7 +629,6 @@ def _resolve_path(target: str, directory: str) -> tuple[str, ...]:
 
 
 # --- Bundle ---
-
 _CHECK_DEADLINE = OKFIssue(  # frozen, so one instance serves every bundle
     severity="error",
     code="check-deadline",
@@ -668,7 +646,7 @@ class OKFBundle:
           capped. ``max_seconds`` (``None``: unbounded) bounds ``check_bundle``
           and the first ``backlinks`` call, each on its own clock.
         - ``get(id)`` -> concept or ``None``; ``len``, ``in`` and iteration
-          (concepts in id order) work as for a mapping of ids.
+          (id order) work as for a mapping of ids.
         - ``list(type=, prefix=, include_deprecated=False)`` -> concepts in id
           order (``type`` compared case-insensitively).
         - ``search(query, limit=5, include_deprecated=False)`` -> ``(concept,
@@ -829,7 +807,6 @@ class OKFBundle:
 
 
 # --- Loader ---
-
 # code -> (severity, message) for every problem the loader itself reports.
 _LOAD_PROBLEMS: dict[str, tuple[Literal["error", "warning", "info"], str]] = {
     "id-unsafe": ("warning", "file name is not a safe concept id; skipped"),
@@ -1125,7 +1102,6 @@ def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
 
 
 # --- Writer ---
-
 _INDEX_TYPE_FALLBACK = "Untyped"
 _MAX_CLASHES_SHOWN = 5
 _MAX_PATH_BYTES = 4_000  # Linux PATH_MAX is 4,096; room left for the temp sibling
@@ -1177,9 +1153,13 @@ def _lone_surrogate(value: Any) -> bool:
     return False
 
 
+class _FrontmatterTooLarge(OKFError):
+    """Frontmatter over ``OKF_MAX_FRONTMATTER_BYTES`` (the export cuts metadata)."""
+
+
 def _render_concept(concept: OKFConcept) -> bytes:
-    """The UTF-8 file bytes of *concept*; ``OKFError`` when it cannot be written.
-    Keys: the known ones, ``usage_window`` after ``sources``, then ``extra``."""
+    """The UTF-8 file bytes of *concept*; ``OKFError`` when it cannot be written
+    or would not load back (frontmatter or file over its byte cap). Keys: the known ones, ``usage_window`` after ``sources``, then ``extra``."""
     extra = dict(concept.extra)
     shadowed = sorted(k for k in extra if k in _KNOWN_KEYS)
     if shadowed:
@@ -1223,7 +1203,14 @@ def _render_concept(concept: OKFConcept) -> bytes:
     body = concept.body + ("\n" if concept.body and concept.body[-1] != "\n" else "")
     if lone or _SURROGATE_RE.search(body):  # YAML would escape it
         raise OKFError(f"concept {concept.id!r}: holds a lone surrogate (not UTF-8)")
-    return f"---\n{dumped}---\n{body}".encode()
+    # DECISION plan-2026-10-21T140931-095ea5f8/D-018
+    # The loader's bounds and measure: do NOT write what `load_bundle` rejects.
+    data = f"---\n{dumped}---\n{body}".encode()
+    if len(dumped.encode("utf-8", "replace")) > OKF_MAX_FRONTMATTER_BYTES:
+        raise _FrontmatterTooLarge(f"concept {concept.id!r}: frontmatter too large")
+    if len(data) > OKF_MAX_FILE_BYTES:
+        raise OKFError(f"concept {concept.id!r}: file too large")
+    return data
 
 
 def _render_index(bundle: OKFBundle) -> str:
@@ -1244,12 +1231,10 @@ def _render_index(bundle: OKFBundle) -> str:
 
 
 def _target_problem(root: Path, rel: str) -> str | None:
-    """Why ``root/rel`` may not be written, or ``None``.
-
-    SECURITY: ``security.resolve_within`` is the only confinement check; the
-    resolved path must also EQUAL the lexical one, so any symlinked component
-    or target is refused, and no ancestor may be a regular file.
-    """
+    """Why ``root/rel`` may not be written, or ``None``. SECURITY:
+    ``security.resolve_within`` is the only confinement check; the resolved path
+    must also EQUAL the lexical one (no symlinked component or target) and no
+    ancestor may be a regular file."""
     lexical = root.joinpath(*rel.split("/"))
     try:
         if len(os.fsencode(lexical)) > _MAX_PATH_BYTES:
@@ -1312,7 +1297,9 @@ def write_bundle(
         - Every id and target is validated and every file rendered AND encoded
           BEFORE the first byte is written, so a bad or lookalike id, a lone
           surrogate, a frontmatter value too deep, large or cyclic
-          (``OKF_MAX_YAML_DEPTH``, ``OKF_MAX_FRONTMATTER_BYTES`` nodes), an
+          (``OKF_MAX_YAML_DEPTH``, ``OKF_MAX_FRONTMATTER_BYTES`` nodes), a
+          frontmatter over ``OKF_MAX_FRONTMATTER_BYTES`` bytes or a file over
+          ``OKF_MAX_FILE_BYTES`` (what is written always loads back), an
           over-long path or a file and a directory sharing a path leave the
           directory untouched (``OKFError`` naming them, capped).
         - Each target passes ``security.resolve_within``; a symlinked target or
@@ -1384,7 +1371,6 @@ def write_bundle(
 
 
 # --- Export of memory entries ---
-
 _DROP = object()
 _MAX_META_ITEMS = 100
 _MAX_META_DEPTH = 4
@@ -1453,10 +1439,8 @@ def capped_line(value: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
 def body_page(
     concept: OKFConcept, offset: Any, size: int
 ) -> tuple[str, int | None, int]:
-    """``(page, next offset or None, length)`` of a concept's stripped body.
-
-    ``offset`` is clamped into the body (a non-int is 0); pages add up to it.
-    """
+    """``(page, next offset or None, length)`` of a concept's stripped body;
+    ``offset`` is clamped into the body (a non-int is 0); pages add up to it."""
     body = strip_unsafe_text(concept.body, multiline=True)
     try:
         start = min(max(int(offset), 0), len(body))
@@ -1477,6 +1461,15 @@ def close_ids(
 def _slug(raw: object) -> str:
     slug = _SLUG_RE.sub("-", str(raw)[:200]).strip("-.")[:80].strip("-.") or "entry"
     return f"entry-{slug}" if slug.casefold() in ("index", "log") else slug
+
+
+def _loads_back(concept: OKFConcept) -> bool:
+    """False when the writer would refuse *concept* for frontmatter size."""
+    try:
+        _render_concept(concept)
+    except OKFError as exc:  # any other refusal: the writer names it
+        return not isinstance(exc, _FrontmatterTooLarge)
+    return True
 
 
 def bundle_from_memory_entries(
@@ -1503,10 +1496,12 @@ def bundle_from_memory_entries(
           text, id or kept metadata becomes U+FFFD (``text-sanitized``).
         - The other metadata goes under ``extra["metadata"]`` as JSON-native
           data cut at depth 4, 100 items per level, 2,000 characters per string
-          and 4,096 nodes in all (so it is always writable); non-JSON values
-          and non-string keys are dropped. ONE ``metadata-truncated`` warning
-          per entry names the cuts (depth, items, size, text, values). Secret
-          or internal-prefixed keys are dropped at any depth, silently.
+          and 4,096 nodes in all; non-JSON values and non-string keys are
+          dropped. If the frontmatter would still pass ``OKF_MAX_FRONTMATTER_BYTES``
+          bytes, ``extra["metadata"]`` goes whole, then the tags. ONE
+          ``metadata-truncated`` warning per entry names the cuts (depth, items,
+          size, text, values). Secret or internal-prefixed keys are dropped at
+          any depth, silently.
         - ``generated`` is ``{by: generated_by or "fsm-llm/<version>", at: now
           or the current time}`` with an explicit UTC offset. There is no
           ``verified``, so every export is ``unverified``.
@@ -1538,8 +1533,6 @@ def bundle_from_memory_entries(
         raw_meta, notes = entry.get("metadata"), set[str]()
         meta = _native(dict(raw_meta), notes) if isinstance(raw_meta, Mapping) else {}
         ident = i if isinstance(i := entry.get("id", ""), (str, int, float)) else ""
-        if cut := sorted(notes - {"surrogates"}):
-            skip(index, f"metadata cut ({', '.join(cut)})", "metadata-truncated")
         if "surrogates" in notes or _lone_surrogate((text, ident)):
             text = _SURROGATE_RE.sub("\ufffd", text)
             skip(index, "lone surrogates replaced with U+FFFD", "text-sanitized")
@@ -1551,20 +1544,25 @@ def bundle_from_memory_entries(
             n += 1
             slug = f"{base}-{n}"
         used.add(slug.casefold())
-        concepts.append(
-            OKFConcept(
-                id=f"memory/{slug}",
-                type=capped_line(type_, 100) or "Memory",
-                title=capped_line(title if isinstance(title, str) else first_line)
-                or None,
-                tags=[t for x in tags if (t := capped_line(x, 100))]
-                if isinstance(tags, list)
-                else [],
-                generated=dict(generated),
-                extra={"metadata": meta} if meta else {},
-                body=text,
-            )
+        concept = OKFConcept(
+            id=f"memory/{slug}",
+            type=capped_line(type_, 100) or "Memory",
+            title=capped_line(title if isinstance(title, str) else first_line) or None,
+            tags=[t for x in tags if (t := capped_line(x, 100))]
+            if isinstance(tags, list)
+            else [],
+            generated=dict(generated),
+            extra={"metadata": meta} if meta else {},
+            body=text,
         )
+        if not _loads_back(concept):  # drop metadata, then tags (D-018)
+            notes.add("size")
+            concept.extra.clear()
+            if not _loads_back(concept):
+                concept.tags = []
+        concepts.append(concept)
+        if cut := sorted(notes - {"surrogates"}):
+            skip(index, f"metadata cut ({', '.join(cut)})", "metadata-truncated")
     return OKFBundle(concepts, issues=issues)
 
 

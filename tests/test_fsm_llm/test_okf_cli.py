@@ -1126,3 +1126,38 @@ class TestOutputEncodingNeverFails:
             monkeypatch.setattr(sys, "stderr", Stubborn())
 
             assert main(["list", str(clean_bundle)]) == 0
+
+
+# --------------------------------------------------------------
+# Step 4.4 (D-018): a CLI export always validates
+# --------------------------------------------------------------
+
+
+class TestExportedStoreValidates:
+    def test_an_oversize_metadata_store_exports_with_a_warning_and_validates(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        hostile = {
+            f"a{i}": {f"b{j}": list(range(100)) for j in range(100)} for i in range(100)
+        }
+        strings = {f"s{i}": "x" * 2_000 for i in range(100)}
+        store = _store(
+            tmp_path / "store.json",
+            [
+                {"id": "ok", "text": "fine", "metadata": {"k": "v"}},
+                {"id": "h", "text": "one", "metadata": hostile},
+                {"id": "s", "text": "two", "metadata": strings},
+            ],
+        )
+        out_dir = tmp_path / "kb"
+
+        code, out, err = _run(capsys, "export", store, out_dir)
+
+        assert code == 0, err
+        assert err.count("metadata-truncated") == 2 and "size" in err
+        assert "wrote 4 files" in out
+
+        code, out, err = _run(capsys, "validate", out_dir)
+
+        assert code == 0, out + err
+        assert "frontmatter-too-large" not in out

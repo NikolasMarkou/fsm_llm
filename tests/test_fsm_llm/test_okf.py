@@ -4821,7 +4821,7 @@ class TestExportedMetadataIsAlwaysWritable:
         assert len(cut) == 1 and "size" in cut[0].message
         assert "memory entry 1" in cut[0].message
 
-    def test_what_survives_stays_inside_the_writer_node_cap(self) -> None:
+    def test_metadata_that_cannot_load_back_is_dropped_whole(self) -> None:
         meta = _hostile_meta()
 
         (concept,) = bundle_from_memory_entries(
@@ -4829,7 +4829,7 @@ class TestExportedMetadataIsAlwaysWritable:
         )
 
         assert okf_module._lone_surrogate(concept.extra) is False  # no OKFError
-        assert concept.extra["metadata"]  # a cut, not a wipe
+        assert concept.extra == {}  # over the frontmatter byte cap: dropped (4.4)
 
     def test_a_normal_entry_is_unchanged_and_silent(self, tmp_path: Path) -> None:
         meta = {"scores": _wide(30, 30), "source": "wiki", "tags": ["x", "y"]}
@@ -4845,3 +4845,129 @@ class TestExportedMetadataIsAlwaysWritable:
             "source": "wiki",
         }
         write_bundle(bundle, tmp_path / "kb")
+
+
+# --------------------------------------------------------------
+# Step 4.4 (D-018): anything the writer accepts loads back without a size issue
+# --------------------------------------------------------------
+
+
+def _load_errors(root: Path) -> list[str]:
+    return [i.code for i in load_bundle(root).issues if i.severity == "error"]
+
+
+def _long_strings_meta() -> dict[str, Any]:
+    return {f"s{i}": "x" * 2_000 for i in range(100)}
+
+
+class TestWrittenImpliesLoadable:
+    @pytest.mark.parametrize("make", [_hostile_meta, _long_strings_meta])
+    def test_an_oversize_metadata_entry_exports_writes_and_loads_back(
+        self, tmp_path: Path, make: Any
+    ) -> None:
+        bundle = bundle_from_memory_entries(
+            [
+                {"id": "ok", "text": "fine", "metadata": {"source": "wiki"}},
+                {"id": "big", "text": "body", "metadata": make()},
+            ]
+        )
+
+        write_bundle(bundle, tmp_path / "kb")
+
+        assert _load_errors(tmp_path / "kb") == []
+        cut = [i for i in bundle.issues if i.code == "metadata-truncated"]
+        assert len(cut) == 1 and "size" in cut[0].message
+        assert "memory entry 1" in cut[0].message
+        loaded = load_bundle(tmp_path / "kb")
+        assert loaded.get("memory/big").body.strip() == "body"
+
+    def test_an_oversize_entry_keeps_its_title_tags_and_text(self) -> None:
+        meta = {"title": "T", "tags": ["a", "b"], **_long_strings_meta()}
+
+        (concept,) = bundle_from_memory_entries(
+            [{"id": "e", "text": "hello", "metadata": meta}]
+        )
+
+        assert concept.title == "T" and concept.tags == ["a", "b"]
+        assert concept.body == "hello"
+
+    def test_a_normal_entry_is_still_silent_and_keeps_metadata(self) -> None:
+        bundle = bundle_from_memory_entries(
+            [{"id": "a", "text": "hi", "metadata": {"source": "wiki"}}]
+        )
+
+        assert bundle.issues == []
+        assert bundle.get("memory/a").extra["metadata"] == {"source": "wiki"}
+
+    def test_oversize_tags_are_dropped_when_metadata_alone_is_not_enough(
+        self, tmp_path: Path
+    ) -> None:
+        tags = [f"{i:03d}" + "t" * 97 for i in range(100)]
+        meta = {"tags": tags, "title": "T", **_long_strings_meta()}
+        bundle = bundle_from_memory_entries(
+            [{"id": "e", "text": "hello", "metadata": meta}]
+        )
+
+        write_bundle(bundle, tmp_path / "kb")
+
+        assert _load_errors(tmp_path / "kb") == []
+
+    def test_a_hand_built_oversize_frontmatter_is_refused_and_nothing_is_written(
+        self, tmp_path: Path
+    ) -> None:
+        big = OKFConcept(id="big", type="Note", extra={"blob": "y" * 20_000})
+        ok = OKFConcept(id="ok", type="Note")
+
+        with pytest.raises(OKFError, match=r"nothing written.*'big'.*frontmatter"):
+            write_bundle(OKFBundle([ok, big]), tmp_path / "kb")
+
+        assert not (tmp_path / "kb").exists() or not any((tmp_path / "kb").iterdir())
+
+    def test_frontmatter_exactly_at_the_cap_writes_and_loads(
+        self, tmp_path: Path
+    ) -> None:
+        def front_bytes(n: int) -> int:
+            concept = OKFConcept(id="c", type="Note", extra={"p": "y" * n})
+            data = okf_module._render_concept(concept)
+            return len(data.split(b"\n---\n", 1)[0]) - len(b"---\n") + 1
+
+        n = OKF_MAX_FRONTMATTER_BYTES - front_bytes(1) + 1
+        assert front_bytes(n) == OKF_MAX_FRONTMATTER_BYTES
+        bundle = OKFBundle([OKFConcept(id="c", type="Note", extra={"p": "y" * n})])
+
+        write_bundle(bundle, tmp_path / "ok")
+        assert _load_errors(tmp_path / "ok") == []
+
+        over = OKFBundle([OKFConcept(id="c", type="Note", extra={"p": "y" * (n + 1)})])
+        with pytest.raises(OKFError, match="frontmatter"):
+            write_bundle(over, tmp_path / "over")
+        assert not (tmp_path / "over").exists()
+
+    def test_a_file_of_exactly_the_file_cap_writes_and_loads_one_more_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        head = len(okf_module._render_concept(OKFConcept(id="c", type="Note")))
+        body = "b" * (OKF_MAX_FILE_BYTES - head - 1) + "\n"
+        bundle = OKFBundle([OKFConcept(id="c", type="Note", body=body)])
+
+        (path, *_) = write_bundle(bundle, tmp_path / "ok", write_index=False)
+
+        assert path.stat().st_size == OKF_MAX_FILE_BYTES
+        assert _load_errors(tmp_path / "ok") == []
+        over = OKFBundle([OKFConcept(id="c", type="Note", body="b" + body)])
+        with pytest.raises(OKFError, match="file too large"):
+            write_bundle(over, tmp_path / "over", write_index=False)
+        assert not (tmp_path / "over").exists()
+
+    def test_a_refused_concept_leaves_an_existing_directory_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "kb"
+        write_bundle(OKFBundle([OKFConcept(id="a", type="Note")]), root)
+        before = sorted(p.name for p in root.iterdir())
+        big = OKFConcept(id="b", type="Note", extra={"blob": "y" * 20_000})
+
+        with pytest.raises(OKFError):
+            write_bundle(OKFBundle([big]), root, overwrite=True)
+
+        assert sorted(p.name for p in root.iterdir()) == before
