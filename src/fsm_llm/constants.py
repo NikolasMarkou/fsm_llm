@@ -412,3 +412,6 @@ OKF_SUMMARY_MAX_ITEMS = 20
 OKF_SUMMARY_FIELD_CHARS = 200
 OKF_READ_PAGE_CHARS = 1_500
 OKF_LIST_MAX_ITEMS = 25
+# Characters of one memory entry exported as a concept body: at most 200 KB of
+# UTF-8, so the written file still loads under `OKF_MAX_FILE_BYTES`.
+OKF_EXPORT_TEXT_MAX_CHARS = 50_000

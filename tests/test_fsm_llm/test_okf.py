@@ -33,11 +33,13 @@ from fsm_llm.okf import (
     OKFIssue,
     OKFLimits,
     TrustTier,
+    bundle_from_memory_entries,
     check_bundle,
     load_bundle,
     parse_concept_text,
     parse_okf_datetime,
     strip_unsafe_text,
+    write_bundle,
 )
 from fsm_llm.security import resolve_within
 
@@ -1948,3 +1950,849 @@ class TestLayering:
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "ok"
+
+
+# --------------------------------------------------------------
+# Writer (step 4)
+# --------------------------------------------------------------
+
+_FULL_DOC = """---
+type: Dataset
+title: Customer Orders
+description: 'One row per order: includes the ''status'' column'
+resource: /data/orders.md
+tags:
+- sales
+- orders
+sources:
+- id: warehouse
+  resource: /data/warehouse.md
+  last_modified: '2026-01-02T03:04:05+00:00'
+usage_window: '2026-02-01T00:00:00+00:00'
+generated:
+  by: agent/test
+  at: '2026-03-01T10:00:00+00:00'
+verified:
+- by: human:alice
+  at: '2026-03-02T10:00:00+00:00'
+status: stable
+stale_after: '2027-01-01T00:00:00+00:00'
+zeta: last
+alpha:
+  nested:
+  - 1
+  - two
+  - true
+---
+# Body
+
+See [warehouse](/data/warehouse.md).
+"""
+
+
+def _tree(root: Path) -> dict[str, bytes]:
+    return {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+def _bundle_of(*concepts: OKFConcept) -> OKFBundle:
+    return OKFBundle(concepts)
+
+
+def _note(cid: str = "a", **kw: Any) -> OKFConcept:
+    return OKFConcept(id=cid, type=kw.pop("type", "Note"), **kw)
+
+
+def _stray_tmp(root: Path) -> list[Path]:
+    return [p for p in root.rglob("*") if p.name.endswith(".okf-tmp")]
+
+
+class TestWriteRoundTrip:
+    def test_load_write_load_is_equal_and_second_write_is_byte_identical(
+        self, tmp_path: Path
+    ) -> None:
+        src = _write(
+            tmp_path / "src",
+            {"data/orders.md": _FULL_DOC, "data/warehouse.md": _doc("Table")},
+        )
+        first = load_bundle(src)
+
+        out = tmp_path / "out"
+        written = write_bundle(first, out)
+        again = load_bundle(out)
+        before = _tree(out)
+        write_bundle(again, out, overwrite=True)
+
+        assert [c.model_dump() for c in again] == [c.model_dump() for c in first]
+        assert _tree(out) == before
+        assert written == sorted(written)
+        assert {p.relative_to(out).as_posix() for p in written} == {
+            "index.md",
+            "data/orders.md",
+            "data/warehouse.md",
+        }
+
+    def test_the_fixed_document_is_reproduced_exactly(self, tmp_path: Path) -> None:
+        src = _write(tmp_path / "src", {"orders.md": _FULL_DOC})
+        out = tmp_path / "out"
+
+        write_bundle(load_bundle(src), out, write_index=False)
+
+        assert (out / "orders.md").read_text(encoding="utf-8") == _FULL_DOC
+
+    def test_unknown_keys_survive_and_known_keys_are_ordered(
+        self, tmp_path: Path
+    ) -> None:
+        text = (
+            "---\nzeta: 1\ntags: [b, a]\nstatus: draft\nweird_key: {x: [1, 2]}\n"
+            "title: T\ntype: Note\ngenerated: {at: '2026-01-01T00:00:00Z', by: me}\n"
+            "alpha: 2\n---\nbody\n"
+        )
+        out = tmp_path / "out"
+        write_bundle(
+            load_bundle(_write(tmp_path / "src", {"n.md": text})),
+            out,
+            write_index=False,
+        )
+
+        data = yaml.safe_load(
+            (out / "n.md").read_text(encoding="utf-8").split("---\n")[1]
+        )
+
+        assert list(data) == [
+            "type",
+            "title",
+            "tags",
+            "generated",
+            "status",
+            "zeta",
+            "weird_key",
+            "alpha",
+        ]
+        assert data["weird_key"] == {"x": [1, 2]}
+        assert data["tags"] == ["b", "a"]
+        assert list(data["generated"]) == ["at", "by"]
+
+    def test_datetime_objects_get_an_explicit_utc_offset(self, tmp_path: Path) -> None:
+        eastern = timezone(timedelta(hours=-5))
+        concept = _note(
+            generated={"by": "x", "at": datetime(2026, 1, 2, 3, 4, 5)},
+            verified=[{"by": "human:a", "at": datetime(2026, 1, 2, tzinfo=eastern)}],
+            stale_after=datetime(2027, 1, 1),
+            sources=[{"resource": "/s.md", "last_modified": datetime(2026, 5, 6)}],
+            extra={"usage_window": datetime(2026, 7, 8), "when": date(2026, 9, 10)},
+        )
+        out = tmp_path / "out"
+
+        write_bundle(_bundle_of(concept), out, write_index=False)
+
+        text = (out / "a.md").read_text(encoding="utf-8")
+        data = yaml.safe_load(text.split("---\n")[1])
+        assert data["generated"]["at"] == "2026-01-02T03:04:05+00:00"
+        assert data["verified"][0]["at"] == "2026-01-02T00:00:00-05:00"
+        assert data["stale_after"] == "2027-01-01T00:00:00+00:00"
+        assert data["sources"][0]["last_modified"] == "2026-05-06T00:00:00+00:00"
+        assert data["usage_window"] == "2026-07-08T00:00:00+00:00"
+        assert data["when"] == "2026-09-10T00:00:00+00:00"
+        assert not [i for i in check_bundle(load_bundle(out)) if i.severity != "info"]
+
+    def test_strings_read_from_disk_are_written_verbatim(self, tmp_path: Path) -> None:
+        text = (
+            "---\ntype: Note\nstale_after: 2026-12-31\n"
+            "generated: {by: x, at: '2026-01-01 10:00:00'}\n---\nb\n"
+        )
+        out = tmp_path / "out"
+
+        write_bundle(
+            load_bundle(_write(tmp_path / "src", {"n.md": text})),
+            out,
+            write_index=False,
+        )
+
+        data = yaml.safe_load((out / "n.md").read_text().split("---\n")[1])
+        assert data["stale_after"] == "2026-12-31"
+        assert data["generated"]["at"] == "2026-01-01 10:00:00"
+
+    def test_output_parses_with_plain_yaml_and_the_okf_loader(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        write_bundle(
+            _bundle_of(
+                _note(
+                    "x/y",
+                    title="yes",
+                    description="a: b\nsecond line\u2028sep # not a comment",
+                    tags=["1", "true", "null"],
+                    body="text\n",
+                )
+            ),
+            out,
+        )
+
+        raw = (out / "x" / "y.md").read_text(encoding="utf-8")
+        plain = yaml.safe_load(raw.split("---\n")[1])
+        loaded = load_bundle(out)
+
+        assert plain["title"] == "yes"
+        assert plain["tags"] == ["1", "true", "null"]
+        assert loaded.issues == []
+        concept = loaded.get("x/y")
+        assert concept is not None
+        assert concept.description == "a: b\nsecond line\u2028sep # not a comment"
+        assert concept.tags == ["1", "true", "null"]
+
+    def test_a_value_shared_by_two_keys_is_not_written_as_an_alias(
+        self, tmp_path: Path
+    ) -> None:
+        shared = {"k": [1, 2]}
+        out = tmp_path / "out"
+
+        write_bundle(
+            _bundle_of(_note(extra={"one": shared, "two": shared})),
+            out,
+            write_index=False,
+        )
+
+        raw = (out / "a.md").read_text(encoding="utf-8")
+        assert "&" not in raw and "*id" not in raw
+        concept = load_bundle(out).get("a")
+        assert concept is not None and concept.extra == {"one": shared, "two": shared}
+
+    @pytest.mark.parametrize("body", ["", "x", "x\n", "---\nnot front\n---\n", "\n\nz"])
+    def test_body_round_trip_and_trailing_newline(
+        self, tmp_path: Path, body: str
+    ) -> None:
+        out = tmp_path / "out"
+        write_bundle(_bundle_of(_note(body=body)), out, write_index=False)
+
+        raw = (out / "a.md").read_text(encoding="utf-8")
+        loaded = load_bundle(out).get("a")
+
+        assert raw.endswith("\n")
+        assert loaded is not None
+        assert loaded.body == (body if not body or body.endswith("\n") else body + "\n")
+
+    def test_the_root_is_created_and_a_file_root_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        write_bundle(_bundle_of(_note()), tmp_path / "deep" / "new")
+        assert (tmp_path / "deep" / "new" / "a.md").is_file()
+
+        blocker = tmp_path / "blocker"
+        blocker.write_text("x")
+        with pytest.raises(OKFError, match="not a directory"):
+            write_bundle(_bundle_of(_note()), blocker)
+        assert blocker.read_text() == "x"
+
+    def test_an_empty_bundle_writes_only_the_index(self, tmp_path: Path) -> None:
+        written = write_bundle(OKFBundle(), tmp_path / "out")
+
+        assert [p.name for p in written] == ["index.md"]
+        assert write_bundle(OKFBundle(), tmp_path / "o2", write_index=False) == []
+
+
+class TestWriteIndex:
+    def test_index_has_okf_version_and_grouped_bullets(self, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        write_bundle(
+            _bundle_of(
+                _note(
+                    "sales/orders", type="Dataset", title="Orders", description="rows"
+                ),
+                _note("sales/q1", type="Report", title="Q1"),
+                _note("b", type="Dataset"),
+            ),
+            out,
+        )
+
+        text = (out / "index.md").read_text(encoding="utf-8")
+        loaded = load_bundle(out)
+
+        assert text.startswith('---\nokf_version: "0.2"\n---\n')
+        assert "# Dataset\n" in text and "# Report\n" in text
+        assert "* [Orders](/sales/orders.md) - rows" in text
+        assert "* [Q1](/sales/q1.md)\n" in text
+        assert "* [b](/b.md)\n" in text
+        assert loaded.okf_version == "0.2"
+        assert len(loaded) == 3 and "index" not in loaded
+        assert loaded.issues == []
+
+    def test_index_text_is_sanitised_and_links_resolve(self, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        write_bundle(
+            _bundle_of(
+                _note(
+                    "has space/x(1)",
+                    type="Note\x1b[31m",
+                    title="Evil [link](http://x) \u202e\x00",
+                    description="line1\nline2 \x1b]0;pwn\x07",
+                )
+            ),
+            out,
+        )
+
+        text = (out / "index.md").read_text(encoding="utf-8")
+
+        assert "\x1b" not in text and "\x00" not in text and "\u202e" not in text
+        assert "\\[link\\]" in text
+        assert "(/has%20space/x%281%29.md)" in text or "(/has%20space/x(1).md)" in text
+        assert load_bundle(out).issues == []
+
+    def test_write_index_false_writes_no_index(self, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        write_bundle(_bundle_of(_note()), out, write_index=False)
+
+        assert not (out / "index.md").exists()
+
+    def test_a_user_owned_index_is_kept_unless_overwrite(self, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "index.md").write_text("# mine\n", encoding="utf-8")
+
+        written = write_bundle(_bundle_of(_note()), out)
+        assert (out / "index.md").read_text(encoding="utf-8") == "# mine\n"
+        assert [p.name for p in written] == ["a.md"]
+
+        write_bundle(_bundle_of(_note()), out, overwrite=True)
+        assert (
+            (out / "index.md")
+            .read_text(encoding="utf-8")
+            .startswith("---\nokf_version")
+        )
+
+    def test_a_symlinked_index_is_refused_with_overwrite(self, tmp_path: Path) -> None:
+        outside = tmp_path / "outside.md"
+        outside.write_text("keep", encoding="utf-8")
+        out = tmp_path / "out"
+        out.mkdir()
+        _symlink(out / "index.md", outside)
+
+        with pytest.raises(OKFError, match=r"index\.md"):
+            write_bundle(_bundle_of(_note()), out, overwrite=True)
+
+        assert outside.read_text(encoding="utf-8") == "keep"
+        assert not (out / "a.md").exists()
+
+
+class TestWriteRefusals:
+    BAD_IDS: ClassVar[list[str]] = [
+        "../evil",
+        "m/../../evil",
+        "..",
+        "/abs/evil",
+        "",
+        "a//b",
+        "a/./b",
+        "a/",
+        ".hidden",
+        "a/.git/x",
+        "a\\b",
+        "a\nb",
+        "a\x00b",
+        "a\x1b[31mb",
+        "a\u202eb",
+        "a\u200bb",
+        "index",
+        "log",
+        "sub/index",
+        "Sub/LOG",
+        "x" * 300,
+    ]
+
+    @pytest.mark.parametrize("bad", BAD_IDS)
+    def test_a_hostile_id_in_the_middle_leaves_nothing_written(
+        self, tmp_path: Path, bad: str
+    ) -> None:
+        root = tmp_path / "out"
+        bundle = _bundle_of(_note("aaa"), _note(bad), _note("zzz"))
+
+        with pytest.raises(OKFError, match="nothing written"):
+            write_bundle(bundle, root)
+
+        assert not root.exists()
+        assert [p.name for p in tmp_path.iterdir()] == []
+
+    def test_every_problem_is_listed_but_capped(self, tmp_path: Path) -> None:
+        bundle = _bundle_of(*(_note(f"../bad{i}") for i in range(12)))
+
+        with pytest.raises(OKFError) as caught:
+            write_bundle(bundle, tmp_path / "out")
+
+        message = str(caught.value)
+        assert "12 problem" in message and "and 7 more" in message
+        assert len(message) < 1500
+
+    def test_case_insensitive_duplicates_are_refused(self, tmp_path: Path) -> None:
+        with pytest.raises(OKFError, match="case-insensitive"):
+            write_bundle(_bundle_of(_note("Dup"), _note("dup")), tmp_path / "out")
+
+        assert not (tmp_path / "out").exists()
+
+    def test_overwrite_refusal_lists_clashes_and_changes_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        write_bundle(_bundle_of(_note("a", body="old\n")), out)
+        before = _tree(out)
+
+        bundle = _bundle_of(*(_note(c, body="new\n") for c in "abcdefgh"))
+        with pytest.raises(OKFError) as caught:
+            write_bundle(bundle, out)
+
+        assert "'a'" in str(caught.value) and "already exists" in str(caught.value)
+        assert _tree(out) == before
+
+        write_bundle(bundle, out, overwrite=True)
+        assert (out / "a.md").read_text().endswith("new\n")
+        assert (out / "h.md").is_file()
+
+    def test_an_existing_directory_target_is_refused(self, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        (out / "a.md").mkdir(parents=True)
+
+        with pytest.raises(OKFError, match="directory"):
+            write_bundle(_bundle_of(_note("a")), out, overwrite=True)
+
+    def test_a_file_where_a_directory_is_needed_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "memory").write_text("file")
+
+        with pytest.raises(OKFError, match="file where a directory"):
+            write_bundle(_bundle_of(_note("memory/x"), _note("zzz")), out)
+
+        assert not (out / "zzz.md").exists()
+
+    def test_a_symlinked_pre_existing_target_is_refused_even_with_overwrite(
+        self, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "outside.txt"
+        outside.write_text("keep", encoding="utf-8")
+        out = tmp_path / "out"
+        out.mkdir()
+        _symlink(out / "a.md", outside)
+
+        with pytest.raises(OKFError, match=r"symbolic link|outside"):
+            write_bundle(_bundle_of(_note("a"), _note("b")), out, overwrite=True)
+
+        assert outside.read_text(encoding="utf-8") == "keep"
+        assert not (out / "b.md").exists()
+
+    def test_a_symlink_to_a_file_inside_the_root_is_refused_too(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "real.md").write_text("real", encoding="utf-8")
+        _symlink(out / "a.md", out / "real.md")
+
+        with pytest.raises(OKFError, match="symbolic link"):
+            write_bundle(_bundle_of(_note("a")), out, overwrite=True)
+
+        assert (out / "real.md").read_text(encoding="utf-8") == "real"
+
+    def test_a_dangling_symlink_target_is_refused(self, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        out.mkdir()
+        _symlink(out / "a.md", tmp_path / "does-not-exist.md")
+
+        with pytest.raises(OKFError):
+            write_bundle(_bundle_of(_note("a")), out, overwrite=True)
+
+        assert not (tmp_path / "does-not-exist.md").exists()
+
+    def test_a_symlinked_directory_component_never_writes_outside(
+        self, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        out = tmp_path / "out"
+        out.mkdir()
+        _symlink(out / "memory", outside)
+
+        with pytest.raises(OKFError, match=r"outside|symbolic link"):
+            write_bundle(
+                _bundle_of(_note("memory/x"), _note("ok")), out, overwrite=True
+            )
+
+        assert list(outside.iterdir()) == []
+        assert not (out / "ok.md").exists()
+
+    def test_extra_keys_that_shadow_known_keys_are_refused(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(OKFError, match="shadow"):
+            write_bundle(
+                _bundle_of(_note("ok"), _note("bad", extra={"title": "sneaky"})),
+                tmp_path / "out",
+            )
+
+        assert not (tmp_path / "out").exists()
+
+    def test_a_non_dumpable_payload_is_an_okf_error_naming_the_concept(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(OKFError, match=r"'weird'.*RepresenterError"):
+            write_bundle(
+                _bundle_of(_note("ok"), _note("weird", extra={"k": object()})),
+                tmp_path / "out",
+            )
+
+        assert not (tmp_path / "out").exists()
+
+    def test_a_cyclic_payload_is_an_okf_error(self, tmp_path: Path) -> None:
+        loop: dict[str, Any] = {}
+        loop["self"] = loop
+
+        with pytest.raises(OKFError, match="'loop'"):
+            write_bundle(_bundle_of(_note("loop", extra={"x": loop})), tmp_path / "out")
+
+        assert not (tmp_path / "out").exists()
+
+
+class TestWriteAtomicity:
+    def test_a_failing_rename_leaves_the_target_and_no_temp_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        out = tmp_path / "out"
+        write_bundle(_bundle_of(_note("a", body="old\n")), out, write_index=False)
+        seen: list[str] = []
+
+        def boom(src: str, dst: str) -> None:
+            seen.append(src)
+            raise OSError("disk says no")
+
+        monkeypatch.setattr(os, "replace", boom)
+        with pytest.raises(OKFError, match="cannot write"):
+            write_bundle(
+                _bundle_of(_note("a", body="new\n")),
+                out,
+                overwrite=True,
+                write_index=False,
+            )
+        monkeypatch.undo()
+
+        assert (out / "a.md").read_text(encoding="utf-8").endswith("old\n")
+        assert _stray_tmp(out) == []
+        assert seen and seen[0].endswith(".okf-tmp") and not seen[0].endswith(".md")
+
+    def test_a_failure_midway_keeps_earlier_files_and_reports_the_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        out = tmp_path / "out"
+        real = os.replace
+        calls = {"n": 0}
+
+        def flaky(src: str, dst: str) -> None:
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("second one fails")
+            real(src, dst)
+
+        monkeypatch.setattr(os, "replace", flaky)
+        with pytest.raises(OKFError, match=r"1 file\(s\) were already written"):
+            write_bundle(
+                _bundle_of(_note("a"), _note("b"), _note("c")), out, write_index=False
+            )
+        monkeypatch.undo()
+
+        assert (out / "a.md").is_file()
+        assert not (out / "b.md").exists() and not (out / "c.md").exists()
+        assert _stray_tmp(out) == []
+
+    def test_a_crash_before_the_rename_leaves_no_loadable_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        out = tmp_path / "out"
+        out.mkdir()
+        snapshot: list[list[str]] = []
+
+        def peek(src: str, dst: str) -> None:
+            snapshot.append(sorted(p.name for p in out.iterdir()))
+            raise OSError("crash")
+
+        monkeypatch.setattr(os, "replace", peek)
+        with pytest.raises(OKFError):
+            write_bundle(_bundle_of(_note("a")), out, write_index=False)
+        monkeypatch.undo()
+
+        (names,) = snapshot
+        assert len(names) == 1 and names[0].endswith(".okf-tmp")
+        assert len(load_bundle(out)) == 0
+
+
+class TestBundleFromMemoryEntries:
+    NOW: ClassVar[datetime] = datetime(2026, 10, 21, 12, 0, 0)
+
+    def test_maps_the_documented_fields(self) -> None:
+        bundle = bundle_from_memory_entries(
+            [
+                {
+                    "id": "mem-1",
+                    "text": "\n  First line here\nsecond line\n",
+                    "metadata": {
+                        "type": "Preference",
+                        "tags": ["a", " b ", 3, ""],
+                        "source": "chat",
+                        "n": 2,
+                    },
+                    "embedding": [0.1, 0.2, 0.3],
+                },
+                {"id": "mem-2", "text": "plain"},
+            ],
+            now=self.NOW,
+        )
+
+        one, two = bundle.get("memory/mem-1"), bundle.get("memory/mem-2")
+        assert one is not None and two is not None
+        assert (one.type, one.title, one.tags) == (
+            "Preference",
+            "First line here",
+            ["a", "b"],
+        )
+        assert one.extra == {"metadata": {"source": "chat", "n": 2}}
+        assert one.body == "\n  First line here\nsecond line\n"
+        assert one.generated == {
+            "by": f"fsm-llm/{__import__('fsm_llm').__version__}",
+            "at": "2026-10-21T12:00:00+00:00",
+        }
+        assert one.verified == [] and one.trust is TrustTier.UNVERIFIED
+        assert (two.type, two.title, two.extra) == ("Memory", "plain", {})
+        assert bundle.issues == []
+
+    def test_metadata_title_and_generated_by_are_used(self) -> None:
+        bundle = bundle_from_memory_entries(
+            [{"id": "x", "text": "t", "metadata": {"title": "  My Title  "}}],
+            generated_by="exporter/9",
+            now="2026-01-01T00:00:00+00:00",
+        )
+
+        concept = bundle.get("memory/x")
+        assert concept is not None and concept.title == "My Title"
+        assert concept.generated == {
+            "by": "exporter/9",
+            "at": "2026-01-01T00:00:00+00:00",
+        }
+
+    def test_default_timestamp_has_an_explicit_utc_offset(self) -> None:
+        bundle = bundle_from_memory_entries([{"id": "x", "text": "t"}])
+
+        concept = bundle.get("memory/x")
+        assert concept is not None and concept.generated is not None
+        assert concept.generated["at"].endswith("+00:00")
+        assert parse_okf_datetime(concept.generated["at"])[1] is None
+
+    def test_secret_looking_and_internal_metadata_never_reach_the_disk(
+        self, tmp_path: Path
+    ) -> None:
+        secret = "sk-live-abcdefghijklmnopqrstuvwxyz0123456789"
+        entry = {
+            "id": "s",
+            "text": "visible text",
+            "metadata": {
+                "api_key": secret,
+                "password": "hunter2-secret",
+                "auth_token": secret,
+                "_internal": "hidden-internal",
+                "system_note": "hidden-system",
+                "nested": {"client_secret": "nested-secret", "ok": "kept", "_x": "no"},
+                "list": [{"token": secret, "fine": 1}],
+                "kept": "yes",
+            },
+            "embedding": [0.123456, 0.654321],
+        }
+        out = tmp_path / "out"
+
+        write_bundle(bundle_from_memory_entries([entry]), out)
+
+        blob = "\n".join(b.decode() for b in _tree(out).values())
+        for needle in (
+            secret,
+            "hunter2",
+            "hidden-internal",
+            "hidden-system",
+            "nested-secret",
+            "0.123456",
+        ):
+            assert needle not in blob
+        concept = load_bundle(out).get("memory/s")
+        assert concept is not None
+        assert concept.extra["metadata"] == {
+            "nested": {"ok": "kept"},
+            "list": [{"fine": 1}],
+            "kept": "yes",
+        }
+
+    @pytest.mark.parametrize(
+        "raw_id",
+        [
+            "../../etc/passwd",
+            "/abs/path",
+            "a\x00b",
+            "a\x1b[31mb",
+            "..",
+            ".",
+            "",
+            None,
+            123,
+            "index",
+            "LOG",
+            "a/b\\c",
+            "\u202e",
+            "é/ü",
+        ],
+    )
+    def test_hostile_ids_become_safe_slugs_under_memory(
+        self, tmp_path: Path, raw_id: object
+    ) -> None:
+        bundle = bundle_from_memory_entries([{"id": raw_id, "text": "t"}])
+        out = tmp_path / "bundle"
+
+        written = write_bundle(bundle, out)
+
+        (concept,) = list(bundle)
+        assert concept.id.startswith("memory/") and "/" not in concept.id[7:]
+        for path in written:
+            assert out in path.resolve().parents
+        assert not (tmp_path / "evil.md").exists()
+        assert [p for p in tmp_path.iterdir()] == [out]
+        assert len(load_bundle(out)) == 1
+
+    def test_duplicate_and_case_variant_ids_get_numeric_suffixes(self) -> None:
+        bundle = bundle_from_memory_entries(
+            [{"id": i, "text": "t"} for i in ("x", "x", "X", "x", "y")]
+        )
+
+        assert [c.id for c in bundle] == [
+            "memory/X-3",
+            "memory/x",
+            "memory/x-2",
+            "memory/x-4",
+            "memory/y",
+        ]
+        assert len({c.id.casefold() for c in bundle}) == 5
+
+    def test_unusable_entries_are_skipped_with_an_issue_never_an_exception(
+        self,
+    ) -> None:
+        bundle = bundle_from_memory_entries(
+            iter(
+                [
+                    "a string",
+                    None,
+                    42,
+                    ["list"],
+                    {"id": "no-text"},
+                    {"id": "blank", "text": "   \n "},
+                    {"id": "num", "text": 5},
+                    {"id": "bytes", "text": b"x"},
+                    {"id": "good", "text": "ok", "metadata": ["not", "a", "mapping"]},
+                    {"id": "good2", "text": "ok", "metadata": 7},
+                ]
+            )
+        )
+
+        assert [c.id for c in bundle] == ["memory/good", "memory/good2"]
+        assert [i.code for i in bundle.issues] == ["entry-skipped"] * 8
+        assert all(i.severity == "warning" for i in bundle.issues)
+        assert "memory entry 0" in bundle.issues[0].message
+
+    def test_huge_text_is_cut_with_an_issue_and_still_loads(
+        self, tmp_path: Path
+    ) -> None:
+        bundle = bundle_from_memory_entries([{"id": "big", "text": "é" * 2_000_000}])
+        out = tmp_path / "out"
+        write_bundle(bundle, out)
+
+        loaded = load_bundle(out)
+
+        assert [i.code for i in bundle.issues] == ["text-truncated"]
+        assert loaded.issues == []
+        concept = loaded.get("memory/big")
+        assert concept is not None and len(concept.body) == 50_001  # + trailing newline
+
+    def test_huge_or_hostile_title_type_and_tags_are_capped_and_stripped(self) -> None:
+        bundle = bundle_from_memory_entries(
+            [
+                {
+                    "id": "h",
+                    "text": "line",
+                    "metadata": {
+                        "title": "T" * 10_000 + "\x1b[31m",
+                        "type": "\u202eNote\x00" + "y" * 500,
+                        "tags": ["a\nb", "z" * 1000],
+                    },
+                },
+                {"id": "h2", "text": "x" * 10_000},
+            ]
+        )
+
+        h, h2 = bundle.get("memory/h"), bundle.get("memory/h2")
+        assert h is not None and h2 is not None
+        assert h.title == "T" * 200
+        assert h.type.startswith("Note") and len(h.type) <= 100 and "\x00" not in h.type
+        assert h.tags[0] == "a b" and len(h.tags[1]) == 100
+        assert h2.title is not None and len(h2.title) == 200
+
+    def test_non_json_metadata_values_are_dropped(self, tmp_path: Path) -> None:
+        bundle = bundle_from_memory_entries(
+            [
+                {
+                    "id": "m",
+                    "text": "t",
+                    "metadata": {
+                        "a_set": {1, 2},
+                        "obj": object(),
+                        "nan": float("nan"),
+                        "inf": float("inf"),
+                        "bytes": b"x",
+                        "date": date(2026, 1, 1),
+                        "ok_float": 1.5,
+                        "ok_none": None,
+                        "tuple": (1, "a"),
+                        "deep": {"a": {"b": {"c": {"d": {"e": 1}}}}},
+                    },
+                }
+            ]
+        )
+        out = tmp_path / "out"
+        write_bundle(bundle, out)
+
+        concept = load_bundle(out).get("memory/m")
+        assert concept is not None
+        assert concept.extra["metadata"] == {
+            "ok_float": 1.5,
+            "ok_none": None,
+            "tuple": [1, "a"],
+            "deep": {"a": {"b": {}}},
+        }
+
+    def test_exported_bundle_loads_clean_and_is_searchable(
+        self, tmp_path: Path
+    ) -> None:
+        bundle = bundle_from_memory_entries(
+            [
+                {"id": "1", "text": "The deployment uses blue green releases"},
+                {
+                    "id": "2",
+                    "text": "Coffee order: oat milk",
+                    "metadata": {"type": "Preference"},
+                },
+            ],
+            now=self.NOW,
+        )
+        out = tmp_path / "out"
+
+        write_bundle(bundle, out)
+        loaded = load_bundle(out)
+
+        assert [i for i in check_bundle(loaded) if i.severity != "info"] == []
+        assert [c.id for c, _ in loaded.search("deployment releases")] == ["memory/1"]
+        assert [c.id for c in loaded.list(type="preference")] == ["memory/2"]
+        assert all(c.trust is TrustTier.UNVERIFIED for c in loaded)

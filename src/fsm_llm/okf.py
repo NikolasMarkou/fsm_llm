@@ -13,27 +13,33 @@ pre-1.0 and mutable. The trust tier is a CLAIM the bundle makes about itself
 
 Entry points: ``parse_concept_text(concept_id, text) -> (OKFConcept, issues)``,
 ``load_bundle(path) -> OKFBundle`` (bounded, confined, never follows symlinks),
-``OKFBundle`` (lookup, lexical search, link graph) and ``check_bundle(bundle)``
-(spec section 11 conformance as a list of issues).
+``OKFBundle`` (lookup, lexical search, link graph), ``check_bundle(bundle)``
+(spec section 11 conformance as a list of issues), ``write_bundle(bundle,
+path)`` (atomic per file, confined) and ``bundle_from_memory_entries(entries)``
+(plain memory-entry mappings to a bundle).
 """
 
 from __future__ import annotations
 
+import math
 import os
 import re
+import tempfile
 import unicodedata
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from itertools import islice
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .__version__ import __version__
 from .constants import (
+    OKF_EXPORT_TEXT_MAX_CHARS,
     OKF_INDEX_MAX_CHARS,
     OKF_MAX_DEPTH,
     OKF_MAX_FILE_BYTES,
@@ -42,9 +48,14 @@ from .constants import (
     OKF_MAX_ISSUES,
     OKF_MAX_TOTAL_BYTES,
     OKF_MAX_YAML_DEPTH,
+    OKF_SUMMARY_FIELD_CHARS,
 )
 from .definitions import OKFError
-from .security import resolve_within
+from .security import (
+    has_internal_prefix,
+    is_forbidden_context_entry,
+    resolve_within,
+)
 
 # --------------------------------------------------------------
 # Untrusted-text helper (shared by every output path)
@@ -967,3 +978,403 @@ def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
                     f"link target {target!r} is not in the bundle",
                 )
     return _capped(out)
+
+
+# --------------------------------------------------------------
+# Writer
+# --------------------------------------------------------------
+
+_ID_MAX_SEGMENT_BYTES = 200
+_INDEX_TYPE_FALLBACK = "Untyped"
+_MAX_CLASHES_SHOWN = 5
+
+
+class _OKFDumper(yaml.SafeDumper):
+    """``SafeDumper`` that never emits anchors or aliases.
+
+    The loader refuses aliases, so a value shared by two keys (the same dict
+    object twice) must be written out twice, not as ``&id001`` / ``*id001``.
+    """
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
+def _iso(value: datetime) -> str:
+    """ISO 8601 with an explicit UTC offset; a naive value is taken as UTC."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
+def _plain(value: Any) -> Any:
+    """Copy *value* for dumping: datetimes (and dates, as midnight UTC) become
+    offset-bearing strings; strings read from disk pass through verbatim."""
+    if isinstance(value, datetime):
+        return _iso(value)
+    if isinstance(value, date):
+        return _iso(datetime(value.year, value.month, value.day))
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
+
+
+def _render_concept(concept: OKFConcept) -> str:
+    """The file text of *concept*. Raises ``OKFError`` when it cannot be dumped.
+
+    Key order is fixed: the known keys, ``usage_window`` (kept in ``extra``)
+    after ``sources``, then the remaining ``extra`` keys in original order.
+    """
+    extra = dict(concept.extra)
+    shadowed = sorted(k for k in extra if k in _KNOWN_KEYS)
+    if shadowed:
+        raise OKFError(
+            f"concept {concept.id!r}: extra keys shadow known keys: {shadowed}"
+        )
+    front: dict[Any, Any] = {"type": concept.type}
+    for key in ("title", "description", "resource"):
+        if (value := getattr(concept, key)) is not None:
+            front[key] = value
+    if concept.tags:
+        front["tags"] = list(concept.tags)
+    if concept.sources:
+        front["sources"] = concept.sources
+    if "usage_window" in extra:
+        front["usage_window"] = extra.pop("usage_window")
+    if concept.generated is not None:
+        front["generated"] = concept.generated
+    if concept.verified:
+        front["verified"] = concept.verified
+    if concept.status is not None:
+        front["status"] = concept.status
+    if concept.stale_after is not None:
+        front["stale_after"] = concept.stale_after
+    front.update(extra)
+    try:
+        dumped = yaml.dump(
+            _plain(front),
+            Dumper=_OKFDumper,
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+        )
+    except (yaml.YAMLError, RecursionError) as exc:
+        raise OKFError(
+            f"concept {concept.id!r}: frontmatter cannot be written "
+            f"({type(exc).__name__})"
+        ) from exc
+    body = concept.body
+    if body and not body.endswith("\n"):
+        body += "\n"
+    return f"---\n{dumped}---\n{body}"
+
+
+def _render_index(bundle: OKFBundle) -> str:
+    """Root ``index.md``: ``okf_version`` frontmatter, a section per type."""
+    groups: dict[str, list[str]] = {}
+    for concept in bundle:
+        heading = strip_unsafe_text(concept.type).strip() or _INDEX_TYPE_FALLBACK
+        title = re.sub(r"([\\\[\]])", r"\\\1", concept.display_title)
+        desc = strip_unsafe_text(concept.description or "").strip()
+        line = f"* [{title}](/{quote(concept.id, safe='/')}.md)"
+        groups.setdefault(heading, []).append(
+            f"{line} - {desc[:OKF_SUMMARY_FIELD_CHARS]}" if desc else line
+        )
+    sections = [
+        f"# {name}\n\n" + "\n".join(groups[name]) + "\n" for name in sorted(groups)
+    ]
+    return '---\nokf_version: "0.2"\n---\n' + "\n".join(sections)
+
+
+def _id_problem(concept_id: object) -> str | None:
+    """Why *concept_id* may not become a file path, or ``None`` when it may."""
+    if not isinstance(concept_id, str) or not concept_id:
+        return "empty or not a string"
+    if strip_unsafe_text(concept_id) != concept_id:
+        return "holds control or format characters"
+    if concept_id.startswith("/") or "\\" in concept_id:
+        return "absolute or holds a backslash"
+    parts = concept_id.split("/")
+    if any(p in ("", ".", "..") or p.startswith(".") for p in parts):
+        return "has an empty, dot or dot-prefixed segment"
+    if any(len(p.encode("utf-8")) > _ID_MAX_SEGMENT_BYTES for p in parts):
+        return "has a segment that is too long"
+    if parts[-1].casefold() in ("index", "log"):
+        return "is reserved (index and log are never concepts)"
+    return None
+
+
+def _target_problem(root: Path, rel: str) -> str | None:
+    """Why ``root/rel`` may not be written, or ``None``.
+
+    SECURITY: ``security.resolve_within`` is the only confinement check. On top
+    of "stays inside" the resolved path must EQUAL the lexical one, so a
+    symlinked directory component or target (even one pointing inside the
+    root) is refused, and no ancestor may be a regular file.
+    """
+    lexical = root.joinpath(*rel.split("/"))
+    try:
+        resolved = resolve_within(root, rel)
+        if resolved is None:
+            return "resolves outside the target directory"
+        if resolved != lexical:
+            return "passes through a symbolic link"
+        if lexical.is_dir():
+            return "is an existing directory"
+        for ancestor in lexical.parents:
+            if ancestor == root:
+                break
+            if ancestor.exists() and not ancestor.is_dir():
+                return "has a file where a directory is needed"
+    except (OSError, RuntimeError, ValueError):
+        return "cannot be resolved"
+    return None
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write *text* to *path* through a same-directory temp file and rename.
+
+    Mirrors ``session.FileSessionStore.save`` on purpose (a private copy; the
+    anchor at ``agents/semantic_memory.py`` forbids a shared helper without a
+    maintainer decision, and core must not import ``harness``). The suffix is
+    not ``.md``, so a crash never leaves a loadable file. ``fsync`` before the
+    rename, and an existence-checked ``finally`` cleans up on ANY failure; no
+    ``except BaseException``. The file mode is the temp file's (owner-only).
+    """
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".okf-tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def write_bundle(
+    bundle: OKFBundle,
+    path: str | os.PathLike[str],
+    *,
+    overwrite: bool = False,
+    write_index: bool = True,
+) -> list[Path]:
+    """Write *bundle* under *path* (created if missing); return the files written.
+
+    Interface contract:
+        - One ``<id>.md`` per concept: frontmatter in a fixed key order (type,
+          title, description, resource, tags, sources, usage_window, generated,
+          verified, status, stale_after, then ``extra`` in original order), the
+          body, a trailing newline. Unknown keys survive; a second write of a
+          loaded bundle is byte-identical. ``datetime`` values get an explicit
+          UTC offset (naive taken as UTC); strings read from disk are verbatim.
+        - Every id and target is validated and every file rendered BEFORE the
+          first byte is written, so a bad id, a clash or an unwritable value
+          leaves the directory untouched (``OKFError`` naming them, capped).
+          An id that is empty, absolute, has an empty, ``.``, ``..`` or
+          dot-prefixed segment, control characters, or ends in ``index`` /
+          ``log`` is refused, as is a case-insensitive duplicate.
+        - Each target passes ``security.resolve_within``; a symlinked target or
+          directory component is refused even with ``overwrite=True``.
+        - An existing file is replaced only with ``overwrite=True``; otherwise
+          every clash is listed in the ``OKFError``. A root that exists as a
+          file is refused.
+        - ``write_index`` adds a root ``index.md`` (``okf_version: "0.2"``, a
+          ``* [Title](/id.md) - description`` bullet per concept under a
+          ``# <type>`` heading). An existing ``index.md`` is kept unless
+          ``overwrite=True``.
+        - Atomic PER FILE (temp file, fsync, rename). The whole bundle is not
+          atomic: an I/O failure midway leaves the files already written.
+    """
+    try:
+        root = Path(path).resolve()
+        if root.exists() and not root.is_dir():
+            raise OKFError(f"bundle root exists and is not a directory: {root}")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise OKFError(f"cannot open bundle root: {type(exc).__name__}") from exc
+
+    problems: list[str] = []
+    plan: list[tuple[str, Path, str]] = []  # (id, target, text)
+    seen: set[str] = set()
+    for concept in bundle:
+        cid = concept.id
+        reason = _id_problem(cid)
+        if reason is None and cid.casefold() in seen:
+            reason = "collides with another id on a case-insensitive disk"
+        if reason is None:
+            seen.add(cid.casefold())
+            reason = _target_problem(root, f"{cid}.md")
+        if reason is None and not overwrite and os.path.lexists(root / f"{cid}.md"):
+            reason = "already exists (pass overwrite=True to replace it)"
+        if reason is not None:
+            problems.append(f"{cid[:80]!r} {reason}")
+            continue
+        try:
+            plan.append((cid, root / f"{cid}.md", _render_concept(concept)))
+        except OKFError as exc:
+            problems.append(str(exc))
+    if write_index:
+        index = root / "index.md"
+        if os.path.lexists(index) and not overwrite:
+            pass  # a user-owned index.md is not ours to replace
+        elif (reason := _target_problem(root, "index.md")) is not None:
+            problems.append(f"'index.md' {reason}")
+        else:
+            plan.append(("index", index, _render_index(bundle)))
+    if problems:
+        shown = "; ".join(problems[:_MAX_CLASHES_SHOWN])
+        more = len(problems) - _MAX_CLASHES_SHOWN
+        raise OKFError(
+            f"nothing written, {len(problems)} problem(s): {shown}"
+            + (f"; and {more} more" if more > 0 else "")
+        )
+
+    written: list[Path] = []
+    for cid, target, text in plan:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(target, text)
+        except OSError as exc:
+            raise OKFError(
+                f"cannot write {cid[:80]!r}: {type(exc).__name__}; "
+                f"{len(written)} file(s) were already written"
+            ) from exc
+        written.append(target)
+    return sorted(written)
+
+
+# --------------------------------------------------------------
+# Export of memory entries
+# --------------------------------------------------------------
+
+_DROP = object()
+_MAX_META_ITEMS = 100
+_MAX_META_DEPTH = 4
+_MAX_META_TEXT = 2_000
+_SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _native(value: Any, depth: int = 0) -> Any:
+    """JSON-native copy of *value* or ``_DROP``; secret-looking and internal
+    keys at any depth are removed (``security`` is the single decision point)."""
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else _DROP
+    if isinstance(value, str):
+        return value[:_MAX_META_TEXT]
+    if depth >= _MAX_META_DEPTH:
+        return _DROP
+    if isinstance(value, (list, tuple)):
+        kept = (_native(v, depth + 1) for v in islice(value, _MAX_META_ITEMS))
+        return [v for v in kept if v is not _DROP]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in islice(value.items(), _MAX_META_ITEMS):
+            if (
+                isinstance(key, str)
+                and not has_internal_prefix(key)
+                and not is_forbidden_context_entry(key, item)
+                and (clean := _native(item, depth + 1)) is not _DROP
+            ):
+                out[key[:_MAX_META_TEXT]] = clean
+        return out
+    return _DROP
+
+
+def _line(value: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
+    """Control-stripped, trimmed, capped one-line text; ``""`` for a non-string."""
+    return strip_unsafe_text(value).strip()[:cap] if isinstance(value, str) else ""
+
+
+def _slug(raw: object) -> str:
+    slug = _SLUG_RE.sub("-", str(raw)[:200]).strip("-.")[:80].strip("-.")
+    if not slug:
+        return "entry"
+    return f"entry-{slug}" if slug.casefold() in ("index", "log") else slug
+
+
+def bundle_from_memory_entries(
+    entries: Iterable[Any],
+    *,
+    generated_by: str | None = None,
+    now: datetime | str | None = None,
+) -> OKFBundle:
+    """Turn memory entries (plain mappings) into an in-memory ``OKFBundle``.
+
+    Interface contract:
+        - ``entries``: mappings shaped like ``SemanticMemoryStore`` entries,
+          ``{id, text, metadata, embedding}``. Only ``id``, ``text`` and
+          ``metadata`` are read; embeddings are NEVER exported. A non-mapping
+          entry, a missing or non-string ``text`` or a blank one is skipped
+          with a warning ``OKFIssue`` on ``bundle.issues``; nothing raises.
+        - Concept id ``memory/<slug of the entry id>`` (characters outside
+          ``A-Za-z0-9._-`` become ``-``, at most 80); a repeated slug gets
+          ``-2``, ``-3``. A hostile id can therefore not shape the path.
+        - ``type`` is metadata ``type`` (a non-blank string) else ``Memory``;
+          ``title`` is metadata ``title`` else the first non-blank line, capped
+          at ``OKF_SUMMARY_FIELD_CHARS``; ``tags`` are the string items of a
+          metadata ``tags`` list. The body is the text (cut at
+          ``OKF_EXPORT_TEXT_MAX_CHARS`` with a warning issue).
+        - Every other metadata entry whose value is JSON-native goes under
+          ``extra["metadata"]``. Entries are dropped when
+          ``is_forbidden_context_entry(key, value)`` is true or the key is
+          internal-prefixed, at any depth; non-JSON values are dropped.
+        - ``generated`` is ``{by: generated_by or "fsm-llm/<version>", at: now
+          or the current time}`` with an explicit UTC offset. There is no
+          ``verified``, so every export is ``unverified`` by construction.
+    """
+    issues: list[OKFIssue] = []
+    concepts: list[OKFConcept] = []
+    used: set[str] = set()
+    stamp = _iso(now) if isinstance(now, datetime) else _line(now, 100)
+    generated = {
+        "by": _line(generated_by, 200) or f"fsm-llm/{__version__}",
+        "at": stamp or _iso(datetime.now(timezone.utc)),
+    }
+
+    def skip(index: int, why: str, code: str = "entry-skipped") -> None:
+        msg = f"memory entry {index}: {why}"
+        issues.append(OKFIssue(severity="warning", code=code, message=msg))
+
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            skip(index, "skipped, not a mapping")
+            continue
+        text = entry.get("text")
+        if not isinstance(text, str) or not text.strip():
+            skip(index, "skipped, text is missing, blank or not a string")
+            continue
+        if len(text) > OKF_EXPORT_TEXT_MAX_CHARS:
+            text = text[:OKF_EXPORT_TEXT_MAX_CHARS]
+            skip(index, "text was cut", "text-truncated")
+        raw_meta = entry.get("metadata")
+        meta = _native(dict(raw_meta)) if isinstance(raw_meta, Mapping) else {}
+        type_, title, tags = (meta.pop(k, None) for k in ("type", "title", "tags"))
+        first_line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+        base = _slug(entry.get("id", ""))
+        slug, n = base, 1
+        while slug.casefold() in used:
+            n += 1
+            slug = f"{base}-{n}"
+        used.add(slug.casefold())
+        concepts.append(
+            OKFConcept(
+                id=f"memory/{slug}",
+                type=_line(type_, 100) or "Memory",
+                title=_line(title if isinstance(title, str) else first_line) or None,
+                tags=[t for x in tags if (t := _line(x, 100))]
+                if isinstance(tags, list)
+                else [],
+                generated=dict(generated),
+                extra={"metadata": meta} if meta else {},
+                body=text,
+            )
+        )
+    return OKFBundle(concepts, issues=issues)
